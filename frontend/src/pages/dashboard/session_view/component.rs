@@ -35,7 +35,7 @@ pub struct SessionViewProps {
     pub on_message_sent: Callback<Uuid>,
     pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>)>,
     #[prop_or_default]
-    pub on_activity: Callback<Uuid>,
+    pub on_activity: Callback<(Uuid, String)>,
     #[prop_or(false)]
     pub voice_enabled: bool,
 }
@@ -816,8 +816,12 @@ impl SessionView {
     }
 
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: String) -> bool {
+        let mut msg_type = "unknown".to_string();
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
-            if parsed.get("type").and_then(|t| t.as_str()) == Some("result") {
+            if let Some(t) = parsed.get("type").and_then(|t| t.as_str()) {
+                msg_type = t.to_string();
+            }
+            if msg_type == "result" {
                 if let Some(cost) = parsed.get("total_cost_usd").and_then(|c| c.as_f64()) {
                     if cost != self.total_cost {
                         self.total_cost = cost;
@@ -836,7 +840,9 @@ impl SessionView {
             }
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
-        ctx.props().on_activity.emit(ctx.props().session.id);
+        ctx.props()
+            .on_activity
+            .emit((ctx.props().session.id, msg_type));
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {
             let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;

@@ -54,7 +54,7 @@ pub fn dashboard_page() -> Html {
     let voice_enabled = use_state(|| false);
     let app_title = use_state(|| "Claude Code Sessions".to_string());
     let activated_sessions = use_state(HashSet::<Uuid>::new);
-    let activity_timestamps = use_state(HashMap::<Uuid, Vec<f64>>::new);
+    let activity_timestamps = use_state(HashMap::<Uuid, Vec<(f64, String)>>::new);
     let initial_focus_set = use_state(|| false);
 
     // Detect spend tier changes and trigger timed animation
@@ -428,13 +428,13 @@ pub fn dashboard_page() -> Html {
 
     let on_activity = {
         let activity_timestamps = activity_timestamps.clone();
-        Callback::from(move |session_id: Uuid| {
+        Callback::from(move |(session_id, msg_type): (Uuid, String)| {
             let now = js_sys::Date::now();
             let cutoff = now - 300_000.0; // 5 minutes
             let mut map = (*activity_timestamps).clone();
             let timestamps = map.entry(session_id).or_default();
-            timestamps.retain(|&t| t > cutoff);
-            timestamps.push(now);
+            timestamps.retain(|(t, _)| *t > cutoff);
+            timestamps.push((now, msg_type));
             activity_timestamps.set(map);
         })
     };

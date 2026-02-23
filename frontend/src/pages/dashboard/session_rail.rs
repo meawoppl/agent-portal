@@ -24,7 +24,7 @@ pub struct SessionRailProps {
     pub connected_sessions: HashSet<Uuid>,
     pub nav_mode: bool,
     #[prop_or_default]
-    pub activity_timestamps: HashMap<Uuid, Vec<f64>>,
+    pub activity_timestamps: HashMap<Uuid, Vec<(f64, String)>>,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
     pub on_toggle_pause: Callback<Uuid>,
@@ -367,13 +367,24 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             let now = js_sys::Date::now();
             let window_ms = 300_000.0; // 5 minutes
             let cutoff = now - window_ms;
-            let ticks: Vec<f64> = props
+            let ticks: Vec<(f64, &str)> = props
                 .activity_timestamps
                 .get(&session.id)
                 .map(|ts| {
                     ts.iter()
-                        .filter(|&&t| t > cutoff)
-                        .map(|&t| (t - cutoff) / window_ms * 100.0)
+                        .filter(|(t, _)| *t > cutoff)
+                        .map(|(t, msg_type)| {
+                            let pct = (t - cutoff) / window_ms * 100.0;
+                            let css_type = match msg_type.as_str() {
+                                "assistant" => "assistant",
+                                "user" => "user",
+                                "result" => "result",
+                                "portal" => "portal",
+                                "error" => "error",
+                                _ => "other",
+                            };
+                            (pct, css_type)
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -383,9 +394,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             } else {
                 html! {
                     <div class="pill-sparkline">
-                        { ticks.iter().map(|pct| {
+                        { ticks.iter().map(|(pct, css_type)| {
                             let style = format!("left: {:.1}%", pct);
-                            html! { <span class="sparkline-tick" {style} /> }
+                            let class = format!("sparkline-tick tick-{}", css_type);
+                            html! { <span {class} {style} /> }
                         }).collect::<Html>() }
                     </div>
                 }

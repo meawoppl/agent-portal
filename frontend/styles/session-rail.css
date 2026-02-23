@@ -177,10 +177,16 @@
     bottom: 0;
     width: 2px;
     height: 100%;
-    background: var(--accent);
-    opacity: 0.6;
+    opacity: 0.7;
     border-radius: 1px;
 }
+
+.sparkline-tick.tick-assistant { background: var(--accent); }
+.sparkline-tick.tick-user { background: var(--success); }
+.sparkline-tick.tick-result { background: #e0af68; }
+.sparkline-tick.tick-portal { background: #bb9af7; }
+.sparkline-tick.tick-error { background: var(--error); }
+.sparkline-tick.tick-other { background: var(--text-secondary); }
 
 .session-pill.paused .sparkline-tick {
     opacity: 0.2;
