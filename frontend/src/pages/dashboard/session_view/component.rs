@@ -821,6 +821,18 @@ impl SessionView {
             if let Some(t) = parsed.get("type").and_then(|t| t.as_str()) {
                 msg_type = t.to_string();
             }
+            if msg_type == "system" {
+                let status = parsed.get("status").and_then(|s| s.as_str()).unwrap_or("");
+                let subtype = parsed.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
+                if status == "compacting" {
+                    msg_type = "compaction_start".to_string();
+                } else if matches!(
+                    subtype,
+                    "compaction" | "compact_boundary" | "context_compaction" | "summary"
+                ) {
+                    msg_type = "compaction_end".to_string();
+                }
+            }
             if msg_type == "result" {
                 if let Some(cost) = parsed.get("total_cost_usd").and_then(|c| c.as_f64()) {
                     if cost != self.total_cost {

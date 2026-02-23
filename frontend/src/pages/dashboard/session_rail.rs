@@ -367,12 +367,19 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             let now = js_sys::Date::now();
             let window_ms = 300_000.0; // 5 minutes
             let cutoff = now - window_ms;
-            let ticks: Vec<(f64, &str)> = props
-                .activity_timestamps
-                .get(&session.id)
+            let timestamps = props.activity_timestamps.get(&session.id);
+
+            // Point ticks (non-compaction)
+            let ticks: Vec<(f64, &str)> = timestamps
                 .map(|ts| {
                     ts.iter()
-                        .filter(|(t, _)| *t > cutoff)
+                        .filter(|(t, msg_type)| {
+                            *t > cutoff
+                                && !matches!(
+                                    msg_type.as_str(),
+                                    "compaction_start" | "compaction_end"
+                                )
+                        })
                         .map(|(t, msg_type)| {
                             let pct = (t - cutoff) / window_ms * 100.0;
                             let css_type = match msg_type.as_str() {
@@ -389,11 +396,41 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 })
                 .unwrap_or_default();
 
-            if ticks.is_empty() {
+            // Compaction ranges: pair up start/end events
+            let compaction_ranges: Vec<(f64, f64)> = {
+                let mut ranges = Vec::new();
+                if let Some(ts) = timestamps {
+                    let mut pending_start: Option<f64> = None;
+                    for (t, msg_type) in ts.iter().filter(|(t, _)| *t > cutoff) {
+                        match msg_type.as_str() {
+                            "compaction_start" => {
+                                pending_start = Some((t - cutoff) / window_ms * 100.0);
+                            }
+                            "compaction_end" => {
+                                let end_pct = (t - cutoff) / window_ms * 100.0;
+                                ranges.push((pending_start.take().unwrap_or(0.0), end_pct));
+                            }
+                            _ => {}
+                        }
+                    }
+                    // In-progress compaction extends to current time
+                    if let Some(start_pct) = pending_start {
+                        ranges.push((start_pct, 100.0));
+                    }
+                }
+                ranges
+            };
+
+            if ticks.is_empty() && compaction_ranges.is_empty() {
                 html! {}
             } else {
                 html! {
                     <div class="pill-sparkline">
+                        { compaction_ranges.iter().map(|(start_pct, end_pct)| {
+                            let width = (end_pct - start_pct).max(1.0);
+                            let style = format!("left: {:.1}%; width: {:.1}%", start_pct, width);
+                            html! { <span class="sparkline-range tick-compaction" {style} /> }
+                        }).collect::<Html>() }
                         { ticks.iter().map(|(pct, css_type)| {
                             let style = format!("left: {:.1}%", pct);
                             let class = format!("sparkline-tick tick-{}", css_type);

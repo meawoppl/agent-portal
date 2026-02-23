@@ -188,7 +188,18 @@
 .sparkline-tick.tick-error { background: var(--error); }
 .sparkline-tick.tick-other { background: var(--text-secondary); }
 
-.session-pill.paused .sparkline-tick {
+.sparkline-range {
+    position: absolute;
+    bottom: 0;
+    height: 100%;
+    opacity: 0.5;
+    border-radius: 1px;
+}
+
+.sparkline-range.tick-compaction { background: #73daca; }
+
+.session-pill.paused .sparkline-tick,
+.session-pill.paused .sparkline-range {
     opacity: 0.2;
 }
 
