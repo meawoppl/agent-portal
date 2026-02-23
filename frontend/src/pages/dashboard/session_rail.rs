@@ -7,7 +7,7 @@ use crate::components::ShareDialog;
 use crate::utils;
 use gloo::events::EventListener;
 use shared::SessionInfo;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlElement, WheelEvent};
@@ -23,6 +23,8 @@ pub struct SessionRailProps {
     pub inactive_hidden: bool,
     pub connected_sessions: HashSet<Uuid>,
     pub nav_mode: bool,
+    #[prop_or_default]
+    pub activity_timestamps: HashMap<Uuid, Vec<f64>>,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
     pub on_toggle_pause: Callback<Uuid>,
@@ -360,6 +362,36 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             None
         };
 
+        // Build sparkline ticks for this session
+        let sparkline = {
+            let now = js_sys::Date::now();
+            let window_ms = 300_000.0; // 5 minutes
+            let cutoff = now - window_ms;
+            let ticks: Vec<f64> = props
+                .activity_timestamps
+                .get(&session.id)
+                .map(|ts| {
+                    ts.iter()
+                        .filter(|&&t| t > cutoff)
+                        .map(|&t| (t - cutoff) / window_ms * 100.0)
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if ticks.is_empty() {
+                html! {}
+            } else {
+                html! {
+                    <div class="pill-sparkline">
+                        { ticks.iter().map(|pct| {
+                            let style = format!("left: {:.1}%", pct);
+                            html! { <span class="sparkline-tick" {style} /> }
+                        }).collect::<Html>() }
+                    </div>
+                }
+            }
+        };
+
         html! {
             <div class={pill_class} onclick={on_click} key={session.id.to_string()}>
                 {
@@ -408,6 +440,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 <button type="button" class="pill-menu-toggle" onclick={on_toggle_menu}>
                     { "▼" }
                 </button>
+                { sparkline }
             </div>
         }
     };

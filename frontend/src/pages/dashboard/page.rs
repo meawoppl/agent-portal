@@ -11,7 +11,7 @@ use crate::utils;
 use crate::Route;
 use gloo_net::http::Request;
 use shared::{AppConfig, SessionInfo};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
@@ -54,6 +54,7 @@ pub fn dashboard_page() -> Html {
     let voice_enabled = use_state(|| false);
     let app_title = use_state(|| "Claude Code Sessions".to_string());
     let activated_sessions = use_state(HashSet::<Uuid>::new);
+    let activity_timestamps = use_state(HashMap::<Uuid, Vec<f64>>::new);
     let initial_focus_set = use_state(|| false);
 
     // Detect spend tier changes and trigger timed animation
@@ -425,6 +426,19 @@ pub fn dashboard_page() -> Html {
         })
     };
 
+    let on_activity = {
+        let activity_timestamps = activity_timestamps.clone();
+        Callback::from(move |session_id: Uuid| {
+            let now = js_sys::Date::now();
+            let cutoff = now - 300_000.0; // 5 minutes
+            let mut map = (*activity_timestamps).clone();
+            let timestamps = map.entry(session_id).or_default();
+            timestamps.retain(|&t| t > cutoff);
+            timestamps.push(now);
+            activity_timestamps.set(map);
+        })
+    };
+
     let on_branch_change = {
         let set_sessions = sessions_hook.set_sessions.clone();
         let sessions = sessions.clone();
@@ -613,6 +627,7 @@ pub fn dashboard_page() -> Html {
                         inactive_hidden={*inactive_hidden}
                         connected_sessions={(*connected_sessions).clone()}
                         nav_mode={keyboard_nav.nav_mode}
+                        activity_timestamps={(*activity_timestamps).clone()}
                         on_select={on_select_session.clone()}
                         on_leave={on_leave.clone()}
                         on_toggle_pause={on_toggle_pause.clone()}
@@ -640,6 +655,7 @@ pub fn dashboard_page() -> Html {
                                                 on_connected_change={on_connected_change.clone()}
                                                 on_message_sent={on_message_sent.clone()}
                                                 on_branch_change={on_branch_change.clone()}
+                                                on_activity={on_activity.clone()}
                                                 voice_enabled={*voice_enabled}
                                             />
                                         </div>

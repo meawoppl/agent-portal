@@ -34,6 +34,8 @@ pub struct SessionViewProps {
     pub on_connected_change: Callback<(Uuid, bool)>,
     pub on_message_sent: Callback<Uuid>,
     pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>)>,
+    #[prop_or_default]
+    pub on_activity: Callback<Uuid>,
     #[prop_or(false)]
     pub voice_enabled: bool,
 }
@@ -834,6 +836,7 @@ impl SessionView {
             }
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
+        ctx.props().on_activity.emit(ctx.props().session.id);
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {
             let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;

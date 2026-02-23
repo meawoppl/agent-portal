@@ -161,6 +161,36 @@
     color: var(--text-secondary);
 }
 
+/* Sparkline - activity ticks at bottom of pill */
+.pill-sparkline {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    pointer-events: none;
+    overflow: hidden;
+    border-radius: 0 0 20px 20px;
+}
+
+.sparkline-tick {
+    position: absolute;
+    bottom: 0;
+    width: 2px;
+    height: 100%;
+    background: var(--accent);
+    opacity: 0.6;
+    border-radius: 1px;
+}
+
+.session-pill.awaiting .sparkline-tick {
+    background: var(--error);
+}
+
+.session-pill.paused .sparkline-tick {
+    opacity: 0.2;
+}
+
 .pill-status {
     font-size: 0.6rem;
     line-height: 1;
