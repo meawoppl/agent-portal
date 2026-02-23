@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -16,6 +17,7 @@ pub struct SessionExited {
 
 struct ManagedTask {
     handle: tokio::task::JoinHandle<()>,
+    cancel: CancellationToken,
 }
 
 pub struct ProcessManager {
@@ -105,9 +107,11 @@ impl ProcessManager {
         };
 
         let exit_tx = self.exit_tx.clone();
+        let cancel = CancellationToken::new();
+        let cancel_clone = cancel.clone();
 
         let handle = tokio::spawn(async move {
-            let exit_code = run_session_task(proxy_config).await;
+            let exit_code = run_session_task(proxy_config, cancel_clone).await;
             let _ = exit_tx.send(SessionExited {
                 session_id,
                 exit_code,
@@ -119,7 +123,8 @@ impl ProcessManager {
             session_id, name, working_directory
         );
 
-        self.tasks.insert(session_id, ManagedTask { handle });
+        self.tasks
+            .insert(session_id, ManagedTask { handle, cancel });
 
         Ok(SpawnResult { session_id })
     }
@@ -127,7 +132,14 @@ impl ProcessManager {
     pub async fn stop(&mut self, session_id: &Uuid) -> bool {
         if let Some(task) = self.tasks.remove(session_id) {
             info!("Stopping session task {}", session_id);
-            task.handle.abort();
+            task.cancel.cancel();
+            // Give the task a moment to shut down gracefully before aborting
+            tokio::select! {
+                _ = task.handle => {}
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                    warn!("Session {} did not stop within 5s, force aborting", session_id);
+                }
+            }
             true
         } else {
             warn!("No task found for session {}", session_id);
@@ -143,7 +155,10 @@ impl ProcessManager {
 
 /// Run a single proxy session as an in-process task.
 /// Returns an exit code: Some(0) for normal exit, Some(1) for error, None for abort.
-async fn run_session_task(mut config: ProxySessionConfig) -> Option<i32> {
+async fn run_session_task(
+    mut config: ProxySessionConfig,
+    cancel: CancellationToken,
+) -> Option<i32> {
     loop {
         let claude_config = SessionConfig {
             session_id: config.session_id,
@@ -165,8 +180,14 @@ async fn run_session_task(mut config: ProxySessionConfig) -> Option<i32> {
 
         let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-        let result =
-            run_connection_loop(&config, &mut claude_session, input_tx, &mut input_rx).await;
+        let result = tokio::select! {
+            r = run_connection_loop(&config, &mut claude_session, input_tx, &mut input_rx) => r,
+            _ = cancel.cancelled() => {
+                info!("Session {} cancelled by stop request", config.session_id);
+                let _ = claude_session.stop().await;
+                return Some(0);
+            }
+        };
 
         let _ = claude_session.stop().await;
 

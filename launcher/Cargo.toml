@@ -43,3 +43,4 @@ portal-auth = { version = "0.1.0", path = "../portal-auth" }
 claude-session-lib = { version = "0.1.0", path = "../claude-session-lib" }
 ws-bridge = { workspace = true, features = ["native-client"] }
 portal-update = { path = "../portal-update" }
+tokio-util.workspace = true
