@@ -497,6 +497,10 @@ pub struct WiggumState {
     pub original_prompt: String,
     /// Current iteration count
     pub iteration: u32,
+    /// When the current loop iteration started
+    pub loop_start: Instant,
+    /// Durations of the last N loop iterations (most recent last)
+    pub loop_durations: Vec<Duration>,
 }
 
 /// Signal for graceful server shutdown with recommended reconnect delay
@@ -1541,6 +1545,8 @@ async fn run_main_loop(
                 state.wiggum_state = Some(WiggumState {
                     original_prompt,
                     iteration: 1,
+                    loop_start: Instant::now(),
+                    loop_durations: Vec::new(),
                 });
                 if let Err(e) = claude_session.send_input(serde_json::Value::String(wiggum_prompt)).await {
                     error!("Failed to send wiggum prompt to Claude: {}", e);
@@ -1727,6 +1733,7 @@ async fn run_main_loop(
                     &state.ws_write,
                     state.connection_start,
                     &mut state.wiggum_state,
+                    &state.output_buffer,
                     claude_session,
                 ).await {
                     Some(result) => return result,
@@ -1744,6 +1751,7 @@ async fn handle_session_event_with_wiggum(
     ws_write: &SharedWsWrite,
     connection_start: Instant,
     wiggum_state: &mut Option<WiggumState>,
+    output_buffer: &Arc<Mutex<PendingOutputBuffer>>,
     claude_session: &mut ClaudeSession,
 ) -> Option<ConnectionResult> {
     match event {
@@ -1775,6 +1783,14 @@ async fn handle_session_event_with_wiggum(
             // Handle wiggum loop continuation
             if should_continue_wiggum {
                 if let Some(ref mut state) = wiggum_state {
+                    // Record the duration of the loop that just finished
+                    let loop_duration = state.loop_start.elapsed();
+                    state.loop_durations.push(loop_duration);
+                    // Keep only the last 10
+                    if state.loop_durations.len() > 10 {
+                        state.loop_durations.remove(0);
+                    }
+
                     state.iteration += 1;
 
                     // Check max iterations safety limit
@@ -1786,6 +1802,28 @@ async fn handle_session_event_with_wiggum(
                         *wiggum_state = None;
                     } else {
                         info!("Wiggum iteration {} - resending prompt", state.iteration);
+
+                        // Send a portal message with loop status
+                        let portal_text = format_wiggum_status(state);
+                        let portal_content = shared::PortalMessage::text(portal_text).to_json();
+                        let seq = {
+                            let mut buf = output_buffer.lock().await;
+                            buf.push(portal_content.clone())
+                        };
+                        let msg = ProxyToServer::SequencedOutput {
+                            seq,
+                            content: portal_content,
+                        };
+                        let mut ws = ws_write.lock().await;
+                        if ws.send(msg).await.is_err() {
+                            error!("Failed to send wiggum portal message");
+                            return Some(ConnectionResult::Disconnected(
+                                connection_start.elapsed(),
+                            ));
+                        }
+
+                        // Reset loop_start for the new iteration
+                        state.loop_start = Instant::now();
 
                         // Resend the prompt
                         let wiggum_prompt = format!(
@@ -1803,6 +1841,35 @@ async fn handle_session_event_with_wiggum(
                     }
                 }
             } else if matches!(output, ClaudeOutput::Result(_)) && wiggum_state.is_some() {
+                // Send final completion portal message
+                if let Some(ref mut state) = wiggum_state {
+                    let loop_duration = state.loop_start.elapsed();
+                    state.loop_durations.push(loop_duration);
+                    if state.loop_durations.len() > 10 {
+                        state.loop_durations.remove(0);
+                    }
+
+                    let total: Duration = state.loop_durations.iter().sum();
+                    let portal_text = format!(
+                        "**Wiggum complete** after **{}** iteration{} (total: {})",
+                        state.iteration,
+                        if state.iteration == 1 { "" } else { "s" },
+                        format_duration(total.as_millis() as u64),
+                    );
+                    let portal_content = shared::PortalMessage::text(portal_text).to_json();
+                    let seq = {
+                        let mut buf = output_buffer.lock().await;
+                        buf.push(portal_content.clone())
+                    };
+                    let msg = ProxyToServer::SequencedOutput {
+                        seq,
+                        content: portal_content,
+                    };
+                    let mut ws = ws_write.lock().await;
+                    if ws.send(msg).await.is_err() {
+                        error!("Failed to send wiggum completion portal message");
+                    }
+                }
                 // Clear wiggum state when done
                 *wiggum_state = None;
             }
@@ -1898,4 +1965,38 @@ fn check_wiggum_done(result: &claude_codes::io::ResultMessage) -> bool {
     }
 
     false // Continue the loop
+}
+
+/// Build the portal message text for a wiggum loop iteration
+fn format_wiggum_status(state: &WiggumState) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "**Wiggum** loop **{}** / {}",
+        state.iteration, WIGGUM_MAX_ITERATIONS,
+    ));
+
+    if !state.loop_durations.is_empty() {
+        lines.push(String::new());
+        lines.push("| Loop | Duration |".to_string());
+        lines.push("|-----:|---------:|".to_string());
+
+        let start_iter = state.iteration as usize - state.loop_durations.len();
+        for (i, d) in state.loop_durations.iter().enumerate() {
+            lines.push(format!(
+                "| {} | {} |",
+                start_iter + i,
+                format_duration(d.as_millis() as u64)
+            ));
+        }
+
+        let total: Duration = state.loop_durations.iter().sum();
+        let avg = total / state.loop_durations.len() as u32;
+        lines.push(format!(
+            "\nAvg: **{}** | Total: **{}**",
+            format_duration(avg.as_millis() as u64),
+            format_duration(total.as_millis() as u64),
+        ));
+    }
+
+    lines.join("\n")
 }

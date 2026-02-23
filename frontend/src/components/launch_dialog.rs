@@ -416,6 +416,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         </div>
                     </div>
 
+                    if *agent_type == shared::AgentType::Codex {
+                        <div class="launch-note launch-note-warn">
+                            { "Codex support is highly experimental." }
+                        </div>
+                    }
+
                     // Directory browser
                     <div class="launch-field">
                         <label>{ "Directory" }</label>
