@@ -381,6 +381,18 @@
     margin: 0 0 1.25rem;
 }
 
+.launch-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.launch-field-half {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
 .launch-field {
     margin-bottom: 1rem;
 }

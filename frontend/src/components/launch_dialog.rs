@@ -15,6 +15,24 @@ struct DirectoryListingResponse {
     resolved_path: Option<String>,
 }
 
+struct AgentConfig {
+    args_placeholder: &'static str,
+    skip_permissions_flag: Option<&'static str>,
+}
+
+fn agent_config(agent_type: shared::AgentType) -> AgentConfig {
+    match agent_type {
+        shared::AgentType::Claude => AgentConfig {
+            args_placeholder: "--model sonnet --allowedTools \"Bash Edit\"",
+            skip_permissions_flag: Some("--dangerously-skip-permissions"),
+        },
+        shared::AgentType::Codex => AgentConfig {
+            args_placeholder: "--model o3 --reasoning-effort high",
+            skip_permissions_flag: Some("--full-auto"),
+        },
+    }
+}
+
 #[derive(Properties, PartialEq)]
 pub struct LaunchDialogProps {
     pub on_close: Callback<()>,
@@ -201,8 +219,11 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 .split_whitespace()
                 .map(|s| s.to_string())
                 .collect();
+            let cfg = agent_config(*agent_type);
             if *skip_permissions {
-                claude_args.push("--dangerously-skip-permissions".to_string());
+                if let Some(flag) = cfg.skip_permissions_flag {
+                    claude_args.push(flag.to_string());
+                }
             }
 
             let launcher_id = *selected_launcher;
@@ -277,6 +298,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let selected_info: Option<LauncherInfo> = (*selected_launcher)
         .and_then(|lid| launchers.iter().find(|l| l.launcher_id == lid).cloned());
 
+    let cfg = agent_config(*agent_type);
+
     // Pre-compute directory listing HTML
     let dir_listing_html = if *dir_loading {
         html! { <div class="dir-loading">{ "Loading..." }</div> }
@@ -343,24 +366,37 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         { " on your machine." }
                     </p>
                 } else {
-                    // Launcher selector
-                    <div class="launch-field">
-                        <label>{ "Launcher" }</label>
-                        <select class="launcher-select" onchange={on_launcher_change}>
-                            { launchers.iter().map(|l| {
-                                let selected = *selected_launcher == Some(l.launcher_id);
-                                html! {
-                                    <option value={l.launcher_id.to_string()} {selected}>
-                                        { &l.launcher_name }
-                                    </option>
-                                }
-                            }).collect::<Html>() }
-                        </select>
-                        if let Some(ref info) = selected_info {
-                            <span class="launcher-subtitle">
-                                { format!("{} running", info.running_sessions) }
-                            </span>
-                        }
+                    // Launcher + Agent selectors (side by side)
+                    <div class="launch-row">
+                        <div class="launch-field launch-field-half">
+                            <label>{ "Launcher" }</label>
+                            <select class="launcher-select" onchange={on_launcher_change}>
+                                { launchers.iter().map(|l| {
+                                    let selected = *selected_launcher == Some(l.launcher_id);
+                                    html! {
+                                        <option value={l.launcher_id.to_string()} {selected}>
+                                            { &l.launcher_name }
+                                        </option>
+                                    }
+                                }).collect::<Html>() }
+                            </select>
+                            if let Some(ref info) = selected_info {
+                                <span class="launcher-subtitle">
+                                    { format!("{} running", info.running_sessions) }
+                                </span>
+                            }
+                        </div>
+                        <div class="launch-field launch-field-half">
+                            <label>{ "Agent" }</label>
+                            <select class="launcher-select" onchange={on_agent_type_change}>
+                                <option value="claude" selected={*agent_type == shared::AgentType::Claude}>
+                                    { "Claude" }
+                                </option>
+                                <option value="codex" selected={*agent_type == shared::AgentType::Codex}>
+                                    { "Codex" }
+                                </option>
+                            </select>
+                        </div>
                     </div>
 
                     // Directory browser
@@ -402,41 +438,30 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         </div>
                     </div>
 
-                    // Agent type selector
-                    <div class="launch-field">
-                        <label>{ "Agent" }</label>
-                        <select class="agent-type-select" onchange={on_agent_type_change}>
-                            <option value="claude" selected={*agent_type == shared::AgentType::Claude}>
-                                { "Claude" }
-                            </option>
-                            <option value="codex" selected={*agent_type == shared::AgentType::Codex}>
-                                { "Codex" }
-                            </option>
-                        </select>
-                    </div>
-
                     // Extra CLI arguments
                     <div class="launch-field">
                         <label>{ "Extra CLI Arguments (optional)" }</label>
                         <input
                             type="text"
-                            placeholder="--model sonnet --allowedTools \"Bash Edit\""
+                            placeholder={cfg.args_placeholder}
                             value={(*extra_args).clone()}
                             oninput={on_args_input}
                         />
                     </div>
 
-                    // Skip permissions checkbox
-                    <div class="launch-field launch-checkbox">
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={*skip_permissions}
-                                onchange={on_skip_permissions}
-                            />
-                            { " --dangerously-skip-permissions" }
-                        </label>
-                    </div>
+                    // Permission bypass checkbox (agent-specific)
+                    if let Some(flag) = cfg.skip_permissions_flag {
+                        <div class="launch-field launch-checkbox">
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={*skip_permissions}
+                                    onchange={on_skip_permissions.clone()}
+                                />
+                                { format!(" {}", flag) }
+                            </label>
+                        </div>
+                    }
 
                     if let Some(ref err) = *error_msg {
                         <p class="launch-error">{ err }</p>
