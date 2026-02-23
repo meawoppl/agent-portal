@@ -43,7 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 claude-codes = "2.1.46"
 
 # Codex CLI integration
-codex-codes = { version = "0.100.1", default-features = false, features = ["types"] }
+codex-codes = { version = "0.101.0", default-features = false, features = ["types"] }
 
 # Frontend (Yew)
 yew = { version = "0.21", features = ["csr"] }

@@ -675,7 +675,7 @@ impl Session {
 
         // Start a thread (conversation session)
         let thread_id = match client.thread_start(&ThreadStartParams::default()).await {
-            Ok(resp) => resp.thread_id,
+            Ok(resp) => resp.thread_id().to_string(),
             Err(e) => {
                 let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(format!(
                     "Failed to start Codex thread: {}",
