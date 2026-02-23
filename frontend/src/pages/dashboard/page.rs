@@ -55,6 +55,7 @@ pub fn dashboard_page() -> Html {
     let app_title = use_state(|| "Claude Code Sessions".to_string());
     let activated_sessions = use_state(HashSet::<Uuid>::new);
     let initial_focus_set = use_state(|| false);
+    let sessions_at_launch = use_state(|| None::<HashSet<Uuid>>);
 
     // Detect spend tier changes and trigger timed animation
     {
@@ -198,6 +199,31 @@ pub fn dashboard_page() -> Html {
         );
     }
 
+    // Auto-focus newly launched session when it appears in the session list
+    {
+        let sessions_at_launch = sessions_at_launch.clone();
+        let active_sessions = active_sessions.clone();
+        let focused_index = focused_index.clone();
+        let activated_sessions = activated_sessions.clone();
+
+        use_effect_with(active_sessions.clone(), move |sessions| {
+            if let Some(ref snapshot) = *sessions_at_launch {
+                if let Some((idx, session)) = sessions
+                    .iter()
+                    .enumerate()
+                    .find(|(_, s)| !snapshot.contains(&s.id))
+                {
+                    focused_index.set(idx);
+                    let mut activated = (*activated_sessions).clone();
+                    activated.insert(session.id);
+                    activated_sessions.set(activated);
+                    sessions_at_launch.set(None);
+                }
+            }
+            || ()
+        });
+    }
+
     // Session selection callback
     let on_select_session = {
         let focused_index = focused_index.clone();
@@ -336,6 +362,15 @@ pub fn dashboard_page() -> Html {
         let show_launch_dialog = show_launch_dialog.clone();
         Callback::from(move |_| {
             show_launch_dialog.set(false);
+        })
+    };
+
+    let on_launch_success = {
+        let sessions_at_launch = sessions_at_launch.clone();
+        let active_sessions = active_sessions.clone();
+        Callback::from(move |_| {
+            let snapshot: HashSet<Uuid> = active_sessions.iter().map(|s| s.id).collect();
+            sessions_at_launch.set(Some(snapshot));
         })
     };
 
@@ -574,7 +609,7 @@ pub fn dashboard_page() -> Html {
 
             // Launch session dialog
             if *show_launch_dialog {
-                <LaunchDialog on_close={on_launch_close.clone()} />
+                <LaunchDialog on_close={on_launch_close.clone()} on_launched={on_launch_success.clone()} />
             }
 
             if loading {

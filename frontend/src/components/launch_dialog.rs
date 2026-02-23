@@ -18,6 +18,7 @@ struct DirectoryListingResponse {
 #[derive(Properties, PartialEq)]
 pub struct LaunchDialogProps {
     pub on_close: Callback<()>,
+    pub on_launched: Callback<()>,
 }
 
 #[function_component(LaunchDialog)]
@@ -190,6 +191,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let launching = launching.clone();
         let error_msg = error_msg.clone();
         let on_close = props.on_close.clone();
+        let on_launched = props.on_launched.clone();
         Callback::from(move |_| {
             let dir = (*current_path).clone();
             if dir.is_empty() {
@@ -210,6 +212,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             let launching = launching.clone();
             let error_msg = error_msg.clone();
             let on_close = on_close.clone();
+            let on_launched = on_launched.clone();
 
             launching.set(true);
             error_msg.set(None);
@@ -229,6 +232,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     .await
                 {
                     Ok(resp) if resp.ok() => {
+                        on_launched.emit(());
                         on_close.emit(());
                     }
                     Ok(resp) => {
