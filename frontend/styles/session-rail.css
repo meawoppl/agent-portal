@@ -79,6 +79,7 @@
     white-space: nowrap;
     transition: all 0.2s;
     flex-shrink: 0;
+    overflow: hidden;
 }
 
 .session-pill:hover {
@@ -169,8 +170,6 @@
     right: 0;
     height: 3px;
     pointer-events: none;
-    overflow: hidden;
-    border-radius: 0 0 20px 20px;
 }
 
 .sparkline-tick {
@@ -181,10 +180,6 @@
     background: var(--accent);
     opacity: 0.6;
     border-radius: 1px;
-}
-
-.session-pill.awaiting .sparkline-tick {
-    background: var(--error);
 }
 
 .session-pill.paused .sparkline-tick {
