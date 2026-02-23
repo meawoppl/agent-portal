@@ -519,6 +519,12 @@ async fn run_shim_connection(
         tokio::select! {
             // Portal disconnected
             _ = &mut disconnect_rx => {
+                // Check if a graceful shutdown was queued before the disconnect
+                if let Ok(shutdown) = graceful_shutdown_rx.try_recv() {
+                    break ShimConnectionResult::ServerShutdown(
+                        Duration::from_millis(shutdown.reconnect_delay_ms)
+                    );
+                }
                 info!("Portal WebSocket disconnected");
                 break ShimConnectionResult::Disconnected;
             }

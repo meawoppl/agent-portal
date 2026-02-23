@@ -1508,6 +1508,11 @@ async fn run_main_loop(
             }
 
             _ = &mut state.disconnect_rx => {
+                // Check if a graceful shutdown was queued before the disconnect
+                if let Ok(shutdown) = state.graceful_shutdown_rx.try_recv() {
+                    info!("Server graceful shutdown, will reconnect in {}ms", shutdown.reconnect_delay_ms);
+                    return ConnectionResult::ServerShutdown(Duration::from_millis(shutdown.reconnect_delay_ms));
+                }
                 info!("WebSocket disconnected");
                 return ConnectionResult::Disconnected(state.connection_start.elapsed());
             }
