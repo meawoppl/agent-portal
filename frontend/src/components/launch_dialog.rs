@@ -5,6 +5,7 @@ use shared::api::LaunchRequest;
 use shared::{DirectoryEntry, LauncherInfo};
 use std::rc::Rc;
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -274,6 +275,22 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let on_close = props.on_close.clone();
         Callback::from(move |_| on_close.emit(()))
     };
+
+    // Close on Escape key
+    {
+        let on_close = props.on_close.clone();
+        use_effect_with((), move |_| {
+            let listener =
+                gloo::events::EventListener::new(&gloo::utils::document(), "keydown", move |e| {
+                    if let Ok(ke) = e.clone().dyn_into::<web_sys::KeyboardEvent>() {
+                        if ke.key() == "Escape" {
+                            on_close.emit(());
+                        }
+                    }
+                });
+            move || drop(listener)
+        });
+    }
 
     // Build breadcrumb segments from current path
     let path_str = (*current_path).clone();
