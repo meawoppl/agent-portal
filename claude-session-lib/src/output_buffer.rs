@@ -193,15 +193,8 @@ impl PendingOutputBuffer {
     }
 
     /// Get the last acknowledged sequence number
-    #[allow(dead_code)]
     pub fn last_ack_seq(&self) -> u64 {
         self.state.last_ack_seq
-    }
-
-    /// Get the next sequence number that will be assigned
-    #[allow(dead_code)]
-    pub fn next_seq(&self) -> u64 {
-        self.state.next_seq
     }
 
     /// Persist the buffer state to disk
@@ -226,21 +219,6 @@ impl PendingOutputBuffer {
             self.state.pending.len()
         );
 
-        Ok(())
-    }
-
-    /// Clear the buffer and remove the persistence file
-    #[allow(dead_code)]
-    pub fn clear(&mut self) -> Result<()> {
-        self.state.pending.clear();
-        self.state.last_ack_seq = self.state.next_seq.saturating_sub(1);
-        self.dirty = false;
-
-        if self.persist_path.exists() {
-            fs::remove_file(&self.persist_path).context("Failed to remove buffer file")?;
-        }
-
-        debug!("Cleared buffer for session {}", self.session_id);
         Ok(())
     }
 }
