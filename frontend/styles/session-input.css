@@ -343,6 +343,41 @@
     color: var(--bg-dark);
 }
 
+/* Upload progress bar — appears above input when files are uploading */
+.upload-bar {
+    padding: 6px 12px;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.upload-bar-header {
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 2px;
+}
+
+.upload-bar-file {
+    padding-left: 8px;
+    line-height: 1.4;
+}
+
+.upload-bar-track {
+    margin-top: 4px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.upload-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+
 /* Drop hint — shown as subtle static label, prominent on drag-hover */
 .session-view-input .drop-hint {
     position: absolute;

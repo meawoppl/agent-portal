@@ -122,6 +122,7 @@ pub struct SessionView {
     send_mode_dropdown_open: bool,
     file_input_ref: NodeRef,
     upload_progress: Option<f32>,
+    upload_files: Vec<(String, u64)>,
     drag_hover: bool,
 }
 
@@ -199,6 +200,7 @@ impl Component for SessionView {
             send_mode_dropdown_open: false,
             file_input_ref: NodeRef::default(),
             upload_progress: None,
+            upload_files: Vec::new(),
             drag_hover: false,
         }
     }
@@ -447,6 +449,7 @@ impl Component for SessionView {
                 self.send_mode_dropdown_open = false;
                 self.drag_hover = false;
                 self.upload_progress = Some(0.0);
+                self.upload_files = files.iter().map(|f| (f.name(), f.size() as u64)).collect();
                 let link = ctx.link().clone();
                 let sender = self.ws_sender.clone();
                 let user_input = self.input_value.trim().to_string();
@@ -587,10 +590,12 @@ impl Component for SessionView {
             }
             SessionViewMsg::FileUploaded(_filename) => {
                 self.upload_progress = None;
+                self.upload_files.clear();
                 true
             }
             SessionViewMsg::FileUploadError(err) => {
                 self.upload_progress = None;
+                self.upload_files.clear();
                 gloo::console::error!("File upload error:", &err);
                 true
             }
@@ -706,6 +711,7 @@ impl Component for SessionView {
                 </div>
 
                 { self.render_permission_dialog(ctx) }
+                { self.render_upload_bar() }
 
                 <form
                     class={drag_hint}
@@ -1092,6 +1098,48 @@ impl SessionView {
             }
         } else {
             html! {}
+        }
+    }
+
+    fn render_upload_bar(&self) -> Html {
+        let progress = match self.upload_progress {
+            Some(p) => p,
+            None => return html! {},
+        };
+
+        let file_count = self.upload_files.len();
+        let header = if file_count == 1 {
+            "Uploading 1 file...".to_string()
+        } else {
+            format!("Uploading {} files...", file_count)
+        };
+
+        let files_html = self
+            .upload_files
+            .iter()
+            .map(|(name, size)| {
+                let human_size = if *size < 1024 {
+                    format!("{} B", size)
+                } else if *size < 1024 * 1024 {
+                    format!("{:.1} KB", *size as f64 / 1024.0)
+                } else {
+                    format!("{:.1} MB", *size as f64 / (1024.0 * 1024.0))
+                };
+                html! { <div class="upload-bar-file">{ format!("{} ({})", name, human_size) }</div> }
+            })
+            .collect::<Html>();
+
+        let pct = (progress * 100.0) as u32;
+        let fill_style = format!("width: {}%", pct);
+
+        html! {
+            <div class="upload-bar">
+                <div class="upload-bar-header">{ header }</div>
+                { files_html }
+                <div class="upload-bar-track">
+                    <div class="upload-bar-fill" style={fill_style} />
+                </div>
+            </div>
         }
     }
 
