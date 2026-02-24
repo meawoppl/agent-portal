@@ -371,6 +371,20 @@ fn log_claude_output(output: &ClaudeOutput) {
                     debug!("  tools: {} available", init.tools.len());
                 }
             }
+            if let Some(task) = sys.as_task_started() {
+                debug!(
+                    "  task_started: id={} type={:?} desc={}",
+                    task.task_id,
+                    task.task_type,
+                    truncate(&task.description, 60)
+                );
+            }
+            if let Some(task) = sys.as_task_notification() {
+                debug!(
+                    "  task_notification: id={} status={:?}",
+                    task.task_id, task.status
+                );
+            }
         }
         ClaudeOutput::Assistant(asst) => {
             let msg = &asst.message;

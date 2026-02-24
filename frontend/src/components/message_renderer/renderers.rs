@@ -366,6 +366,18 @@ pub fn render_system_message(msg: &SystemMessage) -> Html {
         return render_compaction_completed(msg);
     }
 
+    if subtype == "task_started" {
+        return render_task_started(msg);
+    }
+
+    if subtype == "task_progress" {
+        return html! {};
+    }
+
+    if subtype == "task_notification" {
+        return render_task_notification(msg);
+    }
+
     if subtype == "init" || subtype == "status" {
         return html! {};
     }
@@ -466,6 +478,92 @@ fn render_compaction_completed(msg: &SystemMessage) -> Html {
                     </div>
                 </div>
             </div>
+        </div>
+    }
+}
+
+fn render_task_started(msg: &SystemMessage) -> Html {
+    let extra = msg.extra.as_ref();
+    let task_type = extra
+        .and_then(|v| v.get("task_type").and_then(|t| t.as_str()))
+        .unwrap_or("unknown");
+    let description = extra
+        .and_then(|v| v.get("description").and_then(|d| d.as_str()))
+        .unwrap_or("Background task");
+    let task_id = extra
+        .and_then(|v| v.get("task_id").and_then(|t| t.as_str()))
+        .unwrap_or("");
+
+    let type_label = match task_type {
+        "local_agent" => "Sub-agent",
+        "local_bash" => "Background Bash",
+        _ => "Task",
+    };
+
+    html! {
+        <div class="claude-message task-message compact" title={format!("Task ID: {}", task_id)}>
+            <div class="message-header">
+                <span class="message-type-badge task">{ "Task Started" }</span>
+                <span class="task-type-badge">{ type_label }</span>
+                <span class="task-description-inline">{ description }</span>
+            </div>
+        </div>
+    }
+}
+
+fn render_task_notification(msg: &SystemMessage) -> Html {
+    let extra = msg.extra.as_ref();
+    let status = extra
+        .and_then(|v| v.get("status").and_then(|s| s.as_str()))
+        .unwrap_or("completed");
+    let summary_text = msg
+        .summary
+        .as_deref()
+        .or_else(|| extra.and_then(|v| v.get("summary").and_then(|s| s.as_str())));
+    let task_id = extra
+        .and_then(|v| v.get("task_id").and_then(|t| t.as_str()))
+        .unwrap_or("");
+
+    let usage = extra.and_then(|v| v.get("usage"));
+    let duration = usage.and_then(|u| u.get("duration_ms").and_then(|n| n.as_u64()));
+    let tool_uses = usage.and_then(|u| u.get("tool_uses").and_then(|n| n.as_u64()));
+    let total_tokens = usage.and_then(|u| u.get("total_tokens").and_then(|n| n.as_u64()));
+
+    let is_failed = status == "failed";
+    let status_class = if is_failed { "failed" } else { "completed" };
+
+    html! {
+        <div class={classes!("claude-message", "task-message", status_class)}
+             title={format!("Task ID: {}", task_id)}>
+            <div class="message-header">
+                <span class={classes!("message-type-badge", "task", status_class)}>
+                    { if is_failed { "Task Failed" } else { "Task Completed" } }
+                </span>
+                {
+                    if let Some(ms) = duration {
+                        html! { <span class="task-stat">{ format_duration(ms) }</span> }
+                    } else { html! {} }
+                }
+                {
+                    if let Some(tools) = tool_uses {
+                        html! { <span class="task-stat" title="Tool calls">{ format!("{} tools", tools) }</span> }
+                    } else { html! {} }
+                }
+                {
+                    if let Some(tokens) = total_tokens {
+                        html! { <span class="task-stat" title="Total tokens">{ format!("{}k tokens", tokens / 1000) }</span> }
+                    } else { html! {} }
+                }
+            </div>
+            {
+                if let Some(summary) = summary_text {
+                    html! {
+                        <div class="message-body">
+                            <div class="task-summary">{ render_markdown(summary) }</div>
+                        </div>
+                    }
+                } else { html! {} }
+            }
         </div>
     }
 }
