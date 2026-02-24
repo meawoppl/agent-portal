@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-launcher"
-version = "1.2.6"
+version = "1.2.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -423,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "1.2.6"
+version = "1.2.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "1.2.6"
+version = "1.2.7"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "cli-tools"
-version = "1.2.6"
+version = "1.2.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -1287,7 +1287,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "1.2.6"
+version = "1.2.7"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -3930,7 +3930,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "1.2.6"
+version = "1.2.7"
 dependencies = [
  "chrono",
  "claude-codes",
