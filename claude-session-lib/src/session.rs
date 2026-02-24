@@ -125,13 +125,8 @@ impl PermissionResponse {
 /// Internal session state
 enum SessionState {
     Running,
-    WaitingForPermission {
-        #[allow(dead_code)]
-        request_id: String,
-    },
-    Exited {
-        code: i32,
-    },
+    WaitingForPermission,
+    Exited { code: i32 },
 }
 
 /// Commands sent to the agent I/O task
@@ -372,7 +367,7 @@ impl Session {
     pub fn snapshot(&self) -> SessionSnapshot {
         let was_running = matches!(
             self.state,
-            SessionState::Running | SessionState::WaitingForPermission { .. }
+            SessionState::Running | SessionState::WaitingForPermission
         );
         SessionSnapshot::new(
             self.id,
@@ -441,9 +436,7 @@ impl Session {
                                 input: tool_req.input.clone(),
                                 requested_at: Utc::now(),
                             });
-                            self.state = SessionState::WaitingForPermission {
-                                request_id: request_id.clone(),
-                            };
+                            self.state = SessionState::WaitingForPermission;
 
                             // Emit PermissionRequest (not Output) for permission requests
                             return Some(SessionEvent::PermissionRequest {
@@ -479,9 +472,7 @@ impl Session {
                         input: input.clone(),
                         requested_at: Utc::now(),
                     });
-                    self.state = SessionState::WaitingForPermission {
-                        request_id: request_id.clone(),
-                    };
+                    self.state = SessionState::WaitingForPermission;
                     return Some(SessionEvent::PermissionRequest {
                         request_id,
                         tool_name,
@@ -613,7 +604,7 @@ impl Session {
     pub fn is_running(&self) -> bool {
         matches!(
             self.state,
-            SessionState::Running | SessionState::WaitingForPermission { .. }
+            SessionState::Running | SessionState::WaitingForPermission
         )
     }
 
