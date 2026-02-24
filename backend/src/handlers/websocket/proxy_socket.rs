@@ -85,7 +85,7 @@ fn handle_proxy_message(
     db_session_id: &mut Option<Uuid>,
 ) {
     match proxy_msg {
-        ProxyToServer::Register {
+        ProxyToServer::Register(shared::RegisterFields {
             session_id: claude_session_id,
             session_name,
             auth_token,
@@ -98,7 +98,7 @@ fn handle_proxy_message(
             hostname,
             launcher_id,
             agent_type,
-        } => {
+        }) => {
             let key = claude_session_id.to_string();
             *session_key = Some(key.clone());
 

@@ -35,7 +35,7 @@ pub fn connect_websocket(
             Ok(conn) => {
                 let (mut sender, mut receiver) = conn.split();
 
-                let register_msg = ClientToServer::Register {
+                let register_msg = ClientToServer::Register(shared::RegisterFields {
                     session_id,
                     session_name: session_id.to_string(),
                     auth_token: None,
@@ -48,7 +48,7 @@ pub fn connect_websocket(
                     hostname: None,
                     launcher_id: None,
                     agent_type: Default::default(),
-                };
+                });
 
                 if sender.send(register_msg).await.is_err() {
                     on_event.emit(WsEvent::Error("Failed to send registration".to_string()));

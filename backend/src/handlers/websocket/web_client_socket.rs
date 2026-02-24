@@ -84,12 +84,12 @@ fn handle_web_client_message(
     pending_uploads: &mut HashMap<String, PendingUpload>,
 ) -> bool {
     match client_msg {
-        ClientToServer::Register {
+        ClientToServer::Register(shared::RegisterFields {
             session_id,
             session_name,
             replay_after,
             ..
-        } => handle_web_register(
+        }) => handle_web_register(
             app_state,
             session_manager,
             db_pool,
@@ -112,13 +112,13 @@ fn handle_web_client_message(
             );
             false
         }
-        ClientToServer::FileUploadStart {
+        ClientToServer::FileUploadStart(shared::FileUploadStartFields {
             upload_id,
             filename,
             content_type,
             total_chunks,
             total_size,
-        } => {
+        }) => {
             handle_file_upload_start(
                 session_manager,
                 session_key,
@@ -131,11 +131,11 @@ fn handle_web_client_message(
             );
             false
         }
-        ClientToServer::FileUploadChunk {
+        ClientToServer::FileUploadChunk(shared::FileUploadChunkFields {
             upload_id,
             chunk_index,
             data,
-        } => {
+        }) => {
             handle_file_upload_chunk(
                 session_manager,
                 session_key,
@@ -146,13 +146,13 @@ fn handle_web_client_message(
             );
             false
         }
-        ClientToServer::PermissionResponse {
+        ClientToServer::PermissionResponse(shared::PermissionResponseFields {
             request_id,
             allow,
             input,
             permissions,
             reason,
-        } => {
+        }) => {
             if let (Some(ref key), Some(session_id)) = (session_key, *verified_session_id) {
                 handle_permission_response(
                     session_manager,
@@ -391,13 +391,13 @@ fn handle_file_upload_start(
 
     // Forward start message to proxy
     if let Some(ref key) = session_key {
-        let msg = ServerToProxy::FileUploadStart {
+        let msg = ServerToProxy::FileUploadStart(shared::FileUploadStartFields {
             upload_id,
             filename: safe_filename,
             content_type,
             total_chunks,
             total_size,
-        };
+        });
         if !session_manager.send_to_session(key, msg) {
             warn!("Session not connected for file upload start");
         }
@@ -429,11 +429,11 @@ fn handle_file_upload_chunk(
 
     // Forward chunk directly to proxy
     if let Some(ref key) = session_key {
-        let msg = ServerToProxy::FileUploadChunk {
+        let msg = ServerToProxy::FileUploadChunk(shared::FileUploadChunkFields {
             upload_id: upload_id.clone(),
             chunk_index,
             data,
-        };
+        });
         if !session_manager.send_to_session(key, msg) {
             warn!("Session not connected for file upload chunk");
         }

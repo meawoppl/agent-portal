@@ -414,7 +414,7 @@ async fn register_session(
         .and_then(|h| h.into_string().ok())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let register_msg = ProxyToServer::Register {
+    let register_msg = ProxyToServer::Register(shared::RegisterFields {
         session_id: config.session_id,
         session_name: config.session_name.clone(),
         auth_token: config.auth_token.clone(),
@@ -427,7 +427,7 @@ async fn register_session(
         hostname: Some(hostname),
         launcher_id: config.launcher_id,
         agent_type: config.agent_type,
-    };
+    });
 
     if conn.send(register_msg).await.is_err() {
         error!("Failed to send registration message");
@@ -1311,7 +1311,7 @@ async fn handle_ws_message(
 ) -> WsMessageResult {
     if !matches!(
         proxy_msg,
-        ServerToProxy::Heartbeat | ServerToProxy::FileUploadChunk { .. }
+        ServerToProxy::Heartbeat | ServerToProxy::FileUploadChunk(..)
     ) {
         debug!("ws recv: {:?}", proxy_msg);
     }
@@ -1378,13 +1378,13 @@ async fn handle_ws_message(
                 error!("Failed to send InputAck: {}", e);
             }
         }
-        ServerToProxy::PermissionResponse {
+        ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
             request_id,
             allow,
             input,
             permissions,
             reason,
-        } => {
+        }) => {
             debug!(
                 "→ [perm_response] {} allow={} permissions={} reason={:?}",
                 request_id,
@@ -1430,13 +1430,13 @@ async fn handle_ws_message(
             );
             return WsMessageResult::GracefulShutdown(reconnect_delay_ms);
         }
-        ServerToProxy::FileUploadStart {
+        ServerToProxy::FileUploadStart(shared::FileUploadStartFields {
             upload_id,
             filename,
             content_type: _,
             total_chunks,
             total_size,
-        } => {
+        }) => {
             info!(
                 "[upload {}] Starting: {} ({} bytes, {} chunks)",
                 &upload_id[..8.min(upload_id.len())],
@@ -1457,11 +1457,11 @@ async fn handle_ws_message(
                 return WsMessageResult::Disconnect;
             }
         }
-        ServerToProxy::FileUploadChunk {
+        ServerToProxy::FileUploadChunk(shared::FileUploadChunkFields {
             upload_id,
             chunk_index,
             data,
-        } => {
+        }) => {
             if file_upload_tx
                 .send(FileUploadEvent::Chunk {
                     upload_id,

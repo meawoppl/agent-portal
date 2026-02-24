@@ -85,7 +85,7 @@ pub async fn register_with_backend(
         .and_then(|h| h.into_string().ok())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let register_msg = ProxyToServer::Register {
+    let register_msg = ProxyToServer::Register(shared::RegisterFields {
         session_id: config.session_id,
         session_name: config.session_name.clone(),
         auth_token: config.auth_token.clone(),
@@ -98,7 +98,7 @@ pub async fn register_with_backend(
         hostname: Some(hostname),
         launcher_id: config.launcher_id,
         agent_type: config.agent_type,
-    };
+    });
 
     if let Err(e) = conn.send(&register_msg).await {
         error!("Failed to send registration message: {}", e);
@@ -303,13 +303,13 @@ async fn handle_ws_text_message(
                 }
             }
         }
-        ServerToProxy::PermissionResponse {
+        ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
             request_id,
             allow,
             input,
             permissions,
             reason,
-        } => {
+        }) => {
             if perm_tx
                 .send(PermissionResponseData {
                     request_id,

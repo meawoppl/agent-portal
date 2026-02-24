@@ -7,6 +7,67 @@ use crate::{
 };
 
 // =============================================================================
+// Shared field structs — used by both proxy and client endpoints
+// =============================================================================
+
+/// Fields for session registration (shared by proxy and web client).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterFields {
+    pub session_id: Uuid,
+    pub session_name: String,
+    pub auth_token: Option<String>,
+    pub working_directory: String,
+    #[serde(default)]
+    pub resuming: bool,
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    #[serde(default)]
+    pub replay_after: Option<String>,
+    #[serde(default)]
+    pub client_version: Option<String>,
+    #[serde(default)]
+    pub replaces_session_id: Option<Uuid>,
+    #[serde(default)]
+    pub hostname: Option<String>,
+    #[serde(default)]
+    pub launcher_id: Option<Uuid>,
+    #[serde(default)]
+    pub agent_type: AgentType,
+}
+
+/// Fields for a permission response (shared by server-to-proxy and client-to-server).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionResponseFields {
+    pub request_id: String,
+    pub allow: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<PermissionSuggestion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Fields for starting a file upload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileUploadStartFields {
+    pub upload_id: String,
+    pub filename: String,
+    pub content_type: String,
+    pub total_chunks: u32,
+    #[serde(default)]
+    pub total_size: u64,
+}
+
+/// Fields for a single file upload chunk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileUploadChunkFields {
+    pub upload_id: String,
+    pub chunk_index: u32,
+    pub data: String,
+}
+
+// =============================================================================
 // Session endpoint: proxy <-> backend (/ws/session)
 // =============================================================================
 
@@ -23,28 +84,7 @@ impl WsEndpoint for SessionEndpoint {
 #[serde(tag = "type")]
 pub enum ProxyToServer {
     /// Register a new session or connect to an existing one
-    Register {
-        session_id: Uuid,
-        session_name: String,
-        auth_token: Option<String>,
-        working_directory: String,
-        #[serde(default)]
-        resuming: bool,
-        #[serde(default)]
-        git_branch: Option<String>,
-        #[serde(default)]
-        replay_after: Option<String>,
-        #[serde(default)]
-        client_version: Option<String>,
-        #[serde(default)]
-        replaces_session_id: Option<Uuid>,
-        #[serde(default)]
-        hostname: Option<String>,
-        #[serde(default)]
-        launcher_id: Option<Uuid>,
-        #[serde(default)]
-        agent_type: AgentType,
-    },
+    Register(RegisterFields),
 
     /// Raw output from Claude Code (unsequenced fallback)
     ClaudeOutput { content: serde_json::Value },
@@ -115,37 +155,16 @@ pub enum ServerToProxy {
     },
 
     /// User's permission decision
-    PermissionResponse {
-        request_id: String,
-        allow: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        input: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        permissions: Vec<PermissionSuggestion>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-    },
+    PermissionResponse(PermissionResponseFields),
 
     /// Acknowledge receipt of output messages
     OutputAck { session_id: Uuid, ack_seq: u64 },
 
     /// Start a chunked file upload to the proxy's working directory
-    FileUploadStart {
-        upload_id: String,
-        filename: String,
-        content_type: String,
-        total_chunks: u32,
-        /// Total decoded file size in bytes (for progress tracking)
-        total_size: u64,
-    },
+    FileUploadStart(FileUploadStartFields),
 
     /// A single chunk of a file upload (base64-encoded, ~1KB decoded)
-    FileUploadChunk {
-        upload_id: String,
-        chunk_index: u32,
-        /// Base64-encoded chunk data
-        data: String,
-    },
+    FileUploadChunk(FileUploadChunkFields),
 
     /// Server is shutting down
     ServerShutdown {
@@ -171,28 +190,7 @@ impl WsEndpoint for ClientEndpoint {
 #[serde(tag = "type")]
 pub enum ClientToServer {
     /// Register to receive updates for a session
-    Register {
-        session_id: Uuid,
-        session_name: String,
-        auth_token: Option<String>,
-        working_directory: String,
-        #[serde(default)]
-        resuming: bool,
-        #[serde(default)]
-        git_branch: Option<String>,
-        #[serde(default)]
-        replay_after: Option<String>,
-        #[serde(default)]
-        client_version: Option<String>,
-        #[serde(default)]
-        replaces_session_id: Option<Uuid>,
-        #[serde(default)]
-        hostname: Option<String>,
-        #[serde(default)]
-        launcher_id: Option<Uuid>,
-        #[serde(default)]
-        agent_type: AgentType,
-    },
+    Register(RegisterFields),
 
     /// User sends input to Claude
     ClaudeInput {
@@ -202,35 +200,13 @@ pub enum ClientToServer {
     },
 
     /// User's permission decision
-    PermissionResponse {
-        request_id: String,
-        allow: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        input: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        permissions: Vec<PermissionSuggestion>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-    },
+    PermissionResponse(PermissionResponseFields),
 
     /// Start a chunked file upload
-    FileUploadStart {
-        upload_id: String,
-        filename: String,
-        content_type: String,
-        total_chunks: u32,
-        /// Total decoded file size in bytes (for progress tracking)
-        #[serde(default)]
-        total_size: u64,
-    },
+    FileUploadStart(FileUploadStartFields),
 
     /// A single chunk of a file upload
-    FileUploadChunk {
-        upload_id: String,
-        chunk_index: u32,
-        /// Base64-encoded chunk data (~1KB decoded per chunk)
-        data: String,
-    },
+    FileUploadChunk(FileUploadChunkFields),
 }
 
 /// Messages the backend sends to the frontend.
@@ -440,7 +416,7 @@ mod tests {
 
     #[test]
     fn proxy_to_server_register_roundtrip() {
-        let msg = ProxyToServer::Register {
+        let msg = ProxyToServer::Register(RegisterFields {
             session_id: Uuid::nil(),
             session_name: "test".into(),
             auth_token: None,
@@ -453,13 +429,13 @@ mod tests {
             hostname: None,
             launcher_id: None,
             agent_type: AgentType::Claude,
-        };
+        });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"Register""#));
         let parsed: ProxyToServer = serde_json::from_str(&json).unwrap();
         match parsed {
-            ProxyToServer::Register { session_name, .. } => {
-                assert_eq!(session_name, "test");
+            ProxyToServer::Register(reg) => {
+                assert_eq!(reg.session_name, "test");
             }
             _ => panic!("Wrong variant"),
         }

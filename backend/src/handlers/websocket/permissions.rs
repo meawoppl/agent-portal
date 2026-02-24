@@ -126,13 +126,13 @@ pub fn handle_permission_response(
 
     if !session_manager.send_to_session(
         session_key,
-        ServerToProxy::PermissionResponse {
+        ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
             request_id,
             allow,
             input,
             permissions,
             reason,
-        },
+        }),
     ) {
         warn!(
             "Failed to send PermissionResponse to session '{}', session not connected",

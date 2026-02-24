@@ -535,13 +535,13 @@ impl Component for SessionView {
 
                         send_message(
                             ws,
-                            ClientToServer::FileUploadStart {
+                            ClientToServer::FileUploadStart(shared::FileUploadStartFields {
                                 upload_id: upload_id.clone(),
                                 filename: file_name.clone(),
                                 content_type: ct,
                                 total_chunks,
                                 total_size: file_size,
-                            },
+                            }),
                         );
 
                         for i in 0..total_chunks {
@@ -555,11 +555,11 @@ impl Component for SessionView {
 
                             send_message(
                                 ws,
-                                ClientToServer::FileUploadChunk {
+                                ClientToServer::FileUploadChunk(shared::FileUploadChunkFields {
                                     upload_id: upload_id.clone(),
                                     chunk_index: i,
                                     data: encoded,
-                                },
+                                }),
                             );
                         }
 
@@ -971,7 +971,7 @@ impl SessionView {
     fn handle_approve_permission(&mut self, ctx: &Context<Self>, remember: bool) -> bool {
         if let Some(perm) = self.pending_permission.take() {
             if let Some(ref sender) = self.ws_sender {
-                let msg = ClientToServer::PermissionResponse {
+                let msg = ClientToServer::PermissionResponse(shared::PermissionResponseFields {
                     request_id: perm.request_id,
                     allow: true,
                     input: Some(perm.input),
@@ -981,7 +981,7 @@ impl SessionView {
                         vec![]
                     },
                     reason: None,
-                };
+                });
                 send_message(sender, msg);
             }
             ctx.link().send_message(SessionViewMsg::CheckAwaiting);
@@ -995,13 +995,13 @@ impl SessionView {
     fn handle_deny_permission(&mut self, ctx: &Context<Self>) -> bool {
         if let Some(perm) = self.pending_permission.take() {
             if let Some(ref sender) = self.ws_sender {
-                let msg = ClientToServer::PermissionResponse {
+                let msg = ClientToServer::PermissionResponse(shared::PermissionResponseFields {
                     request_id: perm.request_id,
                     allow: false,
                     input: None,
                     permissions: vec![],
                     reason: Some("User denied".to_string()),
-                };
+                });
                 send_message(sender, msg);
             }
             ctx.link().send_message(SessionViewMsg::CheckAwaiting);
@@ -1070,13 +1070,13 @@ impl SessionView {
                     serde_json::to_value(PermissionAnswers::empty()).unwrap_or_default()
                 };
 
-                let msg = ClientToServer::PermissionResponse {
+                let msg = ClientToServer::PermissionResponse(shared::PermissionResponseFields {
                     request_id: perm.request_id,
                     allow: true,
                     input: Some(answers_json),
                     permissions: vec![],
                     reason: None,
-                };
+                });
                 send_message(sender, msg);
             }
             self.multi_select_options.clear();
