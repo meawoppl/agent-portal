@@ -1,315 +1,18 @@
-use super::markdown::render_markdown;
-use super::tool_renderers::render_tool_use;
-use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
+//! Rendering functions for each message type.
+
+use super::types::*;
+use super::{format_duration, shorten_model_name, truncate_str};
+use crate::components::markdown::render_markdown;
+use crate::components::tool_renderers::render_tool_use;
+use serde::Deserialize;
 use serde_json::Value;
 use shared::ToolResultContent;
-use uuid::Uuid;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
-
-/// A group of messages to render together
-#[derive(Debug, Clone, PartialEq)]
-pub enum MessageGroup {
-    /// A single non-assistant message
-    Single(String),
-    /// Multiple consecutive assistant messages grouped together
-    AssistantGroup(Vec<String>),
-}
-
-/// Check if a message should be grouped with assistant messages
-/// This includes assistant messages AND tool result messages (user messages containing only tool results)
-fn should_group_with_assistant(json: &str) -> bool {
-    match serde_json::from_str::<ClaudeMessage>(json) {
-        Ok(ClaudeMessage::Assistant(_)) => true,
-        Ok(ClaudeMessage::User(msg)) => {
-            if msg.content.is_some() {
-                return false;
-            }
-            if let Some(message) = &msg.message {
-                if let Some(blocks) = &message.content {
-                    return !blocks.is_empty()
-                        && blocks
-                            .iter()
-                            .all(|b| matches!(b, ContentBlock::ToolResult { .. }));
-                }
-            }
-            false
-        }
-        _ => false,
-    }
-}
-
-/// Group consecutive assistant messages (and their tool results) together
-pub fn group_messages(messages: &[String]) -> Vec<MessageGroup> {
-    let mut groups = Vec::new();
-    let mut current_assistant_group: Vec<String> = Vec::new();
-
-    for json in messages {
-        if should_group_with_assistant(json) {
-            current_assistant_group.push(json.clone());
-        } else {
-            if !current_assistant_group.is_empty() {
-                groups.push(MessageGroup::AssistantGroup(std::mem::take(
-                    &mut current_assistant_group,
-                )));
-            }
-            groups.push(MessageGroup::Single(json.clone()));
-        }
-    }
-
-    if !current_assistant_group.is_empty() {
-        groups.push(MessageGroup::AssistantGroup(current_assistant_group));
-    }
-
-    groups
-}
-
-// --- Message types ---
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ClaudeMessage {
-    #[serde(rename = "system")]
-    System(SystemMessage),
-    #[serde(rename = "assistant")]
-    Assistant(AssistantMessage),
-    #[serde(rename = "result")]
-    Result(ResultMessage),
-    #[serde(rename = "user")]
-    User(UserMessage),
-    #[serde(rename = "error")]
-    Error(ErrorMessage),
-    #[serde(rename = "portal")]
-    Portal(PortalMessage),
-    #[serde(rename = "rate_limit_event")]
-    RateLimitEvent(RateLimitEventMessage),
-    #[serde(other)]
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PortalMessage {
-    #[serde(default)]
-    pub content: Vec<shared::PortalContent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UserMessage {
-    pub content: Option<String>,
-    pub message: Option<UserMessageContent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UserMessageContent {
-    pub content: Option<Vec<ContentBlock>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ErrorDetails {
-    #[serde(rename = "type")]
-    pub error_type: Option<String>,
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ErrorMessage {
-    pub message: Option<String>,
-    pub error: Option<ErrorDetails>,
-    pub request_id: Option<String>,
-}
-
-impl ErrorMessage {
-    pub fn is_overload(&self) -> bool {
-        self.error
-            .as_ref()
-            .and_then(|e| e.error_type.as_deref())
-            .map(|t| t == "overloaded_error")
-            .unwrap_or(false)
-    }
-
-    pub fn display_message(&self) -> &str {
-        self.error
-            .as_ref()
-            .and_then(|e| e.message.as_deref())
-            .or(self.message.as_deref())
-            .unwrap_or("Unknown error")
-    }
-
-    pub fn error_type(&self) -> Option<&str> {
-        self.error.as_ref().and_then(|e| e.error_type.as_deref())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RateLimitEventMessage {
-    pub rate_limit_info: Option<RateLimitInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RateLimitInfo {
-    pub status: Option<String>,
-    #[serde(rename = "resetsAt")]
-    pub resets_at: Option<u64>,
-    #[serde(rename = "rateLimitType")]
-    pub rate_limit_type: Option<String>,
-    pub utilization: Option<f64>,
-    #[serde(rename = "overageStatus")]
-    pub overage_status: Option<String>,
-    #[serde(rename = "overageDisabledReason")]
-    pub overage_disabled_reason: Option<String>,
-    #[serde(rename = "isUsingOverage")]
-    pub is_using_overage: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SystemMessage {
-    pub subtype: Option<String>,
-    pub session_id: Option<String>,
-    pub model: Option<String>,
-    pub cwd: Option<String>,
-    pub claude_code_version: Option<String>,
-    pub tools: Option<Vec<String>>,
-    pub agents: Option<Vec<String>>,
-    pub skills: Option<Vec<String>>,
-    pub slash_commands: Option<Vec<String>>,
-    pub mcp_servers: Option<Vec<Value>>,
-    pub plugins: Option<Vec<Value>>,
-    pub summary: Option<String>,
-    pub leaf_message_count: Option<u32>,
-    pub duration_ms: Option<u64>,
-    #[serde(flatten)]
-    pub extra: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AssistantMessage {
-    pub message: Option<MessageContent>,
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MessageContent {
-    pub id: Option<String>,
-    pub model: Option<String>,
-    pub role: Option<String>,
-    pub content: Option<Vec<ContentBlock>>,
-    pub usage: Option<UsageInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ContentBlock {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image")]
-    Image { source: ImageSource },
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-    },
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        tool_use_id: String,
-        content: Option<ToolResultContent>,
-        #[serde(default)]
-        is_error: bool,
-    },
-    #[serde(rename = "thinking")]
-    Thinking { thinking: String },
-    #[serde(other)]
-    Other,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageSource {
-    #[serde(rename = "type")]
-    pub source_type: String,
-    pub media_type: String,
-    pub data: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UsageInfo {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub cache_read_input_tokens: Option<u64>,
-    pub cache_creation_input_tokens: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ResultMessage {
-    pub subtype: Option<String>,
-    pub session_id: Option<String>,
-    pub result: Option<String>,
-    pub is_error: Option<bool>,
-    pub duration_ms: Option<u64>,
-    pub duration_api_ms: Option<u64>,
-    pub total_cost_usd: Option<f64>,
-    pub num_turns: Option<u64>,
-    pub usage: Option<UsageInfo>,
-}
-
-// --- Components ---
-
-#[derive(Properties, PartialEq)]
-pub struct MessageRendererProps {
-    pub json: String,
-    #[prop_or_default]
-    pub session_id: Option<Uuid>,
-    #[prop_or_default]
-    pub agent_type: shared::AgentType,
-}
-
-#[function_component(MessageRenderer)]
-pub fn message_renderer(props: &MessageRendererProps) -> Html {
-    if props.agent_type == shared::AgentType::Codex {
-        return html! {
-            <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} />
-        };
-    }
-
-    let parsed: Result<ClaudeMessage, _> = serde_json::from_str(&props.json);
-
-    match parsed {
-        Ok(ClaudeMessage::System(msg)) => render_system_message(&msg),
-        Ok(ClaudeMessage::Assistant(msg)) => render_assistant_message(&msg),
-        Ok(ClaudeMessage::Result(msg)) => render_result_message(&msg),
-        Ok(ClaudeMessage::User(msg)) => render_user_message(&msg),
-        Ok(ClaudeMessage::Error(msg)) => render_error_message(&msg),
-        Ok(ClaudeMessage::Portal(msg)) => render_portal_message(&msg),
-        Ok(ClaudeMessage::RateLimitEvent(msg)) => render_rate_limit_event(&msg),
-        Ok(ClaudeMessage::Unknown) | Err(_) => {
-            html! { <RawMessageRenderer json={props.json.clone()} session_id={props.session_id} /> }
-        }
-    }
-}
-
-#[derive(Properties, PartialEq)]
-pub struct MessageGroupRendererProps {
-    pub group: MessageGroup,
-    #[prop_or_default]
-    pub session_id: Option<Uuid>,
-    #[prop_or_default]
-    pub agent_type: shared::AgentType,
-}
-
-#[function_component(MessageGroupRenderer)]
-pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
-    match &props.group {
-        MessageGroup::Single(json) => {
-            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} /> }
-        }
-        MessageGroup::AssistantGroup(messages) => render_assistant_group(messages),
-    }
-}
 
 // --- Message renderers ---
 
-fn render_assistant_group(messages: &[String]) -> Html {
+pub fn render_assistant_group(messages: &[String]) -> Html {
     let mut all_blocks: Vec<ContentBlock> = Vec::new();
     let mut total_output_tokens: u64 = 0;
     let mut total_input_tokens: u64 = 0;
@@ -391,7 +94,7 @@ fn render_assistant_group(messages: &[String]) -> Html {
     }
 }
 
-fn render_user_message(msg: &UserMessage) -> Html {
+pub fn render_user_message(msg: &UserMessage) -> Html {
     if let Some(text) = &msg.content {
         html! {
             <div class="claude-message user-message">
@@ -446,7 +149,7 @@ fn render_user_message(msg: &UserMessage) -> Html {
     }
 }
 
-fn render_error_message(msg: &ErrorMessage) -> Html {
+pub fn render_error_message(msg: &ErrorMessage) -> Html {
     if msg.is_overload() {
         return render_overload_error(msg);
     }
@@ -473,7 +176,7 @@ fn render_error_message(msg: &ErrorMessage) -> Html {
     }
 }
 
-fn render_portal_message(msg: &PortalMessage) -> Html {
+pub fn render_portal_message(msg: &PortalMessage) -> Html {
     html! {
         <div class="claude-message portal-message">
             <div class="message-header">
@@ -569,7 +272,7 @@ fn render_overload_error(msg: &ErrorMessage) -> Html {
     }
 }
 
-fn render_rate_limit_event(msg: &RateLimitEventMessage) -> Html {
+pub fn render_rate_limit_event(msg: &RateLimitEventMessage) -> Html {
     let info = msg.rate_limit_info.as_ref();
     let status = info.and_then(|i| i.status.as_deref()).unwrap_or("unknown");
     let rate_type = info
@@ -640,7 +343,7 @@ fn render_rate_limit_event(msg: &RateLimitEventMessage) -> Html {
     }
 }
 
-fn render_system_message(msg: &SystemMessage) -> Html {
+pub fn render_system_message(msg: &SystemMessage) -> Html {
     let subtype = msg.subtype.as_deref().unwrap_or("system");
 
     // Check if this is a compaction-related message via subtype or status field
@@ -767,7 +470,7 @@ fn render_compaction_completed(msg: &SystemMessage) -> Html {
     }
 }
 
-fn render_assistant_message(msg: &AssistantMessage) -> Html {
+pub fn render_assistant_message(msg: &AssistantMessage) -> Html {
     let blocks = msg
         .message
         .as_ref()
@@ -825,7 +528,7 @@ fn render_assistant_message(msg: &AssistantMessage) -> Html {
     }
 }
 
-fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
+pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
     html! {
         <>
             {
@@ -1032,7 +735,7 @@ fn render_structured_block(block: &Value) -> Html {
     }
 }
 
-fn render_result_message(msg: &ResultMessage) -> Html {
+pub fn render_result_message(msg: &ResultMessage) -> Html {
     let is_error = msg.is_error.unwrap_or(false);
     let status_class = if is_error { "error" } else { "success" };
 
@@ -1200,260 +903,5 @@ fn format_error_type(error_type: &str) -> String {
         "rate_limit_error" => "Rate Limited".to_string(),
         "request_too_large" => "Request Too Large".to_string(),
         other => other.replace('_', " ").to_string(),
-    }
-}
-
-// --- Raw message logging ---
-
-#[derive(Serialize)]
-struct LogRawMessageRequest {
-    session_id: Option<Uuid>,
-    message_content: Value,
-    message_source: String,
-    render_reason: Option<String>,
-}
-
-fn log_raw_message(session_id: Option<Uuid>, json: &str, reason: &str) {
-    let message_content =
-        serde_json::from_str::<Value>(json).unwrap_or_else(|_| Value::String(json.to_string()));
-
-    let request_body = LogRawMessageRequest {
-        session_id,
-        message_content,
-        message_source: "frontend".to_string(),
-        render_reason: Some(reason.to_string()),
-    };
-
-    spawn_local(async move {
-        let result = Request::post("/api/raw-messages")
-            .header("Content-Type", "application/json")
-            .json(&request_body)
-            .map_err(|e| format!("Failed to serialize: {:?}", e))
-            .map(|req| req.send());
-
-        if let Ok(future) = result {
-            if let Err(e) = future.await {
-                log::warn!("Failed to log raw message: {:?}", e);
-            }
-        }
-    });
-}
-
-#[derive(Properties, PartialEq)]
-pub struct RawMessageRendererProps {
-    pub json: String,
-    #[prop_or_default]
-    pub session_id: Option<Uuid>,
-}
-
-#[function_component(RawMessageRenderer)]
-pub fn raw_message_renderer(props: &RawMessageRendererProps) -> Html {
-    let json = props.json.clone();
-    let session_id = props.session_id;
-
-    use_effect_with(json.clone(), move |json| {
-        let reason = match serde_json::from_str::<Value>(json) {
-            Ok(val) => {
-                if let Some(msg_type) = val.get("type").and_then(|t| t.as_str()) {
-                    format!("Unknown message type: {}", msg_type)
-                } else {
-                    "Message has no 'type' field".to_string()
-                }
-            }
-            Err(e) => format!("JSON parse error: {}", e),
-        };
-
-        log_raw_message(session_id, json, &reason);
-        || ()
-    });
-
-    render_raw_json(&props.json)
-}
-
-fn render_raw_json(json: &str) -> Html {
-    let display = serde_json::from_str::<Value>(json)
-        .ok()
-        .and_then(|v| serde_json::to_string_pretty(&v).ok())
-        .unwrap_or_else(|| json.to_string());
-
-    html! {
-        <div class="claude-message raw-message">
-            <div class="message-header">
-                <span class="message-type-badge raw">{ "Raw" }</span>
-            </div>
-            <div class="message-body">
-                <pre class="raw-json">{ display }</pre>
-            </div>
-        </div>
-    }
-}
-
-// --- Utility functions (used by tool_renderers) ---
-
-pub fn truncate_str(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        s
-    } else {
-        let mut end = max_len;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        &s[..end]
-    }
-}
-
-fn shorten_model_name(model: &str) -> Option<String> {
-    if model.is_empty() || model.starts_with('<') {
-        return None;
-    }
-
-    // Extract version from model strings like:
-    // - "claude-opus-4-5-20251101" -> "4.5"
-    // - "claude-sonnet-4-5-20250929" -> "4.5"
-    // - "claude-3-5-sonnet-20241022" -> "3.5"
-    let extract_version = |model: &str| -> Option<String> {
-        let parts: Vec<&str> = model.split('-').collect();
-        // Look for two consecutive numeric parts (e.g. "4-6" in "claude-opus-4-6")
-        for i in 0..parts.len().saturating_sub(1) {
-            if let (Ok(major), Ok(minor)) = (parts[i].parse::<u32>(), parts[i + 1].parse::<u32>()) {
-                // Skip if minor looks like a date (8+ digits)
-                if parts[i + 1].len() >= 8 {
-                    continue;
-                }
-                return Some(format!("{}.{}", major, minor));
-            }
-        }
-        None
-    };
-
-    let version = extract_version(model);
-
-    Some(if model.contains("opus") {
-        match version {
-            Some(v) => format!("Opus {}", v),
-            None => "Opus".to_string(),
-        }
-    } else if model.contains("sonnet") {
-        match version {
-            Some(v) => format!("Sonnet {}", v),
-            None => "Sonnet".to_string(),
-        }
-    } else if model.contains("haiku") {
-        match version {
-            Some(v) => format!("Haiku {}", v),
-            None => "Haiku".to_string(),
-        }
-    } else {
-        model.split('-').next().unwrap_or(model).to_string()
-    })
-}
-
-pub fn format_duration(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{}ms", ms)
-    } else if ms < 60000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        let mins = ms / 60000;
-        let secs = (ms % 60000) / 1000;
-        format!("{}m {}s", mins, secs)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_message_overload_detection() {
-        let msg = ErrorMessage {
-            message: None,
-            error: Some(ErrorDetails {
-                error_type: Some("overloaded_error".to_string()),
-                message: Some("Overloaded".to_string()),
-            }),
-            request_id: Some("req_123".to_string()),
-        };
-        assert!(msg.is_overload());
-        assert_eq!(msg.display_message(), "Overloaded");
-        assert_eq!(msg.error_type(), Some("overloaded_error"));
-    }
-
-    #[test]
-    fn test_error_message_regular_error() {
-        let msg = ErrorMessage {
-            message: Some("Something went wrong".to_string()),
-            error: None,
-            request_id: None,
-        };
-        assert!(!msg.is_overload());
-        assert_eq!(msg.display_message(), "Something went wrong");
-        assert_eq!(msg.error_type(), None);
-    }
-
-    #[test]
-    fn test_error_message_api_error() {
-        let msg = ErrorMessage {
-            message: None,
-            error: Some(ErrorDetails {
-                error_type: Some("invalid_request_error".to_string()),
-                message: Some("Invalid API key".to_string()),
-            }),
-            request_id: Some("req_456".to_string()),
-        };
-        assert!(!msg.is_overload());
-        assert_eq!(msg.display_message(), "Invalid API key");
-        assert_eq!(msg.error_type(), Some("invalid_request_error"));
-    }
-
-    #[test]
-    fn test_error_message_empty() {
-        let msg = ErrorMessage::default();
-        assert!(!msg.is_overload());
-        assert_eq!(msg.display_message(), "Unknown error");
-        assert_eq!(msg.error_type(), None);
-    }
-
-    #[test]
-    fn test_shorten_model_name() {
-        // Standard model names with version
-        assert_eq!(
-            shorten_model_name("claude-opus-4-5-20251101"),
-            Some("Opus 4.5".to_string())
-        );
-        assert_eq!(
-            shorten_model_name("claude-sonnet-4-5-20250929"),
-            Some("Sonnet 4.5".to_string())
-        );
-        assert_eq!(
-            shorten_model_name("claude-haiku-4-5-20251001"),
-            Some("Haiku 4.5".to_string())
-        );
-
-        // Older model format
-        assert_eq!(
-            shorten_model_name("claude-3-5-sonnet-20241022"),
-            Some("Sonnet 3.5".to_string())
-        );
-
-        // Model IDs without date suffix
-        assert_eq!(
-            shorten_model_name("claude-opus-4-6"),
-            Some("Opus 4.6".to_string())
-        );
-        assert_eq!(
-            shorten_model_name("claude-sonnet-4-5"),
-            Some("Sonnet 4.5".to_string())
-        );
-
-        // No version found - fallback
-        assert_eq!(shorten_model_name("claude-opus"), Some("Opus".to_string()));
-
-        // Empty or invalid
-        assert_eq!(shorten_model_name(""), None);
-        assert_eq!(shorten_model_name("<unknown>"), None);
-
-        // Unknown model
-        assert_eq!(shorten_model_name("gpt-4-turbo"), Some("gpt".to_string()));
     }
 }
