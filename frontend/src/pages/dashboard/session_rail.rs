@@ -377,7 +377,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                             *t > cutoff
                                 && !matches!(
                                     msg_type.as_str(),
-                                    "compaction_start" | "compaction_end"
+                                    "compaction_start"
+                                        | "compaction_end"
+                                        | "task_start"
+                                        | "task_end"
                                 )
                         })
                         .map(|(t, msg_type)| {
@@ -421,7 +424,31 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 ranges
             };
 
-            if ticks.is_empty() && compaction_ranges.is_empty() {
+            // Task ranges: pair up task_start/task_end events
+            let task_ranges: Vec<(f64, f64)> = {
+                let mut ranges = Vec::new();
+                if let Some(ts) = timestamps {
+                    let mut pending_start: Option<f64> = None;
+                    for (t, msg_type) in ts.iter().filter(|(t, _)| *t > cutoff) {
+                        match msg_type.as_str() {
+                            "task_start" => {
+                                pending_start = Some((t - cutoff) / window_ms * 100.0);
+                            }
+                            "task_end" => {
+                                let end_pct = (t - cutoff) / window_ms * 100.0;
+                                ranges.push((pending_start.take().unwrap_or(0.0), end_pct));
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let Some(start_pct) = pending_start {
+                        ranges.push((start_pct, 100.0));
+                    }
+                }
+                ranges
+            };
+
+            if ticks.is_empty() && compaction_ranges.is_empty() && task_ranges.is_empty() {
                 html! {}
             } else {
                 html! {
@@ -430,6 +457,11 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                             let width = (end_pct - start_pct).max(1.0);
                             let style = format!("left: {:.1}%; width: {:.1}%", start_pct, width);
                             html! { <span class="sparkline-range tick-compaction" {style} /> }
+                        }).collect::<Html>() }
+                        { task_ranges.iter().map(|(start_pct, end_pct)| {
+                            let width = (end_pct - start_pct).max(1.0);
+                            let style = format!("left: {:.1}%; width: {:.1}%", start_pct, width);
+                            html! { <span class="sparkline-range tick-task" {style} /> }
                         }).collect::<Html>() }
                         { ticks.iter().map(|(pct, css_type)| {
                             let style = format!("left: {:.1}%", pct);

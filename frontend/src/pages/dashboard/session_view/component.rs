@@ -295,6 +295,10 @@ impl Component for SessionView {
                                     | "summary"
                             ) {
                                 msg_type = "compaction_end".to_string();
+                            } else if subtype == "task_started" {
+                                msg_type = "task_start".to_string();
+                            } else if subtype == "task_notification" {
+                                msg_type = "task_end".to_string();
                             }
                         }
                     }
@@ -874,6 +878,10 @@ impl SessionView {
                     "compaction" | "compact_boundary" | "context_compaction" | "summary"
                 ) {
                     msg_type = "compaction_end".to_string();
+                } else if subtype == "task_started" {
+                    msg_type = "task_start".to_string();
+                } else if subtype == "task_notification" {
+                    msg_type = "task_end".to_string();
                 }
             }
             if msg_type == "result" {

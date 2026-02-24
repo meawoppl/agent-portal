@@ -204,6 +204,7 @@
 }
 
 .sparkline-range.tick-compaction { background: #e8a46c; }
+.sparkline-range.tick-task { background: #bb9af7; }
 
 .session-pill.paused .sparkline-tick,
 .session-pill.paused .sparkline-range {
