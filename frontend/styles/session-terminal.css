@@ -127,6 +127,14 @@
     90% { transform: translateX(1px) rotate(0.5deg); }
 }
 
+.session-view-scroll-area {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+}
+
 .session-view-messages {
     flex: 1;
     overflow-y: auto;

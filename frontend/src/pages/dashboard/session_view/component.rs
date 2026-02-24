@@ -2,7 +2,7 @@
 
 use crate::components::{group_messages, MessageGroupRenderer, VoiceInput};
 use crate::utils;
-use gloo::timers::callback::Timeout;
+use gloo::timers::callback::{Interval, Timeout};
 use gloo_net::http::Request;
 use shared::api::{ErrorMessage, PermissionAnswers};
 use shared::{ClientToServer, SendMode, SessionInfo};
@@ -15,6 +15,27 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{ClipboardEvent, DragEvent, Element, HtmlTextAreaElement, KeyboardEvent};
 use yew::prelude::*;
+
+#[derive(Debug, Clone, PartialEq)]
+enum TaskStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+struct TaskEntry {
+    task_type: String,
+    description: String,
+    started_at: f64,
+    status: TaskStatus,
+    duration_ms: Option<u64>,
+    tool_uses: Option<u64>,
+    total_tokens: Option<u64>,
+    completed_at: Option<f64>,
+    current_activity: Option<String>,
+    last_tool_name: Option<String>,
+}
 
 use super::history::CommandHistory;
 use super::types::{PendingPermission, QuestionAnswers, WsSender, MAX_MESSAGES_PER_SESSION};
@@ -90,6 +111,10 @@ pub enum SessionViewMsg {
     DragEnter,
     /// User dragged files out of the input area
     DragLeave,
+    /// Toggle the tasks sidebar panel
+    ToggleTasksPanel,
+    /// 1-second tick to update task elapsed times and clean up completed tasks
+    TaskTick,
 }
 
 /// SessionView - Main terminal view for a single session
@@ -124,6 +149,10 @@ pub struct SessionView {
     upload_progress: Option<f32>,
     upload_files: Vec<(String, u64)>,
     drag_hover: bool,
+    active_tasks: HashMap<String, TaskEntry>,
+    tasks_panel_open: bool,
+    #[allow(dead_code)]
+    task_tick_handle: Option<Interval>,
 }
 
 impl Component for SessionView {
@@ -200,6 +229,9 @@ impl Component for SessionView {
             upload_progress: None,
             upload_files: Vec::new(),
             drag_hover: false,
+            active_tasks: HashMap::new(),
+            tasks_panel_open: false,
+            task_tick_handle: None,
         }
     }
 
@@ -297,8 +329,71 @@ impl Component for SessionView {
                                 msg_type = "compaction_end".to_string();
                             } else if subtype == "task_started" {
                                 msg_type = "task_start".to_string();
+                                if let Some(task_id) =
+                                    parsed.get("task_id").and_then(|t| t.as_str())
+                                {
+                                    let task_type = parsed
+                                        .get("task_type")
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("unknown")
+                                        .to_string();
+                                    let description = parsed
+                                        .get("description")
+                                        .and_then(|d| d.as_str())
+                                        .unwrap_or("Background task")
+                                        .to_string();
+                                    let ts = js_sys::Date::parse(&msg.created_at);
+                                    let started_at = if ts.is_finite() { ts } else { 0.0 };
+                                    self.active_tasks.insert(
+                                        task_id.to_string(),
+                                        TaskEntry {
+                                            task_type,
+                                            description,
+                                            started_at,
+                                            status: TaskStatus::Running,
+                                            duration_ms: None,
+                                            tool_uses: None,
+                                            total_tokens: None,
+                                            completed_at: None,
+                                            current_activity: None,
+                                            last_tool_name: None,
+                                        },
+                                    );
+                                }
+                            } else if subtype == "task_progress" {
+                                // Update running task with latest progress
+                                if let Some(task_id) =
+                                    parsed.get("task_id").and_then(|t| t.as_str())
+                                {
+                                    if let Some(task) = self.active_tasks.get_mut(task_id) {
+                                        task.current_activity = parsed
+                                            .get("description")
+                                            .and_then(|d| d.as_str())
+                                            .map(|s| s.to_string());
+                                        task.last_tool_name = parsed
+                                            .get("last_tool_name")
+                                            .and_then(|n| n.as_str())
+                                            .map(|s| s.to_string());
+                                        let usage = parsed.get("usage");
+                                        task.duration_ms = usage.and_then(|u| {
+                                            u.get("duration_ms").and_then(|n| n.as_u64())
+                                        });
+                                        task.tool_uses = usage.and_then(|u| {
+                                            u.get("tool_uses").and_then(|n| n.as_u64())
+                                        });
+                                        task.total_tokens = usage.and_then(|u| {
+                                            u.get("total_tokens").and_then(|n| n.as_u64())
+                                        });
+                                    }
+                                }
                             } else if subtype == "task_notification" {
                                 msg_type = "task_end".to_string();
+                                if let Some(task_id) =
+                                    parsed.get("task_id").and_then(|t| t.as_str())
+                                {
+                                    // For history, just remove completed tasks
+                                    self.active_tasks.remove(task_id);
+                                }
                             }
                         }
                     }
@@ -306,6 +401,10 @@ impl Component for SessionView {
                     if ts_ms.is_finite() {
                         ctx.props().on_activity.emit((session_id, msg_type, ts_ms));
                     }
+                }
+                // Start tick interval if we have tasks still running from history
+                if !self.active_tasks.is_empty() {
+                    self.ensure_task_tick(ctx);
                 }
                 self.messages = messages.into_iter().map(|m| m.content).collect();
                 self.last_message_timestamp = last_timestamp;
@@ -644,6 +743,23 @@ impl Component for SessionView {
                 self.drag_hover = false;
                 true
             }
+            SessionViewMsg::ToggleTasksPanel => {
+                self.tasks_panel_open = !self.tasks_panel_open;
+                true
+            }
+            SessionViewMsg::TaskTick => {
+                let now = js_sys::Date::now();
+                // Remove completed tasks older than 10 seconds
+                self.active_tasks.retain(|_, task| match task.completed_at {
+                    Some(t) => now - t < 10_000.0,
+                    None => true,
+                });
+                // Stop interval if no tasks remain
+                if self.active_tasks.is_empty() {
+                    self.task_tick_handle = None;
+                }
+                true
+            }
         }
     }
 
@@ -743,12 +859,15 @@ impl Component for SessionView {
 
         html! {
             <div class="session-view" onclick={close_dropdown}>
-                <div class="session-view-messages" ref={self.messages_ref.clone()}>
-                    {
-                        group_messages(&self.messages).into_iter().map(|group| {
-                            html! { <MessageGroupRenderer group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} /> }
-                        }).collect::<Html>()
-                    }
+                <div class="session-view-scroll-area">
+                    <div class="session-view-messages" ref={self.messages_ref.clone()}>
+                        {
+                            group_messages(&self.messages).into_iter().map(|group| {
+                                html! { <MessageGroupRenderer group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} /> }
+                            }).collect::<Html>()
+                        }
+                    </div>
+                    { self.render_tasks_sidebar(ctx) }
                 </div>
 
                 { self.render_permission_dialog(ctx) }
@@ -880,8 +999,78 @@ impl SessionView {
                     msg_type = "compaction_end".to_string();
                 } else if subtype == "task_started" {
                     msg_type = "task_start".to_string();
+                    if let Some(task_id) = parsed.get("task_id").and_then(|t| t.as_str()) {
+                        let task_type = parsed
+                            .get("task_type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let description = parsed
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("Background task")
+                            .to_string();
+                        self.active_tasks.insert(
+                            task_id.to_string(),
+                            TaskEntry {
+                                task_type,
+                                description,
+                                started_at: js_sys::Date::now(),
+                                status: TaskStatus::Running,
+                                duration_ms: None,
+                                tool_uses: None,
+                                total_tokens: None,
+                                completed_at: None,
+                                current_activity: None,
+                                last_tool_name: None,
+                            },
+                        );
+                        self.ensure_task_tick(ctx);
+                    }
+                } else if subtype == "task_progress" {
+                    if let Some(task_id) = parsed.get("task_id").and_then(|t| t.as_str()) {
+                        if let Some(task) = self.active_tasks.get_mut(task_id) {
+                            task.current_activity = parsed
+                                .get("description")
+                                .and_then(|d| d.as_str())
+                                .map(|s| s.to_string());
+                            task.last_tool_name = parsed
+                                .get("last_tool_name")
+                                .and_then(|n| n.as_str())
+                                .map(|s| s.to_string());
+                            let usage = parsed.get("usage");
+                            task.duration_ms =
+                                usage.and_then(|u| u.get("duration_ms").and_then(|n| n.as_u64()));
+                            task.tool_uses =
+                                usage.and_then(|u| u.get("tool_uses").and_then(|n| n.as_u64()));
+                            task.total_tokens =
+                                usage.and_then(|u| u.get("total_tokens").and_then(|n| n.as_u64()));
+                        }
+                    }
                 } else if subtype == "task_notification" {
                     msg_type = "task_end".to_string();
+                    if let Some(task_id) = parsed.get("task_id").and_then(|t| t.as_str()) {
+                        let status_str = parsed
+                            .get("status")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("completed");
+                        let status = if status_str == "failed" {
+                            TaskStatus::Failed
+                        } else {
+                            TaskStatus::Completed
+                        };
+                        let usage = parsed.get("usage");
+                        if let Some(task) = self.active_tasks.get_mut(task_id) {
+                            task.status = status;
+                            task.completed_at = Some(js_sys::Date::now());
+                            task.duration_ms =
+                                usage.and_then(|u| u.get("duration_ms").and_then(|n| n.as_u64()));
+                            task.tool_uses =
+                                usage.and_then(|u| u.get("tool_uses").and_then(|n| n.as_u64()));
+                            task.total_tokens =
+                                usage.and_then(|u| u.get("total_tokens").and_then(|n| n.as_u64()));
+                        }
+                    }
                 }
             }
             if msg_type == "result" {
@@ -1309,6 +1498,157 @@ impl SessionView {
                         { "Send with attachment(s)" }
                         <span class="option-hint">{ "Upload files + message" }</span>
                     </button>
+                </div>
+            </div>
+        }
+    }
+
+    fn ensure_task_tick(&mut self, ctx: &Context<Self>) {
+        if self.task_tick_handle.is_some() {
+            return;
+        }
+        let link = ctx.link().clone();
+        self.task_tick_handle = Some(Interval::new(1_000, move || {
+            link.send_message(SessionViewMsg::TaskTick);
+        }));
+    }
+
+    fn render_tasks_sidebar(&self, ctx: &Context<Self>) -> Html {
+        if self.active_tasks.is_empty() {
+            return html! {};
+        }
+
+        let link = ctx.link();
+        let on_toggle = link.callback(|e: MouseEvent| {
+            e.stop_propagation();
+            SessionViewMsg::ToggleTasksPanel
+        });
+
+        if !self.tasks_panel_open {
+            let running_count = self
+                .active_tasks
+                .values()
+                .filter(|t| t.status == TaskStatus::Running)
+                .count();
+            let label = if running_count > 0 {
+                format!("{}", running_count)
+            } else {
+                "\u{2713}".to_string()
+            };
+            return html! {
+                <div class="tasks-tab-hint" onclick={on_toggle}>
+                    <span class="tasks-tab-count">{ label }</span>
+                    <span class="tasks-tab-label">{ "Tasks" }</span>
+                </div>
+            };
+        }
+
+        let mut tasks: Vec<_> = self.active_tasks.iter().collect();
+        tasks.sort_by(|a, b| a.1.started_at.partial_cmp(&b.1.started_at).unwrap());
+
+        html! {
+            <div class="tasks-sidebar">
+                <div class="tasks-sidebar-header">
+                    <span class="tasks-sidebar-title">{ "Tasks" }</span>
+                    <button class="tasks-sidebar-close" onclick={on_toggle}>{ "\u{2715}" }</button>
+                </div>
+                <div class="tasks-sidebar-list">
+                    { for tasks.iter().map(|(_, task)| self.render_task_pill(task)) }
+                </div>
+            </div>
+        }
+    }
+
+    fn render_task_pill(&self, task: &TaskEntry) -> Html {
+        let status_class = match task.status {
+            TaskStatus::Running => "running",
+            TaskStatus::Completed => "completed",
+            TaskStatus::Failed => "failed",
+        };
+
+        let type_label = match task.task_type.as_str() {
+            "local_agent" => "Sub-agent",
+            "local_bash" => "Background Bash",
+            _ => "Task",
+        };
+
+        let elapsed = match task.status {
+            TaskStatus::Running => {
+                let secs = ((js_sys::Date::now() - task.started_at) / 1000.0) as u64;
+                if secs >= 60 {
+                    format!("{}m {}s", secs / 60, secs % 60)
+                } else {
+                    format!("{}s", secs)
+                }
+            }
+            _ => {
+                if let Some(ms) = task.duration_ms {
+                    let secs = ms / 1000;
+                    if secs >= 60 {
+                        format!("{}m {}s", secs / 60, secs % 60)
+                    } else {
+                        format!("{}s", secs)
+                    }
+                } else {
+                    let secs = ((task.completed_at.unwrap_or(task.started_at) - task.started_at)
+                        / 1000.0) as u64;
+                    if secs >= 60 {
+                        format!("{}m {}s", secs / 60, secs % 60)
+                    } else {
+                        format!("{}s", secs)
+                    }
+                }
+            }
+        };
+
+        let fading = if task.completed_at.is_some() {
+            " fading"
+        } else {
+            ""
+        };
+
+        html! {
+            <div class={format!("task-pill {}{}", status_class, fading)}>
+                <div class="task-pill-header">
+                    <span class={format!("task-status-dot {}", status_class)} />
+                    <span class="task-type-pill">{ type_label }</span>
+                    {
+                        if let Some(ref tool) = task.last_tool_name {
+                            html! { <span class="task-tool-badge">{ tool }</span> }
+                        } else {
+                            html! {}
+                        }
+                    }
+                </div>
+                <div class="task-pill-description">{ &task.description }</div>
+                {
+                    if let Some(ref activity) = task.current_activity {
+                        html! { <div class="task-pill-activity">{ activity }</div> }
+                    } else {
+                        html! {}
+                    }
+                }
+                <div class="task-pill-stats">
+                    <span class="task-pill-stat">{ elapsed }</span>
+                    {
+                        if let Some(tools) = task.tool_uses {
+                            html! { <span class="task-pill-stat">{ format!("{} tools", tools) }</span> }
+                        } else {
+                            html! {}
+                        }
+                    }
+                    {
+                        if let Some(tokens) = task.total_tokens {
+                            let label = if tokens >= 1000 {
+                                format!("{:.1}k tok", tokens as f64 / 1000.0)
+                            } else {
+                                format!("{} tok", tokens)
+                            };
+                            html! { <span class="task-pill-stat">{ label }</span> }
+                        } else {
+                            html! {}
+                        }
+                    }
                 </div>
             </div>
         }
