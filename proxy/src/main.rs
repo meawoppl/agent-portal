@@ -348,6 +348,9 @@ async fn main() -> Result<()> {
     // Print startup info (suppress in shim mode — stdout is reserved for claude I/O)
     if !args.shim {
         ui::print_startup_banner();
+        if args.session_id_tag.is_none() {
+            ui::print_deprecation_warning();
+        }
         ui::print_session_info(
             &session_name,
             &session_id.to_string(),

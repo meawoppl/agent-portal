@@ -21,6 +21,20 @@ pub fn print_startup_banner() {
     println!();
 }
 
+/// Print deprecation warning when running the proxy directly
+pub fn print_deprecation_warning() {
+    eprintln!(
+        "  {} {}",
+        "WARNING:".bright_yellow().bold(),
+        "Running the proxy binary directly is deprecated.".yellow()
+    );
+    eprintln!(
+        "  {}",
+        "Use the `agent-launcher` service instead for persistent session management.".yellow()
+    );
+    eprintln!();
+}
+
 /// Print session information
 pub fn print_session_info(session_name: &str, session_id: &str, backend_url: &str, resuming: bool) {
     println!("  {} {}", "Session:".dimmed(), session_name.bright_white());
