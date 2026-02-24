@@ -21,7 +21,7 @@ use super::types::{PendingPermission, QuestionAnswers, WsSender, MAX_MESSAGES_PE
 use super::websocket::{connect_websocket, send_message, WsEvent};
 use crate::pages::dashboard::permission_dialog::PermissionDialog;
 use crate::pages::dashboard::types::{
-    calculate_backoff, parse_ask_user_question, MessagesResponse,
+    calculate_backoff, parse_ask_user_question, MessageData, MessagesResponse,
 };
 
 /// Props for the SessionView component
@@ -35,7 +35,7 @@ pub struct SessionViewProps {
     pub on_message_sent: Callback<Uuid>,
     pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>)>,
     #[prop_or_default]
-    pub on_activity: Callback<(Uuid, String)>,
+    pub on_activity: Callback<(Uuid, String, f64)>,
     #[prop_or(false)]
     pub voice_enabled: bool,
 }
@@ -44,7 +44,7 @@ pub struct SessionViewProps {
 pub enum SessionViewMsg {
     SendInput,
     UpdateInput(String),
-    LoadHistory(Vec<String>, Option<String>),
+    LoadHistory(Vec<MessageData>, Option<String>),
     ReceivedOutput(String),
     WebSocketConnected(WsSender),
     WebSocketError(String),
@@ -156,10 +156,8 @@ impl Component for SessionView {
 
                     last_message_time = data.messages.last().map(|m| m.created_at.clone());
 
-                    let messages: Vec<String> =
-                        data.messages.into_iter().map(|m| m.content).collect();
                     link.send_message(SessionViewMsg::LoadHistory(
-                        messages,
+                        data.messages,
                         last_message_time.clone(),
                     ));
                 }
@@ -270,7 +268,37 @@ impl Component for SessionView {
                     let excess = messages.len() - MAX_MESSAGES_PER_SESSION;
                     messages.drain(0..excess);
                 }
-                self.messages = messages;
+                let session_id = ctx.props().session.id;
+                for msg in &messages {
+                    let mut msg_type = "unknown".to_string();
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&msg.content) {
+                        if let Some(t) = parsed.get("type").and_then(|t| t.as_str()) {
+                            msg_type = t.to_string();
+                        }
+                        if msg_type == "system" {
+                            let status =
+                                parsed.get("status").and_then(|s| s.as_str()).unwrap_or("");
+                            let subtype =
+                                parsed.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
+                            if status == "compacting" {
+                                msg_type = "compaction_start".to_string();
+                            } else if matches!(
+                                subtype,
+                                "compaction"
+                                    | "compact_boundary"
+                                    | "context_compaction"
+                                    | "summary"
+                            ) {
+                                msg_type = "compaction_end".to_string();
+                            }
+                        }
+                    }
+                    let ts_ms = js_sys::Date::parse(&msg.created_at);
+                    if ts_ms.is_finite() {
+                        ctx.props().on_activity.emit((session_id, msg_type, ts_ms));
+                    }
+                }
+                self.messages = messages.into_iter().map(|m| m.content).collect();
                 self.last_message_timestamp = last_timestamp;
                 ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 true
@@ -860,7 +888,7 @@ impl SessionView {
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
         ctx.props()
             .on_activity
-            .emit((ctx.props().session.id, msg_type));
+            .emit((ctx.props().session.id, msg_type, js_sys::Date::now()));
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {
             let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;

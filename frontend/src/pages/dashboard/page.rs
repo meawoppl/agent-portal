@@ -463,15 +463,16 @@ pub fn dashboard_page() -> Html {
 
     let on_activity = {
         let activity_timestamps = activity_timestamps.clone();
-        Callback::from(move |(session_id, msg_type): (Uuid, String)| {
-            let now = js_sys::Date::now();
-            let cutoff = now - 300_000.0; // 5 minutes
-            let mut map = (*activity_timestamps).clone();
-            let timestamps = map.entry(session_id).or_default();
-            timestamps.retain(|(t, _)| *t > cutoff);
-            timestamps.push((now, msg_type));
-            activity_timestamps.set(map);
-        })
+        Callback::from(
+            move |(session_id, msg_type, timestamp): (Uuid, String, f64)| {
+                let cutoff = js_sys::Date::now() - 300_000.0; // 5 minutes
+                let mut map = (*activity_timestamps).clone();
+                let timestamps = map.entry(session_id).or_default();
+                timestamps.retain(|(t, _)| *t > cutoff);
+                timestamps.push((timestamp, msg_type));
+                activity_timestamps.set(map);
+            },
+        )
     };
 
     let on_branch_change = {
