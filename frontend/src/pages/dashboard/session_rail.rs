@@ -458,19 +458,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     <span class="pill-hostname">{ hostname }</span>
                     {
                         if let Some(ref branch) = session.git_branch {
-                            if let Some(ref url) = session.pr_url {
-                                html! {
-                                    <a class="pill-branch pill-link" href={url.clone()} target="_blank"
-                                       title={format!("PR: {}", url)}
-                                       onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                        { branch }
-                                    </a>
-                                }
-                            } else {
-                                // Derive repo URL from pr_url if we've ever had one,
-                                // otherwise just show plain text branch name
-                                html! { <span class="pill-branch" title={branch.clone()}>{ branch }</span> }
-                            }
+                            html! { <span class="pill-branch" title={branch.clone()}>{ branch }</span> }
                         } else {
                             html! { <span class="pill-branch pill-no-vcs">{ "No VCS" }</span> }
                         }

@@ -158,14 +158,6 @@
 }
 
 
-a.pill-branch.pill-link {
-    text-decoration: none;
-    color: var(--accent);
-}
-
-a.pill-branch.pill-link:hover {
-    text-decoration: underline;
-}
 
 .pill-branch.pill-no-vcs {
     color: var(--text-muted);
@@ -211,7 +203,7 @@ a.pill-branch.pill-link:hover {
     border-radius: 1px;
 }
 
-.sparkline-range.tick-compaction { background: #73daca; }
+.sparkline-range.tick-compaction { background: #e8a46c; }
 
 .session-pill.paused .sparkline-tick,
 .session-pill.paused .sparkline-range {
