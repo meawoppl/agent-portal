@@ -173,13 +173,7 @@
         font-size: 0.9rem;
     }
 
-    /* Hide send-mode dropdown on mobile */
-    .send-mode-toggle {
-        display: none;
-    }
-
     .send-button-container .send-button {
-        border-radius: 6px;
         padding: 0.6rem 1rem;
     }
 
