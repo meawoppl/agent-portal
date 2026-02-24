@@ -34,23 +34,6 @@ fn days_until_expiration(expires_at: &str) -> Option<i64> {
     Some(diff_days)
 }
 
-/// Format a timestamp for display
-fn format_timestamp(ts: &str) -> String {
-    // Parse and format nicely
-    let date = js_sys::Date::new(&ts.into());
-    if date.get_time().is_nan() {
-        return ts.to_string();
-    }
-    format!(
-        "{}-{:02}-{:02} {:02}:{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date(),
-        date.get_hours(),
-        date.get_minutes()
-    )
-}
-
 /// Token row component
 #[derive(Properties, PartialEq)]
 struct TokenRowProps {
@@ -103,11 +86,11 @@ fn token_row(props: &TokenRowProps) -> Html {
     html! {
         <tr class={if token.revoked || is_expired { "token-row disabled" } else { "token-row" }}>
             <td class="token-name">{ &token.name }</td>
-            <td class="token-created">{ format_timestamp(&token.created_at) }</td>
+            <td class="token-created">{ utils::format_timestamp(&token.created_at) }</td>
             <td class="token-last-used">
-                { token.last_used_at.as_ref().map(|t| format_timestamp(t)).unwrap_or_else(|| "Never".to_string()) }
+                { token.last_used_at.as_ref().map(|t| utils::format_timestamp(t)).unwrap_or_else(|| "Never".to_string()) }
             </td>
-            <td class="token-expires">{ format_timestamp(&token.expires_at) }</td>
+            <td class="token-expires">{ utils::format_timestamp(&token.expires_at) }</td>
             <td class={status_class}>{ status_text }</td>
             <td class="token-actions">
                 if !token.revoked && !is_expired {
@@ -170,8 +153,8 @@ fn session_row(props: &SessionRowProps) -> Html {
             <td class="session-branch">
                 { session.git_branch.as_deref().unwrap_or("—") }
             </td>
-            <td class="session-activity">{ format_timestamp(&session.last_activity) }</td>
-            <td class="session-created">{ format_timestamp(&session.created_at) }</td>
+            <td class="session-activity">{ utils::format_timestamp(&session.last_activity) }</td>
+            <td class="session-created">{ utils::format_timestamp(&session.created_at) }</td>
             <td class={status_class}>{ session.status.as_str() }</td>
             <td class="session-actions">
                 if is_owner {
@@ -895,7 +878,7 @@ pub fn settings_page() -> Html {
                                             <code>{ &token_response.init_url }</code>
                                         </div>
                                         <p class="expires-info">
-                                            { format!("Expires: {}", format_timestamp(&token_response.expires_at)) }
+                                            { format!("Expires: {}", utils::format_timestamp(&token_response.expires_at)) }
                                         </p>
                                         <button onclick={toggle_create_form.clone()}>{ "Done" }</button>
                                     </div>

@@ -109,22 +109,6 @@ fn format_tokens(count: i64) -> String {
     }
 }
 
-/// Format a timestamp for display
-fn format_timestamp(ts: &str) -> String {
-    let date = js_sys::Date::new(&ts.into());
-    if date.get_time().is_nan() {
-        return ts.to_string();
-    }
-    format!(
-        "{}-{:02}-{:02} {:02}:{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date(),
-        date.get_hours(),
-        date.get_minutes()
-    )
-}
-
 // ============================================================================
 // Stats Card Component
 // ============================================================================
@@ -219,7 +203,7 @@ fn user_row(props: &UserRowProps) -> Html {
             <td class={status_class}>{ status_text }</td>
             <td class="numeric">{ user.session_count }</td>
             <td class="numeric">{ utils::format_dollars(user.total_spend_usd) }</td>
-            <td class="timestamp">{ format_timestamp(&user.created_at) }</td>
+            <td class="timestamp">{ utils::format_timestamp(&user.created_at) }</td>
             <td class="actions">
                 <button
                     class={classes!("admin-toggle", if user.is_admin { Some("active") } else { None })}
@@ -294,7 +278,7 @@ fn session_row(props: &SessionRowProps) -> Html {
             <td class="session-branch">{ session.git_branch.as_deref().unwrap_or("-") }</td>
             <td class={status_class}>{ status_text }</td>
             <td class="numeric">{ utils::format_dollars(session.total_cost_usd) }</td>
-            <td class="timestamp">{ format_timestamp(&session.last_activity) }</td>
+            <td class="timestamp">{ utils::format_timestamp(&session.last_activity) }</td>
             <td class="actions">
                 <button class="delete-btn" onclick={on_delete} title="Delete session">
                     { "Delete" }
@@ -346,7 +330,7 @@ fn raw_message_row(props: &RawMessageRowProps) -> Html {
 
     html! {
         <tr>
-            <td class="timestamp">{ format_timestamp(&msg.created_at) }</td>
+            <td class="timestamp">{ utils::format_timestamp(&msg.created_at) }</td>
             <td class="raw-msg-type">{ msg_type }</td>
             <td class="raw-msg-source">{ &msg.message_source }</td>
             <td class="raw-msg-reason">{ msg.render_reason.as_deref().unwrap_or("-") }</td>
@@ -1228,7 +1212,7 @@ pub fn admin_page() -> Html {
                                 <div class="raw-message-modal-meta">
                                     <span><strong>{ "Source: " }</strong>{ &msg.message_source }</span>
                                     <span><strong>{ "Reason: " }</strong>{ msg.render_reason.as_deref().unwrap_or("-") }</span>
-                                    <span><strong>{ "Time: " }</strong>{ format_timestamp(&msg.created_at) }</span>
+                                    <span><strong>{ "Time: " }</strong>{ utils::format_timestamp(&msg.created_at) }</span>
                                 </div>
                                 <pre class="raw-message-modal-content">{ display_content }</pre>
                             </div>
