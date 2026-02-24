@@ -51,6 +51,22 @@ pub fn format_dollars(amount: f64) -> String {
     format!("${}.{}", with_commas, decimal)
 }
 
+/// Format a timestamp string for display (e.g., "2026-01-15 14:30")
+pub fn format_timestamp(ts: &str) -> String {
+    let date = js_sys::Date::new(&ts.into());
+    if date.get_time().is_nan() {
+        return ts.to_string();
+    }
+    format!(
+        "{}-{:02}-{:02} {:02}:{:02}",
+        date.get_full_year(),
+        date.get_month() + 1,
+        date.get_date(),
+        date.get_hours(),
+        date.get_minutes()
+    )
+}
+
 /// Extract folder name from path (last path component)
 pub fn extract_folder(path: &str) -> &str {
     let trimmed = path.trim_end_matches('/');
