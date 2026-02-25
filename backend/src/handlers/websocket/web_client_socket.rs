@@ -268,16 +268,54 @@ fn replay_history(
         return;
     }
 
+    // Look up sender names for user-role messages
+    use crate::schema::users;
+    let user_ids: Vec<Uuid> = history
+        .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| m.user_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let user_names: std::collections::HashMap<Uuid, String> = if !user_ids.is_empty() {
+        users::table
+            .filter(users::id.eq_any(&user_ids))
+            .select((users::id, users::name, users::email))
+            .load::<(Uuid, Option<String>, String)>(&mut conn)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, name, email)| (id, name.unwrap_or(email)))
+            .collect()
+    } else {
+        std::collections::HashMap::new()
+    };
+
     let messages: Vec<serde_json::Value> = history
         .into_iter()
         .map(|msg| {
-            serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
-                let fallback = RawMessageFallback {
-                    message_type: msg.role,
-                    content: msg.content,
-                };
-                serde_json::to_value(&fallback).unwrap_or_default()
-            })
+            let mut val =
+                serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
+                    let fallback = RawMessageFallback {
+                        message_type: msg.role.clone(),
+                        content: msg.content.clone(),
+                    };
+                    serde_json::to_value(&fallback).unwrap_or_default()
+                });
+            // Reconstruct _sender for user messages from DB user_id
+            if msg.role == "user" {
+                if let Some(name) = user_names.get(&msg.user_id) {
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert(
+                            "_sender".to_string(),
+                            serde_json::json!({
+                                "user_id": msg.user_id.to_string(),
+                                "name": name,
+                            }),
+                        );
+                    }
+                }
+            }
+            val
         })
         .collect();
 

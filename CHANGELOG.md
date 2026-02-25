@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.14
+
+- Refactor sender attribution: store actual sender user_id in DB, reconstruct display info at query time
+
 ## 1.3.13
 
 - Add user name attribution to messages in shared sessions

@@ -84,7 +84,7 @@ pub fn handle_claude_output(
     db_session_id: Option<Uuid>,
     db_pool: &DbPool,
     tx: &ProxySender,
-    mut content: serde_json::Value,
+    content: serde_json::Value,
     seq: Option<u64>,
 ) {
     // Deduplicate sequenced messages before broadcasting
@@ -108,35 +108,30 @@ pub fn handle_claude_output(
         }
     }
 
-    // Inject sender attribution into user-type messages
+    // Extract sender attribution for user-type messages (from last_input_sender, not injected into JSON)
     let role_str = content
         .get("type")
         .and_then(|t| t.as_str())
         .unwrap_or("assistant");
-    if role_str == "user" {
-        if let Some(session_id) = db_session_id {
-            if let Some((_, (sender_id, sender_name))) =
-                session_manager.last_input_sender.remove(&session_id)
-            {
-                if let Some(obj) = content.as_object_mut() {
-                    obj.insert(
-                        "_sender".to_string(),
-                        serde_json::json!({
-                            "user_id": sender_id.to_string(),
-                            "name": sender_name,
-                        }),
-                    );
-                }
-            }
-        }
-    }
+    let sender_info = if role_str == "user" {
+        db_session_id.and_then(|sid| {
+            session_manager
+                .last_input_sender
+                .remove(&sid)
+                .map(|(_, v)| v)
+        })
+    } else {
+        None
+    };
 
-    // Broadcast output to all web clients (after dedup check)
+    // Broadcast output to all web clients with sender metadata alongside content
     if let Some(ref key) = session_key {
         session_manager.broadcast_to_web_clients(
             key,
             ServerToClient::ClaudeOutput {
                 content: content.clone(),
+                sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
+                sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
             },
         );
     }
@@ -156,11 +151,17 @@ pub fn handle_claude_output(
                     .unwrap_or("assistant"),
             );
 
+            // Use actual sender's user_id for user messages, fall back to session owner
+            let actual_user_id = sender_info
+                .as_ref()
+                .map(|(id, _)| *id)
+                .unwrap_or(session.user_id);
+
             let new_message = crate::models::NewMessage {
                 session_id,
                 role: role.to_string(),
                 content: content.to_string(),
-                user_id: session.user_id,
+                user_id: actual_user_id,
             };
 
             if let Err(e) = diesel::insert_into(messages::table)

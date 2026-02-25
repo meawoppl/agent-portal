@@ -25,11 +25,16 @@ pub type WsSender = Rc<RefCell<Option<ws_bridge::yew_client::Sender<shared::Clie
 /// Message data from the API
 #[derive(Clone, PartialEq, Deserialize)]
 pub struct MessageData {
-    #[allow(dead_code)]
     pub role: String,
     pub content: String,
     /// ISO 8601 timestamp when message was created
     pub created_at: String,
+    /// User ID of who sent this message (for user-role messages)
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Display name of the sender (looked up from users table)
+    #[serde(default)]
+    pub sender_name: Option<String>,
 }
 
 /// Response from messages API endpoint

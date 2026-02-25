@@ -214,7 +214,13 @@ pub enum ClientToServer {
 #[serde(tag = "type")]
 pub enum ServerToClient {
     /// Output from Claude Code
-    ClaudeOutput { content: serde_json::Value },
+    ClaudeOutput {
+        content: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        sender_user_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        sender_name: Option<String>,
+    },
 
     /// Batch of historical messages for replay
     HistoryBatch { messages: Vec<serde_json::Value> },
@@ -482,11 +488,13 @@ mod tests {
     fn server_to_client_output_roundtrip() {
         let msg = ServerToClient::ClaudeOutput {
             content: serde_json::json!({"type": "assistant", "text": "hello"}),
+            sender_user_id: None,
+            sender_name: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServerToClient::ClaudeOutput { content } => {
+            ServerToClient::ClaudeOutput { content, .. } => {
                 assert_eq!(content["text"], "hello");
             }
             _ => panic!("Wrong variant"),

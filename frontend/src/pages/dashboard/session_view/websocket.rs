@@ -82,8 +82,29 @@ pub fn connect_websocket(
 /// Handle incoming server message and emit appropriate events
 fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     match msg {
-        ServerToClient::ClaudeOutput { content } => {
-            on_event.emit(WsEvent::Output(content.to_string()));
+        ServerToClient::ClaudeOutput {
+            content,
+            sender_user_id,
+            sender_name,
+        } => {
+            // Inject _sender into content for the renderer if sender info is present
+            let output = if sender_user_id.is_some() || sender_name.is_some() {
+                if let Some(mut obj) = content.as_object().cloned() {
+                    obj.insert(
+                        "_sender".to_string(),
+                        serde_json::json!({
+                            "user_id": sender_user_id.unwrap_or_default(),
+                            "name": sender_name.unwrap_or_default(),
+                        }),
+                    );
+                    serde_json::Value::Object(obj).to_string()
+                } else {
+                    content.to_string()
+                }
+            } else {
+                content.to_string()
+            };
+            on_event.emit(WsEvent::Output(output));
         }
         ServerToClient::HistoryBatch { messages } => {
             let strings: Vec<String> = messages.into_iter().map(|v| v.to_string()).collect();

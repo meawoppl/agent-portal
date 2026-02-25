@@ -8,6 +8,7 @@ use axum::{
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::error;
@@ -28,10 +29,19 @@ pub struct MessageResponse {
     pub message: Message,
 }
 
+/// A message with optional sender name (for user-role messages in shared sessions)
+#[derive(Debug, Serialize)]
+pub struct MessageWithSender {
+    #[serde(flatten)]
+    pub message: Message,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_name: Option<String>,
+}
+
 /// Response for listing messages
 #[derive(Debug, Serialize)]
 pub struct MessagesListResponse {
-    pub messages: Vec<Message>,
+    pub messages: Vec<MessageWithSender>,
     pub total: i64,
 }
 
@@ -142,10 +152,46 @@ pub async fn list_messages(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    // Look up sender names for user-role messages
+    use crate::schema::users;
+    let user_ids: Vec<Uuid> = message_list
+        .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| m.user_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let user_names: HashMap<Uuid, String> = if !user_ids.is_empty() {
+        users::table
+            .filter(users::id.eq_any(&user_ids))
+            .select((users::id, users::name, users::email))
+            .load::<(Uuid, Option<String>, String)>(&mut conn)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, name, email)| (id, name.unwrap_or(email)))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+
     let total = message_list.len() as i64;
+    let enriched: Vec<MessageWithSender> = message_list
+        .into_iter()
+        .map(|msg| {
+            let sender_name = if msg.role == "user" {
+                user_names.get(&msg.user_id).cloned()
+            } else {
+                None
+            };
+            MessageWithSender {
+                message: msg,
+                sender_name,
+            }
+        })
+        .collect();
 
     Ok(Json(MessagesListResponse {
-        messages: message_list,
+        messages: enriched,
         total,
     }))
 }

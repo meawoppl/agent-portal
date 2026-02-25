@@ -390,7 +390,29 @@ impl Component for SessionView {
                 if !self.active_tasks.is_empty() {
                     self.ensure_task_tick(ctx);
                 }
-                self.messages = messages.into_iter().map(|m| m.content).collect();
+                self.messages = messages
+                    .into_iter()
+                    .map(|m| {
+                        // Inject _sender into user messages from API metadata
+                        if m.role == "user" && (m.user_id.is_some() || m.sender_name.is_some()) {
+                            if let Ok(mut val) =
+                                serde_json::from_str::<serde_json::Value>(&m.content)
+                            {
+                                if let Some(obj) = val.as_object_mut() {
+                                    obj.insert(
+                                        "_sender".to_string(),
+                                        serde_json::json!({
+                                            "user_id": m.user_id.unwrap_or_default(),
+                                            "name": m.sender_name.unwrap_or_default(),
+                                        }),
+                                    );
+                                }
+                                return val.to_string();
+                            }
+                        }
+                        m.content
+                    })
+                    .collect();
                 self.last_message_timestamp = last_timestamp;
                 ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 true
