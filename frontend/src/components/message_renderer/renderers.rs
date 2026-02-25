@@ -484,9 +484,6 @@ fn render_compaction_completed(msg: &SystemMessage) -> Html {
 
 fn render_task_started(msg: &SystemMessage) -> Html {
     let extra = msg.extra.as_ref();
-    let task_type = extra
-        .and_then(|v| v.get("task_type").and_then(|t| t.as_str()))
-        .unwrap_or("unknown");
     let description = extra
         .and_then(|v| v.get("description").and_then(|d| d.as_str()))
         .unwrap_or("Background task");
@@ -494,11 +491,14 @@ fn render_task_started(msg: &SystemMessage) -> Html {
         .and_then(|v| v.get("task_id").and_then(|t| t.as_str()))
         .unwrap_or("");
 
-    let type_label = match task_type {
-        "local_agent" => "Sub-agent",
-        "local_bash" => "Background Bash",
-        _ => "Task",
-    };
+    let type_label = extra
+        .and_then(|v| v.get("task_type"))
+        .and_then(|v| serde_json::from_value::<shared::CCTaskType>(v.clone()).ok())
+        .map(|tt| match tt {
+            shared::CCTaskType::LocalAgent => "Sub-agent",
+            shared::CCTaskType::LocalBash => "Background Bash",
+        })
+        .unwrap_or("Task");
 
     html! {
         <div class="claude-message task-message compact" title={format!("Task ID: {}", task_id)}>
@@ -513,9 +513,9 @@ fn render_task_started(msg: &SystemMessage) -> Html {
 
 fn render_task_notification(msg: &SystemMessage) -> Html {
     let extra = msg.extra.as_ref();
-    let status = extra
-        .and_then(|v| v.get("status").and_then(|s| s.as_str()))
-        .unwrap_or("completed");
+    let typed_status = extra
+        .and_then(|v| v.get("status"))
+        .and_then(|v| serde_json::from_value::<shared::CCTaskStatus>(v.clone()).ok());
     let summary_text = msg
         .summary
         .as_deref()
@@ -524,12 +524,14 @@ fn render_task_notification(msg: &SystemMessage) -> Html {
         .and_then(|v| v.get("task_id").and_then(|t| t.as_str()))
         .unwrap_or("");
 
-    let usage = extra.and_then(|v| v.get("usage"));
-    let duration = usage.and_then(|u| u.get("duration_ms").and_then(|n| n.as_u64()));
-    let tool_uses = usage.and_then(|u| u.get("tool_uses").and_then(|n| n.as_u64()));
-    let total_tokens = usage.and_then(|u| u.get("total_tokens").and_then(|n| n.as_u64()));
+    let typed_usage = extra
+        .and_then(|v| v.get("usage"))
+        .and_then(|v| serde_json::from_value::<shared::TaskUsage>(v.clone()).ok());
+    let duration = typed_usage.as_ref().map(|u| u.duration_ms);
+    let tool_uses = typed_usage.as_ref().map(|u| u.tool_uses);
+    let total_tokens = typed_usage.as_ref().map(|u| u.total_tokens);
 
-    let is_failed = status == "failed";
+    let is_failed = matches!(typed_status, Some(shared::CCTaskStatus::Failed));
     let status_class = if is_failed { "failed" } else { "completed" };
 
     html! {
