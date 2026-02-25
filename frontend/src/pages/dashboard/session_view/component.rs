@@ -1524,12 +1524,13 @@ impl SessionView {
             SessionViewMsg::ToggleTasksPanel
         });
 
+        let running_count = self
+            .active_tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Running)
+            .count();
+
         if !self.tasks_panel_open {
-            let running_count = self
-                .active_tasks
-                .values()
-                .filter(|t| t.status == TaskStatus::Running)
-                .count();
             let label = if running_count > 0 {
                 format!("{}", running_count)
             } else {
@@ -1546,11 +1547,16 @@ impl SessionView {
         let mut tasks: Vec<_> = self.active_tasks.iter().collect();
         tasks.sort_by(|a, b| a.1.started_at.partial_cmp(&b.1.started_at).unwrap());
 
+        let title = if running_count > 0 {
+            format!("Tasks ({})", running_count)
+        } else {
+            "Tasks".to_string()
+        };
+
         html! {
             <div class="tasks-sidebar">
-                <div class="tasks-sidebar-header">
-                    <span class="tasks-sidebar-title">{ "Tasks" }</span>
-                    <button class="tasks-sidebar-close" onclick={on_toggle}>{ "\u{2715}" }</button>
+                <div class="tasks-sidebar-header" onclick={on_toggle}>
+                    <span class="tasks-sidebar-title">{ title }</span>
                 </div>
                 <div class="tasks-sidebar-list">
                     { for tasks.iter().map(|(_, task)| self.render_task_pill(task)) }
