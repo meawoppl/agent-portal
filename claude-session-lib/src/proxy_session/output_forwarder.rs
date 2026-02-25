@@ -388,7 +388,11 @@ fn log_claude_output(output: &ClaudeOutput) {
         }
         ClaudeOutput::Assistant(asst) => {
             let msg = &asst.message;
-            let stop = msg.stop_reason.as_deref().unwrap_or("none");
+            let stop = msg
+                .stop_reason
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or("none");
 
             // Count content blocks by type
             let mut text_count = 0;

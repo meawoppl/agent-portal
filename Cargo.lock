@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-launcher"
-version = "1.3.10"
+version = "1.3.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -423,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "1.3.10"
+version = "1.3.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -664,9 +664,9 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.47"
+version = "2.1.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "950732b27b3ef815d77d5f22a62e0a247e422d6d171f931ef106141f3614f4e1"
+checksum = "aa5e97c9d81a15c91bb9ad7b588f5c16c07aa08abe64128c68b27dc4993e9f3d"
 dependencies = [
  "anyhow",
  "chrono",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "1.3.10"
+version = "1.3.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "cli-tools"
-version = "1.3.10"
+version = "1.3.11"
 dependencies = [
  "anyhow",
  "clap",
@@ -1132,7 +1132,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1206,7 +1206,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1287,7 +1287,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "1.3.10"
+version = "1.3.11"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -2250,7 +2250,7 @@ dependencies = [
  "hyper 1.8.1",
  "libc",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2715,7 +2715,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3595,7 +3595,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3930,7 +3930,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "1.3.10"
+version = "1.3.11"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -4156,10 +4156,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82a72c767771b47409d2345987fda8628641887d5466101319899796367354a0"
 dependencies = [
  "fastrand",
- "getrandom 0.4.1",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5132,7 +5132,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

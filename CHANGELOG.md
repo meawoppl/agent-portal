@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.11
+
+- Update claude-codes to 2.1.49 (String-to-enum migration for subtype, stop_reason, status)
+- Re-export `CCSystemSubtype` from shared
+
 ## 1.3.10
 
 - Use typed claude-codes structs for task parsing instead of raw JSON field access

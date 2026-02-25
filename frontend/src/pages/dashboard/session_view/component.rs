@@ -324,7 +324,8 @@ impl Component for SessionView {
                         msg_type = claude_msg.message_type();
                         if let shared::ClaudeOutput::System(sys) = &claude_msg {
                             if let Some(status) = sys.as_status() {
-                                if status.status.as_deref() == Some("compacting") {
+                                if status.status.as_ref().map(|s| s.as_str()) == Some("compacting")
+                                {
                                     msg_type = "compaction_start".to_string();
                                 }
                             } else if sys.is_compact_boundary()
@@ -978,7 +979,7 @@ impl SessionView {
             match &claude_msg {
                 shared::ClaudeOutput::System(sys) => {
                     if let Some(status) = sys.as_status() {
-                        if status.status.as_deref() == Some("compacting") {
+                        if status.status.as_ref().map(|s| s.as_str()) == Some("compacting") {
                             msg_type = "compaction_start".to_string();
                         }
                     } else if sys.is_compact_boundary()

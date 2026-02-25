@@ -35,9 +35,9 @@ pub use claude_codes::io::{
 // Re-export claude-codes output types for typed parsing (aliased to avoid conflicts with
 // frontend's local lenient types in message_renderer/types.rs)
 pub use claude_codes::io::{
-    ResultMessage as CCResultMessage, SystemMessage as CCSystemMessage, TaskNotificationMessage,
-    TaskProgressMessage, TaskStartedMessage, TaskStatus as CCTaskStatus, TaskType as CCTaskType,
-    TaskUsage,
+    ResultMessage as CCResultMessage, SystemMessage as CCSystemMessage,
+    SystemSubtype as CCSystemSubtype, TaskNotificationMessage, TaskProgressMessage,
+    TaskStartedMessage, TaskStatus as CCTaskStatus, TaskType as CCTaskType, TaskUsage,
 };
 pub use claude_codes::ClaudeOutput;
 
