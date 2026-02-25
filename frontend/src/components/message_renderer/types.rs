@@ -31,10 +31,18 @@ pub struct PortalMessage {
     pub content: Vec<shared::PortalContent>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageSender {
+    pub user_id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UserMessage {
     pub content: Option<String>,
     pub message: Option<UserMessageContent>,
+    #[serde(default, rename = "_sender")]
+    pub sender: Option<MessageSender>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

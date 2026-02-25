@@ -76,6 +76,8 @@ pub struct MessageRendererProps {
     pub session_id: Option<Uuid>,
     #[prop_or_default]
     pub agent_type: shared::AgentType,
+    #[prop_or_default]
+    pub current_user_id: Option<String>,
 }
 
 #[function_component(MessageRenderer)]
@@ -92,7 +94,9 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
         Ok(ClaudeMessage::System(msg)) => renderers::render_system_message(&msg),
         Ok(ClaudeMessage::Assistant(msg)) => renderers::render_assistant_message(&msg),
         Ok(ClaudeMessage::Result(msg)) => renderers::render_result_message(&msg),
-        Ok(ClaudeMessage::User(msg)) => renderers::render_user_message(&msg),
+        Ok(ClaudeMessage::User(msg)) => {
+            renderers::render_user_message(&msg, props.current_user_id.as_deref())
+        }
         Ok(ClaudeMessage::Error(msg)) => renderers::render_error_message(&msg),
         Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(&msg),
         Ok(ClaudeMessage::RateLimitEvent(msg)) => renderers::render_rate_limit_event(&msg),
@@ -109,13 +113,15 @@ pub struct MessageGroupRendererProps {
     pub session_id: Option<Uuid>,
     #[prop_or_default]
     pub agent_type: shared::AgentType,
+    #[prop_or_default]
+    pub current_user_id: Option<String>,
 }
 
 #[function_component(MessageGroupRenderer)]
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     match &props.group {
         MessageGroup::Single(json) => {
-            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} /> }
+            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} /> }
         }
         MessageGroup::AssistantGroup(messages) => renderers::render_assistant_group(messages),
     }

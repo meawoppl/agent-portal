@@ -84,7 +84,7 @@ pub fn handle_claude_output(
     db_session_id: Option<Uuid>,
     db_pool: &DbPool,
     tx: &ProxySender,
-    content: serde_json::Value,
+    mut content: serde_json::Value,
     seq: Option<u64>,
 ) {
     // Deduplicate sequenced messages before broadcasting
@@ -105,6 +105,29 @@ pub fn handle_claude_output(
                 ack_seq: seq_num,
             });
             return;
+        }
+    }
+
+    // Inject sender attribution into user-type messages
+    let role_str = content
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("assistant");
+    if role_str == "user" {
+        if let Some(session_id) = db_session_id {
+            if let Some((_, (sender_id, sender_name))) =
+                session_manager.last_input_sender.remove(&session_id)
+            {
+                if let Some(obj) = content.as_object_mut() {
+                    obj.insert(
+                        "_sender".to_string(),
+                        serde_json::json!({
+                            "user_id": sender_id.to_string(),
+                            "name": sender_name,
+                        }),
+                    );
+                }
+            }
         }
     }
 

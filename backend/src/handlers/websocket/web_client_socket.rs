@@ -109,6 +109,7 @@ fn handle_web_client_message(
                 *verified_session_id,
                 content,
                 send_mode,
+                user_id,
             );
             false
         }
@@ -290,6 +291,7 @@ fn handle_web_input(
     verified_session_id: Option<Uuid>,
     content: serde_json::Value,
     send_mode: Option<SendMode>,
+    user_id: Uuid,
 ) {
     let Some(ref key) = session_key else {
         warn!("Web client tried to send ClaudeInput but no session_key set (not registered?)");
@@ -301,6 +303,28 @@ fn handle_web_input(
     };
 
     info!("Web client sending ClaudeInput to session: {}", key);
+
+    // Track who sent this input so we can attribute the echoed user message
+    if let Ok(mut conn) = db_pool.get() {
+        use crate::schema::users;
+        let display_name: String = users::table
+            .find(user_id)
+            .select(users::name)
+            .first::<Option<String>>(&mut conn)
+            .ok()
+            .flatten()
+            .or_else(|| {
+                users::table
+                    .find(user_id)
+                    .select(users::email)
+                    .first::<String>(&mut conn)
+                    .ok()
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+        session_manager
+            .last_input_sender
+            .insert(session_id, (user_id, display_name));
+    }
 
     let seq = match db_pool.get() {
         Ok(mut conn) => {

@@ -43,6 +43,8 @@ pub struct SessionManager {
     pub pending_truncations: Arc<DashSet<Uuid>>,
     pub launchers: Arc<DashMap<Uuid, LauncherConnection>>,
     pub pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
+    pub last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
 }
 
 impl Default for SessionManager {
@@ -56,6 +58,7 @@ impl Default for SessionManager {
             pending_truncations: Arc::new(DashSet::new()),
             launchers: Arc::new(DashMap::new()),
             pending_dir_requests: Arc::new(DashMap::new()),
+            last_input_sender: Arc::new(DashMap::new()),
         }
     }
 }

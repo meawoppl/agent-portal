@@ -52,6 +52,7 @@ pub fn dashboard_page() -> Html {
     let pending_leave = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
     let voice_enabled = use_state(|| false);
+    let current_user_id = use_state(|| None::<String>);
     let app_title = use_state(|| "Claude Code Sessions".to_string());
     let activated_sessions = use_state(HashSet::<Uuid>::new);
     let activity_timestamps = use_state(HashMap::<Uuid, Vec<(f64, String)>>::new);
@@ -104,10 +105,11 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Fetch current user info (to check admin status and voice_enabled)
+    // Fetch current user info (to check admin status, voice_enabled, and user_id)
     {
         let is_admin = is_admin.clone();
         let voice_enabled = voice_enabled.clone();
+        let current_user_id = current_user_id.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
                 let api_endpoint = utils::api_url("/api/auth/me");
@@ -118,6 +120,9 @@ pub fn dashboard_page() -> Html {
                         }
                         if let Some(voice) = data.get("voice_enabled").and_then(|v| v.as_bool()) {
                             voice_enabled.set(voice);
+                        }
+                        if let Some(id) = data.get("id").and_then(|v| v.as_str()) {
+                            current_user_id.set(Some(id.to_string()));
                         }
                     }
                 }
@@ -693,6 +698,7 @@ pub fn dashboard_page() -> Html {
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
                                                 voice_enabled={*voice_enabled}
+                                                current_user_id={(*current_user_id).clone()}
                                             />
                                         </div>
                                     }
