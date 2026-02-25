@@ -11,8 +11,9 @@
     z-index: 20;
     display: flex;
     pointer-events: none;
-    transition: width 0.2s ease-out;
+    transition: width 0.25s ease-in-out;
     width: 0;
+    overflow: hidden;
     animation: tabSlideIn 0.35s ease-out;
 }
 
@@ -126,7 +127,8 @@
 /* --- Panel (visible when open) --- */
 .tasks-sidebar-panel {
     pointer-events: auto;
-    flex: 1;
+    width: 280px;
+    min-width: 280px;
     display: flex;
     flex-direction: column;
     background: var(--bg-darker);

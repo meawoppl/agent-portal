@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.15
+
+- Fix stale subagent entries persisting across page reloads by clearing task state on history reload
+- Tasks sidebar panel now slides in/out with the drawer instead of instantly appearing/disappearing
+
 ## 1.3.14
 
 - Refactor sender attribution: store actual sender user_id in DB, reconstruct display info at query time
