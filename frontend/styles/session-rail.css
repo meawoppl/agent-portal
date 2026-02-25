@@ -203,8 +203,8 @@
     border-radius: 1px;
 }
 
-.sparkline-range.tick-compaction { background: #e8a46c; }
-.sparkline-range.tick-task { background: #bb9af7; }
+.sparkline-range.tick-compaction { background: var(--text-secondary); }
+.sparkline-range.tick-task { background: var(--text-secondary); }
 
 .session-pill.paused .sparkline-tick,
 .session-pill.paused .sparkline-range {
