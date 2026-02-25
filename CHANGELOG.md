@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.13
+
+- Add user name attribution to messages in shared sessions
+
 ## 1.3.12
 
 - Increase default image max size from 2 MB to 10 MB

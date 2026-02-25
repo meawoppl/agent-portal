@@ -59,6 +59,8 @@ pub struct SessionViewProps {
     pub on_activity: Callback<(Uuid, String, f64)>,
     #[prop_or(false)]
     pub voice_enabled: bool,
+    #[prop_or_default]
+    pub current_user_id: Option<String>,
 }
 
 /// Messages for the SessionView component
@@ -854,7 +856,7 @@ impl Component for SessionView {
                     <div class="session-view-messages" ref={self.messages_ref.clone()}>
                         {
                             group_messages(&self.messages).into_iter().map(|group| {
-                                html! { <MessageGroupRenderer group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} /> }
+                                html! { <MessageGroupRenderer group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
                             }).collect::<Html>()
                         }
                     </div>

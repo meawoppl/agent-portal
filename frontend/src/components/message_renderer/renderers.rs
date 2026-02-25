@@ -94,12 +94,17 @@ pub fn render_assistant_group(messages: &[String]) -> Html {
     }
 }
 
-pub fn render_user_message(msg: &UserMessage) -> Html {
+pub fn render_user_message(msg: &UserMessage, current_user_id: Option<&str>) -> Html {
+    let label = match &msg.sender {
+        Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
+        _ => "You".to_string(),
+    };
+
     if let Some(text) = &msg.content {
         html! {
             <div class="claude-message user-message">
                 <div class="message-header">
-                    <span class="message-type-badge user">{ "You" }</span>
+                    <span class="message-type-badge user">{ &label }</span>
                 </div>
                 <div class="message-body">
                     <div class="user-text">{ render_markdown(text) }</div>
@@ -134,7 +139,7 @@ pub fn render_user_message(msg: &UserMessage) -> Html {
             html! {
                 <div class="claude-message user-message">
                     <div class="message-header">
-                        <span class="message-type-badge user">{ "You" }</span>
+                        <span class="message-type-badge user">{ &label }</span>
                     </div>
                     <div class="message-body">
                         <div class="user-text">{ render_markdown(&text_content) }</div>
