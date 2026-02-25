@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.12
+
+- Increase default image max size from 2 MB to 10 MB
+
 ## 1.3.11
 
 - Update claude-codes to 2.1.49 (String-to-enum migration for subtype, stop_reason, status)

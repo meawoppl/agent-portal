@@ -242,9 +242,9 @@ async fn check_and_send_branch_update(
     }
 }
 
-/// Default 2 MB limit on image file size for portal messages.
+/// Default 10 MB limit on image file size for portal messages.
 /// Override with PORTAL_MAX_IMAGE_MB environment variable.
-const DEFAULT_MAX_IMAGE_MB: usize = 2;
+const DEFAULT_MAX_IMAGE_MB: usize = 10;
 
 fn max_image_bytes() -> usize {
     std::env::var("PORTAL_MAX_IMAGE_MB")
