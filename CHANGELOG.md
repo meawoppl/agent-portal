@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.10
+
+- Use typed claude-codes structs for task parsing instead of raw JSON field access
+- Parse task_type, task_status, and task_usage via typed deserialization in both component logic and renderers
+
 ## 1.3.9
 
 - Tasks sidebar: header bar toggles open/close (removed separate X button)

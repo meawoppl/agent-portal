@@ -32,6 +32,15 @@ pub use claude_codes::io::{
     ToolResultBlock, ToolResultContent, ToolUseBlock,
 };
 
+// Re-export claude-codes output types for typed parsing (aliased to avoid conflicts with
+// frontend's local lenient types in message_renderer/types.rs)
+pub use claude_codes::io::{
+    ResultMessage as CCResultMessage, SystemMessage as CCSystemMessage, TaskNotificationMessage,
+    TaskProgressMessage, TaskStartedMessage, TaskStatus as CCTaskStatus, TaskType as CCTaskType,
+    TaskUsage,
+};
+pub use claude_codes::ClaudeOutput;
+
 /// Which agent CLI backs a session
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
