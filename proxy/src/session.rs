@@ -114,6 +114,7 @@ pub async fn register_with_backend(
                         success,
                         session_id: _,
                         error,
+                        ..
                     }) = serde_json::from_str::<ServerToProxy>(&text)
                     {
                         return Some((success, error));

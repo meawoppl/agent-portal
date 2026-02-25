@@ -20,6 +20,7 @@ use super::{format_duration, truncate, SharedWsWrite};
 /// Spawn the output forwarder task
 ///
 /// Forwards Claude outputs to WebSocket with sequence numbers for reliable delivery.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_output_forwarder(
     mut output_rx: mpsc::UnboundedReceiver<ClaudeOutput>,
     ws_write: SharedWsWrite,
@@ -28,7 +29,9 @@ pub fn spawn_output_forwarder(
     current_branch: Arc<Mutex<Option<String>>>,
     current_pr_url: Arc<Mutex<Option<String>>>,
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
+    max_image_mb: Option<u32>,
 ) -> tokio::task::JoinHandle<()> {
+    let max_bytes = max_image_mb.unwrap_or(DEFAULT_MAX_IMAGE_MB) as usize * 1024 * 1024;
     tokio::spawn(async move {
         let mut message_count: u64 = 0;
         let mut pending_git_check = false;
@@ -65,7 +68,8 @@ pub fn spawn_output_forwarder(
             track_image_reads(&output, &mut image_read_map);
 
             // Check for image tool results in user messages and send portal messages
-            let portal_messages = extract_image_portal_messages(&output, &mut image_read_map);
+            let portal_messages =
+                extract_image_portal_messages(&output, &mut image_read_map, max_bytes);
 
             // Serialize and buffer with sequence number
             let content = serde_json::to_value(&output)
@@ -242,18 +246,8 @@ async fn check_and_send_branch_update(
     }
 }
 
-/// Default 10 MB limit on image file size for portal messages.
-/// Override with PORTAL_MAX_IMAGE_MB environment variable.
-const DEFAULT_MAX_IMAGE_MB: usize = 10;
-
-fn max_image_bytes() -> usize {
-    std::env::var("PORTAL_MAX_IMAGE_MB")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_MAX_IMAGE_MB)
-        * 1024
-        * 1024
-}
+/// Default max image size in MB (used when backend doesn't provide a value)
+const DEFAULT_MAX_IMAGE_MB: u32 = 10;
 
 /// Return the MIME type for a supported image extension, or None.
 fn image_mime_type(path: &str) -> Option<&'static str> {
@@ -301,6 +295,7 @@ fn track_image_reads(output: &ClaudeOutput, image_read_map: &mut HashMap<String,
 fn extract_image_portal_messages(
     output: &ClaudeOutput,
     image_read_map: &mut HashMap<String, String>,
+    max_image_bytes: usize,
 ) -> Vec<shared::PortalMessage> {
     let blocks = match output {
         ClaudeOutput::User(user) => &user.message.content,
@@ -320,10 +315,9 @@ fn extract_image_portal_messages(
 
                 match std::fs::read(&file_path) {
                     Ok(data) => {
-                        let max_bytes = max_image_bytes();
-                        if data.len() > max_bytes {
+                        if data.len() > max_image_bytes {
                             let size_mb = data.len() as f64 / (1024.0 * 1024.0);
-                            let limit_mb = max_bytes as f64 / (1024.0 * 1024.0);
+                            let limit_mb = max_image_bytes as f64 / (1024.0 * 1024.0);
                             portal_messages.push(shared::PortalMessage::text(format!(
                                 "Image too large to display: **{:.1} MB** (limit is {:.0} MB)",
                                 size_mb, limit_mb

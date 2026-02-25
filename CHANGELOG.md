@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.16
+
+- Backend sends max image size to proxies via RegisterAck; proxy uses it instead of local env var
+- Remove frontend image size check (backend/proxy is authoritative)
+
 ## 1.3.15
 
 - Fix stale subagent entries persisting across page reloads by clearing task state on history reload

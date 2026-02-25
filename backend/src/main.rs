@@ -53,6 +53,8 @@ pub struct AppState {
     pub message_retention_days: u32,
     /// Days to keep sessions before auto-deletion (default: 14, 0 = disabled)
     pub session_max_age_days: u32,
+    /// Maximum image size in MB that proxies should inline (default: 10)
+    pub max_image_mb: u32,
 }
 
 #[tokio::main]
@@ -259,6 +261,11 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(14);
 
+    let max_image_mb: u32 = env::var("PORTAL_MAX_IMAGE_MB")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+
     tracing::info!(
         "Message retention: max {} messages/session, {} days",
         message_retention_count,
@@ -268,6 +275,7 @@ async fn main() -> anyhow::Result<()> {
         "Session max age: {} days (0 = disabled)",
         session_max_age_days
     );
+    tracing::info!("Max image size: {} MB", max_image_mb);
 
     // Create app state
     let app_state = Arc::new(AppState {
@@ -286,6 +294,7 @@ async fn main() -> anyhow::Result<()> {
         message_retention_count,
         message_retention_days,
         session_max_age_days,
+        max_image_mb,
     });
 
     // Setup CORS

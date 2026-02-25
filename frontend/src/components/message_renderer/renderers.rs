@@ -697,23 +697,11 @@ const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
     "image/svg+xml",
 ];
 
-/// 10 MB limit on base64 data we'll render as an inline image.
-/// Base64 encodes at ~1.33x, so 10MB base64 ≈ 7.5MB raw image.
-const MAX_IMAGE_BASE64_BYTES: usize = 10 * 1024 * 1024;
-
 fn render_image_source(source: &ImageSource, filename: Option<String>) -> Html {
     if !ALLOWED_IMAGE_MEDIA_TYPES.contains(&source.media_type.as_str()) {
         return html! {
             <pre class="tool-result-content">
                 { format!("[unsupported image type: {}]", source.media_type) }
-            </pre>
-        };
-    }
-    if source.data.len() > MAX_IMAGE_BASE64_BYTES {
-        let size_mb = source.data.len() as f64 / (1024.0 * 1024.0);
-        return html! {
-            <pre class="tool-result-content">
-                { format!("[image too large: {:.1} MB, limit is 10 MB]", size_mb) }
             </pre>
         };
     }

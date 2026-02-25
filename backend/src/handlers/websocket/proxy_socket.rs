@@ -126,6 +126,7 @@ fn handle_proxy_message(
                 success: result.success,
                 session_id: claude_session_id,
                 error: result.error,
+                max_image_mb: Some(app_state.max_image_mb),
             });
 
             info!(

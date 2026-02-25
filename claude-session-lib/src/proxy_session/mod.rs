@@ -339,9 +339,10 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
     };
 
     // Register with backend and wait for acknowledgment
-    if let Err(duration) = register_session(&mut conn, &config_with_branch).await {
-        return ConnectionResult::Disconnected(duration);
-    }
+    let max_image_mb = match register_session(&mut conn, &config_with_branch).await {
+        Ok(mb) => mb,
+        Err(duration) => return ConnectionResult::Disconnected(duration),
+    };
 
     // Look up PR URL for the current branch and send as SessionUpdate
     if let Some(ref branch) = config_with_branch.git_branch {
@@ -429,7 +430,7 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
     }
 
     // Run the message loop - split connection for concurrent read/write
-    run_message_loop(session, &config_with_branch, conn).await
+    run_message_loop(session, &config_with_branch, conn, max_image_mb).await
 }
 
 /// Connect to the backend WebSocket
@@ -455,11 +456,12 @@ async fn connect_to_backend(
     }
 }
 
-/// Register session with the backend and wait for acknowledgment
+/// Register session with the backend and wait for acknowledgment.
+/// On success, returns the backend-provided max_image_mb (if any).
 async fn register_session(
     conn: &mut NativeConnection,
     config: &ProxySessionConfig,
-) -> Result<(), Duration> {
+) -> Result<Option<u32>, Duration> {
     info!("Registering session...");
 
     let hostname = hostname::get()
@@ -495,8 +497,9 @@ async fn register_session(
                     success,
                     session_id: _,
                     error,
+                    max_image_mb,
                 }) => {
-                    return Some((success, error));
+                    return Some((success, error, max_image_mb));
                 }
                 Ok(_) => continue,
                 Err(_) => return None,
@@ -507,11 +510,11 @@ async fn register_session(
     .await;
 
     match ack_timeout {
-        Ok(Some((true, _))) => {
-            info!("Session registered");
-            Ok(())
+        Ok(Some((true, _, max_image_mb))) => {
+            info!("Session registered (max_image_mb: {:?})", max_image_mb);
+            Ok(max_image_mb)
         }
-        Ok(Some((false, error))) => {
+        Ok(Some((false, error, _))) => {
             let err_msg = error.as_deref().unwrap_or("Unknown error");
             error!("Registration failed: {}", err_msg);
             Err(Duration::ZERO)
@@ -525,7 +528,7 @@ async fn register_session(
             info!(
                 "No RegisterAck received (timeout), assuming success for backwards compatibility"
             );
-            Ok(())
+            Ok(None)
         }
     }
 }
@@ -535,6 +538,7 @@ async fn run_message_loop(
     session: &mut SessionState<'_>,
     config: &ProxySessionConfig,
     conn: NativeConnection,
+    max_image_mb: Option<u32>,
 ) -> ConnectionResult {
     let connection_start = Instant::now();
     let session_id = config.session_id;
@@ -583,6 +587,7 @@ async fn run_message_loop(
         current_branch,
         current_pr_url,
         session.output_buffer.clone(),
+        max_image_mb,
     );
 
     // Spawn WebSocket reader task
