@@ -105,13 +105,13 @@ pub fn save_inactive_hidden(hidden: bool) {
     }
 }
 
-/// Load cost display preference from localStorage (default: shown)
+/// Load cost display preference from localStorage (default: hidden)
 pub fn load_show_cost() -> bool {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|storage| storage.get_item(SHOW_COST_STORAGE_KEY).ok().flatten())
-        .map(|v| v != "false")
-        .unwrap_or(true)
+        .map(|v| v == "true")
+        .unwrap_or(false)
 }
 
 /// Save cost display preference to localStorage

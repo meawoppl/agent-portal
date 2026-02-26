@@ -30,12 +30,28 @@ pub enum Route {
     AccessDenied,
 }
 
+/// Wrapper for /admin route — provides back-navigation on_close callback
+#[function_component(AdminRoute)]
+fn admin_route() -> Html {
+    let navigator = use_navigator().unwrap();
+    let on_close = Callback::from(move |_| navigator.push(&Route::Dashboard));
+    html! { <AdminPage on_close={on_close} /> }
+}
+
+/// Wrapper for /settings route — provides back-navigation on_close callback
+#[function_component(SettingsRoute)]
+fn settings_route() -> Html {
+    let navigator = use_navigator().unwrap();
+    let on_close = Callback::from(move |_| navigator.push(&Route::Dashboard));
+    html! { <SettingsPage on_close={on_close} /> }
+}
+
 fn switch(routes: Route) -> Html {
     match routes {
         Route::Home => html! { <SplashPage /> },
         Route::Dashboard => html! { <DashboardPage /> },
-        Route::Settings => html! { <SettingsPage /> },
-        Route::Admin => html! { <AdminPage /> },
+        Route::Settings => html! { <SettingsRoute /> },
+        Route::Admin => html! { <AdminRoute /> },
         Route::Banned => html! { <BannedPage /> },
         Route::AccessDenied => html! { <AccessDeniedPage /> },
     }

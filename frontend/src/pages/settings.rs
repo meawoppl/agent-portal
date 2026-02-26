@@ -1,7 +1,6 @@
 use crate::audio::{self, EventSound, SoundConfig, SoundEvent, Waveform, STORAGE_KEY};
 use crate::components::ShareDialog;
 use crate::utils;
-use crate::Route;
 use gloo_net::http::Request;
 use shared::{
     CreateProxyTokenRequest, CreateProxyTokenResponse, ProxyTokenInfo, ProxyTokenListResponse,
@@ -10,7 +9,6 @@ use shared::{
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
-use yew_router::prelude::*;
 
 /// Settings page tabs
 #[derive(Clone, Copy, PartialEq)]
@@ -479,9 +477,13 @@ struct NewTokenForm {
     expires_in_days: u32,
 }
 
+#[derive(Properties, PartialEq)]
+pub struct SettingsPageProps {
+    pub on_close: Callback<()>,
+}
+
 #[function_component(SettingsPage)]
-pub fn settings_page() -> Html {
-    let navigator = use_navigator().unwrap();
+pub fn settings_page(props: &SettingsPageProps) -> Html {
     let active_tab = use_state(|| SettingsTab::Sessions);
 
     // Token state
@@ -789,10 +791,8 @@ pub fn settings_page() -> Html {
 
     // Back to dashboard
     let go_back = {
-        let navigator = navigator.clone();
-        Callback::from(move |_| {
-            navigator.push(&Route::Dashboard);
-        })
+        let on_close = props.on_close.clone();
+        Callback::from(move |_| on_close.emit(()))
     };
 
     // Count expiring tokens (within 7 days)

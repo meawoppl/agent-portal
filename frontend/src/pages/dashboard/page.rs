@@ -8,8 +8,9 @@ use super::types::{
 };
 use crate::components::{LaunchDialog, ProxyTokenSetup};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
+use crate::pages::admin::AdminPage;
+use crate::pages::settings::SettingsPage;
 use crate::utils;
-use crate::Route;
 use gloo_net::http::Request;
 use shared::{AppConfig, SessionInfo};
 use std::collections::HashSet;
@@ -17,7 +18,6 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
 use yew::prelude::*;
-use yew_router::prelude::*;
 
 // =============================================================================
 // Dashboard Page - Main Orchestrating Component
@@ -25,8 +25,6 @@ use yew_router::prelude::*;
 
 #[function_component(DashboardPage)]
 pub fn dashboard_page() -> Html {
-    let navigator = use_navigator().unwrap();
-
     // Use the sessions hook for fetching and polling
     let sessions_hook = use_sessions();
     let sessions = sessions_hook.sessions.clone();
@@ -45,6 +43,8 @@ pub fn dashboard_page() -> Html {
     // UI state
     let show_new_session = use_state(|| false);
     let show_launch_dialog = use_state(|| false);
+    let show_admin = use_state(|| false);
+    let show_settings = use_state(|| false);
     let focused_index = use_state(|| 0usize);
     let awaiting_sessions = use_state(HashSet::<Uuid>::new);
     let paused_sessions = use_state(load_paused_sessions);
@@ -275,15 +275,25 @@ pub fn dashboard_page() -> Html {
         on_activate,
     });
 
-    // Navigation callbacks
+    // Modal open callbacks
     let go_to_admin = {
-        let navigator = navigator.clone();
-        Callback::from(move |_| navigator.push(&Route::Admin))
+        let show_admin = show_admin.clone();
+        Callback::from(move |_| show_admin.set(true))
     };
 
     let go_to_settings = {
-        let navigator = navigator.clone();
-        Callback::from(move |_| navigator.push(&Route::Settings))
+        let show_settings = show_settings.clone();
+        Callback::from(move |_| show_settings.set(true))
+    };
+
+    let close_admin = {
+        let show_admin = show_admin.clone();
+        Callback::from(move |_: ()| show_admin.set(false))
+    };
+
+    let close_settings = {
+        let show_settings = show_settings.clone();
+        Callback::from(move |_: ()| show_settings.set(false))
     };
 
     let do_logout = Callback::from(move |_| {
@@ -775,6 +785,20 @@ pub fn dashboard_page() -> Html {
                         }
                     </div>
                 </>
+            }
+
+            // Admin modal — full-page overlay preserves dashboard state
+            if *show_admin {
+                <div class="full-page-modal">
+                    <AdminPage on_close={close_admin.clone()} />
+                </div>
+            }
+
+            // Settings modal — full-page overlay preserves dashboard state
+            if *show_settings {
+                <div class="full-page-modal">
+                    <SettingsPage on_close={close_settings.clone()} />
+                </div>
             }
 
             // Leave confirmation modal

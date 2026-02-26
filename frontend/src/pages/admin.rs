@@ -353,8 +353,13 @@ fn raw_message_row(props: &RawMessageRowProps) -> Html {
 // Main Admin Page Component
 // ============================================================================
 
+#[derive(Properties, PartialEq)]
+pub struct AdminPageProps {
+    pub on_close: Callback<()>,
+}
+
 #[function_component(AdminPage)]
-pub fn admin_page() -> Html {
+pub fn admin_page(props: &AdminPageProps) -> Html {
     let active_tab = use_state(|| AdminTab::Overview);
     let stats = use_state(|| None::<AdminStats>);
     let users = use_state(Vec::<AdminUserInfo>::new);
@@ -915,8 +920,8 @@ pub fn admin_page() -> Html {
 
     // Back to dashboard
     let go_back = {
-        let navigator = navigator.clone();
-        Callback::from(move |_| navigator.push(&Route::Dashboard))
+        let on_close = props.on_close.clone();
+        Callback::from(move |_| on_close.emit(()))
     };
 
     html! {
