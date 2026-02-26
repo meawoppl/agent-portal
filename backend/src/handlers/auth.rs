@@ -19,8 +19,10 @@ use crate::{
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
+const OAUTH_CSRF_COOKIE: &str = "oauth_csrf";
+
 /// Regular web login - redirects to Google OAuth
-pub async fn login(State(app_state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
     let client = match &app_state.oauth_basic_client {
         Some(c) => c,
         None => return Redirect::temporary("/api/auth/dev-login").into_response(),
@@ -32,7 +34,16 @@ pub async fn login(State(app_state): State<Arc<AppState>>) -> impl IntoResponse 
         .add_scope(Scope::new("email".to_string()))
         .add_scope(Scope::new("profile".to_string()));
 
-    let (auth_url, _csrf_token) = auth_request.url();
+    let (auth_url, csrf_token) = auth_request.url();
+
+    // Store the CSRF token in a short-lived signed cookie so we can verify it on callback.
+    let mut csrf_cookie = Cookie::new(OAUTH_CSRF_COOKIE, csrf_token.secret().clone());
+    csrf_cookie.set_path("/api/auth/google/callback");
+    csrf_cookie.set_http_only(true);
+    csrf_cookie.set_secure(!app_state.dev_mode);
+    csrf_cookie.set_same_site(SameSite::Lax);
+    csrf_cookie.set_max_age(tower_cookies::cookie::time::Duration::minutes(10));
+    cookies.signed(&app_state.cookie_key).add(csrf_cookie);
 
     Redirect::temporary(auth_url.as_str()).into_response()
 }
@@ -123,6 +134,35 @@ pub async fn callback(
         .oauth_basic_client
         .as_ref()
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    // Verify CSRF state token for regular web logins.
+    // Device flow uses a deterministic "device:{code}" state so we skip it there.
+    let is_device_flow = query
+        .state
+        .as_deref()
+        .is_some_and(|s| s.starts_with("device:"));
+
+    if !is_device_flow {
+        let csrf_cookie = cookies
+            .signed(&app_state.cookie_key)
+            .get(OAUTH_CSRF_COOKIE)
+            .ok_or_else(|| {
+                error!("OAuth callback: missing CSRF cookie");
+                StatusCode::FORBIDDEN
+            })?;
+
+        let state_value = query.state.as_deref().unwrap_or("");
+        if csrf_cookie.value() != state_value {
+            error!("OAuth callback: CSRF token mismatch");
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        // Consume the CSRF cookie
+        let mut remove_csrf = Cookie::new(OAUTH_CSRF_COOKIE, "");
+        remove_csrf.set_path("/api/auth/google/callback");
+        remove_csrf.set_max_age(tower_cookies::cookie::time::Duration::ZERO);
+        cookies.signed(&app_state.cookie_key).add(remove_csrf);
+    }
 
     // Exchange code for token
     let token: oauth2::StandardTokenResponse<
