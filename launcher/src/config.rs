@@ -47,21 +47,49 @@ pub fn load_config() -> LauncherConfig {
     }
 }
 
-pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
+fn save_config(config: &LauncherConfig) -> anyhow::Result<()> {
     let path = config_path();
-    let mut config: LauncherConfig = match std::fs::read_to_string(&path) {
-        Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
-        Err(_) => LauncherConfig::default(),
-    };
-
-    config.auth_token = Some(token.to_string());
-
-    let contents = toml::to_string_pretty(&config)?;
+    let contents = toml::to_string_pretty(config)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, contents)?;
-    tracing::info!("Saved auth token to {}", path.display());
+    tracing::debug!("Saved config to {}", path.display());
+    Ok(())
+}
+
+pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
+    let mut config = load_config();
+    config.auth_token = Some(token.to_string());
+    save_config(&config)?;
+    tracing::info!("Saved auth token to {}", config_path().display());
+    Ok(())
+}
+
+pub fn add_session(session: &ExpectedSession) -> anyhow::Result<()> {
+    let mut config = load_config();
+    if config
+        .sessions
+        .iter()
+        .any(|s| s.working_directory == session.working_directory)
+    {
+        tracing::debug!("Session already in config: {}", session.working_directory);
+        return Ok(());
+    }
+    config.sessions.push(session.clone());
+    save_config(&config)
+}
+
+pub fn remove_session(working_directory: &str) -> anyhow::Result<()> {
+    let mut config = load_config();
+    let before = config.sessions.len();
+    config
+        .sessions
+        .retain(|s| s.working_directory != working_directory);
+    if config.sessions.len() < before {
+        save_config(&config)?;
+        tracing::debug!("Removed session from config: {}", working_directory);
+    }
     Ok(())
 }
 

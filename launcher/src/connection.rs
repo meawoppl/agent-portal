@@ -1,4 +1,4 @@
-use crate::config::ExpectedSession;
+use crate::config::{self, ExpectedSession};
 use crate::process_manager::{ProcessManager, SessionExited};
 use shared::{LauncherEndpoint, LauncherToServer, ServerToLauncher};
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ pub async fn run_launcher_loop(
     auth_token: Option<&str>,
     mut process_manager: ProcessManager,
     mut exit_rx: mpsc::UnboundedReceiver<SessionExited>,
-    expected_sessions: Vec<ExpectedSession>,
+    mut expected_sessions: Vec<ExpectedSession>,
 ) -> anyhow::Result<()> {
     process_manager.set_launcher_id(launcher_id);
     let mut backoff = Duration::from_secs(1);
@@ -143,6 +143,7 @@ pub async fn run_launcher_loop(
                                         msg,
                                         &mut ws_sender,
                                         &mut process_manager,
+                                        &mut expected_sessions,
                                     ).await;
                                 }
                                 Some(Err(e)) => {
@@ -184,13 +185,17 @@ pub async fn run_launcher_loop(
                                 break;
                             }
 
-                            // Schedule restart if this was an expected session
                             if let Some(dir) = exited_dir {
-                                if let Some(expected) = expected_sessions.iter().find(|s| s.working_directory == dir) {
-                                    // restart_counts is never reset after a successful run.
-                                    // This is intentional: MAX_RESTART_ATTEMPTS is a
-                                    // total lifetime cap per directory, not a per-window
-                                    // counter. Fail-fast rather than retry indefinitely.
+                                let is_clean_exit = exited.exit_code == Some(0);
+                                if is_clean_exit {
+                                    // Clean exit: remove from expected sessions
+                                    expected_sessions.retain(|s| s.working_directory != dir);
+                                    if let Err(e) = config::remove_session(&dir) {
+                                        warn!("Failed to remove session from config: {}", e);
+                                    }
+                                    info!("Session exited cleanly, removed from expected: {}", dir);
+                                } else if let Some(expected) = expected_sessions.iter().find(|s| s.working_directory == dir) {
+                                    // Non-clean exit: try to restart
                                     let count = restart_counts.entry(dir.clone()).or_insert(0);
                                     *count += 1;
                                     if *count <= MAX_RESTART_ATTEMPTS {
@@ -209,6 +214,10 @@ pub async fn run_launcher_loop(
                                             "Expected session exceeded max restarts ({}): {}",
                                             MAX_RESTART_ATTEMPTS, dir
                                         );
+                                        expected_sessions.retain(|s| s.working_directory != dir);
+                                        if let Err(e) = config::remove_session(&dir) {
+                                            warn!("Failed to remove session from config: {}", e);
+                                        }
                                     }
                                 }
                             }
@@ -323,6 +332,7 @@ async fn handle_message(
     msg: ServerToLauncher,
     ws_sender: &mut ws_bridge::WsSender<LauncherToServer>,
     process_manager: &mut ProcessManager,
+    expected_sessions: &mut Vec<ExpectedSession>,
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
@@ -350,13 +360,31 @@ async fn handle_message(
                 .await;
 
             let response = match result {
-                Ok(session_id) => LauncherToServer::LaunchSessionResult {
-                    request_id,
-                    success: true,
-                    session_id: Some(session_id),
-                    pid: None,
-                    error: None,
-                },
+                Ok(session_id) => {
+                    // Persist so this session survives launcher restarts
+                    if !expected_sessions
+                        .iter()
+                        .any(|s| s.working_directory == working_directory)
+                    {
+                        let expected = ExpectedSession {
+                            working_directory: working_directory.clone(),
+                            session_name: session_name.clone(),
+                            agent_type,
+                            claude_args: claude_args.clone(),
+                        };
+                        if let Err(e) = config::add_session(&expected) {
+                            warn!("Failed to persist session to config: {}", e);
+                        }
+                        expected_sessions.push(expected);
+                    }
+                    LauncherToServer::LaunchSessionResult {
+                        request_id,
+                        success: true,
+                        session_id: Some(session_id),
+                        pid: None,
+                        error: None,
+                    }
+                }
                 Err(e) => {
                     error!("Failed to spawn: {}", e);
                     LauncherToServer::LaunchSessionResult {
@@ -375,7 +403,14 @@ async fn handle_message(
         }
         ServerToLauncher::StopSession { session_id } => {
             info!("Stop request for session {}", session_id);
+            let working_dir = process_manager.session_working_directory(&session_id);
             process_manager.stop(&session_id).await;
+            if let Some(dir) = working_dir {
+                expected_sessions.retain(|s| s.working_directory != dir);
+                if let Err(e) = config::remove_session(&dir) {
+                    warn!("Failed to remove session from config: {}", e);
+                }
+            }
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);
