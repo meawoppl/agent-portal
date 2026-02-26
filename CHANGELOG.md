@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.26
+
+- Fix Shift+Tab keyboard hint text
+
 ## 1.3.25
 
 - Keep server shutdown banner until first message received from reconnected server
