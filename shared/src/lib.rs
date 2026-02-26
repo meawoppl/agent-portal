@@ -171,6 +171,9 @@ pub struct LauncherInfo {
     pub hostname: String,
     pub connected: bool,
     pub running_sessions: u32,
+    /// Working directory where the launcher process is running
+    #[serde(default)]
+    pub working_directory: Option<String>,
 }
 
 /// API types for HTTP endpoints

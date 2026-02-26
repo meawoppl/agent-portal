@@ -31,6 +31,7 @@ pub struct LauncherConnection {
     pub hostname: String,
     pub user_id: Uuid,
     pub running_sessions: Vec<Uuid>,
+    pub working_directory: Option<String>,
 }
 
 #[derive(Clone)]
@@ -251,6 +252,7 @@ impl SessionManager {
                 hostname: entry.value().hostname.clone(),
                 connected: true,
                 running_sessions: entry.value().running_sessions.len() as u32,
+                working_directory: entry.value().working_directory.clone(),
             })
             .collect()
     }

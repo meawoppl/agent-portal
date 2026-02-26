@@ -43,6 +43,9 @@ pub async fn run_launcher_loop(
                         .map(|h| h.to_string_lossy().to_string())
                         .unwrap_or_default(),
                     version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                    working_directory: std::env::current_dir()
+                        .ok()
+                        .map(|p| p.to_string_lossy().to_string()),
                 };
                 if ws_sender.send(register).await.is_err() {
                     warn!("Failed to send registration");

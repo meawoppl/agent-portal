@@ -13,13 +13,14 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     let (mut ws_sender, mut ws_receiver) = conn.split();
 
     // Wait for LauncherRegister message
-    let (launcher_id, launcher_name, hostname, user_id) = loop {
+    let (launcher_id, launcher_name, hostname, user_id, working_directory) = loop {
         match ws_receiver.recv().await {
             Some(Ok(LauncherToServer::LauncherRegister {
                 launcher_id,
                 launcher_name,
                 auth_token,
                 hostname,
+                working_directory,
                 ..
             })) => {
                 // Authenticate
@@ -73,7 +74,13 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                     return;
                 };
 
-                break (launcher_id, launcher_name, hostname, user_id);
+                break (
+                    launcher_id,
+                    launcher_name,
+                    hostname,
+                    user_id,
+                    working_directory,
+                );
             }
             Some(Ok(_)) => continue,
             Some(Err(e)) => {
@@ -104,6 +111,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             hostname,
             user_id,
             running_sessions: Vec::new(),
+            working_directory,
         },
     );
 

@@ -306,6 +306,9 @@ pub enum LauncherToServer {
         hostname: String,
         #[serde(default)]
         version: Option<String>,
+        /// Working directory where the launcher process is running
+        #[serde(default)]
+        working_directory: Option<String>,
     },
 
     /// Result of a launch request
