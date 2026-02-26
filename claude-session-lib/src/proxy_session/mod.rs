@@ -416,15 +416,8 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
         };
 
         let short_id = &session.config.session_id.to_string()[..8];
-        let mut text = format!(
-            "{}\n\n\
-             | | |\n\
-             |---|---|\n\
-             | Name | `{}` |\n\
-             | Host | `{}` |\n\
-             | Directory | `{}` |\n\
-             | Agent | {} |\n\
-             | ID | `{}…` |",
+        let text = format!(
+            "{} — `{}` on `{}` in `{}` ({} `{}…`)",
             status_line,
             session.config.session_name,
             hostname,
@@ -432,10 +425,6 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
             config_with_branch.agent_type,
             short_id,
         );
-
-        if let Some(ref branch) = config_with_branch.git_branch {
-            text.push_str(&format!("\n| Branch | `{}` |", branch));
-        }
 
         let portal_content = shared::PortalMessage::text(text).to_json();
         let seq = {
