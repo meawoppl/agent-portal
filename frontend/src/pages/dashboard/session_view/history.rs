@@ -144,19 +144,6 @@ impl CommandHistory {
             }
         }
     }
-
-    /// Reset navigation state
-    #[allow(dead_code)]
-    pub fn reset(&mut self) {
-        self.position = None;
-        self.draft.clear();
-    }
-
-    /// Check if currently navigating history
-    #[allow(dead_code)]
-    pub fn is_navigating(&self) -> bool {
-        self.position.is_some()
-    }
 }
 
 #[cfg(test)]

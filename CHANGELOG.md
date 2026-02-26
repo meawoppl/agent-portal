@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.24
+
+- Remove unused dead code methods from CommandHistory
+
 ## 1.3.23
 
 - Fix result message duplicating previous assistant message text
