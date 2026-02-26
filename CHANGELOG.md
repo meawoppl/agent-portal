@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.33
+
+- Prevent duplicate launchers per host-user and fix tilde expansion
+
 ## 1.3.32
 
 - Launcher cleanup: fix task abort, URL dedup, send error logging, config path
