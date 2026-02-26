@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.20
+
+- Fix tasks drawer pull-tab clipped by overflow:hidden on drawer container
+
 ## 1.3.19
 
 - Add `agent-portal login` subcommand for explicit authentication
