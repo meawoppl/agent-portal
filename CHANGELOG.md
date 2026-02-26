@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.38
+
+- Add "Add machine" button to launch dialog for setting up new launchers
+- Remove Service section from settings Credentials tab
+
 ## 1.3.37
 
 - Move install under service subcommand (`agent-portal service install`)

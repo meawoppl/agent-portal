@@ -136,6 +136,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let skip_permissions = use_state(|| false);
     let launching = use_state(|| false);
     let error_msg = use_state(|| None::<String>);
+    let show_setup = use_state(|| false);
     let debounce_handle = use_mut_ref(|| None::<Timeout>);
 
     // Fetch launchers on mount
@@ -368,6 +369,13 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         Callback::from(move |_| on_close.emit(()))
     };
 
+    let toggle_setup = {
+        let show_setup = show_setup.clone();
+        Callback::from(move |_: MouseEvent| {
+            show_setup.set(!*show_setup);
+        })
+    };
+
     // Close on Escape key
     {
         let on_close = props.on_close.clone();
@@ -507,6 +515,13 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             </select>
                         </div>
                     </div>
+
+                    <button class="launch-add-machine" onclick={toggle_setup}>
+                        { if *show_setup { "Hide setup" } else { "+ Add machine" } }
+                    </button>
+                    if *show_setup {
+                        <ProxyTokenSetup />
+                    }
 
                     if *agent_type == shared::AgentType::Codex {
                         <div class="launch-note launch-note-warn">

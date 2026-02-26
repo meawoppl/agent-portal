@@ -1,5 +1,5 @@
 use crate::audio::{self, EventSound, SoundConfig, SoundEvent, Waveform, STORAGE_KEY};
-use crate::components::{ProxyTokenSetup, ShareDialog};
+use crate::components::ShareDialog;
 use crate::utils;
 use gloo_net::http::Request;
 use shared::{
@@ -954,16 +954,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                                 { "Credentials expired for more than 7 days are automatically deleted." }
                             </p>
                         }
-                    </section>
-
-                    <section class="service-section">
-                        <div class="section-header">
-                            <h2>{ "Service" }</h2>
-                            <p class="section-description">
-                                { "Install and configure the agent on your machines." }
-                            </p>
-                        </div>
-                        <ProxyTokenSetup />
                     </section>
                 }
 
