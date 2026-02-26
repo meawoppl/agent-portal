@@ -191,7 +191,7 @@
 .sparkline-tick.tick-assistant { background: var(--accent); }
 .sparkline-tick.tick-user { background: var(--success); }
 .sparkline-tick.tick-result { background: #e0af68; }
-.sparkline-tick.tick-portal { background: #bb9af7; }
+.sparkline-tick.tick-portal { background: #7dcfff; }
 .sparkline-tick.tick-error { background: var(--error); }
 .sparkline-tick.tick-other { background: var(--text-secondary); }
 
@@ -204,7 +204,7 @@
 }
 
 .sparkline-range.tick-compaction { background: var(--text-secondary); }
-.sparkline-range.tick-task { background: var(--text-secondary); }
+.sparkline-range.tick-task { background: #bb9af7; }
 
 .session-pill.paused .sparkline-tick,
 .session-pill.paused .sparkline-range {

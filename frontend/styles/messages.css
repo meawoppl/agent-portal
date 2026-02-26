@@ -62,12 +62,12 @@
 }
 
 .message-type-badge.portal {
-    background: rgba(187, 154, 247, 0.2);
-    color: var(--link-color);
+    background: rgba(125, 207, 255, 0.2);
+    color: #7dcfff;
 }
 
 .portal-message {
-    border-left: 3px solid var(--link-color);
+    border-left: 3px solid #7dcfff;
 }
 
 .message-type-badge.raw {

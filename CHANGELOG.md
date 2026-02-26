@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.18
+
+- Differentiate task and portal message colors (tasks=purple, portal=teal)
+- Sparkline tick colors now match their message type colors
+
 ## 1.3.17
 
 - Rename agent-launcher to agent-portal
