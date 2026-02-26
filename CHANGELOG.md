@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.36
+
+- Add agent install setup under Service section in Credentials settings tab
+
 ## 1.3.35
 
 - Add bash-style Tab completion to launch dialog path input
