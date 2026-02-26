@@ -71,11 +71,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         if let Some(first) = data.first() {
                             let lid = first.launcher_id;
                             selected_launcher.set(Some(lid));
-                            // Start at the launcher's working directory, fall back to home
-                            let initial_path = first
-                                .working_directory
-                                .clone()
-                                .unwrap_or_else(|| "~".to_string());
+                            // Always start at home — don't carry over last-used directory
+                            let initial_path = "~".to_string();
                             fetch_directories(
                                 lid,
                                 initial_path,
@@ -187,16 +184,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let dir_entries = dir_entries.clone();
         let dir_loading = dir_loading.clone();
         let dir_error = dir_error.clone();
-        let launchers = launchers.clone();
         Callback::from(move |e: Event| {
             if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                 if let Ok(id) = select.value().parse::<Uuid>() {
                     selected_launcher.set(Some(id));
-                    let path = launchers
-                        .iter()
-                        .find(|l| l.launcher_id == id)
-                        .and_then(|l| l.working_directory.clone())
-                        .unwrap_or_else(|| "~".to_string());
+                    // Always start at home — don't carry over last-used directory
+                    let path = "~".to_string();
                     current_path.set(path.clone());
                     fetch_directories(
                         id,
