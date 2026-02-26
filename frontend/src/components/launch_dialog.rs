@@ -4,7 +4,6 @@ use gloo_net::http::Request;
 use serde::Deserialize;
 use shared::api::LaunchRequest;
 use shared::{DirectoryEntry, LauncherInfo};
-use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -35,6 +34,87 @@ fn agent_config(agent_type: shared::AgentType) -> AgentConfig {
     }
 }
 
+/// Bundles the four directory-browser state handles so they travel together.
+#[derive(Clone)]
+struct DirBrowser {
+    path: UseStateHandle<String>,
+    entries: UseStateHandle<Vec<DirectoryEntry>>,
+    loading: UseStateHandle<bool>,
+    error: UseStateHandle<Option<String>>,
+}
+
+impl DirBrowser {
+    /// Navigate to `path`: update the path bar and fetch the listing.
+    /// Use this for breadcrumb clicks, directory clicks, and launcher changes.
+    fn navigate(&self, launcher_id: Option<Uuid>, path: String) {
+        self.path.set(path.clone());
+        if let Some(lid) = launcher_id {
+            self.fetch(lid, path, true);
+        }
+    }
+
+    /// Fetch a directory listing for `path` from `launcher_id`.
+    /// Pass `update_path = true` when navigating so the path bar is updated to
+    /// the server-resolved path (e.g. `~` → `/home/user/`).
+    /// Pass `false` when the user is mid-typing so their input isn't overwritten.
+    fn fetch(&self, launcher_id: Uuid, path: String, update_path: bool) {
+        let browser = self.clone();
+        browser.loading.set(true);
+        browser.error.set(None);
+        spawn_local(async move {
+            let url = format!(
+                "/api/launchers/{}/directories?path={}",
+                launcher_id,
+                js_sys::encode_uri_component(&path)
+            );
+            match Request::get(&url).send().await {
+                Ok(resp) if resp.ok() => {
+                    if let Ok(listing) = resp.json::<DirectoryListingResponse>().await {
+                        browser.entries.set(listing.entries);
+                        if update_path {
+                            if let Some(resolved) = listing.resolved_path {
+                                browser.path.set(resolved);
+                            } else {
+                                browser.path.set(path);
+                            }
+                        }
+                    } else {
+                        browser
+                            .error
+                            .set(Some("Failed to parse response".to_string()));
+                    }
+                }
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status == 400 {
+                        browser
+                            .error
+                            .set(Some("Path not found or not readable".to_string()));
+                    } else if status == 504 {
+                        browser
+                            .error
+                            .set(Some("Launcher not responding".to_string()));
+                    } else {
+                        browser.error.set(Some(format!("Error {}", status)));
+                    }
+                }
+                Err(e) => {
+                    browser.error.set(Some(format!("Request failed: {}", e)));
+                }
+            }
+            browser.loading.set(false);
+        });
+    }
+}
+
+fn parent_path(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rfind('/') {
+        Some(0) | None => "/".to_string(),
+        Some(idx) => format!("{}/", &trimmed[..idx]),
+    }
+}
+
 #[derive(Properties, PartialEq)]
 pub struct LaunchDialogProps {
     pub on_close: Callback<()>,
@@ -45,10 +125,12 @@ pub struct LaunchDialogProps {
 pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let launchers = use_state(Vec::<LauncherInfo>::new);
     let selected_launcher = use_state(|| None::<Uuid>);
-    let current_path = use_state(|| "~".to_string());
-    let dir_entries = use_state(Vec::<DirectoryEntry>::new);
-    let dir_loading = use_state(|| false);
-    let dir_error = use_state(|| None::<String>);
+    let dir = DirBrowser {
+        path: use_state(|| "~".to_string()),
+        entries: use_state(Vec::<DirectoryEntry>::new),
+        loading: use_state(|| false),
+        error: use_state(|| None::<String>),
+    };
     let extra_args = use_state(String::new);
     let agent_type = use_state(|| shared::AgentType::Claude);
     let skip_permissions = use_state(|| false);
@@ -60,10 +142,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     {
         let launchers = launchers.clone();
         let selected_launcher = selected_launcher.clone();
-        let current_path = current_path.clone();
-        let dir_entries = dir_entries.clone();
-        let dir_loading = dir_loading.clone();
-        let dir_error = dir_error.clone();
+        let dir = dir.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
                 if let Ok(resp) = Request::get("/api/launchers").send().await {
@@ -71,16 +150,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         if let Some(first) = data.first() {
                             let lid = first.launcher_id;
                             selected_launcher.set(Some(lid));
-                            // Always start at home — don't carry over last-used directory
-                            let initial_path = "~".to_string();
-                            fetch_directories(
-                                lid,
-                                initial_path,
-                                current_path,
-                                dir_entries,
-                                dir_loading,
-                                dir_error,
-                            );
+                            dir.fetch(lid, "~".to_string(), true);
                         }
                         launchers.set(data);
                     }
@@ -92,32 +162,18 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     let on_path_input = {
         let selected_launcher = selected_launcher.clone();
-        let current_path = current_path.clone();
-        let dir_entries = dir_entries.clone();
-        let dir_loading = dir_loading.clone();
-        let dir_error = dir_error.clone();
+        let dir = dir.clone();
         let debounce_handle = debounce_handle.clone();
         Callback::from(move |e: InputEvent| {
             if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
                 let path = input.value();
-                current_path.set(path.clone());
+                dir.path.set(path.clone());
 
                 // Debounce: cancel previous timer, start new one
-                let launcher_id = *selected_launcher;
-                if let Some(lid) = launcher_id {
-                    let current_path = current_path.clone();
-                    let dir_entries = dir_entries.clone();
-                    let dir_loading = dir_loading.clone();
-                    let dir_error = dir_error.clone();
+                if let Some(lid) = *selected_launcher {
+                    let dir = dir.clone();
                     let handle = Timeout::new(300, move || {
-                        fetch_directories(
-                            lid,
-                            path,
-                            current_path,
-                            dir_entries,
-                            dir_loading,
-                            dir_error,
-                        );
+                        dir.fetch(lid, path, false); // user is typing — don't overwrite the input
                     });
                     *debounce_handle.borrow_mut() = Some(handle);
                 }
@@ -157,55 +213,32 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
-    let navigate_to = {
+    // navigate_to: Yew's Callback<String> is Rc-backed and cheap to clone,
+    // replacing the previous Rc<dyn Fn(String)>. Call sites use .emit(path).
+    let navigate_to: Callback<String> = {
         let selected_launcher = selected_launcher.clone();
-        let current_path = current_path.clone();
-        let dir_entries = dir_entries.clone();
-        let dir_loading = dir_loading.clone();
-        let dir_error = dir_error.clone();
-        Rc::new(move |path: String| {
-            current_path.set(path.clone());
-            if let Some(lid) = *selected_launcher {
-                fetch_directories(
-                    lid,
-                    path,
-                    current_path.clone(),
-                    dir_entries.clone(),
-                    dir_loading.clone(),
-                    dir_error.clone(),
-                );
-            }
+        let dir = dir.clone();
+        Callback::from(move |path: String| {
+            dir.navigate(*selected_launcher, path);
         })
     };
 
     let on_launcher_change = {
         let selected_launcher = selected_launcher.clone();
-        let current_path = current_path.clone();
-        let dir_entries = dir_entries.clone();
-        let dir_loading = dir_loading.clone();
-        let dir_error = dir_error.clone();
+        let dir = dir.clone();
         Callback::from(move |e: Event| {
             if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                 if let Ok(id) = select.value().parse::<Uuid>() {
                     selected_launcher.set(Some(id));
                     // Always start at home — don't carry over last-used directory
-                    let path = "~".to_string();
-                    current_path.set(path.clone());
-                    fetch_directories(
-                        id,
-                        path,
-                        current_path.clone(),
-                        dir_entries.clone(),
-                        dir_loading.clone(),
-                        dir_error.clone(),
-                    );
+                    dir.navigate(Some(id), "~".to_string());
                 }
             }
         })
     };
 
     let on_launch = {
-        let current_path = current_path.clone();
+        let dir_path = dir.path.clone();
         let extra_args = extra_args.clone();
         let agent_type = agent_type.clone();
         let skip_permissions = skip_permissions.clone();
@@ -215,8 +248,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let on_close = props.on_close.clone();
         let on_launched = props.on_launched.clone();
         Callback::from(move |_| {
-            let dir = (*current_path).clone();
-            if dir.is_empty() {
+            let working_dir = (*dir_path).clone();
+            if working_dir.is_empty() {
                 error_msg.set(Some("Working directory is required".to_string()));
                 return;
             }
@@ -244,7 +277,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
             spawn_local(async move {
                 let body = LaunchRequest {
-                    working_directory: dir,
+                    working_directory: working_dir,
                     launcher_id,
                     claude_args,
                     agent_type: selected_agent_type,
@@ -300,7 +333,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     }
 
     // Build breadcrumb segments from current path
-    let path_str = (*current_path).clone();
+    let path_str = (*dir.path).clone();
     let breadcrumbs: Vec<(String, String)> = {
         let mut segs = vec![("/".to_string(), "/".to_string())];
         let trimmed = path_str.trim_start_matches('/');
@@ -325,32 +358,33 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let cfg = agent_config(*agent_type);
 
     // Pre-compute directory listing HTML
-    let dir_listing_html = if *dir_loading {
+    let dir_listing_html = if *dir.loading {
         html! { <div class="dir-loading">{ "Loading..." }</div> }
-    } else if let Some(ref err) = *dir_error {
+    } else if let Some(ref err) = *dir.error {
         html! { <div class="dir-error-msg">{ err }</div> }
-    } else if dir_entries.is_empty() {
+    } else if dir.entries.is_empty() {
         html! { <div class="dir-empty">{ "Empty directory" }</div> }
     } else {
-        let parent = parent_path(&current_path);
-        let nav_up = navigate_to.clone();
-        let on_up = Callback::from(move |_: MouseEvent| {
-            nav_up(parent.clone());
-        });
-        let entries_html = dir_entries
+        let parent = parent_path(&dir.path);
+        let on_up = {
+            let navigate_to = navigate_to.clone();
+            Callback::from(move |_: MouseEvent| navigate_to.emit(parent.clone()))
+        };
+        let entries_html = dir
+            .entries
             .iter()
             .map(|entry| {
                 if entry.is_dir {
-                    let nav = navigate_to.clone();
-                    let mut child = (*current_path).clone();
+                    let mut child = (*dir.path).clone();
                     if !child.ends_with('/') {
                         child.push('/');
                     }
                     child.push_str(&entry.name);
                     child.push('/');
-                    let onclick = Callback::from(move |_: MouseEvent| {
-                        nav(child.clone());
-                    });
+                    let onclick = {
+                        let navigate_to = navigate_to.clone();
+                        Callback::from(move |_: MouseEvent| navigate_to.emit(child.clone()))
+                    };
                     html! {
                         <div class="dir-entry dir-entry-folder" onclick={onclick}>
                             <span class="dir-entry-icon">{ "\u{1F4C1}" }</span>
@@ -434,21 +468,23 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         <input
                             type="text"
                             class="dir-path-input"
-                            value={(*current_path).clone()}
+                            value={(*dir.path).clone()}
                             oninput={on_path_input}
                         />
                         <div class="dir-breadcrumb">
                             { breadcrumbs.iter().enumerate().map(|(i, (full_path, label))| {
-                                let nav = navigate_to.clone();
-                                let p = full_path.clone();
+                                        let p = full_path.clone();
                                 let is_last = i == breadcrumbs.len() - 1;
-                                let onclick = Callback::from(move |e: MouseEvent| {
-                                    e.prevent_default();
-                                    nav(p.clone());
-                                });
+                                let onclick = {
+                                    let navigate_to = navigate_to.clone();
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        navigate_to.emit(p.clone());
+                                    })
+                                };
                                 html! {
                                     <>
-                                        if i > 0 {
+                                        if i > 1 {
                                             <span class="dir-breadcrumb-sep">{ "/" }</span>
                                         }
                                         <a
@@ -518,60 +554,4 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             </div>
         </div>
     }
-}
-
-fn parent_path(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    match trimmed.rfind('/') {
-        Some(0) | None => "/".to_string(),
-        Some(idx) => format!("{}/", &trimmed[..idx]),
-    }
-}
-
-fn fetch_directories(
-    launcher_id: Uuid,
-    path: String,
-    current_path: UseStateHandle<String>,
-    dir_entries: UseStateHandle<Vec<DirectoryEntry>>,
-    dir_loading: UseStateHandle<bool>,
-    dir_error: UseStateHandle<Option<String>>,
-) {
-    dir_loading.set(true);
-    dir_error.set(None);
-    spawn_local(async move {
-        let url = format!(
-            "/api/launchers/{}/directories?path={}",
-            launcher_id,
-            js_sys::encode_uri_component(&path)
-        );
-        match Request::get(&url).send().await {
-            Ok(resp) if resp.ok() => {
-                if let Ok(listing) = resp.json::<DirectoryListingResponse>().await {
-                    dir_entries.set(listing.entries);
-                    // Use the resolved path from the launcher (handles ~ expansion)
-                    if let Some(resolved) = listing.resolved_path {
-                        current_path.set(resolved);
-                    } else {
-                        current_path.set(path);
-                    }
-                } else {
-                    dir_error.set(Some("Failed to parse response".to_string()));
-                }
-            }
-            Ok(resp) => {
-                let status = resp.status();
-                if status == 400 {
-                    dir_error.set(Some("Path not found or not readable".to_string()));
-                } else if status == 504 {
-                    dir_error.set(Some("Launcher not responding".to_string()));
-                } else {
-                    dir_error.set(Some(format!("Error {}", status)));
-                }
-            }
-            Err(e) => {
-                dir_error.set(Some(format!("Request failed: {}", e)));
-            }
-        }
-        dir_loading.set(false);
-    });
 }

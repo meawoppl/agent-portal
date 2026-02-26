@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.34
+
+- Fix launch dialog bugs and refactor DirBrowser
+
 ## 1.3.33
 
 - Prevent duplicate launchers per host-user and fix tilde expansion
