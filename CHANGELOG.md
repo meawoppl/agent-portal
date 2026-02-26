@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.23
+
+- Fix result message duplicating previous assistant message text
+
 ## 1.3.22
 
 - Fix launcher crash: install ring crypto provider for rustls 0.23
