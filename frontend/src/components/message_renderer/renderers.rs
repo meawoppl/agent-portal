@@ -861,21 +861,6 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
 
     html! {
         <div class={classes!("claude-message", "result-message", status_class)}>
-            {
-                if let Some(result_text) = msg.result.as_deref() {
-                    if !result_text.is_empty() {
-                        html! {
-                            <div class="message-body">
-                                <div class="result-text">{ render_markdown(result_text) }</div>
-                            </div>
-                        }
-                    } else {
-                        html! {}
-                    }
-                } else {
-                    html! {}
-                }
-            }
             <div class="result-stats-bar">
                 <span class={classes!("result-status", status_class)}>
                     { if is_error { "✗" } else { "✓" } }
