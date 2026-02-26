@@ -58,14 +58,23 @@ pub async fn run_launcher_loop(
                 let ack_ok = loop {
                     match ws_receiver.recv().await {
                         Some(Ok(ServerToLauncher::LauncherRegisterAck {
-                            success, error, ..
+                            success,
+                            error,
+                            fatal,
+                            ..
                         })) => {
                             if success {
                                 info!("Registration successful");
-                                break true;
+                                break Some(true);
                             } else {
-                                error!("Registration failed: {}", error.unwrap_or_default());
-                                break false;
+                                let msg = error.unwrap_or_default();
+                                if fatal {
+                                    error!("Registration rejected (fatal): {}", msg);
+                                    break None; // signal: exit, do not retry
+                                } else {
+                                    error!("Registration failed: {}", msg);
+                                    break Some(false);
+                                }
                             }
                         }
                         Some(Ok(_)) => continue,
@@ -73,15 +82,22 @@ pub async fn run_launcher_loop(
                             warn!("Decode error during registration: {}", e);
                             continue;
                         }
-                        None => break false,
+                        None => break Some(false),
                     }
                 };
 
-                if !ack_ok {
-                    warn!("Registration failed, will retry");
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                    continue;
+                match ack_ok {
+                    None => {
+                        // Fatal rejection — exit immediately, do not retry
+                        return Err(anyhow::anyhow!("Fatal registration error, exiting"));
+                    }
+                    Some(false) => {
+                        warn!("Registration failed, will retry");
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                        continue;
+                    }
+                    Some(true) => {} // fall through to main loop
                 }
 
                 // Reconcile expected sessions: launch any that aren't running
@@ -227,10 +243,11 @@ pub async fn run_launcher_loop(
 }
 
 fn list_directory(path: &str, request_id: Uuid) -> LauncherToServer {
-    // Resolve ~ to home directory
+    // Resolve ~ to home directory (trailing slash ensures the dir itself is listed,
+    // not treated as a filter prefix against its parent)
     let resolved = if path == "~" || path == "~/" {
         dirs::home_dir()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| format!("{}/", p.to_string_lossy()))
             .unwrap_or_else(|| "/".to_string())
     } else if let Some(rest) = path.strip_prefix("~/") {
         dirs::home_dir()

@@ -229,6 +229,17 @@ impl SessionManager {
         ids
     }
 
+    /// Returns the name of an existing launcher with the same hostname and user_id, if any.
+    pub fn find_duplicate_launcher(&self, hostname: &str, user_id: Uuid) -> Option<String> {
+        self.launchers
+            .iter()
+            .find(|entry| {
+                let c = entry.value();
+                c.user_id == user_id && c.hostname == hostname
+            })
+            .map(|entry| entry.value().launcher_name.clone())
+    }
+
     pub fn register_launcher(&self, launcher_id: Uuid, connection: LauncherConnection) {
         info!(
             "Registering launcher: {} ({})",

@@ -41,6 +41,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
                                                 success: false,
+                                                fatal: true,
                                                 launcher_id,
                                                 error: Some("Authentication failed".to_string()),
                                             })
@@ -54,6 +55,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
                                     success: false,
+                                    fatal: false,
                                     launcher_id,
                                     error: Some("Database error".to_string()),
                                 })
@@ -67,6 +69,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                     let _ = ws_sender
                         .send(ServerToLauncher::LauncherRegisterAck {
                             success: false,
+                            fatal: true,
                             launcher_id,
                             error: Some("No auth token provided".to_string()),
                         })
@@ -91,12 +94,37 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         }
     };
 
+    // Reject duplicate: only one launcher per (hostname, user) is allowed
+    if let Some(existing_name) = app_state
+        .session_manager
+        .find_duplicate_launcher(&hostname, user_id)
+    {
+        warn!(
+            "Rejecting duplicate launcher '{}' from {} (user {}) — '{}' already connected",
+            launcher_name, hostname, user_id, existing_name
+        );
+        let _ = ws_sender
+            .send(ServerToLauncher::LauncherRegisterAck {
+                success: false,
+                launcher_id,
+                fatal: true,
+                error: Some(format!(
+                    "A launcher named '{}' is already connected from this host. \
+                     Stop the existing instance before starting a new one.",
+                    existing_name
+                )),
+            })
+            .await;
+        return;
+    }
+
     // Send RegisterAck
     let _ = ws_sender
         .send(ServerToLauncher::LauncherRegisterAck {
             success: true,
             launcher_id,
             error: None,
+            fatal: false,
         })
         .await;
 

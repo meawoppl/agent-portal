@@ -377,6 +377,9 @@ pub enum ServerToLauncher {
         launcher_id: Uuid,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// If true the launcher must not retry — it should exit immediately
+        #[serde(default)]
+        fatal: bool,
     },
 
     /// Request to launch a new proxy instance
