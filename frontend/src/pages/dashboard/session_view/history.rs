@@ -144,7 +144,6 @@ impl CommandHistory {
             }
         }
     }
-
 }
 
 #[cfg(test)]
