@@ -29,13 +29,20 @@ services:
       db:
         condition: service_healthy
     environment:
+      # --- Required ---
       DATABASE_URL: "postgresql://claude_portal:dev_password_change_in_production@db:5432/claude_portal"
+      # --- Auth (required in production) ---
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-your_client_id}"
       GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-your_client_secret}"
       GOOGLE_REDIRECT_URI: "http://localhost:3000/auth/google/callback"
       SESSION_SECRET: "${SESSION_SECRET:-dev_secret_change_in_production_please}"
+      # --- Optional ---
+      # APP_TITLE: "Agent Portal"           # Header text shown in the dashboard
+      # ALLOWED_EMAIL_DOMAIN: "company.com" # Restrict logins to one domain
+      # ALLOWED_EMAILS: "a@b.com,c@d.com"  # Whitelist specific email addresses
       HOST: "0.0.0.0"
       PORT: "3000"
+      # RUST_LOG: "info"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
