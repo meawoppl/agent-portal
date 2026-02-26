@@ -181,6 +181,58 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
+    let on_path_keydown = {
+        let selected_launcher = selected_launcher.clone();
+        let dir = dir.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() != "Tab" || e.shift_key() {
+                return;
+            }
+            e.prevent_default();
+
+            let path = (*dir.path).clone();
+            if path.ends_with('/') || path.is_empty() {
+                return;
+            }
+
+            let base = match path.rfind('/') {
+                Some(idx) => &path[..=idx],
+                None => "",
+            };
+
+            let entries = &*dir.entries;
+            if entries.is_empty() {
+                return;
+            }
+
+            // Longest common prefix of all entry names
+            let first = &entries[0].name;
+            let mut len = first.len();
+            for entry in entries.iter().skip(1) {
+                len = first
+                    .chars()
+                    .zip(entry.name.chars())
+                    .take(len)
+                    .take_while(|(a, b)| a == b)
+                    .count();
+            }
+            let lcp = &first[..len];
+
+            let completed = if entries.len() == 1 && entries[0].is_dir {
+                format!("{}{}/", base, lcp)
+            } else {
+                format!("{}{}", base, lcp)
+            };
+
+            if completed != path {
+                dir.path.set(completed.clone());
+                if let Some(lid) = *selected_launcher {
+                    dir.fetch(lid, completed, false);
+                }
+            }
+        })
+    };
+
     let on_args_input = {
         let extra_args = extra_args.clone();
         Callback::from(move |e: InputEvent| {
@@ -470,6 +522,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             class="dir-path-input"
                             value={(*dir.path).clone()}
                             oninput={on_path_input}
+                            onkeydown={on_path_keydown}
                         />
                         <div class="dir-breadcrumb">
                             { breadcrumbs.iter().enumerate().map(|(i, (full_path, label))| {

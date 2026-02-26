@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.35
+
+- Add bash-style Tab completion to launch dialog path input
+
 ## 1.3.34
 
 - Fix launch dialog bugs and refactor DirBrowser
