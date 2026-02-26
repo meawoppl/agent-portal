@@ -6,12 +6,35 @@
 use crate::components::ShareDialog;
 use crate::utils;
 use gloo::events::EventListener;
+use gloo::timers::callback::Interval;
 use shared::SessionInfo;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
+
+type ActivityMap = HashMap<Uuid, Vec<(f64, String)>>;
+
+/// Shared activity timestamp buffer. Uses pointer-based PartialEq so that
+/// mutations to the inner map never cause SessionRail to re-render on their own —
+/// re-renders are driven exclusively by the 100 ms sparkline tick instead.
+#[derive(Clone)]
+pub struct ActivityRef(pub Rc<RefCell<ActivityMap>>);
+
+impl PartialEq for ActivityRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Default for ActivityRef {
+    fn default() -> Self {
+        ActivityRef(Rc::new(RefCell::new(ActivityMap::new())))
+    }
+}
 
 /// Props for the SessionRail component
 #[derive(Properties, PartialEq)]
@@ -24,7 +47,7 @@ pub struct SessionRailProps {
     pub connected_sessions: HashSet<Uuid>,
     pub nav_mode: bool,
     #[prop_or_default]
-    pub activity_timestamps: HashMap<Uuid, Vec<(f64, String)>>,
+    pub activity_timestamps: ActivityRef,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
     pub on_toggle_pause: Callback<Uuid>,
@@ -41,6 +64,23 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let stop_confirm = use_state(|| false);
     let copied_id = use_state(|| false);
     let share_session_id = use_state(|| None::<Uuid>);
+
+    // Independent 100 ms tick that drives sparkline redraws.
+    // Accumulation happens externally via ActivityRef mutations; this timer
+    // is the only thing that causes SessionRail to re-render for sparklines.
+    let render_time = use_state(js_sys::Date::now);
+    {
+        let render_time = render_time.clone();
+        use_effect_with((), move |_| {
+            let n = Rc::new(std::cell::Cell::new(0u32));
+            let interval = Interval::new(100, move || {
+                let next = n.get().wrapping_add(1);
+                n.set(next);
+                render_time.set(js_sys::Date::now());
+            });
+            move || drop(interval)
+        });
+    }
 
     // Scroll focused session into view
     {
@@ -362,12 +402,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             None
         };
 
-        // Build sparkline ticks for this session
+        // Build sparkline ticks for this session.
+        // `render_time` is updated every 100 ms; reading the activity buffer here
+        // (rather than at event-arrival time) keeps accumulation and drawing separate.
         let sparkline = {
-            let now = js_sys::Date::now();
+            let now = *render_time;
             let window_ms = 300_000.0; // 5 minutes
             let cutoff = now - window_ms;
-            let timestamps = props.activity_timestamps.get(&session.id);
+            let activity_map = props.activity_timestamps.0.borrow();
+            let timestamps = activity_map.get(&session.id);
 
             // Point ticks (non-compaction)
             let ticks: Vec<(f64, &str)> = timestamps

@@ -1,6 +1,6 @@
 //! Dashboard page - Main session management interface
 
-use super::session_rail::SessionRail;
+use super::session_rail::{ActivityRef, SessionRail};
 use super::session_view::SessionView;
 use super::types::{
     load_inactive_hidden, load_paused_sessions, load_show_cost, save_inactive_hidden,
@@ -12,6 +12,7 @@ use crate::utils;
 use crate::Route;
 use gloo_net::http::Request;
 use shared::{AppConfig, SessionInfo};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -57,7 +58,11 @@ pub fn dashboard_page() -> Html {
     let current_user_id = use_state(|| None::<String>);
     let app_title = use_state(|| "Agent Portal".to_string());
     let activated_sessions = use_state(HashSet::<Uuid>::new);
-    let activity_timestamps = use_state(HashMap::<Uuid, Vec<(f64, String)>>::new);
+    // Activity buffer: mutations don't trigger page re-renders.
+    // SessionRail reads this on its own 100 ms tick instead.
+    let activity_timestamps = use_memo((), |_| {
+        RefCell::new(HashMap::<Uuid, Vec<(f64, String)>>::new())
+    });
     let initial_focus_set = use_state(|| false);
     let sessions_at_launch = use_state(|| None::<HashSet<Uuid>>);
 
@@ -482,11 +487,11 @@ pub fn dashboard_page() -> Html {
         Callback::from(
             move |(session_id, msg_type, timestamp): (Uuid, String, f64)| {
                 let cutoff = js_sys::Date::now() - 300_000.0; // 5 minutes
-                let mut map = (*activity_timestamps).clone();
+                let mut map = activity_timestamps.borrow_mut();
                 let timestamps = map.entry(session_id).or_default();
                 timestamps.retain(|(t, _)| *t > cutoff);
                 timestamps.push((timestamp, msg_type));
-                activity_timestamps.set(map);
+                // No .set() — no re-render. SessionRail draws on its own 100 ms tick.
             },
         )
     };
@@ -688,7 +693,7 @@ pub fn dashboard_page() -> Html {
                         inactive_hidden={*inactive_hidden}
                         connected_sessions={(*connected_sessions).clone()}
                         nav_mode={keyboard_nav.nav_mode}
-                        activity_timestamps={(*activity_timestamps).clone()}
+                        activity_timestamps={ActivityRef(activity_timestamps.clone())}
                         on_select={on_select_session.clone()}
                         on_leave={on_leave.clone()}
                         on_toggle_pause={on_toggle_pause.clone()}

@@ -1007,6 +1007,9 @@ impl SessionView {
 
         self.command_history.push(input.clone());
         self.input_value.clear();
+        if let Some(el) = self.input_ref.cast::<Element>() {
+            el.remove_attribute("style").ok();
+        }
 
         let session_id = ctx.props().session.id;
         ctx.props().on_message_sent.emit(session_id);
