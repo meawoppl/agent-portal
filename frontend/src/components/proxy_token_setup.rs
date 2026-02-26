@@ -68,13 +68,13 @@ pub fn proxy_token_setup() -> Html {
             )
         }
         Platform::Windows => format!(
-            "# Download from GitHub releases, then run:\n.\\claude-portal.exe --backend-url \"{}\"",
+            "# Download from GitHub releases, then run:\n.\\agent-portal.exe --backend-url \"{}\"",
             ws_backend_url
         ),
     };
-    let run_command = match *selected_platform {
-        Platform::Linux | Platform::MacOS => "claude-portal".to_string(),
-        Platform::Windows => ".\\claude-portal.exe".to_string(),
+    let status_command = match *selected_platform {
+        Platform::Linux | Platform::MacOS => "agent-portal service status".to_string(),
+        Platform::Windows => ".\\agent-portal.exe service status".to_string(),
     };
 
     html! {
@@ -140,9 +140,9 @@ pub fn proxy_token_setup() -> Html {
             <div class="setup-step">
                 <span class="step-number">{ "2" }</span>
                 <div class="step-content">
-                    <p class="step-label">{ "Start a session:" }</p>
-                    <CopyCommand command={run_command} />
-                    <p class="step-hint">{ "(Opens browser to authenticate on first run)" }</p>
+                    <p class="step-label">{ "Check status:" }</p>
+                    <CopyCommand command={status_command} />
+                    <p class="step-hint">{ "(The installer starts the service automatically. You'll authenticate in your browser on first connection.)" }</p>
                 </div>
             </div>
         </div>

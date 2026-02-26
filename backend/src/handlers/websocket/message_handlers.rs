@@ -124,6 +124,38 @@ pub fn handle_claude_output(
         None
     };
 
+    // Validate that content roundtrips through ClaudeOutput parsing (frontend depends on this)
+    match serde_json::from_value::<shared::ClaudeOutput>(content.clone()) {
+        Ok(parsed) => {
+            if let shared::ClaudeOutput::System(ref sys) = parsed {
+                if sys.is_task_started() && sys.as_task_started().is_none() {
+                    warn!(
+                        "task_started message matched subtype but failed struct parse: {}",
+                        content
+                    );
+                }
+                if sys.is_task_progress() && sys.as_task_progress().is_none() {
+                    warn!(
+                        "task_progress message matched subtype but failed struct parse: {}",
+                        content
+                    );
+                }
+                if sys.is_task_notification() && sys.as_task_notification().is_none() {
+                    warn!(
+                        "task_notification message matched subtype but failed struct parse: {}",
+                        content
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            warn!(
+                "ClaudeOutput parse failed for message: {} — raw: {}",
+                e, content
+            );
+        }
+    }
+
     // Broadcast output to all web clients with sender metadata alongside content
     if let Some(ref key) = session_key {
         session_manager.broadcast_to_web_clients(

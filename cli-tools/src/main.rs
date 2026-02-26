@@ -4,6 +4,7 @@
 //! cc-proxy API endpoints, useful for testing and debugging.
 
 mod client;
+mod poke;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -65,6 +66,14 @@ enum Commands {
     Auth {
         #[command(subcommand)]
         action: AuthAction,
+    },
+
+    /// Send a message to an active session (for debugging)
+    Poke {
+        /// Session ID (UUID)
+        session_id: String,
+        /// Message to send
+        message: String,
     },
 }
 
@@ -246,6 +255,13 @@ async fn main() -> Result<()> {
                 }
             }
         },
+
+        Commands::Poke {
+            session_id,
+            message,
+        } => {
+            poke::poke_session(&cli.server, &session_id, &message).await?;
+        }
 
         Commands::Auth { action } => match action {
             AuthAction::Login => {

@@ -30,7 +30,7 @@ pub fn print_deprecation_warning() {
     );
     eprintln!(
         "  {}",
-        "Use the `agent-launcher` service instead for persistent session management.".yellow()
+        "Use the `agent-portal` service instead for persistent session management.".yellow()
     );
     eprintln!();
 }

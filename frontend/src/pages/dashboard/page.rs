@@ -605,27 +605,25 @@ pub fn dashboard_page() -> Html {
                         }
                     }
                     <button
+                        class="header-button"
+                        onclick={toggle_launch_dialog.clone()}
+                        title="Launch a new session via launcher"
+                    >
+                        { "Launch" }
+                    </button>
+                    <button
                         class={classes!("new-session-button", if *show_new_session { "active" } else { "" })}
                         onclick={toggle_new_session.clone()}
-                        title={if *show_new_session { "Close" } else { "Connect a new Claude proxy session" }}
+                        title={if *show_new_session { "Close" } else { "Install agent-portal on a new machine" }}
                     >
-                        { if *show_new_session { "Close" } else { "+ New Session" } }
+                        { if *show_new_session { "Close" } else { "+ Install" } }
                     </button>
                     {
                         if *is_admin {
                             html! {
-                                <>
-                                    <button
-                                        class="header-button"
-                                        onclick={toggle_launch_dialog.clone()}
-                                        title="Launch a new session via launcher"
-                                    >
-                                        { "Launch" }
-                                    </button>
-                                    <button class="header-button" onclick={go_to_admin.clone()}>
-                                        { "Admin" }
-                                    </button>
-                                </>
+                                <button class="header-button" onclick={go_to_admin.clone()}>
+                                    { "Admin" }
+                                </button>
                             }
                         } else {
                             html! {}
@@ -667,13 +665,13 @@ pub fn dashboard_page() -> Html {
                             <div class="onboarding-step">
                                 <span class="step-number">{ "1" }</span>
                                 <div class="step-content">
-                                    <p>{ "Click " }<strong>{ "+ New Session" }</strong>{ " above to get a setup command" }</p>
+                                    <p>{ "Click " }<strong>{ "+ Install" }</strong>{ " to set up agent-portal on a machine" }</p>
                                 </div>
                             </div>
                             <div class="onboarding-step">
                                 <span class="step-number">{ "2" }</span>
                                 <div class="step-content">
-                                    <p>{ "Run that command on your dev machine to connect Claude Code" }</p>
+                                    <p>{ "Click " }<strong>{ "Launch" }</strong>{ " to start a session on a connected machine" }</p>
                                 </div>
                             </div>
                         </div>

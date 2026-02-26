@@ -225,13 +225,13 @@ jobs:
           shared-key: "launcher-linux"
 
       - name: Build launcher
-        run: cargo build -p agent-launcher --release
+        run: cargo build -p agent-portal --release
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: launcher-linux-x86_64
-          path: target/release/agent-launcher
+          path: target/release/agent-portal
 
   build-launcher-macos-arm64:
     name: Build Launcher (macOS ARM64)
@@ -248,16 +248,16 @@ jobs:
           shared-key: "launcher-macos-arm64"
 
       - name: Build launcher
-        run: cargo build -p agent-launcher --release
+        run: cargo build -p agent-portal --release
 
       - name: Ad-hoc code sign
-        run: codesign -s - target/release/agent-launcher
+        run: codesign -s - target/release/agent-portal
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: launcher-darwin-aarch64
-          path: target/release/agent-launcher
+          path: target/release/agent-portal
 
   build-proxy-windows:
     name: Build Proxy (Windows x86_64)
@@ -297,11 +297,11 @@ jobs:
           shared-key: "launcher-windows"
 
       - name: Build launcher
-        run: cargo build -p agent-launcher --release
+        run: cargo build -p agent-portal --release
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: launcher-windows-x86_64
-          path: target/release/agent-launcher.exe
+          path: target/release/agent-portal.exe
 

@@ -3,7 +3,7 @@ use anyhow::Result;
 // --- Linux (systemd) ---
 
 #[cfg(target_os = "linux")]
-const SERVICE_NAME: &str = "agent-launcher";
+const SERVICE_NAME: &str = "agent-portal";
 
 #[cfg(target_os = "linux")]
 fn service_file_path() -> Result<std::path::PathBuf> {
@@ -121,7 +121,7 @@ pub fn status() -> Result<()> {
 
     if !service_path.exists() {
         println!("Service is not installed.");
-        println!("  Run 'agent-launcher service install' to set it up.");
+        println!("  Run 'agent-portal service install' to set it up.");
         return Ok(());
     }
 
@@ -137,6 +137,11 @@ pub fn status() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_installed() -> bool {
+    service_file_path().map(|p| p.exists()).unwrap_or(false)
 }
 
 // --- macOS (launchd) ---
@@ -156,7 +161,7 @@ fn plist_path() -> Result<std::path::PathBuf> {
 #[cfg(target_os = "macos")]
 fn log_dir() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    format!("{}/Library/Logs/agent-launcher", home)
+    format!("{}/Library/Logs/agent-portal", home)
 }
 
 #[cfg(target_os = "macos")]
@@ -273,7 +278,7 @@ pub fn status() -> Result<()> {
 
     if !plist.exists() {
         println!("Service is not installed.");
-        println!("  Run 'agent-launcher service install' to set it up.");
+        println!("  Run 'agent-portal service install' to set it up.");
         return Ok(());
     }
 
@@ -300,6 +305,11 @@ pub fn status() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+pub fn is_installed() -> bool {
+    plist_path().map(|p| p.exists()).unwrap_or(false)
+}
+
 // --- Unsupported platforms ---
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -315,4 +325,9 @@ pub fn uninstall() -> Result<()> {
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn status() -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn is_installed() -> bool {
+    false
 }

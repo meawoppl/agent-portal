@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.17
+
+- Rename agent-launcher to agent-portal
+- Make launcher the default install path (install script downloads agent-portal, installs as service)
+- Launch button available to all users (not just admin)
+- Launch dialog shows install instructions when no launchers are connected
+- agent-portal recommends service install when run interactively
+
 ## 1.3.16
 
 - Backend sends max image size to proxies via RegisterAck; proxy uses it instead of local env var

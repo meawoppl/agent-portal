@@ -1,3 +1,4 @@
+use crate::components::ProxyTokenSetup;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use serde::Deserialize;
@@ -381,11 +382,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 <h3>{ "Launch Session" }</h3>
 
                 if launchers.is_empty() {
-                    <p class="launch-no-launchers">
-                        { "No launchers connected. Run " }
-                        <code>{ "agent-launcher" }</code>
-                        { " on your machine." }
-                    </p>
+                    <div class="launch-no-launchers">
+                        <p>{ "No launchers connected. Install agent-portal on a machine to get started:" }</p>
+                        <ProxyTokenSetup />
+                    </div>
                 } else {
                     // Launcher + Agent selectors (side by side)
                     <div class="launch-row">
