@@ -222,3 +222,23 @@
     border-color: var(--text-secondary);
     color: var(--bg-dark);
 }
+
+.cost-toggle-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-family: monospace;
+    font-weight: 600;
+    padding: 0.2rem 0.4rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    line-height: 1;
+}
+
+.cost-toggle-btn:hover {
+    color: var(--text-secondary);
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.05);
+}

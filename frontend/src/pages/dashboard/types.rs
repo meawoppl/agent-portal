@@ -16,6 +16,9 @@ pub const PAUSED_SESSIONS_STORAGE_KEY: &str = "claude-portal-paused-sessions";
 /// Storage key for inactive hidden state in localStorage
 pub const INACTIVE_HIDDEN_STORAGE_KEY: &str = "claude-portal-inactive-hidden";
 
+/// Storage key for cost display visibility in localStorage
+pub const SHOW_COST_STORAGE_KEY: &str = "claude-portal-show-cost";
+
 /// Maximum number of messages to keep in frontend memory (matches backend limit)
 pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
@@ -99,6 +102,22 @@ pub fn save_inactive_hidden(hidden: bool) {
             INACTIVE_HIDDEN_STORAGE_KEY,
             if hidden { "true" } else { "false" },
         );
+    }
+}
+
+/// Load cost display preference from localStorage (default: shown)
+pub fn load_show_cost() -> bool {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(SHOW_COST_STORAGE_KEY).ok().flatten())
+        .map(|v| v != "false")
+        .unwrap_or(true)
+}
+
+/// Save cost display preference to localStorage
+pub fn save_show_cost(show: bool) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(SHOW_COST_STORAGE_KEY, if show { "true" } else { "false" });
     }
 }
 
