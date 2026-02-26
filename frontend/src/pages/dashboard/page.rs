@@ -3,7 +3,8 @@
 use super::session_rail::SessionRail;
 use super::session_view::SessionView;
 use super::types::{
-    load_inactive_hidden, load_paused_sessions, save_inactive_hidden, save_paused_sessions,
+    load_inactive_hidden, load_paused_sessions, load_show_cost, save_inactive_hidden,
+    save_paused_sessions, save_show_cost,
 };
 use crate::components::{LaunchDialog, ProxyTokenSetup};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
@@ -48,6 +49,7 @@ pub fn dashboard_page() -> Html {
     let awaiting_sessions = use_state(HashSet::<Uuid>::new);
     let paused_sessions = use_state(load_paused_sessions);
     let inactive_hidden = use_state(load_inactive_hidden);
+    let show_cost = use_state(load_show_cost);
     let connected_sessions = use_state(HashSet::<Uuid>::new);
     let pending_leave = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
@@ -457,6 +459,15 @@ pub fn dashboard_page() -> Html {
         })
     };
 
+    let on_toggle_show_cost = {
+        let show_cost = show_cost.clone();
+        Callback::from(move |_: MouseEvent| {
+            let new_val = !*show_cost;
+            save_show_cost(new_val);
+            show_cost.set(new_val);
+        })
+    };
+
     let on_message_sent = {
         let awaiting_sessions = awaiting_sessions.clone();
         Callback::from(move |current_session_id: Uuid| {
@@ -563,9 +574,20 @@ pub fn dashboard_page() -> Html {
                                 if *spend_animating { Some("spend-animating") } else { None },
                             );
                             html! {
-                                <span class={spend_class} title="Total spend across all sessions">
-                                    { utils::format_dollars(total_user_spend) }
-                                </span>
+                                <>
+                                    if *show_cost {
+                                        <span class={spend_class} title="Total spend across all sessions">
+                                            { utils::format_dollars(total_user_spend) }
+                                        </span>
+                                    }
+                                    <button
+                                        class="cost-toggle-btn"
+                                        onclick={on_toggle_show_cost.clone()}
+                                        title={if *show_cost { "Hide cost" } else { "Show cost" }}
+                                    >
+                                        { if *show_cost { "$" } else { "$?" } }
+                                    </button>
+                                </>
                             }
                         } else {
                             html! {}
