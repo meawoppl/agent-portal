@@ -55,7 +55,7 @@ pub fn dashboard_page() -> Html {
     let is_admin = use_state(|| false);
     let voice_enabled = use_state(|| false);
     let current_user_id = use_state(|| None::<String>);
-    let app_title = use_state(|| "Claude Code Sessions".to_string());
+    let app_title = use_state(|| "Agent Portal".to_string());
     let activated_sessions = use_state(HashSet::<Uuid>::new);
     let activity_timestamps = use_state(HashMap::<Uuid, Vec<(f64, String)>>::new);
     let initial_focus_set = use_state(|| false);

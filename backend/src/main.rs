@@ -226,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
     let app_title = if args.dev_mode {
         "⚠️ INSECURE DEV MODE ⚠️".to_string()
     } else {
-        env::var("APP_TITLE").unwrap_or_else(|_| "Claude Code Sessions".to_string())
+        env::var("APP_TITLE").unwrap_or_else(|_| "Agent Portal".to_string())
     };
 
     // Email access control (optional)

@@ -392,7 +392,7 @@ pub enum DevicePollResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// Custom title for the app (displayed in top bar)
-    /// Defaults to "Claude Code Sessions" if not configured
+    /// Defaults to "Agent Portal" if not configured; override with APP_TITLE env var
     pub app_title: String,
 }
 
