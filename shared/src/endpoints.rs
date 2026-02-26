@@ -514,6 +514,7 @@ mod tests {
             auth_token: Some("tok".into()),
             hostname: "host1".into(),
             version: Some("1.0".into()),
+            working_directory: Some("/home/user/project".into()),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LauncherRegister""#));
