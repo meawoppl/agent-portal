@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.30
+
+- Unify admin and settings page layout styles
+
+## 1.3.29
+
+- Fix transparent admin/settings overlay background
+
 ## 1.3.28
 
 - Move bug report to bottom-right link with bug emoji

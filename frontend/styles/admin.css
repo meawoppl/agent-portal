@@ -4,19 +4,18 @@
 
 .admin-container {
     min-height: 100vh;
-    background: var(--bg-primary);
+    background: var(--bg-dark);
     color: var(--text-primary);
-    padding: 1.5rem;
-    max-width: 1400px;
-    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
 }
 
 .admin-header {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    padding-bottom: 1rem;
+    justify-content: space-between;
+    padding: 1rem 2rem;
+    background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
 }
 
@@ -34,7 +33,7 @@
     color: var(--error);
     padding: 1rem;
     border-radius: 8px;
-    margin-bottom: 1rem;
+    margin: 1rem 2rem 0;
 }
 
 .admin-loading {
@@ -46,39 +45,55 @@
     color: var(--text-secondary);
 }
 
-/* Admin Tabs */
+/* Admin Tabs — matches settings tab style */
 .admin-tabs {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
+    gap: 0;
+    padding: 0 2rem;
+    background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
-    padding-bottom: 0.5rem;
 }
 
 .admin-tabs .tab-btn {
-    padding: 0.75rem 1.5rem;
     background: transparent;
     border: none;
-    border-radius: 6px 6px 0 0;
     color: var(--text-secondary);
+    padding: 1rem 1.5rem;
+    font-size: 1rem;
     cursor: pointer;
-    font-size: 0.95rem;
-    transition: all 0.2s;
+    position: relative;
+    transition: color 0.2s;
 }
 
 .admin-tabs .tab-btn:hover {
-    background: var(--bg-hover);
     color: var(--text-primary);
 }
 
 .admin-tabs .tab-btn.active {
+    color: var(--accent);
+    background: transparent;
+}
+
+.admin-tabs .tab-btn.active::after {
+    content: "";
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
     background: var(--accent);
-    color: var(--bg-primary);
+}
+
+/* Admin content area */
+.admin-content {
+    padding: 1.5rem 2rem;
+    flex: 1;
+    overflow-y: auto;
 }
 
 /* Stats Grid */
 .admin-overview {
-    padding: 1rem 0;
+    padding: 0;
 }
 
 .stats-grid {
@@ -295,7 +310,7 @@
 
 /* Raw Messages Section */
 .admin-raw-messages {
-    padding: 1rem 0;
+    padding: 0;
 }
 
 .admin-raw-messages .raw-messages-description {
@@ -411,13 +426,16 @@
 
 /* Responsive Admin */
 @media (max-width: 768px) {
-    .admin-container {
+    .admin-header {
         padding: 1rem;
     }
 
-    .admin-header {
-        flex-direction: column;
-        align-items: flex-start;
+    .admin-tabs {
+        padding: 0 1rem;
+    }
+
+    .admin-content {
+        padding: 1rem;
     }
 
     .stats-grid {
