@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.22
+
+- Fix launcher crash: install ring crypto provider for rustls 0.23
+
 ## 1.3.21
 
 - Fix sparkline tick subpixel rendering artifacts via GPU compositing
