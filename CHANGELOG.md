@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.32
+
+- Launcher cleanup: fix task abort, URL dedup, send error logging, config path
+
 ## 1.3.31
 
 - Show session details (name, host, directory, branch, agent) in portal message on connect/reconnect

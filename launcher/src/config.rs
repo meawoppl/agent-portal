@@ -7,7 +7,6 @@ pub struct LauncherConfig {
     pub backend_url: Option<String>,
     pub auth_token: Option<String>,
     pub name: Option<String>,
-    pub max_processes: Option<usize>,
     #[serde(default)]
     pub sessions: Vec<ExpectedSession>,
 }
@@ -25,7 +24,8 @@ pub struct ExpectedSession {
 
 fn config_path() -> PathBuf {
     dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.config"))
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("claude-portal")
         .join("launcher.toml")
 }
@@ -75,13 +75,11 @@ mod tests {
 backend_url = "wss://example.com"
 auth_token = "tok_abc123"
 name = "my-launcher"
-max_processes = 10
 "#;
         let config: LauncherConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.backend_url.unwrap(), "wss://example.com");
         assert_eq!(config.auth_token.unwrap(), "tok_abc123");
         assert_eq!(config.name.unwrap(), "my-launcher");
-        assert_eq!(config.max_processes.unwrap(), 10);
         assert!(config.sessions.is_empty());
     }
 
@@ -91,7 +89,6 @@ max_processes = 10
         assert!(config.backend_url.is_none());
         assert!(config.auth_token.is_none());
         assert!(config.name.is_none());
-        assert!(config.max_processes.is_none());
         assert!(config.sessions.is_empty());
     }
 
@@ -117,7 +114,6 @@ auth_token = "secret"
             backend_url: Some("wss://test.com".to_string()),
             auth_token: Some("tok_test".to_string()),
             name: Some("test-launcher".to_string()),
-            max_processes: Some(3),
             sessions: vec![ExpectedSession {
                 working_directory: "/home/user/project".to_string(),
                 session_name: Some("my-session".to_string()),
@@ -130,7 +126,6 @@ auth_token = "secret"
         assert_eq!(deserialized.backend_url, config.backend_url);
         assert_eq!(deserialized.auth_token, config.auth_token);
         assert_eq!(deserialized.name, config.name);
-        assert_eq!(deserialized.max_processes, config.max_processes);
         assert_eq!(deserialized.sessions.len(), 1);
         assert_eq!(
             deserialized.sessions[0].working_directory,

@@ -29,10 +29,6 @@ pub struct ProcessManager {
     launcher_id: Option<Uuid>,
 }
 
-pub struct SpawnResult {
-    pub session_id: Uuid,
-}
-
 impl ProcessManager {
     pub fn new(
         backend_url: String,
@@ -81,7 +77,7 @@ impl ProcessManager {
         session_name: Option<&str>,
         claude_args: &[String],
         agent_type: shared::AgentType,
-    ) -> anyhow::Result<SpawnResult> {
+    ) -> anyhow::Result<Uuid> {
         if self.tasks.len() >= self.max_sessions {
             anyhow::bail!(
                 "At session limit ({}/{})",
@@ -148,18 +144,19 @@ impl ProcessManager {
             },
         );
 
-        Ok(SpawnResult { session_id })
+        Ok(session_id)
     }
 
     pub async fn stop(&mut self, session_id: &Uuid) -> bool {
-        if let Some(task) = self.tasks.remove(session_id) {
+        if let Some(mut task) = self.tasks.remove(session_id) {
             info!("Stopping session task {}", session_id);
             task.cancel.cancel();
             // Give the task a moment to shut down gracefully before aborting
             tokio::select! {
-                _ = task.handle => {}
+                _ = &mut task.handle => {}
                 _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
                     warn!("Session {} did not stop within 5s, force aborting", session_id);
+                    task.handle.abort();
                 }
             }
             true

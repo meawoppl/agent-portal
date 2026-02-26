@@ -25,8 +25,8 @@ struct Args {
     name: Option<String>,
 
     /// Maximum concurrent sessions
-    #[arg(long)]
-    max_sessions: Option<usize>,
+    #[arg(long, default_value_t = 20)]
+    max_sessions: usize,
 
     /// Development mode (no auth required)
     #[arg(long)]
@@ -66,6 +66,12 @@ enum ServiceAction {
 }
 
 const BINARY_PREFIX: &str = "agent-portal";
+
+fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> String {
+    args_url
+        .or(config_url)
+        .unwrap_or_else(|| shared::default_backend_url().to_string())
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -133,10 +139,7 @@ async fn main() -> anyhow::Result<()> {
     let config = config::load_config();
 
     // CLI args override config file, which overrides the compile-time default
-    let backend_url = args
-        .backend_url
-        .or(config.backend_url)
-        .unwrap_or_else(|| shared::default_backend_url().to_string());
+    let backend_url = resolve_backend_url(args.backend_url, config.backend_url);
 
     let auth_token = match args.auth_token.or(config.auth_token) {
         Some(token) => Some(token),
@@ -150,8 +153,6 @@ async fn main() -> anyhow::Result<()> {
             Some(result.access_token)
         }
     };
-    let max_sessions = args.max_sessions.or(config.max_processes).unwrap_or(5);
-
     let launcher_name = args.name.or(config.name).unwrap_or_else(|| {
         hostname::get()
             .map(|h| h.to_string_lossy().to_string())
@@ -166,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
         launcher_id
     );
     tracing::info!("Backend URL: {}", backend_url);
-    tracing::info!("Max sessions: {}", max_sessions);
+    tracing::debug!("Max sessions: {}", args.max_sessions);
 
     if !config.sessions.is_empty() {
         tracing::info!("Expected sessions configured: {}", config.sessions.len());
@@ -176,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (process_manager, exit_rx) =
-        process_manager::ProcessManager::new(backend_url.clone(), max_sessions);
+        process_manager::ProcessManager::new(backend_url.clone(), args.max_sessions);
 
     connection::run_launcher_loop(
         &backend_url,
@@ -193,11 +194,7 @@ async fn main() -> anyhow::Result<()> {
 /// `agent-portal login` — authenticate via device flow and save the token
 async fn cmd_login(args: &Args) -> anyhow::Result<()> {
     let config = config::load_config();
-    let backend_url = args
-        .backend_url
-        .clone()
-        .or(config.backend_url)
-        .unwrap_or_else(|| shared::default_backend_url().to_string());
+    let backend_url = resolve_backend_url(args.backend_url.clone(), config.backend_url);
 
     println!("Authenticating with {}...", backend_url);
     let result = portal_auth::device_flow_login(&backend_url, None).await?;

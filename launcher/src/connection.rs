@@ -105,6 +105,7 @@ pub async fn run_launcher_loop(
                             agent_type: expected.agent_type,
                         };
                         if ws_sender.send(request).await.is_err() {
+                            warn!("Failed to send expected session launch request");
                             break;
                         }
                     }
@@ -146,6 +147,7 @@ pub async fn run_launcher_loop(
                                 uptime_secs: start.elapsed().as_secs(),
                             };
                             if ws_sender.send(hb).await.is_err() {
+                                warn!("Failed to send heartbeat");
                                 break;
                             }
                         }
@@ -162,12 +164,17 @@ pub async fn run_launcher_loop(
                                 exit_code: exited.exit_code,
                             };
                             if ws_sender.send(msg).await.is_err() {
+                                warn!("Failed to send session exited notification");
                                 break;
                             }
 
                             // Schedule restart if this was an expected session
                             if let Some(dir) = exited_dir {
                                 if let Some(expected) = expected_sessions.iter().find(|s| s.working_directory == dir) {
+                                    // restart_counts is never reset after a successful run.
+                                    // This is intentional: MAX_RESTART_ATTEMPTS is a
+                                    // total lifetime cap per directory, not a per-window
+                                    // counter. Fail-fast rather than retry indefinitely.
                                     let count = restart_counts.entry(dir.clone()).or_insert(0);
                                     *count += 1;
                                     if *count <= MAX_RESTART_ATTEMPTS {
@@ -201,6 +208,7 @@ pub async fn run_launcher_loop(
                                 agent_type: session.agent_type,
                             };
                             if ws_sender.send(request).await.is_err() {
+                                warn!("Failed to send session restart request");
                                 break;
                             }
                         }
@@ -248,6 +256,8 @@ fn list_directory(path: &str, request_id: Uuid) -> LauncherToServer {
     };
 
     let dir = std::path::Path::new(dir_path);
+    // Uses synchronous std::fs::read_dir (blocking I/O). This is acceptable because
+    // list_directory is only called for small local directories (UI path completion).
     let read_dir = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(e) => {
@@ -323,10 +333,10 @@ async fn handle_message(
                 .await;
 
             let response = match result {
-                Ok(spawn_result) => LauncherToServer::LaunchSessionResult {
+                Ok(session_id) => LauncherToServer::LaunchSessionResult {
                     request_id,
                     success: true,
-                    session_id: Some(spawn_result.session_id),
+                    session_id: Some(session_id),
                     pid: None,
                     error: None,
                 },
@@ -342,7 +352,9 @@ async fn handle_message(
                 }
             };
 
-            let _ = ws_sender.send(response).await;
+            if ws_sender.send(response).await.is_err() {
+                warn!("Failed to send launch session result");
+            }
         }
         ServerToLauncher::StopSession { session_id } => {
             info!("Stop request for session {}", session_id);
@@ -350,7 +362,9 @@ async fn handle_message(
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);
-            let _ = ws_sender.send(response).await;
+            if ws_sender.send(response).await.is_err() {
+                warn!("Failed to send list directories result");
+            }
         }
         ServerToLauncher::ServerShutdown { reason, .. } => {
             info!("Server shutting down: {}", reason);
