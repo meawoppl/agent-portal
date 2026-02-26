@@ -6,7 +6,7 @@ use super::types::{
     load_inactive_hidden, load_paused_sessions, load_show_cost, save_inactive_hidden,
     save_paused_sessions, save_show_cost,
 };
-use crate::components::{LaunchDialog, ProxyTokenSetup};
+use crate::components::LaunchDialog;
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
@@ -41,7 +41,6 @@ pub fn dashboard_page() -> Html {
     let spend_initialized = use_state(|| false);
 
     // UI state
-    let show_new_session = use_state(|| false);
     let show_launch_dialog = use_state(|| false);
     let show_admin = use_state(|| false);
     let show_settings = use_state(|| false);
@@ -367,13 +366,6 @@ pub fn dashboard_page() -> Html {
         })
     };
 
-    let toggle_new_session = {
-        let show_new_session = show_new_session.clone();
-        Callback::from(move |_| {
-            show_new_session.set(!*show_new_session);
-        })
-    };
-
     let toggle_launch_dialog = {
         let show_launch_dialog = show_launch_dialog.clone();
         Callback::from(move |_: MouseEvent| {
@@ -615,18 +607,11 @@ pub fn dashboard_page() -> Html {
                         }
                     }
                     <button
-                        class="header-button"
+                        class={classes!("new-session-button", if *show_launch_dialog { "active" } else { "" })}
                         onclick={toggle_launch_dialog.clone()}
-                        title="Launch a new session via launcher"
+                        title={if *show_launch_dialog { "Close" } else { "Launch a session or install agent-portal" }}
                     >
-                        { "Launch" }
-                    </button>
-                    <button
-                        class={classes!("new-session-button", if *show_new_session { "active" } else { "" })}
-                        onclick={toggle_new_session.clone()}
-                        title={if *show_new_session { "Close" } else { "Install agent-portal on a new machine" }}
-                    >
-                        { if *show_new_session { "Close" } else { "+ Install" } }
+                        { if *show_launch_dialog { "Close" } else { "+ Launch Session" } }
                     </button>
                     {
                         if *is_admin {
@@ -648,15 +633,6 @@ pub fn dashboard_page() -> Html {
                 </div>
             </header>
 
-            // New session modal
-            if *show_new_session {
-                <div class="modal-overlay" onclick={toggle_new_session.clone()}>
-                    <div class="modal-content" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        <ProxyTokenSetup />
-                    </div>
-                </div>
-            }
-
             // Launch session dialog
             if *show_launch_dialog {
                 <LaunchDialog on_close={on_launch_close.clone()} on_launched={on_launch_success.clone()} />
@@ -675,13 +651,13 @@ pub fn dashboard_page() -> Html {
                             <div class="onboarding-step">
                                 <span class="step-number">{ "1" }</span>
                                 <div class="step-content">
-                                    <p>{ "Click " }<strong>{ "+ Install" }</strong>{ " to set up agent-portal on a machine" }</p>
+                                    <p>{ "Click " }<strong>{ "+ Launch Session" }</strong>{ " to install agent-portal on a machine" }</p>
                                 </div>
                             </div>
                             <div class="onboarding-step">
                                 <span class="step-number">{ "2" }</span>
                                 <div class="step-content">
-                                    <p>{ "Click " }<strong>{ "Launch" }</strong>{ " to start a session on a connected machine" }</p>
+                                    <p>{ "Once a launcher is connected, use " }<strong>{ "+ Launch Session" }</strong>{ " to start a session" }</p>
                                 </div>
                             </div>
                         </div>

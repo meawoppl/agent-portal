@@ -366,23 +366,6 @@
     line-height: 1.5;
 }
 
-.launch-add-machine {
-    background: none;
-    border: 1px dashed var(--border);
-    color: var(--text-secondary);
-    padding: 0.4rem 0.8rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    width: 100%;
-    margin-bottom: 0.5rem;
-}
-
-.launch-add-machine:hover {
-    color: var(--text-primary);
-    border-color: var(--text-secondary);
-}
-
 .launch-no-launchers code {
     background: var(--bg-dark);
     padding: 0.15rem 0.4rem;
@@ -645,4 +628,5 @@
     border-color: var(--text-muted);
     color: var(--text-primary);
 }
+
 

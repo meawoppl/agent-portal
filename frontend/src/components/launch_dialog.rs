@@ -10,6 +10,9 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
+/// Sentinel value used in the launcher <select> to represent the "connect new host" option.
+const CONNECT_NEW: &str = "__install__";
+
 #[derive(Deserialize)]
 struct DirectoryListingResponse {
     entries: Vec<DirectoryEntry>,
@@ -125,6 +128,9 @@ pub struct LaunchDialogProps {
 pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let launchers = use_state(Vec::<LauncherInfo>::new);
     let selected_launcher = use_state(|| None::<Uuid>);
+    // When true the dialog shows ProxyTokenSetup instead of the launch form.
+    // Auto-set to true when no launchers are connected; set by the dropdown sentinel.
+    let show_install = use_state(|| false);
     let dir = DirBrowser {
         path: use_state(|| "~".to_string()),
         entries: use_state(Vec::<DirectoryEntry>::new),
@@ -136,13 +142,13 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let skip_permissions = use_state(|| false);
     let launching = use_state(|| false);
     let error_msg = use_state(|| None::<String>);
-    let show_setup = use_state(|| false);
     let debounce_handle = use_mut_ref(|| None::<Timeout>);
 
-    // Fetch launchers on mount
+    // Fetch launchers on mount; auto-select install mode when none are connected
     {
         let launchers = launchers.clone();
         let selected_launcher = selected_launcher.clone();
+        let show_install = show_install.clone();
         let dir = dir.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
@@ -152,6 +158,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             let lid = first.launcher_id;
                             selected_launcher.set(Some(lid));
                             dir.fetch(lid, "~".to_string(), true);
+                        } else {
+                            show_install.set(true);
                         }
                         launchers.set(data);
                     }
@@ -177,58 +185,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         dir.fetch(lid, path, false); // user is typing — don't overwrite the input
                     });
                     *debounce_handle.borrow_mut() = Some(handle);
-                }
-            }
-        })
-    };
-
-    let on_path_keydown = {
-        let selected_launcher = selected_launcher.clone();
-        let dir = dir.clone();
-        Callback::from(move |e: KeyboardEvent| {
-            if e.key() != "Tab" || e.shift_key() {
-                return;
-            }
-            e.prevent_default();
-
-            let path = (*dir.path).clone();
-            if path.ends_with('/') || path.is_empty() {
-                return;
-            }
-
-            let base = match path.rfind('/') {
-                Some(idx) => &path[..=idx],
-                None => "",
-            };
-
-            let entries = &*dir.entries;
-            if entries.is_empty() {
-                return;
-            }
-
-            // Longest common prefix of all entry names
-            let first = &entries[0].name;
-            let mut len = first.len();
-            for entry in entries.iter().skip(1) {
-                len = first
-                    .chars()
-                    .zip(entry.name.chars())
-                    .take(len)
-                    .take_while(|(a, b)| a == b)
-                    .count();
-            }
-            let lcp = &first[..len];
-
-            let completed = if entries.len() == 1 && entries[0].is_dir {
-                format!("{}{}/", base, lcp)
-            } else {
-                format!("{}{}", base, lcp)
-            };
-
-            if completed != path {
-                dir.path.set(completed.clone());
-                if let Some(lid) = *selected_launcher {
-                    dir.fetch(lid, completed, false);
                 }
             }
         })
@@ -278,12 +234,16 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     let on_launcher_change = {
         let selected_launcher = selected_launcher.clone();
+        let show_install = show_install.clone();
         let dir = dir.clone();
         Callback::from(move |e: Event| {
             if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
-                if let Ok(id) = select.value().parse::<Uuid>() {
+                if select.value() == CONNECT_NEW {
+                    show_install.set(true);
+                    selected_launcher.set(None);
+                } else if let Ok(id) = select.value().parse::<Uuid>() {
+                    show_install.set(false);
                     selected_launcher.set(Some(id));
-                    // Always start at home — don't carry over last-used directory
                     dir.navigate(Some(id), "~".to_string());
                 }
             }
@@ -367,13 +327,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let on_backdrop = {
         let on_close = props.on_close.clone();
         Callback::from(move |_| on_close.emit(()))
-    };
-
-    let toggle_setup = {
-        let show_setup = show_setup.clone();
-        Callback::from(move |_: MouseEvent| {
-            show_setup.set(!*show_setup);
-        })
     };
 
     // Close on Escape key
@@ -472,56 +425,70 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         }
     };
 
+    // Launcher dropdown — always visible regardless of mode.
+    // Real launchers are listed first; a disabled divider and "+ Connect New Host"
+    // sentinel option follow so the user can switch to the install flow.
+    let launcher_select_html = html! {
+        <div class="launch-field">
+            <label>{ "Launcher" }</label>
+            <select class="launcher-select" onchange={on_launcher_change}>
+                { launchers.iter().map(|l| {
+                    let selected = !*show_install && *selected_launcher == Some(l.launcher_id);
+                    html! {
+                        <option value={l.launcher_id.to_string()} {selected}>
+                            { &l.launcher_name }
+                        </option>
+                    }
+                }).collect::<Html>() }
+                if !launchers.is_empty() {
+                    <option disabled=true value="">{ "──────────────" }</option>
+                }
+                <option value={CONNECT_NEW} selected={*show_install}>
+                    { "+ Connect New Host" }
+                </option>
+            </select>
+            if let Some(ref info) = selected_info {
+                <span class="launcher-subtitle">
+                    { format!("{} running", info.running_sessions) }
+                </span>
+            }
+        </div>
+    };
+
     html! {
         <div class="launch-dialog-backdrop" onclick={on_backdrop}>
             <div class="launch-dialog" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
                 <h3>{ "Launch Session" }</h3>
 
-                if launchers.is_empty() {
-                    <div class="launch-no-launchers">
-                        <p>{ "No launchers connected. Install agent-portal on a machine to get started:" }</p>
-                        <ProxyTokenSetup />
+                { launcher_select_html }
+
+                if *show_install {
+                    // Install mode: show setup instructions
+                    <ProxyTokenSetup />
+                    <div class="launch-actions">
+                        <button
+                            class="launch-button-cancel"
+                            onclick={
+                                let on_close = props.on_close.clone();
+                                Callback::from(move |_| on_close.emit(()))
+                            }
+                        >
+                            { "Close" }
+                        </button>
                     </div>
                 } else {
-                    // Launcher + Agent selectors (side by side)
-                    <div class="launch-row">
-                        <div class="launch-field launch-field-half">
-                            <label>{ "Launcher" }</label>
-                            <select class="launcher-select" onchange={on_launcher_change}>
-                                { launchers.iter().map(|l| {
-                                    let selected = *selected_launcher == Some(l.launcher_id);
-                                    html! {
-                                        <option value={l.launcher_id.to_string()} {selected}>
-                                            { &l.launcher_name }
-                                        </option>
-                                    }
-                                }).collect::<Html>() }
-                            </select>
-                            if let Some(ref info) = selected_info {
-                                <span class="launcher-subtitle">
-                                    { format!("{} running", info.running_sessions) }
-                                </span>
-                            }
-                        </div>
-                        <div class="launch-field launch-field-half">
-                            <label>{ "Agent" }</label>
-                            <select class="launcher-select" onchange={on_agent_type_change}>
-                                <option value="claude" selected={*agent_type == shared::AgentType::Claude}>
-                                    { "Claude" }
-                                </option>
-                                <option value="codex" selected={*agent_type == shared::AgentType::Codex}>
-                                    { "Codex" }
-                                </option>
-                            </select>
-                        </div>
+                    // Launch mode: agent selector, directory browser, args, actions
+                    <div class="launch-field">
+                        <label>{ "Agent" }</label>
+                        <select class="launcher-select" onchange={on_agent_type_change}>
+                            <option value="claude" selected={*agent_type == shared::AgentType::Claude}>
+                                { "Claude" }
+                            </option>
+                            <option value="codex" selected={*agent_type == shared::AgentType::Codex}>
+                                { "Codex" }
+                            </option>
+                        </select>
                     </div>
-
-                    <button class="launch-add-machine" onclick={toggle_setup}>
-                        { if *show_setup { "Hide setup" } else { "+ Add machine" } }
-                    </button>
-                    if *show_setup {
-                        <ProxyTokenSetup />
-                    }
 
                     if *agent_type == shared::AgentType::Codex {
                         <div class="launch-note launch-note-warn">
@@ -537,11 +504,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             class="dir-path-input"
                             value={(*dir.path).clone()}
                             oninput={on_path_input}
-                            onkeydown={on_path_keydown}
                         />
                         <div class="dir-breadcrumb">
                             { breadcrumbs.iter().enumerate().map(|(i, (full_path, label))| {
-                                        let p = full_path.clone();
+                                let p = full_path.clone();
                                 let is_last = i == breadcrumbs.len() - 1;
                                 let onclick = {
                                     let navigate_to = navigate_to.clone();
