@@ -53,19 +53,12 @@
 }
 
 /* Bug report link in keyboard hints bar */
-.keyboard-hints .bug-report-link {
-    font-size: 0.75rem;
+.keyboard-hints .server-version {
+    font-size: 0.7rem;
     color: var(--text-secondary);
-    text-decoration: none;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    transition: color 0.2s, background 0.2s;
+    opacity: 0.5;
     white-space: nowrap;
-}
-
-.keyboard-hints .bug-report-link:hover {
-    color: var(--warning);
-    background: rgba(0, 0, 0, 0.3);
+    margin-left: auto;
 }
 
 /* ==========================================================================

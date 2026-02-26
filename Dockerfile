@@ -46,6 +46,7 @@ EXPOSE 3000
 #   APP_TITLE             Text shown in the dashboard header (default: "Agent Portal")
 #   ALLOWED_EMAIL_DOMAIN  Restrict login to one email domain (e.g. "company.com")
 #   ALLOWED_EMAILS        Comma-separated list of allowed emails (e.g. "a@b.com,c@d.com")
+#   PORTAL_MAX_IMAGE_MB   Max image size proxies will inline in MB (default: 10)
 #   HOST                  Bind address (default: 0.0.0.0)
 #   PORT                  Listen port (default: 3000)
 #   RUST_LOG              Log level, e.g. "info" or "debug" (default: "info")

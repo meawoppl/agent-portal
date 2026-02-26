@@ -56,6 +56,7 @@ pub fn dashboard_page() -> Html {
     let voice_enabled = use_state(|| false);
     let current_user_id = use_state(|| None::<String>);
     let app_title = use_state(|| "Agent Portal".to_string());
+    let server_version = use_state(String::new);
     let activated_sessions = use_state(HashSet::<Uuid>::new);
     // Activity buffer: mutations don't trigger page re-renders.
     // SessionRail reads this on its own 100 ms tick instead.
@@ -135,15 +136,17 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Fetch app configuration (title, etc.)
+    // Fetch app configuration (title, version, etc.)
     {
         let app_title = app_title.clone();
+        let server_version = server_version.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
                 let api_endpoint = utils::api_url("/api/config");
                 if let Ok(response) = Request::get(&api_endpoint).send().await {
                     if let Ok(config) = response.json::<AppConfig>().await {
                         app_title.set(config.app_title);
+                        server_version.set(config.server_version);
                     }
                 }
             });
@@ -629,6 +632,14 @@ pub fn dashboard_page() -> Html {
                     <button class="header-button" onclick={go_to_settings.clone()}>
                         { "Settings" }
                     </button>
+                    <a
+                        href="https://github.com/meawoppl/claude-code-portal/issues/new"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="header-button"
+                    >
+                        { "Report a Bug" }
+                    </a>
                     <button class="header-button logout" onclick={do_logout.clone()}>
                         { "Logout" }
                     </button>
@@ -759,14 +770,9 @@ pub fn dashboard_page() -> Html {
                                 }
                             }
                         </div>
-                        <a
-                            href="https://github.com/meawoppl/claude-code-portal/issues/new"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="bug-report-link"
-                        >
-                            { "🐛 Report a Bug" }
-                        </a>
+                        if !(*server_version).is_empty() {
+                            <span class="server-version">{ format!("v{}", *server_version) }</span>
+                        }
                     </div>
                 </>
             }

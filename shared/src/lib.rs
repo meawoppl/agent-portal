@@ -394,6 +394,8 @@ pub struct AppConfig {
     /// Custom title for the app (displayed in top bar)
     /// Defaults to "Agent Portal" if not configured; override with APP_TITLE env var
     pub app_title: String,
+    /// Backend server version string (e.g. "1.3.24")
+    pub server_version: String,
 }
 
 #[cfg(test)]
