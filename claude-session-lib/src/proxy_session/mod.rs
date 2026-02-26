@@ -382,10 +382,15 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
         }
     }
 
-    // Send a portal message so the frontend shows connection status
+    // Send a portal message with session details
     {
-        let text = if session.first_connection {
-            "Proxy connected".to_string()
+        let hostname = hostname::get()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let status_line = if session.first_connection {
+            "**Session started**".to_string()
         } else {
             let duration_str = session
                 .disconnected_at
@@ -404,11 +409,34 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
                 "unexpected disconnect"
             };
             if duration_str.is_empty() {
-                format!("Proxy reconnected ({})", reason)
+                format!("**Proxy reconnected** ({})", reason)
             } else {
-                format!("Proxy reconnected after {} ({})", duration_str, reason)
+                format!("**Proxy reconnected** after {} ({})", duration_str, reason)
             }
         };
+
+        let short_id = &session.config.session_id.to_string()[..8];
+        let mut text = format!(
+            "{}\n\n\
+             | | |\n\
+             |---|---|\n\
+             | Name | `{}` |\n\
+             | Host | `{}` |\n\
+             | Directory | `{}` |\n\
+             | Agent | {} |\n\
+             | ID | `{}…` |",
+            status_line,
+            session.config.session_name,
+            hostname,
+            session.config.working_directory,
+            config_with_branch.agent_type,
+            short_id,
+        );
+
+        if let Some(ref branch) = config_with_branch.git_branch {
+            text.push_str(&format!("\n| Branch | `{}` |", branch));
+        }
+
         let portal_content = shared::PortalMessage::text(text).to_json();
         let seq = {
             let mut buf = session.output_buffer.lock().await;

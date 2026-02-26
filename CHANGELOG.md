@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.31
+
+- Show session details (name, host, directory, branch, agent) in portal message on connect/reconnect
+
 ## 1.3.30
 
 - Unify admin and settings page layout styles
