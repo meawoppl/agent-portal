@@ -1,11 +1,11 @@
 [package]
-name = "agent-launcher"
+name = "agent-portal"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "agent-launcher"
+name = "agent-portal"
 path = "src/main.rs"
 
 [dependencies]

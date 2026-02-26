@@ -2,7 +2,7 @@
 //!
 //! On startup, checks if a newer version is available from GitHub releases
 //! and self-updates if necessary. Parameterized by binary name so both
-//! `claude-portal` and `agent-launcher` can use it.
+//! `claude-portal` and `agent-portal` can use it.
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -41,7 +41,7 @@ impl Platform {
     /// Detect the current platform for a given binary prefix.
     ///
     /// The `binary_prefix` is the base name of the binary (e.g. "claude-portal"
-    /// or "agent-launcher"). The platform suffix is appended automatically.
+    /// or "agent-portal"). The platform suffix is appended automatically.
     pub fn current(binary_prefix: &str) -> Self {
         let (os, arch) = if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
             ("linux", "x86_64")
@@ -98,7 +98,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Check for updates from GitHub releases.
 ///
-/// `binary_prefix` is the base name (e.g. "claude-portal" or "agent-launcher").
+/// `binary_prefix` is the base name (e.g. "claude-portal" or "agent-portal").
 /// If `check_only` is true, reports availability without installing.
 pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<UpdateResult> {
     let self_path = std::env::current_exe().context("Failed to get current executable path")?;

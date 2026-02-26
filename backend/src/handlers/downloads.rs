@@ -34,19 +34,20 @@ pub async fn install_script(
 
     let script = format!(
         r##"#!/bin/bash
-# Agent Portal Installer
-# Downloads and installs the claude-portal binary, then configures backend URL
+# Agent Launcher Installer
+# Downloads and installs the agent-portal binary, configures backend URL,
+# and installs as a system service.
 
 set -e
 
-CONFIG_DIR="${{HOME}}/.config/claude-code-portal"
-BIN_NAME="claude-portal"
+CONFIG_DIR="${{HOME}}/.config/claude-portal"
+BIN_NAME="agent-portal"
 BIN_PATH="${{CONFIG_DIR}}/${{BIN_NAME}}"
-CONFIG_FILE="${{CONFIG_DIR}}/config.json"
+CONFIG_FILE="${{CONFIG_DIR}}/launcher.toml"
 GITHUB_RELEASE_URL="https://github.com/meawoppl/claude-code-portal/releases/download/latest"
 BACKEND_URL="{backend_url}"
 
-echo "Agent Portal Installer"
+echo "Agent Launcher Installer"
 echo "============================"
 echo ""
 
@@ -55,8 +56,8 @@ mkdir -p "${{CONFIG_DIR}}"
 
 # Check if binary already exists (has auto-update, skip download)
 if [ -x "${{BIN_PATH}}" ]; then
-    echo "claude-portal already installed at: ${{BIN_PATH}}"
-    echo "Skipping download (portal has auto-update built in)"
+    echo "agent-portal already installed at: ${{BIN_PATH}}"
+    echo "Skipping download (launcher has auto-update built in)"
     echo ""
 else
     # Detect OS and architecture
@@ -67,7 +68,7 @@ else
         Linux)
             case "${{ARCH}}" in
                 x86_64|amd64)
-                    BINARY_NAME="claude-portal-linux-x86_64"
+                    BINARY_NAME="agent-portal-linux-x86_64"
                     ;;
                 *)
                     echo "Error: Unsupported Linux architecture: ${{ARCH}}"
@@ -79,10 +80,10 @@ else
         Darwin)
             case "${{ARCH}}" in
                 arm64|aarch64)
-                    BINARY_NAME="claude-portal-darwin-aarch64"
+                    BINARY_NAME="agent-portal-darwin-aarch64"
                     ;;
                 x86_64)
-                    BINARY_NAME="claude-portal-darwin-x86_64"
+                    BINARY_NAME="agent-portal-darwin-x86_64"
                     ;;
                 *)
                     echo "Error: Unsupported macOS architecture: ${{ARCH}}"
@@ -95,7 +96,7 @@ else
             echo "Error: Unsupported operating system: ${{OS}}"
             echo "Supported: Linux, Darwin (macOS)"
             echo "For Windows, download manually from:"
-            echo "  ${{GITHUB_RELEASE_URL}}/claude-portal-windows-x86_64.exe"
+            echo "  ${{GITHUB_RELEASE_URL}}/agent-portal-windows-x86_64.exe"
             exit 1
             ;;
     esac
@@ -109,7 +110,7 @@ else
 
     # Download the binary to a temp file first (allows replacing running binary)
     TEMP_BIN="${{BIN_PATH}}.new.$$"
-    echo "Downloading claude-portal from GitHub releases..."
+    echo "Downloading agent-portal from GitHub releases..."
     if command -v curl &> /dev/null; then
         curl -fsSL "${{DOWNLOAD_URL}}" -o "${{TEMP_BIN}}"
     elif command -v wget &> /dev/null; then
@@ -134,15 +135,21 @@ else
     echo ""
 fi
 
-# Write config with backend URL
-echo "Configuring backend URL: ${{BACKEND_URL}}"
-cat > "${{CONFIG_FILE}}" << EOF
-{{
-  "preferences": {{
-    "default_backend_url": "${{BACKEND_URL}}"
-  }}
-}}
+# Write config with backend URL (preserve existing config if present)
+if [ -f "${{CONFIG_FILE}}" ]; then
+    # Config exists — update backend_url if not already set
+    if ! grep -q "backend_url" "${{CONFIG_FILE}}" 2>/dev/null; then
+        echo "backend_url = \"${{BACKEND_URL}}\"" >> "${{CONFIG_FILE}}"
+        echo "Added backend_url to existing config"
+    else
+        echo "Config already exists with backend_url, skipping"
+    fi
+else
+    echo "Configuring backend URL: ${{BACKEND_URL}}"
+    cat > "${{CONFIG_FILE}}" << EOF
+backend_url = "${{BACKEND_URL}}"
 EOF
+fi
 echo ""
 
 # Add to PATH in shell rc files
@@ -151,9 +158,9 @@ add_to_path() {{
     local path_line="export PATH=\"\$PATH:${{CONFIG_DIR}}\""
 
     if [ -f "${{rc_file}}" ]; then
-        if ! grep -q "claude-code-portal" "${{rc_file}}" 2>/dev/null; then
+        if ! grep -q "claude-portal" "${{rc_file}}" 2>/dev/null; then
             echo "" >> "${{rc_file}}"
-            echo "# Agent Portal binary path" >> "${{rc_file}}"
+            echo "# Agent Launcher binary path" >> "${{rc_file}}"
             echo "${{path_line}}" >> "${{rc_file}}"
             echo "Updated: ${{rc_file}}"
             return 0
@@ -178,12 +185,19 @@ else
 fi
 
 echo ""
+
+# Install as system service
+echo "Installing as system service..."
+"${{BIN_PATH}}" service install 2>/dev/null && echo "Service installed!" || echo "Service install skipped (may need manual setup)"
+echo ""
+
 echo "Installation complete!"
 echo ""
-echo "To start a session, run:"
-echo "  claude-portal"
+echo "The agent-portal service is now running in the background."
+echo "You'll be prompted to authenticate in your browser on first connection."
 echo ""
-echo "(You'll be prompted to authenticate in your browser on first run)"
+echo "To check status:  agent-portal service status"
+echo "To view logs:     journalctl --user -u agent-portal -f"
 "##
     );
 

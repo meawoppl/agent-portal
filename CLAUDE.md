@@ -313,7 +313,24 @@ cargo fmt --check             # Format check
 cd backend
 diesel migration run          # Apply migrations
 diesel migration revert       # Undo last migration
+
+# Debugging - poke a message into an active session
+cargo run -p cli-tools -- poke <session-id> "your message here"
 ```
+
+### Session Debugging with `poke`
+
+The `portal-api poke` command connects as a web client to an active session, sends a message, and prints all responses with detailed output for task-related system messages. It also validates that `ClaudeOutput` types roundtrip correctly through `serde_json::Value`, which catches silent parsing failures.
+
+```bash
+# Send a message and watch task lifecycle
+cargo run -p cli-tools -- poke <session-id> "launch a background task that sleeps 3 seconds"
+
+# Connect to a different server
+cargo run -p cli-tools -- -s http://portal.example.com poke <session-id> "hello"
+```
+
+Output shows `✓` or `✗` for each task message's typed parse result, making it easy to diagnose issues where the sidebar doesn't show subagents.
 
 ### Build Order Matters
 

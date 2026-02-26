@@ -9,7 +9,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
-#[command(name = "agent-launcher")]
+#[command(name = "agent-portal")]
 #[command(about = "Persistent daemon that launches claude-portal sessions as in-process tasks")]
 struct Args {
     /// Backend WebSocket URL (default: wss://txcl.io in release, ws://localhost:3000 in debug)
@@ -67,7 +67,7 @@ enum ServiceAction {
     Status,
 }
 
-const BINARY_PREFIX: &str = "agent-launcher";
+const BINARY_PREFIX: &str = "agent-portal";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -87,6 +87,14 @@ async fn main() -> anyhow::Result<()> {
             ServiceAction::Uninstall => service::uninstall(),
             ServiceAction::Status => service::status(),
         };
+    }
+
+    // Check if running as a system service; suggest installing if not
+    if !args.no_update && !service::is_installed() {
+        eprintln!();
+        eprintln!("  Tip: Install agent-portal as a system service for persistent operation:");
+        eprintln!("    agent-portal service install");
+        eprintln!();
     }
 
     // Apply pending updates (Windows only)
