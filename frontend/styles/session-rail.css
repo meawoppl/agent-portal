@@ -186,6 +186,7 @@
     height: 100%;
     opacity: 1;
     border-radius: 1px;
+    transform: translateZ(0);
 }
 
 .sparkline-tick.tick-assistant { background: var(--accent); }
@@ -201,6 +202,7 @@
     height: 100%;
     opacity: 0.5;
     border-radius: 1px;
+    transform: translateZ(0);
 }
 
 .sparkline-range.tick-compaction { background: var(--text-secondary); }

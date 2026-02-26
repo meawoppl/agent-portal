@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.21
+
+- Fix sparkline tick subpixel rendering artifacts via GPU compositing
+
 ## 1.3.20
 
 - Fix tasks drawer pull-tab clipped by overflow:hidden on drawer container
