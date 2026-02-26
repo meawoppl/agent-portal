@@ -72,9 +72,13 @@ pub fn proxy_token_setup() -> Html {
             ws_backend_url
         ),
     };
-    let status_command = match *selected_platform {
-        Platform::Linux | Platform::MacOS => "agent-portal service status".to_string(),
-        Platform::Windows => ".\\agent-portal.exe service status".to_string(),
+    let login_command = match *selected_platform {
+        Platform::Linux | Platform::MacOS => "agent-portal login".to_string(),
+        Platform::Windows => ".\\agent-portal.exe login".to_string(),
+    };
+    let service_command = match *selected_platform {
+        Platform::Linux | Platform::MacOS => "agent-portal install".to_string(),
+        Platform::Windows => ".\\agent-portal.exe install".to_string(),
     };
 
     html! {
@@ -140,9 +144,17 @@ pub fn proxy_token_setup() -> Html {
             <div class="setup-step">
                 <span class="step-number">{ "2" }</span>
                 <div class="step-content">
-                    <p class="step-label">{ "Check status:" }</p>
-                    <CopyCommand command={status_command} />
-                    <p class="step-hint">{ "(The installer starts the service automatically. You'll authenticate in your browser on first connection.)" }</p>
+                    <p class="step-label">{ "Log in:" }</p>
+                    <CopyCommand command={login_command} />
+                </div>
+            </div>
+
+            <div class="setup-step">
+                <span class="step-number">{ "3" }</span>
+                <div class="step-content">
+                    <p class="step-label">{ "Run as a background service:" }</p>
+                    <CopyCommand command={service_command} />
+                    <p class="step-hint">{ "(Or run directly with: agent-portal)" }</p>
                 </div>
             </div>
         </div>

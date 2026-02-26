@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.19
+
+- Add `agent-portal login` subcommand for explicit authentication
+- Add `agent-portal install` subcommand to install as system service
+- Add `agent-portal update` subcommand to update binary and restart service
+- Install script no longer auto-installs system service
+- Updated frontend setup instructions with 3-step flow (install, login, service)
+
 ## 1.3.18
 
 - Differentiate task and portal message colors (tasks=purple, portal=teal)

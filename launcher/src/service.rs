@@ -140,6 +140,13 @@ pub fn status() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
+pub fn restart() -> Result<()> {
+    systemctl(&["restart", SERVICE_NAME])?;
+    println!("Restarted {}", SERVICE_NAME);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 pub fn is_installed() -> bool {
     service_file_path().map(|p| p.exists()).unwrap_or(false)
 }
@@ -306,6 +313,21 @@ pub fn status() -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn restart() -> Result<()> {
+    use anyhow::Context;
+    let plist = plist_path()?;
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", &plist.to_string_lossy()])
+        .output();
+    std::process::Command::new("launchctl")
+        .args(["load", &plist.to_string_lossy()])
+        .output()
+        .context("Failed to run launchctl load")?;
+    println!("Restarted {}", PLIST_LABEL);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 pub fn is_installed() -> bool {
     plist_path().map(|p| p.exists()).unwrap_or(false)
 }
@@ -324,6 +346,11 @@ pub fn uninstall() -> Result<()> {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn status() -> Result<()> {
+    anyhow::bail!("Service management is not supported on this platform")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn restart() -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
 }
 

@@ -36,21 +36,19 @@ struct Args {
     #[arg(long)]
     no_update: bool,
 
-    /// Check for updates without installing
-    #[arg(long)]
-    check_update: bool,
-
-    /// Force update from GitHub releases
-    #[arg(long)]
-    update: bool,
-
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Manage the launcher as a system service
+    /// Authenticate with the backend server via browser
+    Login,
+    /// Install agent-portal as a persistent system service
+    Install,
+    /// Update agent-portal to the latest version (restarts service if running)
+    Update,
+    /// Manage the launcher system service
     Service {
         #[command(subcommand)]
         action: ServiceAction,
@@ -80,64 +78,34 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Handle service subcommands before anything else
-    if let Some(Command::Service { action }) = args.command {
-        return match action {
-            ServiceAction::Install => service::install(),
-            ServiceAction::Uninstall => service::uninstall(),
-            ServiceAction::Status => service::status(),
-        };
+    // Handle subcommands before the daemon startup path
+    match args.command {
+        Some(Command::Login) => return cmd_login(&args).await,
+        Some(Command::Install) => return service::install(),
+        Some(Command::Update) => return cmd_update().await,
+        Some(Command::Service { action }) => {
+            return match action {
+                ServiceAction::Install => service::install(),
+                ServiceAction::Uninstall => service::uninstall(),
+                ServiceAction::Status => service::status(),
+            };
+        }
+        None => {}
     }
+
+    // --- Daemon startup path ---
 
     // Check if running as a system service; suggest installing if not
     if !args.no_update && !service::is_installed() {
         eprintln!();
         eprintln!("  Tip: Install agent-portal as a system service for persistent operation:");
-        eprintln!("    agent-portal service install");
+        eprintln!("    agent-portal install");
         eprintln!();
     }
 
     // Apply pending updates (Windows only)
     if let Ok(true) = portal_update::apply_pending_update() {
         info!("Pending update applied successfully");
-    }
-
-    // Handle explicit update commands
-    if args.check_update {
-        match portal_update::check_for_update(BINARY_PREFIX, true).await {
-            Ok(portal_update::UpdateResult::UpToDate) => {
-                info!("Launcher is up to date");
-            }
-            Ok(portal_update::UpdateResult::UpdateAvailable {
-                version,
-                download_url,
-            }) => {
-                info!("Update available: {} ({})", version, download_url);
-            }
-            Ok(portal_update::UpdateResult::Updated) => {}
-            Err(e) => {
-                warn!("Update check failed: {}", e);
-            }
-        }
-        return Ok(());
-    }
-
-    if args.update {
-        match portal_update::check_for_update(BINARY_PREFIX, false).await {
-            Ok(portal_update::UpdateResult::UpToDate) => {
-                info!("Launcher is up to date");
-            }
-            Ok(portal_update::UpdateResult::Updated) => {
-                info!("Launcher updated successfully, please restart");
-                std::process::exit(0);
-            }
-            Ok(portal_update::UpdateResult::UpdateAvailable { .. }) => {}
-            Err(e) => {
-                warn!("Update failed: {}", e);
-                return Err(e);
-            }
-        }
-        return Ok(());
     }
 
     // Auto-update on startup (unless --no-update)
@@ -216,4 +184,51 @@ async fn main() -> anyhow::Result<()> {
         config.sessions,
     )
     .await
+}
+
+/// `agent-portal login` — authenticate via device flow and save the token
+async fn cmd_login(args: &Args) -> anyhow::Result<()> {
+    let config = config::load_config();
+    let backend_url = args
+        .backend_url
+        .clone()
+        .or(config.backend_url)
+        .unwrap_or_else(|| shared::default_backend_url().to_string());
+
+    println!("Authenticating with {}...", backend_url);
+    let result = portal_auth::device_flow_login(&backend_url, None).await?;
+    config::save_auth_token(&result.access_token)?;
+    println!();
+    println!("Logged in as {}", result.user_email);
+    Ok(())
+}
+
+/// `agent-portal update` — update binary and restart service if running
+async fn cmd_update() -> anyhow::Result<()> {
+    // Apply any pending updates first (Windows)
+    if let Ok(true) = portal_update::apply_pending_update() {
+        info!("Pending update applied successfully");
+    }
+
+    match portal_update::check_for_update(BINARY_PREFIX, false).await {
+        Ok(portal_update::UpdateResult::UpToDate) => {
+            println!("agent-portal is already up to date.");
+        }
+        Ok(portal_update::UpdateResult::Updated) => {
+            println!("agent-portal updated successfully.");
+            // Restart the service if it's installed and running
+            if service::is_installed() {
+                println!("Restarting system service...");
+                service::restart()?;
+                println!("Service restarted.");
+            }
+        }
+        Ok(portal_update::UpdateResult::UpdateAvailable { version, .. }) => {
+            println!("Update available: {}", version);
+        }
+        Err(e) => {
+            anyhow::bail!("Update failed: {}", e);
+        }
+    }
+    Ok(())
 }

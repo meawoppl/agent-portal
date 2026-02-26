@@ -34,9 +34,8 @@ pub async fn install_script(
 
     let script = format!(
         r##"#!/bin/bash
-# Agent Launcher Installer
-# Downloads and installs the agent-portal binary, configures backend URL,
-# and installs as a system service.
+# Agent Portal Installer
+# Downloads and installs the agent-portal binary and configures backend URL.
 
 set -e
 
@@ -47,7 +46,7 @@ CONFIG_FILE="${{CONFIG_DIR}}/launcher.toml"
 GITHUB_RELEASE_URL="https://github.com/meawoppl/claude-code-portal/releases/download/latest"
 BACKEND_URL="{backend_url}"
 
-echo "Agent Launcher Installer"
+echo "Agent Portal Installer"
 echo "============================"
 echo ""
 
@@ -186,18 +185,13 @@ fi
 
 echo ""
 
-# Install as system service
-echo "Installing as system service..."
-"${{BIN_PATH}}" service install 2>/dev/null && echo "Service installed!" || echo "Service install skipped (may need manual setup)"
-echo ""
-
 echo "Installation complete!"
 echo ""
-echo "The agent-portal service is now running in the background."
-echo "You'll be prompted to authenticate in your browser on first connection."
+echo "Next steps:"
+echo "  1. Log in:             agent-portal login"
+echo "  2. Install as service: agent-portal install"
 echo ""
-echo "To check status:  agent-portal service status"
-echo "To view logs:     journalctl --user -u agent-portal -f"
+echo "Or run directly:         agent-portal"
 "##
     );
 
