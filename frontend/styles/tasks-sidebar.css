@@ -13,7 +13,6 @@
     pointer-events: none;
     transition: width 0.25s ease-in-out;
     width: 0;
-    overflow: hidden;
     animation: tabSlideIn 0.35s ease-out;
 }
 
