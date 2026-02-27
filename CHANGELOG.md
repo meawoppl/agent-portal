@@ -17,6 +17,8 @@
 ## 1.3.40
 
 - Review and update all docs for accuracy across 15 files
+- Fix subagent completion handling in history loading path to preserve task data
+- Replace catch-all status mapping with explicit CCTaskStatus variant matching
 
 ## 1.3.38
 
