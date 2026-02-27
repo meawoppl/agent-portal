@@ -168,11 +168,14 @@ pub enum ServerToProxy {
     /// A single chunk of a file upload (base64-encoded, ~1KB decoded)
     FileUploadChunk(FileUploadChunkFields),
 
-    /// Server is shutting down
+    /// Server is shutting down (proxy should reconnect after delay)
     ServerShutdown {
         reason: String,
         reconnect_delay_ms: u64,
     },
+
+    /// Session has been terminated (proxy should NOT reconnect)
+    SessionTerminated { reason: String },
 }
 
 // =============================================================================
@@ -607,5 +610,17 @@ mod tests {
         let _: ServerToProxy = serde_json::from_str(json).unwrap();
         let _: ServerToClient = serde_json::from_str(json).unwrap();
         let _: ServerToLauncher = serde_json::from_str(json).unwrap();
+    }
+
+    #[test]
+    fn wire_compat_session_terminated() {
+        let json = r#"{"type":"SessionTerminated","reason":"Session stopped by user"}"#;
+        let msg: ServerToProxy = serde_json::from_str(json).unwrap();
+        match msg {
+            ServerToProxy::SessionTerminated { reason } => {
+                assert_eq!(reason, "Session stopped by user");
+            }
+            _ => panic!("Wrong variant"),
+        }
     }
 }

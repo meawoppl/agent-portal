@@ -291,15 +291,14 @@ impl SessionManager {
         false
     }
 
-    /// Stop a directly-connected proxy by sending it a shutdown message.
-    /// The proxy will disconnect, and the session will be marked as disconnected in the DB.
+    /// Stop a directly-connected proxy by sending it a termination message.
+    /// The proxy will disconnect without attempting to reconnect.
     /// Returns true if the session was found and the message was sent.
     pub fn disconnect_session(&self, session_id: Uuid) -> bool {
         let key = session_id.to_string();
         if let Some(sender) = self.sessions.get(&key) {
-            let _ = sender.send(ServerToProxy::ServerShutdown {
+            let _ = sender.send(ServerToProxy::SessionTerminated {
                 reason: "Session stopped by user".to_string(),
-                reconnect_delay_ms: 30_000,
             });
             true
         } else {

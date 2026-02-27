@@ -117,6 +117,8 @@ pub enum ConnectionResult {
     SessionNotFound,
     /// Server is shutting down gracefully, includes suggested reconnect delay
     ServerShutdown(Duration),
+    /// Session was terminated by the server (do not reconnect)
+    SessionTerminated,
 }
 
 /// Result from the connection loop
@@ -239,6 +241,8 @@ struct ConnectionState {
     disconnect_rx: tokio::sync::oneshot::Receiver<()>,
     /// Receiver for graceful server shutdown signal
     graceful_shutdown_rx: mpsc::UnboundedReceiver<GracefulShutdown>,
+    /// Receiver for session terminated signal (do not reconnect)
+    session_terminated_rx: tokio::sync::oneshot::Receiver<()>,
     /// When the connection was established
     connection_start: Instant,
     /// Buffer for pending outputs
@@ -317,6 +321,11 @@ pub async fn run_connection_loop(
                 );
 
                 tokio::time::sleep(delay).await;
+            }
+            ConnectionResult::SessionTerminated => {
+                info!("Session terminated by server, not reconnecting");
+                session.persist_buffer().await;
+                return Ok(LoopResult::NormalExit);
             }
         }
     }
@@ -582,6 +591,9 @@ async fn run_message_loop(
     // Channel for file upload events from backend
     let (file_upload_tx, file_upload_rx) = mpsc::unbounded_channel::<FileUploadEvent>();
 
+    // Channel for session terminated signal (do not reconnect)
+    let (session_terminated_tx, session_terminated_rx) = tokio::sync::oneshot::channel::<()>();
+
     // Wrap ws_write for sharing
     let ws_write = std::sync::Arc::new(tokio::sync::Mutex::new(ws_write));
 
@@ -617,6 +629,7 @@ async fn run_message_loop(
         disconnect_tx,
         wiggum_tx,
         graceful_shutdown_tx,
+        session_terminated_tx,
         heartbeat.clone(),
         file_upload_tx,
     );
@@ -629,6 +642,7 @@ async fn run_message_loop(
         ws_write: ws_write.clone(),
         disconnect_rx,
         graceful_shutdown_rx,
+        session_terminated_rx,
         connection_start,
         output_buffer: session.output_buffer.clone(),
         wiggum_rx,
@@ -676,6 +690,11 @@ async fn run_main_loop(
                 }
                 let mut ws = state.ws_write.lock().await;
                 let _ = ws.send(ProxyToServer::Heartbeat).await;
+            }
+
+            _ = &mut state.session_terminated_rx => {
+                info!("Session terminated by server");
+                return ConnectionResult::SessionTerminated;
             }
 
             _ = &mut state.disconnect_rx => {

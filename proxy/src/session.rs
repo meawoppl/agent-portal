@@ -197,6 +197,8 @@ pub enum WsEvent {
     Disconnect,
     /// Server requested graceful shutdown with reconnect delay
     GracefulShutdown(u64),
+    /// Session was terminated by the server (do not reconnect)
+    SessionTerminated,
 }
 
 /// Spawn a WebSocket reader task (raw tokio-tungstenite).
@@ -328,6 +330,11 @@ async fn handle_ws_text_message(
                 reason, reconnect_delay_ms
             );
             let _ = event_tx.send(WsEvent::GracefulShutdown(reconnect_delay_ms));
+            false // stop reading
+        }
+        ServerToProxy::SessionTerminated { reason } => {
+            info!("Session terminated by server: {}", reason);
+            let _ = event_tx.send(WsEvent::SessionTerminated);
             false // stop reading
         }
         _ => true,

@@ -39,6 +39,8 @@ pub(super) enum WsMessageResult {
     Disconnect,
     /// Server requested graceful shutdown with specified delay in ms
     GracefulShutdown(u64),
+    /// Session was terminated by the server (do not reconnect)
+    SessionTerminated,
 }
 
 /// Spawn the WebSocket reader task
@@ -52,6 +54,7 @@ pub(super) fn spawn_ws_reader(
     disconnect_tx: tokio::sync::oneshot::Sender<()>,
     wiggum_tx: mpsc::UnboundedSender<String>,
     graceful_shutdown_tx: mpsc::UnboundedSender<GracefulShutdown>,
+    session_terminated_tx: tokio::sync::oneshot::Sender<()>,
     heartbeat: crate::heartbeat::HeartbeatTracker,
     file_upload_tx: mpsc::UnboundedSender<FileUploadEvent>,
 ) -> tokio::task::JoinHandle<()> {
@@ -77,6 +80,10 @@ pub(super) fn spawn_ws_reader(
                             let _ = graceful_shutdown_tx.send(GracefulShutdown {
                                 reconnect_delay_ms: delay_ms,
                             });
+                            break;
+                        }
+                        WsMessageResult::SessionTerminated => {
+                            let _ = session_terminated_tx.send(());
                             break;
                         }
                     }
@@ -224,6 +231,10 @@ async fn handle_ws_message(
                 reason, reconnect_delay_ms
             );
             return WsMessageResult::GracefulShutdown(reconnect_delay_ms);
+        }
+        ServerToProxy::SessionTerminated { reason } => {
+            info!("Session terminated by server: {}", reason);
+            return WsMessageResult::SessionTerminated;
         }
         ServerToProxy::FileUploadStart(shared::FileUploadStartFields {
             upload_id,

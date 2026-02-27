@@ -467,6 +467,12 @@ async fn run_shim_loop(
                 );
                 tokio::time::sleep(delay).await;
             }
+            ShimConnectionResult::SessionTerminated => {
+                info!("Session terminated by server, not reconnecting");
+                stdout_reader_task.abort();
+                stdin_reader_task.abort();
+                return;
+            }
         }
     }
 }
@@ -475,6 +481,7 @@ enum ShimConnectionResult {
     ClaudeExited,
     Disconnected,
     ServerShutdown(Duration),
+    SessionTerminated,
 }
 
 /// Run the message loop for a single WebSocket connection.
@@ -581,6 +588,9 @@ async fn run_shim_connection(
                         break ShimConnectionResult::ServerShutdown(
                             Duration::from_millis(delay_ms)
                         );
+                    }
+                    Some(WsEvent::SessionTerminated) => {
+                        break ShimConnectionResult::SessionTerminated;
                     }
                     Some(WsEvent::Disconnect) | None => {
                         info!("Portal WebSocket disconnected");
