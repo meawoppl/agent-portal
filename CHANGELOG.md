@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.40
+
+- Break up settings.rs into sub-components (TokensPanel, SessionsPanel, SoundsPanel)
+
 ## 1.3.38
 
 - Add "Add machine" button to launch dialog for setting up new launchers
