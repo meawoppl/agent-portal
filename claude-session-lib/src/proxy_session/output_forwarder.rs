@@ -28,6 +28,7 @@ pub fn spawn_output_forwarder(
     working_directory: String,
     current_branch: Arc<Mutex<Option<String>>>,
     current_pr_url: Arc<Mutex<Option<String>>>,
+    current_repo_url: Arc<Mutex<Option<String>>>,
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
     max_image_mb: Option<u32>,
 ) -> tokio::task::JoinHandle<()> {
@@ -55,6 +56,7 @@ pub fn spawn_output_forwarder(
                     &working_directory,
                     &current_branch,
                     &current_pr_url,
+                    &current_repo_url,
                 )
                 .await;
             }
@@ -146,6 +148,22 @@ pub(super) fn get_git_branch(cwd: &str) -> Option<String> {
     }
 }
 
+/// Look up the GitHub repository URL using the `gh` CLI
+pub(super) fn get_repo_url(cwd: &str) -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["repo", "view", "--json", "url", "-q", ".url"])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Look up the GitHub PR URL for a branch using the `gh` CLI
 pub(super) fn get_pr_url(cwd: &str, branch: &str) -> Option<String> {
     if branch == "main" || branch == "master" || branch.starts_with("detached:") {
@@ -204,19 +222,23 @@ async fn check_and_send_branch_update(
     working_directory: &str,
     current_branch: &Arc<Mutex<Option<String>>>,
     current_pr_url: &Arc<Mutex<Option<String>>>,
+    current_repo_url: &Arc<Mutex<Option<String>>>,
 ) {
     let new_branch = get_git_branch(working_directory);
     let new_pr_url = new_branch
         .as_deref()
         .and_then(|b| get_pr_url(working_directory, b));
+    let new_repo_url = get_repo_url(working_directory);
 
     let mut branch_guard = current_branch.lock().await;
     let mut pr_guard = current_pr_url.lock().await;
+    let mut repo_guard = current_repo_url.lock().await;
 
     let branch_changed = *branch_guard != new_branch;
     let pr_changed = *pr_guard != new_pr_url;
+    let repo_changed = *repo_guard != new_repo_url;
 
-    if branch_changed || pr_changed {
+    if branch_changed || pr_changed || repo_changed {
         if branch_changed {
             debug!(
                 "Git branch changed: {:?} -> {:?}",
@@ -228,15 +250,18 @@ async fn check_and_send_branch_update(
         }
         *branch_guard = new_branch.clone();
         *pr_guard = new_pr_url.clone();
+        *repo_guard = new_repo_url.clone();
 
         // Drop locks before acquiring ws lock
         drop(branch_guard);
         drop(pr_guard);
+        drop(repo_guard);
 
         let update_msg = ProxyToServer::SessionUpdate {
             session_id,
             git_branch: new_branch,
             pr_url: new_pr_url,
+            repo_url: new_repo_url,
         };
 
         let mut ws = ws_write.lock().await;

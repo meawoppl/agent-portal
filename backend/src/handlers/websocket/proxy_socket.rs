@@ -98,6 +98,7 @@ fn handle_proxy_message(
             hostname,
             launcher_id,
             agent_type,
+            repo_url,
         }) => {
             let key = claude_session_id.to_string();
             *session_key = Some(key.clone());
@@ -117,6 +118,7 @@ fn handle_proxy_message(
                 hostname: hostname.as_deref().unwrap_or("unknown"),
                 launcher_id,
                 agent_type,
+                repo_url: &repo_url,
             };
             let result = register_or_update_session(app_state, &params);
 
@@ -186,6 +188,7 @@ fn handle_proxy_message(
             session_id: update_session_id,
             git_branch,
             pr_url,
+            repo_url,
         } => {
             handle_session_update(
                 session_manager,
@@ -195,6 +198,7 @@ fn handle_proxy_message(
                 update_session_id,
                 git_branch,
                 pr_url,
+                repo_url,
             );
         }
         ProxyToServer::InputAck {
@@ -207,6 +211,7 @@ fn handle_proxy_message(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_session_update(
     session_manager: &SessionManager,
     session_key: &Option<SessionId>,
@@ -215,6 +220,7 @@ fn handle_session_update(
     update_session_id: Uuid,
     git_branch: Option<String>,
     pr_url: Option<String>,
+    repo_url: Option<String>,
 ) {
     let Some(current_session_id) = db_session_id else {
         return;
@@ -243,14 +249,15 @@ fn handle_session_update(
         .set((
             sessions::git_branch.eq(&git_branch),
             sessions::pr_url.eq(&pr_url),
+            sessions::repo_url.eq(&repo_url),
         ))
         .execute(&mut conn)
     {
         error!("Failed to update session metadata: {}", e);
     } else {
         info!(
-            "Updated session {}: branch={:?} pr_url={:?}",
-            current_session_id, git_branch, pr_url
+            "Updated session {}: branch={:?} pr_url={:?} repo_url={:?}",
+            current_session_id, git_branch, pr_url, repo_url
         );
 
         if let Some(ref key) = session_key {
@@ -260,6 +267,7 @@ fn handle_session_update(
                     session_id: current_session_id,
                     git_branch,
                     pr_url,
+                    repo_url,
                 },
             );
         }

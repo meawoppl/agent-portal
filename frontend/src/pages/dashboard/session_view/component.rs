@@ -54,7 +54,8 @@ pub struct SessionViewProps {
     pub on_cost_change: Callback<(Uuid, f64)>,
     pub on_connected_change: Callback<(Uuid, bool)>,
     pub on_message_sent: Callback<Uuid>,
-    pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>)>,
+    #[allow(clippy::type_complexity)]
+    pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>, Option<String>)>,
     #[prop_or_default]
     pub on_activity: Callback<(Uuid, String, f64)>,
     #[prop_or(false)]
@@ -80,7 +81,7 @@ pub enum SessionViewMsg {
     DenyPermission,
     PermissionSelectUp,
     PermissionSelectDown,
-    BranchChanged(Option<String>, Option<String>),
+    BranchChanged(Option<String>, Option<String>, Option<String>),
     PermissionConfirm,
     PermissionSelectAndConfirm(usize),
     HistoryUp,
@@ -526,11 +527,11 @@ impl Component for SessionView {
                     .emit((session_id, is_awaiting));
                 false
             }
-            SessionViewMsg::BranchChanged(branch, pr_url) => {
+            SessionViewMsg::BranchChanged(branch, pr_url, repo_url) => {
                 let session_id = ctx.props().session.id;
                 ctx.props()
                     .on_branch_change
-                    .emit((session_id, branch, pr_url));
+                    .emit((session_id, branch, pr_url, repo_url));
                 false
             }
             SessionViewMsg::HistoryUp => {
@@ -989,9 +990,9 @@ impl SessionView {
                     .send_message(SessionViewMsg::PermissionRequest(perm));
                 false
             }
-            WsEvent::BranchChanged(branch, pr_url) => {
+            WsEvent::BranchChanged(branch, pr_url, repo_url) => {
                 ctx.link()
-                    .send_message(SessionViewMsg::BranchChanged(branch, pr_url));
+                    .send_message(SessionViewMsg::BranchChanged(branch, pr_url, repo_url));
                 false
             }
         }

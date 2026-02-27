@@ -18,7 +18,7 @@ pub enum WsEvent {
     Output(String),
     HistoryBatch(Vec<String>),
     Permission(PendingPermission),
-    BranchChanged(Option<String>, Option<String>),
+    BranchChanged(Option<String>, Option<String>, Option<String>),
 }
 
 /// Connect to WebSocket and start receiving messages.
@@ -48,6 +48,7 @@ pub fn connect_websocket(
                     hostname: None,
                     launcher_id: None,
                     agent_type: Default::default(),
+                    repo_url: None,
                 });
 
                 if sender.send(register_msg).await.is_err() {
@@ -132,8 +133,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             session_id: _,
             git_branch,
             pr_url,
+            repo_url,
         } => {
-            on_event.emit(WsEvent::BranchChanged(git_branch, pr_url));
+            on_event.emit(WsEvent::BranchChanged(git_branch, pr_url, repo_url));
         }
         _ => {}
     }

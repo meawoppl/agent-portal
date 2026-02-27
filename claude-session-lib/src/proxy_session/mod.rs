@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use output_forwarder::{get_git_branch, get_pr_url, spawn_output_forwarder};
+use output_forwarder::{get_git_branch, get_pr_url, get_repo_url, spawn_output_forwarder};
 use wiggum::{handle_session_event_with_wiggum, WiggumState};
 use ws_reader::{spawn_ws_reader, FileReceiveState, FileUploadEvent};
 
@@ -353,18 +353,21 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
         Err(duration) => return ConnectionResult::Disconnected(duration),
     };
 
-    // Look up PR URL for the current branch and send as SessionUpdate
-    if let Some(ref branch) = config_with_branch.git_branch {
-        let pr_url = get_pr_url(&session.config.working_directory, branch);
-        if pr_url.is_some() {
-            let update_msg = ProxyToServer::SessionUpdate {
-                session_id: config_with_branch.session_id,
-                git_branch: config_with_branch.git_branch.clone(),
-                pr_url,
-            };
-            if conn.send(update_msg).await.is_err() {
-                error!("Failed to send initial PR URL update");
-            }
+    // Look up PR URL and repo URL for the current branch and send as SessionUpdate
+    let repo_url = get_repo_url(&session.config.working_directory);
+    let pr_url = config_with_branch
+        .git_branch
+        .as_deref()
+        .and_then(|b| get_pr_url(&session.config.working_directory, b));
+    if pr_url.is_some() || repo_url.is_some() {
+        let update_msg = ProxyToServer::SessionUpdate {
+            session_id: config_with_branch.session_id,
+            git_branch: config_with_branch.git_branch.clone(),
+            pr_url,
+            repo_url,
+        };
+        if conn.send(update_msg).await.is_err() {
+            error!("Failed to send initial session update");
         }
     }
 
@@ -508,6 +511,7 @@ async fn register_session(
         hostname: Some(hostname),
         launcher_id: config.launcher_id,
         agent_type: config.agent_type,
+        repo_url: get_repo_url(&config.working_directory),
     });
 
     if conn.send(register_msg).await.is_err() {
@@ -603,9 +607,10 @@ async fn run_message_loop(
     // Channel to signal WebSocket disconnection
     let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
 
-    // Shared state for tracking git branch and PR URL updates
+    // Shared state for tracking git branch, PR URL, and repo URL updates
     let current_branch = Arc::new(Mutex::new(config.git_branch.clone()));
     let current_pr_url = Arc::new(Mutex::new(None::<String>));
+    let current_repo_url = Arc::new(Mutex::new(None::<String>));
 
     // Spawn output forwarder task with buffer
     let output_task = spawn_output_forwarder(
@@ -615,6 +620,7 @@ async fn run_message_loop(
         config.working_directory.clone(),
         current_branch,
         current_pr_url,
+        current_repo_url,
         session.output_buffer.clone(),
         max_image_mb,
     );

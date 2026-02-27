@@ -33,6 +33,8 @@ pub struct RegisterFields {
     pub launcher_id: Option<Uuid>,
     #[serde(default)]
     pub agent_type: AgentType,
+    #[serde(default)]
+    pub repo_url: Option<String>,
 }
 
 /// Fields for a permission response (shared by server-to-proxy and client-to-server).
@@ -114,6 +116,8 @@ pub enum ProxyToServer {
         git_branch: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         pr_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        repo_url: Option<String>,
     },
 
     /// Acknowledge receipt of input messages
@@ -249,6 +253,8 @@ pub enum ServerToClient {
         git_branch: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         pr_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        repo_url: Option<String>,
     },
 
     /// User spend data update
@@ -446,6 +452,7 @@ mod tests {
             hostname: None,
             launcher_id: None,
             agent_type: AgentType::Claude,
+            repo_url: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"Register""#));

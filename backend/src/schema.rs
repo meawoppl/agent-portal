@@ -124,6 +124,8 @@ diesel::table! {
         pr_url -> Nullable<Varchar>,
         #[max_length = 16]
         agent_type -> Varchar,
+        #[max_length = 512]
+        repo_url -> Nullable<Varchar>,
     }
 }
 

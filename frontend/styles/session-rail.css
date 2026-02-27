@@ -400,6 +400,15 @@ a.pill-menu-option.pr-link:hover {
     background: rgba(122, 162, 247, 0.15);
 }
 
+.pill-menu-option.disabled {
+    color: var(--text-muted);
+    cursor: default;
+}
+
+.pill-menu-option.disabled:hover {
+    background: transparent;
+}
+
 .pill-menu-option .option-hint {
     font-size: 0.7rem;
     font-weight: 400;

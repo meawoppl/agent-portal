@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN repo_url VARCHAR(512);
