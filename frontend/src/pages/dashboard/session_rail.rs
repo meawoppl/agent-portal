@@ -156,6 +156,45 @@ fn extract_ranges(
     ranges
 }
 
+/// Semver staleness level for a proxy client relative to the server.
+enum VersionStaleness {
+    /// Same version or no version info available
+    Current,
+    /// Patch version behind (e.g. 1.3.38 vs 1.3.39)
+    PatchBehind,
+    /// Minor version behind (e.g. 1.2.0 vs 1.3.0)
+    MinorBehind,
+    /// Major version behind (e.g. 0.9.0 vs 1.0.0)
+    MajorBehind,
+}
+
+/// Compare a client version against the server version.
+/// Returns the staleness level.
+fn version_staleness(client: &str, server: &str) -> VersionStaleness {
+    let parse = |s: &str| -> Option<(u64, u64, u64)> {
+        let mut parts = s.split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        let patch = parts.next()?.parse().ok()?;
+        Some((major, minor, patch))
+    };
+    let Some((cm, cmi, cp)) = parse(client) else {
+        return VersionStaleness::Current;
+    };
+    let Some((sm, smi, sp)) = parse(server) else {
+        return VersionStaleness::Current;
+    };
+    if cm < sm {
+        VersionStaleness::MajorBehind
+    } else if cmi < smi {
+        VersionStaleness::MinorBehind
+    } else if cp < sp {
+        VersionStaleness::PatchBehind
+    } else {
+        VersionStaleness::Current
+    }
+}
+
 /// Props for the SessionRail component
 #[derive(Properties, PartialEq)]
 pub struct SessionRailProps {
@@ -168,6 +207,9 @@ pub struct SessionRailProps {
     pub nav_mode: bool,
     #[prop_or_default]
     pub activity_timestamps: ActivityRef,
+    /// Server version string for comparing against client versions
+    #[prop_or_default]
+    pub server_version: String,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
     pub on_toggle_pause: Callback<Uuid>,
@@ -577,6 +619,33 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 {
                     if session.agent_type == shared::AgentType::Codex {
                         html! { <span class="pill-agent-badge codex">{ "Codex" }</span> }
+                    } else {
+                        html! {}
+                    }
+                }
+                {
+                    if let Some(ref cv) = session.client_version {
+                        if !props.server_version.is_empty() {
+                            let staleness = version_staleness(cv, &props.server_version);
+                            let badge_class = match staleness {
+                                VersionStaleness::Current => "",
+                                VersionStaleness::PatchBehind => "version-patch",
+                                VersionStaleness::MinorBehind => "version-minor",
+                                VersionStaleness::MajorBehind => "version-major",
+                            };
+                            if !badge_class.is_empty() {
+                                html! {
+                                    <span class={classes!("pill-version-badge", badge_class)}
+                                        title={format!("Client v{} (server v{})", cv, props.server_version)}>
+                                        { format!("v{}", cv) }
+                                    </span>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        } else {
+                            html! {}
+                        }
                     } else {
                         html! {}
                     }

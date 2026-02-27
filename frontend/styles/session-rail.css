@@ -298,6 +298,30 @@
     background: rgba(0, 170, 68, 0.15);
 }
 
+/* Version staleness badge */
+.pill-version-badge {
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.pill-version-badge.version-patch {
+    color: #e0af68;
+    background: rgba(224, 175, 104, 0.15);
+}
+
+.pill-version-badge.version-minor {
+    color: #ff9e64;
+    background: rgba(255, 158, 100, 0.15);
+}
+
+.pill-version-badge.version-major {
+    color: #f7768e;
+    background: rgba(247, 118, 142, 0.15);
+}
+
 /* Pill menu toggle (▼ button) */
 .pill-menu-toggle {
     background: transparent;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.40
+
+- Show proxy version badge in session pill, color-coded by staleness
+
 ## 1.3.38
 
 - Add "Add machine" button to launch dialog for setting up new launchers

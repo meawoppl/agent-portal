@@ -675,6 +675,7 @@ pub fn dashboard_page() -> Html {
                         connected_sessions={(*connected_sessions).clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
+                        server_version={(*server_version).clone()}
                         on_select={on_select_session.clone()}
                         on_leave={on_leave.clone()}
                         on_toggle_pause={on_toggle_pause.clone()}

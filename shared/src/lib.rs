@@ -205,6 +205,9 @@ pub struct SessionInfo {
     /// Which agent CLI backs this session (claude or codex)
     #[serde(default)]
     pub agent_type: AgentType,
+    /// Proxy client version string (e.g. "1.3.39")
+    #[serde(default)]
+    pub client_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
