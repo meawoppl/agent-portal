@@ -26,6 +26,7 @@ pub struct RegistrationParams<'a> {
     pub hostname: &'a str,
     pub launcher_id: Option<Uuid>,
     pub agent_type: AgentType,
+    pub repo_url: &'a Option<String>,
 }
 
 /// Register or update a session in the database.
@@ -82,6 +83,7 @@ pub fn register_or_update_session(
                 sessions::git_branch.eq(params.git_branch),
                 sessions::client_version.eq(params.client_version),
                 sessions::hostname.eq(params.hostname),
+                sessions::repo_url.eq(params.repo_url),
             ))
             .execute(&mut conn)
         {
@@ -146,6 +148,7 @@ fn create_new_session(
         hostname: params.hostname.to_string(),
         launcher_id: params.launcher_id,
         agent_type: params.agent_type.as_str().to_string(),
+        repo_url: params.repo_url.clone(),
     };
 
     match diesel::insert_into(sessions::table)

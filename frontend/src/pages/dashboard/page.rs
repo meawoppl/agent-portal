@@ -497,11 +497,17 @@ pub fn dashboard_page() -> Html {
         let set_sessions = sessions_hook.set_sessions.clone();
         let sessions = sessions.clone();
         Callback::from(
-            move |(session_id, branch, pr_url): (Uuid, Option<String>, Option<String>)| {
+            move |(session_id, branch, pr_url, repo_url): (
+                Uuid,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )| {
                 let mut updated = sessions.clone();
                 if let Some(session) = updated.iter_mut().find(|s| s.id == session_id) {
                     session.git_branch = branch;
                     session.pr_url = pr_url;
+                    session.repo_url = repo_url;
                 }
                 set_sessions.emit(updated);
             },

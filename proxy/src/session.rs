@@ -98,6 +98,7 @@ pub async fn register_with_backend(
         hostname: Some(hostname),
         launcher_id: config.launcher_id,
         agent_type: config.agent_type,
+        repo_url: get_repo_url(&config.working_directory),
     });
 
     if let Err(e) = conn.send(&register_msg).await {
@@ -181,6 +182,22 @@ pub fn get_git_branch(cwd: &str) -> Option<String> {
     } else {
         Some(branch)
     }
+}
+
+/// Get the GitHub repository URL using the `gh` CLI.
+pub fn get_repo_url(cwd: &str) -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["repo", "view", "--json", "url", "-q", ".url"])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Events produced by the WebSocket reader for the shim's select loop.

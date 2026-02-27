@@ -202,6 +202,9 @@ pub struct SessionInfo {
     /// GitHub PR URL for the current branch
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// GitHub repository URL
+    #[serde(default)]
+    pub repo_url: Option<String>,
     /// Which agent CLI backs this session (claude or codex)
     #[serde(default)]
     pub agent_type: AgentType,

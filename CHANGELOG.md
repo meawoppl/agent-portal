@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.41
+
+- Add repo URL to pill menu with 3-state display: PR link, repo link, or "No Repository Detected"
+- Proxy detects GitHub repo URL via `gh repo view` and sends it alongside branch/PR info
+
 ## 1.3.40
 
 - Review and update all docs for accuracy across 15 files
