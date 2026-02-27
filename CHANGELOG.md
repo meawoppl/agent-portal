@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.42
+
+- Detect subagent task completion via tool_result fallback when task_notification is missing (--print mode)
+
 ## 1.3.41
 
 - Add repo URL to pill menu with 3-state display: PR link, repo link, or "No Repository Detected"
