@@ -3,6 +3,16 @@
 //! Restricted to users with is_admin=true. Provides system overview,
 //! user management, and session management capabilities.
 
+mod overview_tab;
+mod raw_messages_tab;
+mod sessions_tab;
+mod users_tab;
+
+use overview_tab::AdminOverviewTab;
+use raw_messages_tab::AdminRawMessagesTab;
+use sessions_tab::AdminSessionsTab;
+use users_tab::AdminUsersTab;
+
 use crate::utils;
 use crate::Route;
 use gloo_net::http::Request;
@@ -24,34 +34,34 @@ enum AdminTab {
 }
 
 // ============================================================================
-// API Response Types
+// API Response Types (shared across tabs)
 // ============================================================================
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminStats {
-    total_users: i64,
-    admin_users: i64,
-    disabled_users: i64,
-    total_sessions: i64,
-    active_sessions: i64,
-    connected_proxy_clients: usize,
-    connected_web_clients: usize,
-    total_spend_usd: f64,
-    total_input_tokens: i64,
-    total_output_tokens: i64,
+pub struct AdminStats {
+    pub total_users: i64,
+    pub admin_users: i64,
+    pub disabled_users: i64,
+    pub total_sessions: i64,
+    pub active_sessions: i64,
+    pub connected_proxy_clients: usize,
+    pub connected_web_clients: usize,
+    pub total_spend_usd: f64,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminUserInfo {
-    id: Uuid,
-    email: String,
-    name: Option<String>,
-    is_admin: bool,
-    disabled: bool,
-    voice_enabled: bool,
-    created_at: String,
-    session_count: i64,
-    total_spend_usd: f64,
+pub struct AdminUserInfo {
+    pub id: Uuid,
+    pub email: String,
+    pub name: Option<String>,
+    pub is_admin: bool,
+    pub disabled: bool,
+    pub voice_enabled: bool,
+    pub created_at: String,
+    pub session_count: i64,
+    pub total_spend_usd: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -60,18 +70,18 @@ struct AdminUsersResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminSessionInfo {
-    id: Uuid,
-    user_email: String,
-    session_name: String,
-    working_directory: String,
-    git_branch: Option<String>,
-    status: String,
-    total_cost_usd: f64,
-    last_activity: String,
-    is_connected: bool,
+pub struct AdminSessionInfo {
+    pub id: Uuid,
+    pub user_email: String,
+    pub session_name: String,
+    pub working_directory: String,
+    pub git_branch: Option<String>,
+    pub status: String,
+    pub total_cost_usd: f64,
+    pub last_activity: String,
+    pub is_connected: bool,
     #[serde(default)]
-    hostname: String,
+    pub hostname: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,273 +90,18 @@ struct AdminSessionsResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-struct RawMessageLogInfo {
-    id: Uuid,
-    session_id: Option<Uuid>,
-    message_content: serde_json::Value,
-    message_source: String,
-    render_reason: Option<String>,
-    created_at: String,
+pub struct RawMessageLogInfo {
+    pub id: Uuid,
+    pub session_id: Option<Uuid>,
+    pub message_content: serde_json::Value,
+    pub message_source: String,
+    pub render_reason: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct RawMessagesResponse {
     logs: Vec<RawMessageLogInfo>,
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Format token count with K/M suffix for readability
-fn format_tokens(count: i64) -> String {
-    if count >= 1_000_000 {
-        format!("{:.1}M", count as f64 / 1_000_000.0)
-    } else if count >= 1_000 {
-        format!("{:.1}K", count as f64 / 1_000.0)
-    } else {
-        count.to_string()
-    }
-}
-
-// ============================================================================
-// Stats Card Component
-// ============================================================================
-
-#[derive(Properties, PartialEq)]
-struct StatCardProps {
-    label: String,
-    value: String,
-    #[prop_or_default]
-    subvalue: Option<String>,
-    #[prop_or_default]
-    class: Option<String>,
-}
-
-#[function_component(StatCard)]
-fn stat_card(props: &StatCardProps) -> Html {
-    let class = classes!("admin-stat-card", props.class.clone());
-    html! {
-        <div class={class}>
-            <div class="stat-value">{ &props.value }</div>
-            <div class="stat-label">{ &props.label }</div>
-            {
-                if let Some(ref sub) = props.subvalue {
-                    html! { <div class="stat-subvalue">{ sub }</div> }
-                } else {
-                    html! {}
-                }
-            }
-        </div>
-    }
-}
-
-// ============================================================================
-// User Row Component
-// ============================================================================
-
-#[derive(Properties, PartialEq)]
-struct UserRowProps {
-    user: AdminUserInfo,
-    on_toggle_admin: Callback<Uuid>,
-    on_toggle_disabled: Callback<Uuid>,
-    on_toggle_voice: Callback<Uuid>,
-    current_user_id: Uuid,
-}
-
-#[function_component(UserRow)]
-fn user_row(props: &UserRowProps) -> Html {
-    let user = &props.user;
-    let is_self = user.id == props.current_user_id;
-
-    let on_toggle_admin = {
-        let callback = props.on_toggle_admin.clone();
-        let user_id = user.id;
-        Callback::from(move |_: MouseEvent| callback.emit(user_id))
-    };
-
-    let on_toggle_disabled = {
-        let callback = props.on_toggle_disabled.clone();
-        let user_id = user.id;
-        Callback::from(move |_: MouseEvent| callback.emit(user_id))
-    };
-
-    let on_toggle_voice = {
-        let callback = props.on_toggle_voice.clone();
-        let user_id = user.id;
-        Callback::from(move |_: MouseEvent| callback.emit(user_id))
-    };
-
-    let status_class = if user.disabled {
-        "user-status disabled"
-    } else if user.is_admin {
-        "user-status admin"
-    } else {
-        "user-status active"
-    };
-
-    let status_text = if user.disabled {
-        "Disabled"
-    } else if user.is_admin {
-        "Admin"
-    } else {
-        "User"
-    };
-
-    html! {
-        <tr class={classes!(if is_self { Some("self-row") } else { None })}>
-            <td class="user-email">
-                { &user.email }
-                { if is_self { html! { <span class="you-badge">{ "(you)" }</span> } } else { html! {} } }
-            </td>
-            <td>{ user.name.as_deref().unwrap_or("-") }</td>
-            <td class={status_class}>{ status_text }</td>
-            <td class="numeric">{ user.session_count }</td>
-            <td class="numeric">{ utils::format_dollars(user.total_spend_usd) }</td>
-            <td class="timestamp">{ utils::format_timestamp(&user.created_at) }</td>
-            <td class="actions">
-                <button
-                    class={classes!("admin-toggle", if user.is_admin { Some("active") } else { None })}
-                    onclick={on_toggle_admin}
-                    disabled={is_self}
-                    title={if is_self { "Cannot change your own admin status" } else if user.is_admin { "Remove admin" } else { "Make admin" }}
-                >
-                    { if user.is_admin { "Remove Admin" } else { "Make Admin" } }
-                </button>
-                <button
-                    class={classes!("ban-toggle", if user.disabled { Some("active") } else { None })}
-                    onclick={on_toggle_disabled}
-                    disabled={is_self}
-                    title={if is_self { "Cannot ban your own account" } else if user.disabled { "Unban user" } else { "Ban user" }}
-                >
-                    { if user.disabled { "Unban" } else { "Ban" } }
-                </button>
-                <button
-                    class={classes!("voice-toggle", if user.voice_enabled { Some("active") } else { None })}
-                    onclick={on_toggle_voice}
-                    title={if user.voice_enabled { "Disable voice input" } else { "Enable voice input" }}
-                >
-                    { if user.voice_enabled { "Voice: On" } else { "Voice: Off" } }
-                </button>
-            </td>
-        </tr>
-    }
-}
-
-// ============================================================================
-// Session Row Component
-// ============================================================================
-
-#[derive(Properties, PartialEq)]
-struct SessionRowProps {
-    session: AdminSessionInfo,
-    on_delete: Callback<Uuid>,
-}
-
-#[function_component(SessionRow)]
-fn session_row(props: &SessionRowProps) -> Html {
-    let session = &props.session;
-
-    let on_delete = {
-        let callback = props.on_delete.clone();
-        let session_id = session.id;
-        Callback::from(move |_: MouseEvent| callback.emit(session_id))
-    };
-
-    let status_class = if session.is_connected {
-        "session-status connected"
-    } else if session.status == "active" {
-        "session-status active"
-    } else {
-        "session-status disconnected"
-    };
-
-    let status_text = if session.is_connected {
-        "Connected"
-    } else {
-        &session.status
-    };
-
-    let hostname = &session.hostname;
-    let project_name = utils::extract_folder(&session.working_directory);
-
-    html! {
-        <tr>
-            <td class="session-user">{ &session.user_email }</td>
-            <td class="session-hostname">{ hostname }</td>
-            <td class="session-project">{ project_name }</td>
-            <td class="session-branch">{ session.git_branch.as_deref().unwrap_or("-") }</td>
-            <td class={status_class}>{ status_text }</td>
-            <td class="numeric">{ utils::format_dollars(session.total_cost_usd) }</td>
-            <td class="timestamp">{ utils::format_timestamp(&session.last_activity) }</td>
-            <td class="actions">
-                <button class="delete-btn" onclick={on_delete} title="Delete session">
-                    { "Delete" }
-                </button>
-            </td>
-        </tr>
-    }
-}
-
-// ============================================================================
-// Raw Message Row Component
-// ============================================================================
-
-#[derive(Properties, PartialEq)]
-struct RawMessageRowProps {
-    message: RawMessageLogInfo,
-    on_delete: Callback<Uuid>,
-    on_view: Callback<RawMessageLogInfo>,
-}
-
-#[function_component(RawMessageRow)]
-fn raw_message_row(props: &RawMessageRowProps) -> Html {
-    let msg = &props.message;
-
-    let on_delete = {
-        let callback = props.on_delete.clone();
-        let msg_id = msg.id;
-        Callback::from(move |_: MouseEvent| callback.emit(msg_id))
-    };
-
-    let on_view = {
-        let callback = props.on_view.clone();
-        let message = msg.clone();
-        Callback::from(move |_: MouseEvent| callback.emit(message.clone()))
-    };
-
-    // Get message type from content if available
-    let msg_type = msg
-        .message_content
-        .get("type")
-        .and_then(|t| t.as_str())
-        .unwrap_or("unknown");
-
-    // Truncate session ID for display
-    let session_id_display = msg
-        .session_id
-        .map(|id| format!("{}...", &id.to_string()[..8]))
-        .unwrap_or_else(|| "-".to_string());
-
-    html! {
-        <tr>
-            <td class="timestamp">{ utils::format_timestamp(&msg.created_at) }</td>
-            <td class="raw-msg-type">{ msg_type }</td>
-            <td class="raw-msg-source">{ &msg.message_source }</td>
-            <td class="raw-msg-reason">{ msg.render_reason.as_deref().unwrap_or("-") }</td>
-            <td class="raw-msg-session" title={msg.session_id.map(|id| id.to_string()).unwrap_or_default()}>
-                { session_id_display }
-            </td>
-            <td class="actions">
-                <button class="view-btn" onclick={on_view} title="View message content">
-                    { "View" }
-                </button>
-                <button class="delete-btn" onclick={on_delete} title="Delete">
-                    { "Delete" }
-                </button>
-            </td>
-        </tr>
-    }
 }
 
 // ============================================================================
@@ -987,156 +742,36 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                 {
                                     match *active_tab {
                                         AdminTab::Overview => {
-                                            if let Some(ref s) = *stats {
-                                                html! {
-                                                    <div class="admin-overview">
-                                                        <div class="stats-grid">
-                                                            <StatCard
-                                                                label="Total Users"
-                                                                value={s.total_users.to_string()}
-                                                                subvalue={Some(format!("{} admins, {} disabled", s.admin_users, s.disabled_users))}
-                                                            />
-                                                            <StatCard
-                                                                label="Total Sessions"
-                                                                value={s.total_sessions.to_string()}
-                                                                subvalue={Some(format!("{} active", s.active_sessions))}
-                                                            />
-                                                            <StatCard
-                                                                label="Connected Clients"
-                                                                value={format!("{}", s.connected_proxy_clients + s.connected_web_clients)}
-                                                                subvalue={Some(format!("{} proxy, {} web", s.connected_proxy_clients, s.connected_web_clients))}
-                                                            />
-                                                            <StatCard
-                                                                label="Total API Spend"
-                                                                value={utils::format_dollars(s.total_spend_usd)}
-                                                                class="spend-card"
-                                                            />
-                                                            <StatCard
-                                                                label="Input Tokens"
-                                                                value={format_tokens(s.total_input_tokens)}
-                                                            />
-                                                            <StatCard
-                                                                label="Output Tokens"
-                                                                value={format_tokens(s.total_output_tokens)}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                }
-                                            } else {
-                                                html! { <p>{ "No stats available" }</p> }
+                                            html! {
+                                                <AdminOverviewTab stats={(*stats).clone()} />
                                             }
                                         }
                                         AdminTab::Users => {
                                             html! {
-                                                <div class="admin-users">
-                                                    <table class="admin-table">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>{ "Email" }</th>
-                                                                <th>{ "Name" }</th>
-                                                                <th>{ "Status" }</th>
-                                                                <th>{ "Sessions" }</th>
-                                                                <th>{ "Spend" }</th>
-                                                                <th>{ "Created" }</th>
-                                                                <th>{ "Actions" }</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {
-                                                                users.iter().map(|user| {
-                                                                    html! {
-                                                                        <UserRow
-                                                                            key={user.id.to_string()}
-                                                                            user={user.clone()}
-                                                                            on_toggle_admin={on_toggle_admin.clone()}
-                                                                            on_toggle_disabled={on_toggle_disabled.clone()}
-                                                                            on_toggle_voice={on_toggle_voice.clone()}
-                                                                            current_user_id={current_user_id.unwrap_or_default()}
-                                                                        />
-                                                                    }
-                                                                }).collect::<Html>()
-                                                            }
-                                                        </tbody>
-                                                    </table>
-                                                </div>
+                                                <AdminUsersTab
+                                                    users={(*users).clone()}
+                                                    on_toggle_admin={on_toggle_admin.clone()}
+                                                    on_toggle_disabled={on_toggle_disabled.clone()}
+                                                    on_toggle_voice={on_toggle_voice.clone()}
+                                                    current_user_id={current_user_id.unwrap_or_default()}
+                                                />
                                             }
                                         }
                                         AdminTab::Sessions => {
                                             html! {
-                                                <div class="admin-sessions">
-                                                    <table class="admin-table">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>{ "User" }</th>
-                                                                <th>{ "Hostname" }</th>
-                                                                <th>{ "Project" }</th>
-                                                                <th>{ "Branch" }</th>
-                                                                <th>{ "Status" }</th>
-                                                                <th>{ "Cost" }</th>
-                                                                <th>{ "Last Activity" }</th>
-                                                                <th>{ "Actions" }</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {
-                                                                sessions.iter().map(|session| {
-                                                                    html! {
-                                                                        <SessionRow
-                                                                            key={session.id.to_string()}
-                                                                            session={session.clone()}
-                                                                            on_delete={on_delete_session.clone()}
-                                                                        />
-                                                                    }
-                                                                }).collect::<Html>()
-                                                            }
-                                                        </tbody>
-                                                    </table>
-                                                </div>
+                                                <AdminSessionsTab
+                                                    sessions={(*sessions).clone()}
+                                                    on_delete={on_delete_session.clone()}
+                                                />
                                             }
                                         }
                                         AdminTab::RawMessages => {
                                             html! {
-                                                <div class="admin-raw-messages">
-                                                    <p class="raw-messages-description">
-                                                        { "Messages that failed to parse and were rendered as raw JSON are logged here for debugging." }
-                                                    </p>
-                                                    {
-                                                        if raw_messages.is_empty() {
-                                                            html! {
-                                                                <p class="no-raw-messages">{ "No raw messages logged yet." }</p>
-                                                            }
-                                                        } else {
-                                                            html! {
-                                                                <table class="admin-table">
-                                                                    <thead>
-                                                                        <tr>
-                                                                            <th>{ "Time" }</th>
-                                                                            <th>{ "Type" }</th>
-                                                                            <th>{ "Source" }</th>
-                                                                            <th>{ "Reason" }</th>
-                                                                            <th>{ "Session" }</th>
-                                                                            <th>{ "Actions" }</th>
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody>
-                                                                        {
-                                                                            raw_messages.iter().map(|msg| {
-                                                                                html! {
-                                                                                    <RawMessageRow
-                                                                                        key={msg.id.to_string()}
-                                                                                        message={msg.clone()}
-                                                                                        on_delete={on_delete_raw_message.clone()}
-                                                                                        on_view={on_view_raw_message.clone()}
-                                                                                    />
-                                                                                }
-                                                                            }).collect::<Html>()
-                                                                        }
-                                                                    </tbody>
-                                                                </table>
-                                                            }
-                                                        }
-                                                    }
-                                                </div>
+                                                <AdminRawMessagesTab
+                                                    raw_messages={(*raw_messages).clone()}
+                                                    on_delete={on_delete_raw_message.clone()}
+                                                    on_view={on_view_raw_message.clone()}
+                                                />
                                             }
                                         }
                                     }
@@ -1212,7 +847,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                             <div class="modal-content raw-message-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
                                 <div class="raw-message-modal-header">
                                     <h3>{ "Raw Message Content" }</h3>
-                                    <button class="modal-close" onclick={on_close_raw_message_viewer.clone()}>{ "×" }</button>
+                                    <button class="modal-close" onclick={on_close_raw_message_viewer.clone()}>{ "\u{00d7}" }</button>
                                 </div>
                                 <div class="raw-message-modal-meta">
                                     <span><strong>{ "Source: " }</strong>{ &msg.message_source }</span>
