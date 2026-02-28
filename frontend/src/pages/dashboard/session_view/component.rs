@@ -442,6 +442,25 @@ impl Component for SessionView {
                                 }
                             }
                         }
+                        // Fallback: detect task completion from tool_result in user messages
+                        if let shared::ClaudeOutput::User(user_msg) = &claude_msg {
+                            for block in &user_msg.message.content {
+                                if let shared::ContentBlock::ToolResult(tr) = block {
+                                    if let Some(task_id) =
+                                        self.tool_use_to_task.get(&tr.tool_use_id)
+                                    {
+                                        if let Some(entry) = self.active_tasks.get_mut(task_id) {
+                                            if entry.status == TaskStatus::Running {
+                                                entry.status = TaskStatus::Completed;
+                                                let ts = js_sys::Date::parse(&msg.created_at);
+                                                entry.completed_at =
+                                                    Some(if ts.is_finite() { ts } else { 0.0 });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } else if let Ok(parsed) =
                         serde_json::from_str::<serde_json::Value>(&msg.content)
                     {
