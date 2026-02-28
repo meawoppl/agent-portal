@@ -78,6 +78,10 @@ impl ProcessManager {
         claude_args: &[String],
         agent_type: shared::AgentType,
     ) -> anyhow::Result<Uuid> {
+        // Enforce the concurrency cap. Each session is a long-lived Claude CLI
+        // process consuming memory, CPU, and a WebSocket connection. Without a
+        // limit, a burst of launch requests could starve the host of resources
+        // and degrade every running session.
         if self.tasks.len() >= self.max_sessions {
             anyhow::bail!(
                 "At session limit ({}/{})",

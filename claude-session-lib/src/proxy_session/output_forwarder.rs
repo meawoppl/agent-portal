@@ -537,7 +537,7 @@ fn log_claude_output(output: &ClaudeOutput) {
         ClaudeOutput::RateLimitEvent(evt) => {
             let info = &evt.rate_limit_info;
             debug!(
-                "← [rate_limit_event] status={} type={} resets_at={} utilization={:?} overage={}",
+                "← [rate_limit_event] status={} type={:?} resets_at={:?} utilization={:?} overage={}",
                 info.status,
                 info.rate_limit_type,
                 info.resets_at,

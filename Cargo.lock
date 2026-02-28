@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "1.3.40"
+version = "1.3.45"
 dependencies = [
  "anyhow",
  "chrono",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "1.3.40"
+version = "1.3.45"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -665,9 +665,9 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.49"
+version = "2.1.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa5e97c9d81a15c91bb9ad7b588f5c16c07aa08abe64128c68b27dc4993e9f3d"
+checksum = "3b6ec8a841ec95644b5cfaa2545e7a79fd74483bcc131cd94777271e3d3cdd3e"
 dependencies = [
  "anyhow",
  "chrono",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "1.3.40"
+version = "1.3.45"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -736,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "cli-tools"
-version = "1.3.40"
+version = "1.3.45"
 dependencies = [
  "anyhow",
  "clap",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "1.3.40"
+version = "1.3.45"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -3958,7 +3958,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "1.3.40"
+version = "1.3.45"
 dependencies = [
  "chrono",
  "claude-codes",

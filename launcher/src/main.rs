@@ -24,7 +24,11 @@ struct Args {
     #[arg(long)]
     name: Option<String>,
 
-    /// Maximum concurrent sessions
+    /// Maximum concurrent sessions. Each session spawns a Claude CLI child
+    /// process with its own memory and CPU footprint, so unbounded concurrency
+    /// can exhaust system resources and degrade performance for every session.
+    /// The default of 20 is a conservative starting point for a typical
+    /// developer machine; tune upward on larger hosts if needed.
     #[arg(long, default_value_t = 20)]
     max_sessions: usize,
 

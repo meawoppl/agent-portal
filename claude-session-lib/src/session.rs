@@ -267,8 +267,46 @@ impl Session {
                             }
                         }
                         Err(e) => {
+                            // Deserialization errors are non-fatal: the CLI sent a message
+                            // we don't understand yet. Wrap in a portal message so the
+                            // frontend renders it cleanly, and keep the session alive.
+                            if let claude_codes::Error::Deserialization(ref parse_err) = e {
+                                tracing::warn!(
+                                    "Unparsable message from CLI (session continues): {}",
+                                    parse_err.error_message
+                                );
+
+                                let raw_display = parse_err
+                                    .raw_json
+                                    .as_ref()
+                                    .and_then(|v| serde_json::to_string_pretty(v).ok())
+                                    .unwrap_or_else(|| parse_err.error_message.clone());
+
+                                let portal_json = serde_json::json!({
+                                    "type": "portal",
+                                    "content": [{
+                                        "type": "text",
+                                        "text": format!(
+                                            "Received an unrecognized message from the agent CLI. \
+                                            The session will continue normally.\n\n\
+                                            {}\n\n\
+                                            If you believe this is a bug, please report it at:\n\
+                                            https://github.com/meawoppl/rust-code-agent-sdks/issues",
+                                            raw_display
+                                        )
+                                    }]
+                                });
+                                let _ = event_tx.send(IoEvent::RawOutput(portal_json));
+                                continue;
+                            }
+
                             let err_str = e.to_string();
                             if err_str.contains("exit") || err_str.contains("terminated") {
+                                let _ = event_tx.send(IoEvent::Exited { code: 1 });
+                                break;
+                            }
+                            // Connection closed is fatal
+                            if matches!(e, claude_codes::Error::ConnectionClosed) {
                                 let _ = event_tx.send(IoEvent::Exited { code: 1 });
                                 break;
                             }

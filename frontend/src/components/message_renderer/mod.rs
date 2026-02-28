@@ -203,10 +203,17 @@ fn render_raw_json(json: &str) -> Html {
     html! {
         <div class="claude-message raw-message">
             <div class="message-header">
-                <span class="message-type-badge raw">{ "Raw" }</span>
+                <span class="message-type-badge raw">{ "Unrecognized Message" }</span>
             </div>
             <div class="message-body">
                 <pre class="raw-json">{ display }</pre>
+                <p class="raw-message-hint">
+                    { "This message type is not yet supported by the portal. " }
+                    <a href="https://github.com/meawoppl/rust-code-agent-sdks/issues"
+                       target="_blank" rel="noopener noreferrer">
+                        { "Report this issue" }
+                    </a>
+                </p>
             </div>
         </div>
     }

@@ -394,21 +394,52 @@ impl Component for SessionView {
                                 entry.total_tokens = Some(progress.usage.total_tokens);
                             } else if let Some(notif) = sys.as_task_notification() {
                                 msg_type = "task_end".to_string();
-                                if let Some(entry) = self.active_tasks.get_mut(&notif.task_id) {
-                                    entry.status = match notif.status {
-                                        shared::CCTaskStatus::Failed => TaskStatus::Failed,
-                                        _ => TaskStatus::Completed,
-                                    };
-                                    let ts = js_sys::Date::parse(&msg.created_at);
-                                    entry.completed_at =
-                                        Some(if ts.is_finite() { ts } else { 0.0 });
-                                    if let Some(usage) = &notif.usage {
-                                        entry.duration_ms = Some(usage.duration_ms);
-                                        entry.tool_uses = Some(usage.tool_uses);
-                                        entry.total_tokens = Some(usage.total_tokens);
+                                let ts = js_sys::Date::parse(&msg.created_at);
+                                let completed_at = if ts.is_finite() { ts } else { 0.0 };
+                                let entry = self
+                                    .active_tasks
+                                    .entry(notif.task_id.clone())
+                                    .or_insert_with(|| TaskEntry {
+                                        task_type: "local_agent".to_string(),
+                                        description: notif.summary.clone(),
+                                        started_at: completed_at,
+                                        status: TaskStatus::Running,
+                                        duration_ms: None,
+                                        tool_uses: None,
+                                        total_tokens: None,
+                                        completed_at: None,
+                                        current_activity: None,
+                                        last_tool_name: None,
+                                    });
+                                entry.status = match notif.status {
+                                    shared::CCTaskStatus::Completed => TaskStatus::Completed,
+                                    shared::CCTaskStatus::Failed => TaskStatus::Failed,
+                                };
+                                entry.completed_at = Some(completed_at);
+                                if let Some(usage) = &notif.usage {
+                                    entry.duration_ms = Some(usage.duration_ms);
+                                    entry.tool_uses = Some(usage.tool_uses);
+                                    entry.total_tokens = Some(usage.total_tokens);
+                                }
+                            }
+                        }
+                        // Fallback: detect task completion from tool_result in user messages
+                        if let shared::ClaudeOutput::User(user_msg) = &claude_msg {
+                            for block in &user_msg.message.content {
+                                if let shared::ContentBlock::ToolResult(tr) = block {
+                                    if let Some(task_id) =
+                                        self.tool_use_to_task.get(&tr.tool_use_id)
+                                    {
+                                        if let Some(entry) = self.active_tasks.get_mut(task_id) {
+                                            if entry.status == TaskStatus::Running {
+                                                entry.status = TaskStatus::Completed;
+                                                let ts = js_sys::Date::parse(&msg.created_at);
+                                                entry.completed_at =
+                                                    Some(if ts.is_finite() { ts } else { 0.0 });
+                                            }
+                                        }
                                     }
                                 }
-                                // If we never saw task_started (truncated), just ignore the notification
                             }
                         }
                         // Fallback: detect task completion from tool_result in user messages
@@ -1155,8 +1186,8 @@ impl SessionView {
                                 last_tool_name: None,
                             });
                         entry.status = match notif.status {
+                            shared::CCTaskStatus::Completed => TaskStatus::Completed,
                             shared::CCTaskStatus::Failed => TaskStatus::Failed,
-                            _ => TaskStatus::Completed,
                         };
                         entry.completed_at = Some(js_sys::Date::now());
                         if let Some(usage) = &notif.usage {

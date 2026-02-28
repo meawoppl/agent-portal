@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.44
+
+- Break up settings.rs into sub-components (TokensPanel, SessionsPanel, SoundsPanel)
+
+## 1.3.43
+
+- Update claude-codes to 2.1.51 (typed enums for message fields)
+- Handle unparsable CLI messages gracefully instead of crashing sessions
+
 ## 1.3.42
 
 - Detect subagent task completion via tool_result fallback when task_notification is missing (--print mode)
@@ -11,7 +20,10 @@
 
 ## 1.3.40
 
+- Break up admin.rs into sub-components per tab (overview, users, sessions, raw messages)
 - Review and update all docs for accuracy across 15 files
+- Fix subagent completion handling in history loading path to preserve task data
+- Replace catch-all status mapping with explicit CCTaskStatus variant matching
 
 ## 1.3.38
 
