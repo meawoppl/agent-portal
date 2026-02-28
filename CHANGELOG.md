@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.46
+
+- Show proxy version badge in session pill, color-coded by staleness
+
 ## 1.3.44
 
 - Break up settings.rs into sub-components (TokensPanel, SessionsPanel, SoundsPanel)

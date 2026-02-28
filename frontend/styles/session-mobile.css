@@ -103,6 +103,10 @@
         font-size: 0.6rem;
     }
 
+    .pill-version-badge {
+        font-size: 0.55rem;
+    }
+
     .pill-menu-toggle {
         padding: 0.35rem 0.45rem;
     }
