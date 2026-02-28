@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.3
+
+- Bake user's PATH into systemd/launchd service so spawned agents can find `claude`
+
 ## 2.0.2
 
 - Fix install script: `agent-portal install` → `agent-portal service install`
