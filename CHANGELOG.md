@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2
+
+- Fix install script: `agent-portal install` → `agent-portal service install`
+
 ## 2.0.1
 
 - Version bump to 2.0.1

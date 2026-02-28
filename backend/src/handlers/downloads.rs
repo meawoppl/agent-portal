@@ -192,7 +192,7 @@ echo "Installation complete!"
 echo ""
 echo "Next steps:"
 echo "  1. Log in:             agent-portal login"
-echo "  2. Install as service: agent-portal install"
+echo "  2. Install as service: agent-portal service install"
 echo ""
 echo "Or run directly:         agent-portal"
 "##
