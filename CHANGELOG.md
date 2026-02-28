@@ -16,6 +16,7 @@
 
 ## 1.3.40
 
+- Break up admin.rs into sub-components per tab (overview, users, sessions, raw messages)
 - Review and update all docs for accuracy across 15 files
 - Fix subagent completion handling in history loading path to preserve task data
 - Replace catch-all status mapping with explicit CCTaskStatus variant matching
