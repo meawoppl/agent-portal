@@ -95,6 +95,7 @@ The **portal** refers to the complete system: backend server, web frontend, and 
 | Platform | Status |
 |----------|--------|
 | Linux (x86_64) | Tested |
+| Linux (aarch64) | Builds in CI |
 | macOS (Apple Silicon) | Builds in CI |
 | macOS (Intel) | Builds in CI |
 | Windows (x86_64) | Builds in CI |

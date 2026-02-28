@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.49
+
+- Add Linux aarch64 support (CI builds, auto-update, install script)
+
 ## 1.3.48
 
 - Fix session reconnect race: old connection cleanup no longer overwrites newer connection's registration

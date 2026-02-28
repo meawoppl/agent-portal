@@ -69,9 +69,12 @@ else
                 x86_64|amd64)
                     BINARY_NAME="agent-portal-linux-x86_64"
                     ;;
+                aarch64|arm64)
+                    BINARY_NAME="agent-portal-linux-aarch64"
+                    ;;
                 *)
                     echo "Error: Unsupported Linux architecture: ${{ARCH}}"
-                    echo "Supported: x86_64"
+                    echo "Supported: x86_64, aarch64"
                     exit 1
                     ;;
             esac

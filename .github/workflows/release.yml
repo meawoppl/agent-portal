@@ -46,6 +46,43 @@ jobs:
           name: agent-portal-linux-x86_64
           path: target/release/agent-portal-linux-x86_64
 
+  build-linux-aarch64:
+    name: Build (Linux aarch64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-linux-aarch64"
+
+      - name: Build proxy
+        run: cargo build -p claude-portal --release
+
+      - name: Build launcher
+        run: cargo build -p agent-portal --release
+
+      - name: Rename binaries
+        run: |
+          mv target/release/claude-portal target/release/claude-portal-linux-aarch64
+          mv target/release/agent-portal target/release/agent-portal-linux-aarch64
+
+      - name: Upload proxy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-portal-linux-aarch64
+          path: target/release/claude-portal-linux-aarch64
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-portal-linux-aarch64
+          path: target/release/agent-portal-linux-aarch64
+
   build-macos-arm64:
     name: Build (macOS ARM64)
     runs-on: macos-14
@@ -171,7 +208,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-linux, build-macos-arm64, build-macos-intel, build-windows]
+    needs: [build-linux, build-linux-aarch64, build-macos-arm64, build-macos-intel, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -187,15 +224,17 @@ jobs:
         run: |
           mkdir -p release
           mv binaries/claude-portal-linux-x86_64/claude-portal-linux-x86_64 release/
+          mv binaries/claude-portal-linux-aarch64/claude-portal-linux-aarch64 release/
           mv binaries/claude-portal-darwin-aarch64/claude-portal-darwin-aarch64 release/
           mv binaries/claude-portal-darwin-x86_64/claude-portal-darwin-x86_64 release/
           mv binaries/claude-portal-windows-x86_64/claude-portal-windows-x86_64.exe release/
           mv binaries/agent-portal-linux-x86_64/agent-portal-linux-x86_64 release/
+          mv binaries/agent-portal-linux-aarch64/agent-portal-linux-aarch64 release/
           mv binaries/agent-portal-darwin-aarch64/agent-portal-darwin-aarch64 release/
           mv binaries/agent-portal-darwin-x86_64/agent-portal-darwin-x86_64 release/
           mv binaries/agent-portal-windows-x86_64/agent-portal-windows-x86_64.exe release/
-          chmod +x release/claude-portal-linux-x86_64 release/claude-portal-darwin-*
-          chmod +x release/agent-portal-linux-x86_64 release/agent-portal-darwin-*
+          chmod +x release/claude-portal-linux-* release/claude-portal-darwin-*
+          chmod +x release/agent-portal-linux-* release/agent-portal-darwin-*
           ls -la release/
 
       - name: Delete existing latest release
@@ -221,6 +260,7 @@ jobs:
             | Platform | Binary |
             |----------|--------|
             | Linux (x86_64) | `claude-portal-linux-x86_64` |
+            | Linux (aarch64) | `claude-portal-linux-aarch64` |
             | macOS (Apple Silicon M1+) | `claude-portal-darwin-aarch64` |
             | macOS (Intel) | `claude-portal-darwin-x86_64` |
             | Windows (x86_64) | `claude-portal-windows-x86_64.exe` |
@@ -229,15 +269,18 @@ jobs:
             | Platform | Binary |
             |----------|--------|
             | Linux (x86_64) | `agent-portal-linux-x86_64` |
+            | Linux (aarch64) | `agent-portal-linux-aarch64` |
             | macOS (Apple Silicon M1+) | `agent-portal-darwin-aarch64` |
             | macOS (Intel) | `agent-portal-darwin-x86_64` |
             | Windows (x86_64) | `agent-portal-windows-x86_64.exe` |
           files: |
             release/claude-portal-linux-x86_64
+            release/claude-portal-linux-aarch64
             release/claude-portal-darwin-aarch64
             release/claude-portal-darwin-x86_64
             release/claude-portal-windows-x86_64.exe
             release/agent-portal-linux-x86_64
+            release/agent-portal-linux-aarch64
             release/agent-portal-darwin-aarch64
             release/agent-portal-darwin-x86_64
             release/agent-portal-windows-x86_64.exe

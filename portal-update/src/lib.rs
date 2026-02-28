@@ -45,6 +45,8 @@ impl Platform {
     pub fn current(binary_prefix: &str) -> Self {
         let (os, arch) = if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
             ("linux", "x86_64")
+        } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+            ("linux", "aarch64")
         } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             ("darwin", "aarch64")
         } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
@@ -57,6 +59,7 @@ impl Platform {
 
         let binary_name = match (os, arch) {
             ("linux", "x86_64") => format!("{}-linux-x86_64", binary_prefix),
+            ("linux", "aarch64") => format!("{}-linux-aarch64", binary_prefix),
             ("darwin", "aarch64") => format!("{}-darwin-aarch64", binary_prefix),
             ("darwin", "x86_64") => format!("{}-darwin-x86_64", binary_prefix),
             ("windows", "x86_64") => format!("{}-windows-x86_64.exe", binary_prefix),

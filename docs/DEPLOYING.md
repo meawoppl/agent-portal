@@ -187,6 +187,7 @@ Admins can access the admin dashboard at `/admin` which provides:
 | Platform | Status | Notes |
 |----------|--------|-------|
 | Linux (x86_64) | Tested | Primary development platform |
+| Linux (aarch64) | Untested | Builds in CI, PRs welcome |
 | macOS (Apple Silicon) | Untested | Builds in CI, PRs welcome |
 | macOS (Intel) | Untested | Builds in CI, PRs welcome |
 | Windows (x86_64) | Untested | Builds in CI, PRs welcome |

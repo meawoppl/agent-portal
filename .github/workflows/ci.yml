@@ -184,6 +184,29 @@ jobs:
           name: proxy-linux-x86_64
           path: target/release/claude-portal
 
+  build-proxy-linux-aarch64:
+    name: Build Proxy (Linux aarch64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "proxy-linux-aarch64"
+
+      - name: Build proxy
+        run: cargo build -p claude-portal --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-linux-aarch64
+          path: target/release/claude-portal
+
   build-proxy-macos-arm64:
     name: Build Proxy (macOS ARM64)
     runs-on: macos-14
@@ -231,6 +254,29 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: launcher-linux-x86_64
+          path: target/release/agent-portal
+
+  build-launcher-linux-aarch64:
+    name: Build Launcher (Linux aarch64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "launcher-linux-aarch64"
+
+      - name: Build launcher
+        run: cargo build -p agent-portal --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-linux-aarch64
           path: target/release/agent-portal
 
   build-launcher-macos-arm64:
