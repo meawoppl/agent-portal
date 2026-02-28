@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.47
+
+- Fix oneshot drop race causing launcher sessions to not reconnect on server restart
+
 ## 1.3.46
 
 - Show proxy version badge in session pill, color-coded by staleness
