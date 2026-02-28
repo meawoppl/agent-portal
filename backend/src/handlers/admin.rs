@@ -597,7 +597,9 @@ pub async fn delete_session(
 
     // Remove from session manager (disconnect if connected)
     let session_key = session_id.to_string();
-    app_state.session_manager.unregister_session(&session_key);
+    app_state
+        .session_manager
+        .unregister_session(&session_key, None);
 
     // Delete session and all associated data, recording costs
     super::helpers::delete_session_with_data(&mut conn, &session, true)
