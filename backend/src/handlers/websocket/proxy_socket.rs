@@ -20,6 +20,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
 
     let mut session_key: Option<SessionId> = None;
     let mut db_session_id: Option<Uuid> = None;
+    let mut connection_gen: Option<u64> = None;
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -40,6 +41,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     &tx,
                     &mut session_key,
                     &mut db_session_id,
+                    &mut connection_gen,
                 );
             }
             Err(e) => {
@@ -49,26 +51,36 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
         }
     }
 
-    // Cleanup - mark session as disconnected in DB
-    if let Some(session_id) = db_session_id {
-        match db_pool.get() {
-            Ok(mut conn) => {
-                use crate::schema::sessions;
-                let _ = diesel::update(sessions::table.find(session_id))
-                    .set(sessions::status.eq("disconnected"))
-                    .execute(&mut conn);
-            }
-            Err(e) => {
-                error!(
-                    "Failed to get database connection for session disconnect cleanup: {}",
-                    e
-                );
+    // Cleanup — only if no newer connection has taken over this session.
+    // A reconnecting proxy may have already registered a new connection,
+    // in which case our generation will be stale and we must skip cleanup
+    // to avoid overwriting the new connection's state.
+    let is_stale = session_key
+        .as_ref()
+        .zip(connection_gen)
+        .is_some_and(|(key, gen)| !session_manager.is_current_connection(key, gen));
+
+    if !is_stale {
+        if let Some(session_id) = db_session_id {
+            match db_pool.get() {
+                Ok(mut conn) => {
+                    use crate::schema::sessions;
+                    let _ = diesel::update(sessions::table.find(session_id))
+                        .set(sessions::status.eq("disconnected"))
+                        .execute(&mut conn);
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to get database connection for session disconnect cleanup: {}",
+                        e
+                    );
+                }
             }
         }
-    }
 
-    if let Some(key) = session_key {
-        session_manager.unregister_session(&key);
+        if let Some(key) = session_key {
+            session_manager.unregister_session(&key, connection_gen);
+        }
     }
 
     send_task.abort();
@@ -83,6 +95,7 @@ fn handle_proxy_message(
     tx: &ProxySender,
     session_key: &mut Option<SessionId>,
     db_session_id: &mut Option<Uuid>,
+    connection_gen: &mut Option<u64>,
 ) {
     match proxy_msg {
         ProxyToServer::Register(shared::RegisterFields {
@@ -103,7 +116,8 @@ fn handle_proxy_message(
             let key = claude_session_id.to_string();
             *session_key = Some(key.clone());
 
-            session_manager.register_session(key.clone(), tx.clone());
+            let gen = session_manager.register_session(key.clone(), tx.clone());
+            *connection_gen = Some(gen);
 
             let params = RegistrationParams {
                 claude_session_id,

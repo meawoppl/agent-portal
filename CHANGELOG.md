@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.48
+
+- Fix session reconnect race: old connection cleanup no longer overwrites newer connection's registration
+
 ## 1.3.47
 
 - Fix oneshot drop race causing launcher sessions to not reconnect on server restart
