@@ -16,6 +16,7 @@ fn service_file_path() -> Result<std::path::PathBuf> {
 
 #[cfg(target_os = "linux")]
 fn generate_unit(binary_path: &str) -> String {
+    let path = std::env::var("PATH").unwrap_or_default();
     format!(
         r#"[Unit]
 Description=Agent Launcher
@@ -24,6 +25,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=PATH={path}
 ExecStart={binary_path} --no-update
 Restart=on-failure
 RestartSec=5
@@ -174,6 +176,7 @@ fn log_dir() -> String {
 #[cfg(target_os = "macos")]
 fn generate_plist(binary_path: &str) -> String {
     let log_dir = log_dir();
+    let path = std::env::var("PATH").unwrap_or_default();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -186,6 +189,11 @@ fn generate_plist(binary_path: &str) -> String {
         <string>{binary_path}</string>
         <string>--no-update</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{path}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
