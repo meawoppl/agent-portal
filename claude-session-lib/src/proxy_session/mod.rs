@@ -669,6 +669,12 @@ async fn run_message_loop(
     result
 }
 
+/// Receive from a oneshot, returning `Some(T)` on success or `None` if the sender was dropped.
+/// This prevents `tokio::select!` from treating a dropped sender as a valid signal.
+async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> {
+    rx.await.ok()
+}
+
 /// Run the main select loop
 ///
 /// The Claude session internally uses a dedicated drain task to continuously
@@ -698,7 +704,7 @@ async fn run_main_loop(
                 let _ = ws.send(ProxyToServer::Heartbeat).await;
             }
 
-            _ = &mut state.session_terminated_rx => {
+            Some(()) = recv_option(&mut state.session_terminated_rx) => {
                 info!("Session terminated by server");
                 return ConnectionResult::SessionTerminated;
             }
