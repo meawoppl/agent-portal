@@ -232,6 +232,27 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
+    let on_path_keydown = {
+        let dir = dir.clone();
+        let navigate_to = navigate_to.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Tab" {
+                let dirs: Vec<&DirectoryEntry> =
+                    dir.entries.iter().filter(|ent| ent.is_dir).collect();
+                if dirs.len() == 1 {
+                    e.prevent_default();
+                    let base = if (*dir.path).ends_with('/') {
+                        (*dir.path).clone()
+                    } else {
+                        parent_path(&dir.path)
+                    };
+                    let child = format!("{}{}/", base, dirs[0].name);
+                    navigate_to.emit(child);
+                }
+            }
+        })
+    };
+
     let on_launcher_change = {
         let selected_launcher = selected_launcher.clone();
         let show_install = show_install.clone();
@@ -388,12 +409,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             .iter()
             .map(|entry| {
                 if entry.is_dir {
-                    let mut child = (*dir.path).clone();
-                    if !child.ends_with('/') {
-                        child.push('/');
-                    }
-                    child.push_str(&entry.name);
-                    child.push('/');
+                    let base = if (*dir.path).ends_with('/') {
+                        (*dir.path).clone()
+                    } else {
+                        parent_path(&dir.path)
+                    };
+                    let child = format!("{}{}/", base, entry.name);
                     let onclick = {
                         let navigate_to = navigate_to.clone();
                         Callback::from(move |_: MouseEvent| navigate_to.emit(child.clone()))
@@ -504,6 +525,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             class="dir-path-input"
                             value={(*dir.path).clone()}
                             oninput={on_path_input}
+                            onkeydown={on_path_keydown.clone()}
                         />
                         <div class="dir-breadcrumb">
                             { breadcrumbs.iter().enumerate().map(|(i, (full_path, label))| {
