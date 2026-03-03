@@ -139,6 +139,6 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 1rem 1.5rem;
+    padding: 1rem 1.5rem 0;
     min-width: 0; /* Allow flex child to shrink below content size */
 }
