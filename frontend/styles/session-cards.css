@@ -87,10 +87,11 @@
 
 /* Messages inside portal use same styles but are scaled */
 .portal-terminal-content .messages {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
     padding: 0;
+}
+
+.portal-terminal-content .claude-message {
+    margin-bottom: 0.5rem;
 }
 
 .empty-terminal {
