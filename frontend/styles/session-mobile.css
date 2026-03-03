@@ -570,12 +570,12 @@
 
     /* Messages even more compact */
     .session-view-messages {
-        padding: 0.35rem;
-        gap: 0.35rem;
+        padding: 0.5rem;
+        gap: 0.4rem;
     }
 
     .claude-message .message-body {
-        padding: 0.35rem;
+        padding: 0.5rem;
     }
 
     /* Tool renders ultra-compact */

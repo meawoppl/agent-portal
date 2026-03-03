@@ -224,7 +224,6 @@
     background: rgba(99, 102, 241, 0.1);
     border-left: 3px solid var(--accent);
     border-radius: 0 4px 4px 0;
-    margin: 0.5rem 0;
     font-family: var(--font-mono);
     font-size: 0.85rem;
     overflow: hidden;
@@ -271,7 +270,6 @@
     background: rgba(34, 197, 94, 0.1);
     border-left: 3px solid var(--success);
     border-radius: 0 4px 4px 0;
-    margin: 0.5rem 0;
     font-family: var(--font-mono);
     font-size: 0.85rem;
 }

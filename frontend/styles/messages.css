@@ -13,14 +13,17 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.35rem 0.75rem;
+    padding: 0.4rem 0.85rem;
     background: rgba(0, 0, 0, 0.2);
     border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
 }
 
 .claude-message .message-body {
-    padding: 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.85rem;
 }
 
 /* Message Type Badges */
