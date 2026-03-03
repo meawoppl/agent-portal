@@ -197,12 +197,14 @@ pub async fn stop_session(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let stopped = app_state
+    // Try both paths — launcher-managed and direct proxy connection.
+    // Don't short-circuit: the launcher may claim the session but fail to deliver.
+    let via_launcher = app_state
         .session_manager
-        .stop_session_on_launcher(session_id)
-        || app_state.session_manager.disconnect_session(session_id);
+        .stop_session_on_launcher(session_id);
+    let via_proxy = app_state.session_manager.disconnect_session(session_id);
 
-    if stopped {
+    if via_launcher || via_proxy {
         Ok(StatusCode::ACCEPTED)
     } else {
         Err(StatusCode::NOT_FOUND)

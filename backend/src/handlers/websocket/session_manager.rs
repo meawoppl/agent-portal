@@ -335,10 +335,11 @@ impl SessionManager {
     pub fn disconnect_session(&self, session_id: Uuid) -> bool {
         let key = session_id.to_string();
         if let Some(sender) = self.sessions.get(&key) {
-            let _ = sender.send(ServerToProxy::SessionTerminated {
-                reason: "Session stopped by user".to_string(),
-            });
-            true
+            sender
+                .send(ServerToProxy::SessionTerminated {
+                    reason: "Session stopped by user".to_string(),
+                })
+                .is_ok()
         } else {
             false
         }
