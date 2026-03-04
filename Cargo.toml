@@ -3,7 +3,7 @@ members = ["shared", "backend", "frontend", "proxy", "cli-tools", "claude-sessio
 resolver = "2"
 
 [workspace.package]
-version = "2.0.16"
+version = "2.0.17"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -15,7 +15,7 @@ tokio-util = "0.7"
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-full"] }
 
 # Database
 diesel = { version = "2.2", features = ["postgres", "r2d2", "chrono", "uuid", "serde_json", "numeric"] }
@@ -62,3 +62,10 @@ uuid = { version = "1.11", features = ["v4", "serde", "js"] }
 
 # WebSocket bridge
 ws-bridge = "0.1.1"
+
+# Optimize release builds for size (especially important for WASM)
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true

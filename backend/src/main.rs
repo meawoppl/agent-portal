@@ -17,6 +17,7 @@ use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, T
 use shared::WsEndpoint;
 use std::{env, sync::Arc};
 use tower_cookies::{CookieManagerLayer, Key};
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -443,7 +444,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Serving embedded frontend assets");
 
     // Add CORS and cookie management
-    let app = app.layer(CookieManagerLayer::new()).layer(cors);
+    let app = app
+        .layer(CompressionLayer::new())
+        .layer(CookieManagerLayer::new())
+        .layer(cors);
 
     // Spawn background task to broadcast user spend updates
     {
