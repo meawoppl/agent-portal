@@ -127,7 +127,6 @@ pub enum SessionViewMsg {
 /// SessionView - Main terminal view for a single session
 pub struct SessionView {
     messages: Vec<String>,
-    input_value: String,
     ws_connected: bool,
     ws_sender: Option<WsSender>,
     messages_ref: NodeRef,
@@ -215,7 +214,6 @@ impl Component for SessionView {
 
         Self {
             messages: vec![],
-            input_value: String::new(),
             ws_connected: false,
             ws_sender: None,
             messages_ref: NodeRef::default(),
@@ -306,14 +304,10 @@ impl Component for SessionView {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
-            SessionViewMsg::UpdateInput(value) => {
-                if value.is_empty() {
-                    if let Some(el) = self.input_ref.cast::<Element>() {
-                        el.remove_attribute("style").ok();
-                    }
-                }
-                self.input_value = value;
-                true
+            SessionViewMsg::UpdateInput(_value) => {
+                // Textarea is uncontrolled — the DOM already has the new value.
+                // No re-render needed; we read from the DOM at send time.
+                false
             }
             SessionViewMsg::SendInput => self.handle_send_input_with_mode(ctx, SendMode::Normal),
             SessionViewMsg::LoadHistory(mut messages, last_timestamp) => {
@@ -591,20 +585,17 @@ impl Component for SessionView {
                 false
             }
             SessionViewMsg::HistoryUp => {
-                if let Some(cmd) = self.command_history.navigate_up(&self.input_value) {
-                    self.input_value = cmd;
-                    true
-                } else {
-                    false
+                let current = self.get_input_text();
+                if let Some(cmd) = self.command_history.navigate_up(&current) {
+                    self.set_input_text(&cmd);
                 }
+                false
             }
             SessionViewMsg::HistoryDown => {
                 if let Some(cmd) = self.command_history.navigate_down() {
-                    self.input_value = cmd;
-                    true
-                } else {
-                    false
+                    self.set_input_text(&cmd);
                 }
+                false
             }
             SessionViewMsg::VoiceRecordingChanged(recording) => {
                 self.is_recording = recording;
@@ -616,12 +607,13 @@ impl Component for SessionView {
             SessionViewMsg::VoiceTranscription(text) => {
                 self.interim_transcription = None;
                 if !text.is_empty() {
-                    if self.input_value.is_empty() {
-                        self.input_value = text;
+                    let current = self.get_input_text();
+                    let new_value = if current.is_empty() {
+                        text
                     } else {
-                        self.input_value.push(' ');
-                        self.input_value.push_str(&text);
-                    }
+                        format!("{} {}", current, text)
+                    };
+                    self.set_input_text(&new_value);
                     ctx.link().send_message(SessionViewMsg::SendInput);
                 }
                 true
@@ -681,8 +673,8 @@ impl Component for SessionView {
                 self.upload_files = files.iter().map(|f| (f.name(), f.size() as u64)).collect();
                 let link = ctx.link().clone();
                 let sender = self.ws_sender.clone();
-                let user_input = self.input_value.trim().to_string();
-                self.input_value.clear();
+                let user_input = self.get_input_text().trim().to_string();
+                self.set_input_text("");
                 if !user_input.is_empty() {
                     self.command_history.push(user_input.clone());
                 }
@@ -991,7 +983,6 @@ impl Component for SessionView {
                             self.interim_transcription.is_some().then_some("has-interim")
                         )}
                         placeholder="Type your message... (Shift+Enter for new line)"
-                        value={self.input_value.clone()}
                         oninput={handle_input}
                         onkeydown={handle_keydown}
                         onpaste={handle_paste}
@@ -1009,6 +1000,31 @@ impl Component for SessionView {
 
 // Helper methods extracted from the main impl
 impl SessionView {
+    /// Read the current textarea value directly from the DOM.
+    fn get_input_text(&self) -> String {
+        self.input_ref
+            .cast::<HtmlTextAreaElement>()
+            .map(|el| el.value())
+            .unwrap_or_default()
+    }
+
+    /// Write text to the textarea DOM element and auto-resize it.
+    /// Does NOT trigger a Yew re-render.
+    fn set_input_text(&self, text: &str) {
+        if let Some(el) = self.input_ref.cast::<HtmlTextAreaElement>() {
+            el.set_value(text);
+            // Auto-resize
+            let elem: &Element = el.as_ref();
+            if text.is_empty() {
+                elem.remove_attribute("style").ok();
+            } else {
+                elem.set_attribute("style", "height: auto").ok();
+                elem.set_attribute("style", &format!("height: {}px", el.scroll_height()))
+                    .ok();
+            }
+        }
+    }
+
     fn handle_ws_event(&mut self, ctx: &Context<Self>, event: WsEvent) -> bool {
         match event {
             WsEvent::Connected(sender) => {
@@ -1056,17 +1072,14 @@ impl SessionView {
 
     fn handle_send_input_with_mode(&mut self, ctx: &Context<Self>, send_mode: SendMode) -> bool {
         crate::audio::ensure_audio_context();
-        let input = self.input_value.trim().to_string();
+        let input = self.get_input_text().trim().to_string();
 
         if input.is_empty() {
             return false;
         }
 
         self.command_history.push(input.clone());
-        self.input_value.clear();
-        if let Some(el) = self.input_ref.cast::<Element>() {
-            el.remove_attribute("style").ok();
-        }
+        self.set_input_text("");
 
         let session_id = ctx.props().session.id;
         ctx.props().on_message_sent.emit(session_id);
@@ -1499,10 +1512,11 @@ impl SessionView {
 
     fn render_interim_transcription(&self) -> Html {
         if let Some(ref interim) = self.interim_transcription {
-            let preview = if self.input_value.is_empty() {
+            let current = self.get_input_text();
+            let preview = if current.is_empty() {
                 interim.clone()
             } else {
-                format!("{} {}", self.input_value, interim)
+                format!("{} {}", current, interim)
             };
             html! {
                 <div class="interim-transcription">{ preview }</div>
