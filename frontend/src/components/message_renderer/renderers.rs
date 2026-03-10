@@ -1,7 +1,8 @@
 //! Rendering functions for each message type.
 
 use super::types::*;
-use super::{format_duration, shorten_model_name, truncate_str};
+use super::{format_duration, shorten_model_name};
+use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown;
 use crate::components::tool_renderers::render_tool_use;
 use serde::Deserialize;
@@ -655,14 +656,9 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
                             let class = if *is_error { "tool-result error" } else { "tool-result" };
                             match content {
                                 Some(ToolResultContent::Text(s)) => {
-                                    let display = if s.len() > 500 {
-                                        format!("{}...", truncate_str(s, 500))
-                                    } else {
-                                        s.clone()
-                                    };
                                     html! {
                                         <div class={class}>
-                                            <pre class="tool-result-content">{ display }</pre>
+                                            <ExpandableText full_text={s.clone()} max_len={500} class="tool-result-content" />
                                         </div>
                                     }
                                 }
@@ -820,12 +816,7 @@ fn render_structured_block(block: &Value) -> Html {
         }
         "text" => {
             let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
-            let display = if text.len() > 500 {
-                format!("{}...", truncate_str(text, 500))
-            } else {
-                text.to_string()
-            };
-            html! { <pre class="tool-result-content">{ display }</pre> }
+            html! { <ExpandableText full_text={text.to_string()} max_len={500} class="tool-result-content" /> }
         }
         _ => {
             let json = serde_json::to_string_pretty(block).unwrap_or_default();

@@ -802,3 +802,28 @@
     border-left: 3px solid var(--error);
 }
 
+/* ==========================================================================
+   Expandable Text / Lines
+   ========================================================================== */
+
+.expandable-toggle {
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8em;
+    user-select: none;
+    transition: color 0.15s;
+}
+
+.expandable-toggle:hover {
+    color: var(--accent);
+}
+
+.tool-arg-entry {
+    white-space: nowrap;
+}
+
+.tool-arg-entry + .tool-arg-entry::before {
+    content: ", ";
+    color: var(--text-muted);
+}
+

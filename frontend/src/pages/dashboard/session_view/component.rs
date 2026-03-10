@@ -165,6 +165,8 @@ pub struct SessionView {
     tab_anim: Option<&'static str>,
     /// Whether the drawer is still visible during departure animation
     tab_departing: bool,
+    /// Tracks textarea content so it can be restored after reconnection re-renders
+    input_text: String,
 }
 
 impl Component for SessionView {
@@ -246,6 +248,7 @@ impl Component for SessionView {
             task_tick_handle: None,
             tab_anim: None,
             tab_departing: false,
+            input_text: String::new(),
         }
     }
 
@@ -267,6 +270,15 @@ impl Component for SessionView {
         if first_render && ctx.props().focused {
             if let Some(input) = self.input_ref.cast::<HtmlTextAreaElement>() {
                 let _ = input.focus();
+            }
+        }
+
+        // Restore textarea content if it was cleared during a re-render (e.g. reconnection)
+        if !self.input_text.is_empty() {
+            if let Some(el) = self.input_ref.cast::<HtmlTextAreaElement>() {
+                if el.value().is_empty() {
+                    self.set_input_text(&self.input_text.clone());
+                }
             }
         }
 
@@ -304,9 +316,10 @@ impl Component for SessionView {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
-            SessionViewMsg::UpdateInput(_value) => {
+            SessionViewMsg::UpdateInput(value) => {
                 // Textarea is uncontrolled — the DOM already has the new value.
-                // No re-render needed; we read from the DOM at send time.
+                // Track in state so we can restore after reconnection re-renders.
+                self.input_text = value;
                 false
             }
             SessionViewMsg::SendInput => self.handle_send_input_with_mode(ctx, SendMode::Normal),
@@ -1084,6 +1097,7 @@ impl SessionView {
 
         self.command_history.push(input.clone());
         self.set_input_text("");
+        self.input_text.clear();
 
         let session_id = ctx.props().session.id;
         ctx.props().on_message_sent.emit(session_id);

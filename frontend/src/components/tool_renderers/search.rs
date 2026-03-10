@@ -1,7 +1,7 @@
 use serde_json::Value;
 use yew::prelude::*;
 
-use crate::components::message_renderer::truncate_str;
+use crate::components::expandable::ExpandableText;
 
 pub fn render_glob_tool(input: &Value) -> Html {
     let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
@@ -98,7 +98,7 @@ pub fn render_webfetch_tool(input: &Value) -> Html {
             </div>
             {
                 if let Some(p) = prompt {
-                    html! { <div class="webfetch-prompt">{ truncate_str(p, 100) }</div> }
+                    html! { <ExpandableText full_text={p.to_string()} max_len={100} class="webfetch-prompt" tag="div" /> }
                 } else {
                     html! {}
                 }

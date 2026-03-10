@@ -16,7 +16,7 @@ use self::search::{
     render_glob_tool, render_grep_tool, render_webfetch_tool, render_websearch_tool,
 };
 use self::task::render_task_tool;
-use super::message_renderer::truncate_str;
+use super::expandable::ExpandableText;
 
 /// Render a tool use block with special handling for various tools
 pub fn render_tool_use(name: &str, input: &Value) -> Html {
@@ -73,149 +73,45 @@ fn render_read_tool(input: &Value) -> Html {
 
 /// Generic tool renderer for unrecognized tools
 fn render_generic_tool(name: &str, input: &Value) -> Html {
-    let input_preview = format_tool_input(name, input);
+    let args_html = render_generic_args(input);
     html! {
         <div class="tool-use">
             <div class="tool-use-header">
                 <span class="tool-icon">{ "⚡" }</span>
                 <span class="tool-name">{ name }</span>
             </div>
-            <pre class="tool-args">{ input_preview }</pre>
+            <div class="tool-args">{ args_html }</div>
         </div>
     }
 }
 
-pub fn format_tool_input(tool_name: &str, input: &Value) -> String {
-    match tool_name {
-        "Bash" => input
-            .get("command")
-            .and_then(|v| v.as_str())
-            .map(|s| format!("$ {}", s))
-            .unwrap_or_else(|| format_generic_input(input)),
-        "Read" => {
-            let path = input
-                .get("file_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let mut result = path.to_string();
-            if let Some(offset) = input.get("offset").and_then(|v| v.as_i64()) {
-                if let Some(limit) = input.get("limit").and_then(|v| v.as_i64()) {
-                    result.push_str(&format!(" [lines {}-{}]", offset, offset + limit));
-                }
-            }
-            result
-        }
-        "Edit" => {
-            let path = input
-                .get("file_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let old_len = input
-                .get("old_string")
-                .and_then(|v| v.as_str())
-                .map(|s| s.len())
-                .unwrap_or(0);
-            let new_len = input
-                .get("new_string")
-                .and_then(|v| v.as_str())
-                .map(|s| s.len())
-                .unwrap_or(0);
-            format!("{}\n-{} chars +{} chars", path, old_len, new_len)
-        }
-        "Write" => {
-            let path = input
-                .get("file_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let content_len = input
-                .get("content")
-                .and_then(|v| v.as_str())
-                .map(|s| s.len())
-                .unwrap_or(0);
-            format!("{} ({} bytes)", path, content_len)
-        }
-        "Glob" => {
-            let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
-            let path = input.get("path").and_then(|v| v.as_str());
-            match path {
-                Some(p) => format!("{} in {}", pattern, p),
-                None => pattern.to_string(),
-            }
-        }
-        "Grep" => {
-            let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
-            let path = input.get("path").and_then(|v| v.as_str());
-            let glob = input.get("glob").and_then(|v| v.as_str());
-            let mut result = format!("/{}/", pattern);
-            if let Some(g) = glob {
-                result.push_str(&format!(" --glob={}", g));
-            }
-            if let Some(p) = path {
-                result.push_str(&format!(" in {}", p));
-            }
-            result
-        }
-        "Task" => {
-            let desc = input
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let agent = input
-                .get("subagent_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("agent");
-            format!("[{}] {}", agent, desc)
-        }
-        "WebFetch" => input
-            .get("url")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format_generic_input(input)),
-        "WebSearch" => input
-            .get("query")
-            .and_then(|v| v.as_str())
-            .map(|s| format!("\"{}\"", s))
-            .unwrap_or_else(|| format_generic_input(input)),
-        "TodoWrite" => input
-            .get("todos")
-            .and_then(|v| v.as_array())
-            .map(|arr| format!("{} items", arr.len()))
-            .unwrap_or_else(|| format_generic_input(input)),
-        "AskUserQuestion" => input
-            .get("questions")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                format!(
-                    "{} question{}",
-                    arr.len(),
-                    if arr.len() == 1 { "" } else { "s" }
-                )
-            })
-            .unwrap_or_else(|| format_generic_input(input)),
-        _ => format_generic_input(input),
-    }
-}
-
-fn format_generic_input(input: &Value) -> String {
+/// Render generic tool arguments as expandable Html.
+fn render_generic_args(input: &Value) -> Html {
     if let Some(obj) = input.as_object() {
-        let parts: Vec<String> = obj
+        let entries: Vec<(&String, &Value)> = obj
             .iter()
             .filter(|(_, v)| v.is_string() || v.is_number() || v.is_boolean())
             .take(3)
-            .map(|(k, v)| {
-                let val = match v {
-                    Value::String(s) => truncate_str(s, 40).to_string(),
-                    other => other.to_string(),
-                };
-                format!("{}={}", k, val)
-            })
             .collect();
-        if parts.is_empty() {
-            "...".to_string()
-        } else {
-            parts.join(", ")
+        if entries.is_empty() {
+            return html! { "..." };
+        }
+        html! {
+            { for entries.into_iter().map(|(k, v)| {
+                match v {
+                    Value::String(s) => html! {
+                        <span class="tool-arg-entry">
+                            { format!("{}=", k) }
+                            <ExpandableText full_text={s.clone()} max_len={40} tag="span" />
+                        </span>
+                    },
+                    other => html! {
+                        <span class="tool-arg-entry">{ format!("{}={}", k, other) }</span>
+                    },
+                }
+            })}
         }
     } else {
-        "...".to_string()
+        html! { "..." }
     }
 }
