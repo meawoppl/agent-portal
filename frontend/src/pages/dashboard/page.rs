@@ -393,6 +393,10 @@ pub fn dashboard_page() -> Html {
     let on_awaiting_change = {
         let awaiting_sessions = awaiting_sessions.clone();
         Callback::from(move |(session_id, is_awaiting): (Uuid, bool)| {
+            let currently_awaiting = awaiting_sessions.contains(&session_id);
+            if currently_awaiting == is_awaiting {
+                return;
+            }
             let mut set = (*awaiting_sessions).clone();
             if is_awaiting {
                 set.insert(session_id);
