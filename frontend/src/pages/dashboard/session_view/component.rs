@@ -114,6 +114,8 @@ pub enum SessionViewMsg {
     DragEnter,
     /// User dragged files out of the input area
     DragLeave,
+    /// No-op (used by keydown/paste handlers that need to return a message)
+    Noop,
     /// Toggle the tasks sidebar panel
     ToggleTasksPanel,
     /// 1-second tick to update task elapsed times and clean up completed tasks
@@ -841,6 +843,7 @@ impl Component for SessionView {
                 self.drag_hover = false;
                 true
             }
+            SessionViewMsg::Noop => false,
             SessionViewMsg::ToggleTasksPanel => {
                 self.tasks_panel_open = !self.tasks_panel_open;
                 true
@@ -904,7 +907,7 @@ impl Component for SessionView {
                 }
                 "Enter" => {
                     // Shift+Enter inserts newline (default behavior)
-                    SessionViewMsg::CheckAwaiting
+                    SessionViewMsg::Noop
                 }
                 "ArrowUp" => {
                     e.prevent_default();
@@ -914,7 +917,7 @@ impl Component for SessionView {
                     e.prevent_default();
                     SessionViewMsg::HistoryDown
                 }
-                _ => SessionViewMsg::CheckAwaiting,
+                _ => SessionViewMsg::Noop,
             }
         });
 
@@ -934,7 +937,7 @@ impl Component for SessionView {
                     return SessionViewMsg::FilesSelected(files);
                 }
             }
-            SessionViewMsg::CheckAwaiting
+            SessionViewMsg::Noop
         });
 
         let handle_dragover = link.callback(|e: DragEvent| {
