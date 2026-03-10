@@ -868,7 +868,10 @@ impl Component for SessionView {
         let handle_input = link.callback(|e: InputEvent| {
             let input: HtmlTextAreaElement = e.target_unchecked_into();
             let el: &Element = input.as_ref();
-            el.set_attribute("style", "height: auto").ok();
+            // Measure content height with overflow hidden to prevent scrollbar
+            // from narrowing the text area and causing layout bounce.
+            el.set_attribute("style", "height: 0; overflow-y: hidden")
+                .ok();
             el.set_attribute("style", &format!("height: {}px", input.scroll_height()))
                 .ok();
             SessionViewMsg::UpdateInput(input.value())
@@ -1018,7 +1021,8 @@ impl SessionView {
             if text.is_empty() {
                 elem.remove_attribute("style").ok();
             } else {
-                elem.set_attribute("style", "height: auto").ok();
+                elem.set_attribute("style", "height: 0; overflow-y: hidden")
+                    .ok();
                 elem.set_attribute("style", &format!("height: {}px", el.scroll_height()))
                     .ok();
             }
