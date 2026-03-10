@@ -125,23 +125,6 @@ Stores hashed JWT tokens for proxy CLI authentication.
 | `expires_at` | TIMESTAMP | No | Token expiration time |
 | `revoked` | BOOL | No | Whether token has been revoked |
 
-### `raw_message_log`
-
-Audit log of all messages flowing through the system. Used for debugging and admin inspection.
-
-| Column | Type | Nullable | Description |
-|---|---|---|---|
-| `id` | UUID (PK) | No | Log entry ID |
-| `session_id` | UUID (FK → sessions) | Yes | Associated session |
-| `user_id` | UUID (FK → users) | Yes | Associated user |
-| `message_content` | JSONB | No | Full message JSON |
-| `message_source` | VARCHAR(50) | No | Origin (`proxy`, `web_client`, etc.) |
-| `render_reason` | VARCHAR(255) | Yes | Why message was logged |
-| `created_at` | TIMESTAMP | No | Log timestamp |
-| `content_hash` | VARCHAR(64) | No | SHA-256 hash for deduplication |
-
-**Unique constraint**: `content_hash` prevents duplicate log entries.
-
 ### `deleted_session_costs`
 
 Aggregates cost data from deleted sessions so user spend totals remain accurate.
@@ -165,12 +148,10 @@ Aggregates cost data from deleted sessions so user spend totals remain accurate.
 users ──┬── sessions ──┬── messages
         │              ├── session_members
         │              ├── pending_inputs
-        │              ├── pending_permission_requests
-        │              └── raw_message_log
+        │              └── pending_permission_requests
         ├── session_members
         ├── proxy_auth_tokens
-        ├── deleted_session_costs
-        └── raw_message_log
+        └── deleted_session_costs
 ```
 
 All foreign keys reference `users.id` or `sessions.id`. Diesel's `joinable!` macro declarations in `schema.rs` define these relationships.

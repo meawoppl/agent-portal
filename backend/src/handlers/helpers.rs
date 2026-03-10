@@ -1,7 +1,7 @@
 use crate::models::{NewDeletedSessionCosts, Session};
 use crate::schema::{
-    deleted_session_costs, messages, pending_inputs, pending_permission_requests, raw_message_log,
-    session_members, sessions,
+    deleted_session_costs, messages, pending_inputs, pending_permission_requests, session_members,
+    sessions,
 };
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
@@ -24,7 +24,7 @@ impl From<diesel::result::Error> for DeleteSessionError {
     }
 }
 
-/// Delete a session and all associated data (messages, session_members, raw_message_log).
+/// Delete a session and all associated data (messages, session_members).
 /// Optionally records the session costs to deleted_session_costs for the owner.
 ///
 /// Returns the number of deleted messages.
@@ -105,11 +105,6 @@ pub fn delete_session_with_data(
     )
     .execute(conn);
 
-    // Delete raw_message_log (ignore errors, table may not have entries)
-    let _ =
-        diesel::delete(raw_message_log::table.filter(raw_message_log::session_id.eq(session_id)))
-            .execute(conn);
-
     // Delete the session
     diesel::delete(sessions::table.filter(sessions::id.eq(session_id)))
         .execute(conn)
@@ -124,11 +119,11 @@ pub fn delete_session_with_data(
 /// Delete multiple sessions for a user (bulk delete for banning).
 /// Does NOT record costs (banned users forfeit their cost history).
 ///
-/// Returns (sessions_deleted, messages_deleted, members_deleted, raw_logs_deleted)
+/// Returns (sessions_deleted, messages_deleted, members_deleted)
 pub fn delete_user_sessions(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     user_id: Uuid,
-) -> Result<(usize, usize, usize, usize), DeleteSessionError> {
+) -> Result<(usize, usize, usize), DeleteSessionError> {
     // Get all session IDs for this user
     let session_ids: Vec<Uuid> = sessions::table
         .filter(sessions::user_id.eq(user_id))
@@ -140,7 +135,7 @@ pub fn delete_user_sessions(
         })?;
 
     if session_ids.is_empty() {
-        return Ok((0, 0, 0, 0));
+        return Ok((0, 0, 0));
     }
 
     // Delete messages for all user's sessions
@@ -162,13 +157,6 @@ pub fn delete_user_sessions(
         DeleteSessionError(format!("Failed to delete session members: {}", e))
     })?;
 
-    // Delete raw_message_log for all user's sessions (ignore errors)
-    let deleted_raw = diesel::delete(
-        raw_message_log::table.filter(raw_message_log::session_id.eq_any(&session_ids)),
-    )
-    .execute(conn)
-    .unwrap_or(0);
-
     // Delete all sessions
     let deleted_sessions = diesel::delete(sessions::table.filter(sessions::user_id.eq(user_id)))
         .execute(conn)
@@ -177,10 +165,5 @@ pub fn delete_user_sessions(
             DeleteSessionError(format!("Failed to delete sessions: {}", e))
         })?;
 
-    Ok((
-        deleted_sessions,
-        deleted_messages,
-        deleted_members,
-        deleted_raw,
-    ))
+    Ok((deleted_sessions, deleted_messages, deleted_members))
 }

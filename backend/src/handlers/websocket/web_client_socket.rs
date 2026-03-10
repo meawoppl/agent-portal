@@ -4,7 +4,6 @@ use crate::models::NewPendingInput;
 use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
-use shared::api::RawMessageFallback;
 use shared::{
     ClientEndpoint, ClientToServer, PortalMessage, SendMode, ServerToClient, ServerToProxy,
 };
@@ -297,11 +296,10 @@ fn replay_history(
         .map(|msg| {
             let mut val =
                 serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
-                    let fallback = RawMessageFallback {
-                        message_type: msg.role.clone(),
-                        content: msg.content.clone(),
-                    };
-                    serde_json::to_value(&fallback).unwrap_or_default()
+                    serde_json::json!({
+                        "type": msg.role,
+                        "content": msg.content,
+                    })
                 });
             // Reconstruct _sender for user messages from DB user_id
             if msg.role == "user" {

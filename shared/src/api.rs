@@ -188,14 +188,6 @@ impl PermissionAnswers {
     }
 }
 
-/// Fallback wrapper for unparseable DB message content
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RawMessageFallback {
-    #[serde(rename = "type")]
-    pub message_type: String,
-    pub content: String,
-}
-
 /// Response for GET /api/settings/sound
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoundSettingsResponse {

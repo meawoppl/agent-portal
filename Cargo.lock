@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "anyhow",
  "chrono",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -473,7 +473,6 @@ dependencies = [
  "google-cognitive-apis",
  "hex",
  "jsonwebtoken 9.3.1",
- "md5",
  "mime_guess",
  "oauth2",
  "rand 0.8.5",
@@ -733,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -766,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -788,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "cli-tools"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "anyhow",
  "clap",
@@ -1366,7 +1365,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -2732,12 +2731,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "md5"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3135,7 +3128,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "portal-auth"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "anyhow",
  "colored",
@@ -3150,7 +3143,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "anyhow",
  "hex",
@@ -4066,7 +4059,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.0.21"
+version = "2.0.23"
 dependencies = [
  "chrono",
  "claude-codes",

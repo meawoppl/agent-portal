@@ -9,18 +9,14 @@ use axum::{
 };
 use bigdecimal::ToPrimitive;
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use shared::api::UpdateUserRequest;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::{
-    db::get_user_usage,
-    models::{NewRawMessageLog, RawMessageLog, User},
-    schema, AppState,
-};
+use crate::{db::get_user_usage, models::User, schema, AppState};
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
@@ -448,7 +444,7 @@ pub async fn update_user(
             }
 
             // Delete all user's sessions and associated data
-            let (deleted_sessions, deleted_messages, deleted_members, deleted_raw) =
+            let (deleted_sessions, deleted_messages, deleted_members) =
                 super::helpers::delete_user_sessions(&mut conn, user_id).map_err(|e| {
                     error!("Failed to delete user sessions: {:?}", e);
                     StatusCode::INTERNAL_SERVER_ERROR
@@ -456,12 +452,8 @@ pub async fn update_user(
 
             if deleted_sessions > 0 {
                 info!(
-                    "Deleted {} sessions, {} messages, {} members, {} raw logs for banned user {}",
-                    deleted_sessions,
-                    deleted_messages,
-                    deleted_members,
-                    deleted_raw,
-                    target_user.email
+                    "Deleted {} sessions, {} messages, {} members for banned user {}",
+                    deleted_sessions, deleted_messages, deleted_members, target_user.email
                 );
             }
         }
@@ -609,212 +601,6 @@ pub async fn delete_session(
         "Admin {} deleted session {} ({}) - cost ${:.4} recorded",
         admin.email, session_id, session.session_name, session.total_cost_usd
     );
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-// ============================================================================
-// Raw Message Log - Track messages rendered as raw for debugging
-// ============================================================================
-
-/// Request to log a raw-rendered message
-#[derive(Debug, Deserialize)]
-pub struct LogRawMessageRequest {
-    pub session_id: Option<Uuid>,
-    pub message_content: serde_json::Value,
-    pub message_source: String,
-    pub render_reason: Option<String>,
-}
-
-/// Response for a single raw message log entry
-#[derive(Debug, Serialize)]
-pub struct RawMessageLogResponse {
-    pub id: Uuid,
-    pub session_id: Option<Uuid>,
-    pub user_id: Option<Uuid>,
-    pub message_content: serde_json::Value,
-    pub message_source: String,
-    pub render_reason: Option<String>,
-    pub created_at: String,
-}
-
-impl From<RawMessageLog> for RawMessageLogResponse {
-    fn from(log: RawMessageLog) -> Self {
-        Self {
-            id: log.id,
-            session_id: log.session_id,
-            user_id: log.user_id,
-            message_content: log.message_content,
-            message_source: log.message_source,
-            render_reason: log.render_reason,
-            created_at: log.created_at.to_string(),
-        }
-    }
-}
-
-/// List response for raw message logs
-#[derive(Debug, Serialize)]
-pub struct RawMessageLogsResponse {
-    pub logs: Vec<RawMessageLogResponse>,
-    pub total: i64,
-}
-
-/// Log a raw-rendered message (called by frontend when rendering raw)
-/// This endpoint is available to authenticated users, not just admins
-/// Uses content hashing to deduplicate - same content for same session is ignored
-pub async fn log_raw_message(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Json(request): Json<LogRawMessageRequest>,
-) -> Result<StatusCode, StatusCode> {
-    // Get user from cookie (any authenticated user can log raw messages)
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let user_id: Uuid = cookie
-        .value()
-        .parse()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Verify user has access to the session (if session_id is provided)
-    if let Some(session_id) = request.session_id {
-        use schema::{session_members, sessions};
-        let has_access = sessions::table
-            .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
-            .filter(sessions::id.eq(session_id))
-            .filter(session_members::user_id.eq(user_id))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .unwrap_or(0)
-            > 0;
-
-        if !has_access {
-            warn!(
-                "User {} attempted to log raw message for session {} they don't have access to",
-                user_id, session_id
-            );
-            return Err(StatusCode::FORBIDDEN);
-        }
-    }
-
-    // Compute MD5 hash of content for deduplication
-    let content_str = request.message_content.to_string();
-    let content_hash = format!("{:x}", md5::compute(&content_str));
-
-    // Insert with ON CONFLICT DO NOTHING to deduplicate
-    diesel::insert_into(schema::raw_message_log::table)
-        .values(NewRawMessageLog {
-            session_id: request.session_id,
-            user_id: Some(user_id),
-            message_content: request.message_content,
-            message_source: request.message_source,
-            render_reason: request.render_reason,
-            content_hash,
-        })
-        .on_conflict_do_nothing()
-        .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to log raw message: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(StatusCode::CREATED)
-}
-
-/// List recent raw message logs (admin only)
-pub async fn list_raw_messages(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-) -> Result<Json<RawMessageLogsResponse>, StatusCode> {
-    let admin = require_admin(&app_state, &cookies).await?;
-    info!("Admin {} requested raw message logs", admin.email);
-
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Get total count
-    let total: i64 = schema::raw_message_log::table
-        .count()
-        .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to count raw messages: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    // Get recent logs (limit to 100 for now)
-    let logs: Vec<RawMessageLog> = schema::raw_message_log::table
-        .order(schema::raw_message_log::created_at.desc())
-        .limit(100)
-        .load(&mut conn)
-        .map_err(|e| {
-            error!("Failed to load raw messages: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let log_responses: Vec<RawMessageLogResponse> = logs.into_iter().map(Into::into).collect();
-
-    Ok(Json(RawMessageLogsResponse {
-        logs: log_responses,
-        total,
-    }))
-}
-
-/// Get a single raw message log by ID (admin only)
-pub async fn get_raw_message(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Path(id): Path<Uuid>,
-) -> Result<Json<RawMessageLogResponse>, StatusCode> {
-    let admin = require_admin(&app_state, &cookies).await?;
-    info!("Admin {} requested raw message {}", admin.email, id);
-
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let log: RawMessageLog = schema::raw_message_log::table
-        .find(id)
-        .first(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
-
-    Ok(Json(log.into()))
-}
-
-/// Delete a raw message log entry (admin only)
-pub async fn delete_raw_message(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Path(id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
-    let admin = require_admin(&app_state, &cookies).await?;
-
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let deleted = diesel::delete(schema::raw_message_log::table.find(id))
-        .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to delete raw message: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    if deleted == 0 {
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    info!("Admin {} deleted raw message log {}", admin.email, id);
 
     Ok(StatusCode::NO_CONTENT)
 }

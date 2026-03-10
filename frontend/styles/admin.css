@@ -308,122 +308,6 @@
     background: rgba(247, 118, 142, 0.2);
 }
 
-/* Raw Messages Section */
-.admin-raw-messages {
-    padding: 0;
-}
-
-.admin-raw-messages .raw-messages-description {
-    color: var(--text-secondary);
-    margin-bottom: 1rem;
-    font-size: 0.9rem;
-}
-
-.admin-raw-messages .no-raw-messages {
-    color: var(--text-muted);
-    text-align: center;
-    padding: 2rem;
-    font-style: italic;
-}
-
-.admin-raw-messages .raw-msg-type {
-    font-family: monospace;
-    color: var(--accent);
-}
-
-.admin-raw-messages .raw-msg-source {
-    color: var(--text-secondary);
-}
-
-.admin-raw-messages .raw-msg-reason {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.admin-raw-messages .raw-msg-session {
-    font-family: monospace;
-    font-size: 0.85rem;
-    color: var(--text-muted);
-}
-
-.view-btn {
-    padding: 0.35rem 0.75rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    border: 1px solid var(--accent);
-    background: transparent;
-    color: var(--accent);
-}
-
-.view-btn:hover {
-    background: rgba(122, 162, 247, 0.2);
-}
-
-/* Raw Message Viewer Modal */
-.raw-message-modal {
-    width: 90%;
-    max-width: 800px;
-    max-height: 80vh;
-    display: flex;
-    flex-direction: column;
-}
-
-.raw-message-modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1rem;
-}
-
-.raw-message-modal-header h3 {
-    margin: 0;
-    font-size: 1.1rem;
-}
-
-.raw-message-modal-header .modal-close {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    font-size: 1.5rem;
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
-}
-
-.raw-message-modal-header .modal-close:hover {
-    color: var(--text-primary);
-}
-
-.raw-message-modal-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    margin-bottom: 1rem;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-}
-
-.raw-message-modal-content {
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1rem;
-    overflow: auto;
-    flex: 1;
-    font-family: monospace;
-    font-size: 0.85rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
 /* Responsive Admin */
 @media (max-width: 768px) {
     .admin-header {
@@ -456,9 +340,6 @@
         gap: 0.25rem;
     }
 
-    .raw-message-modal {
-        width: 95%;
-    }
 }
 
 /* Ban Modal */

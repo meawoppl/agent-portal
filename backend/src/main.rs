@@ -426,16 +426,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/admin/sessions/:id",
             axum::routing::delete(handlers::admin::delete_session),
         )
-        // Raw message logging (for debugging unrecognized message types)
-        .route("/api/raw-messages", post(handlers::admin::log_raw_message))
-        .route(
-            "/api/admin/raw-messages",
-            get(handlers::admin::list_raw_messages),
-        )
-        .route(
-            "/api/admin/raw-messages/:id",
-            get(handlers::admin::get_raw_message).delete(handlers::admin::delete_raw_message),
-        )
         // Add single unified state
         .with_state(app_state.clone())
         // Serve embedded frontend assets with SPA fallback

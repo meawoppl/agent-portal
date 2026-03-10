@@ -67,22 +67,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    raw_message_log (id) {
-        id -> Uuid,
-        session_id -> Nullable<Uuid>,
-        user_id -> Nullable<Uuid>,
-        message_content -> Jsonb,
-        #[max_length = 50]
-        message_source -> Varchar,
-        #[max_length = 255]
-        render_reason -> Nullable<Varchar>,
-        created_at -> Timestamp,
-        #[max_length = 64]
-        content_hash -> Varchar,
-    }
-}
-
-diesel::table! {
     session_members (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -155,8 +139,6 @@ diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
 diesel::joinable!(pending_permission_requests -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
-diesel::joinable!(raw_message_log -> sessions (session_id));
-diesel::joinable!(raw_message_log -> users (user_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
@@ -167,7 +149,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     pending_inputs,
     pending_permission_requests,
     proxy_auth_tokens,
-    raw_message_log,
     session_members,
     sessions,
     users,

@@ -4,12 +4,10 @@
 //! user management, and session management capabilities.
 
 mod overview_tab;
-mod raw_messages_tab;
 mod sessions_tab;
 mod users_tab;
 
 use overview_tab::AdminOverviewTab;
-use raw_messages_tab::AdminRawMessagesTab;
 use sessions_tab::AdminSessionsTab;
 use users_tab::AdminUsersTab;
 
@@ -30,7 +28,6 @@ enum AdminTab {
     Overview,
     Users,
     Sessions,
-    RawMessages,
 }
 
 // ============================================================================
@@ -89,21 +86,6 @@ struct AdminSessionsResponse {
     sessions: Vec<AdminSessionInfo>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct RawMessageLogInfo {
-    pub id: Uuid,
-    pub session_id: Option<Uuid>,
-    pub message_content: serde_json::Value,
-    pub message_source: String,
-    pub render_reason: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawMessagesResponse {
-    logs: Vec<RawMessageLogInfo>,
-}
-
 // ============================================================================
 // Main Admin Page Component
 // ============================================================================
@@ -119,8 +101,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let stats = use_state(|| None::<AdminStats>);
     let users = use_state(Vec::<AdminUserInfo>::new);
     let sessions = use_state(Vec::<AdminSessionInfo>::new);
-    let raw_messages = use_state(Vec::<RawMessageLogInfo>::new);
-    let viewing_raw_message = use_state(|| None::<RawMessageLogInfo>);
     let loading = use_state(|| true);
     let error = use_state(|| None::<String>);
     let current_user_id = use_state(|| None::<Uuid>);
@@ -275,48 +255,15 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
         })
     };
 
-    // Fetch raw messages
-    let fetch_raw_messages = {
-        let raw_messages = raw_messages.clone();
-        let error = error.clone();
-        Callback::from(move |_| {
-            let raw_messages = raw_messages.clone();
-            let error = error.clone();
-            spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/admin/raw-messages");
-                match Request::get(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 403 {
-                            return;
-                        }
-                        match response.json::<RawMessagesResponse>().await {
-                            Ok(data) => {
-                                raw_messages.set(data.logs);
-                            }
-                            Err(e) => {
-                                error.set(Some(format!("Failed to parse raw messages: {:?}", e)));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error.set(Some(format!("Failed to fetch raw messages: {:?}", e)));
-                    }
-                }
-            });
-        })
-    };
-
     // Initial data fetch
     {
         let fetch_stats = fetch_stats.clone();
         let fetch_users = fetch_users.clone();
         let fetch_sessions = fetch_sessions.clone();
-        let fetch_raw_messages = fetch_raw_messages.clone();
         use_effect_with((), move |_| {
             fetch_stats.emit(());
             fetch_users.emit(());
             fetch_sessions.emit(());
-            fetch_raw_messages.emit(());
             || ()
         });
     }
@@ -609,46 +556,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
         })
     };
 
-    // Delete raw message handler (no confirmation needed)
-    let on_delete_raw_message = {
-        let raw_messages = raw_messages.clone();
-        Callback::from(move |msg_id: Uuid| {
-            let raw_messages = raw_messages.clone();
-            spawn_local(async move {
-                let api_endpoint = utils::api_url(&format!("/api/admin/raw-messages/{}", msg_id));
-                match Request::delete(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 204 {
-                            let updated: Vec<_> = (*raw_messages)
-                                .iter()
-                                .filter(|m| m.id != msg_id)
-                                .cloned()
-                                .collect();
-                            raw_messages.set(updated);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Failed to delete raw message: {:?}", e);
-                    }
-                }
-            });
-        })
-    };
-
-    // View raw message handler
-    let on_view_raw_message = {
-        let viewing_raw_message = viewing_raw_message.clone();
-        Callback::from(move |msg: RawMessageLogInfo| {
-            viewing_raw_message.set(Some(msg));
-        })
-    };
-
-    // Close raw message viewer
-    let on_close_raw_message_viewer = {
-        let viewing_raw_message = viewing_raw_message.clone();
-        Callback::from(move |_| viewing_raw_message.set(None))
-    };
-
     // Tab click handlers
     let on_overview_tab = {
         let active_tab = active_tab.clone();
@@ -661,10 +568,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let on_sessions_tab = {
         let active_tab = active_tab.clone();
         Callback::from(move |_| active_tab.set(AdminTab::Sessions))
-    };
-    let on_raw_messages_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(AdminTab::RawMessages))
     };
 
     // Cancel confirmation
@@ -730,12 +633,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                 >
                                     { format!("Sessions ({})", sessions.len()) }
                                 </button>
-                                <button
-                                    class={classes!("tab-btn", if *active_tab == AdminTab::RawMessages { Some("active") } else { None })}
-                                    onclick={on_raw_messages_tab}
-                                >
-                                    { format!("Raw Messages ({})", raw_messages.len()) }
-                                </button>
                             </nav>
 
                             <div class="admin-content">
@@ -762,15 +659,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                                 <AdminSessionsTab
                                                     sessions={(*sessions).clone()}
                                                     on_delete={on_delete_session.clone()}
-                                                />
-                                            }
-                                        }
-                                        AdminTab::RawMessages => {
-                                            html! {
-                                                <AdminRawMessagesTab
-                                                    raw_messages={(*raw_messages).clone()}
-                                                    on_delete={on_delete_raw_message.clone()}
-                                                    on_view={on_view_raw_message.clone()}
                                                 />
                                             }
                                         }
@@ -831,37 +719,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                 }
             }
 
-            // Raw message viewer modal
-            {
-                if let Some(ref msg) = *viewing_raw_message {
-                    // Display as plain text - if it's a JSON string, extract the string content,
-                    // otherwise show the raw JSON representation. This avoids confusing escape
-                    // sequences when the original content wasn't valid JSON.
-                    let display_content = match &msg.message_content {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => serde_json::to_string_pretty(other)
-                            .unwrap_or_else(|_| other.to_string()),
-                    };
-                    html! {
-                        <div class="modal-overlay" onclick={on_close_raw_message_viewer.clone()}>
-                            <div class="modal-content raw-message-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                <div class="raw-message-modal-header">
-                                    <h3>{ "Raw Message Content" }</h3>
-                                    <button class="modal-close" onclick={on_close_raw_message_viewer.clone()}>{ "\u{00d7}" }</button>
-                                </div>
-                                <div class="raw-message-modal-meta">
-                                    <span><strong>{ "Source: " }</strong>{ &msg.message_source }</span>
-                                    <span><strong>{ "Reason: " }</strong>{ msg.render_reason.as_deref().unwrap_or("-") }</span>
-                                    <span><strong>{ "Time: " }</strong>{ utils::format_timestamp(&msg.created_at) }</span>
-                                </div>
-                                <pre class="raw-message-modal-content">{ display_content }</pre>
-                            </div>
-                        </div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
         </div>
     }
 }

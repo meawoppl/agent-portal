@@ -202,35 +202,6 @@ pub struct NewSessionMember {
 }
 
 // ============================================================================
-// Raw Message Log Models
-// ============================================================================
-
-#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
-#[diesel(table_name = crate::schema::raw_message_log)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct RawMessageLog {
-    pub id: Uuid,
-    pub session_id: Option<Uuid>,
-    pub user_id: Option<Uuid>,
-    pub message_content: serde_json::Value,
-    pub message_source: String,
-    pub render_reason: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub content_hash: String,
-}
-
-#[derive(Debug, Insertable)]
-#[diesel(table_name = crate::schema::raw_message_log)]
-pub struct NewRawMessageLog {
-    pub session_id: Option<Uuid>,
-    pub user_id: Option<Uuid>,
-    pub message_content: serde_json::Value,
-    pub message_source: String,
-    pub render_reason: Option<String>,
-    pub content_hash: String,
-}
-
-// ============================================================================
 // Pending Input Models (for reliable frontend->proxy message delivery)
 // ============================================================================
 
