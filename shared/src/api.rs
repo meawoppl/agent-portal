@@ -250,7 +250,7 @@ pub struct UpdateScheduledTaskRequest {
 }
 
 /// Info about a scheduled task (returned by list/create endpoints)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScheduledTaskInfo {
     pub id: uuid::Uuid,
     pub name: String,

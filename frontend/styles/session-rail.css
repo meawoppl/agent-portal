@@ -310,6 +310,11 @@
     background: rgba(0, 170, 68, 0.15);
 }
 
+.pill-agent-badge.cron {
+    color: var(--accent);
+    background: rgba(125, 207, 255, 0.15);
+}
+
 /* Version staleness badge */
 .pill-version-badge {
     font-size: 0.6rem;

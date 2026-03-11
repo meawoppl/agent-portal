@@ -683,6 +683,13 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     }
                 }
                 {
+                    if session.scheduled_task_id.is_some() {
+                        html! { <span class="pill-agent-badge cron">{ "Cron" }</span> }
+                    } else {
+                        html! {}
+                    }
+                }
+                {
                     if is_hidden {
                         html! { <span class="pill-hidden-badge">{ "ᴴ" }</span> }
                     } else {
