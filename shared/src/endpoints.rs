@@ -394,6 +394,8 @@ pub enum LauncherToServer {
         claude_args: Vec<String>,
         #[serde(default)]
         agent_type: AgentType,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scheduled_task_id: Option<Uuid>,
     },
 
     /// Inject input into a session on behalf of the scheduler
@@ -438,6 +440,8 @@ pub enum ServerToLauncher {
         claude_args: Vec<String>,
         #[serde(default)]
         agent_type: AgentType,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scheduled_task_id: Option<Uuid>,
     },
 
     /// Request to stop a running session
@@ -589,6 +593,7 @@ mod tests {
             session_name: Some("my-session".into()),
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
+            scheduled_task_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LaunchSession""#));
@@ -630,6 +635,7 @@ mod tests {
             session_name: Some("my-project".into()),
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
+            scheduled_task_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"RequestLaunch""#));

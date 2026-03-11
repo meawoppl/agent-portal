@@ -1,6 +1,7 @@
 mod config;
 mod connection;
 mod process_manager;
+mod scheduler;
 mod service;
 
 use clap::{Parser, Subcommand};

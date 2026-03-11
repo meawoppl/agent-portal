@@ -21,6 +21,16 @@ struct ManagedTask {
     working_directory: String,
 }
 
+pub struct SpawnParams {
+    pub auth_token: String,
+    pub working_directory: String,
+    pub session_name: Option<String>,
+    pub claude_args: Vec<String>,
+    pub agent_type: shared::AgentType,
+    pub scheduled_task_id: Option<Uuid>,
+    pub resume_session_id: Option<Uuid>,
+}
+
 pub struct ProcessManager {
     tasks: HashMap<Uuid, ManagedTask>,
     backend_url: String,
@@ -70,14 +80,7 @@ impl ProcessManager {
             .map(|t| t.working_directory.clone())
     }
 
-    pub async fn spawn(
-        &mut self,
-        auth_token: &str,
-        working_directory: &str,
-        session_name: Option<&str>,
-        claude_args: &[String],
-        agent_type: shared::AgentType,
-    ) -> anyhow::Result<Uuid> {
+    pub async fn spawn(&mut self, params: SpawnParams) -> anyhow::Result<Uuid> {
         // Enforce the concurrency cap. Each session is a long-lived Claude CLI
         // process consuming memory, CPU, and a WebSocket connection. Without a
         // limit, a burst of launch requests could starve the host of resources
@@ -90,12 +93,18 @@ impl ProcessManager {
             );
         }
 
-        let wd = std::path::Path::new(working_directory);
+        let wd = std::path::Path::new(&params.working_directory);
         if !wd.is_dir() {
-            anyhow::bail!("Working directory does not exist: {}", working_directory);
+            anyhow::bail!(
+                "Working directory does not exist: {}",
+                params.working_directory
+            );
         }
 
-        let session_id = Uuid::new_v4();
+        let (session_id, resume) = match params.resume_session_id {
+            Some(id) => (id, true),
+            None => (Uuid::new_v4(), false),
+        };
         let default_name = {
             let hostname = hostname::get()
                 .ok()
@@ -104,23 +113,27 @@ impl ProcessManager {
             let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
             format!("{}-{}", hostname, timestamp)
         };
-        let name = session_name.unwrap_or(&default_name).to_string();
+        let name = params
+            .session_name
+            .as_deref()
+            .unwrap_or(&default_name)
+            .to_string();
 
-        let git_branch = get_git_branch(working_directory);
+        let git_branch = get_git_branch(&params.working_directory);
 
         let proxy_config = ProxySessionConfig {
             backend_url: self.backend_url.clone(),
             session_id,
             session_name: name.clone(),
-            auth_token: Some(auth_token.to_string()),
-            working_directory: working_directory.to_string(),
-            resume: false,
+            auth_token: Some(params.auth_token),
+            working_directory: params.working_directory.clone(),
+            resume,
             git_branch,
-            claude_args: claude_args.to_vec(),
+            claude_args: params.claude_args,
             replaces_session_id: None,
             launcher_id: self.launcher_id,
-            agent_type,
-            scheduled_task_id: None,
+            agent_type: params.agent_type,
+            scheduled_task_id: params.scheduled_task_id,
         };
 
         let exit_tx = self.exit_tx.clone();
@@ -137,7 +150,7 @@ impl ProcessManager {
 
         info!(
             "Spawned session task: session_id={}, session_name={}, dir={}",
-            session_id, name, working_directory
+            session_id, name, params.working_directory
         );
 
         self.tasks.insert(
@@ -145,7 +158,7 @@ impl ProcessManager {
             ManagedTask {
                 handle,
                 cancel,
-                working_directory: working_directory.to_string(),
+                working_directory: params.working_directory,
             },
         );
 
