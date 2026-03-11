@@ -3,7 +3,7 @@
 //! Dropdown pattern matches the send button: always in DOM, toggled by .open class,
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
-use crate::components::ShareDialog;
+use crate::components::{ScheduleDialog, ShareDialog};
 use crate::utils;
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
@@ -226,6 +226,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let stop_confirm = use_state(|| false);
     let copied_id = use_state(|| false);
     let share_session_id = use_state(|| None::<Uuid>);
+    let schedule_session = use_state(|| None::<SessionInfo>);
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -474,6 +475,24 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             html! {}
         };
 
+        let schedule_option = if session.my_role == "owner" {
+            let schedule_session = schedule_session.clone();
+            let session_clone = session.clone();
+            let menu_session = menu_session.clone();
+            let on_schedule = Callback::from(move |_: MouseEvent| {
+                schedule_session.set(Some(session_clone.clone()));
+                menu_session.set(None);
+            });
+            html! {
+                <button type="button" class="pill-menu-option schedule" onclick={on_schedule}>
+                    { "Schedule Task" }
+                    <span class="option-hint">{ "Cron jobs" }</span>
+                </button>
+            }
+        } else {
+            html! {}
+        };
+
         html! {
             <>
                 <button
@@ -485,6 +504,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     <span class="option-hint">{ short_id }</span>
                 </button>
                 { share_option }
+                { schedule_option }
                 { repo_option }
                 <button
                     type="button"
@@ -787,6 +807,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     let share_session_id = share_session_id.clone();
                     let on_close = Callback::from(move |_| share_session_id.set(None));
                     html! { <ShareDialog {session_id} {on_close} /> }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if let Some(ref session) = *schedule_session {
+                    let schedule_session = schedule_session.clone();
+                    let on_close = Callback::from(move |_| schedule_session.set(None));
+                    html! { <ScheduleDialog session={session.clone()} {on_close} /> }
                 } else {
                     html! {}
                 }

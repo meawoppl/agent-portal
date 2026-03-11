@@ -33,6 +33,7 @@ pub struct LauncherConnection {
     pub user_id: Uuid,
     pub running_sessions: Vec<Uuid>,
     pub working_directory: Option<String>,
+    pub version: String,
 }
 
 #[derive(Clone)]
@@ -302,6 +303,7 @@ impl SessionManager {
                 connected: true,
                 running_sessions: entry.value().running_sessions.len() as u32,
                 working_directory: entry.value().working_directory.clone(),
+                version: entry.value().version.clone(),
             })
             .collect()
     }

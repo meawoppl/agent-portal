@@ -1,13 +1,10 @@
 mod sessions_panel;
 mod sounds_panel;
-mod tasks_panel;
 mod tokens_panel;
 
 use sessions_panel::SessionsPanel;
-use shared::api::ScheduledTaskInfo;
 use shared::{ProxyTokenInfo, SessionInfo};
 use sounds_panel::SoundsPanel;
-use tasks_panel::TasksPanel;
 use tokens_panel::{count_expiring_tokens, TokensPanel};
 use yew::prelude::*;
 
@@ -15,7 +12,6 @@ use yew::prelude::*;
 enum SettingsTab {
     Sessions,
     Tokens,
-    Tasks,
     Sounds,
 }
 
@@ -31,7 +27,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     // Counts for tab badges (updated when panels load their data)
     let session_count = use_state(|| 0usize);
     let expiring_token_count = use_state(|| 0usize);
-    let task_count = use_state(|| 0usize);
 
     let on_sessions_loaded = {
         let session_count = session_count.clone();
@@ -47,13 +42,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         })
     };
 
-    let on_tasks_loaded = {
-        let task_count = task_count.clone();
-        Callback::from(move |tasks: Vec<ScheduledTaskInfo>| {
-            task_count.set(tasks.len());
-        })
-    };
-
     let on_sessions_tab = {
         let active_tab = active_tab.clone();
         Callback::from(move |_| active_tab.set(SettingsTab::Sessions))
@@ -62,11 +50,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_tokens_tab = {
         let active_tab = active_tab.clone();
         Callback::from(move |_| active_tab.set(SettingsTab::Tokens))
-    };
-
-    let on_tasks_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(SettingsTab::Tasks))
     };
 
     let on_sounds_tab = {
@@ -113,15 +96,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     }
                 </button>
                 <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::Tasks).then_some("active"))}
-                    onclick={on_tasks_tab}
-                >
-                    { "Tasks" }
-                    if *task_count > 0 {
-                        <span class="count-badge">{ *task_count }</span>
-                    }
-                </button>
-                <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sounds).then_some("active"))}
                     onclick={on_sounds_tab}
                 >
@@ -132,9 +106,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
             <main class="settings-content">
                 if *active_tab == SettingsTab::Tokens {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
-                }
-                if *active_tab == SettingsTab::Tasks {
-                    <TasksPanel on_tasks_loaded={on_tasks_loaded} />
                 }
                 if *active_tab == SettingsTab::Sounds {
                     <SoundsPanel />

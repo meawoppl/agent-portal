@@ -174,6 +174,9 @@ pub struct LauncherInfo {
     /// Working directory where the launcher process is running
     #[serde(default)]
     pub working_directory: Option<String>,
+    /// Launcher binary version
+    #[serde(default)]
+    pub version: String,
 }
 
 /// API types for HTTP endpoints
