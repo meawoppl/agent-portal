@@ -99,6 +99,7 @@ pub async fn register_with_backend(
         launcher_id: config.launcher_id,
         agent_type: config.agent_type,
         repo_url: get_repo_url(&config.working_directory),
+        scheduled_task_id: config.scheduled_task_id,
     });
 
     if let Err(e) = conn.send(&register_msg).await {

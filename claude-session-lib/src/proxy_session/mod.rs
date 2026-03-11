@@ -47,6 +47,8 @@ pub struct ProxySessionConfig {
     pub launcher_id: Option<Uuid>,
     /// Which agent CLI to use
     pub agent_type: shared::AgentType,
+    /// If this session was started by a scheduled task
+    pub scheduled_task_id: Option<Uuid>,
 }
 
 /// Exponential backoff helper
@@ -512,6 +514,7 @@ async fn register_session(
         launcher_id: config.launcher_id,
         agent_type: config.agent_type,
         repo_url: get_repo_url(&config.working_directory),
+        scheduled_task_id: config.scheduled_task_id,
     });
 
     if conn.send(register_msg).await.is_err() {

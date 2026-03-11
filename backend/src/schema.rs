@@ -78,6 +78,33 @@ diesel::table! {
 }
 
 diesel::table! {
+    scheduled_tasks (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        name -> Varchar,
+        #[max_length = 128]
+        cron_expression -> Varchar,
+        #[max_length = 64]
+        timezone -> Varchar,
+        #[max_length = 255]
+        hostname -> Nullable<Varchar>,
+        working_directory -> Text,
+        prompt -> Text,
+        claude_args -> Jsonb,
+        #[max_length = 16]
+        agent_type -> Varchar,
+        enabled -> Bool,
+        max_runtime_minutes -> Int4,
+        last_session_id -> Nullable<Uuid>,
+        last_run_at -> Nullable<Timestamp>,
+        next_run_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     sessions (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -110,6 +137,7 @@ diesel::table! {
         agent_type -> Varchar,
         #[max_length = 512]
         repo_url -> Nullable<Varchar>,
+        scheduled_task_id -> Nullable<Uuid>,
     }
 }
 
@@ -139,6 +167,7 @@ diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
 diesel::joinable!(pending_permission_requests -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
+diesel::joinable!(scheduled_tasks -> users (user_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
@@ -149,6 +178,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     pending_inputs,
     pending_permission_requests,
     proxy_auth_tokens,
+    scheduled_tasks,
     session_members,
     sessions,
     users,

@@ -346,6 +346,21 @@ async fn main() -> anyhow::Result<()> {
             "/api/proxy-tokens/:id",
             axum::routing::delete(handlers::proxy_tokens::revoke_token_handler),
         )
+        // Scheduled task management endpoints
+        .route(
+            "/api/scheduled-tasks",
+            get(handlers::scheduled_tasks::list_tasks_handler)
+                .post(handlers::scheduled_tasks::create_task_handler),
+        )
+        .route(
+            "/api/scheduled-tasks/:id",
+            axum::routing::patch(handlers::scheduled_tasks::update_task_handler)
+                .delete(handlers::scheduled_tasks::delete_task_handler),
+        )
+        .route(
+            "/api/scheduled-tasks/:id/runs",
+            get(handlers::scheduled_tasks::list_runs_handler),
+        )
         // Sound settings
         .route(
             "/api/settings/sound",

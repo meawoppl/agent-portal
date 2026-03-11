@@ -1,5 +1,9 @@
 use axum::extract::ws::WebSocket;
-use shared::{LauncherEndpoint, LauncherToServer, ServerToClient, ServerToLauncher};
+use diesel::prelude::*;
+use shared::{
+    AgentType, LauncherEndpoint, LauncherToServer, ScheduledTaskConfig, ServerToClient,
+    ServerToLauncher, ServerToProxy,
+};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -130,6 +134,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
 
     // Create channel for sending messages to this launcher
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerToLauncher>();
+    let tx_for_sync = tx.clone();
 
     app_state.session_manager.register_launcher(
         launcher_id,
@@ -147,6 +152,52 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         "Launcher '{}' registered for user {}",
         launcher_name, user_id
     );
+
+    // Send initial ScheduleSync with the user's scheduled tasks
+    if let Ok(mut db_conn) = app_state.db_pool.get() {
+        use crate::schema::scheduled_tasks;
+        let launcher_hostname = app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .map(|l| l.hostname.clone())
+            .unwrap_or_default();
+
+        let tasks: Vec<crate::models::ScheduledTask> = scheduled_tasks::table
+            .filter(scheduled_tasks::user_id.eq(user_id))
+            .filter(scheduled_tasks::enabled.eq(true))
+            .load(&mut db_conn)
+            .unwrap_or_default();
+
+        let task_configs: Vec<ScheduledTaskConfig> = tasks
+            .iter()
+            .filter(|t| t.hostname.is_none() || t.hostname.as_deref() == Some(&launcher_hostname))
+            .map(|t| ScheduledTaskConfig {
+                id: t.id,
+                name: t.name.clone(),
+                cron_expression: t.cron_expression.clone(),
+                timezone: t.timezone.clone(),
+                working_directory: t.working_directory.clone(),
+                prompt: t.prompt.clone(),
+                claude_args: serde_json::from_value(t.claude_args.clone()).unwrap_or_default(),
+                agent_type: t.agent_type.parse().unwrap_or(AgentType::Claude),
+                enabled: t.enabled,
+                max_runtime_minutes: t.max_runtime_minutes,
+                last_session_id: t.last_session_id,
+            })
+            .collect();
+
+        if !task_configs.is_empty() {
+            let count = task_configs.len();
+            let _ = tx_for_sync.send(ServerToLauncher::ScheduleSync {
+                tasks: task_configs,
+            });
+            info!(
+                "Sent initial ScheduleSync with {} tasks to launcher '{}'",
+                count, launcher_name
+            );
+        }
+    }
 
     // Main message loop
     loop {
@@ -294,6 +345,89 @@ fn handle_launcher_message(
                     );
                 }
             }
+        }
+        LauncherToServer::InjectInput {
+            session_id,
+            content,
+        } => {
+            info!(
+                "InjectInput for session {} from launcher {}",
+                session_id, launcher_id
+            );
+            let session_key = session_id.to_string();
+            let content_value = serde_json::Value::String(content);
+
+            // Set sender attribution to "Scheduler"
+            app_state
+                .session_manager
+                .last_input_sender
+                .insert(session_id, (user_id, "Scheduler".to_string()));
+
+            // Sequence and send (same pipeline as web client input)
+            if let Ok(mut db_conn) = app_state.db_pool.get() {
+                use crate::schema::{pending_inputs, sessions};
+
+                let next_seq: i64 = diesel::update(sessions::table.find(session_id))
+                    .set(sessions::input_seq.eq(sessions::input_seq + 1))
+                    .returning(sessions::input_seq)
+                    .get_result(&mut db_conn)
+                    .unwrap_or(0);
+
+                if next_seq > 0 {
+                    let new_input = crate::models::NewPendingInput {
+                        session_id,
+                        seq_num: next_seq,
+                        content: serde_json::to_string(&content_value).unwrap_or_default(),
+                    };
+                    let _ = diesel::insert_into(pending_inputs::table)
+                        .values(&new_input)
+                        .execute(&mut db_conn);
+
+                    app_state.session_manager.send_to_session(
+                        &session_key,
+                        ServerToProxy::SequencedInput {
+                            session_id,
+                            seq: next_seq,
+                            content: content_value,
+                            send_mode: None,
+                        },
+                    );
+                }
+            }
+        }
+        LauncherToServer::ScheduledRunStarted {
+            task_id,
+            session_id,
+        } => {
+            info!(
+                "Scheduled run started: task={}, session={}",
+                task_id, session_id
+            );
+            if let Ok(mut db_conn) = app_state.db_pool.get() {
+                use crate::schema::scheduled_tasks;
+                let _ = diesel::update(
+                    scheduled_tasks::table
+                        .filter(scheduled_tasks::id.eq(task_id))
+                        .filter(scheduled_tasks::user_id.eq(user_id)),
+                )
+                .set((
+                    scheduled_tasks::last_run_at.eq(diesel::dsl::now),
+                    scheduled_tasks::last_session_id.eq(session_id),
+                    scheduled_tasks::updated_at.eq(diesel::dsl::now),
+                ))
+                .execute(&mut db_conn);
+            }
+        }
+        LauncherToServer::ScheduledRunCompleted {
+            task_id,
+            session_id,
+            exit_code,
+            duration_secs,
+        } => {
+            info!(
+                "Scheduled run completed: task={}, session={}, exit={:?}, duration={}s",
+                task_id, session_id, exit_code, duration_secs
+            );
         }
         LauncherToServer::LauncherRegister { .. } => {}
     }

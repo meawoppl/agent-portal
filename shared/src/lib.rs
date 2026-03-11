@@ -211,6 +211,9 @@ pub struct SessionInfo {
     /// Proxy client version string (e.g. "1.3.39")
     #[serde(default)]
     pub client_version: Option<String>,
+    /// Scheduled task ID if this session was spawned by a scheduled task
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_task_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

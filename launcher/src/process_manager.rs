@@ -120,6 +120,7 @@ impl ProcessManager {
             replaces_session_id: None,
             launcher_id: self.launcher_id,
             agent_type,
+            scheduled_task_id: None,
         };
 
         let exit_tx = self.exit_tx.clone();
