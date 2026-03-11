@@ -1,0 +1,312 @@
+/* =============================================================================
+   Schedule Dialog — modal for managing scheduled tasks per session
+   ============================================================================= */
+
+.sched-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.sched-dialog {
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 90vw;
+    max-width: 600px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sched-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 1.25rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.sched-title {
+    margin: 0;
+    font-size: 1.15rem;
+    color: var(--text-primary);
+}
+
+.sched-context {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+    font-size: 0.8rem;
+}
+
+.sched-host {
+    color: var(--text-secondary);
+}
+
+.sched-dir {
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 350px;
+}
+
+.sched-close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    line-height: 1;
+}
+
+.sched-close:hover {
+    color: var(--text-primary);
+    background: var(--bg-dark);
+}
+
+/* Version warning */
+.sched-version-warning {
+    background: rgba(224, 175, 104, 0.15);
+    border-bottom: 1px solid rgba(224, 175, 104, 0.3);
+    color: #e0af68;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.85rem;
+}
+
+/* Body */
+.sched-body {
+    padding: 1rem 1.5rem 1.25rem;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.sched-loading {
+    padding: 2rem;
+    text-align: center;
+}
+
+.sched-empty {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin: 0 0 1rem;
+}
+
+/* Task rows */
+.sched-task-row {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    transition: border-color 0.2s;
+}
+
+.sched-task-row:hover {
+    border-color: var(--text-secondary);
+}
+
+.sched-task-row.disabled {
+    opacity: 0.5;
+}
+
+.sched-task-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.sched-task-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.sched-task-cron {
+    background: rgba(125, 207, 255, 0.15);
+    color: var(--accent);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+}
+
+.sched-task-tz {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.sched-task-prompt-preview {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin: 0.35rem 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sched-task-actions {
+    display: flex;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+}
+
+/* Buttons */
+.sched-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.15s;
+}
+
+.sched-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+
+.sched-btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.sched-btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: #fff;
+}
+
+.sched-btn-danger:hover {
+    border-color: var(--error);
+    color: var(--error);
+}
+
+.sched-btn-danger.confirming {
+    background: var(--error);
+    border-color: var(--error);
+    color: #fff;
+}
+
+.sched-new-btn {
+    margin-top: 0.75rem;
+}
+
+/* Form */
+.sched-form-container {
+    border-top: 1px solid var(--border);
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+}
+
+.sched-form-title {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.sched-error {
+    background: rgba(247, 118, 142, 0.15);
+    border: 1px solid var(--error);
+    color: var(--error);
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+
+.sched-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.sched-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.sched-field label {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.sched-field input,
+.sched-field textarea {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.sched-field textarea {
+    font-family: var(--font-mono);
+    resize: vertical;
+    min-height: 70px;
+}
+
+.sched-field input:focus,
+.sched-field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.sched-field-row {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.sched-field-row .sched-field {
+    flex: 1;
+}
+
+.sched-field-sm {
+    max-width: 120px;
+}
+
+.sched-hint {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+.sched-form-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .sched-dialog {
+        width: 95vw;
+        max-height: 90vh;
+    }
+
+    .sched-field-row {
+        flex-direction: column;
+    }
+
+    .sched-field-sm {
+        max-width: none;
+    }
+}
