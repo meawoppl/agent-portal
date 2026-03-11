@@ -312,6 +312,7 @@ fn handle_launcher_message(
             session_name,
             claude_args,
             agent_type,
+            scheduled_task_id,
         } => {
             info!(
                 "Launcher requested launch: dir={}, name={:?}",
@@ -327,6 +328,7 @@ fn handle_launcher_message(
                         session_name,
                         claude_args,
                         agent_type,
+                        scheduled_task_id,
                     };
                     if !app_state
                         .session_manager
