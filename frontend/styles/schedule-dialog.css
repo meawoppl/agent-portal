@@ -289,6 +289,12 @@
     font-family: var(--font-mono);
 }
 
+.sched-cron-desc {
+    font-size: 0.75rem;
+    color: var(--accent);
+    margin-top: 0.15rem;
+}
+
 .sched-form-actions {
     display: flex;
     gap: 0.5rem;
