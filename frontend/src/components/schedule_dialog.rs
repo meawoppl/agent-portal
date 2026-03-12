@@ -50,138 +50,7 @@ enum FormMode {
     Edit(Uuid),
 }
 
-/// Describe a 5-field cron expression in plain English.
-/// Returns None if the expression is invalid / unparseable.
-fn describe_cron(expr: &str) -> Option<String> {
-    let parts: Vec<&str> = expr.split_whitespace().collect();
-    if parts.len() != 5 {
-        return None;
-    }
-    let [min, hour, dom, month, dow] = [parts[0], parts[1], parts[2], parts[3], parts[4]];
-
-    let time_desc = match (min, hour) {
-        ("*", "*") => "Every minute".to_string(),
-        (m, "*") => {
-            let m_val: u32 = m.parse().ok()?;
-            if m_val > 59 {
-                return None;
-            }
-            format!("Every hour at :{:02}", m_val)
-        }
-        ("*", h) => {
-            // */N pattern on hour
-            if let Some(step) = h.strip_prefix("*/") {
-                let n: u32 = step.parse().ok()?;
-                if n == 0 || n > 23 {
-                    return None;
-                }
-                return Some(format!("Every {} hours", n));
-            }
-            let _: u32 = h.parse().ok()?;
-            format!("Every minute of hour {}", h)
-        }
-        ("0", h) => {
-            let h_val: u32 = h.parse().ok()?;
-            if h_val > 23 {
-                return None;
-            }
-            let (display_h, ampm) = if h_val == 0 {
-                (12, "AM")
-            } else if h_val < 12 {
-                (h_val, "AM")
-            } else if h_val == 12 {
-                (12, "PM")
-            } else {
-                (h_val - 12, "PM")
-            };
-            format!("At {}:00 {}", display_h, ampm)
-        }
-        (m, h) => {
-            // Check for */N patterns
-            if m.starts_with("*/") || h.starts_with("*/") {
-                return None; // Complex, skip
-            }
-            let h_val: u32 = h.parse().ok()?;
-            let m_val: u32 = m.parse().ok()?;
-            if h_val > 23 || m_val > 59 {
-                return None;
-            }
-            let (display_h, ampm) = if h_val == 0 {
-                (12, "AM")
-            } else if h_val < 12 {
-                (h_val, "AM")
-            } else if h_val == 12 {
-                (12, "PM")
-            } else {
-                (h_val - 12, "PM")
-            };
-            format!("At {}:{:02} {}", display_h, m_val, ampm)
-        }
-    };
-
-    let dow_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    let month_names = [
-        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-
-    let day_desc = match (dom, dow) {
-        ("*", "*") => String::new(),
-        (d, "*") => {
-            if let Some(step) = d.strip_prefix("*/") {
-                let n: u32 = step.parse().ok()?;
-                format!(", every {} days", n)
-            } else {
-                let d_val: u32 = d.parse().ok()?;
-                if d_val == 0 || d_val > 31 {
-                    return None;
-                }
-                let suffix = match d_val {
-                    1 | 21 | 31 => "st",
-                    2 | 22 => "nd",
-                    3 | 23 => "rd",
-                    _ => "th",
-                };
-                format!(", on the {}{}", d_val, suffix)
-            }
-        }
-        ("*", w) => {
-            // Could be a list like "1,3,5" or a single value
-            let names: Vec<&str> = w
-                .split(',')
-                .filter_map(|p| {
-                    let n: usize = p.parse().ok()?;
-                    dow_names.get(n).copied()
-                })
-                .collect();
-            if names.is_empty() {
-                return None;
-            }
-            format!(", on {}", names.join(", "))
-        }
-        _ => String::new(), // Both specified — complex, skip extra detail
-    };
-
-    let month_desc = if month == "*" {
-        String::new()
-    } else if let Some(step) = month.strip_prefix("*/") {
-        let n: u32 = step.parse().ok()?;
-        format!(", every {} months", n)
-    } else {
-        let names: Vec<&str> = month
-            .split(',')
-            .filter_map(|p| {
-                let n: usize = p.parse().ok()?;
-                month_names.get(n).copied()
-            })
-            .collect();
-        if names.is_empty() {
-            return None;
-        }
-        format!(", in {}", names.join(", "))
-    };
-
-    Some(format!("{}{}{}", time_desc, day_desc, month_desc))
-}
+use super::cron_describe;
 
 #[function_component(ScheduleDialog)]
 pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
@@ -557,7 +426,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             />
                                             <span class="sched-hint">{ "min hour dom month dow" }</span>
                                             {
-                                                if let Some(desc) = describe_cron(&form.cron_expression) {
+                                                if let Some(desc) = cron_describe::describe(&form.cron_expression) {
                                                     html! { <span class="sched-cron-desc">{ desc }</span> }
                                                 } else {
                                                     html! {}
