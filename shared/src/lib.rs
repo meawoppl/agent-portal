@@ -190,8 +190,7 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     pub last_activity: String,
     pub created_at: String,
-    #[serde(default)]
-    pub updated_at: Option<String>,
+    pub updated_at: String,
     #[serde(default)]
     pub git_branch: Option<String>,
     /// The current user's role in this session (owner, editor, viewer)

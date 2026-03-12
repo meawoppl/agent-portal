@@ -356,7 +356,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                     <div class="sched-body">
                         // Existing tasks list
                         if tasks.is_empty() && form_mode.is_none() {
-                            <p class="sched-empty">{ "No scheduled tasks for this directory." }</p>
+                            <p class="sched-empty">{ "No scheduled tasks for this session." }</p>
                         }
                         { for tasks.iter().map(|task| {
                             let task_id = task.id;

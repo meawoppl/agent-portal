@@ -7,12 +7,15 @@ use crate::components::{ScheduleDialog, ShareDialog};
 use crate::utils;
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
+use gloo_net::http::Request;
+use shared::api::ScheduledTaskListResponse;
 use shared::SessionInfo;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
@@ -227,6 +230,37 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let copied_id = use_state(|| false);
     let share_session_id = use_state(|| None::<Uuid>);
     let schedule_session = use_state(|| None::<SessionInfo>);
+    let stop_has_tasks = use_state(|| false);
+
+    // Fetch scheduled task status when dropdown opens for a session
+    {
+        let stop_has_tasks = stop_has_tasks.clone();
+        let menu_id = *menu_session;
+        let sessions = props.sessions.clone();
+        use_effect_with(menu_id, move |menu_id| {
+            if let Some(sid) = menu_id {
+                if let Some(session) = sessions.iter().find(|s| s.id == *sid) {
+                    let wd = session.working_directory.clone();
+                    let stop_has_tasks = stop_has_tasks.clone();
+                    spawn_local(async move {
+                        let url = utils::api_url("/api/scheduled-tasks");
+                        if let Ok(resp) = Request::get(&url).send().await {
+                            if let Ok(data) = resp.json::<ScheduledTaskListResponse>().await {
+                                let has = data
+                                    .tasks
+                                    .iter()
+                                    .any(|t| t.working_directory == wd && t.enabled);
+                                stop_has_tasks.set(has);
+                            }
+                        }
+                    });
+                }
+            } else {
+                stop_has_tasks.set(false);
+            }
+            || ()
+        });
+    }
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -373,19 +407,36 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         };
 
         let stop_option = if is_connected && session.status == shared::SessionStatus::Active {
-            let (stop_label, stop_hint) = if confirming_stop {
-                ("Click again to confirm", "This will terminate the process")
+            if *stop_has_tasks {
+                // Block stop — open schedule dialog so user can delete tasks first
+                let schedule_session = schedule_session.clone();
+                let session_clone = session.clone();
+                let menu_session = menu_session.clone();
+                let on_click = Callback::from(move |_: MouseEvent| {
+                    schedule_session.set(Some(session_clone.clone()));
+                    menu_session.set(None);
+                });
+                html! {
+                    <button type="button" class="pill-menu-option stop blocked" onclick={on_click}>
+                        { "Delete Scheduled Tasks First" }
+                        <span class="option-hint">{ "Opens task manager" }</span>
+                    </button>
+                }
             } else {
-                ("Stop Session", "Terminate process")
-            };
-            html! {
-                <button type="button"
-                    class={classes!("pill-menu-option", "stop", confirming_stop.then_some("confirming"))}
-                    onclick={on_stop}
-                >
-                    { stop_label }
-                    <span class="option-hint">{ stop_hint }</span>
-                </button>
+                let (stop_label, stop_hint) = if confirming_stop {
+                    ("Click again to confirm", "This will terminate the process")
+                } else {
+                    ("Stop Session", "Terminate process")
+                };
+                html! {
+                    <button type="button"
+                        class={classes!("pill-menu-option", "stop", confirming_stop.then_some("confirming"))}
+                        onclick={on_stop}
+                    >
+                        { stop_label }
+                        <span class="option-hint">{ stop_hint }</span>
+                    </button>
+                }
             }
         } else {
             html! {}

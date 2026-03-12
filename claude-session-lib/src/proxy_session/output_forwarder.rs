@@ -30,9 +30,9 @@ pub fn spawn_output_forwarder(
     current_pr_url: Arc<Mutex<Option<String>>>,
     current_repo_url: Arc<Mutex<Option<String>>>,
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
-    max_image_mb: Option<u32>,
+    max_image_mb: u32,
 ) -> tokio::task::JoinHandle<()> {
-    let max_bytes = max_image_mb.unwrap_or(DEFAULT_MAX_IMAGE_MB) as usize * 1024 * 1024;
+    let max_bytes = max_image_mb as usize * 1024 * 1024;
     tokio::spawn(async move {
         let mut message_count: u64 = 0;
         let mut pending_git_check = false;
@@ -270,9 +270,6 @@ async fn check_and_send_branch_update(
         }
     }
 }
-
-/// Default max image size in MB (used when backend doesn't provide a value)
-const DEFAULT_MAX_IMAGE_MB: u32 = 10;
 
 /// Return the MIME type for a supported image extension, or None.
 fn image_mime_type(path: &str) -> Option<&'static str> {

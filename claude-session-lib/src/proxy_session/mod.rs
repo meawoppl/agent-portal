@@ -488,11 +488,11 @@ async fn connect_to_backend(
 }
 
 /// Register session with the backend and wait for acknowledgment.
-/// On success, returns the backend-provided max_image_mb (if any).
+/// On success, returns the backend-provided max_image_mb.
 async fn register_session(
     conn: &mut NativeConnection,
     config: &ProxySessionConfig,
-) -> Result<Option<u32>, Duration> {
+) -> Result<u32, Duration> {
     info!("Registering session...");
 
     let hostname = hostname::get()
@@ -544,7 +544,7 @@ async fn register_session(
 
     match ack_timeout {
         Ok(Some((true, _, max_image_mb))) => {
-            info!("Session registered (max_image_mb: {:?})", max_image_mb);
+            info!("Session registered (max_image_mb: {})", max_image_mb);
             Ok(max_image_mb)
         }
         Ok(Some((false, error, _))) => {
@@ -561,7 +561,7 @@ async fn register_session(
             info!(
                 "No RegisterAck received (timeout), assuming success for backwards compatibility"
             );
-            Ok(None)
+            Ok(10)
         }
     }
 }
@@ -571,7 +571,7 @@ async fn run_message_loop(
     session: &mut SessionState<'_>,
     config: &ProxySessionConfig,
     conn: NativeConnection,
-    max_image_mb: Option<u32>,
+    max_image_mb: u32,
 ) -> ConnectionResult {
     let connection_start = Instant::now();
     let session_id = config.session_id;
