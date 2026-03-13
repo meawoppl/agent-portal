@@ -64,8 +64,16 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let inactive_hidden = config.inactive_hidden;
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
-
         Callback::from(move |e: KeyboardEvent| {
+            // Don't handle keyboard nav when a modal overlay is open
+            if gloo::utils::document()
+                .query_selector(".sched-overlay, .share-dialog-overlay")
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                return;
+            }
             let in_nav_mode = *nav_mode;
             let len = sessions.len();
 

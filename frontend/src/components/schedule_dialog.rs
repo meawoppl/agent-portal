@@ -6,6 +6,7 @@ use shared::api::{
 };
 use shared::{LauncherInfo, SessionInfo};
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
@@ -66,6 +67,24 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
     let hostname = props.session.hostname.clone();
 
     let folder = utils::extract_folder(&working_directory);
+
+    // Close on Escape
+    {
+        let on_close = props.on_close.clone();
+        use_effect_with((), move |_| {
+            let listener = gloo::events::EventListener::new(
+                &gloo::utils::document(),
+                "keydown",
+                move |event| {
+                    let e: &web_sys::KeyboardEvent = event.unchecked_ref();
+                    if e.key() == "Escape" {
+                        on_close.emit(());
+                    }
+                },
+            );
+            move || drop(listener)
+        });
+    }
 
     // Fetch launcher version for this session's hostname
     {
@@ -193,7 +212,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             hostname: host,
                             working_directory: wd,
                             prompt: data.prompt.clone(),
-                            claude_args: vec![],
+                            claude_args: vec!["--dangerously-skip-permissions".to_string()],
                             agent_type: shared::AgentType::Claude,
                             max_runtime_minutes: data.max_runtime_minutes,
                         };
