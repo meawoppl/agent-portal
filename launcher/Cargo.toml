@@ -47,5 +47,6 @@ portal-auth = { path = "../portal-auth" }
 claude-session-lib = { path = "../claude-session-lib" }
 ws-bridge = { workspace = true, features = ["native-client"] }
 portal-update = { path = "../portal-update" }
+reqwest = { version = "0.12", features = ["json"] }
 tokio-util.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
