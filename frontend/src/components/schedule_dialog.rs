@@ -43,6 +43,8 @@ struct TaskForm {
     timezone: String,
     prompt: String,
     max_runtime_minutes: i32,
+    extra_args: String,
+    skip_permissions: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -149,6 +151,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             form.set(TaskForm {
                 timezone: "UTC".to_string(),
                 max_runtime_minutes: 30,
+                skip_permissions: true,
                 ..Default::default()
             });
             error_msg.set(None);
@@ -163,12 +166,24 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let error_msg = error_msg.clone();
         Callback::from(move |task_id: Uuid| {
             if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
+                let has_skip = task
+                    .claude_args
+                    .iter()
+                    .any(|a| a == "--dangerously-skip-permissions" || a == "--full-auto");
+                let other_args: Vec<_> = task
+                    .claude_args
+                    .iter()
+                    .filter(|a| *a != "--dangerously-skip-permissions" && *a != "--full-auto")
+                    .cloned()
+                    .collect();
                 form.set(TaskForm {
                     name: task.name.clone(),
                     cron_expression: task.cron_expression.clone(),
                     timezone: task.timezone.clone(),
                     prompt: task.prompt.clone(),
                     max_runtime_minutes: task.max_runtime_minutes,
+                    extra_args: other_args.join(" "),
+                    skip_permissions: has_skip,
                 });
                 error_msg.set(None);
                 form_mode.set(Some(FormMode::Edit(task_id)));
@@ -203,6 +218,15 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             }
 
             spawn_local(async move {
+                let mut claude_args: Vec<String> = Vec::new();
+                if data.skip_permissions {
+                    claude_args.push("--dangerously-skip-permissions".to_string());
+                }
+                let extra = data.extra_args.trim();
+                if !extra.is_empty() {
+                    claude_args.extend(extra.split_whitespace().map(String::from));
+                }
+
                 let result = match mode {
                     Some(FormMode::Create) => {
                         let body = CreateScheduledTaskRequest {
@@ -212,7 +236,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             hostname: host,
                             working_directory: wd,
                             prompt: data.prompt.clone(),
-                            claude_args: vec!["--dangerously-skip-permissions".to_string()],
+                            claude_args: claude_args.clone(),
                             agent_type: shared::AgentType::Claude,
                             max_runtime_minutes: data.max_runtime_minutes,
                         };
@@ -229,6 +253,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             timezone: Some(data.timezone.clone()),
                             prompt: Some(data.prompt.clone()),
                             max_runtime_minutes: Some(data.max_runtime_minutes),
+                            claude_args: Some(claude_args.clone()),
                             ..Default::default()
                         };
                         Request::patch(&utils::api_url(&format!("/api/scheduled-tasks/{}", id)))
@@ -334,6 +359,25 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
             let mut f = (*form).clone();
             f.prompt = input.value();
+            form.set(f);
+        })
+    };
+
+    let on_extra_args_input = {
+        let form = form.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            let mut f = (*form).clone();
+            f.extra_args = input.value();
+            form.set(f);
+        })
+    };
+
+    let on_skip_permissions = {
+        let form = form.clone();
+        Callback::from(move |_: Event| {
+            let mut f = (*form).clone();
+            f.skip_permissions = !f.skip_permissions;
             form.set(f);
         })
     };
@@ -481,6 +525,25 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             oninput={on_prompt_input}
                                             required=true
                                         />
+                                    </div>
+                                    <div class="sched-field">
+                                        <label>{ "Extra CLI Arguments (optional)" }</label>
+                                        <input
+                                            type="text"
+                                            placeholder="--model sonnet --verbose"
+                                            value={form.extra_args.clone()}
+                                            oninput={on_extra_args_input}
+                                        />
+                                    </div>
+                                    <div class="sched-field sched-checkbox">
+                                        <label>
+                                            <input
+                                                type="checkbox"
+                                                checked={form.skip_permissions}
+                                                onchange={on_skip_permissions}
+                                            />
+                                            { " --dangerously-skip-permissions" }
+                                        </label>
                                     </div>
                                     <div class="sched-form-actions">
                                         <button type="button" class="sched-btn" onclick={close_form}>
