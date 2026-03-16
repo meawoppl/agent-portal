@@ -166,15 +166,14 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let error_msg = error_msg.clone();
         Callback::from(move |task_id: Uuid| {
             if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
-                let has_skip = task.claude_args.iter().any(|a| {
-                    a == "--dangerously-skip-permissions" || a == "--full-auto"
-                });
+                let has_skip = task
+                    .claude_args
+                    .iter()
+                    .any(|a| a == "--dangerously-skip-permissions" || a == "--full-auto");
                 let other_args: Vec<_> = task
                     .claude_args
                     .iter()
-                    .filter(|a| {
-                        *a != "--dangerously-skip-permissions" && *a != "--full-auto"
-                    })
+                    .filter(|a| *a != "--dangerously-skip-permissions" && *a != "--full-auto")
                     .cloned()
                     .collect();
                 form.set(TaskForm {
