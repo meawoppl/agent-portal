@@ -9,7 +9,6 @@
     background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
-    scroll-behavior: smooth;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
 }

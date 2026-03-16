@@ -286,21 +286,39 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         use_effect_with(focused_index, move |_| {
             if let Some(rail) = rail_ref.cast::<Element>() {
                 if let Some(child) = rail.children().item(focused_index as u32) {
-                    child.scroll_into_view();
+                    let opts = web_sys::ScrollIntoViewOptions::new();
+                    opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+                    opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                    opts.set_inline(web_sys::ScrollLogicalPosition::Nearest);
+                    child.scroll_into_view_with_scroll_into_view_options(&opts);
                 }
             }
             || ()
         });
     }
 
-    // Handle wheel event to translate vertical scroll to horizontal
+    // Handle wheel event to translate vertical scroll to horizontal.
+    // We directly set scrollLeft so that macOS trackpad inertia feels
+    // immediate rather than fighting CSS scroll-behavior: smooth.
     let on_wheel = {
         let rail_ref = rail_ref.clone();
         Callback::from(move |e: WheelEvent| {
             if let Some(rail) = rail_ref.cast::<HtmlElement>() {
+                let dx = e.delta_x();
+                let dy = e.delta_y();
+                // Use whichever axis has the larger delta — this lets both
+                // vertical scroll-wheel and horizontal trackpad swipes work
+                // naturally. Raw pixel values are used (no multiplier) so the
+                // scroll rate matches the rest of macOS.
+                let delta = if dx.abs() > dy.abs() { dx } else { dy };
+                if delta.abs() < 0.5 {
+                    return;
+                }
                 e.prevent_default();
-                let delta = e.delta_y();
-                rail.set_scroll_left(rail.scroll_left() + (delta * 3.0) as i32);
+                let opts = web_sys::ScrollToOptions::new();
+                opts.set_left(f64::from(rail.scroll_left()) + delta);
+                opts.set_behavior(web_sys::ScrollBehavior::Instant);
+                rail.scroll_to_with_scroll_to_options(&opts);
             }
         })
     };

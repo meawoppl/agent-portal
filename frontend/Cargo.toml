@@ -59,6 +59,10 @@ web-sys = { workspace = true, features = [
     "DataTransferItem",
     "DataTransferItemList",
     "DragEvent",
+    "ScrollBehavior",
+    "ScrollIntoViewOptions",
+    "ScrollLogicalPosition",
+    "ScrollToOptions",
 ] }
 
 # Utility libraries for WASM
