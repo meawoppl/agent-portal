@@ -197,10 +197,12 @@ pub async fn stop_session(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let stopped = app_state
+    // The proxy always connects directly, so disconnect_session() is the
+    // primary kill path. Also tell the launcher to clean up the process.
+    let stopped = app_state.session_manager.disconnect_session(session_id);
+    app_state
         .session_manager
-        .stop_session_on_launcher(session_id)
-        || app_state.session_manager.disconnect_session(session_id);
+        .stop_session_on_launcher(session_id);
 
     if stopped {
         Ok(StatusCode::ACCEPTED)

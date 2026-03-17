@@ -10,8 +10,8 @@ use uuid::Uuid;
 /// Key is question index, value is the selected answer(s)
 pub type QuestionAnswers = HashMap<usize, String>;
 
-/// Storage key for paused sessions in localStorage
-pub const PAUSED_SESSIONS_STORAGE_KEY: &str = "claude-portal-paused-sessions";
+/// Storage key for hidden sessions in localStorage
+pub const HIDDEN_SESSIONS_STORAGE_KEY: &str = "claude-portal-hidden-sessions";
 
 /// Storage key for inactive hidden state in localStorage
 pub const INACTIVE_HIDDEN_STORAGE_KEY: &str = "claude-portal-inactive-hidden";
@@ -121,22 +121,22 @@ pub fn save_show_cost(show: bool) {
     }
 }
 
-/// Load paused session IDs from localStorage
-pub fn load_paused_sessions() -> HashSet<Uuid> {
+/// Load hidden session IDs from localStorage
+pub fn load_hidden_sessions() -> HashSet<Uuid> {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(PAUSED_SESSIONS_STORAGE_KEY).ok().flatten())
+        .and_then(|storage| storage.get_item(HIDDEN_SESSIONS_STORAGE_KEY).ok().flatten())
         .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
         .map(|ids| ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect())
         .unwrap_or_default()
 }
 
-/// Save paused session IDs to localStorage
-pub fn save_paused_sessions(paused: &HashSet<Uuid>) {
+/// Save hidden session IDs to localStorage
+pub fn save_hidden_sessions(hidden: &HashSet<Uuid>) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let ids: Vec<String> = paused.iter().map(|id| id.to_string()).collect();
+        let ids: Vec<String> = hidden.iter().map(|id| id.to_string()).collect();
         if let Ok(json) = serde_json::to_string(&ids) {
-            let _ = storage.set_item(PAUSED_SESSIONS_STORAGE_KEY, &json);
+            let _ = storage.set_item(HIDDEN_SESSIONS_STORAGE_KEY, &json);
         }
     }
 }

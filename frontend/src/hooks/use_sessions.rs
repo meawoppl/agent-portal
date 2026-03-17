@@ -26,15 +26,6 @@ pub struct UseSessions {
 /// # Returns
 /// * `UseSessions` - The current sessions, loading state, and control callbacks
 ///
-/// # Example
-/// ```ignore
-/// let sessions = use_sessions();
-/// if sessions.loading {
-///     // Show loading indicator
-/// } else {
-///     // Render session list
-/// }
-/// ```
 #[hook]
 pub fn use_sessions() -> UseSessions {
     let sessions = use_state(Vec::<SessionInfo>::new);

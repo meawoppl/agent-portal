@@ -12,8 +12,8 @@ pub struct KeyboardNavConfig {
     pub sessions: Vec<SessionInfo>,
     /// Currently focused session index
     pub focused_index: usize,
-    /// Set of paused session IDs
-    pub paused_sessions: HashSet<Uuid>,
+    /// Set of hidden session IDs
+    pub hidden_sessions: HashSet<Uuid>,
     /// Set of connected session IDs
     pub connected_sessions: HashSet<Uuid>,
     /// Whether inactive sessions are hidden
@@ -22,6 +22,8 @@ pub struct KeyboardNavConfig {
     pub on_select: Callback<usize>,
     /// Callback to activate a session (mark it as having been viewed)
     pub on_activate: Callback<Uuid>,
+    /// Callback when triple-Escape interrupt is triggered
+    pub on_interrupt: Callback<()>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -32,12 +34,15 @@ pub struct UseKeyboardNav {
     pub on_keydown: Callback<KeyboardEvent>,
 }
 
+/// Max time window (ms) for 3 Escape presses to trigger an interrupt.
+const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
+
 /// Hook for managing two-mode keyboard navigation.
 ///
 /// Edit Mode (default):
 /// - Typing works normally
 /// - Escape -> Nav Mode
-/// - Shift+Tab -> next active session (skips paused)
+/// - Shift+Tab -> next active session (skips hidden)
 ///
 /// Nav Mode:
 /// - Arrow keys / hjkl navigate sessions
@@ -45,49 +50,38 @@ pub struct UseKeyboardNav {
 /// - Enter/Escape/i -> Edit Mode
 /// - w -> next waiting session
 ///
-/// # Arguments
-/// * `config` - Configuration containing sessions, focused index, and callbacks
-///
-/// # Returns
-/// * `UseKeyboardNav` - The current mode and keydown handler
-///
-/// # Example
-/// ```ignore
-/// let nav = use_keyboard_nav(KeyboardNavConfig {
-///     sessions: sessions.clone(),
-///     focused_index: *focused_index,
-///     paused_sessions: paused.clone(),
-///     connected_sessions: connected.clone(),
-///     inactive_hidden: *inactive_hidden,
-///     on_select: on_select.clone(),
-///     on_activate: on_activate.clone(),
-/// });
-///
-/// html! {
-///     <div onkeydown={nav.on_keydown.clone()}>
-///         { if nav.nav_mode { "NAV" } else { "EDIT" } }
-///     </div>
-/// }
-/// ```
+/// Triple-Escape (within 600ms) sends an interrupt to the focused session.
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
     let nav_mode = use_state(|| false);
+    // Track timestamps of recent Escape presses for triple-Escape detection
+    let escape_times = use_mut_ref(Vec::<f64>::new);
 
     let on_keydown = {
         let nav_mode = nav_mode.clone();
+        let escape_times = escape_times.clone();
         let sessions = config.sessions.clone();
         let focused_index = config.focused_index;
-        let paused_sessions = config.paused_sessions.clone();
+        let hidden_sessions = config.hidden_sessions.clone();
         let connected_sessions = config.connected_sessions.clone();
         let inactive_hidden = config.inactive_hidden;
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
-
+        let on_interrupt = config.on_interrupt.clone();
         Callback::from(move |e: KeyboardEvent| {
+            // Don't handle keyboard nav when a modal overlay is open
+            if gloo::utils::document()
+                .query_selector(".sched-overlay, .share-dialog-overlay")
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                return;
+            }
             let in_nav_mode = *nav_mode;
             let len = sessions.len();
 
-            // Helper: navigate to next non-paused session
+            // Helper: navigate to next non-hidden session
             let navigate_to_next_active = |current: usize| -> Option<usize> {
                 if len == 0 {
                     return None;
@@ -95,7 +89,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 for i in 1..=len {
                     let idx = (current + i) % len;
                     if let Some(session) = sessions.get(idx) {
-                        if !paused_sessions.contains(&session.id) {
+                        if !hidden_sessions.contains(&session.id) {
                             return Some(idx);
                         }
                     }
@@ -103,30 +97,30 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 None
             };
 
-            // Helper: navigate by delta, skipping paused sessions
+            // Helper: navigate by delta, skipping hidden sessions
             let navigate_by_delta = |current: usize, delta: i32| -> Option<usize> {
                 if len == 0 {
                     return None;
                 }
 
-                let non_paused_count = sessions
+                let non_hidden_count = sessions
                     .iter()
-                    .filter(|s| !paused_sessions.contains(&s.id))
+                    .filter(|s| !hidden_sessions.contains(&s.id))
                     .count();
 
-                // If all sessions are paused, allow normal navigation
-                if non_paused_count == 0 {
+                // If all sessions are hidden, allow normal navigation
+                if non_hidden_count == 0 {
                     return Some((current as i32 + delta).rem_euclid(len as i32) as usize);
                 }
 
-                // Skip paused sessions when navigating
+                // Skip hidden sessions when navigating
                 let step = if delta > 0 { 1 } else { len - 1 };
                 let mut new_index = current;
 
                 for _ in 0..len {
                     new_index = (new_index + step) % len;
                     if let Some(session) = sessions.get(new_index) {
-                        if !paused_sessions.contains(&session.id) {
+                        if !hidden_sessions.contains(&session.id) {
                             return Some(new_index);
                         }
                     }
@@ -144,6 +138,23 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     on_select.emit(new_idx);
                 }
                 return;
+            }
+
+            // Track Escape presses for triple-Escape interrupt detection
+            if e.key() == "Escape" {
+                let now = js_sys::Date::now();
+                let mut times = escape_times.borrow_mut();
+                times.push(now);
+                // Keep only presses within the time window
+                times.retain(|&t| now - t <= TRIPLE_ESCAPE_WINDOW_MS);
+                if times.len() >= 3 {
+                    times.clear();
+                    e.prevent_default();
+                    // Return to edit mode and fire interrupt
+                    nav_mode.set(false);
+                    on_interrupt.emit(());
+                    return;
+                }
             }
 
             if in_nav_mode {
@@ -197,8 +208,8 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                                 // Add active sessions first
                                 for (idx, session) in sessions.iter().enumerate() {
                                     let is_connected = connected_sessions.contains(&session.id);
-                                    let is_paused = paused_sessions.contains(&session.id);
-                                    if is_connected && !is_paused {
+                                    let is_hidden = hidden_sessions.contains(&session.id);
+                                    if is_connected && !is_hidden {
                                         visible_indices.push(idx);
                                     }
                                 }
@@ -207,8 +218,8 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                                 if !inactive_hidden {
                                     for (idx, session) in sessions.iter().enumerate() {
                                         let is_connected = connected_sessions.contains(&session.id);
-                                        let is_paused = paused_sessions.contains(&session.id);
-                                        if !is_connected || is_paused {
+                                        let is_hidden = hidden_sessions.contains(&session.id);
+                                        if !is_connected || is_hidden {
                                             visible_indices.push(idx);
                                         }
                                     }

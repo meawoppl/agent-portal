@@ -396,6 +396,7 @@ async fn main() -> Result<()> {
         replaces_session_id: None,
         launcher_id: None,
         agent_type,
+        scheduled_task_id: None,
     };
 
     // Branch: shim mode or normal proxy mode

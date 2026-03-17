@@ -22,8 +22,8 @@ This guide covers how to use Claude Code Portal once it's set up.
 
 - **Active sessions** show a green indicator
 - **Disconnected sessions** are greyed out but remain accessible for history
-- **Paused sessions** are dimmed and excluded from rotation
-- Click the pause button on any session to toggle pause state
+- **Hidden sessions** are dimmed and excluded from rotation
+- Click the hide button on any session to toggle hidden state
 
 ## Running the CLI
 

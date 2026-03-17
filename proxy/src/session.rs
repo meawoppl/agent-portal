@@ -99,6 +99,7 @@ pub async fn register_with_backend(
         launcher_id: config.launcher_id,
         agent_type: config.agent_type,
         repo_url: get_repo_url(&config.working_directory),
+        scheduled_task_id: config.scheduled_task_id,
     });
 
     if let Err(e) = conn.send(&register_msg).await {
@@ -216,6 +217,8 @@ pub enum WsEvent {
     GracefulShutdown(u64),
     /// Session was terminated by the server (do not reconnect)
     SessionTerminated,
+    /// Interrupt the current Claude response
+    Interrupt,
 }
 
 /// Spawn a WebSocket reader task (raw tokio-tungstenite).
@@ -353,6 +356,10 @@ async fn handle_ws_text_message(
             info!("Session terminated by server: {}", reason);
             let _ = event_tx.send(WsEvent::SessionTerminated);
             false // stop reading
+        }
+        ServerToProxy::Interrupt => {
+            info!("Interrupt received from server");
+            event_tx.send(WsEvent::Interrupt).is_ok()
         }
         _ => true,
     }

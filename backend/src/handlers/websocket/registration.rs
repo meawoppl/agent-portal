@@ -27,6 +27,7 @@ pub struct RegistrationParams<'a> {
     pub launcher_id: Option<Uuid>,
     pub agent_type: AgentType,
     pub repo_url: &'a Option<String>,
+    pub scheduled_task_id: Option<Uuid>,
 }
 
 /// Register or update a session in the database.
@@ -149,6 +150,7 @@ fn create_new_session(
         launcher_id: params.launcher_id,
         agent_type: params.agent_type.as_str().to_string(),
         repo_url: params.repo_url.clone(),
+        scheduled_task_id: params.scheduled_task_id,
     };
 
     match diesel::insert_into(sessions::table)

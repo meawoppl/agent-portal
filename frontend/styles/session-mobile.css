@@ -86,7 +86,7 @@
     }
 
     .pill-stop,
-    .pill-pause,
+    .pill-hide,
     .pill-leave,
     .pill-delete {
         width: 20px;
@@ -99,7 +99,7 @@
         padding: 0.1rem 0.3rem;
     }
 
-    .pill-paused-badge {
+    .pill-hidden-badge {
         font-size: 0.6rem;
     }
 

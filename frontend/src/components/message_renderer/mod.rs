@@ -1,11 +1,8 @@
 mod renderers;
 pub mod types;
 
-use gloo_net::http::Request;
-use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
-use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 use types::{ClaudeMessage, ContentBlock};
@@ -100,9 +97,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
         Ok(ClaudeMessage::Error(msg)) => renderers::render_error_message(&msg),
         Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(&msg),
         Ok(ClaudeMessage::RateLimitEvent(msg)) => renderers::render_rate_limit_event(&msg),
-        Ok(ClaudeMessage::Unknown) | Err(_) => {
-            html! { <RawMessageRenderer json={props.json.clone()} session_id={props.session_id} /> }
-        }
+        Ok(ClaudeMessage::Unknown) | Err(_) => render_raw_json(&props.json),
     }
 }
 
@@ -125,73 +120,6 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         }
         MessageGroup::AssistantGroup(messages) => renderers::render_assistant_group(messages),
     }
-}
-
-// --- Raw message logging ---
-
-#[derive(Serialize)]
-struct LogRawMessageRequest {
-    session_id: Option<Uuid>,
-    message_content: Value,
-    message_source: String,
-    render_reason: Option<String>,
-}
-
-fn log_raw_message(session_id: Option<Uuid>, json: &str, reason: &str) {
-    let message_content =
-        serde_json::from_str::<Value>(json).unwrap_or_else(|_| Value::String(json.to_string()));
-
-    let request_body = LogRawMessageRequest {
-        session_id,
-        message_content,
-        message_source: "frontend".to_string(),
-        render_reason: Some(reason.to_string()),
-    };
-
-    spawn_local(async move {
-        let result = Request::post("/api/raw-messages")
-            .header("Content-Type", "application/json")
-            .json(&request_body)
-            .map_err(|e| format!("Failed to serialize: {:?}", e))
-            .map(|req| req.send());
-
-        if let Ok(future) = result {
-            if let Err(e) = future.await {
-                log::warn!("Failed to log raw message: {:?}", e);
-            }
-        }
-    });
-}
-
-#[derive(Properties, PartialEq)]
-pub struct RawMessageRendererProps {
-    pub json: String,
-    #[prop_or_default]
-    pub session_id: Option<Uuid>,
-}
-
-#[function_component(RawMessageRenderer)]
-pub fn raw_message_renderer(props: &RawMessageRendererProps) -> Html {
-    let json = props.json.clone();
-    let session_id = props.session_id;
-
-    use_effect_with(json.clone(), move |json| {
-        let reason = match serde_json::from_str::<Value>(json) {
-            Ok(val) => {
-                if let Some(msg_type) = val.get("type").and_then(|t| t.as_str()) {
-                    format!("Unknown message type: {}", msg_type)
-                } else {
-                    "Message has no 'type' field".to_string()
-                }
-            }
-            Err(e) => format!("JSON parse error: {}", e),
-        };
-
-        log_raw_message(session_id, json, &reason);
-        || ()
-    });
-
-    render_raw_json(&props.json)
 }
 
 fn render_raw_json(json: &str) -> Html {

@@ -103,6 +103,7 @@
 
 /* Code blocks */
 .md-code-block {
+    position: relative;
     margin: 0.75rem 0;
     background: var(--bg-darker);
     border: 1px solid var(--border);
@@ -118,6 +119,36 @@
     line-height: 1.5;
     color: var(--text-primary);
     white-space: pre;
+}
+
+.code-copy-button {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    padding: 0.2rem 0.5rem;
+    background: var(--border);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+.md-code-block:hover .code-copy-button {
+    opacity: 1;
+}
+
+.code-copy-button:hover {
+    background: var(--accent);
+    color: white;
+}
+
+.code-copy-button.copied {
+    opacity: 1;
+    background: var(--success);
+    color: white;
 }
 
 /* Blockquotes */

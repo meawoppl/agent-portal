@@ -35,6 +35,27 @@ pub struct RegisterFields {
     pub agent_type: AgentType,
     #[serde(default)]
     pub repo_url: Option<String>,
+    #[serde(default)]
+    pub scheduled_task_id: Option<Uuid>,
+}
+
+/// Configuration for a scheduled task, sent from backend to launcher via ScheduleSync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduledTaskConfig {
+    pub id: Uuid,
+    pub name: String,
+    pub cron_expression: String,
+    pub timezone: String,
+    pub working_directory: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub claude_args: Vec<String>,
+    #[serde(default)]
+    pub agent_type: AgentType,
+    pub enabled: bool,
+    pub max_runtime_minutes: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_session_id: Option<Uuid>,
 }
 
 /// Fields for a permission response (shared by server-to-proxy and client-to-server).
@@ -137,8 +158,7 @@ pub enum ServerToProxy {
         session_id: Uuid,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        max_image_mb: Option<u32>,
+        max_image_mb: u32,
     },
 
     /// Keepalive heartbeat
@@ -180,6 +200,9 @@ pub enum ServerToProxy {
 
     /// Session has been terminated (proxy should NOT reconnect)
     SessionTerminated { reason: String },
+
+    /// Interrupt the current Claude response
+    Interrupt,
 }
 
 // =============================================================================
@@ -216,6 +239,9 @@ pub enum ClientToServer {
 
     /// A single chunk of a file upload
     FileUploadChunk(FileUploadChunkFields),
+
+    /// Interrupt the current Claude response
+    Interrupt,
 }
 
 /// Messages the backend sends to the frontend.
@@ -373,6 +399,22 @@ pub enum LauncherToServer {
         claude_args: Vec<String>,
         #[serde(default)]
         agent_type: AgentType,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scheduled_task_id: Option<Uuid>,
+    },
+
+    /// Inject input into a session on behalf of the scheduler
+    InjectInput { session_id: Uuid, content: String },
+
+    /// Report that a scheduled task run has started
+    ScheduledRunStarted { task_id: Uuid, session_id: Uuid },
+
+    /// Report that a scheduled task run has completed
+    ScheduledRunCompleted {
+        task_id: Uuid,
+        session_id: Uuid,
+        exit_code: Option<i32>,
+        duration_secs: u64,
     },
 }
 
@@ -403,6 +445,8 @@ pub enum ServerToLauncher {
         claude_args: Vec<String>,
         #[serde(default)]
         agent_type: AgentType,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scheduled_task_id: Option<Uuid>,
     },
 
     /// Request to stop a running session
@@ -416,6 +460,9 @@ pub enum ServerToLauncher {
         reason: String,
         reconnect_delay_ms: u64,
     },
+
+    /// Sync scheduled task definitions to the launcher
+    ScheduleSync { tasks: Vec<ScheduledTaskConfig> },
 }
 
 #[cfg(test)]
@@ -453,6 +500,7 @@ mod tests {
             launcher_id: None,
             agent_type: AgentType::Claude,
             repo_url: None,
+            scheduled_task_id: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"Register""#));
@@ -550,6 +598,7 @@ mod tests {
             session_name: Some("my-session".into()),
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
+            scheduled_task_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LaunchSession""#));
@@ -591,6 +640,7 @@ mod tests {
             session_name: Some("my-project".into()),
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
+            scheduled_task_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"RequestLaunch""#));
@@ -629,5 +679,69 @@ mod tests {
             }
             _ => panic!("Wrong variant"),
         }
+    }
+
+    #[test]
+    fn schedule_sync_roundtrip() {
+        let msg = ServerToLauncher::ScheduleSync {
+            tasks: vec![ScheduledTaskConfig {
+                id: Uuid::nil(),
+                name: "nightly audit".into(),
+                cron_expression: "0 3 * * *".into(),
+                timezone: "UTC".into(),
+                working_directory: "/home/user/project".into(),
+                prompt: "Check deps".into(),
+                claude_args: vec![],
+                agent_type: AgentType::Claude,
+                enabled: true,
+                max_runtime_minutes: 30,
+                last_session_id: None,
+            }],
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"ScheduleSync""#));
+        let parsed: ServerToLauncher = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServerToLauncher::ScheduleSync { tasks } => {
+                assert_eq!(tasks.len(), 1);
+                assert_eq!(tasks[0].name, "nightly audit");
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn inject_input_roundtrip() {
+        let msg = LauncherToServer::InjectInput {
+            session_id: Uuid::nil(),
+            content: "Check for updates".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"InjectInput""#));
+        let _: LauncherToServer = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn scheduled_run_started_roundtrip() {
+        let msg = LauncherToServer::ScheduledRunStarted {
+            task_id: Uuid::nil(),
+            session_id: Uuid::nil(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"ScheduledRunStarted""#));
+        let _: LauncherToServer = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn scheduled_run_completed_roundtrip() {
+        let msg = LauncherToServer::ScheduledRunCompleted {
+            task_id: Uuid::nil(),
+            session_id: Uuid::nil(),
+            exit_code: Some(0),
+            duration_secs: 120,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"ScheduledRunCompleted""#));
+        let _: LauncherToServer = serde_json::from_str(&json).unwrap();
     }
 }

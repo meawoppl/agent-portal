@@ -592,6 +592,19 @@ async fn run_shim_connection(
                     Some(WsEvent::SessionTerminated) => {
                         break ShimConnectionResult::SessionTerminated;
                     }
+                    Some(WsEvent::Interrupt) => {
+                        info!("Sending interrupt to Claude");
+                        let mut stdin = claude_stdin.lock().await;
+                        let input = ClaudeInput::interrupt();
+                        if let Ok(json_line) = serde_json::to_string(&input) {
+                            if let Err(e) = stdin.write_all(json_line.as_bytes()).await {
+                                error!("Failed to write interrupt to claude: {}", e);
+                                break ShimConnectionResult::ClaudeExited;
+                            }
+                            let _ = stdin.write_all(b"\n").await;
+                            let _ = stdin.flush().await;
+                        }
+                    }
                     Some(WsEvent::Disconnect) | None => {
                         info!("Portal WebSocket disconnected");
                         break ShimConnectionResult::Disconnected;

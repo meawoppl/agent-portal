@@ -4,8 +4,9 @@ use crate::models::NewPendingInput;
 use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
-use shared::api::RawMessageFallback;
-use shared::{ClientEndpoint, ClientToServer, SendMode, ServerToClient, ServerToProxy};
+use shared::{
+    ClientEndpoint, ClientToServer, PortalMessage, SendMode, ServerToClient, ServerToProxy,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -171,6 +172,15 @@ fn handle_web_client_message(
             }
             false
         }
+        ClientToServer::Interrupt => {
+            if let Some(ref key) = session_key {
+                info!("Web client sending interrupt to session");
+                session_manager.send_to_session(key, ServerToProxy::Interrupt);
+            } else {
+                warn!("Web client tried to send Interrupt without registered session");
+            }
+            false
+        }
     }
 }
 
@@ -295,11 +305,10 @@ fn replay_history(
         .map(|msg| {
             let mut val =
                 serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
-                    let fallback = RawMessageFallback {
-                        message_type: msg.role.clone(),
-                        content: msg.content.clone(),
-                    };
-                    serde_json::to_value(&fallback).unwrap_or_default()
+                    serde_json::json!({
+                        "type": msg.role,
+                        "content": msg.content,
+                    })
                 });
             // Reconstruct _sender for user messages from DB user_id
             if msg.role == "user" {
@@ -362,6 +371,39 @@ fn handle_web_input(
         session_manager
             .last_input_sender
             .insert(session_id, (user_id, display_name));
+    }
+
+    // For slash commands, broadcast a portal message so the user sees feedback
+    if let serde_json::Value::String(text) = &content {
+        if text.starts_with('/') {
+            let portal = PortalMessage::text(format!("`{}`", text));
+            session_manager.broadcast_to_web_clients(
+                key,
+                ServerToClient::ClaudeOutput {
+                    content: portal.to_json(),
+                    sender_user_id: None,
+                    sender_name: None,
+                },
+            );
+            // Store in DB so it appears in history
+            if let Ok(mut conn) = db_pool.get() {
+                use crate::schema::{messages, sessions};
+                if let Ok(session) = sessions::table
+                    .find(session_id)
+                    .first::<crate::models::Session>(&mut conn)
+                {
+                    let new_message = crate::models::NewMessage {
+                        session_id,
+                        role: "portal".to_string(),
+                        content: serde_json::to_string(&portal.to_json()).unwrap_or_default(),
+                        user_id: session.user_id,
+                    };
+                    let _ = diesel::insert_into(messages::table)
+                        .values(&new_message)
+                        .execute(&mut conn);
+                }
+            }
+        }
     }
 
     let seq = match db_pool.get() {

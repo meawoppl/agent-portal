@@ -62,6 +62,8 @@ pub struct SessionViewProps {
     pub voice_enabled: bool,
     #[prop_or_default]
     pub current_user_id: Option<String>,
+    #[prop_or(0)]
+    pub interrupt_signal: u32,
 }
 
 /// Messages for the SessionView component
@@ -114,6 +116,8 @@ pub enum SessionViewMsg {
     DragEnter,
     /// User dragged files out of the input area
     DragLeave,
+    /// No-op (used by keydown/paste handlers that need to return a message)
+    Noop,
     /// Toggle the tasks sidebar panel
     ToggleTasksPanel,
     /// 1-second tick to update task elapsed times and clean up completed tasks
@@ -122,12 +126,13 @@ pub enum SessionViewMsg {
     ClearTabPulse,
     /// Finish the departure animation and hide the drawer
     FinishDeparture,
+    /// Send an interrupt to stop the current Claude response
+    Interrupt,
 }
 
 /// SessionView - Main terminal view for a single session
 pub struct SessionView {
     messages: Vec<String>,
-    input_value: String,
     ws_connected: bool,
     ws_sender: Option<WsSender>,
     messages_ref: NodeRef,
@@ -166,6 +171,8 @@ pub struct SessionView {
     tab_anim: Option<&'static str>,
     /// Whether the drawer is still visible during departure animation
     tab_departing: bool,
+    /// Tracks textarea content so it can be restored after reconnection re-renders
+    input_text: String,
 }
 
 impl Component for SessionView {
@@ -215,7 +222,6 @@ impl Component for SessionView {
 
         Self {
             messages: vec![],
-            input_value: String::new(),
             ws_connected: false,
             ws_sender: None,
             messages_ref: NodeRef::default(),
@@ -248,10 +254,11 @@ impl Component for SessionView {
             task_tick_handle: None,
             tab_anim: None,
             tab_departing: false,
+            input_text: String::new(),
         }
     }
 
-    fn changed(&mut self, ctx: &Context<Self>, _old_props: &Self::Properties) -> bool {
+    fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
         let now_focused = ctx.props().focused;
         let became_focused = now_focused && !self.was_focused;
         self.was_focused = now_focused;
@@ -262,6 +269,14 @@ impl Component for SessionView {
             }
         }
 
+        // Detect interrupt signal change on the focused session
+        if now_focused
+            && ctx.props().interrupt_signal != old_props.interrupt_signal
+            && ctx.props().interrupt_signal > 0
+        {
+            ctx.link().send_message(SessionViewMsg::Interrupt);
+        }
+
         true
     }
 
@@ -269,6 +284,15 @@ impl Component for SessionView {
         if first_render && ctx.props().focused {
             if let Some(input) = self.input_ref.cast::<HtmlTextAreaElement>() {
                 let _ = input.focus();
+            }
+        }
+
+        // Restore textarea content if it was cleared during a re-render (e.g. reconnection)
+        if !self.input_text.is_empty() {
+            if let Some(el) = self.input_ref.cast::<HtmlTextAreaElement>() {
+                if el.value().is_empty() {
+                    self.set_input_text(&self.input_text.clone());
+                }
             }
         }
 
@@ -307,13 +331,10 @@ impl Component for SessionView {
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
             SessionViewMsg::UpdateInput(value) => {
-                if value.is_empty() {
-                    if let Some(el) = self.input_ref.cast::<Element>() {
-                        el.remove_attribute("style").ok();
-                    }
-                }
-                self.input_value = value;
-                true
+                // Textarea is uncontrolled — the DOM already has the new value.
+                // Track in state so we can restore after reconnection re-renders.
+                self.input_text = value;
+                false
             }
             SessionViewMsg::SendInput => self.handle_send_input_with_mode(ctx, SendMode::Normal),
             SessionViewMsg::LoadHistory(mut messages, last_timestamp) => {
@@ -591,20 +612,17 @@ impl Component for SessionView {
                 false
             }
             SessionViewMsg::HistoryUp => {
-                if let Some(cmd) = self.command_history.navigate_up(&self.input_value) {
-                    self.input_value = cmd;
-                    true
-                } else {
-                    false
+                let current = self.get_input_text();
+                if let Some(cmd) = self.command_history.navigate_up(&current) {
+                    self.set_input_text(&cmd);
                 }
+                false
             }
             SessionViewMsg::HistoryDown => {
                 if let Some(cmd) = self.command_history.navigate_down() {
-                    self.input_value = cmd;
-                    true
-                } else {
-                    false
+                    self.set_input_text(&cmd);
                 }
+                false
             }
             SessionViewMsg::VoiceRecordingChanged(recording) => {
                 self.is_recording = recording;
@@ -616,12 +634,13 @@ impl Component for SessionView {
             SessionViewMsg::VoiceTranscription(text) => {
                 self.interim_transcription = None;
                 if !text.is_empty() {
-                    if self.input_value.is_empty() {
-                        self.input_value = text;
+                    let current = self.get_input_text();
+                    let new_value = if current.is_empty() {
+                        text
                     } else {
-                        self.input_value.push(' ');
-                        self.input_value.push_str(&text);
-                    }
+                        format!("{} {}", current, text)
+                    };
+                    self.set_input_text(&new_value);
                     ctx.link().send_message(SessionViewMsg::SendInput);
                 }
                 true
@@ -681,8 +700,8 @@ impl Component for SessionView {
                 self.upload_files = files.iter().map(|f| (f.name(), f.size() as u64)).collect();
                 let link = ctx.link().clone();
                 let sender = self.ws_sender.clone();
-                let user_input = self.input_value.trim().to_string();
-                self.input_value.clear();
+                let user_input = self.get_input_text().trim().to_string();
+                self.set_input_text("");
                 if !user_input.is_empty() {
                     self.command_history.push(user_input.clone());
                 }
@@ -836,6 +855,7 @@ impl Component for SessionView {
                 self.drag_hover = false;
                 true
             }
+            SessionViewMsg::Noop => false,
             SessionViewMsg::ToggleTasksPanel => {
                 self.tasks_panel_open = !self.tasks_panel_open;
                 true
@@ -848,6 +868,13 @@ impl Component for SessionView {
                 self.tab_departing = false;
                 self.tasks_panel_open = false;
                 true
+            }
+            SessionViewMsg::Interrupt => {
+                if let Some(ref sender) = self.ws_sender {
+                    log::info!("Sending interrupt to session");
+                    send_message(sender, ClientToServer::Interrupt);
+                }
+                false
             }
             SessionViewMsg::TaskTick => {
                 let now = js_sys::Date::now();
@@ -876,7 +903,10 @@ impl Component for SessionView {
         let handle_input = link.callback(|e: InputEvent| {
             let input: HtmlTextAreaElement = e.target_unchecked_into();
             let el: &Element = input.as_ref();
-            el.set_attribute("style", "height: auto").ok();
+            // Measure content height with overflow hidden to prevent scrollbar
+            // from narrowing the text area and causing layout bounce.
+            el.set_attribute("style", "height: 0; overflow-y: hidden")
+                .ok();
             el.set_attribute("style", &format!("height: {}px", input.scroll_height()))
                 .ok();
             SessionViewMsg::UpdateInput(input.value())
@@ -896,7 +926,7 @@ impl Component for SessionView {
                 }
                 "Enter" => {
                     // Shift+Enter inserts newline (default behavior)
-                    SessionViewMsg::CheckAwaiting
+                    SessionViewMsg::Noop
                 }
                 "ArrowUp" => {
                     e.prevent_default();
@@ -906,7 +936,7 @@ impl Component for SessionView {
                     e.prevent_default();
                     SessionViewMsg::HistoryDown
                 }
-                _ => SessionViewMsg::CheckAwaiting,
+                _ => SessionViewMsg::Noop,
             }
         });
 
@@ -926,7 +956,7 @@ impl Component for SessionView {
                     return SessionViewMsg::FilesSelected(files);
                 }
             }
-            SessionViewMsg::CheckAwaiting
+            SessionViewMsg::Noop
         });
 
         let handle_dragover = link.callback(|e: DragEvent| {
@@ -991,7 +1021,6 @@ impl Component for SessionView {
                             self.interim_transcription.is_some().then_some("has-interim")
                         )}
                         placeholder="Type your message... (Shift+Enter for new line)"
-                        value={self.input_value.clone()}
                         oninput={handle_input}
                         onkeydown={handle_keydown}
                         onpaste={handle_paste}
@@ -1009,6 +1038,32 @@ impl Component for SessionView {
 
 // Helper methods extracted from the main impl
 impl SessionView {
+    /// Read the current textarea value directly from the DOM.
+    fn get_input_text(&self) -> String {
+        self.input_ref
+            .cast::<HtmlTextAreaElement>()
+            .map(|el| el.value())
+            .unwrap_or_default()
+    }
+
+    /// Write text to the textarea DOM element and auto-resize it.
+    /// Does NOT trigger a Yew re-render.
+    fn set_input_text(&self, text: &str) {
+        if let Some(el) = self.input_ref.cast::<HtmlTextAreaElement>() {
+            el.set_value(text);
+            // Auto-resize
+            let elem: &Element = el.as_ref();
+            if text.is_empty() {
+                elem.remove_attribute("style").ok();
+            } else {
+                elem.set_attribute("style", "height: 0; overflow-y: hidden")
+                    .ok();
+                elem.set_attribute("style", &format!("height: {}px", el.scroll_height()))
+                    .ok();
+            }
+        }
+    }
+
     fn handle_ws_event(&mut self, ctx: &Context<Self>, event: WsEvent) -> bool {
         match event {
             WsEvent::Connected(sender) => {
@@ -1056,17 +1111,15 @@ impl SessionView {
 
     fn handle_send_input_with_mode(&mut self, ctx: &Context<Self>, send_mode: SendMode) -> bool {
         crate::audio::ensure_audio_context();
-        let input = self.input_value.trim().to_string();
+        let input = self.get_input_text().trim().to_string();
 
         if input.is_empty() {
             return false;
         }
 
         self.command_history.push(input.clone());
-        self.input_value.clear();
-        if let Some(el) = self.input_ref.cast::<Element>() {
-            el.remove_attribute("style").ok();
-        }
+        self.set_input_text("");
+        self.input_text.clear();
 
         let session_id = ctx.props().session.id;
         ctx.props().on_message_sent.emit(session_id);
@@ -1499,10 +1552,11 @@ impl SessionView {
 
     fn render_interim_transcription(&self) -> Html {
         if let Some(ref interim) = self.interim_transcription {
-            let preview = if self.input_value.is_empty() {
+            let current = self.get_input_text();
+            let preview = if current.is_empty() {
                 interim.clone()
             } else {
-                format!("{} {}", self.input_value, interim)
+                format!("{} {}", current, interim)
             };
             html! {
                 <div class="interim-transcription">{ preview }</div>

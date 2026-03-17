@@ -17,6 +17,7 @@ use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, T
 use shared::WsEndpoint;
 use std::{env, sync::Arc};
 use tower_cookies::{CookieManagerLayer, Key};
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -345,6 +346,21 @@ async fn main() -> anyhow::Result<()> {
             "/api/proxy-tokens/:id",
             axum::routing::delete(handlers::proxy_tokens::revoke_token_handler),
         )
+        // Scheduled task management endpoints
+        .route(
+            "/api/scheduled-tasks",
+            get(handlers::scheduled_tasks::list_tasks_handler)
+                .post(handlers::scheduled_tasks::create_task_handler),
+        )
+        .route(
+            "/api/scheduled-tasks/:id",
+            axum::routing::patch(handlers::scheduled_tasks::update_task_handler)
+                .delete(handlers::scheduled_tasks::delete_task_handler),
+        )
+        .route(
+            "/api/scheduled-tasks/:id/runs",
+            get(handlers::scheduled_tasks::list_runs_handler),
+        )
         // Sound settings
         .route(
             "/api/settings/sound",
@@ -425,25 +441,20 @@ async fn main() -> anyhow::Result<()> {
             "/api/admin/sessions/:id",
             axum::routing::delete(handlers::admin::delete_session),
         )
-        // Raw message logging (for debugging unrecognized message types)
-        .route("/api/raw-messages", post(handlers::admin::log_raw_message))
-        .route(
-            "/api/admin/raw-messages",
-            get(handlers::admin::list_raw_messages),
-        )
-        .route(
-            "/api/admin/raw-messages/:id",
-            get(handlers::admin::get_raw_message).delete(handlers::admin::delete_raw_message),
-        )
         // Add single unified state
         .with_state(app_state.clone())
         // Serve embedded frontend assets with SPA fallback
         .fallback(axum::routing::get(embedded_assets::serve_embedded_frontend));
 
+    // Pre-compress all embedded assets at startup (brotli + gzip)
+    embedded_assets::init_cache();
     tracing::info!("Serving embedded frontend assets");
 
     // Add CORS and cookie management
-    let app = app.layer(CookieManagerLayer::new()).layer(cors);
+    let app = app
+        .layer(CompressionLayer::new())
+        .layer(CookieManagerLayer::new())
+        .layer(cors);
 
     // Spawn background task to broadcast user spend updates
     {

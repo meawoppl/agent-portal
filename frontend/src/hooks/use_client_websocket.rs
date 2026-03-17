@@ -30,15 +30,6 @@ fn calculate_backoff(attempt: u32) -> u32 {
 /// # Returns
 /// * `UseClientWebSocket` - The current spend data and shutdown status
 ///
-/// # Example
-/// ```ignore
-/// let ws = use_client_websocket();
-/// if let Some(reason) = &ws.shutdown_reason {
-///     // Show shutdown banner
-/// }
-/// // Display total spend
-/// html! { <span>{ format!("${:.2}", ws.total_spend) }</span> }
-/// ```
 #[hook]
 pub fn use_client_websocket() -> UseClientWebSocket {
     let total_spend = use_state(|| 0.0f64);

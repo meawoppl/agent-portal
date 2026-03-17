@@ -8,6 +8,7 @@ pub mod launchers;
 pub mod messages;
 pub mod proxy_tokens;
 pub mod retention;
+pub mod scheduled_tasks;
 pub mod sessions;
 pub mod sound_settings;
 pub mod voice;

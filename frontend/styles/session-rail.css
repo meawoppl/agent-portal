@@ -9,7 +9,6 @@
     background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
-    scroll-behavior: smooth;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
 }
@@ -137,12 +136,24 @@
     text-overflow: ellipsis;
 }
 
+.pill-hostname-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    overflow: hidden;
+}
+
 .pill-hostname {
     font-size: 0.7rem;
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.pill-hostname-row .pill-version-badge {
+    font-size: 0.55rem;
+    flex-shrink: 0;
 }
 
 .pill-branch {
@@ -208,8 +219,8 @@
 .sparkline-range.tick-compaction { background: var(--text-secondary); }
 .sparkline-range.tick-task { background: #bb9af7; }
 
-.session-pill.paused .sparkline-tick,
-.session-pill.paused .sparkline-range {
+.session-pill.hidden .sparkline-tick,
+.session-pill.hidden .sparkline-range {
     opacity: 0.2;
 }
 
@@ -250,36 +261,36 @@
     color: var(--text-secondary);
 }
 
-/* Paused session styling - more greyed out, no awaiting highlight */
-.session-pill.paused {
+/* Hidden session styling - more greyed out, no awaiting highlight */
+.session-pill.hidden {
     opacity: 0.35;
     border-style: dashed;
     filter: grayscale(50%);
 }
 
-.session-pill.paused:hover {
+.session-pill.hidden:hover {
     opacity: 0.55;
     filter: grayscale(30%);
 }
 
-.session-pill.paused.focused {
+.session-pill.hidden.focused {
     opacity: 0.5;
     filter: grayscale(40%);
 }
 
-/* Paused sessions should NOT show awaiting (red) highlighting */
-.session-pill.paused.awaiting {
+/* Hidden sessions should NOT show awaiting (red) highlighting */
+.session-pill.hidden.awaiting {
     border-color: var(--border);
     animation: none;
     box-shadow: none;
 }
 
-.session-pill.paused.focused.awaiting {
+.session-pill.hidden.focused.awaiting {
     border-color: var(--text-secondary);
     background: rgba(127, 132, 156, 0.15);
 }
 
-.pill-paused-badge {
+.pill-hidden-badge {
     font-size: 0.7rem;
     color: var(--text-secondary);
     font-weight: 600;
@@ -298,6 +309,11 @@
     background: rgba(0, 170, 68, 0.15);
 }
 
+.pill-agent-badge.cron {
+    color: var(--accent);
+    background: rgba(125, 207, 255, 0.15);
+}
+
 /* Version staleness badge */
 .pill-version-badge {
     font-size: 0.6rem;
@@ -305,6 +321,12 @@
     padding: 0 0.3rem;
     border-radius: 3px;
     flex-shrink: 0;
+}
+
+.pill-version-badge.version-current {
+    color: var(--text-secondary);
+    background: transparent;
+    opacity: 0.5;
 }
 
 .pill-version-badge.version-patch {
@@ -391,11 +413,11 @@
     font-weight: 600;
 }
 
-.pill-menu-option.pause.active {
+.pill-menu-option.hide.active {
     color: var(--success);
 }
 
-.pill-menu-option.pause.active:hover {
+.pill-menu-option.hide.active:hover {
     background: rgba(158, 206, 106, 0.15);
 }
 

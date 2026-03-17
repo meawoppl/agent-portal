@@ -4,7 +4,11 @@
 //! Supports: headings, bold, italic, strikethrough, links, code blocks,
 //! inline code, blockquotes, lists, and tables.
 
+use gloo::timers::callback::Timeout;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::window;
 use yew::prelude::*;
 
 /// Render markdown text as HTML
@@ -174,7 +178,7 @@ fn render_heading(level: pulldown_cmark::HeadingLevel, inner: Html) -> Html {
     }
 }
 
-/// Render a code block with optional language class
+/// Render a code block with optional language class and copy button
 fn render_code_block(kind: &CodeBlockKind, inner_events: &[Event]) -> Html {
     let code_text = extract_text(inner_events);
     let lang_class = match kind {
@@ -186,8 +190,65 @@ fn render_code_block(kind: &CodeBlockKind, inner_events: &[Event]) -> Html {
     };
 
     html! {
+        <CodeBlock code_text={code_text} lang_class={lang_class} />
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct CodeBlockProps {
+    code_text: String,
+    lang_class: Option<String>,
+}
+
+#[function_component(CodeBlock)]
+fn code_block(props: &CodeBlockProps) -> Html {
+    let copied = use_state(|| false);
+
+    let on_copy = {
+        let code_text = props.code_text.clone();
+        let copied = copied.clone();
+
+        Callback::from(move |_: MouseEvent| {
+            let code_text = code_text.clone();
+            let copied = copied.clone();
+
+            spawn_local(async move {
+                if let Some(window) = window() {
+                    let navigator = window.navigator();
+                    let clipboard = js_sys::Reflect::get(&navigator, &"clipboard".into())
+                        .ok()
+                        .and_then(|v| v.dyn_into::<web_sys::Clipboard>().ok());
+
+                    if let Some(clipboard) = clipboard {
+                        let promise = clipboard.write_text(&code_text);
+                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+
+                        copied.set(true);
+                        let copied_reset = copied.clone();
+                        Timeout::new(2000, move || {
+                            copied_reset.set(false);
+                        })
+                        .forget();
+                    }
+                }
+            });
+        })
+    };
+
+    let button_class = if *copied {
+        "code-copy-button copied"
+    } else {
+        "code-copy-button"
+    };
+
+    let button_label = if *copied { "Copied!" } else { "Copy" };
+
+    html! {
         <pre class="md-code-block">
-            <code class={classes!("md-code", lang_class)}>{ code_text }</code>
+            <button class={button_class} onclick={on_copy} title="Copy to clipboard">
+                { button_label }
+            </button>
+            <code class={classes!("md-code", props.lang_class.clone())}>{ &props.code_text }</code>
         </pre>
     }
 }

@@ -2,6 +2,7 @@ use serde_json::Value;
 use yew::prelude::*;
 
 use crate::components::diff::render_diff_lines;
+use crate::components::expandable::ExpandableLines;
 
 pub fn render_edit_tool(input: &Value) -> Html {
     let file_path = input
@@ -51,9 +52,7 @@ pub fn render_write_tool(input: &Value) -> Html {
         .unwrap_or("unknown file");
     let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
-    let preview_lines: Vec<&str> = content.lines().take(20).collect();
     let total_lines = content.lines().count();
-    let truncated = total_lines > 20;
 
     html! {
         <div class="tool-use write-tool">
@@ -64,29 +63,7 @@ pub fn render_write_tool(input: &Value) -> Html {
                 <span class="write-size">{ format!("({} lines, {} bytes)", total_lines, content.len()) }</span>
             </div>
             <div class="write-preview">
-                <pre class="write-content">
-                    {
-                        preview_lines.iter().enumerate().map(|(i, line)| {
-                            html! {
-                                <div class="write-line">
-                                    <span class="line-number">{ format!("{:>4}", i + 1) }</span>
-                                    <span class="line-content">{ *line }</span>
-                                </div>
-                            }
-                        }).collect::<Html>()
-                    }
-                    {
-                        if truncated {
-                            html! {
-                                <div class="write-truncated">
-                                    { format!("... {} more lines", total_lines - 20) }
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </pre>
+                <ExpandableLines content={content.to_string()} max_lines={20} />
             </div>
         </div>
     }

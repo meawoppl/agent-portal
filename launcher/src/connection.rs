@@ -1,5 +1,6 @@
 use crate::config::{self, ExpectedSession};
-use crate::process_manager::{ProcessManager, SessionExited};
+use crate::process_manager::{ProcessManager, SessionExited, SpawnParams};
+use crate::scheduler::Scheduler;
 use shared::{LauncherEndpoint, LauncherToServer, ServerToLauncher};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -23,6 +24,7 @@ pub async fn run_launcher_loop(
 ) -> anyhow::Result<()> {
     process_manager.set_launcher_id(launcher_id);
     let mut backoff = Duration::from_secs(1);
+    let mut scheduler = Scheduler::new();
 
     loop {
         info!("Connecting to backend: {}", backend_url);
@@ -119,6 +121,7 @@ pub async fn run_launcher_loop(
                             session_name: expected.session_name.clone(),
                             claude_args: expected.claude_args.clone(),
                             agent_type: expected.agent_type,
+                            scheduled_task_id: None,
                         };
                         if ws_sender.send(request).await.is_err() {
                             warn!("Failed to send expected session launch request");
@@ -135,6 +138,17 @@ pub async fn run_launcher_loop(
                 let start = Instant::now();
 
                 loop {
+                    let sched_dur = scheduler
+                        .next_fire_duration()
+                        .unwrap_or(Duration::from_secs(3600));
+                    let prompt_dur = scheduler
+                        .next_prompt_duration()
+                        .unwrap_or(Duration::from_secs(3600));
+                    let sched_sleep = tokio::time::sleep(sched_dur);
+                    let prompt_sleep = tokio::time::sleep(prompt_dur);
+                    tokio::pin!(sched_sleep);
+                    tokio::pin!(prompt_sleep);
+
                     tokio::select! {
                         result = ws_receiver.recv() => {
                             match result {
@@ -144,6 +158,7 @@ pub async fn run_launcher_loop(
                                         &mut ws_sender,
                                         &mut process_manager,
                                         &mut expected_sessions,
+                                        &mut scheduler,
                                     ).await;
                                 }
                                 Some(Err(e)) => {
@@ -167,6 +182,11 @@ pub async fn run_launcher_loop(
                                 warn!("Failed to send heartbeat");
                                 break;
                             }
+
+                            // Enforce max runtime on scheduled sessions
+                            for session_id in scheduler.timed_out_sessions() {
+                                process_manager.stop(&session_id).await;
+                            }
                         }
 
                         Some(exited) = exit_rx.recv() => {
@@ -183,6 +203,20 @@ pub async fn run_launcher_loop(
                             if ws_sender.send(msg).await.is_err() {
                                 warn!("Failed to send session exited notification");
                                 break;
+                            }
+
+                            // Report scheduled run completion
+                            if let Some(run_info) = scheduler.on_session_exited(&exited.session_id) {
+                                let completed = LauncherToServer::ScheduledRunCompleted {
+                                    task_id: run_info.task_id,
+                                    session_id: exited.session_id,
+                                    exit_code: exited.exit_code,
+                                    duration_secs: run_info.started_at.elapsed().as_secs(),
+                                };
+                                if ws_sender.send(completed).await.is_err() {
+                                    warn!("Failed to send ScheduledRunCompleted");
+                                    break;
+                                }
                             }
 
                             if let Some(dir) = exited_dir {
@@ -231,10 +265,61 @@ pub async fn run_launcher_loop(
                                 session_name: session.session_name,
                                 claude_args: session.claude_args,
                                 agent_type: session.agent_type,
+                                scheduled_task_id: None,
                             };
                             if ws_sender.send(request).await.is_err() {
                                 warn!("Failed to send session restart request");
                                 break;
+                            }
+                        }
+
+                        // Scheduler: fire due tasks
+                        _ = &mut sched_sleep => {
+                            for task_to_fire in scheduler.fire_due_tasks() {
+                                info!(
+                                    "Firing scheduled task '{}' ({})",
+                                    task_to_fire.config.name, task_to_fire.config.id
+                                );
+                                let msg = LauncherToServer::RequestLaunch {
+                                    request_id: task_to_fire.request_id,
+                                    working_directory: task_to_fire.config.working_directory.clone(),
+                                    session_name: Some(task_to_fire.config.name.clone()),
+                                    claude_args: task_to_fire.config.claude_args.clone(),
+                                    agent_type: task_to_fire.config.agent_type,
+                                    scheduled_task_id: Some(task_to_fire.config.id),
+                                };
+                                if ws_sender.send(msg).await.is_err() {
+                                    warn!("Failed to send RequestLaunch for scheduled task");
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Scheduler: send pending prompts after delay
+                        _ = &mut prompt_sleep => {
+                            for (session_id, task_id, content) in scheduler.ready_prompts() {
+                                info!(
+                                    "Injecting prompt for task {} into session {}",
+                                    task_id, session_id
+                                );
+
+                                let started = LauncherToServer::ScheduledRunStarted {
+                                    task_id,
+                                    session_id,
+                                };
+                                if ws_sender.send(started).await.is_err() {
+                                    warn!("Failed to send ScheduledRunStarted");
+                                    break;
+                                }
+
+                                let inject = LauncherToServer::InjectInput {
+                                    session_id,
+                                    content,
+                                };
+                                if ws_sender.send(inject).await.is_err() {
+                                    warn!("Failed to send InjectInput");
+                                    break;
+                                }
                             }
                         }
                     }
@@ -333,6 +418,7 @@ async fn handle_message(
     ws_sender: &mut ws_bridge::WsSender<LauncherToServer>,
     process_manager: &mut ProcessManager,
     expected_sessions: &mut Vec<ExpectedSession>,
+    scheduler: &mut Scheduler,
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
@@ -344,38 +430,56 @@ async fn handle_message(
             agent_type,
             ..
         } => {
+            // Check if this is a scheduled launch
+            let (resume_session_id, scheduled_task_id, is_scheduled) = if let Some((
+                resume_id,
+                task_id,
+            )) =
+                scheduler.get_pending_launch_info(&request_id)
+            {
+                (resume_id, Some(task_id), true)
+            } else {
+                (None, None, false)
+            };
+
             info!(
-                "Launch request: dir={}, name={:?}, agent={}",
-                working_directory, session_name, agent_type
+                "Launch request: dir={}, name={:?}, agent={}, scheduled={}",
+                working_directory, session_name, agent_type, is_scheduled
             );
 
             let result = process_manager
-                .spawn(
-                    &auth_token,
-                    &working_directory,
-                    session_name.as_deref(),
-                    &claude_args,
+                .spawn(SpawnParams {
+                    auth_token,
+                    working_directory: working_directory.clone(),
+                    session_name: session_name.clone(),
+                    claude_args: claude_args.clone(),
                     agent_type,
-                )
+                    scheduled_task_id,
+                    resume_session_id,
+                })
                 .await;
 
             let response = match result {
                 Ok(session_id) => {
-                    // Persist so this session survives launcher restarts
-                    if !expected_sessions
-                        .iter()
-                        .any(|s| s.working_directory == working_directory)
-                    {
-                        let expected = ExpectedSession {
-                            working_directory: working_directory.clone(),
-                            session_name: session_name.clone(),
-                            agent_type,
-                            claude_args: claude_args.clone(),
-                        };
-                        if let Err(e) = config::add_session(&expected) {
-                            warn!("Failed to persist session to config: {}", e);
+                    if is_scheduled {
+                        scheduler.on_session_spawned(request_id, session_id);
+                    } else {
+                        // Persist so this session survives launcher restarts
+                        if !expected_sessions
+                            .iter()
+                            .any(|s| s.working_directory == working_directory)
+                        {
+                            let expected = ExpectedSession {
+                                working_directory: working_directory.clone(),
+                                session_name: session_name.clone(),
+                                agent_type,
+                                claude_args: claude_args.clone(),
+                            };
+                            if let Err(e) = config::add_session(&expected) {
+                                warn!("Failed to persist session to config: {}", e);
+                            }
+                            expected_sessions.push(expected);
                         }
-                        expected_sessions.push(expected);
                     }
                     LauncherToServer::LaunchSessionResult {
                         request_id,
@@ -387,6 +491,9 @@ async fn handle_message(
                 }
                 Err(e) => {
                     error!("Failed to spawn: {}", e);
+                    if is_scheduled {
+                        scheduler.clear_pending_launch(&request_id);
+                    }
                     LauncherToServer::LaunchSessionResult {
                         request_id,
                         success: false,
@@ -417,6 +524,10 @@ async fn handle_message(
             if ws_sender.send(response).await.is_err() {
                 warn!("Failed to send list directories result");
             }
+        }
+        ServerToLauncher::ScheduleSync { tasks } => {
+            info!("Received ScheduleSync with {} task(s)", tasks.len());
+            scheduler.update_tasks(tasks);
         }
         ServerToLauncher::ServerShutdown { reason, .. } => {
             info!("Server shutting down: {}", reason);

@@ -67,22 +67,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    raw_message_log (id) {
-        id -> Uuid,
-        session_id -> Nullable<Uuid>,
-        user_id -> Nullable<Uuid>,
-        message_content -> Jsonb,
-        #[max_length = 50]
-        message_source -> Varchar,
-        #[max_length = 255]
-        render_reason -> Nullable<Varchar>,
-        created_at -> Timestamp,
-        #[max_length = 64]
-        content_hash -> Varchar,
-    }
-}
-
-diesel::table! {
     session_members (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -90,6 +74,32 @@ diesel::table! {
         #[max_length = 20]
         role -> Varchar,
         created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    scheduled_tasks (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        name -> Varchar,
+        #[max_length = 128]
+        cron_expression -> Varchar,
+        #[max_length = 64]
+        timezone -> Varchar,
+        #[max_length = 255]
+        hostname -> Varchar,
+        working_directory -> Text,
+        prompt -> Text,
+        claude_args -> Jsonb,
+        #[max_length = 16]
+        agent_type -> Varchar,
+        enabled -> Bool,
+        max_runtime_minutes -> Int4,
+        last_session_id -> Nullable<Uuid>,
+        last_run_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -126,6 +136,7 @@ diesel::table! {
         agent_type -> Varchar,
         #[max_length = 512]
         repo_url -> Nullable<Varchar>,
+        scheduled_task_id -> Nullable<Uuid>,
     }
 }
 
@@ -155,8 +166,7 @@ diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
 diesel::joinable!(pending_permission_requests -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
-diesel::joinable!(raw_message_log -> sessions (session_id));
-diesel::joinable!(raw_message_log -> users (user_id));
+diesel::joinable!(scheduled_tasks -> users (user_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
@@ -167,7 +177,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     pending_inputs,
     pending_permission_requests,
     proxy_auth_tokens,
-    raw_message_log,
+    scheduled_tasks,
     session_members,
     sessions,
     users,

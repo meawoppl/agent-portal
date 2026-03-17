@@ -1,6 +1,8 @@
+use gloo::events::EventListener;
 use gloo_net::http::Request;
 use shared::api::{AddMemberRequest, UpdateMemberRoleRequest};
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -47,6 +49,8 @@ pub struct ShareDialog {
     email_input: String,
     new_role: String,
     error: Option<String>,
+    #[allow(dead_code)] // RAII guard — must be held to keep listener active
+    _escape_listener: Option<EventListener>,
 }
 
 impl Component for ShareDialog {
@@ -55,12 +59,20 @@ impl Component for ShareDialog {
 
     fn create(ctx: &Context<Self>) -> Self {
         ctx.link().send_message(ShareDialogMsg::LoadMembers);
+        let on_close = ctx.props().on_close.clone();
+        let listener = EventListener::new(&gloo::utils::document(), "keydown", move |event| {
+            let e: &web_sys::KeyboardEvent = event.unchecked_ref();
+            if e.key() == "Escape" {
+                on_close.emit(());
+            }
+        });
         Self {
             members: Vec::new(),
             loading: true,
             email_input: String::new(),
             new_role: "viewer".to_string(),
             error: None,
+            _escape_listener: Some(listener),
         }
     }
 

@@ -3,16 +3,19 @@
 //! Dropdown pattern matches the send button: always in DOM, toggled by .open class,
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
-use crate::components::ShareDialog;
+use crate::components::{ScheduleDialog, ShareDialog};
 use crate::utils;
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
+use gloo_net::http::Request;
+use shared::api::ScheduledTaskListResponse;
 use shared::SessionInfo;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
@@ -201,7 +204,7 @@ pub struct SessionRailProps {
     pub sessions: Vec<SessionInfo>,
     pub focused_index: usize,
     pub awaiting_sessions: HashSet<Uuid>,
-    pub paused_sessions: HashSet<Uuid>,
+    pub hidden_sessions: HashSet<Uuid>,
     pub inactive_hidden: bool,
     pub connected_sessions: HashSet<Uuid>,
     pub nav_mode: bool,
@@ -212,7 +215,7 @@ pub struct SessionRailProps {
     pub server_version: String,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
-    pub on_toggle_pause: Callback<Uuid>,
+    pub on_toggle_hidden: Callback<Uuid>,
     pub on_toggle_inactive_hidden: Callback<MouseEvent>,
     pub on_stop: Callback<Uuid>,
 }
@@ -226,6 +229,38 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let stop_confirm = use_state(|| false);
     let copied_id = use_state(|| false);
     let share_session_id = use_state(|| None::<Uuid>);
+    let schedule_session = use_state(|| None::<SessionInfo>);
+    let stop_has_tasks = use_state(|| false);
+
+    // Fetch scheduled task status when dropdown opens for a session
+    {
+        let stop_has_tasks = stop_has_tasks.clone();
+        let menu_id = *menu_session;
+        let sessions = props.sessions.clone();
+        use_effect_with(menu_id, move |menu_id| {
+            if let Some(sid) = menu_id {
+                if let Some(session) = sessions.iter().find(|s| s.id == *sid) {
+                    let wd = session.working_directory.clone();
+                    let stop_has_tasks = stop_has_tasks.clone();
+                    spawn_local(async move {
+                        let url = utils::api_url("/api/scheduled-tasks");
+                        if let Ok(resp) = Request::get(&url).send().await {
+                            if let Ok(data) = resp.json::<ScheduledTaskListResponse>().await {
+                                let has = data
+                                    .tasks
+                                    .iter()
+                                    .any(|t| t.working_directory == wd && t.enabled);
+                                stop_has_tasks.set(has);
+                            }
+                        }
+                    });
+                }
+            } else {
+                stop_has_tasks.set(false);
+            }
+            || ()
+        });
+    }
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -251,21 +286,39 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         use_effect_with(focused_index, move |_| {
             if let Some(rail) = rail_ref.cast::<Element>() {
                 if let Some(child) = rail.children().item(focused_index as u32) {
-                    child.scroll_into_view();
+                    let opts = web_sys::ScrollIntoViewOptions::new();
+                    opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+                    opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                    opts.set_inline(web_sys::ScrollLogicalPosition::Nearest);
+                    child.scroll_into_view_with_scroll_into_view_options(&opts);
                 }
             }
             || ()
         });
     }
 
-    // Handle wheel event to translate vertical scroll to horizontal
+    // Handle wheel event to translate vertical scroll to horizontal.
+    // We directly set scrollLeft so that macOS trackpad inertia feels
+    // immediate rather than fighting CSS scroll-behavior: smooth.
     let on_wheel = {
         let rail_ref = rail_ref.clone();
         Callback::from(move |e: WheelEvent| {
             if let Some(rail) = rail_ref.cast::<HtmlElement>() {
+                let dx = e.delta_x();
+                let dy = e.delta_y();
+                // Use whichever axis has the larger delta — this lets both
+                // vertical scroll-wheel and horizontal trackpad swipes work
+                // naturally. Raw pixel values are used (no multiplier) so the
+                // scroll rate matches the rest of macOS.
+                let delta = if dx.abs() > dy.abs() { dx } else { dy };
+                if delta.abs() < 0.5 {
+                    return;
+                }
                 e.prevent_default();
-                let delta = e.delta_y();
-                rail.set_scroll_left(rail.scroll_left() + (delta * 3.0) as i32);
+                let opts = web_sys::ScrollToOptions::new();
+                opts.set_left(f64::from(rail.scroll_left()) + delta);
+                opts.set_behavior(web_sys::ScrollBehavior::Instant);
+                rail.scroll_to_with_scroll_to_options(&opts);
             }
         })
     };
@@ -320,7 +373,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     };
 
     let dropdown_content = if let Some(session) = open_session {
-        let is_paused = props.paused_sessions.contains(&session.id);
+        let is_hidden = props.hidden_sessions.contains(&session.id);
         let is_connected = props.connected_sessions.contains(&session.id);
 
         let on_stop = {
@@ -340,12 +393,12 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         };
         let confirming_stop = *stop_confirm;
 
-        let on_pause = {
-            let on_toggle_pause = props.on_toggle_pause.clone();
+        let on_hide = {
+            let on_toggle_hidden = props.on_toggle_hidden.clone();
             let session_id = session.id;
             let menu_session = menu_session.clone();
             Callback::from(move |_: MouseEvent| {
-                on_toggle_pause.emit(session_id);
+                on_toggle_hidden.emit(session_id);
                 menu_session.set(None);
             })
         };
@@ -360,31 +413,48 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             })
         };
 
-        let pause_label = if is_paused {
-            "Unpause Session"
+        let hide_label = if is_hidden {
+            "Show Session"
         } else {
-            "Pause Session"
+            "Hide Session"
         };
-        let pause_hint = if is_paused {
-            "Resume rotation"
+        let hide_hint = if is_hidden {
+            "Show in rotation"
         } else {
-            "Skip in rotation"
+            "Hide from rotation"
         };
 
         let stop_option = if is_connected && session.status == shared::SessionStatus::Active {
-            let (stop_label, stop_hint) = if confirming_stop {
-                ("Click again to confirm", "This will terminate the process")
+            if *stop_has_tasks {
+                // Block stop — open schedule dialog so user can delete tasks first
+                let schedule_session = schedule_session.clone();
+                let session_clone = session.clone();
+                let menu_session = menu_session.clone();
+                let on_click = Callback::from(move |_: MouseEvent| {
+                    schedule_session.set(Some(session_clone.clone()));
+                    menu_session.set(None);
+                });
+                html! {
+                    <button type="button" class="pill-menu-option stop blocked" onclick={on_click}>
+                        { "Delete Scheduled Tasks First" }
+                        <span class="option-hint">{ "Opens task manager" }</span>
+                    </button>
+                }
             } else {
-                ("Stop Session", "Terminate process")
-            };
-            html! {
-                <button type="button"
-                    class={classes!("pill-menu-option", "stop", confirming_stop.then_some("confirming"))}
-                    onclick={on_stop}
-                >
-                    { stop_label }
-                    <span class="option-hint">{ stop_hint }</span>
-                </button>
+                let (stop_label, stop_hint) = if confirming_stop {
+                    ("Click again to confirm", "This will terminate the process")
+                } else {
+                    ("Stop Session", "Terminate process")
+                };
+                html! {
+                    <button type="button"
+                        class={classes!("pill-menu-option", "stop", confirming_stop.then_some("confirming"))}
+                        onclick={on_stop}
+                    >
+                        { stop_label }
+                        <span class="option-hint">{ stop_hint }</span>
+                    </button>
+                }
             }
         } else {
             html! {}
@@ -474,6 +544,24 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             html! {}
         };
 
+        let schedule_option = if session.my_role == "owner" {
+            let schedule_session = schedule_session.clone();
+            let session_clone = session.clone();
+            let menu_session = menu_session.clone();
+            let on_schedule = Callback::from(move |_: MouseEvent| {
+                schedule_session.set(Some(session_clone.clone()));
+                menu_session.set(None);
+            });
+            html! {
+                <button type="button" class="pill-menu-option schedule" onclick={on_schedule}>
+                    { "Schedule Task" }
+                    <span class="option-hint">{ "Cron jobs" }</span>
+                </button>
+            }
+        } else {
+            html! {}
+        };
+
         html! {
             <>
                 <button
@@ -485,14 +573,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     <span class="option-hint">{ short_id }</span>
                 </button>
                 { share_option }
+                { schedule_option }
                 { repo_option }
                 <button
                     type="button"
-                    class={classes!("pill-menu-option", "pause", is_paused.then_some("active"))}
-                    onclick={on_pause}
+                    class={classes!("pill-menu-option", "hide", is_hidden.then_some("active"))}
+                    onclick={on_hide}
                 >
-                    { pause_label }
-                    <span class="option-hint">{ pause_hint }</span>
+                    { hide_label }
+                    <span class="option-hint">{ hide_hint }</span>
                 </button>
                 { leave_option }
                 { stop_option }
@@ -509,7 +598,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
      -> Html {
         let is_focused = index == props.focused_index;
         let is_awaiting = props.awaiting_sessions.contains(&session.id);
-        let is_paused = props.paused_sessions.contains(&session.id);
+        let is_hidden = props.hidden_sessions.contains(&session.id);
         let is_connected = props.connected_sessions.contains(&session.id);
 
         let on_click = {
@@ -551,7 +640,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             "session-pill",
             if is_focused { Some("focused") } else { None },
             if is_awaiting { Some("awaiting") } else { None },
-            if is_paused { Some("paused") } else { None },
+            if is_hidden { Some("hidden") } else { None },
             if in_nav_mode { Some("nav-mode") } else { None },
             if is_status_disconnected {
                 Some("status-disconnected")
@@ -575,6 +664,49 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 .map(|n| format!("{}", n + 1))
         } else {
             None
+        };
+
+        // Build version badge (rendered inline with hostname).
+        let version_badge = if let Some(ref cv) = session.client_version {
+            if !props.server_version.is_empty() {
+                let staleness = version_staleness(cv, &props.server_version);
+                let (badge_class, tooltip) = match staleness {
+                    VersionStaleness::Current => {
+                        ("version-current", format!("v{} — up to date", cv))
+                    }
+                    VersionStaleness::PatchBehind => (
+                        "version-patch",
+                        format!(
+                            "v{} → v{} (patch update available)",
+                            cv, props.server_version
+                        ),
+                    ),
+                    VersionStaleness::MinorBehind => (
+                        "version-minor",
+                        format!(
+                            "v{} → v{} (minor update available)",
+                            cv, props.server_version
+                        ),
+                    ),
+                    VersionStaleness::MajorBehind => (
+                        "version-major",
+                        format!(
+                            "v{} → v{} (major update available)",
+                            cv, props.server_version
+                        ),
+                    ),
+                };
+                html! {
+                    <span class={classes!("pill-version-badge", badge_class)}
+                        title={tooltip}>
+                        { format!("v{}", cv) }
+                    </span>
+                }
+            } else {
+                html! {}
+            }
+        } else {
+            html! {}
         };
 
         // Build sparkline. `render_time` ticks every 100 ms; view_for() does
@@ -620,7 +752,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 </span>
                 <span class="pill-name" title={session.session_name.clone()}>
                     <span class="pill-folder">{ folder }</span>
-                    <span class="pill-hostname">{ hostname }</span>
+                    <span class="pill-hostname-row">
+                        <span class="pill-hostname">{ hostname }</span>
+                        { version_badge }
+                    </span>
                     {
                         if let Some(ref branch) = session.git_branch {
                             html! { <span class="pill-branch" title={branch.clone()}>{ branch }</span> }
@@ -637,35 +772,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     }
                 }
                 {
-                    if let Some(ref cv) = session.client_version {
-                        if !props.server_version.is_empty() {
-                            let staleness = version_staleness(cv, &props.server_version);
-                            let badge_class = match staleness {
-                                VersionStaleness::Current => "",
-                                VersionStaleness::PatchBehind => "version-patch",
-                                VersionStaleness::MinorBehind => "version-minor",
-                                VersionStaleness::MajorBehind => "version-major",
-                            };
-                            if !badge_class.is_empty() {
-                                html! {
-                                    <span class={classes!("pill-version-badge", badge_class)}
-                                        title={format!("Client v{} (server v{})", cv, props.server_version)}>
-                                        { format!("v{}", cv) }
-                                    </span>
-                                }
-                            } else {
-                                html! {}
-                            }
-                        } else {
-                            html! {}
-                        }
+                    if session.scheduled_task_id.is_some() {
+                        html! { <span class="pill-agent-badge cron">{ "Cron" }</span> }
                     } else {
                         html! {}
                     }
                 }
                 {
-                    if is_paused {
-                        html! { <span class="pill-paused-badge">{ "ᴾ" }</span> }
+                    if is_hidden {
+                        html! { <span class="pill-hidden-badge">{ "ᴴ" }</span> }
                     } else {
                         html! {}
                     }
@@ -686,14 +801,14 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         }
     };
 
-    // Split sessions into visible (not paused) vs hidden (paused only)
-    let (visible_indices, paused_indices): (Vec<_>, Vec<_>) =
+    // Split sessions into visible vs hidden
+    let (visible_indices, hidden_indices): (Vec<_>, Vec<_>) =
         props.sessions.iter().enumerate().partition(|(_, session)| {
-            let is_paused = props.paused_sessions.contains(&session.id);
-            !is_paused
+            let is_hidden = props.hidden_sessions.contains(&session.id);
+            !is_hidden
         });
 
-    let paused_count = paused_indices.len();
+    let hidden_count = hidden_indices.len();
     let visible_count = visible_indices.len();
 
     // Container with position:relative holds the rail + dropdown.
@@ -719,7 +834,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 }).collect::<Html>() }
 
                 {
-                    if paused_count > 0 {
+                    if hidden_count > 0 {
                         let toggle_class = classes!(
                             "session-rail-divider",
                             if props.inactive_hidden { Some("collapsed") } else { None }
@@ -727,9 +842,9 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                         html! {
                             <div class={toggle_class} onclick={props.on_toggle_inactive_hidden.clone()}>
                                 <span class="divider-line"></span>
-                                <button class="divider-toggle" title={if props.inactive_hidden { "Show paused sessions" } else { "Hide paused sessions" }}>
+                                <button class="divider-toggle" title={if props.inactive_hidden { "Show hidden sessions" } else { "Collapse hidden sessions" }}>
                                     { if props.inactive_hidden {
-                                        format!("▶ {}", paused_count)
+                                        format!("▶ {}", hidden_count)
                                     } else {
                                         "◀".to_string()
                                     }}
@@ -743,7 +858,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
 
                 {
                     if !props.inactive_hidden {
-                        paused_indices.iter().enumerate().map(|(display_idx, (index, session))| {
+                        hidden_indices.iter().enumerate().map(|(display_idx, (index, session))| {
                             render_pill(*index, session, Some(visible_count + display_idx))
                         }).collect::<Html>()
                     } else {
@@ -761,6 +876,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     let share_session_id = share_session_id.clone();
                     let on_close = Callback::from(move |_| share_session_id.set(None));
                     html! { <ShareDialog {session_id} {on_close} /> }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if let Some(ref session) = *schedule_session {
+                    let schedule_session = schedule_session.clone();
+                    let on_close = Callback::from(move |_| schedule_session.set(None));
+                    html! { <ScheduleDialog session={session.clone()} {on_close} /> }
                 } else {
                     html! {}
                 }

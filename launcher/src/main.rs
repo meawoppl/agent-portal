@@ -1,6 +1,8 @@
 mod config;
 mod connection;
+mod pastebin;
 mod process_manager;
+mod scheduler;
 mod service;
 
 use clap::{Parser, Subcommand};
@@ -65,6 +67,8 @@ enum ServiceAction {
     Uninstall,
     /// Show the current service status
     Status,
+    /// Upload system info, build info, and logs to an unlisted paste
+    Pastebin,
 }
 
 const BINARY_PREFIX: &str = "agent-portal";
@@ -99,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
                 ServiceAction::Install => service::install(),
                 ServiceAction::Uninstall => service::uninstall(),
                 ServiceAction::Status => service::status(),
+                ServiceAction::Pastebin => pastebin::upload_diagnostics().await,
             };
         }
         None => {}

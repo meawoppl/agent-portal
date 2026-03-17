@@ -49,6 +49,7 @@ pub fn connect_websocket(
                     launcher_id: None,
                     agent_type: Default::default(),
                     repo_url: None,
+                    scheduled_task_id: None,
                 });
 
                 if sender.send(register_msg).await.is_err() {

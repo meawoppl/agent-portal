@@ -33,6 +33,7 @@ pub struct LauncherConnection {
     pub user_id: Uuid,
     pub running_sessions: Vec<Uuid>,
     pub working_directory: Option<String>,
+    pub version: String,
 }
 
 #[derive(Clone)]
@@ -302,6 +303,7 @@ impl SessionManager {
                 connected: true,
                 running_sessions: entry.value().running_sessions.len() as u32,
                 working_directory: entry.value().working_directory.clone(),
+                version: entry.value().version.clone(),
             })
             .collect()
     }
@@ -335,10 +337,11 @@ impl SessionManager {
     pub fn disconnect_session(&self, session_id: Uuid) -> bool {
         let key = session_id.to_string();
         if let Some(sender) = self.sessions.get(&key) {
-            let _ = sender.send(ServerToProxy::SessionTerminated {
-                reason: "Session stopped by user".to_string(),
-            });
-            true
+            sender
+                .send(ServerToProxy::SessionTerminated {
+                    reason: "Session stopped by user".to_string(),
+                })
+                .is_ok()
         } else {
             false
         }

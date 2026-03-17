@@ -174,6 +174,9 @@ pub struct LauncherInfo {
     /// Working directory where the launcher process is running
     #[serde(default)]
     pub working_directory: Option<String>,
+    /// Launcher binary version
+    #[serde(default)]
+    pub version: String,
 }
 
 /// API types for HTTP endpoints
@@ -187,8 +190,7 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     pub last_activity: String,
     pub created_at: String,
-    #[serde(default)]
-    pub updated_at: Option<String>,
+    pub updated_at: String,
     #[serde(default)]
     pub git_branch: Option<String>,
     /// The current user's role in this session (owner, editor, viewer)
@@ -211,6 +213,9 @@ pub struct SessionInfo {
     /// Proxy client version string (e.g. "1.3.39")
     #[serde(default)]
     pub client_version: Option<String>,
+    /// Scheduled task ID if this session was spawned by a scheduled task
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_task_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

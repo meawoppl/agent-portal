@@ -56,6 +56,7 @@ pub struct Session {
     pub pr_url: Option<String>,
     pub agent_type: String,
     pub repo_url: Option<String>,
+    pub scheduled_task_id: Option<Uuid>,
 }
 
 #[derive(Debug, Insertable)]
@@ -85,6 +86,7 @@ pub struct NewSessionWithId {
     pub launcher_id: Option<Uuid>,
     pub agent_type: String,
     pub repo_url: Option<String>,
+    pub scheduled_task_id: Option<Uuid>,
 }
 
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
@@ -202,35 +204,6 @@ pub struct NewSessionMember {
 }
 
 // ============================================================================
-// Raw Message Log Models
-// ============================================================================
-
-#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
-#[diesel(table_name = crate::schema::raw_message_log)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct RawMessageLog {
-    pub id: Uuid,
-    pub session_id: Option<Uuid>,
-    pub user_id: Option<Uuid>,
-    pub message_content: serde_json::Value,
-    pub message_source: String,
-    pub render_reason: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub content_hash: String,
-}
-
-#[derive(Debug, Insertable)]
-#[diesel(table_name = crate::schema::raw_message_log)]
-pub struct NewRawMessageLog {
-    pub session_id: Option<Uuid>,
-    pub user_id: Option<Uuid>,
-    pub message_content: serde_json::Value,
-    pub message_source: String,
-    pub render_reason: Option<String>,
-    pub content_hash: String,
-}
-
-// ============================================================================
 // Pending Input Models (for reliable frontend->proxy message delivery)
 // ============================================================================
 
@@ -251,4 +224,45 @@ pub struct NewPendingInput {
     pub session_id: Uuid,
     pub seq_num: i64,
     pub content: String,
+}
+
+// ============================================================================
+// Scheduled Task Models
+// ============================================================================
+
+#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[diesel(table_name = crate::schema::scheduled_tasks)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ScheduledTask {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub cron_expression: String,
+    pub timezone: String,
+    pub hostname: String,
+    pub working_directory: String,
+    pub prompt: String,
+    pub claude_args: serde_json::Value,
+    pub agent_type: String,
+    pub enabled: bool,
+    pub max_runtime_minutes: i32,
+    pub last_session_id: Option<Uuid>,
+    pub last_run_at: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::scheduled_tasks)]
+pub struct NewScheduledTask {
+    pub user_id: Uuid,
+    pub name: String,
+    pub cron_expression: String,
+    pub timezone: String,
+    pub hostname: String,
+    pub working_directory: String,
+    pub prompt: String,
+    pub claude_args: serde_json::Value,
+    pub agent_type: String,
+    pub max_runtime_minutes: i32,
 }
