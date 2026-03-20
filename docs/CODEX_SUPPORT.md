@@ -1,6 +1,6 @@
 # Codex Support Plan
 
-This document plans what would need to change in claude-code-portal to support OpenAI Codex CLI sessions alongside Claude Code sessions. Both agent SDKs ([claude-codes](https://crates.io/crates/claude-codes) and [codex-codes](https://crates.io/crates/codex-codes)) are maintained in the same [repository](https://github.com/meawoppl/rust-code-agent-sdks).
+This document plans what would need to change in agent-portal to support OpenAI Codex CLI sessions alongside Claude Code sessions. Both agent SDKs ([claude-codes](https://crates.io/crates/claude-codes) and [codex-codes](https://crates.io/crates/codex-codes)) are maintained in the same [repository](https://github.com/meawoppl/rust-code-agent-sdks).
 
 ## Protocol Comparison
 

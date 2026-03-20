@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # PID file locations
 PID_DIR="/tmp/claude-portal-dev"
 BACKEND_PID_FILE="$PID_DIR/backend.pid"
-DB_CONTAINER="claude-portal-db"
+DB_CONTAINER="agent-portal-db"
 
 # Log file locations
 BACKEND_LOG="/tmp/claude-portal-backend.log"
@@ -191,7 +191,7 @@ stop_all() {
 # Show status
 show_status() {
     echo ""
-    echo "Claude Code Portal Development Environment Status"
+    echo "Agent Portal Development Environment Status"
     echo "=================================================="
     echo ""
 
@@ -252,7 +252,7 @@ show_logs() {
 do_start() {
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║     Starting Claude Code Portal Development Environment   ║"
+    echo "║       Starting Agent Portal Development Environment       ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
 
@@ -263,7 +263,7 @@ do_start() {
 
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║        ✅ Claude Code Portal Dev Environment Ready        ║"
+    echo "║          ✅ Agent Portal Dev Environment Ready            ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
     echo "  🌐 Web Interface:  http://localhost:3000/"
@@ -298,7 +298,7 @@ nuke_db() {
     stop_all
 
     log "Removing database volume..."
-    docker volume rm claude-code-portal_test_postgres_data 2>/dev/null || true
+    docker volume rm agent-portal_test_postgres_data 2>/dev/null || true
 
     success "Database nuked. Run './scripts/dev.sh start' to recreate."
 }

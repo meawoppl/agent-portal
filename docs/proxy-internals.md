@@ -6,7 +6,7 @@ This document describes the internal architecture and message flow of the `claud
 
 The proxy acts as a bridge between:
 1. **Claude CLI** - The local Claude Code command-line tool
-2. **Backend WebSocket** - The claude-code-portal backend server
+2. **Backend WebSocket** - The agent-portal backend server
 3. **Web Interface** - Users interacting via browser
 
 ```
@@ -60,7 +60,7 @@ The proxy communicates with the backend using typed per-endpoint enums defined i
 ### Startup Sequence
 
 1. **Parse Configuration**
-   - Load saved auth from `~/.config/claude-code-portal/config.json`
+   - Load saved auth from `~/.config/agent-portal/config.json`
    - Parse CLI arguments (`--init`, `--backend-url`, etc.)
 
 2. **Authentication**
@@ -129,8 +129,8 @@ let mut claude_session = Session::new(claude_config).await?;
 ## Configuration Storage
 
 Config is stored in the OS-standard config directory (via the `directories` crate):
-- Linux: `~/.config/claude-code-portal/config.json`
-- macOS: `~/Library/Application Support/com.anthropic.claude-code-portal/config.json`
+- Linux: `~/.config/agent-portal/config.json`
+- macOS: `~/Library/Application Support/com.anthropic.agent-portal/config.json`
 
 ```json
 {

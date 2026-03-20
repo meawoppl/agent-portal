@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers deploying claude-code-portal to production.
+This guide covers deploying agent-portal to production.
 
 ## Prerequisites
 
@@ -192,11 +192,11 @@ Admins can access the admin dashboard at `/admin` which provides:
 | macOS (Intel) | Untested | Builds in CI, PRs welcome |
 | Windows (x86_64) | Untested | Builds in CI, PRs welcome |
 
-Pre-built binaries for all platforms are available from [GitHub Releases](https://github.com/meawoppl/claude-code-portal/releases/latest).
+Pre-built binaries for all platforms are available from [GitHub Releases](https://github.com/meawoppl/agent-portal/releases/latest).
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) for common issues and solutions.
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
 
 ## Google OAuth Setup
 

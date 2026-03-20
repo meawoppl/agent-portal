@@ -27,8 +27,8 @@ A web portal that extends [Claude Code](https://docs.anthropic.com/en/docs/claud
 
 ```bash
 # Clone the repository
-git clone https://github.com/meawoppl/claude-code-portal.git
-cd claude-code-portal
+git clone https://github.com/meawoppl/agent-portal.git
+cd agent-portal
 
 # Start everything (auto-installs dependencies)
 ./scripts/dev.sh start
@@ -88,7 +88,7 @@ The **portal** refers to the complete system: backend server, web frontend, and 
 | [Deployment Guide](docs/DEPLOYING.md) | Production deployment, Google OAuth setup, configuration |
 | [Docker Guide](docs/DOCKER.md) | Docker and Kubernetes deployment with 1Password |
 | [VS Code Setup](docs/VSCODE_SETUP.md) | Use Claude Code in VS Code with portal integration |
-| [Troubleshooting](TROUBLESHOOTING.md) | Common issues and solutions |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 
 ## Platform Support
 
@@ -100,7 +100,7 @@ The **portal** refers to the complete system: backend server, web frontend, and 
 | macOS (Intel) | Builds in CI |
 | Windows (x86_64) | Builds in CI |
 
-Pre-built binaries available from [GitHub Releases](https://github.com/meawoppl/claude-code-portal/releases/latest).
+Pre-built binaries available from [GitHub Releases](https://github.com/meawoppl/agent-portal/releases/latest).
 
 ## Technologies
 
@@ -139,5 +139,5 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/meawoppl/claude-code-portal/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/meawoppl/claude-code-portal/discussions)
+- **Issues**: [GitHub Issues](https://github.com/meawoppl/agent-portal/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/meawoppl/agent-portal/discussions)

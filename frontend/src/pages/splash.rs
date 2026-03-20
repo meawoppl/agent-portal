@@ -120,7 +120,7 @@ pub fn splash_page() -> Html {
                 <div class="splash-footer">
                     <span class="version">{ format!("v{}", VERSION) }</span>
                     <a
-                        href="https://github.com/meawoppl/claude-code-portal"
+                        href="https://github.com/meawoppl/agent-portal"
                         target="_blank"
                         rel="noopener noreferrer"
                         class="footer-link"
@@ -129,7 +129,7 @@ pub fn splash_page() -> Html {
                         { "GitHub" }
                     </a>
                     <a
-                        href="https://github.com/meawoppl/claude-code-portal/issues/new"
+                        href="https://github.com/meawoppl/agent-portal/issues/new"
                         target="_blank"
                         rel="noopener noreferrer"
                         class="footer-link bug-report"

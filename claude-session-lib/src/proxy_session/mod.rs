@@ -682,7 +682,7 @@ async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> 
 ///
 /// The Claude session internally uses a dedicated drain task to continuously
 /// read stdout, so there's no risk of buffer starvation in this select! loop.
-/// See: https://github.com/meawoppl/claude-code-portal/issues/278
+/// See: https://github.com/meawoppl/agent-portal/issues/278
 async fn run_main_loop(
     claude_session: &mut ClaudeSession,
     input_rx: &mut mpsc::UnboundedReceiver<String>,

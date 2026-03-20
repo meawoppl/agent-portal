@@ -7,7 +7,7 @@ The proxy CLI authenticates users through an OAuth device flow, similar to how `
 1. **First Run**: When you run `claude-portal` for the first time in a directory, it will:
    - Display a link and verification code
    - Wait for you to authenticate in your browser
-   - Store the auth token in `~/.config/claude-code-portal/config.json`
+   - Store the auth token in `~/.config/agent-portal/config.json`
 
 2. **Subsequent Runs**: The proxy automatically uses the cached authentication
 
@@ -75,8 +75,8 @@ $ claude-portal --reauth  # Force new authentication
 ### Config File Location
 
 The config file is stored at:
-- **Linux/Mac**: `~/.config/claude-code-portal/config.json`
-- **Windows**: `%APPDATA%\claude-code-portal\config.json`
+- **Linux/Mac**: `~/.config/agent-portal/config.json`
+- **Windows**: `%APPDATA%\agent-portal\config.json`
 
 ### Config File Format
 
@@ -153,14 +153,14 @@ claude-portal
 
 ```bash
 # Linux/Mac
-cat ~/.config/claude-code-portal/config.json | jq
+cat ~/.config/agent-portal/config.json | jq
 ```
 
 ### Manually edit config
 
 ```bash
 # Open in editor
-vim ~/.config/claude-code-portal/config.json
+vim ~/.config/agent-portal/config.json
 ```
 
 ## Security Considerations

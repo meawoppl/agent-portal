@@ -81,7 +81,7 @@ curl -fsSL "http://localhost:3000/api/download/install.sh?init_url=http%3A%2F%2F
 
 When the user runs the curl command, the backend generates a bash script that:
 
-1. **Downloads the binary** to `~/.config/claude-code-portal/claude-portal`
+1. **Downloads the binary** to `~/.config/agent-portal/claude-portal`
 2. **Makes it executable**
 3. **Adds to PATH** in `.bashrc`/`.zshrc`/`.profile`
 4. **Runs initialization** (if init_url was provided):
@@ -97,7 +97,7 @@ When `claude-portal --init <url>` runs, it:
 2. **Extracts the backend URL** (converts `http://` to `ws://` for WebSocket)
 3. **Decodes the base64 config** from the `/p/{config}` path
 4. **Extracts the JWT token** from the config
-5. **Saves to config file** (`~/.config/claude-code-portal/claude-code-portal/config.json`):
+5. **Saves to config file** (`~/.config/agent-portal/agent-portal/config.json`):
    ```json
    {
      "sessions": {

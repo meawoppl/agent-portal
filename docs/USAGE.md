@@ -44,7 +44,7 @@ To authenticate, visit: https://your-portal.com/api/auth/device
 Enter code: ABC-123
 ```
 
-Open the URL in your browser, sign in with Google, and enter the code. Credentials are cached in `~/.config/claude-code-portal/config.json`.
+Open the URL in your browser, sign in with Google, and enter the code. Credentials are cached in `~/.config/agent-portal/config.json`.
 
 ### CLI Options
 

@@ -1,4 +1,4 @@
-//! Auto-update functionality for the claude-portal binary.
+//! Auto-update functionality for the agent-portal binary.
 //!
 //! Thin wrapper around `portal_update` with the correct binary prefix.
 

@@ -1,10 +1,10 @@
 # CLAUDE.md - AI Assistant Instructions
 
-This file contains instructions for AI assistants (like Claude) working on the claude-code-portal codebase. It documents the architecture, conventions, and common tasks.
+This file contains instructions for AI assistants (like Claude) working on the agent-portal codebase. It documents the architecture, conventions, and common tasks.
 
 ## Project Overview
 
-claude-code-portal is a web-based proxy system for Claude Code sessions built with:
+agent-portal is a web-based proxy system for Claude Code sessions built with:
 - **Backend**: Rust + Axum + PostgreSQL + Diesel ORM
 - **Frontend**: Rust + Yew (WebAssembly)
 - **Proxy**: Rust CLI wrapper for claude binary
@@ -22,7 +22,7 @@ We maintain **[meawoppl/rust-code-agent-sdks](https://github.com/meawoppl/rust-c
 ### Workspace Structure
 
 ```
-claude-code-portal/
+agent-portal/
 ├── shared/              # WASM-compatible common types
 ├── backend/             # Axum server (native only)
 ├── frontend/            # Yew WASM app (WASM target)
@@ -534,7 +534,7 @@ sessions::table.filter(sessions::id.eq(...))
 **Fix**:
 1. Check backend is running: `curl http://localhost:3000/`
 2. Verify WebSocket URL: should be `ws://localhost:3000` (not `wss://`)
-3. Check backend logs: `tail -f /tmp/claude-code-portal-backend.log`
+3. Check backend logs: `tail -f /tmp/agent-portal-backend.log`
 4. Try dev mode authentication: backend with `--dev-mode`
 
 ## Code Conventions
@@ -772,7 +772,7 @@ This is a shorthand for the full PR review cycle when the user is confident in t
 
 1. Check existing code for similar patterns
 2. Run `./scripts/dev.sh start` to verify changes
-3. Check `TROUBLESHOOTING.md` for common issues
+3. Check `docs/TROUBLESHOOTING.md` for common issues
 4. Ensure all tests pass before committing
 5. Ask human developer for architectural decisions
 

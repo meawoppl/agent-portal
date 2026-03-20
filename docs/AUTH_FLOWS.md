@@ -1,6 +1,6 @@
 # Authentication Flows - Complete Reference
 
-This document provides exhaustive detail on every authentication pathway in claude-code-portal. There are **TWO COMPLETELY SEPARATE** authentication systems that share some infrastructure but serve different purposes.
+This document provides exhaustive detail on every authentication pathway in agent-portal. There are **TWO COMPLETELY SEPARATE** authentication systems that share some infrastructure but serve different purposes.
 
 ---
 
@@ -196,7 +196,7 @@ Allow the CLI tool (proxy binary) to authenticate without requiring a browser on
 Step 1.1: User runs CLI command that requires authentication
           Example: claude-portal --backend-url wss://example.com
           ↓
-          CLI checks for cached token in ~/.config/claude-code-portal/config.json
+          CLI checks for cached token in ~/.config/agent-portal/config.json
           ├── Token exists and valid → Use it, skip device flow
           └── No token or expired → Start device flow
 
@@ -377,7 +377,7 @@ Step 4.3: CLI receives "complete" response
           }
 
 Step 4.4: CLI stores credentials
-          Write to ~/.config/claude-code-portal/config.json:
+          Write to ~/.config/agent-portal/config.json:
           {
             "backend_url": "wss://example.com",
             "auth_token": "eyJhbGciOiJIUzI1NiIs...",

@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions for claude-code-portal development.
+Common issues and solutions for agent-portal development.
 
 ## diesel CLI Installation Issues
 
@@ -87,7 +87,7 @@ brew install trunk
 **Solution:**
 ```bash
 # Check if container is running
-docker ps | grep claude-code-portal
+docker ps | grep agent-portal
 
 # Start database
 docker-compose -f docker-compose.test.yml up -d db
@@ -194,7 +194,7 @@ cargo run -p backend -- --dev-mode
 curl http://localhost:3000/
 
 # Check backend logs
-tail -f /tmp/claude-code-portal-backend.log
+tail -f /tmp/agent-portal-backend.log
 
 # Verify WebSocket endpoint
 wscat -c ws://localhost:3000/ws/session
@@ -260,7 +260,7 @@ chmod +x scripts/*.sh
 If everything is broken, try a full cleanup:
 ```bash
 ./scripts/clean.sh
-rm -rf ~/.config/claude-code-portal/  # Remove cached auth
+rm -rf ~/.config/agent-portal/  # Remove cached auth
 cargo clean
 cd frontend && trunk clean && cd ..
 ./scripts/install-deps.sh
@@ -297,7 +297,7 @@ RUST_LOG=debug cargo run -p backend -- --dev-mode
 RUST_LOG=debug cargo run -p proxy
 
 # View all logs
-tail -f /tmp/claude-code-portal-*.log
+tail -f /tmp/agent-portal-*.log
 ```
 
 ### Test database connection manually
@@ -321,8 +321,8 @@ If you're still stuck:
 
 1. Check the logs:
    ```bash
-   tail -f /tmp/claude-code-portal-backend.log
-   tail -f /tmp/claude-code-portal-proxy.log
+   tail -f /tmp/agent-portal-backend.log
+   tail -f /tmp/agent-portal-proxy.log
    ```
 
 2. Enable verbose output:

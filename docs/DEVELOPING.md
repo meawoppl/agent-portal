@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide covers setting up a development environment and contributing to claude-code-portal.
+This guide covers setting up a development environment and contributing to agent-portal.
 
 ## Prerequisites
 
@@ -33,8 +33,8 @@ The fastest way to get a dev environment running:
 
 ```bash
 # Clone the repository
-git clone https://github.com/meawoppl/claude-code-portal.git
-cd claude-code-portal
+git clone https://github.com/meawoppl/agent-portal.git
+cd agent-portal
 
 # Start everything (auto-installs dependencies)
 ./scripts/dev.sh start
@@ -120,7 +120,7 @@ cargo run -p proxy -- --backend-url ws://localhost:3000
 ## Project Structure
 
 ```
-claude-code-portal/
+agent-portal/
 ├── Cargo.toml              # Workspace definition
 ├── Cargo.lock              # Dependency lock file
 │
@@ -344,7 +344,7 @@ sessions.filter(id.eq(some_id))
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) for common issues and solutions.
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
 
 ### Quick Fixes
 
@@ -357,7 +357,7 @@ psql $DATABASE_URL
 lsof -i :3000
 
 # Check logs
-tail -f /tmp/claude-code-portal-backend.log
+tail -f /tmp/agent-portal-backend.log
 ```
 
 **Frontend won't build:**

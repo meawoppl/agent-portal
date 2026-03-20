@@ -6,8 +6,8 @@ This guide covers using the `dev.sh` script to quickly set up a local developmen
 
 ```bash
 # Clone and start
-git clone https://github.com/meawoppl/claude-code-portal.git
-cd claude-code-portal
+git clone https://github.com/meawoppl/agent-portal.git
+cd agent-portal
 ./scripts/dev.sh start
 ```
 
@@ -52,7 +52,7 @@ Access the database directly:
 ### Backend
 
 - **URL**: http://localhost:3000
-- **Log file**: `/tmp/claude-code-portal-backend.log`
+- **Log file**: `/tmp/agent-portal-backend.log`
 - **Mode**: Dev mode (OAuth bypassed)
 - **Test user**: `testing@testing.local`
 

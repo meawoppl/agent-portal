@@ -796,7 +796,7 @@ pub fn dashboard_page() -> Html {
                         </div>
                         <div class="hints-right">
                             <a
-                                href="https://github.com/meawoppl/claude-code-portal/issues/new"
+                                href="https://github.com/meawoppl/agent-portal/issues/new"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 class="bug-report-link"
