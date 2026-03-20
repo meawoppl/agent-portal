@@ -29,7 +29,7 @@ QUICK START:\n  \
 2. Run: claude-portal --init <token-url>\n  \
 3. Start coding: claude-portal [claude args]\n\n\
 CONFIG:\n  \
-Configuration is stored in ~/.config/claude-code-portal/config.json and includes\n  \
+Configuration is stored in ~/.config/agent-portal/config.json and includes\n  \
 the backend URL and authentication tokens per working directory."
 )]
 #[command(after_help = "EXAMPLES:\n  \

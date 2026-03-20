@@ -18,7 +18,7 @@ docker-compose down
 ## Building the Image
 
 ```bash
-docker build -f backend/Dockerfile -t claude-code-portal-backend .
+docker build -f backend/Dockerfile -t agent-portal-backend .
 ```
 
 ## Running with Environment Variables
@@ -68,24 +68,24 @@ Run the container with the env file:
 
 ```bash
 docker run -d \
-  --name claude-code-portal-backend \
+  --name agent-portal-backend \
   -p 3000:3000 \
   --env-file .env \
-  claude-code-portal-backend
+  agent-portal-backend
 ```
 
 Or pass variables directly:
 
 ```bash
 docker run -d \
-  --name claude-code-portal-backend \
+  --name agent-portal-backend \
   -p 3000:3000 \
   -e DATABASE_URL="postgresql://..." \
   -e GOOGLE_CLIENT_ID="..." \
   -e GOOGLE_CLIENT_SECRET="..." \
   -e GOOGLE_REDIRECT_URI="https://your-domain.com/api/auth/google/callback" \
   -e SESSION_SECRET="$(openssl rand -base64 32)" \
-  claude-code-portal-backend
+  agent-portal-backend
 ```
 
 ## Docker Compose
@@ -98,7 +98,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: claude-code-portal-backend
+    container_name: agent-portal-backend
     ports:
       - "3000:3000"
     env_file:
@@ -165,7 +165,7 @@ docker buildx create --use
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -f backend/Dockerfile \
-  -t your-registry/claude-code-portal-backend:latest \
+  -t your-registry/agent-portal-backend:latest \
   --push \
   .
 ```
@@ -205,7 +205,7 @@ docker buildx build \
 
 Check logs:
 ```bash
-docker logs claude-code-portal-backend
+docker logs agent-portal-backend
 ```
 
 Common causes:
@@ -217,7 +217,7 @@ Common causes:
 
 Test connectivity:
 ```bash
-docker run --rm --env-file .env claude-code-portal-backend \
+docker run --rm --env-file .env agent-portal-backend \
   bash -c 'psql $DATABASE_URL -c "SELECT 1"'
 ```
 
@@ -225,7 +225,7 @@ docker run --rm --env-file .env claude-code-portal-backend \
 
 Test the endpoint:
 ```bash
-docker exec claude-code-portal-backend curl -f http://localhost:3000/
+docker exec agent-portal-backend curl -f http://localhost:3000/
 ```
 
 ## Production Checklist

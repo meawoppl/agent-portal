@@ -1,6 +1,6 @@
 # Proxy Binary Login Flow
 
-This document describes how the `claude-portal` CLI authenticates with the claude-code-portal backend.
+This document describes how the `claude-portal` CLI authenticates with the agent-portal backend.
 
 ## Overview
 
@@ -52,7 +52,7 @@ The simplest way to authenticate the proxy is using a pre-generated JWT token fr
 │     - Extracts optional session prefix                              │
 │                     │                                                │
 │                     ▼                                                │
-│  6. Saves to ~/.config/claude-code-portal/config.json                         │
+│  6. Saves to ~/.config/agent-portal/config.json                         │
 │                     │                                                │
 │                     ▼                                                │
 │  ✓ Configuration saved for user@example.com                         │
@@ -252,7 +252,7 @@ In dev mode:
 Credentials are stored in:
 
 ```
-~/.config/claude-code-portal/config.json
+~/.config/agent-portal/config.json
 ```
 
 Structure:

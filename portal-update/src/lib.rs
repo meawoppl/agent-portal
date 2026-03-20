@@ -13,7 +13,7 @@ use tracing::info;
 use tracing::warn;
 
 /// GitHub repository for releases
-const GITHUB_REPO: &str = "meawoppl/claude-code-portal";
+const GITHUB_REPO: &str = "meawoppl/agent-portal";
 
 /// Result of an update check
 #[derive(Debug)]
@@ -123,7 +123,7 @@ pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<U
     info!("Platform: {} {}", platform.os, platform.arch);
 
     let client = reqwest::Client::builder()
-        .user_agent("claude-portal")
+        .user_agent("agent-portal")
         .build()
         .context("Failed to create HTTP client")?;
 

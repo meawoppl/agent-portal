@@ -128,7 +128,7 @@ Terminal 4 should show:
 
 ```bash
 # Check config file was created
-cat ~/.config/claude-code-portal/config.json
+cat ~/.config/agent-portal/config.json
 
 # Should show:
 {
@@ -190,7 +190,7 @@ cargo run -p proxy
 - [ ] Proxy shows OAuth device flow on first run
 - [ ] Can open device URL and complete OAuth
 - [ ] Proxy receives auth token after OAuth
-- [ ] Config file created at `~/.config/claude-code-portal/config.json`
+- [ ] Config file created at `~/.config/agent-portal/config.json`
 - [ ] Config contains auth token
 - [ ] Second run uses cached auth (no OAuth prompt)
 - [ ] Web UI shows login with Google
@@ -219,15 +219,15 @@ The code expires after 15 minutes. Get a new one by running the proxy again.
 
 Check permissions on `~/.config/` directory:
 ```bash
-mkdir -p ~/.config/claude-code-portal
-chmod 700 ~/.config/claude-code-portal
+mkdir -p ~/.config/agent-portal
+chmod 700 ~/.config/agent-portal
 ```
 
 ### Token not working
 
 Delete config and re-authenticate:
 ```bash
-rm ~/.config/claude-code-portal/config.json
+rm ~/.config/agent-portal/config.json
 cargo run -p proxy
 ```
 
@@ -240,5 +240,5 @@ cargo run -p proxy
 docker-compose down -v
 
 # Remove config (optional)
-rm -rf ~/.config/claude-code-portal
+rm -rf ~/.config/agent-portal
 ```

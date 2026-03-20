@@ -94,7 +94,7 @@ This script:
 - Stops Docker containers and removes volumes
 - Cleans cargo build artifacts
 - Removes log files
-- Optionally removes ~/.config/claude-code-portal/
+- Optionally removes ~/.config/agent-portal/
 
 **Usage:**
 ```bash
@@ -163,13 +163,13 @@ cargo run -p proxy -- \
 ## Log Files
 
 Scripts write logs to `/tmp/`:
-- `/tmp/claude-code-portal-backend.log` - Backend logs
-- `/tmp/claude-code-portal-proxy.log` - Proxy logs
+- `/tmp/agent-portal-backend.log` - Backend logs
+- `/tmp/agent-portal-proxy.log` - Proxy logs
 
 View logs:
 ```bash
-tail -f /tmp/claude-code-portal-backend.log
-tail -f /tmp/claude-code-portal-proxy.log
+tail -f /tmp/agent-portal-backend.log
+tail -f /tmp/agent-portal-proxy.log
 ```
 
 ## Troubleshooting
@@ -178,7 +178,7 @@ tail -f /tmp/claude-code-portal-proxy.log
 
 ```bash
 # Check if database is running
-docker ps | grep claude-code-portal
+docker ps | grep agent-portal
 
 # If not, start it
 docker-compose -f docker-compose.test.yml up -d db

@@ -115,14 +115,14 @@ pub fn proxy_token_setup() -> Html {
                             <p class="note warning-note">
                                 <span class="note-icon">{ "!" }</span>
                                 { "Windows support is experimental and largely untested. " }
-                                <a href="https://github.com/meawoppl/claude-code-portal/issues" target="_blank">
+                                <a href="https://github.com/meawoppl/agent-portal/issues" target="_blank">
                                     { "Please report issues!" }
                                 </a>
                             </p>
                             <p class="note windows-note">
                                 <span class="note-icon">{ "!" }</span>
                                 { "Download Windows binary from " }
-                                <a href="https://github.com/meawoppl/claude-code-portal/releases/latest" target="_blank">
+                                <a href="https://github.com/meawoppl/agent-portal/releases/latest" target="_blank">
                                     { "GitHub releases" }
                                 </a>
                             </p>

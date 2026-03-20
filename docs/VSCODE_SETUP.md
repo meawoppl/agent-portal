@@ -4,7 +4,7 @@ Route Claude Code extension sessions through the portal so they appear on the da
 
 ## Prerequisites
 
-- `claude-portal` binary installed (from [GitHub Releases](https://github.com/meawoppl/claude-code-portal/releases/latest) or built from source)
+- `claude-portal` binary installed (from [GitHub Releases](https://github.com/meawoppl/agent-portal/releases/latest) or built from source)
 - Portal backend running (locally or remotely)
 
 ## Setup
@@ -32,7 +32,7 @@ Once authenticated, all future sessions (terminal and VS Code) reuse the stored 
 
 **Important**: The auth token is stored per-working-directory. The shim uses a cross-directory fallback, so authenticating from *any* directory is sufficient for VS Code sessions to work.
 
-**Config location on macOS**: `~/Library/Application Support/com.anthropic.claude-code-portal/config.json` (not `~/.config/`). The proxy uses the `directories` crate which follows OS-standard paths.
+**Config location on macOS**: `~/Library/Application Support/com.anthropic.agent-portal/config.json` (not `~/.config/`). The proxy uses the `directories` crate which follows OS-standard paths.
 
 ### 2. Create the shim script
 
@@ -92,7 +92,7 @@ The portal binary is printing non-JSON to stdout. Ensure you have the latest bin
 
 ```bash
 # Rebuild from source
-cd /path/to/claude-code-portal
+cd /path/to/agent-portal
 cargo build --release -p claude-portal
 cp target/release/claude-portal ~/.claude/claude-portal
 ```
@@ -111,8 +111,8 @@ The shim crashed before launching claude. Common causes:
 The shim launched claude but couldn't register with the portal. Check:
 
 1. **Auth token exists**: Check the config file for `auth_token` entries:
-   - macOS: `cat ~/Library/Application\ Support/com.anthropic.claude-code-portal/config.json`
-   - Linux: `cat ~/.config/claude-code-portal/config.json`
+   - macOS: `cat ~/Library/Application\ Support/com.anthropic.agent-portal/config.json`
+   - Linux: `cat ~/.config/agent-portal/config.json`
 2. **Backend is reachable**: `curl https://your-portal-server/` should return HTML
 3. **WebSocket connects**: Check stderr output (visible in VS Code output panel > Claude Code)
 

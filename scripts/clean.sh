@@ -30,10 +30,10 @@ rm -f /tmp/claude-portal-*.log
 success "Logs removed"
 
 log "Removing test config (optional)..."
-read -p "Remove ~/.config/claude-code-portal/config.json? (y/N) " -n 1 -r
+read -p "Remove ~/.config/agent-portal/config.json? (y/N) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    rm -rf ~/.config/claude-code-portal/
+    rm -rf ~/.config/agent-portal/
     success "Config removed"
 fi
 

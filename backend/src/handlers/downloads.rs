@@ -43,7 +43,7 @@ CONFIG_DIR="${{HOME}}/.config/claude-portal"
 BIN_NAME="agent-portal"
 BIN_PATH="${{CONFIG_DIR}}/${{BIN_NAME}}"
 CONFIG_FILE="${{CONFIG_DIR}}/launcher.toml"
-GITHUB_RELEASE_URL="https://github.com/meawoppl/claude-code-portal/releases/download/latest"
+GITHUB_RELEASE_URL="https://github.com/meawoppl/agent-portal/releases/download/latest"
 BACKEND_URL="{backend_url}"
 
 echo "Agent Portal Installer"
