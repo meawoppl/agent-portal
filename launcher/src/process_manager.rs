@@ -197,25 +197,12 @@ async fn run_session_task(
     cancel: CancellationToken,
 ) -> Option<i32> {
     loop {
-        let binary_name = match config.agent_type {
-            shared::AgentType::Codex => "codex",
-            _ => "claude",
-        };
-        let resolved_path = which::which(binary_name).ok();
-        if resolved_path.is_none() {
-            error!(
-                "'{}' not found on PATH – cannot start {:?} session",
-                binary_name, config.agent_type
-            );
-            return Some(1);
-        }
-
         let claude_config = SessionConfig {
             session_id: config.session_id,
             working_directory: PathBuf::from(&config.working_directory),
             session_name: config.session_name.clone(),
             resume: config.resume,
-            claude_path: resolved_path,
+            claude_path: None,
             extra_args: config.claude_args.clone(),
             agent_type: config.agent_type,
         };

@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -729,9 +729,9 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.52"
+version = "2.1.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8e31455ac644adf66d92d35a9257a0f1aa003024587cf37efb2a5c843db59f3"
+checksum = "02d928255084931ab050625cf6587928e8dcbf0336678b815dd7dd03298e5201"
 dependencies = [
  "anyhow",
  "chrono",
@@ -741,11 +741,12 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+ "which 8.0.2",
 ]
 
 [[package]]
 name = "claude-portal"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -778,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -800,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "cli-tools"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -817,15 +818,16 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.101.0"
+version = "0.101.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e8814f37f6da6430c201decb978367077b4f222495465a529793ec7e2ea5256"
+checksum = "d315794186d340a6430afac04c41d8030a7144a7533844096c3bcb01e4cb2a8c"
 dependencies = [
  "log",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "which 8.0.2",
 ]
 
 [[package]]
@@ -1420,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -3201,7 +3203,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "portal-auth"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "anyhow",
  "colored",
@@ -3216,7 +3218,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "anyhow",
  "hex",
@@ -4132,7 +4134,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.2.1"
+version = "2.2.4"
 dependencies = [
  "chrono",
  "claude-codes",
