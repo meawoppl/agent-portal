@@ -772,7 +772,7 @@ This is a shorthand for the full PR review cycle when the user is confident in t
 
 1. Check existing code for similar patterns
 2. Run `./scripts/dev.sh start` to verify changes
-3. Check `TROUBLESHOOTING.md` for common issues
+3. Check `docs/TROUBLESHOOTING.md` for common issues
 4. Ensure all tests pass before committing
 5. Ask human developer for architectural decisions
 

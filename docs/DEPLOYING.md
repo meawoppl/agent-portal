@@ -196,7 +196,7 @@ Pre-built binaries for all platforms are available from [GitHub Releases](https:
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) for common issues and solutions.
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
 
 ## Google OAuth Setup
 

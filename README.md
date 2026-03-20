@@ -88,7 +88,7 @@ The **portal** refers to the complete system: backend server, web frontend, and 
 | [Deployment Guide](docs/DEPLOYING.md) | Production deployment, Google OAuth setup, configuration |
 | [Docker Guide](docs/DOCKER.md) | Docker and Kubernetes deployment with 1Password |
 | [VS Code Setup](docs/VSCODE_SETUP.md) | Use Claude Code in VS Code with portal integration |
-| [Troubleshooting](TROUBLESHOOTING.md) | Common issues and solutions |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 
 ## Platform Support
 

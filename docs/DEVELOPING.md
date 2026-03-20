@@ -344,7 +344,7 @@ sessions.filter(id.eq(some_id))
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) for common issues and solutions.
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
 
 ### Quick Fixes
 
