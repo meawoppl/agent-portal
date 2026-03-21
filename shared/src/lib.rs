@@ -362,14 +362,6 @@ impl std::fmt::Debug for PortalContent {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MessageInfo {
-    pub id: Uuid,
-    pub role: MessageRole,
-    pub content: String,
-    pub created_at: String,
-}
-
 // ============================================================================
 // Device Flow Types (shared between backend and proxy)
 // ============================================================================
