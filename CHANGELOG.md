@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.2
+
+- Add rate limiting to device flow auth and download endpoints (10 req/min per IP)
+
 ## 2.3.1
 
 - Remove stale cli-tools crate and dead API types

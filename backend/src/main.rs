@@ -15,8 +15,11 @@ use axum::{
 use clap::Parser;
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use shared::WsEndpoint;
-use std::{env, sync::Arc};
+use std::{env, net::SocketAddr, sync::Arc};
 use tower_cookies::{CookieManagerLayer, Key};
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
+use tower_governor::GovernorLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -304,6 +307,55 @@ async fn main() -> anyhow::Result<()> {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Rate limiting configs (per IP via SmartIpKeyExtractor for proxy support)
+    let auth_rate_limit = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(6)
+            .burst_size(10)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .unwrap(),
+    );
+
+    let download_rate_limit = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(6)
+            .burst_size(10)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .unwrap(),
+    );
+
+    // Rate-limited device flow auth routes
+    let auth_device_routes = Router::new()
+        .route(
+            "/api/auth/device/code",
+            post(handlers::device_flow::device_code),
+        )
+        .route(
+            "/api/auth/device/poll",
+            post(handlers::device_flow::device_poll),
+        )
+        .layer(GovernorLayer {
+            config: auth_rate_limit,
+        })
+        .with_state(app_state.clone());
+
+    // Rate-limited download routes
+    let download_routes = Router::new()
+        .route(
+            "/api/download/install.sh",
+            get(handlers::downloads::install_script),
+        )
+        .route(
+            "/api/download/proxy",
+            get(handlers::downloads::proxy_binary).head(handlers::downloads::proxy_binary),
+        )
+        .layer(GovernorLayer {
+            config: download_rate_limit,
+        })
+        .with_state(app_state.clone());
+
     // Build our application with routes
     let app = Router::new()
         // Health check endpoint
@@ -375,15 +427,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/auth/dev-login", get(handlers::auth::dev_login))
         // Device-specific login endpoint (separate from regular web login)
         .route("/api/auth/device-login", get(handlers::auth::device_login))
-        // Device flow endpoints for CLI (under /api/auth)
-        .route(
-            "/api/auth/device/code",
-            post(handlers::device_flow::device_code),
-        )
-        .route(
-            "/api/auth/device/poll",
-            post(handlers::device_flow::device_poll),
-        )
+        // Non-rate-limited device flow endpoints (verify page, approve, deny are user-facing)
         .route(
             "/api/auth/device",
             get(handlers::device_flow::device_verify_page),
@@ -424,15 +468,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/launchers/:launcher_id/renew-token",
             post(handlers::launchers::renew_launcher_token),
         )
-        // Download routes for proxy binary and install script
-        .route(
-            "/api/download/install.sh",
-            get(handlers::downloads::install_script),
-        )
-        .route(
-            "/api/download/proxy",
-            get(handlers::downloads::proxy_binary).head(handlers::downloads::proxy_binary),
-        )
         // Admin dashboard routes (admin-only)
         .route("/api/admin/stats", get(handlers::admin::get_stats))
         .route("/api/admin/users", get(handlers::admin::list_users))
@@ -447,6 +482,9 @@ async fn main() -> anyhow::Result<()> {
         )
         // Add single unified state
         .with_state(app_state.clone())
+        // Merge rate-limited route groups
+        .merge(auth_device_routes)
+        .merge(download_routes)
         // Serve embedded frontend assets with SPA fallback
         .fallback(axum::routing::get(embedded_assets::serve_embedded_frontend));
 
@@ -511,9 +549,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Create graceful shutdown handler
     let shutdown_state = app_state.clone();
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(shutdown_state))
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal(shutdown_state))
+    .await?;
 
     Ok(())
 }
