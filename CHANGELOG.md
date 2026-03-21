@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.2
+
+- Collapse admin stats endpoint from 15 DB queries down to 3 using conditional aggregation
+
 ## 2.3.1
 
 - Remove stale cli-tools crate and dead API types
