@@ -2,9 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// Re-export types from parent module for convenience
-pub use crate::{DevicePollResponse, MessageInfo, SessionInfo, UserInfo};
-
 /// API error types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ApiError {

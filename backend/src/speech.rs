@@ -77,12 +77,6 @@ impl SpeechService {
         Self { config }
     }
 
-    /// Create a new speech service with default configuration
-    #[allow(dead_code)]
-    pub fn with_defaults() -> Self {
-        Self::new(SpeechConfig::default())
-    }
-
     /// Start a streaming recognition session
     ///
     /// Returns a tuple of:
@@ -234,20 +228,4 @@ async fn run_recognition(
     let _ = recognize_task.await;
 
     Ok(())
-}
-
-/// Check if Google Cloud credentials are available
-#[allow(dead_code)]
-pub fn credentials_available(path: Option<&str>) -> bool {
-    match path {
-        Some(p) => std::path::Path::new(p).exists(),
-        None => {
-            // Check for application default credentials
-            if let Ok(adc_path) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS") {
-                std::path::Path::new(&adc_path).exists()
-            } else {
-                false
-            }
-        }
-    }
 }
