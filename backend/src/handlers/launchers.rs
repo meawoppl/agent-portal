@@ -11,14 +11,16 @@ use tower_cookies::Cookies;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::auth::extract_user_id;
+use crate::errors::AppError;
 use crate::AppState;
 
 /// GET /api/launchers - List connected launchers for the current user
 pub async fn list_launchers(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<Json<Vec<LauncherInfo>>, StatusCode> {
-    let user_id = get_user_id(&app_state, &cookies)?;
+) -> Result<Json<Vec<LauncherInfo>>, AppError> {
+    let user_id = extract_user_id(&app_state, &cookies)?;
     let launchers = app_state.session_manager.get_launchers_for_user(&user_id);
     Ok(Json(launchers))
 }
@@ -33,8 +35,8 @@ pub async fn launch_session(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Json(req): Json<LaunchRequest>,
-) -> Result<Json<LaunchResponse>, StatusCode> {
-    let user_id = get_user_id(&app_state, &cookies)?;
+) -> Result<Json<LaunchResponse>, AppError> {
+    let user_id = extract_user_id(&app_state, &cookies)?;
 
     // Find the right launcher
     let launcher_id = if let Some(id) = req.launcher_id {
@@ -44,7 +46,7 @@ pub async fn launch_session(
         let launchers = app_state.session_manager.get_launchers_for_user(&user_id);
         launchers.first().map(|l| l.launcher_id).ok_or_else(|| {
             error!("No connected launchers for user {}", user_id);
-            StatusCode::NOT_FOUND
+            AppError::NotFound("No connected launchers")
         })?
     };
 
@@ -68,7 +70,9 @@ pub async fn launch_session(
         .send_to_launcher(&launcher_id, launch_msg)
     {
         error!("Failed to send launch request to launcher {}", launcher_id);
-        return Err(StatusCode::BAD_GATEWAY);
+        return Err(AppError::Internal(
+            "Failed to send launch request".to_string(),
+        ));
     }
 
     info!(
@@ -97,7 +101,7 @@ pub async fn list_directories(
     Path(launcher_id): Path<Uuid>,
     Query(query): Query<DirectoryQuery>,
 ) -> Result<Json<DirectoryListingResponse>, StatusCode> {
-    let user_id = get_user_id(&app_state, &cookies)?;
+    let user_id = extract_user_id(&app_state, &cookies).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     // Verify the launcher belongs to this user
     let launcher = app_state
@@ -159,19 +163,16 @@ pub async fn list_directories(
     }
 }
 
-pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<String, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<String, AppError> {
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     use crate::schema::users;
     use diesel::prelude::*;
 
-    let user: crate::models::User = users::table.find(user_id).first(&mut conn).map_err(|e| {
-        error!("Failed to find user: {}", e);
-        StatusCode::NOT_FOUND
-    })?;
+    let user: crate::models::User = users::table
+        .find(user_id)
+        .first(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     let token_id = Uuid::new_v4();
     let token = crate::jwt::create_proxy_token(
@@ -181,10 +182,7 @@ pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<S
         &user.email,
         1, // 1 day expiration for launched sessions
     )
-    .map_err(|e| {
-        error!("Failed to create launch token: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| AppError::Internal(format!("Failed to create launch token: {}", e)))?;
 
     // Store token hash in DB
     let token_hash = crate::jwt::hash_token(&token);
@@ -199,10 +197,7 @@ pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<S
     diesel::insert_into(proxy_auth_tokens::table)
         .values(&new_token)
         .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to store launch token: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     Ok(token)
 }
@@ -212,8 +207,8 @@ pub async fn renew_launcher_token(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(launcher_id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
-    let user_id = get_user_id(&app_state, &cookies)?;
+) -> Result<StatusCode, AppError> {
+    let user_id = extract_user_id(&app_state, &cookies)?;
 
     // Verify the launcher belongs to this user and get its current token info
     let (old_token_hash, sender) = {
@@ -221,9 +216,9 @@ pub async fn renew_launcher_token(
             .session_manager
             .launchers
             .get(&launcher_id)
-            .ok_or(StatusCode::NOT_FOUND)?;
+            .ok_or(AppError::NotFound("Launcher not found"))?;
         if launcher.user_id != user_id {
-            return Err(StatusCode::FORBIDDEN);
+            return Err(AppError::Forbidden);
         }
         (launcher.token_hash.clone(), launcher.sender.clone())
     };
@@ -235,37 +230,8 @@ pub async fn renew_launcher_token(
         old_token_hash,
         sender,
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
 
     info!("Manually renewed token for launcher {}", launcher_id);
     Ok(StatusCode::OK)
-}
-
-fn get_user_id(app_state: &AppState, cookies: &Cookies) -> Result<Uuid, StatusCode> {
-    if app_state.dev_mode {
-        use crate::schema::users;
-        use diesel::prelude::*;
-
-        let mut conn = app_state
-            .db_pool
-            .get()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let user: crate::models::User = users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .first(&mut conn)
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        return Ok(user.id);
-    }
-
-    let session_cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(shared::protocol::SESSION_COOKIE_NAME)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    session_cookie
-        .value()
-        .parse()
-        .map_err(|_| StatusCode::UNAUTHORIZED)
 }

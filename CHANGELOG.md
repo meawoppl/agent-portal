@@ -2,7 +2,9 @@
 
 ## 2.3.2
 
-- Add rate limiting to device flow auth and download endpoints (10 req/min per IP)
+- Add unified AppError type for backend handlers with structured error responses
+- Consolidate duplicate auth extraction into shared `auth::extract_user_id`
+- Convert sessions, messages, launchers, and sound_settings handlers to use AppError
 
 ## 2.3.1
 

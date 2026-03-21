@@ -1,5 +1,7 @@
+mod auth;
 mod db;
 mod embedded_assets;
+mod errors;
 mod handlers;
 mod jwt;
 mod models;
