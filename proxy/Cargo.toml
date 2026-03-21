@@ -17,7 +17,6 @@ claude-codes = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["full"] }
-tokio-util = { workspace = true }
 
 # WebSocket client
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
@@ -27,12 +26,8 @@ futures-util = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# HTTP client for registration and updates
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-
 # Error handling
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 
 # CLI argument parsing
 clap = { version = "4.5", features = ["derive", "env"] }
@@ -72,5 +67,3 @@ base64 = "0.22"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-[dev-dependencies]
-tempfile = "3.14"

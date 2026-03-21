@@ -19,9 +19,7 @@ tower-http = { workspace = true }
 
 # Database - using diesel with postgres
 diesel = { workspace = true }
-diesel-async = { workspace = true }
 diesel_migrations = "2.2"
-deadpool = "0.12"
 
 # Serialization
 serde = { workspace = true }
@@ -51,9 +49,6 @@ chrono = { workspace = true, features = ["std", "clock"] }
 # UUID
 uuid = { workspace = true }
 
-# Session management
-axum-sessions = "0.6"
-async-trait = "0.1"
 
 # Secure random for session keys
 rand = "0.8"

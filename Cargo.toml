@@ -1,9 +1,9 @@
 [workspace]
-members = ["shared", "backend", "frontend", "proxy", "cli-tools", "claude-session-lib", "launcher", "portal-auth", "portal-update"]
+members = ["shared", "backend", "frontend", "proxy", "claude-session-lib", "launcher", "portal-auth", "portal-update"]
 resolver = "2"
 
 [workspace.package]
-version = "2.3.0"
+version = "2.3.1"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -19,7 +19,6 @@ tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-
 
 # Database
 diesel = { version = "2.2", features = ["postgres", "r2d2", "chrono", "uuid", "serde_json", "numeric"] }
-diesel-async = { version = "0.5", features = ["postgres", "deadpool"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

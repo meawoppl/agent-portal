@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.1
+
+- Remove stale cli-tools crate and dead API types
+- Remove unused dependencies from backend, proxy, launcher, and shared
+
 ## 2.3.0
 
 - Auto-renew launcher auth tokens over WebSocket when within 7 days of expiry
