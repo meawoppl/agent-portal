@@ -7,8 +7,8 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use bigdecimal::ToPrimitive;
 use diesel::prelude::*;
+use diesel::sql_types::{BigInt, Double};
 use serde::Serialize;
 use shared::api::UpdateUserRequest;
 use std::sync::Arc;
@@ -99,6 +99,51 @@ pub struct AdminStats {
     pub total_cache_read_tokens: i64,
 }
 
+/// Aggregated user counts from a single query.
+#[derive(QueryableByName)]
+struct UserStats {
+    #[diesel(sql_type = BigInt)]
+    total: i64,
+    #[diesel(sql_type = BigInt)]
+    admin_count: i64,
+    #[diesel(sql_type = BigInt)]
+    disabled_count: i64,
+}
+
+/// Aggregated session counts and cost/token sums from a single query.
+#[derive(QueryableByName)]
+struct SessionStats {
+    #[diesel(sql_type = BigInt)]
+    total: i64,
+    #[diesel(sql_type = BigInt)]
+    active_count: i64,
+    #[diesel(sql_type = Double)]
+    spend_usd: f64,
+    #[diesel(sql_type = BigInt)]
+    sum_input_tokens: i64,
+    #[diesel(sql_type = BigInt)]
+    sum_output_tokens: i64,
+    #[diesel(sql_type = BigInt)]
+    sum_cache_creation_tokens: i64,
+    #[diesel(sql_type = BigInt)]
+    sum_cache_read_tokens: i64,
+}
+
+/// Aggregated deleted-session cost/token sums from a single query.
+#[derive(QueryableByName)]
+struct DeletedCostStats {
+    #[diesel(sql_type = Double)]
+    spend_usd: f64,
+    #[diesel(sql_type = BigInt)]
+    sum_input_tokens: i64,
+    #[diesel(sql_type = BigInt)]
+    sum_output_tokens: i64,
+    #[diesel(sql_type = BigInt)]
+    sum_cache_creation_tokens: i64,
+    #[diesel(sql_type = BigInt)]
+    sum_cache_read_tokens: i64,
+}
+
 pub async fn get_stats(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
@@ -111,146 +156,53 @@ pub async fn get_stats(
         .get()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Count users
-    let total_users: i64 = schema::users::table
-        .count()
-        .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to count users: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Query 1: All user counts in one pass
+    let user_stats: UserStats = diesel::sql_query(
+        "SELECT COUNT(*) as total, \
+         COUNT(*) FILTER (WHERE is_admin) as admin_count, \
+         COUNT(*) FILTER (WHERE disabled) as disabled_count \
+         FROM users",
+    )
+    .get_result(&mut conn)
+    .map_err(|e| {
+        error!("Failed to query user stats: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    let admin_users: i64 = schema::users::table
-        .filter(schema::users::is_admin.eq(true))
-        .count()
-        .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to count admin users: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Query 2: All session counts + cost/token sums in one pass
+    let session_stats: SessionStats = diesel::sql_query(
+        "SELECT COUNT(*) as total, \
+         COUNT(*) FILTER (WHERE status = 'active') as active_count, \
+         COALESCE(SUM(total_cost_usd), 0.0) as spend_usd, \
+         COALESCE(SUM(input_tokens), 0) as sum_input_tokens, \
+         COALESCE(SUM(output_tokens), 0) as sum_output_tokens, \
+         COALESCE(SUM(cache_creation_tokens), 0) as sum_cache_creation_tokens, \
+         COALESCE(SUM(cache_read_tokens), 0) as sum_cache_read_tokens \
+         FROM sessions",
+    )
+    .get_result(&mut conn)
+    .map_err(|e| {
+        error!("Failed to query session stats: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    let disabled_users: i64 = schema::users::table
-        .filter(schema::users::disabled.eq(true))
-        .count()
-        .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to count disabled users: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Query 3: Deleted session cost/token sums in one pass
+    let deleted_stats: DeletedCostStats = diesel::sql_query(
+        "SELECT \
+         COALESCE(SUM(cost_usd), 0.0) as spend_usd, \
+         COALESCE(SUM(input_tokens), 0) as sum_input_tokens, \
+         COALESCE(SUM(output_tokens), 0) as sum_output_tokens, \
+         COALESCE(SUM(cache_creation_tokens), 0) as sum_cache_creation_tokens, \
+         COALESCE(SUM(cache_read_tokens), 0) as sum_cache_read_tokens \
+         FROM deleted_session_costs",
+    )
+    .get_result(&mut conn)
+    .map_err(|e| {
+        error!("Failed to query deleted session stats: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    // Count sessions
-    let total_sessions: i64 = schema::sessions::table
-        .count()
-        .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to count sessions: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let active_sessions: i64 = schema::sessions::table
-        .filter(schema::sessions::status.eq("active"))
-        .count()
-        .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to count active sessions: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    // Get cost total from active sessions
-    let active_spend: f64 = schema::sessions::table
-        .select(diesel::dsl::sum(schema::sessions::total_cost_usd))
-        .first::<Option<f64>>(&mut conn)
-        .map_err(|e| {
-            error!("Failed to sum active session spend: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .unwrap_or(0.0);
-
-    // Get token totals from active sessions (separate queries due to Diesel type constraints)
-    let active_input: i64 = schema::sessions::table
-        .select(diesel::dsl::sum(schema::sessions::input_tokens))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-    let active_output: i64 = schema::sessions::table
-        .select(diesel::dsl::sum(schema::sessions::output_tokens))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-    let active_cache_creation: i64 = schema::sessions::table
-        .select(diesel::dsl::sum(schema::sessions::cache_creation_tokens))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-    let active_cache_read: i64 = schema::sessions::table
-        .select(diesel::dsl::sum(schema::sessions::cache_read_tokens))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-
-    // Get cost total from deleted sessions
-    let deleted_spend: f64 = schema::deleted_session_costs::table
-        .select(diesel::dsl::sum(schema::deleted_session_costs::cost_usd))
-        .first::<Option<f64>>(&mut conn)
-        .map_err(|e| {
-            error!("Failed to sum deleted session spend: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .unwrap_or(0.0);
-
-    // Get token totals from deleted sessions
-    let deleted_input: i64 = schema::deleted_session_costs::table
-        .select(diesel::dsl::sum(
-            schema::deleted_session_costs::input_tokens,
-        ))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-    let deleted_output: i64 = schema::deleted_session_costs::table
-        .select(diesel::dsl::sum(
-            schema::deleted_session_costs::output_tokens,
-        ))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-    let deleted_cache_creation: i64 = schema::deleted_session_costs::table
-        .select(diesel::dsl::sum(
-            schema::deleted_session_costs::cache_creation_tokens,
-        ))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-    let deleted_cache_read: i64 = schema::deleted_session_costs::table
-        .select(diesel::dsl::sum(
-            schema::deleted_session_costs::cache_read_tokens,
-        ))
-        .first::<Option<bigdecimal::BigDecimal>>(&mut conn)
-        .ok()
-        .flatten()
-        .and_then(|d| d.to_i64())
-        .unwrap_or(0);
-
-    let total_spend_usd = active_spend + deleted_spend;
-    let total_input_tokens = active_input + deleted_input;
-    let total_output_tokens = active_output + deleted_output;
-    let total_cache_creation_tokens = active_cache_creation + deleted_cache_creation;
-    let total_cache_read_tokens = active_cache_read + deleted_cache_read;
-
-    // Get connected client counts from session manager
+    // Get connected client counts from session manager (no DB query needed)
     let connected_proxy_clients = app_state.session_manager.sessions.len();
     let connected_web_clients: usize = app_state
         .session_manager
@@ -260,18 +212,20 @@ pub async fn get_stats(
         .sum();
 
     Ok(Json(AdminStats {
-        total_users,
-        admin_users,
-        disabled_users,
-        total_sessions,
-        active_sessions,
+        total_users: user_stats.total,
+        admin_users: user_stats.admin_count,
+        disabled_users: user_stats.disabled_count,
+        total_sessions: session_stats.total,
+        active_sessions: session_stats.active_count,
         connected_proxy_clients,
         connected_web_clients,
-        total_spend_usd,
-        total_input_tokens,
-        total_output_tokens,
-        total_cache_creation_tokens,
-        total_cache_read_tokens,
+        total_spend_usd: session_stats.spend_usd + deleted_stats.spend_usd,
+        total_input_tokens: session_stats.sum_input_tokens + deleted_stats.sum_input_tokens,
+        total_output_tokens: session_stats.sum_output_tokens + deleted_stats.sum_output_tokens,
+        total_cache_creation_tokens: session_stats.sum_cache_creation_tokens
+            + deleted_stats.sum_cache_creation_tokens,
+        total_cache_read_tokens: session_stats.sum_cache_read_tokens
+            + deleted_stats.sum_cache_read_tokens,
     }))
 }
 
