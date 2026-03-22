@@ -19,45 +19,11 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{
+    errors::AppError,
     models::{NewScheduledTask, ScheduledTask},
     schema::scheduled_tasks,
     AppState,
 };
-
-// ============================================================================
-// Internal helpers
-// ============================================================================
-
-/// Extract user_id from session cookie (same pattern as proxy_tokens)
-async fn get_user_id_from_session(
-    app_state: &AppState,
-    cookies: &Cookies,
-) -> Result<Uuid, StatusCode> {
-    if app_state.dev_mode {
-        let mut conn = app_state
-            .db_pool
-            .get()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        use crate::schema::users;
-        let user: crate::models::User = users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .first(&mut conn)
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        return Ok(user.id);
-    }
-
-    let session_cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(shared::protocol::SESSION_COOKIE_NAME)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    session_cookie
-        .value()
-        .parse()
-        .map_err(|_| StatusCode::UNAUTHORIZED)
-}
 
 /// Convert a ScheduledTask model to a ScheduledTaskInfo API response.
 fn task_to_info(t: ScheduledTask) -> ScheduledTaskInfo {
@@ -137,45 +103,40 @@ fn send_schedule_sync(app_state: &AppState, user_id: Uuid) {
 // ============================================================================
 
 /// GET /api/scheduled-tasks
-async fn list_tasks(
+pub async fn list_tasks_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid,
-) -> Result<Json<ScheduledTaskListResponse>, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    cookies: Cookies,
+) -> Result<Json<ScheduledTaskListResponse>, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     let tasks: Vec<ScheduledTask> = scheduled_tasks::table
         .filter(scheduled_tasks::user_id.eq(user_id))
         .order(scheduled_tasks::created_at.desc())
         .load(&mut conn)
-        .map_err(|e| {
-            error!("Failed to list scheduled tasks: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     let infos: Vec<ScheduledTaskInfo> = tasks.into_iter().map(task_to_info).collect();
     Ok(Json(ScheduledTaskListResponse { tasks: infos }))
 }
 
 /// POST /api/scheduled-tasks
-async fn create_task(
+pub async fn create_task_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid,
+    cookies: Cookies,
     Json(req): Json<CreateScheduledTaskRequest>,
-) -> Result<Json<ScheduledTaskInfo>, StatusCode> {
+) -> Result<Json<ScheduledTaskInfo>, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
     // Basic cron validation: must have 5 space-separated fields
     let fields: Vec<&str> = req.cron_expression.split_whitespace().collect();
     if fields.len() != 5 {
         warn!("Invalid cron expression: {}", req.cron_expression);
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(AppError::Internal("Invalid cron expression".to_string()));
     }
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     let new_task = NewScheduledTask {
         user_id,
@@ -193,10 +154,7 @@ async fn create_task(
     let saved: ScheduledTask = diesel::insert_into(scheduled_tasks::table)
         .values(&new_task)
         .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to create scheduled task: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     info!("Created scheduled task '{}' ({})", saved.name, saved.id);
 
@@ -207,30 +165,29 @@ async fn create_task(
 }
 
 /// PATCH /api/scheduled-tasks/:id
-async fn update_task(
+pub async fn update_task_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid,
+    cookies: Cookies,
     Path(task_id): Path<Uuid>,
     Json(req): Json<UpdateScheduledTaskRequest>,
-) -> Result<Json<ScheduledTaskInfo>, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<ScheduledTaskInfo>, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Verify ownership
     let existing: ScheduledTask = scheduled_tasks::table
         .filter(scheduled_tasks::id.eq(task_id))
         .filter(scheduled_tasks::user_id.eq(user_id))
         .first(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound("scheduled task"))?;
 
     // Validate cron if provided
     if let Some(ref cron) = req.cron_expression {
         let fields: Vec<&str> = cron.split_whitespace().collect();
         if fields.len() != 5 {
             warn!("Invalid cron expression in update: {}", cron);
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(AppError::Internal("Invalid cron expression".to_string()));
         }
     }
 
@@ -276,10 +233,7 @@ async fn update_task(
         scheduled_tasks::updated_at.eq(diesel::dsl::now),
     ))
     .get_result(&mut conn)
-    .map_err(|e| {
-        error!("Failed to update scheduled task: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     info!("Updated scheduled task '{}' ({})", updated.name, updated.id);
 
@@ -290,22 +244,21 @@ async fn update_task(
 }
 
 /// DELETE /api/scheduled-tasks/:id
-async fn delete_task(
+pub async fn delete_task_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid,
+    cookies: Cookies,
     Path(task_id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<StatusCode, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Verify ownership
     let task: ScheduledTask = scheduled_tasks::table
         .filter(scheduled_tasks::id.eq(task_id))
         .filter(scheduled_tasks::user_id.eq(user_id))
         .first(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound("scheduled task"))?;
 
     // Clear scheduled_task_id on any sessions referencing this task
     use crate::schema::sessions;
@@ -315,10 +268,7 @@ async fn delete_task(
 
     diesel::delete(scheduled_tasks::table.filter(scheduled_tasks::id.eq(task_id)))
         .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to delete scheduled task: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     info!("Deleted scheduled task '{}' ({})", task.name, task_id);
 
@@ -329,22 +279,21 @@ async fn delete_task(
 }
 
 /// GET /api/scheduled-tasks/:id/runs
-async fn list_runs(
+pub async fn list_runs_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid,
+    cookies: Cookies,
     Path(task_id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Verify task ownership
     let _task: ScheduledTask = scheduled_tasks::table
         .filter(scheduled_tasks::id.eq(task_id))
         .filter(scheduled_tasks::user_id.eq(user_id))
         .first(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound("scheduled task"))?;
 
     use crate::schema::sessions;
     let runs: Vec<crate::models::Session> = sessions::table
@@ -352,59 +301,7 @@ async fn list_runs(
         .order(sessions::created_at.desc())
         .limit(50)
         .load(&mut conn)
-        .map_err(|e| {
-            error!("Failed to list runs for task {}: {}", task_id, e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     Ok(Json(serde_json::to_value(runs).unwrap_or_default()))
-}
-
-// ============================================================================
-// Wrapper handlers (extract user_id from session cookie)
-// ============================================================================
-
-pub async fn list_tasks_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-) -> Result<Json<ScheduledTaskListResponse>, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    list_tasks(State(app_state), user_id).await
-}
-
-pub async fn create_task_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Json(req): Json<CreateScheduledTaskRequest>,
-) -> Result<Json<ScheduledTaskInfo>, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    create_task(State(app_state), user_id, Json(req)).await
-}
-
-pub async fn update_task_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Path(task_id): Path<Uuid>,
-    Json(req): Json<UpdateScheduledTaskRequest>,
-) -> Result<Json<ScheduledTaskInfo>, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    update_task(State(app_state), user_id, Path(task_id), Json(req)).await
-}
-
-pub async fn delete_task_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Path(task_id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    delete_task(State(app_state), user_id, Path(task_id)).await
-}
-
-pub async fn list_runs_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Path(task_id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    list_runs(State(app_state), user_id, Path(task_id)).await
 }

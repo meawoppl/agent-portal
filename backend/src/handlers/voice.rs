@@ -23,28 +23,6 @@ use tower_cookies::Cookies;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use shared::protocol::SESSION_COOKIE_NAME;
-
-/// Extract user_id from signed session cookie
-fn extract_user_id_from_cookies(app_state: &AppState, cookies: &Cookies) -> Option<Uuid> {
-    // In dev mode, use the test user
-    if app_state.dev_mode {
-        let mut conn = app_state.db_pool.get().ok()?;
-        use crate::schema::users;
-        return users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .select(users::id)
-            .first::<Uuid>(&mut conn)
-            .ok();
-    }
-
-    // Extract from signed cookie
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)?;
-    cookie.value().parse().ok()
-}
-
 /// Check if user has voice feature enabled
 fn check_voice_enabled(app_state: &AppState, user_id: Uuid) -> bool {
     let mut conn = match app_state.db_pool.get() {
@@ -101,7 +79,7 @@ pub async fn handle_voice_websocket(
     cookies: Cookies,
 ) -> Response {
     // Authenticate the user
-    let user_id = match extract_user_id_from_cookies(&app_state, &cookies) {
+    let user_id = match crate::auth::extract_user_id(&app_state, &cookies).ok() {
         Some(id) => id,
         None => {
             warn!("Unauthenticated voice WebSocket connection attempt");

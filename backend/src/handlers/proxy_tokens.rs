@@ -14,10 +14,12 @@ use shared::{
     ProxyTokenListResponse,
 };
 use std::sync::Arc;
+use tower_cookies::Cookies;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
+    errors::AppError,
     jwt::{create_proxy_token, hash_token},
     models::{NewProxyAuthToken, ProxyAuthToken, User},
     schema::proxy_auth_tokens,
@@ -25,22 +27,21 @@ use crate::{
 };
 
 /// POST /api/proxy-tokens - Create a new proxy token
-pub async fn create_token(
+pub async fn create_token_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid, // This would come from session/auth middleware
+    cookies: Cookies,
     Json(req): Json<CreateProxyTokenRequest>,
-) -> Result<Json<CreateProxyTokenResponse>, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<CreateProxyTokenResponse>, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Get user email for JWT claims
     use crate::schema::users;
-    let user: User = users::table.find(user_id).first(&mut conn).map_err(|e| {
-        error!("Failed to find user: {}", e);
-        StatusCode::NOT_FOUND
-    })?;
+    let user: User = users::table
+        .find(user_id)
+        .first(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     // Generate token ID
     let token_id = Uuid::new_v4();
@@ -57,10 +58,7 @@ pub async fn create_token(
         &user.email,
         req.expires_in_days,
     )
-    .map_err(|e| {
-        error!("Failed to create JWT: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Hash token for storage
     let token_hash = hash_token(&token);
@@ -76,20 +74,16 @@ pub async fn create_token(
     let saved_token: ProxyAuthToken = diesel::insert_into(proxy_auth_tokens::table)
         .values(&new_token)
         .get_result(&mut conn)
-        .map_err(|e| {
-            error!("Failed to save token: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     // Build init URL
     let config = ProxyInitConfig {
         token: token.clone(),
         session_name_prefix: None,
     };
-    let encoded_config = config.encode().map_err(|e| {
-        error!("Failed to encode config: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let encoded_config = config
+        .encode()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let init_url = format!("{}/p/{}", app_state.public_url, encoded_config);
 
     info!("Created proxy token '{}' for user {}", req.name, user.email);
@@ -103,23 +97,19 @@ pub async fn create_token(
 }
 
 /// GET /api/proxy-tokens - List all tokens for the current user
-pub async fn list_tokens(
+pub async fn list_tokens_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid, // This would come from session/auth middleware
-) -> Result<Json<ProxyTokenListResponse>, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    cookies: Cookies,
+) -> Result<Json<ProxyTokenListResponse>, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     let tokens: Vec<ProxyAuthToken> = proxy_auth_tokens::table
         .filter(proxy_auth_tokens::user_id.eq(user_id))
         .order(proxy_auth_tokens::created_at.desc())
         .load(&mut conn)
-        .map_err(|e| {
-            error!("Failed to list tokens: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     let token_infos: Vec<ProxyTokenInfo> = tokens
         .into_iter()
@@ -139,15 +129,14 @@ pub async fn list_tokens(
 }
 
 /// DELETE /api/proxy-tokens/:id - Revoke a token
-pub async fn revoke_token(
+pub async fn revoke_token_handler(
     State(app_state): State<Arc<AppState>>,
-    user_id: Uuid, // This would come from session/auth middleware
+    cookies: Cookies,
     Path(token_id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<StatusCode, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Update token to revoked (only if owned by user)
     let updated = diesel::update(
@@ -157,13 +146,10 @@ pub async fn revoke_token(
     )
     .set(proxy_auth_tokens::revoked.eq(true))
     .execute(&mut conn)
-    .map_err(|e| {
-        error!("Failed to revoke token: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     if updated == 0 {
-        return Err(StatusCode::NOT_FOUND);
+        return Err(AppError::NotFound("proxy token"));
     }
 
     info!("Revoked proxy token {}", token_id);
@@ -225,75 +211,4 @@ pub fn verify_and_get_user(
         .execute(conn);
 
     Ok((claims.sub, claims.email))
-}
-
-// ============================================================================
-// Wrapper handlers that extract user_id from session
-// ============================================================================
-
-use tower_cookies::Cookies;
-
-/// Wrapper for create_token that extracts user from session
-pub async fn create_token_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Json(req): Json<CreateProxyTokenRequest>,
-) -> Result<Json<CreateProxyTokenResponse>, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    create_token(State(app_state), user_id, Json(req)).await
-}
-
-/// Wrapper for list_tokens that extracts user from session
-pub async fn list_tokens_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-) -> Result<Json<ProxyTokenListResponse>, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    list_tokens(State(app_state), user_id).await
-}
-
-/// Wrapper for revoke_token that extracts user from session
-pub async fn revoke_token_handler(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Path(token_id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
-    let user_id = get_user_id_from_session(&app_state, &cookies).await?;
-    revoke_token(State(app_state), user_id, Path(token_id)).await
-}
-
-/// Extract user_id from session cookie
-async fn get_user_id_from_session(
-    app_state: &AppState,
-    cookies: &Cookies,
-) -> Result<Uuid, StatusCode> {
-    // In dev mode, use the test user
-    if app_state.dev_mode {
-        let mut conn = app_state
-            .db_pool
-            .get()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        use crate::schema::users;
-        let user: User = users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .first(&mut conn)
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        return Ok(user.id);
-    }
-
-    // Get signed session cookie
-    let session_cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(shared::protocol::SESSION_COOKIE_NAME)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // Parse user_id from cookie value
-    let user_id: Uuid = session_cookie
-        .value()
-        .parse()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    Ok(user_id)
 }

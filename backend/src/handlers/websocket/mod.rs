@@ -41,7 +41,7 @@ pub async fn handle_web_client_websocket(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Response {
-    let user_id = match auth::extract_user_id_from_cookies(&app_state, &cookies) {
+    let user_id = match crate::auth::extract_user_id(&app_state, &cookies).ok() {
         Some(id) => id,
         None => {
             warn!("Unauthenticated WebSocket connection attempt to /ws/client");
