@@ -2,18 +2,16 @@
    Tasks Sidebar Overlay — "window shade" drawer with pull-tab
    ========================================================================== */
 
-/* --- Drawer wrapper (positions the whole unit) --- */
+/* --- Drawer wrapper (flex sibling of messages — pushes chat to make room) --- */
 .tasks-drawer {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 20;
     display: flex;
+    flex-shrink: 0;
     pointer-events: none;
     transition: width 0.25s ease-in-out;
     width: 0;
+    overflow: hidden;
     animation: tabSlideIn 0.35s ease-out;
+    position: relative; /* anchor the pull-tab */
 }
 
 .tasks-drawer.open {
