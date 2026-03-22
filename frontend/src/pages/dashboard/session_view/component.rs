@@ -702,6 +702,7 @@ impl Component for SessionView {
                 let sender = self.ws_sender.clone();
                 let user_input = self.get_input_text().trim().to_string();
                 self.set_input_text("");
+                self.input_text.clear();
                 if !user_input.is_empty() {
                     self.command_history.push(user_input.clone());
                 }

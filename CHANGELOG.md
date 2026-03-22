@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.4
+
+- Fix send bar not clearing after sending with attachments
+
 ## 2.3.3
 
 - Consolidate remaining duplicate user ID extraction into shared auth module
