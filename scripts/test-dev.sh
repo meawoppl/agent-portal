@@ -193,7 +193,7 @@ done
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║          ✅ CC-Proxy Test Environment Running        ║"
+echo "║       ✅ Agent Portal Test Environment Running        ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 echo "  🌐 Web Interface:  http://localhost:3000/"

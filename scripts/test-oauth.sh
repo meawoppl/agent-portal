@@ -113,7 +113,7 @@ PROXY_PID=$!
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║       ✅ CC-Proxy Test Environment (OAuth Mode)      ║"
+echo "║     ✅ Agent Portal Test Environment (OAuth Mode)     ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 echo "  🌐 Web Interface:  http://localhost:3000/app/"

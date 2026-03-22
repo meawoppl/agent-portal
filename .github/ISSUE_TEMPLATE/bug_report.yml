@@ -12,7 +12,7 @@ body:
     id: deployment
     attributes:
       label: Deployment Type
-      description: How are you using cc-proxy?
+      description: How are you using Agent Portal?
       options:
         - txcl.io (hosted service)
         - Self-hosted with my own config

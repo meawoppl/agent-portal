@@ -171,7 +171,6 @@ agent-portal/
 ├── claude-session-lib/     # Library for managing Claude CLI sessions
 ├── portal-auth/            # Shared OAuth device flow client
 ├── portal-update/          # Shared auto-update logic
-├── cli-tools/              # Developer CLI tools (poke, etc.)
 │
 ├── scripts/                # Helper scripts
 │   ├── dev.sh              # Development environment

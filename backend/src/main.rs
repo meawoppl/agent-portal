@@ -29,8 +29,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use handlers::websocket::SessionManager;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "cc-proxy-backend")]
-#[command(about = "CC-Proxy backend server")]
+#[command(name = "agent-portal-backend")]
+#[command(about = "Agent Portal backend server")]
 struct Args {
     /// Enable development mode (bypasses OAuth, creates test user)
     #[arg(long)]

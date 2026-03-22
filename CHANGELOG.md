@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.3
+
+- Replace stale "CC-Proxy" / "cc-proxy" references with "Agent Portal" / "agent-portal" across codebase
+- Remove stale cli-tools entry from docs/DEVELOPING.md directory listing
+
 ## 2.3.2
 
 - Add unified AppError type for backend handlers with structured error responses

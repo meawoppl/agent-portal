@@ -1,8 +1,8 @@
 {
-  "name": "cc-proxy-css-lint",
+  "name": "agent-portal-css-lint",
   "version": "0.1.0",
   "private": true,
-  "description": "CSS linting for cc-proxy frontend",
+  "description": "CSS linting for agent-portal frontend",
   "scripts": {
     "lint:css": "stylelint \"../styles/**/*.css\"",
     "lint:css:fix": "stylelint \"../styles/**/*.css\" --fix"
