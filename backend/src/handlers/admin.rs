@@ -173,7 +173,7 @@ pub async fn get_stats(
     let session_stats: SessionStats = diesel::sql_query(
         "SELECT COUNT(*) as total, \
          COUNT(*) FILTER (WHERE status = 'active') as active_count, \
-         COALESCE(SUM(total_cost_usd), 0.0) as spend_usd, \
+         COALESCE(SUM(total_cost_usd), 0.0)::float8 as spend_usd, \
          COALESCE(SUM(input_tokens), 0) as sum_input_tokens, \
          COALESCE(SUM(output_tokens), 0) as sum_output_tokens, \
          COALESCE(SUM(cache_creation_tokens), 0) as sum_cache_creation_tokens, \
@@ -189,7 +189,7 @@ pub async fn get_stats(
     // Query 3: Deleted session cost/token sums in one pass
     let deleted_stats: DeletedCostStats = diesel::sql_query(
         "SELECT \
-         COALESCE(SUM(cost_usd), 0.0) as spend_usd, \
+         COALESCE(SUM(cost_usd), 0.0)::float8 as spend_usd, \
          COALESCE(SUM(input_tokens), 0) as sum_input_tokens, \
          COALESCE(SUM(output_tokens), 0) as sum_output_tokens, \
          COALESCE(SUM(cache_creation_tokens), 0) as sum_cache_creation_tokens, \
