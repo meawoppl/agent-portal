@@ -2,7 +2,7 @@
 
 A web portal that extends [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with session sharing, remote access, and collaborative features. Run Claude Code on powerful machines and access it from anywhere through your browser.
 
-<div style="position: relative; padding-bottom: 48.975188781014026%; height: 0;"><iframe src="https://www.loom.com/embed/38bdd5406c2443ff8c978d5d5b01e967" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></iframe></div>
+[Features Anthropic Missed](https://www.loom.com/share/38bdd5406c2443ff8c978d5d5b01e967)
 
 ## Features
 
