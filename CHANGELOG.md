@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.5
+
+- Fix admin stats endpoint returning empty body due to SQL type mismatch (COALESCE returns numeric, Diesel expects float8)
+
 ## 2.3.4
 
 - Fix send bar not clearing after sending with attachments
