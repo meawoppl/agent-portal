@@ -65,7 +65,7 @@ impl Backoff {
         Self {
             current: 1,
             initial: 1,
-            max: 30,
+            max: shared::protocol::MAX_RECONNECT_BACKOFF_SECS,
             multiplier: 2,
             stable_threshold: 30,
         }

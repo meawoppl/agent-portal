@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
-const MAX_BACKOFF: Duration = Duration::from_secs(30);
+const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
 const RESTART_DELAY: Duration = Duration::from_secs(5);
 const MAX_RESTART_ATTEMPTS: u32 = 3;
 

@@ -161,21 +161,74 @@ async fn main() -> anyhow::Result<()> {
     // Create session manager for WebSocket connections
     let session_manager = SessionManager::new();
 
-    // Cleanup stale sessions on startup (mark all "active" sessions as "disconnected"
-    // since they can't be active if we just started)
+    // Deferred stale session cleanup: wait for proxies to reconnect before
+    // marking unreconnected sessions as disconnected. Without this grace
+    // period, a backend restart would immediately hide all sessions from the
+    // frontend (which only shows status="active") and users would have to
+    // restart launchers to get sessions back.
     {
-        use diesel::prelude::*;
-        use schema::sessions::dsl::*;
-        let mut conn = pool.get()?;
-        let updated = diesel::update(sessions.filter(status.eq("active")))
-            .set(status.eq("disconnected"))
-            .execute(&mut conn)?;
-        if updated > 0 {
+        let startup_pool = pool.clone();
+        let startup_manager = session_manager.clone();
+        tokio::spawn(async move {
+            const RECONNECT_GRACE_SECS: u64 = shared::protocol::MAX_RECONNECT_BACKOFF_SECS * 2;
             tracing::info!(
-                "Marked {} stale sessions as disconnected on startup",
-                updated
+                "Waiting {}s for proxies to reconnect before cleaning stale sessions",
+                RECONNECT_GRACE_SECS
             );
-        }
+            tokio::time::sleep(std::time::Duration::from_secs(RECONNECT_GRACE_SECS)).await;
+
+            let connected_keys: std::collections::HashSet<String> = startup_manager
+                .registered_session_keys()
+                .into_iter()
+                .collect();
+
+            let Ok(mut conn) = startup_pool.get() else {
+                tracing::error!("Failed to get DB connection for stale session cleanup");
+                return;
+            };
+
+            use diesel::prelude::*;
+            use schema::sessions;
+
+            let active_sessions: Vec<(uuid::Uuid,)> = match sessions::table
+                .filter(sessions::status.eq("active"))
+                .select((sessions::id,))
+                .load(&mut conn)
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Failed to query active sessions for cleanup: {}", e);
+                    return;
+                }
+            };
+
+            let stale_ids: Vec<uuid::Uuid> = active_sessions
+                .into_iter()
+                .map(|(id,)| id)
+                .filter(|id| !connected_keys.contains(&id.to_string()))
+                .collect();
+
+            if stale_ids.is_empty() {
+                tracing::info!("No stale sessions to clean up after reconnect grace period");
+                return;
+            }
+
+            match diesel::update(sessions::table.filter(sessions::id.eq_any(&stale_ids)))
+                .set(sessions::status.eq("disconnected"))
+                .execute(&mut conn)
+            {
+                Ok(updated) => {
+                    tracing::info!(
+                        "Marked {} stale sessions as disconnected ({}s grace period elapsed)",
+                        updated,
+                        RECONNECT_GRACE_SECS
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Failed to mark stale sessions as disconnected: {}", e);
+                }
+            }
+        });
     }
 
     // Get base URL from env or construct from host/port

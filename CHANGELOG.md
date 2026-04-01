@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.9
+
+- Defer stale session cleanup on backend startup to give proxies time to reconnect, fixing sessions disappearing from the pills menu after a backend restart
+
 ## 2.3.8
 
 - Add `agent-portal service start`, `stop`, and `restart` subcommands

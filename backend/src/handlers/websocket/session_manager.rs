@@ -355,6 +355,11 @@ impl SessionManager {
         }
     }
 
+    /// Return the set of session keys that currently have a registered proxy connection.
+    pub fn registered_session_keys(&self) -> Vec<SessionId> {
+        self.sessions.iter().map(|r| r.key().clone()).collect()
+    }
+
     pub fn register_dir_request(&self, request_id: Uuid) -> oneshot::Receiver<LauncherToServer> {
         let (tx, rx) = oneshot::channel();
         self.pending_dir_requests.insert(request_id, tx);

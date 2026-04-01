@@ -10,3 +10,8 @@ pub const MAX_PENDING_MESSAGE_AGE_SECS: u64 = 300;
 
 /// Device authorization code lifetime in seconds (5 minutes).
 pub const DEVICE_CODE_EXPIRES_SECS: u64 = 300;
+
+/// Maximum reconnection backoff for proxies and launchers (in seconds).
+/// Used by proxy/launcher to cap exponential backoff, and by the backend
+/// to determine how long to wait before cleaning up stale sessions.
+pub const MAX_RECONNECT_BACKOFF_SECS: u64 = 30;
