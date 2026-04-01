@@ -1,5 +1,18 @@
 use super::message_renderer::truncate_str;
+use std::cell::RefCell;
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use yew::prelude::*;
+
+thread_local! {
+    static EXPANDED_SET: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
+}
+
+fn content_hash(s: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
+}
 
 #[derive(Properties, PartialEq)]
 pub struct ExpandableTextProps {
@@ -17,7 +30,9 @@ pub struct ExpandableTextProps {
 /// as-is with no toggle.
 #[function_component(ExpandableText)]
 pub fn expandable_text(props: &ExpandableTextProps) -> Html {
-    let expanded = use_state(|| false);
+    let render_trigger = use_state(|| 0u32);
+    let hash = content_hash(&props.full_text);
+    let expanded = EXPANDED_SET.with(|set| set.borrow().contains(&hash));
     let text = &*props.full_text;
 
     if text.len() <= props.max_len {
@@ -31,14 +46,20 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
     let remaining = text.len() - props.max_len;
 
     let toggle = {
-        let expanded = expanded.clone();
+        let render_trigger = render_trigger.clone();
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
-            expanded.set(!*expanded);
+            EXPANDED_SET.with(|set| {
+                let mut s = set.borrow_mut();
+                if !s.remove(&hash) {
+                    s.insert(hash);
+                }
+            });
+            render_trigger.set(*render_trigger + 1);
         })
     };
 
-    let (display, toggle_label) = if *expanded {
+    let (display, toggle_label) = if expanded {
         (text.to_string(), "show less".to_string())
     } else {
         (
@@ -81,7 +102,9 @@ pub struct ExpandableLinesProps {
 /// with a clickable toggle to reveal all lines.
 #[function_component(ExpandableLines)]
 pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
-    let expanded = use_state(|| false);
+    let render_trigger = use_state(|| 0u32);
+    let hash = content_hash(&props.content);
+    let expanded = EXPANDED_SET.with(|set| set.borrow().contains(&hash));
     let content = &*props.content;
     let all_lines: Vec<&str> = content.lines().collect();
     let total = all_lines.len();
@@ -100,14 +123,20 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
     }
 
     let toggle = {
-        let expanded = expanded.clone();
+        let render_trigger = render_trigger.clone();
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
-            expanded.set(!*expanded);
+            EXPANDED_SET.with(|set| {
+                let mut s = set.borrow_mut();
+                if !s.remove(&hash) {
+                    s.insert(hash);
+                }
+            });
+            render_trigger.set(*render_trigger + 1);
         })
     };
 
-    let visible = if *expanded {
+    let visible = if expanded {
         &all_lines[..]
     } else {
         &all_lines[..props.max_lines]
@@ -123,7 +152,7 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
                 </div>
             })}
             <div class="write-truncated expandable-toggle" onclick={toggle}>
-                { if *expanded {
+                { if expanded {
                     "show less".to_string()
                 } else {
                     format!("... {} more lines", remaining)

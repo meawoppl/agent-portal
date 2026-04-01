@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.11
+
+- Fix expanded "... more chars" content collapsing when new messages arrive
+
 ## 2.3.10
 
 - Upload progress bar fills over 1.5s minimum and collapses with animation after completion
