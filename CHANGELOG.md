@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.10
+
+- Upload progress bar fills over 1.5s minimum and collapses with animation after completion
+
 ## 2.3.9
 
 - Defer stale session cleanup on backend startup to give proxies time to reconnect, fixing sessions disappearing from the pills menu after a backend restart

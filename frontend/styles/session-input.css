@@ -351,6 +351,16 @@
     border-top: 1px solid var(--border);
     font-size: 0.78rem;
     color: var(--text-secondary);
+    max-height: 120px;
+    opacity: 1;
+    overflow: hidden;
+    transition: max-height 0.35s ease, opacity 0.35s ease, padding 0.35s ease;
+}
+
+.upload-bar.departing {
+    max-height: 0;
+    opacity: 0;
+    padding: 0 12px;
 }
 
 .upload-bar-header {
@@ -376,7 +386,7 @@
     height: 100%;
     background: var(--accent);
     border-radius: 2px;
-    transition: width 0.2s ease;
+    transition: width 1.5s ease;
 }
 
 /* Drop hint — shown as subtle static label, prominent on drag-hover */

@@ -131,6 +131,8 @@ pub enum SessionViewMsg {
     DragEnter,
     /// User dragged files out of the input area
     DragLeave,
+    /// Dismiss the upload bar after completion
+    UploadDismiss,
     /// No-op (used by keydown/paste handlers that need to return a message)
     Noop,
     /// Toggle the tasks sidebar panel
@@ -175,6 +177,9 @@ pub struct SessionView {
     file_input_ref: NodeRef,
     upload_progress: Option<f32>,
     upload_files: Vec<(String, u64)>,
+    upload_departing: bool,
+    #[allow(dead_code)]
+    upload_dismiss_timer: Option<Timeout>,
     drag_hover: bool,
     active_tasks: HashMap<String, TaskEntry>,
     /// Maps tool_use_id → task_id for fallback task completion via tool_result
@@ -253,6 +258,8 @@ impl Component for SessionView {
             file_input_ref: NodeRef::default(),
             upload_progress: None,
             upload_files: Vec::new(),
+            upload_departing: false,
+            upload_dismiss_timer: None,
             drag_hover: false,
             active_tasks: HashMap::new(),
             tool_use_to_task: HashMap::new(),
@@ -831,14 +838,29 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::FileUploaded(_filename) => {
-                self.upload_progress = None;
-                self.upload_files.clear();
+                self.upload_progress = Some(1.0);
+                self.upload_departing = false;
+                let link = ctx.link().clone();
+                self.upload_dismiss_timer = Some(Timeout::new(2_000, move || {
+                    link.send_message(SessionViewMsg::UploadDismiss);
+                }));
                 true
             }
-            SessionViewMsg::FileUploadError(err) => {
+            SessionViewMsg::UploadDismiss => {
+                self.upload_departing = true;
+                self.upload_dismiss_timer = None;
+                let link = ctx.link().clone();
+                // Clear after the CSS collapse animation finishes
+                self.upload_dismiss_timer = Some(Timeout::new(400, move || {
+                    link.send_message(SessionViewMsg::FileUploadError("dismiss".into()));
+                }));
+                true
+            }
+            SessionViewMsg::FileUploadError(_err) => {
                 self.upload_progress = None;
                 self.upload_files.clear();
-                gloo::console::error!("File upload error:", &err);
+                self.upload_departing = false;
+                self.upload_dismiss_timer = None;
                 true
             }
             SessionViewMsg::DragEnter => {
@@ -1566,8 +1588,11 @@ impl SessionView {
             None => return html! {},
         };
 
+        let complete = progress >= 1.0;
         let file_count = self.upload_files.len();
-        let header = if file_count == 1 {
+        let header = if complete {
+            "Upload complete".to_string()
+        } else if file_count == 1 {
             "Uploading 1 file...".to_string()
         } else {
             format!("Uploading {} files...", file_count)
@@ -1591,8 +1616,14 @@ impl SessionView {
         let pct = (progress * 100.0) as u32;
         let fill_style = format!("width: {}%", pct);
 
+        let bar_class = if self.upload_departing {
+            "upload-bar departing"
+        } else {
+            "upload-bar"
+        };
+
         html! {
-            <div class="upload-bar">
+            <div class={bar_class}>
                 <div class="upload-bar-header">{ header }</div>
                 { files_html }
                 <div class="upload-bar-track">
@@ -1668,7 +1699,7 @@ impl SessionView {
             "send-mode-dropdown"
         };
 
-        let is_uploading = self.upload_progress.is_some();
+        let is_uploading = self.upload_progress.is_some_and(|p| p < 1.0);
 
         html! {
             <div class="send-button-container">
