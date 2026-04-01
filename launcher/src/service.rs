@@ -142,6 +142,26 @@ pub fn status() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
+pub fn start() -> Result<()> {
+    if !is_installed() {
+        anyhow::bail!("Service is not installed. Run 'agent-portal service install' first.");
+    }
+    systemctl(&["start", SERVICE_NAME])?;
+    println!("Started {}", SERVICE_NAME);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn stop() -> Result<()> {
+    if !is_installed() {
+        anyhow::bail!("Service is not installed.");
+    }
+    systemctl(&["stop", SERVICE_NAME])?;
+    println!("Stopped {}", SERVICE_NAME);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 pub fn restart() -> Result<()> {
     systemctl(&["restart", SERVICE_NAME])?;
     println!("Restarted {}", SERVICE_NAME);
@@ -321,6 +341,36 @@ pub fn status() -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn start() -> Result<()> {
+    use anyhow::Context;
+    if !is_installed() {
+        anyhow::bail!("Service is not installed. Run 'agent-portal service install' first.");
+    }
+    let plist = plist_path()?;
+    std::process::Command::new("launchctl")
+        .args(["load", &plist.to_string_lossy()])
+        .output()
+        .context("Failed to run launchctl load")?;
+    println!("Started {}", PLIST_LABEL);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn stop() -> Result<()> {
+    use anyhow::Context;
+    if !is_installed() {
+        anyhow::bail!("Service is not installed.");
+    }
+    let plist = plist_path()?;
+    std::process::Command::new("launchctl")
+        .args(["unload", &plist.to_string_lossy()])
+        .output()
+        .context("Failed to run launchctl unload")?;
+    println!("Stopped {}", PLIST_LABEL);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 pub fn restart() -> Result<()> {
     use anyhow::Context;
     let plist = plist_path()?;
@@ -354,6 +404,16 @@ pub fn uninstall() -> Result<()> {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn status() -> Result<()> {
+    anyhow::bail!("Service management is not supported on this platform")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn start() -> Result<()> {
+    anyhow::bail!("Service management is not supported on this platform")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn stop() -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
 }
 

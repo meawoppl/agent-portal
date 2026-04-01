@@ -67,6 +67,12 @@ enum ServiceAction {
     Uninstall,
     /// Show the current service status
     Status,
+    /// Start the launcher service
+    Start,
+    /// Stop the launcher service
+    Stop,
+    /// Restart the launcher service
+    Restart,
     /// Upload system info, build info, and logs to an unlisted paste
     Pastebin,
 }
@@ -103,6 +109,9 @@ async fn main() -> anyhow::Result<()> {
                 ServiceAction::Install => service::install(),
                 ServiceAction::Uninstall => service::uninstall(),
                 ServiceAction::Status => service::status(),
+                ServiceAction::Start => service::start(),
+                ServiceAction::Stop => service::stop(),
+                ServiceAction::Restart => service::restart(),
                 ServiceAction::Pastebin => pastebin::upload_diagnostics().await,
             };
         }

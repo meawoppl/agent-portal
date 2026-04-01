@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.8
+
+- Add `agent-portal service start`, `stop`, and `restart` subcommands
+
 ## 2.3.7
 
 - Fix awaiting-input detection to skip noise message types (portal, error, system, rate_limit_event)
