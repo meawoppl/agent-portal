@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.12
+
+- Render each message in assistant groups as its own component so only new messages re-render
+- Revert thread_local expanded state hack (no longer needed)
+
 ## 2.3.11
 
 - Fix expanded "... more chars" content collapsing when new messages arrive

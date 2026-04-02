@@ -20,7 +20,6 @@ fn preserve_user_newlines(text: &str) -> String {
 // --- Message renderers ---
 
 pub fn render_assistant_group(messages: &[String]) -> Html {
-    let mut all_blocks: Vec<ContentBlock> = Vec::new();
     let mut total_output_tokens: u64 = 0;
     let mut total_input_tokens: u64 = 0;
     let mut total_cache_read: u64 = 0;
@@ -28,33 +27,20 @@ pub fn render_assistant_group(messages: &[String]) -> Html {
     let mut model_name = String::new();
 
     for json in messages {
-        match serde_json::from_str::<ClaudeMessage>(json) {
-            Ok(ClaudeMessage::Assistant(msg)) => {
-                if let Some(message) = &msg.message {
-                    if let Some(blocks) = &message.content {
-                        all_blocks.extend(blocks.clone());
-                    }
-                    if let Some(usage) = &message.usage {
-                        total_output_tokens += usage.output_tokens.unwrap_or(0);
-                        total_input_tokens += usage.input_tokens.unwrap_or(0);
-                        total_cache_read += usage.cache_read_input_tokens.unwrap_or(0);
-                        total_cache_created += usage.cache_creation_input_tokens.unwrap_or(0);
-                    }
-                    if model_name.is_empty() {
-                        if let Some(m) = &message.model {
-                            model_name = m.clone();
-                        }
+        if let Ok(ClaudeMessage::Assistant(msg)) = serde_json::from_str::<ClaudeMessage>(json) {
+            if let Some(message) = &msg.message {
+                if let Some(usage) = &message.usage {
+                    total_output_tokens += usage.output_tokens.unwrap_or(0);
+                    total_input_tokens += usage.input_tokens.unwrap_or(0);
+                    total_cache_read += usage.cache_read_input_tokens.unwrap_or(0);
+                    total_cache_created += usage.cache_creation_input_tokens.unwrap_or(0);
+                }
+                if model_name.is_empty() {
+                    if let Some(m) = &message.model {
+                        model_name = m.clone();
                     }
                 }
             }
-            Ok(ClaudeMessage::User(msg)) => {
-                if let Some(message) = &msg.message {
-                    if let Some(blocks) = &message.content {
-                        all_blocks.extend(blocks.clone());
-                    }
-                }
-            }
-            _ => {}
         }
     }
 
@@ -95,10 +81,32 @@ pub fn render_assistant_group(messages: &[String]) -> Html {
                 }
             </div>
             <div class="message-body">
-                { render_content_blocks(&all_blocks) }
+                { for messages.iter().map(|json| {
+                    html! { <GroupedMessageContent json={json.clone()} /> }
+                })}
             </div>
         </div>
     }
+}
+
+/// Renders the content blocks for a single message within an assistant group.
+/// Each message is its own component so Yew preserves it across re-renders
+/// when new messages are appended to the group.
+#[derive(Properties, PartialEq)]
+struct GroupedMessageContentProps {
+    json: String,
+}
+
+#[function_component(GroupedMessageContent)]
+fn grouped_message_content(props: &GroupedMessageContentProps) -> Html {
+    let blocks = match serde_json::from_str::<ClaudeMessage>(&props.json) {
+        Ok(ClaudeMessage::Assistant(msg)) => {
+            msg.message.and_then(|m| m.content).unwrap_or_default()
+        }
+        Ok(ClaudeMessage::User(msg)) => msg.message.and_then(|m| m.content).unwrap_or_default(),
+        _ => return html! {},
+    };
+    render_content_blocks(&blocks)
 }
 
 pub fn render_user_message(msg: &UserMessage, current_user_id: Option<&str>) -> Html {
