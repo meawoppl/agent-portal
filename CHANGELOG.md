@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.15
+
+- Add `agent-portal service logs` command with `-n` (line count) and `-f` (follow) options
+
 ## 2.3.14
 
 - Resume existing Claude sessions on launcher restart instead of creating new ones

@@ -169,6 +169,22 @@ pub fn restart() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
+pub fn logs(lines: u32, follow: bool) -> Result<()> {
+    use anyhow::Context;
+    let mut args = vec!["--user", "-u", SERVICE_NAME, "--no-pager"];
+    let lines_str = format!("-n{}", lines);
+    args.push(&lines_str);
+    if follow {
+        args.push("-f");
+    }
+    let status = std::process::Command::new("journalctl")
+        .args(&args)
+        .status()
+        .context("Failed to run journalctl")?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+#[cfg(target_os = "linux")]
 pub fn is_installed() -> bool {
     service_file_path().map(|p| p.exists()).unwrap_or(false)
 }
@@ -386,6 +402,22 @@ pub fn restart() -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn logs(lines: u32, follow: bool) -> Result<()> {
+    use anyhow::Context;
+    let log_file = format!("{}/stdout.log", log_dir());
+    let mut args = vec!["-n".to_string(), lines.to_string()];
+    if follow {
+        args.push("-f".to_string());
+    }
+    args.push(log_file);
+    let status = std::process::Command::new("tail")
+        .args(&args)
+        .status()
+        .context("Failed to run tail")?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+#[cfg(target_os = "macos")]
 pub fn is_installed() -> bool {
     plist_path().map(|p| p.exists()).unwrap_or(false)
 }
@@ -419,6 +451,11 @@ pub fn stop() -> Result<()> {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn restart() -> Result<()> {
+    anyhow::bail!("Service management is not supported on this platform")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn logs(_lines: u32, _follow: bool) -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
 }
 

@@ -73,6 +73,15 @@ enum ServiceAction {
     Stop,
     /// Restart the launcher service
     Restart,
+    /// Show service logs
+    Logs {
+        /// Number of lines to show
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: u32,
+        /// Follow log output
+        #[arg(short, long)]
+        follow: bool,
+    },
     /// Upload system info, build info, and logs to an unlisted paste
     Pastebin,
 }
@@ -112,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
                 ServiceAction::Start => service::start(),
                 ServiceAction::Stop => service::stop(),
                 ServiceAction::Restart => service::restart(),
+                ServiceAction::Logs { lines, follow } => service::logs(lines, follow),
                 ServiceAction::Pastebin => pastebin::upload_diagnostics().await,
             };
         }
