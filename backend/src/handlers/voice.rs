@@ -142,7 +142,7 @@ async fn handle_voice_socket(
     let send_task = tokio::spawn(async move {
         while let Some(msg) = client_rx.recv().await {
             if let Ok(json) = serde_json::to_string(&msg) {
-                if ws_sender.send(Message::Text(json)).await.is_err() {
+                if ws_sender.send(Message::Text(json.into())).await.is_err() {
                     break;
                 }
             }

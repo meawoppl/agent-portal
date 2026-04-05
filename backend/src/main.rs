@@ -391,9 +391,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/auth/device/poll",
             post(handlers::device_flow::device_poll),
         )
-        .layer(GovernorLayer {
-            config: auth_rate_limit,
-        })
+        .layer(GovernorLayer::new(auth_rate_limit))
         .with_state(app_state.clone());
 
     // Rate-limited download routes
@@ -406,9 +404,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/download/proxy",
             get(handlers::downloads::proxy_binary).head(handlers::downloads::proxy_binary),
         )
-        .layer(GovernorLayer {
-            config: download_rate_limit,
-        })
+        .layer(GovernorLayer::new(download_rate_limit))
         .with_state(app_state.clone());
 
     // Build our application with routes
@@ -419,28 +415,28 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/config", get(handlers::config::get_config))
         // Session API routes
         .route("/api/sessions", get(handlers::sessions::list_sessions))
-        .route("/api/sessions/:id", get(handlers::sessions::get_session))
+        .route("/api/sessions/{id}", get(handlers::sessions::get_session))
         .route(
-            "/api/sessions/:id",
+            "/api/sessions/{id}",
             axum::routing::delete(handlers::sessions::delete_session),
         )
         .route(
-            "/api/sessions/:id/stop",
+            "/api/sessions/{id}/stop",
             post(handlers::sessions::stop_session),
         )
         // Session member management routes
         .route(
-            "/api/sessions/:id/members",
+            "/api/sessions/{id}/members",
             get(handlers::sessions::list_session_members)
                 .post(handlers::sessions::add_session_member),
         )
         .route(
-            "/api/sessions/:id/members/:user_id",
+            "/api/sessions/{id}/members/{user_id}",
             axum::routing::delete(handlers::sessions::remove_session_member)
                 .patch(handlers::sessions::update_session_member_role),
         )
         .route(
-            "/api/sessions/:id/messages",
+            "/api/sessions/{id}/messages",
             get(handlers::messages::list_messages).post(handlers::messages::create_message),
         )
         // Proxy token management endpoints
@@ -450,7 +446,7 @@ async fn main() -> anyhow::Result<()> {
                 .post(handlers::proxy_tokens::create_token_handler),
         )
         .route(
-            "/api/proxy-tokens/:id",
+            "/api/proxy-tokens/{id}",
             axum::routing::delete(handlers::proxy_tokens::revoke_token_handler),
         )
         // Scheduled task management endpoints
@@ -460,12 +456,12 @@ async fn main() -> anyhow::Result<()> {
                 .post(handlers::scheduled_tasks::create_task_handler),
         )
         .route(
-            "/api/scheduled-tasks/:id",
+            "/api/scheduled-tasks/{id}",
             axum::routing::patch(handlers::scheduled_tasks::update_task_handler)
                 .delete(handlers::scheduled_tasks::delete_task_handler),
         )
         .route(
-            "/api/scheduled-tasks/:id/runs",
+            "/api/scheduled-tasks/{id}/runs",
             get(handlers::scheduled_tasks::list_runs_handler),
         )
         // Sound settings
@@ -505,7 +501,7 @@ async fn main() -> anyhow::Result<()> {
             get(handlers::websocket::handle_web_client_websocket),
         )
         .route(
-            "/ws/voice/:session_id",
+            "/ws/voice/{session_id}",
             get(handlers::voice::handle_voice_websocket),
         )
         .route(
@@ -515,24 +511,24 @@ async fn main() -> anyhow::Result<()> {
         // Launcher API routes
         .route("/api/launchers", get(handlers::launchers::list_launchers))
         .route(
-            "/api/launchers/:launcher_id/directories",
+            "/api/launchers/{launcher_id}/directories",
             get(handlers::launchers::list_directories),
         )
         .route("/api/launch", post(handlers::launchers::launch_session))
         .route(
-            "/api/launchers/:launcher_id/renew-token",
+            "/api/launchers/{launcher_id}/renew-token",
             post(handlers::launchers::renew_launcher_token),
         )
         // Admin dashboard routes (admin-only)
         .route("/api/admin/stats", get(handlers::admin::get_stats))
         .route("/api/admin/users", get(handlers::admin::list_users))
         .route(
-            "/api/admin/users/:id",
+            "/api/admin/users/{id}",
             axum::routing::patch(handlers::admin::update_user),
         )
         .route("/api/admin/sessions", get(handlers::admin::list_sessions))
         .route(
-            "/api/admin/sessions/:id",
+            "/api/admin/sessions/{id}",
             axum::routing::delete(handlers::admin::delete_session),
         )
         // Add single unified state

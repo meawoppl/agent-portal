@@ -617,7 +617,7 @@ async fn run_shim_connection(
                 let msg = ProxyToServer::SequencedOutput { seq, content };
                 let mut ws = ws_write.lock().await;
                 if let Ok(json) = serde_json::to_string(&msg) {
-                    if let Err(e) = ws.send(Message::Text(json)).await {
+                    if let Err(e) = ws.send(Message::Text(json.into())).await {
                         error!("Failed to send output to portal: {}", e);
                         break ShimConnectionResult::Disconnected;
                     }
@@ -628,7 +628,7 @@ async fn run_shim_connection(
             Some(perm_msg) = perm_request_rx.recv() => {
                 let mut ws = ws_write.lock().await;
                 if let Ok(json) = serde_json::to_string(&perm_msg) {
-                    if let Err(e) = ws.send(Message::Text(json)).await {
+                    if let Err(e) = ws.send(Message::Text(json.into())).await {
                         error!("Failed to send permission request to portal: {}", e);
                         break ShimConnectionResult::Disconnected;
                     }

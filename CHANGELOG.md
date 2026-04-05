@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.0
+
+- Upgrade axum 0.7 to 0.8, ws-bridge 0.1 to 0.2, tokio-tungstenite 0.24 to 0.28
+- Upgrade tower-cookies 0.10 to 0.11, tower_governor 0.4 to 0.8
+- Migrate route paths from `:param` to `{param}` syntax
+
 ## 2.3.15
 
 - Add `agent-portal service logs` command with `-n` (line count) and `-f` (follow) options

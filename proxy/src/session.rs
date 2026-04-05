@@ -41,7 +41,7 @@ impl WebSocketConnection {
     pub async fn send<T: serde::Serialize>(&mut self, msg: &T) -> Result<(), String> {
         let json = serde_json::to_string(msg).map_err(|e| e.to_string())?;
         self.write
-            .send(Message::Text(json))
+            .send(Message::Text(json.into()))
             .await
             .map_err(|e| e.to_string())
     }
@@ -309,7 +309,7 @@ async fn handle_ws_text_message(
             };
             let mut ws = ws_write.lock().await;
             if let Ok(json) = serde_json::to_string(&ack) {
-                if let Err(e) = ws.send(Message::Text(json)).await {
+                if let Err(e) = ws.send(Message::Text(json.into())).await {
                     error!("Failed to send InputAck: {}", e);
                 }
             }
@@ -337,7 +337,7 @@ async fn handle_ws_text_message(
         ServerToProxy::Heartbeat => {
             let mut ws = ws_write.lock().await;
             if let Ok(json) = serde_json::to_string(&ProxyToServer::Heartbeat) {
-                let _ = ws.send(Message::Text(json)).await;
+                let _ = ws.send(Message::Text(json.into())).await;
             }
             true
         }
