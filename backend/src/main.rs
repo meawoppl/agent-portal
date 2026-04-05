@@ -1,6 +1,5 @@
 mod auth;
 mod db;
-mod embedded_assets;
 mod errors;
 mod handlers;
 mod jwt;
@@ -22,7 +21,6 @@ use tower_cookies::{CookieManagerLayer, Key};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::GovernorLayer;
-use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -537,17 +535,18 @@ async fn main() -> anyhow::Result<()> {
         .merge(auth_device_routes)
         .merge(download_routes)
         // Serve embedded frontend assets with SPA fallback
-        .fallback(axum::routing::get(embedded_assets::serve_embedded_frontend));
-
-    // Pre-compress all embedded assets at startup (brotli + gzip)
-    embedded_assets::init_cache();
-    tracing::info!("Serving embedded frontend assets");
+        .merge(
+            memory_serve::load!()
+                .index_file(Some("/index.html"))
+                .fallback(Some("/index.html"))
+                .fallback_status(axum::http::StatusCode::OK)
+                .html_cache_control(memory_serve::CacheControl::NoCache)
+                .cache_control(memory_serve::CacheControl::Long)
+                .into_router(),
+        );
 
     // Add CORS and cookie management
-    let app = app
-        .layer(CompressionLayer::new())
-        .layer(CookieManagerLayer::new())
-        .layer(cors);
+    let app = app.layer(CookieManagerLayer::new()).layer(cors);
 
     // Spawn background task to broadcast user spend updates
     {

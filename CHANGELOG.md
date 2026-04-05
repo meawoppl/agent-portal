@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.1
+
+- Replace rust-embed + startup brotli/gzip compression with memory-serve (build-time compression, zero startup cost)
+- Remove rust-embed, brotli, flate2, mime_guess dependencies
+- Closes #613
+
 ## 2.4.0
 
 - Upgrade axum 0.7 to 0.8, ws-bridge 0.1 to 0.2, tokio-tungstenite 0.24 to 0.28

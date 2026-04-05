@@ -71,10 +71,10 @@ clap = { version = "4.5", features = ["derive"] }
 tower-cookies = { version = "0.11", features = ["signed"] }
 bigdecimal = "0.4.10"
 google-cognitive-apis = { version = "0.2.2", features = ["speech-to-text"] }
-rust-embed = { version = "8.11.0", features = ["axum", "mime-guess"] }
-mime_guess = "2.0.5"
-brotli = "8.0"
-flate2 = "1.0"
+memory-serve = "2.1"
 ws-bridge = { workspace = true, features = ["server"] }
 tower_governor = "0.8.0"
 governor = "0.8"
+
+[build-dependencies]
+memory-serve = "2.1"
