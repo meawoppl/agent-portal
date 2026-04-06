@@ -12,5 +12,6 @@ pub async fn get_config(State(app_state): State<Arc<AppState>>) -> Json<AppConfi
     Json(AppConfig {
         app_title: app_state.app_title.clone(),
         server_version: env!("CARGO_PKG_VERSION").to_string(),
+        splash_text: app_state.splash_text.clone(),
     })
 }

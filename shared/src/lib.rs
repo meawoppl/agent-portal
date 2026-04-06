@@ -402,6 +402,10 @@ pub struct AppConfig {
     pub app_title: String,
     /// Backend server version string (e.g. "1.3.24")
     pub server_version: String,
+    /// When set, replaces the marketing splash page with a minimal login page
+    /// displaying this text as the heading. Set via SPLASH_TEXT env var.
+    #[serde(default)]
+    pub splash_text: Option<String>,
 }
 
 #[cfg(test)]

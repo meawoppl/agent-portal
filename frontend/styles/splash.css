@@ -304,3 +304,21 @@
     }
 }
 
+/* Minimal splash (SPLASH_TEXT mode) */
+.splash-minimal {
+    max-width: 400px;
+}
+
+.splash-minimal .splash-header h1 {
+    font-size: 2rem;
+    margin-bottom: 2rem;
+}
+
+.splash-minimal .login-button {
+    margin-bottom: 2rem;
+}
+
+.splash-minimal .splash-footer {
+    gap: 1rem;
+}
+

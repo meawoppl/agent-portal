@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.2
+
+- Add `SPLASH_TEXT` env var for minimal login page (heading + sign-in button + version + bug link)
+- When unset, the full marketing splash page is shown as before
+
 ## 2.4.1
 
 - Replace rust-embed + startup brotli/gzip compression with memory-serve (build-time compression, zero startup cost)

@@ -47,6 +47,7 @@ pub struct AppState {
     pub jwt_secret: String,
     pub speech_credentials_path: Option<String>,
     pub app_title: String,
+    pub splash_text: Option<String>,
     /// Allowed email domain (e.g., "company.com")
     pub allowed_email_domain: Option<String>,
     /// Allowed email addresses (comma-separated in env var)
@@ -286,6 +287,8 @@ async fn main() -> anyhow::Result<()> {
         env::var("APP_TITLE").unwrap_or_else(|_| "Agent Portal".to_string())
     };
 
+    let splash_text = env::var("SPLASH_TEXT").ok();
+
     // Email access control (optional)
     let allowed_email_domain = env::var("ALLOWED_EMAIL_DOMAIN").ok();
     let allowed_emails = env::var("ALLOWED_EMAILS").ok().map(|s| {
@@ -346,6 +349,7 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret,
         speech_credentials_path,
         app_title,
+        splash_text,
         allowed_email_domain,
         allowed_emails,
         message_retention_count,
