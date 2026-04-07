@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.3
+
+- Add GitHub link to minimal splash page footer
+
 ## 2.4.2
 
 - Add `SPLASH_TEXT` env var for minimal login page (heading + sign-in button + version + bug link)

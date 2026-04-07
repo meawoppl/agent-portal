@@ -57,6 +57,14 @@ fn minimal_splash(heading: String) -> Html {
                 <div class="splash-footer">
                     <span class="version">{ format!("v{}", VERSION) }</span>
                     <a
+                        href="https://github.com/meawoppl/agent-portal"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="footer-link"
+                    >
+                        { "GitHub" }
+                    </a>
+                    <a
                         href="https://github.com/meawoppl/agent-portal/issues/new"
                         target="_blank"
                         rel="noopener noreferrer"
