@@ -9,21 +9,6 @@
     background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-}
-
-.session-rail::-webkit-scrollbar {
-    height: 4px;
-}
-
-.session-rail::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.session-rail::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 2px;
 }
 
 /* Divider between active and inactive sessions */

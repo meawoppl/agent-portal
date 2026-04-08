@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.7
+
+- Global thin scrollbar styling (6px, subtle, matches dark theme)
+
 ## 2.4.6
 
 - Add sortable columns to admin users table (Email, Name, Status, Sessions, Spend, Created)
