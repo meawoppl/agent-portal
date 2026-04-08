@@ -1,4 +1,4 @@
-//! Admin users tab — user management table
+//! Admin users tab — user management table with sortable columns
 
 use crate::utils;
 use uuid::Uuid;
@@ -6,6 +6,79 @@ use web_sys::MouseEvent;
 use yew::prelude::*;
 
 use super::AdminUserInfo;
+
+#[derive(Clone, Copy, PartialEq)]
+enum SortColumn {
+    Email,
+    Name,
+    Status,
+    Sessions,
+    Spend,
+    Created,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SortDirection {
+    Asc,
+    Desc,
+}
+
+impl SortDirection {
+    fn toggle(self) -> Self {
+        match self {
+            SortDirection::Asc => SortDirection::Desc,
+            SortDirection::Desc => SortDirection::Asc,
+        }
+    }
+
+    fn indicator(self) -> &'static str {
+        match self {
+            SortDirection::Asc => " \u{25b2}",
+            SortDirection::Desc => " \u{25bc}",
+        }
+    }
+}
+
+fn sort_users(
+    users: &[AdminUserInfo],
+    column: SortColumn,
+    direction: SortDirection,
+) -> Vec<AdminUserInfo> {
+    let mut sorted = users.to_vec();
+    sorted.sort_by(|a, b| {
+        let cmp = match column {
+            SortColumn::Email => a.email.to_lowercase().cmp(&b.email.to_lowercase()),
+            SortColumn::Name => {
+                let a_name = a.name.as_deref().unwrap_or("");
+                let b_name = b.name.as_deref().unwrap_or("");
+                a_name.to_lowercase().cmp(&b_name.to_lowercase())
+            }
+            SortColumn::Status => {
+                fn rank(u: &AdminUserInfo) -> u8 {
+                    if u.disabled {
+                        2
+                    } else if u.is_admin {
+                        0
+                    } else {
+                        1
+                    }
+                }
+                rank(a).cmp(&rank(b))
+            }
+            SortColumn::Sessions => a.session_count.cmp(&b.session_count),
+            SortColumn::Spend => a
+                .total_spend_usd
+                .partial_cmp(&b.total_spend_usd)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            SortColumn::Created => a.created_at.cmp(&b.created_at),
+        };
+        match direction {
+            SortDirection::Asc => cmp,
+            SortDirection::Desc => cmp.reverse(),
+        }
+    });
+    sorted
+}
 
 #[derive(Properties, PartialEq)]
 struct UserRowProps {
@@ -106,23 +179,60 @@ pub struct AdminUsersTabProps {
 
 #[function_component(AdminUsersTab)]
 pub fn admin_users_tab(props: &AdminUsersTabProps) -> Html {
+    let sort_column = use_state(|| None::<SortColumn>);
+    let sort_direction = use_state(|| SortDirection::Desc);
+
+    let sorted_users = {
+        match *sort_column {
+            Some(col) => sort_users(&props.users, col, *sort_direction),
+            None => props.users.clone(),
+        }
+    };
+
+    let make_sort_handler = |col: SortColumn| {
+        let sort_column = sort_column.clone();
+        let sort_direction = sort_direction.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *sort_column == Some(col) {
+                sort_direction.set((*sort_direction).toggle());
+            } else {
+                sort_column.set(Some(col));
+                sort_direction.set(SortDirection::Asc);
+            }
+        })
+    };
+
+    let header = |label: &str, col: SortColumn| {
+        let active = *sort_column == Some(col);
+        let indicator = if active {
+            (*sort_direction).indicator()
+        } else {
+            ""
+        };
+        html! {
+            <th class="sortable" onclick={make_sort_handler(col)}>
+                { label }{ indicator }
+            </th>
+        }
+    };
+
     html! {
         <div class="admin-users">
             <table class="admin-table">
                 <thead>
                     <tr>
-                        <th>{ "Email" }</th>
-                        <th>{ "Name" }</th>
-                        <th>{ "Status" }</th>
-                        <th>{ "Sessions" }</th>
-                        <th>{ "Spend" }</th>
-                        <th>{ "Created" }</th>
+                        { header("Email", SortColumn::Email) }
+                        { header("Name", SortColumn::Name) }
+                        { header("Status", SortColumn::Status) }
+                        { header("Sessions", SortColumn::Sessions) }
+                        { header("Spend", SortColumn::Spend) }
+                        { header("Created", SortColumn::Created) }
                         <th>{ "Actions" }</th>
                     </tr>
                 </thead>
                 <tbody>
                     {
-                        props.users.iter().map(|user| {
+                        sorted_users.iter().map(|user| {
                             html! {
                                 <UserRow
                                     key={user.id.to_string()}

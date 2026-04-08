@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.6
+
+- Add sortable columns to admin users table (Email, Name, Status, Sessions, Spend, Created)
+
 ## 2.4.5
 
 - Fix admin stats 500: cast SUM(bigint) to ::bigint in raw SQL queries (#627)
