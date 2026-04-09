@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.8
+
+- Purge expired device flow codes every 60 seconds (#615)
+
 ## 2.4.7
 
 - Global thin scrollbar styling (6px, subtle, matches dark theme)

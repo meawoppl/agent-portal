@@ -565,6 +565,25 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Started user spend broadcast task (every 5 seconds)");
     }
 
+    // Spawn background task to purge expired device flow codes (runs every 60 seconds)
+    {
+        let store = device_flow_store.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let mut map = store.write().await;
+                let before = map.len();
+                map.retain(|_, state| state.expires_at > std::time::SystemTime::now());
+                let removed = before - map.len();
+                if removed > 0 {
+                    tracing::debug!("Purged {} expired device flow codes", removed);
+                }
+            }
+        });
+        tracing::info!("Started device flow cleanup task (every 60 seconds)");
+    }
+
     // Spawn background task for message retention cleanup (runs every 60 seconds)
     {
         let app_state = app_state.clone();
