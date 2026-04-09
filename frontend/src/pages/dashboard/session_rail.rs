@@ -288,7 +288,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         let focused_index = props.focused_index;
         use_effect_with(focused_index, move |_| {
             if let Some(rail) = rail_ref.cast::<Element>() {
-                if let Some(child) = rail.children().item(focused_index as u32) {
+                let selector = format!("[data-index=\"{}\"]", focused_index);
+                if let Ok(Some(child)) = rail.query_selector(&selector) {
                     let opts = web_sys::ScrollIntoViewOptions::new();
                     opts.set_behavior(web_sys::ScrollBehavior::Smooth);
                     opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
@@ -742,7 +743,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         };
 
         html! {
-            <div class={pill_class} onclick={on_click} key={session.id.to_string()}>
+            <div class={pill_class} onclick={on_click} key={session.id.to_string()} data-index={index.to_string()}>
                 {
                     if let Some(num) = &number_annotation {
                         html! { <span class="pill-number">{ num }</span> }

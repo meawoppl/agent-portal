@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.9
+
+- Fix pill scroll-into-view when tabbing to off-screen sessions
+
 ## 2.4.8
 
 - Purge expired device flow codes every 60 seconds (#615)
