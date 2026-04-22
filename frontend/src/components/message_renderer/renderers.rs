@@ -136,7 +136,7 @@ pub fn render_user_message(
         let text_content: String = blocks
             .iter()
             .filter_map(|block| match block {
-                ContentBlock::Text { text } => Some(text.clone()),
+                ContentBlock::Text { text, .. } => Some(text.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -658,8 +658,13 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
             {
                 blocks.iter().map(|block| {
                     match block {
-                        ContentBlock::Text { text } => {
-                            html! { <div class="assistant-text">{ render_markdown(text) }</div> }
+                        ContentBlock::Text { text, citations } => {
+                            html! {
+                                <div class="assistant-text">
+                                    { render_markdown(text) }
+                                    { render_citations(citations) }
+                                </div>
+                            }
                         }
                         ContentBlock::ToolUse { id: _, name, input } => {
                             render_tool_use(name, input)
@@ -695,7 +700,27 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
                                 </div>
                             }
                         }
-                        ContentBlock::Other => html! {},
+                        ContentBlock::ServerToolUse { id: _, name, input } => {
+                            render_server_tool_use(name, input)
+                        }
+                        ContentBlock::WebSearchToolResult { tool_use_id: _, content } => {
+                            render_web_search_result(content)
+                        }
+                        ContentBlock::CodeExecutionToolResult { tool_use_id: _, content } => {
+                            render_code_execution_result(content)
+                        }
+                        ContentBlock::McpToolUse { id: _, name, server_name, input } => {
+                            render_mcp_tool_use(name, server_name.as_deref(), input)
+                        }
+                        ContentBlock::McpToolResult { tool_use_id: _, content, is_error } => {
+                            render_mcp_tool_result(content, is_error.unwrap_or(false))
+                        }
+                        ContentBlock::ContainerUpload { data } => {
+                            render_container_upload(data)
+                        }
+                        ContentBlock::Unknown(value) => {
+                            render_unknown_block(value)
+                        }
                     }
                 }).collect::<Html>()
             }
@@ -817,6 +842,165 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                 </div>
             }
         </>
+    }
+}
+
+fn render_citations(citations: &[Value]) -> Html {
+    if citations.is_empty() {
+        return html! {};
+    }
+    html! {
+        <div class="citation-list">
+            { for citations.iter().enumerate().map(|(i, cite)| {
+                let url = cite.get("url").and_then(|v| v.as_str()).unwrap_or("#");
+                let title = cite.get("title").and_then(|v| v.as_str())
+                    .or_else(|| cite.get("cited_text").and_then(|v| v.as_str()))
+                    .unwrap_or("source");
+                html! {
+                    <a class="citation-link"
+                       href={url.to_string()}
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       title={title.to_string()}>
+                        { format!("[{}]", i + 1) }
+                    </a>
+                }
+            })}
+        </div>
+    }
+}
+
+fn render_server_tool_use(name: &str, input: &Value) -> Html {
+    let badge_label = if name.contains("web_search") || name.contains("search") {
+        "Web Search"
+    } else {
+        "Server"
+    };
+    let args_summary = summarize_input(input);
+    html! {
+        <div class="tool-use server-tool-use">
+            <div class="tool-use-header">
+                <span class="tool-badge server">{ badge_label }</span>
+                <span class="tool-name">{ name }</span>
+                { if !args_summary.is_empty() {
+                    html! { <span class="tool-meta">{ args_summary }</span> }
+                } else {
+                    html! {}
+                }}
+            </div>
+        </div>
+    }
+}
+
+fn render_web_search_result(content: &Value) -> Html {
+    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
+    html! {
+        <div class="tool-result web-search-result">
+            <div class="tool-use-header">
+                <span class="tool-badge server">{ "Web Search Result" }</span>
+            </div>
+            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
+        </div>
+    }
+}
+
+fn render_code_execution_result(content: &Value) -> Html {
+    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
+    html! {
+        <div class="tool-result code-execution-result">
+            <div class="tool-use-header">
+                <span class="tool-badge code-exec">{ "Code Execution" }</span>
+            </div>
+            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" />
+        </div>
+    }
+}
+
+fn render_mcp_tool_use(name: &str, server_name: Option<&str>, input: &Value) -> Html {
+    let display_name = match server_name {
+        Some(server) => format!("{} > {}", server, name),
+        None => name.to_string(),
+    };
+    let args_summary = summarize_input(input);
+    html! {
+        <div class="tool-use mcp-tool-use">
+            <div class="tool-use-header">
+                <span class="tool-badge mcp">{ "MCP" }</span>
+                <span class="tool-name">{ display_name }</span>
+                { if !args_summary.is_empty() {
+                    html! { <span class="tool-meta">{ args_summary }</span> }
+                } else {
+                    html! {}
+                }}
+            </div>
+        </div>
+    }
+}
+
+fn render_mcp_tool_result(content: &Value, is_error: bool) -> Html {
+    let class = if is_error {
+        "tool-result mcp-tool-result error"
+    } else {
+        "tool-result mcp-tool-result"
+    };
+    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
+    html! {
+        <div class={class}>
+            <div class="tool-use-header">
+                <span class={if is_error { "tool-badge mcp error" } else { "tool-badge mcp" }}>
+                    { if is_error { "MCP Error" } else { "MCP Result" } }
+                </span>
+            </div>
+            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" />
+        </div>
+    }
+}
+
+fn render_container_upload(data: &Value) -> Html {
+    let preview = serde_json::to_string_pretty(data).unwrap_or_else(|_| data.to_string());
+    html! {
+        <div class="tool-use container-upload">
+            <div class="tool-use-header">
+                <span class="tool-badge container">{ "Container Upload" }</span>
+            </div>
+            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
+        </div>
+    }
+}
+
+fn render_unknown_block(value: &Value) -> Html {
+    let preview = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    html! {
+        <div class="tool-use unknown-block">
+            <div class="tool-use-header">
+                <span class="tool-badge unknown">{ "Unknown Block" }</span>
+            </div>
+            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
+        </div>
+    }
+}
+
+fn summarize_input(input: &Value) -> String {
+    if let Some(obj) = input.as_object() {
+        let entries: Vec<String> = obj
+            .iter()
+            .filter(|(_, v)| v.is_string() || v.is_number() || v.is_boolean())
+            .take(3)
+            .map(|(k, v)| match v {
+                Value::String(s) => {
+                    let truncated = if s.len() > 40 {
+                        format!("{}...", super::truncate_str(s, 40))
+                    } else {
+                        s.clone()
+                    };
+                    format!("{}={}", k, truncated)
+                }
+                other => format!("{}={}", k, other),
+            })
+            .collect();
+        entries.join(", ")
+    } else {
+        String::new()
     }
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.11
+
+- Bump claude-codes to 2.1.117
+- Render new content block types: ServerToolUse, WebSearchToolResult, McpToolUse, McpToolResult, CodeExecutionToolResult, ContainerUpload
+- Render web search citations on text blocks
+- Show unknown content blocks as collapsible JSON instead of silently dropping them
+
 ## 2.4.10
 
 - Add token renewal button in settings credentials panel

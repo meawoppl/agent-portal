@@ -146,7 +146,11 @@ pub struct MessageContent {
 #[serde(tag = "type")]
 pub enum ContentBlock {
     #[serde(rename = "text")]
-    Text { text: String },
+    Text {
+        text: String,
+        #[serde(default)]
+        citations: Vec<Value>,
+    },
     #[serde(rename = "image")]
     Image { source: ImageSource },
     #[serde(rename = "tool_use")]
@@ -164,8 +168,49 @@ pub enum ContentBlock {
     },
     #[serde(rename = "thinking")]
     Thinking { thinking: String },
-    #[serde(other)]
-    Other,
+    #[serde(rename = "server_tool_use")]
+    ServerToolUse {
+        id: String,
+        name: String,
+        #[serde(default)]
+        input: Value,
+    },
+    #[serde(rename = "web_search_tool_result")]
+    WebSearchToolResult {
+        tool_use_id: String,
+        #[serde(default)]
+        content: Value,
+    },
+    #[serde(rename = "code_execution_tool_result")]
+    CodeExecutionToolResult {
+        tool_use_id: String,
+        #[serde(default)]
+        content: Value,
+    },
+    #[serde(rename = "mcp_tool_use")]
+    McpToolUse {
+        id: String,
+        name: String,
+        #[serde(default)]
+        server_name: Option<String>,
+        #[serde(default)]
+        input: Value,
+    },
+    #[serde(rename = "mcp_tool_result")]
+    McpToolResult {
+        tool_use_id: String,
+        #[serde(default)]
+        content: Value,
+        #[serde(default)]
+        is_error: Option<bool>,
+    },
+    #[serde(rename = "container_upload")]
+    ContainerUpload {
+        #[serde(flatten)]
+        data: Value,
+    },
+    #[serde(untagged)]
+    Unknown(Value),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

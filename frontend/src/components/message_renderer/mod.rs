@@ -41,9 +41,15 @@ fn should_group_with_assistant(json: &str) -> bool {
             if let Some(message) = &msg.message {
                 if let Some(blocks) = &message.content {
                     return !blocks.is_empty()
-                        && blocks
-                            .iter()
-                            .all(|b| matches!(b, ContentBlock::ToolResult { .. }));
+                        && blocks.iter().all(|b| {
+                            matches!(
+                                b,
+                                ContentBlock::ToolResult { .. }
+                                    | ContentBlock::WebSearchToolResult { .. }
+                                    | ContentBlock::McpToolResult { .. }
+                                    | ContentBlock::CodeExecutionToolResult { .. }
+                            )
+                        });
                 }
             }
             false

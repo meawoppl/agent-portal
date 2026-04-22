@@ -827,3 +827,99 @@
     color: var(--text-muted);
 }
 
+/* ==========================================================================
+   New Content Block Renderers
+   ========================================================================== */
+
+/* Server Tool Use / Web Search */
+.server-tool-use {
+    background: rgba(122, 162, 247, 0.08);
+    border-left-color: #7aa2f7;
+}
+
+.tool-badge.server {
+    background: rgba(122, 162, 247, 0.2);
+    color: #7aa2f7;
+}
+
+.web-search-result {
+    background: rgba(122, 162, 247, 0.05);
+    border-left-color: #7aa2f7;
+}
+
+/* MCP Tool Use / Result */
+.mcp-tool-use {
+    background: rgba(187, 154, 247, 0.08);
+    border-left-color: #bb9af7;
+}
+
+.mcp-tool-result {
+    background: rgba(187, 154, 247, 0.05);
+}
+
+.tool-badge.mcp {
+    background: rgba(187, 154, 247, 0.2);
+    color: #bb9af7;
+}
+
+.tool-badge.mcp.error {
+    background: rgba(247, 118, 142, 0.2);
+    color: var(--error);
+}
+
+/* Code Execution Result */
+.code-execution-result {
+    background: rgba(158, 206, 106, 0.05);
+    border-left-color: var(--success);
+}
+
+.tool-badge.code-exec {
+    background: rgba(158, 206, 106, 0.2);
+    color: var(--success);
+}
+
+/* Container Upload */
+.container-upload {
+    background: rgba(224, 175, 104, 0.08);
+    border-left-color: #e0af68;
+}
+
+.tool-badge.container {
+    background: rgba(224, 175, 104, 0.2);
+    color: #e0af68;
+}
+
+/* Unknown Block */
+.unknown-block {
+    background: rgba(127, 132, 156, 0.08);
+    border-left-color: var(--text-muted);
+}
+
+.tool-badge.unknown {
+    background: rgba(127, 132, 156, 0.2);
+    color: var(--text-secondary);
+}
+
+/* Citations */
+.citation-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
+}
+
+.citation-link {
+    font-size: 0.7rem;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 0.05rem 0.2rem;
+    border-radius: 2px;
+    background: rgba(122, 162, 247, 0.1);
+    transition: background 0.15s;
+}
+
+.citation-link:hover {
+    background: rgba(122, 162, 247, 0.25);
+    text-decoration: underline;
+}
+
