@@ -464,13 +464,55 @@ pub fn render_system_message(msg: &SystemMessage, timestamp: Option<&str>) -> Ht
         return render_task_notification(msg, timestamp);
     }
 
-    if subtype == "init" || subtype == "status" {
+    if subtype == "init" {
+        return render_init_bar(msg, timestamp);
+    }
+
+    if subtype == "status" {
         return html! {};
     }
 
     html! {
         <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
             <span class="message-type-badge system">{ subtype }</span>
+        </div>
+    }
+}
+
+fn render_init_bar(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
+    let model_short = msg
+        .model
+        .as_deref()
+        .and_then(shorten_model_name)
+        .unwrap_or_default();
+    let version = msg.claude_code_version.as_deref().unwrap_or("");
+    let tool_count = msg.tools.as_ref().map(|t| t.len()).unwrap_or(0);
+    let mcp_count = msg.mcp_servers.as_ref().map(|s| s.len()).unwrap_or(0);
+    let fast_mode = msg
+        .extra
+        .as_ref()
+        .and_then(|v| v.get("fast_mode_state"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("off");
+
+    html! {
+        <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
+            <span class="message-type-badge system">{ "Session" }</span>
+            if !model_short.is_empty() {
+                <span class="init-badge">{ &model_short }</span>
+            }
+            if !version.is_empty() {
+                <span class="init-badge">{ format!("v{}", version) }</span>
+            }
+            if fast_mode == "on" {
+                <span class="init-badge fast">{ "Fast" }</span>
+            }
+            if mcp_count > 0 {
+                <span class="init-badge">{ format!("{} MCP", mcp_count) }</span>
+            }
+            if tool_count > 0 {
+                <span class="init-badge">{ format!("{} tools", tool_count) }</span>
+            }
         </div>
     }
 }

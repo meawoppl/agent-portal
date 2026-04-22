@@ -88,6 +88,20 @@
     margin-left: 0.25rem;
 }
 
+.init-badge {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.1rem 0.4rem;
+    background: rgba(127, 132, 156, 0.2);
+    color: var(--text-secondary);
+    border-radius: 3px;
+}
+
+.init-badge.fast {
+    background: rgba(224, 175, 104, 0.2);
+    color: #e0af68;
+}
+
 /* System Message - Init */
 .system-message .message-subtype {
     color: var(--text-secondary);
