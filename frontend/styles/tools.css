@@ -517,6 +517,26 @@
     color: var(--error);
 }
 
+.result-message .stat-item.stop-reason {
+    color: #e0af68;
+    font-weight: 500;
+}
+
+.result-message .stat-item.fast-mode {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.result-message .stat-item.errors {
+    color: var(--error);
+    font-weight: 500;
+}
+
+.result-message .stat-item.denials {
+    color: #e0af68;
+    font-weight: 500;
+}
+
 /* User Message */
 .user-message {
     border-left: 3px solid var(--accent);

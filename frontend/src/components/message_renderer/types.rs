@@ -240,6 +240,15 @@ pub struct ResultMessage {
     pub total_cost_usd: Option<f64>,
     pub num_turns: Option<u64>,
     pub usage: Option<UsageInfo>,
+    pub stop_reason: Option<String>,
+    pub terminal_reason: Option<String>,
+    pub fast_mode_state: Option<String>,
+    #[serde(default)]
+    pub errors: Vec<String>,
+    pub model_usage: Option<Value>,
+    pub api_error_status: Option<u16>,
+    #[serde(default)]
+    pub permission_denials: Vec<Value>,
 }
 
 #[cfg(test)]

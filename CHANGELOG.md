@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.12
+
+- Show cost, stop reason, fast mode, errors, and permission denials in result stats bar
+- Add model usage breakdown to result timing tooltip
+
 ## 2.4.11
 
 - Bump claude-codes to 2.1.117

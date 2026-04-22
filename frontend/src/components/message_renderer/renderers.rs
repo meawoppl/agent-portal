@@ -1029,10 +1029,105 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
     let api_ms = msg.duration_api_ms.unwrap_or(0);
     let turns = msg.num_turns.unwrap_or(0);
 
-    let timing_tooltip = format!(
+    let mut timing_tooltip = format!(
         "Total: {}ms | API: {}ms | Turns: {}",
         duration_ms, api_ms, turns
     );
+
+    if let Some(model_usage) = &msg.model_usage {
+        if let Some(obj) = model_usage.as_object() {
+            for (model, cost) in obj {
+                if let Some(c) = cost.as_f64() {
+                    timing_tooltip.push_str(&format!(
+                        " | {}: ${:.4}",
+                        shorten_model_name(model).unwrap_or(model.clone()),
+                        c
+                    ));
+                }
+            }
+        }
+    }
+
+    let errors_tooltip = if !msg.errors.is_empty() {
+        msg.errors.join("\n")
+    } else {
+        String::new()
+    };
+
+    let denials_tooltip = if !msg.permission_denials.is_empty() {
+        msg.permission_denials
+            .iter()
+            .filter_map(|v| {
+                v.get("tool_name")
+                    .and_then(|t| t.as_str())
+                    .or_else(|| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        String::new()
+    };
+
+    let extra_badges = html! {
+        <>
+            {
+                if let Some(cost) = msg.total_cost_usd {
+                    html! {
+                        <span class="stat-item cost" title="Total cost">
+                            { format!("${:.2}", cost) }
+                        </span>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if msg.stop_reason.as_deref() == Some("max_tokens") {
+                    html! {
+                        <span class="stat-item stop-reason" title="Session stopped: max tokens reached">
+                            { "max tokens" }
+                        </span>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if msg.fast_mode_state.as_deref() == Some("on") {
+                    html! {
+                        <span class="stat-item fast-mode" title="Fast mode enabled">
+                            { "Fast" }
+                        </span>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if !msg.errors.is_empty() {
+                    html! {
+                        <span class="stat-item errors" title={errors_tooltip.clone()}>
+                            { format!("{} error{}", msg.errors.len(), if msg.errors.len() == 1 { "" } else { "s" }) }
+                        </span>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if !msg.permission_denials.is_empty() {
+                    html! {
+                        <span class="stat-item denials" title={denials_tooltip.clone()}>
+                            { format!("{} denied", msg.permission_denials.len()) }
+                        </span>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+        </>
+    };
 
     if is_error {
         if let Some(error_html) = try_render_api_error(msg.result.as_deref()) {
@@ -1045,6 +1140,7 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
                             <span class="stat-item duration" title={timing_tooltip.clone()}>
                                 { format_duration(duration_ms) }
                             </span>
+                            { extra_badges.clone() }
                         </div>
                     </div>
                 </>
@@ -1088,6 +1184,7 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
                         html! {}
                     }
                 }
+                { extra_badges }
             </div>
         </div>
     }
