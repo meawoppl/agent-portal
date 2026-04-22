@@ -82,6 +82,14 @@ pub struct CreateProxyTokenResponse {
     pub expires_at: String,
 }
 
+/// Request to renew an existing proxy token
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenewProxyTokenRequest {
+    /// New token lifetime in days (default: 30)
+    #[serde(default = "default_expires_in_days")]
+    pub expires_in_days: u32,
+}
+
 /// Info about an existing proxy token (without the secret)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProxyTokenInfo {

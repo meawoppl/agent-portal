@@ -11,7 +11,7 @@ use axum::{
 use diesel::prelude::*;
 use shared::{
     CreateProxyTokenRequest, CreateProxyTokenResponse, ProxyInitConfig, ProxyTokenInfo,
-    ProxyTokenListResponse,
+    ProxyTokenListResponse, RenewProxyTokenRequest,
 };
 use std::sync::Arc;
 use tower_cookies::Cookies;
@@ -154,6 +154,82 @@ pub async fn revoke_token_handler(
 
     info!("Revoked proxy token {}", token_id);
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/proxy-tokens/:id/renew - Renew a token with a new expiration
+pub async fn renew_token_handler(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(token_id): Path<Uuid>,
+    Json(req): Json<RenewProxyTokenRequest>,
+) -> Result<Json<CreateProxyTokenResponse>, AppError> {
+    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+
+    let existing: ProxyAuthToken = proxy_auth_tokens::table
+        .filter(proxy_auth_tokens::id.eq(token_id))
+        .filter(proxy_auth_tokens::user_id.eq(user_id))
+        .first(&mut conn)
+        .map_err(|_| AppError::NotFound("proxy token"))?;
+
+    if existing.revoked {
+        return Err(AppError::BadRequest("Cannot renew a revoked token"));
+    }
+
+    use crate::schema::users;
+    let user: User = users::table
+        .find(user_id)
+        .first(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    let new_token_id = Uuid::new_v4();
+    let expires_at = chrono::Utc::now() + chrono::Duration::days(req.expires_in_days as i64);
+
+    let jwt_secret = app_state.jwt_secret.as_bytes();
+    let token = create_proxy_token(
+        jwt_secret,
+        new_token_id,
+        user_id,
+        &user.email,
+        req.expires_in_days,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let token_hash = hash_token(&token);
+
+    diesel::update(
+        proxy_auth_tokens::table
+            .filter(proxy_auth_tokens::id.eq(token_id))
+            .filter(proxy_auth_tokens::user_id.eq(user_id)),
+    )
+    .set((
+        proxy_auth_tokens::token_hash.eq(&token_hash),
+        proxy_auth_tokens::expires_at.eq(expires_at.naive_utc()),
+    ))
+    .execute(&mut conn)
+    .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    let config = ProxyInitConfig {
+        token: token.clone(),
+        session_name_prefix: None,
+    };
+    let encoded_config = config
+        .encode()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let init_url = format!("{}/p/{}", app_state.public_url, encoded_config);
+
+    info!(
+        "Renewed proxy token '{}' for user {}",
+        existing.name, user.email
+    );
+
+    Ok(Json(CreateProxyTokenResponse {
+        id: token_id,
+        token,
+        init_url,
+        expires_at: expires_at.to_rfc3339(),
+    }))
 }
 
 /// Verify a proxy token and return the user_id if valid

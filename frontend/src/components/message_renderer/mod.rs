@@ -7,6 +7,19 @@ use yew::prelude::*;
 
 use types::{ClaudeMessage, ContentBlock};
 
+/// Extract `_created_at` from a raw JSON message string and format it as local time.
+fn extract_local_timestamp(json: &str) -> Option<String> {
+    let val: Value = serde_json::from_str(json).ok()?;
+    let iso = val.get("_created_at")?.as_str()?;
+    let ms = js_sys::Date::parse(iso);
+    if ms.is_nan() {
+        return None;
+    }
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
+    date.to_locale_string("default", &js_sys::Object::new())
+        .as_string()
+}
+
 /// A group of messages to render together
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageGroup {
@@ -85,18 +98,23 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
         };
     }
 
+    let ts = extract_local_timestamp(&props.json);
     let parsed: Result<ClaudeMessage, _> = serde_json::from_str(&props.json);
 
     match parsed {
-        Ok(ClaudeMessage::System(msg)) => renderers::render_system_message(&msg),
-        Ok(ClaudeMessage::Assistant(msg)) => renderers::render_assistant_message(&msg),
+        Ok(ClaudeMessage::System(msg)) => renderers::render_system_message(&msg, ts.as_deref()),
+        Ok(ClaudeMessage::Assistant(msg)) => {
+            renderers::render_assistant_message(&msg, ts.as_deref())
+        }
         Ok(ClaudeMessage::Result(msg)) => renderers::render_result_message(&msg),
         Ok(ClaudeMessage::User(msg)) => {
-            renderers::render_user_message(&msg, props.current_user_id.as_deref())
+            renderers::render_user_message(&msg, props.current_user_id.as_deref(), ts.as_deref())
         }
-        Ok(ClaudeMessage::Error(msg)) => renderers::render_error_message(&msg),
-        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(&msg),
-        Ok(ClaudeMessage::RateLimitEvent(msg)) => renderers::render_rate_limit_event(&msg),
+        Ok(ClaudeMessage::Error(msg)) => renderers::render_error_message(&msg, ts.as_deref()),
+        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(&msg, ts.as_deref()),
+        Ok(ClaudeMessage::RateLimitEvent(msg)) => {
+            renderers::render_rate_limit_event(&msg, ts.as_deref())
+        }
         Ok(ClaudeMessage::Unknown) | Err(_) => render_raw_json(&props.json),
     }
 }
@@ -118,7 +136,12 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         MessageGroup::Single(json) => {
             html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} /> }
         }
-        MessageGroup::AssistantGroup(messages) => renderers::render_assistant_group(messages),
+        MessageGroup::AssistantGroup(messages) => {
+            let ts = messages
+                .first()
+                .and_then(|json| extract_local_timestamp(json));
+            renderers::render_assistant_group(messages, ts.as_deref())
+        }
     }
 }
 

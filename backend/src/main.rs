@@ -451,6 +451,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/proxy-tokens/{id}",
             axum::routing::delete(handlers::proxy_tokens::revoke_token_handler),
         )
+        .route(
+            "/api/proxy-tokens/{id}/renew",
+            post(handlers::proxy_tokens::renew_token_handler),
+        )
         // Scheduled task management endpoints
         .route(
             "/api/scheduled-tasks",

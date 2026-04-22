@@ -9,6 +9,7 @@ pub enum AppError {
     DbQuery(String),
     Unauthorized,
     Forbidden,
+    BadRequest(&'static str),
     NotFound(&'static str),
     Internal(String),
 }
@@ -26,6 +27,7 @@ impl IntoResponse for AppError {
             }
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden"),
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, *msg),
             AppError::NotFound(what) => (StatusCode::NOT_FOUND, *what),
             AppError::Internal(e) => {
                 tracing::error!("Internal error: {}", e);

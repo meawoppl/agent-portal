@@ -19,7 +19,7 @@ fn preserve_user_newlines(text: &str) -> String {
 
 // --- Message renderers ---
 
-pub fn render_assistant_group(messages: &[String]) -> Html {
+pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> Html {
     let mut total_output_tokens: u64 = 0;
     let mut total_input_tokens: u64 = 0;
     let mut total_cache_read: u64 = 0;
@@ -52,7 +52,7 @@ pub fn render_assistant_group(messages: &[String]) -> Html {
 
     html! {
         <div class="claude-message assistant-message">
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge assistant">{ "Assistant" }</span>
                 {
                     if count > 1 {
@@ -109,7 +109,11 @@ fn grouped_message_content(props: &GroupedMessageContentProps) -> Html {
     render_content_blocks(&blocks)
 }
 
-pub fn render_user_message(msg: &UserMessage, current_user_id: Option<&str>) -> Html {
+pub fn render_user_message(
+    msg: &UserMessage,
+    current_user_id: Option<&str>,
+    timestamp: Option<&str>,
+) -> Html {
     let label = match &msg.sender {
         Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
         _ => "You".to_string(),
@@ -118,7 +122,7 @@ pub fn render_user_message(msg: &UserMessage, current_user_id: Option<&str>) -> 
     if let Some(text) = &msg.content {
         html! {
             <div class="claude-message user-message">
-                <div class="message-header">
+                <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                     <span class="message-type-badge user">{ &label }</span>
                 </div>
                 <div class="message-body">
@@ -153,7 +157,7 @@ pub fn render_user_message(msg: &UserMessage, current_user_id: Option<&str>) -> 
         } else if !text_content.is_empty() {
             html! {
                 <div class="claude-message user-message">
-                    <div class="message-header">
+                    <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                         <span class="message-type-badge user">{ &label }</span>
                     </div>
                     <div class="message-body">
@@ -169,9 +173,9 @@ pub fn render_user_message(msg: &UserMessage, current_user_id: Option<&str>) -> 
     }
 }
 
-pub fn render_error_message(msg: &ErrorMessage) -> Html {
+pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
     if msg.is_overload() {
-        return render_overload_error(msg);
+        return render_overload_error(msg, timestamp);
     }
 
     let message = msg.display_message();
@@ -179,7 +183,7 @@ pub fn render_error_message(msg: &ErrorMessage) -> Html {
 
     html! {
         <div class="claude-message error-message-display">
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge result error">{ "Error" }</span>
                 {
                     if let Some(err_type) = error_type {
@@ -196,10 +200,10 @@ pub fn render_error_message(msg: &ErrorMessage) -> Html {
     }
 }
 
-pub fn render_portal_message(msg: &PortalMessage) -> Html {
+pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Html {
     html! {
         <div class="claude-message portal-message">
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge portal">{ "Portal" }</span>
             </div>
             <div class="message-body">
@@ -266,12 +270,12 @@ fn format_file_size(bytes: u64) -> String {
     }
 }
 
-fn render_overload_error(msg: &ErrorMessage) -> Html {
+fn render_overload_error(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
     let request_id = msg.request_id.as_deref().unwrap_or("unknown");
 
     html! {
         <div class="claude-message overload-message">
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge overload">{ "API Busy" }</span>
             </div>
             <div class="message-body">
@@ -292,7 +296,7 @@ fn render_overload_error(msg: &ErrorMessage) -> Html {
     }
 }
 
-pub fn render_rate_limit_event(msg: &RateLimitEventMessage) -> Html {
+pub fn render_rate_limit_event(msg: &RateLimitEventMessage, timestamp: Option<&str>) -> Html {
     let info = msg.rate_limit_info.as_ref();
     let status = info.and_then(|i| i.status.as_deref()).unwrap_or("unknown");
     let rate_type = info
@@ -322,7 +326,7 @@ pub fn render_rate_limit_event(msg: &RateLimitEventMessage) -> Html {
 
     html! {
         <div class="claude-message rate-limit-message">
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge rate-limit">{ "Rate Limit" }</span>
             </div>
             <div class="message-body">
@@ -363,7 +367,7 @@ pub fn render_rate_limit_event(msg: &RateLimitEventMessage) -> Html {
     }
 }
 
-pub fn render_system_message(msg: &SystemMessage) -> Html {
+pub fn render_system_message(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
     let subtype = msg.subtype.as_deref().unwrap_or("system");
 
     // Check if this is a compaction-related message via subtype or status field
@@ -387,7 +391,7 @@ pub fn render_system_message(msg: &SystemMessage) -> Html {
     }
 
     if subtype == "task_started" {
-        return render_task_started(msg);
+        return render_task_started(msg, timestamp);
     }
 
     if subtype == "task_progress" {
@@ -395,7 +399,7 @@ pub fn render_system_message(msg: &SystemMessage) -> Html {
     }
 
     if subtype == "task_notification" {
-        return render_task_notification(msg);
+        return render_task_notification(msg, timestamp);
     }
 
     if subtype == "init" || subtype == "status" {
@@ -403,7 +407,7 @@ pub fn render_system_message(msg: &SystemMessage) -> Html {
     }
 
     html! {
-        <div class="claude-message system-message compact">
+        <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
             <span class="message-type-badge system">{ subtype }</span>
         </div>
     }
@@ -502,7 +506,7 @@ fn render_compaction_completed(msg: &SystemMessage) -> Html {
     }
 }
 
-fn render_task_started(msg: &SystemMessage) -> Html {
+fn render_task_started(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
     let extra = msg.extra.as_ref();
     let description = extra
         .and_then(|v| v.get("description").and_then(|d| d.as_str()))
@@ -522,7 +526,7 @@ fn render_task_started(msg: &SystemMessage) -> Html {
 
     html! {
         <div class="claude-message task-message compact" title={format!("Task ID: {}", task_id)}>
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge task">{ "Task Started" }</span>
                 <span class="task-type-badge">{ type_label }</span>
                 <span class="task-description-inline">{ description }</span>
@@ -531,7 +535,7 @@ fn render_task_started(msg: &SystemMessage) -> Html {
     }
 }
 
-fn render_task_notification(msg: &SystemMessage) -> Html {
+fn render_task_notification(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
     let extra = msg.extra.as_ref();
     let typed_status = extra
         .and_then(|v| v.get("status"))
@@ -557,7 +561,7 @@ fn render_task_notification(msg: &SystemMessage) -> Html {
     html! {
         <div class={classes!("claude-message", "task-message", status_class)}
              title={format!("Task ID: {}", task_id)}>
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class={classes!("message-type-badge", "task", status_class)}>
                     { if is_failed { "Task Failed" } else { "Task Completed" } }
                 </span>
@@ -590,7 +594,7 @@ fn render_task_notification(msg: &SystemMessage) -> Html {
     }
 }
 
-pub fn render_assistant_message(msg: &AssistantMessage) -> Html {
+pub fn render_assistant_message(msg: &AssistantMessage, timestamp: Option<&str>) -> Html {
     let blocks = msg
         .message
         .as_ref()
@@ -620,7 +624,7 @@ pub fn render_assistant_message(msg: &AssistantMessage) -> Html {
 
     html! {
         <div class="claude-message assistant-message">
-            <div class="message-header">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge assistant">{ "Assistant" }</span>
                 {
                     if let Some(short_name) = shorten_model_name(model) {

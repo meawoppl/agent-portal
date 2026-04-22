@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.10
+
+- Add token renewal button in settings credentials panel
+- Add local-time tooltip on message headers
+
 ## 2.4.9
 
 - Fix pill scroll-into-view when tabbing to off-screen sessions

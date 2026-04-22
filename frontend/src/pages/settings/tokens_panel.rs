@@ -2,6 +2,7 @@ use crate::utils;
 use gloo_net::http::Request;
 use shared::{
     CreateProxyTokenRequest, CreateProxyTokenResponse, ProxyTokenInfo, ProxyTokenListResponse,
+    RenewProxyTokenRequest,
 };
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -60,12 +61,14 @@ pub async fn fetch_tokens_from_api() -> Option<Vec<ProxyTokenInfo>> {
 struct TokenRowProps {
     token: ProxyTokenInfo,
     on_revoke: Callback<Uuid>,
+    on_renew: Callback<Uuid>,
 }
 
 #[function_component(TokenRow)]
 fn token_row(props: &TokenRowProps) -> Html {
     let token = &props.token;
     let on_revoke = props.on_revoke.clone();
+    let on_renew = props.on_renew.clone();
     let token_id = token.id;
 
     let days_left = days_until_expiration(&token.expires_at);
@@ -104,6 +107,13 @@ fn token_row(props: &TokenRowProps) -> Html {
         on_revoke.emit(token_id);
     });
 
+    let on_renew_click = {
+        let on_renew = on_renew.clone();
+        Callback::from(move |_| {
+            on_renew.emit(token_id);
+        })
+    };
+
     html! {
         <tr class={if token.revoked || is_expired { "token-row disabled" } else { "token-row" }}>
             <td class="token-name">{ &token.name }</td>
@@ -114,6 +124,11 @@ fn token_row(props: &TokenRowProps) -> Html {
             <td class="token-expires">{ utils::format_timestamp(&token.expires_at) }</td>
             <td class={status_class}>{ status_text }</td>
             <td class="token-actions">
+                if !token.revoked {
+                    <button class="renew-button" onclick={on_renew_click}>
+                        { "Renew" }
+                    </button>
+                }
                 if !token.revoked && !is_expired {
                     <button class="revoke-button" onclick={on_revoke_click}>
                         { "Revoke" }
@@ -207,6 +222,57 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
 
             confirm_action.set(Some((
                 "Revoke this token? Connected proxies will be disconnected.".to_string(),
+                action,
+            )));
+        })
+    };
+
+    let renewed_token = use_state(|| None::<CreateProxyTokenResponse>);
+
+    let on_renew_token = {
+        let confirm_action = confirm_action.clone();
+        let renewed_token = renewed_token.clone();
+        let fetch_tokens = fetch_tokens.clone();
+
+        Callback::from(move |token_id: Uuid| {
+            let confirm_action_inner = confirm_action.clone();
+            let renewed_token = renewed_token.clone();
+            let fetch_tokens = fetch_tokens.clone();
+
+            let action = Callback::from(move |_: MouseEvent| {
+                let confirm_action_inner = confirm_action_inner.clone();
+                let renewed_token = renewed_token.clone();
+                let fetch_tokens = fetch_tokens.clone();
+
+                spawn_local(async move {
+                    let api_endpoint =
+                        utils::api_url(&format!("/api/proxy-tokens/{}/renew", token_id));
+                    let request_body = RenewProxyTokenRequest {
+                        expires_in_days: 30,
+                    };
+
+                    match Request::post(&api_endpoint)
+                        .json(&request_body)
+                        .unwrap()
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if let Ok(data) = response.json::<CreateProxyTokenResponse>().await {
+                                renewed_token.set(Some(data));
+                                fetch_tokens.emit(());
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to renew token: {:?}", e);
+                        }
+                    }
+                    confirm_action_inner.set(None);
+                });
+            });
+
+            confirm_action.set(Some((
+                "Renew this token for 30 days? You will need to update your proxy with the new token.".to_string(),
                 action,
             )));
         })
@@ -392,6 +458,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                                             key={token.id.to_string()}
                                             token={token.clone()}
                                             on_revoke={on_revoke_token.clone()}
+                                            on_renew={on_renew_token.clone()}
                                         />
                                     }
                                 }) }
@@ -403,6 +470,36 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                     </p>
                 }
             </section>
+
+            if let Some(token_response) = &*renewed_token {
+                <div class="modal-overlay" onclick={{
+                    let renewed_token = renewed_token.clone();
+                    Callback::from(move |_| renewed_token.set(None))
+                }}>
+                    <div class="confirm-modal token-renewed-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                        <div class="token-created-success">
+                            <h3>{ "Token Renewed" }</h3>
+                            <p class="warning">
+                                { "Copy this token now. It will not be shown again!" }
+                            </p>
+                            <div class="token-display">
+                                <code>{ &token_response.token }</code>
+                            </div>
+                            <div class="init-url">
+                                <label>{ "Or use this initialization URL:" }</label>
+                                <code>{ &token_response.init_url }</code>
+                            </div>
+                            <p class="expires-info">
+                                { format!("Expires: {}", utils::format_timestamp(&token_response.expires_at)) }
+                            </p>
+                            <button onclick={{
+                                let renewed_token = renewed_token.clone();
+                                Callback::from(move |_| renewed_token.set(None))
+                            }}>{ "Done" }</button>
+                        </div>
+                    </div>
+                </div>
+            }
 
             if let Some((message, action)) = &*confirm_action {
                 <div class="modal-overlay" onclick={cancel_confirm.clone()}>
