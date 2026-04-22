@@ -514,12 +514,12 @@ impl Component for SessionView {
                 self.messages = messages
                     .into_iter()
                     .map(|m| {
-                        // Inject _sender into user messages from API metadata
-                        if m.role == "user" && (m.user_id.is_some() || m.sender_name.is_some()) {
-                            if let Ok(mut val) =
-                                serde_json::from_str::<serde_json::Value>(&m.content)
-                            {
-                                if let Some(obj) = val.as_object_mut() {
+                        if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&m.content) {
+                            if let Some(obj) = val.as_object_mut() {
+                                // Inject _sender into user messages from API metadata
+                                if m.role == "user"
+                                    && (m.user_id.is_some() || m.sender_name.is_some())
+                                {
                                     obj.insert(
                                         "_sender".to_string(),
                                         serde_json::json!({
@@ -528,8 +528,13 @@ impl Component for SessionView {
                                         }),
                                     );
                                 }
-                                return val.to_string();
+                                // Inject _created_at for tooltip display
+                                obj.insert(
+                                    "_created_at".to_string(),
+                                    serde_json::Value::String(m.created_at.clone()),
+                                );
                             }
+                            return val.to_string();
                         }
                         m.content
                     })
@@ -1341,6 +1346,22 @@ impl SessionView {
         ctx.props()
             .on_activity
             .emit((ctx.props().session.id, msg_type, js_sys::Date::now()));
+        // Inject _created_at for tooltip display
+        let output = if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&output) {
+            if let Some(obj) = val.as_object_mut() {
+                let now_iso = js_sys::Date::new_0()
+                    .to_iso_string()
+                    .as_string()
+                    .unwrap_or_default();
+                obj.insert(
+                    "_created_at".to_string(),
+                    serde_json::Value::String(now_iso),
+                );
+            }
+            val.to_string()
+        } else {
+            output
+        };
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {
             let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;

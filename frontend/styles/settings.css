@@ -249,6 +249,30 @@
 }
 
 /* Action buttons - use specific selectors to override dashboard.css */
+.settings-container .renew-button {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+    position: static;
+    opacity: 1;
+    width: auto;
+    height: auto;
+    top: auto;
+    right: auto;
+    z-index: auto;
+    margin-right: 0.5rem;
+}
+
+.settings-container .renew-button:hover {
+    background: var(--accent);
+    color: white;
+}
+
 .settings-container .revoke-button,
 .settings-container .delete-button {
     background: transparent;
