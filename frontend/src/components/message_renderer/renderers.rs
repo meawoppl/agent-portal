@@ -17,6 +17,52 @@ fn preserve_user_newlines(text: &str) -> String {
     text.replace('\n', "  \n")
 }
 
+fn extract_ephemeral_cache(usage: &UsageInfo) -> (u64, u64) {
+    let mut e1h: u64 = 0;
+    let mut e5m: u64 = 0;
+    if let Some(cc) = &usage.cache_creation {
+        if let Some(v) = cc.get("ephemeral_1h_input_tokens").and_then(|v| v.as_u64()) {
+            e1h = v;
+        }
+        if let Some(v) = cc.get("ephemeral_5m_input_tokens").and_then(|v| v.as_u64()) {
+            e5m = v;
+        }
+    }
+    (e1h, e5m)
+}
+
+fn build_model_tooltip(model: &str, usage: Option<&UsageInfo>) -> String {
+    let mut parts = vec![model.to_string()];
+    if let Some(u) = usage {
+        if let Some(tier) = &u.service_tier {
+            parts.push(tier.clone());
+        }
+        if let Some(geo) = &u.inference_geo {
+            parts.push(geo.clone());
+        }
+    }
+    parts.join(" | ")
+}
+
+fn build_usage_tooltip(usage: Option<&UsageInfo>) -> String {
+    usage
+        .map(|u| {
+            let mut tooltip = format!(
+                "Input: {} | Output: {} | Cache read: {} | Cache created: {}",
+                u.input_tokens.unwrap_or(0),
+                u.output_tokens.unwrap_or(0),
+                u.cache_read_input_tokens.unwrap_or(0),
+                u.cache_creation_input_tokens.unwrap_or(0)
+            );
+            let (e1h, e5m) = extract_ephemeral_cache(u);
+            if e1h > 0 || e5m > 0 {
+                tooltip.push_str(&format!(" | Ephemeral 1h: {} | Ephemeral 5m: {}", e1h, e5m));
+            }
+            tooltip
+        })
+        .unwrap_or_default()
+}
+
 // --- Message renderers ---
 
 pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> Html {
@@ -24,7 +70,10 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
     let mut total_input_tokens: u64 = 0;
     let mut total_cache_read: u64 = 0;
     let mut total_cache_created: u64 = 0;
+    let mut total_ephemeral_1h: u64 = 0;
+    let mut total_ephemeral_5m: u64 = 0;
     let mut model_name = String::new();
+    let mut first_usage: Option<UsageInfo> = None;
 
     for json in messages {
         if let Ok(ClaudeMessage::Assistant(msg)) = serde_json::from_str::<ClaudeMessage>(json) {
@@ -34,6 +83,12 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
                     total_input_tokens += usage.input_tokens.unwrap_or(0);
                     total_cache_read += usage.cache_read_input_tokens.unwrap_or(0);
                     total_cache_created += usage.cache_creation_input_tokens.unwrap_or(0);
+                    let (e1h, e5m) = extract_ephemeral_cache(usage);
+                    total_ephemeral_1h += e1h;
+                    total_ephemeral_5m += e5m;
+                    if first_usage.is_none() {
+                        first_usage = Some(usage.clone());
+                    }
                 }
                 if model_name.is_empty() {
                     if let Some(m) = &message.model {
@@ -45,10 +100,17 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
     }
 
     let count = messages.len();
-    let usage_tooltip = format!(
+    let mut usage_tooltip = format!(
         "Input: {} | Output: {} | Cache read: {} | Cache created: {} | {} messages",
         total_input_tokens, total_output_tokens, total_cache_read, total_cache_created, count
     );
+    if total_ephemeral_1h > 0 || total_ephemeral_5m > 0 {
+        usage_tooltip.push_str(&format!(
+            " | Ephemeral 1h: {} | Ephemeral 5m: {}",
+            total_ephemeral_1h, total_ephemeral_5m
+        ));
+    }
+    let model_tooltip = build_model_tooltip(&model_name, first_usage.as_ref());
 
     html! {
         <div class="claude-message assistant-message">
@@ -63,7 +125,7 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
                 }
                 {
                     if let Some(short_name) = shorten_model_name(&model_name) {
-                        html! { <span class="model-name" title={model_name.clone()}>{ short_name }</span> }
+                        html! { <span class="model-name" title={model_tooltip.clone()}>{ short_name }</span> }
                     } else {
                         html! {}
                     }
@@ -609,18 +671,11 @@ pub fn render_assistant_message(msg: &AssistantMessage, timestamp: Option<&str>)
         .and_then(|m| m.model.as_ref())
         .map(|s| s.as_str())
         .unwrap_or("");
+    let stop_reason = msg.message.as_ref().and_then(|m| m.stop_reason.as_deref());
+    let is_truncated = stop_reason == Some("max_tokens");
 
-    let usage_tooltip = usage
-        .map(|u| {
-            format!(
-                "Input: {} | Output: {} | Cache read: {} | Cache created: {}",
-                u.input_tokens.unwrap_or(0),
-                u.output_tokens.unwrap_or(0),
-                u.cache_read_input_tokens.unwrap_or(0),
-                u.cache_creation_input_tokens.unwrap_or(0)
-            )
-        })
-        .unwrap_or_default();
+    let model_tooltip = build_model_tooltip(model, usage);
+    let usage_tooltip = build_usage_tooltip(usage);
 
     html! {
         <div class="claude-message assistant-message">
@@ -628,7 +683,14 @@ pub fn render_assistant_message(msg: &AssistantMessage, timestamp: Option<&str>)
                 <span class="message-type-badge assistant">{ "Assistant" }</span>
                 {
                     if let Some(short_name) = shorten_model_name(model) {
-                        html! { <span class="model-name" title={model.to_string()}>{ short_name }</span> }
+                        html! { <span class="model-name" title={model_tooltip}>{ short_name }</span> }
+                    } else {
+                        html! {}
+                    }
+                }
+                {
+                    if is_truncated {
+                        html! { <span class="truncated-badge" title="Response was cut off (max_tokens)">{ "truncated" }</span> }
                     } else {
                         html! {}
                     }

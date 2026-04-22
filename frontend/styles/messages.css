@@ -176,6 +176,16 @@
     cursor: help;
 }
 
+.truncated-badge {
+    color: #e0af68;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.1rem 0.4rem;
+    background: rgba(224, 175, 104, 0.15);
+    border-radius: 3px;
+    cursor: help;
+}
+
 .assistant-message .usage-badge {
     display: flex;
     align-items: center;

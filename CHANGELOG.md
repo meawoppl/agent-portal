@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.13
+
+- Show truncation warning when assistant message hits max_tokens
+- Add service tier and inference region to model name tooltip
+- Add ephemeral cache details to usage tooltip
+
 ## 2.4.12
 
 - Show cost, stop reason, fast mode, errors, and permission denials in result stats bar

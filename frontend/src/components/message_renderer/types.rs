@@ -138,6 +138,7 @@ pub struct MessageContent {
     pub id: Option<String>,
     pub model: Option<String>,
     pub role: Option<String>,
+    pub stop_reason: Option<String>,
     pub content: Option<Vec<ContentBlock>>,
     pub usage: Option<UsageInfo>,
 }
@@ -227,6 +228,9 @@ pub struct UsageInfo {
     pub output_tokens: Option<u64>,
     pub cache_read_input_tokens: Option<u64>,
     pub cache_creation_input_tokens: Option<u64>,
+    pub service_tier: Option<String>,
+    pub inference_geo: Option<String>,
+    pub cache_creation: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
