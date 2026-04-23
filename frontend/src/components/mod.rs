@@ -4,7 +4,7 @@ mod cron_describe;
 mod diff;
 pub mod expandable;
 mod launch_dialog;
-mod markdown;
+pub(crate) mod markdown;
 pub mod message_renderer;
 mod proxy_token_setup;
 mod schedule_dialog;

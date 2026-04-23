@@ -248,7 +248,7 @@ fn code_block(props: &CodeBlockProps) -> Html {
             <button class={button_class} onclick={on_copy} title="Copy to clipboard">
                 { button_label }
             </button>
-            <code class={classes!("md-code", props.lang_class.clone())}>{ &props.code_text }</code>
+            <code class={classes!("md-code", props.lang_class.clone())}>{ linkify_urls(&props.code_text) }</code>
         </pre>
     }
 }
@@ -394,7 +394,7 @@ fn extract_text(events: &[Event]) -> String {
 
 /// Convert raw URLs in text to clickable links
 /// Handles http:// and https:// URLs that aren't already in markdown link syntax
-fn linkify_urls(text: &str) -> Html {
+pub fn linkify_urls(text: &str) -> Html {
     let mut parts: Vec<Html> = Vec::new();
     let mut remaining = text;
 
