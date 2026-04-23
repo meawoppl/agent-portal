@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.15
+
+- Linkify URLs in code blocks, tool results, expandable text, and thinking blocks
+
 ## 2.4.14
 
 - Show session init info bar with model, version, fast mode, MCP servers, and tool count

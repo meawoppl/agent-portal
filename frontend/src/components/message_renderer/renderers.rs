@@ -800,7 +800,7 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
                             html! {
                                 <div class="thinking-block">
                                     <span class="thinking-label">{ "thinking" }</span>
-                                    <div class="thinking-content">{ thinking }</div>
+                                    <div class="thinking-content">{ crate::components::markdown::linkify_urls(thinking) }</div>
                                 </div>
                             }
                         }

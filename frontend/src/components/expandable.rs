@@ -1,3 +1,4 @@
+use super::markdown::linkify_urls;
 use super::message_renderer::truncate_str;
 use yew::prelude::*;
 
@@ -22,9 +23,9 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
 
     if text.len() <= props.max_len {
         return match props.tag.as_str() {
-            "span" => html! { <span class={props.class.clone()}>{ text }</span> },
-            "div" => html! { <div class={props.class.clone()}>{ text }</div> },
-            _ => html! { <pre class={props.class.clone()}>{ text }</pre> },
+            "span" => html! { <span class={props.class.clone()}>{ linkify_urls(text) }</span> },
+            "div" => html! { <div class={props.class.clone()}>{ linkify_urls(text) }</div> },
+            _ => html! { <pre class={props.class.clone()}>{ linkify_urls(text) }</pre> },
         };
     }
 
@@ -50,19 +51,19 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
     match props.tag.as_str() {
         "span" => html! {
             <span class={props.class.clone()}>
-                { &display }
+                { linkify_urls(&display) }
                 <span class="expandable-toggle" onclick={toggle}>{ toggle_label }</span>
             </span>
         },
         "div" => html! {
             <div class={props.class.clone()}>
-                { &display }
+                { linkify_urls(&display) }
                 <span class="expandable-toggle" onclick={toggle}>{ toggle_label }</span>
             </div>
         },
         _ => html! {
             <pre class={props.class.clone()}>
-                { &display }
+                { linkify_urls(&display) }
                 <span class="expandable-toggle" onclick={toggle}>{ toggle_label }</span>
             </pre>
         },
