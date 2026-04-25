@@ -93,7 +93,7 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
                 { for all_lines.iter().enumerate().map(|(i, line)| html! {
                     <div class="write-line">
                         <span class="line-number">{ format!("{:>4}", i + 1) }</span>
-                        <span class="line-content">{ *line }</span>
+                        <span class="line-content">{ linkify_urls(line) }</span>
                     </div>
                 })}
             </pre>
@@ -120,7 +120,7 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
             { for visible.iter().enumerate().map(|(i, line)| html! {
                 <div class="write-line">
                     <span class="line-number">{ format!("{:>4}", i + 1) }</span>
-                    <span class="line-content">{ *line }</span>
+                    <span class="line-content">{ linkify_urls(line) }</span>
                 </div>
             })}
             <div class="write-truncated expandable-toggle" onclick={toggle}>

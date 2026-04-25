@@ -256,7 +256,7 @@ pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html
                 }
             </div>
             <div class="message-body">
-                <div class="error-text">{ message }</div>
+                <div class="error-text">{ crate::components::markdown::linkify_urls(message) }</div>
             </div>
         </div>
     }
@@ -1359,7 +1359,7 @@ fn try_render_api_error(result_text: Option<&str>) -> Option<Html> {
                     <div class="error-icon">{ "⚠" }</div>
                     <div class="error-details">
                         <div class="error-type-display">{ display_type }</div>
-                        <div class="error-message-text">{ error_message }</div>
+                        <div class="error-message-text">{ crate::components::markdown::linkify_urls(error_message) }</div>
                     </div>
                 </div>
                 {

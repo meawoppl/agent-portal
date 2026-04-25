@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.16
+
+- Linkify URLs in inline code spans, error messages, and file content previews
+
 ## 2.4.15
 
 - Linkify URLs in code blocks, tool results, expandable text, and thinking blocks
