@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.17
+
+- Optimistic send: user messages appear instantly with a pending indicator, confirmed when server echoes back
+
 ## 2.4.16
 
 - Linkify URLs in inline code spans, error messages, and file content previews

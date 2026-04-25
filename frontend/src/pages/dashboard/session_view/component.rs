@@ -1145,6 +1145,19 @@ impl SessionView {
         let session_id = ctx.props().session.id;
         ctx.props().on_message_sent.emit(session_id);
 
+        // Optimistic local echo: show the message immediately with _pending flag
+        let now_iso = js_sys::Date::new_0()
+            .to_iso_string()
+            .as_string()
+            .unwrap_or_default();
+        let optimistic_msg = serde_json::json!({
+            "type": "user",
+            "content": input,
+            "_pending": true,
+            "_created_at": now_iso,
+        });
+        self.messages.push(optimistic_msg.to_string());
+
         // Send the text
         if let Some(ref sender) = self.ws_sender {
             let msg = ClientToServer::ClaudeInput {
@@ -1343,9 +1356,11 @@ impl SessionView {
             }
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
-        ctx.props()
-            .on_activity
-            .emit((ctx.props().session.id, msg_type, js_sys::Date::now()));
+        ctx.props().on_activity.emit((
+            ctx.props().session.id,
+            msg_type.clone(),
+            js_sys::Date::now(),
+        ));
         // Inject _created_at for tooltip display
         let output = if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&output) {
             if let Some(obj) = val.as_object_mut() {
@@ -1362,6 +1377,25 @@ impl SessionView {
         } else {
             output
         };
+        // If this is a confirmed user message from the server, replace the
+        // optimistic pending message instead of appending a duplicate.
+        if msg_type == "user" {
+            if let Some(pos) = self.messages.iter().position(|m| {
+                serde_json::from_str::<serde_json::Value>(m)
+                    .ok()
+                    .and_then(|v| v.get("_pending")?.as_bool())
+                    .unwrap_or(false)
+            }) {
+                self.messages[pos] = output;
+                self.last_message_timestamp = Some(
+                    js_sys::Date::new_0()
+                        .to_iso_string()
+                        .as_string()
+                        .unwrap_or_default(),
+                );
+                return true;
+            }
+        }
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {
             let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;

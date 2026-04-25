@@ -180,12 +180,16 @@ pub fn render_user_message(
         Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
         _ => "You".to_string(),
     };
+    let pending_class = if msg.pending { " pending" } else { "" };
 
     if let Some(text) = &msg.content {
         html! {
-            <div class="claude-message user-message">
+            <div class={format!("claude-message user-message{}", pending_class)}>
                 <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                     <span class="message-type-badge user">{ &label }</span>
+                    if msg.pending {
+                        <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
+                    }
                 </div>
                 <div class="message-body">
                     <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>

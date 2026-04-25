@@ -43,6 +43,8 @@ pub struct UserMessage {
     pub message: Option<UserMessageContent>,
     #[serde(default, rename = "_sender")]
     pub sender: Option<MessageSender>,
+    #[serde(default, rename = "_pending")]
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -542,6 +542,23 @@
     border-left: 3px solid var(--accent);
 }
 
+.user-message.pending {
+    opacity: 0.6;
+    border-left-style: dashed;
+}
+
+.pending-indicator {
+    color: var(--accent);
+    font-size: 1.2rem;
+    line-height: 1;
+    animation: pending-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
 .user-message .user-text {
     color: var(--text-primary);
     line-height: 1.6;
