@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.18
+
+- Fix iOS Safari scroll bounce creating stuck dead space below messages
+
 ## 2.4.17
 
 - Optimistic send: user messages appear instantly with a pending indicator, confirmed when server echoes back

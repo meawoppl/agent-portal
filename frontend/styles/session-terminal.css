@@ -133,6 +133,7 @@
     position: relative;
     overflow: hidden;
     min-height: 0;
+    overscroll-behavior: contain;
 }
 
 .session-view-messages {
@@ -141,4 +142,5 @@
     overflow-x: hidden;
     padding: 1rem 1.5rem 0;
     min-width: 0; /* Allow flex child to shrink below content size */
+    overscroll-behavior: contain; /* Prevent iOS rubber-banding from escaping this container */
 }

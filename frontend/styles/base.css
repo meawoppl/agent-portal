@@ -45,5 +45,6 @@ html, body {
     background: var(--bg-dark);
     color: var(--text-primary);
     min-height: 100vh;
+    overscroll-behavior: none; /* Prevent iOS bounce/rubber-banding on the document */
 }
 
