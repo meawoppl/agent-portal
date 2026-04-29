@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.19
+
+- Fix iOS keyboard gap: use position:fixed on mobile to track visual viewport
+
 ## 2.4.18
 
 - Fix iOS Safari scroll bounce creating stuck dead space below messages

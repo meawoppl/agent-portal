@@ -12,8 +12,13 @@
 
 /* --- Tablet + phone (max-width: 768px) ---------------------------------- */
 @media (max-width: 768px) {
-    /* Ensure dashboard fills exactly the viewport on mobile */
+    /* Ensure dashboard fills exactly the visual viewport on mobile.
+       position:fixed + inset:0 tracks the visual viewport on iOS Safari,
+       which correctly excludes the keyboard — unlike 100dvh which can lag. */
     .focus-flow-container {
+        position: fixed;
+        inset: 0;
+        height: auto;
         overflow: hidden;
     }
 
