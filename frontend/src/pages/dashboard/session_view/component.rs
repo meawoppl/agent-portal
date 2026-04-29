@@ -1384,11 +1384,24 @@ impl SessionView {
         } else {
             output
         };
-        // When a confirmed user message arrives from the server, remove the
-        // oldest pending send so it doesn't duplicate. The confirmed version
-        // appends to self.messages at the natural scroll position.
+        // When a confirmed user message arrives from the server, find and remove
+        // the matching pending send by content so lost messages don't consume
+        // unrelated pending entries.
         if msg_type == "user" && !self.pending_sends.is_empty() {
-            self.pending_sends.remove(0);
+            let echo_content = serde_json::from_str::<serde_json::Value>(&output)
+                .ok()
+                .and_then(|v| v.get("content").cloned());
+            if let Some(ref echo) = echo_content {
+                if let Some(pos) = self.pending_sends.iter().position(|pending| {
+                    serde_json::from_str::<serde_json::Value>(pending)
+                        .ok()
+                        .and_then(|v| v.get("content").cloned())
+                        .as_ref()
+                        == Some(echo)
+                }) {
+                    self.pending_sends.remove(pos);
+                }
+            }
         }
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {

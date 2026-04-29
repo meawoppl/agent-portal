@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.20
+
+- Match pending sends by content when draining on server echo
+
 ## 2.4.19
 
 - Fix iOS keyboard gap: use position:fixed on mobile to track visual viewport
