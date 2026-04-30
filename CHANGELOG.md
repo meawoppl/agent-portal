@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.20
+
+- Fix false autolinks: angle-bracket Rust paths like `<crate::Type>` no longer render as clickable URLs
+
 ## 2.4.19
 
 - Fix iOS keyboard gap: use position:fixed on mobile to track visual viewport
