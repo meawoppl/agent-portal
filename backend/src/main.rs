@@ -811,6 +811,14 @@ async fn run_session_age_cleanup(app_state: &Arc<AppState>) {
         return;
     };
 
+    // Set a 5-second timeout for cleanup queries
+    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
+        tracing::warn!(
+            "Failed to set statement_timeout for session age cleanup: {}",
+            e
+        );
+    }
+
     let cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(i64::from(max_days));
 
     let old_sessions: Vec<models::Session> = match schema::sessions::table

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.25
+
+- Add 5-second query timeout to retention cleanup tasks (#616)
+- Cap retention deletes at 1000 messages per cycle to avoid long-running queries
+
 ## 2.4.24
 
 - Limit launcher registrations to 10 per user (#617)
