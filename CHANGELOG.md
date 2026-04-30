@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.22
+
+- Fix stuck reconnect loop: drop pending messages after 5 consecutive replay failures (#650)
+
 ## 2.4.21
 
 - Click truncated bash commands to expand full command text

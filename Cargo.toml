@@ -3,7 +3,7 @@ members = ["shared", "backend", "frontend", "proxy", "claude-session-lib", "laun
 resolver = "2"
 
 [workspace.package]
-version = "2.4.21"
+version = "2.4.22"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
