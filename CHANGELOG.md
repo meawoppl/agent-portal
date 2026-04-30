@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.21
+
+- Click truncated bash commands to expand full command text
+
 ## 2.4.20
 
 - Fix false autolinks: angle-bracket Rust paths like `<crate::Type>` no longer render as clickable URLs

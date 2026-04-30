@@ -297,6 +297,15 @@
 
 .bash-command-inline {
     max-width: 70%;
+    cursor: pointer;
+}
+
+.bash-command-inline.expanded {
+    white-space: pre-wrap;
+    overflow: visible;
+    text-overflow: unset;
+    max-width: none;
+    flex-basis: 100%;
 }
 
 .tool-header-spacer {
