@@ -147,6 +147,35 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         return;
     }
 
+    // Reject if user already has too many launchers
+    const MAX_LAUNCHERS_PER_USER: usize = 10;
+    let user_launcher_count = app_state
+        .session_manager
+        .launchers
+        .iter()
+        .filter(|entry| entry.value().user_id == user_id)
+        .count();
+
+    if user_launcher_count >= MAX_LAUNCHERS_PER_USER {
+        error!(
+            "User {} has {} launchers, rejecting new registration (max {})",
+            user_id, user_launcher_count, MAX_LAUNCHERS_PER_USER
+        );
+        let _ = ws_sender
+            .send(ServerToLauncher::LauncherRegisterAck {
+                success: false,
+                launcher_id,
+                fatal: true,
+                error: Some(format!(
+                    "You already have {} launchers connected (max {}). \
+                     Disconnect an existing launcher before starting a new one.",
+                    user_launcher_count, MAX_LAUNCHERS_PER_USER
+                )),
+            })
+            .await;
+        return;
+    }
+
     // Send RegisterAck
     let _ = ws_sender
         .send(ServerToLauncher::LauncherRegisterAck {
