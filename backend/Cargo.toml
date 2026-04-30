@@ -75,6 +75,7 @@ memory-serve = "2.1"
 ws-bridge = { workspace = true, features = ["server"] }
 tower_governor = "0.8.0"
 governor = "0.8"
+base64 = "0.22.1"
 
 [build-dependencies]
 memory-serve = "2.1"
