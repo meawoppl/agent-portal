@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.31
+
+- Add stable keys to grouped assistant messages to preserve expanded state on new messages
+
 ## 2.4.30
 
 - Disable Google STT single-utterance mode to prevent immediate session end on quiet/silent mic inputs (common on macOS)

@@ -29,6 +29,13 @@ pub enum MessageGroup {
     AssistantGroup(Vec<String>),
 }
 
+impl MessageGroup {
+    /// Stable key for this group based on its position in the message list.
+    pub fn key(&self, index: usize) -> yew::virtual_dom::Key {
+        yew::virtual_dom::Key::from(format!("g{}", index))
+    }
+}
+
 /// Check if a message should be grouped with assistant messages
 /// This includes assistant messages AND tool result messages (user messages containing only tool results)
 fn should_group_with_assistant(json: &str) -> bool {

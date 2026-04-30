@@ -1038,12 +1038,13 @@ impl Component for SessionView {
                 <div class="session-view-scroll-area">
                     <div class="session-view-messages" ref={self.messages_ref.clone()}>
                         {
-                            group_messages(&self.messages).into_iter().map(|group| {
-                                html! { <MessageGroupRenderer group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
+                            group_messages(&self.messages).into_iter().enumerate().map(|(i, group)| {
+                                let key = group.key(i);
+                                html! { <MessageGroupRenderer {key} group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
                             }).collect::<Html>()
                         }
-                        { for self.pending_sends.iter().map(|json| {
-                            html! { <MessageRenderer json={json.clone()} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
+                        { for self.pending_sends.iter().enumerate().map(|(i, json)| {
+                            html! { <MessageRenderer key={format!("p{}", i)} json={json.clone()} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
                         })}
                     </div>
                     { self.render_tasks_sidebar(ctx) }
