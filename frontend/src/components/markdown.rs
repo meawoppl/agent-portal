@@ -81,15 +81,22 @@ fn render_tag(tag: &Tag, events: &[Event]) -> (Html, usize) {
             dest_url, title, ..
         } => {
             let href = dest_url.to_string();
-            let title_attr = if title.is_empty() {
-                None
+            // Guard against false autolinks from angle-bracket syntax like
+            // <crate::path::Type> which pulldown-cmark interprets as URLs.
+            if !is_valid_url(&href) && !href.starts_with('#') && !href.starts_with('/') {
+                // Not a real URL — render as plain text with angle brackets
+                html! { <><>{"<"}</>{ inner_html }<>{">"}</></> }
             } else {
-                Some(title.to_string())
-            };
-            html! {
-                <a href={href} title={title_attr} target="_blank" rel="noopener noreferrer" class="md-link">
-                    { inner_html }
-                </a>
+                let title_attr = if title.is_empty() {
+                    None
+                } else {
+                    Some(title.to_string())
+                };
+                html! {
+                    <a href={href} title={title_attr} target="_blank" rel="noopener noreferrer" class="md-link">
+                        { inner_html }
+                    </a>
+                }
             }
         }
         Tag::Image {
