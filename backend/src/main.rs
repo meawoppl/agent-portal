@@ -560,13 +560,16 @@ async fn main() -> anyhow::Result<()> {
     {
         let app_state = app_state.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
+                if app_state.session_manager.user_clients.is_empty() {
+                    continue;
+                }
                 broadcast_user_spend_updates(&app_state).await;
             }
         });
-        tracing::info!("Started user spend broadcast task (every 5 seconds)");
+        tracing::info!("Started user spend broadcast task (every 30 seconds)");
     }
 
     // Spawn background task to purge expired device flow codes (runs every 60 seconds)
@@ -679,61 +682,89 @@ async fn shutdown_signal(app_state: Arc<AppState>) {
 /// Query user spend from DB and broadcast to all connected web clients
 async fn broadcast_user_spend_updates(app_state: &Arc<AppState>) {
     use diesel::prelude::*;
-    use schema::sessions::dsl::*;
     use shared::{ServerToClient, SessionCost};
 
-    let user_ids = app_state.session_manager.get_all_user_ids();
+    let connected_user_ids = app_state.session_manager.get_all_user_ids();
+    if connected_user_ids.is_empty() {
+        return;
+    }
 
-    for user_id_val in user_ids {
-        let Ok(mut conn) = app_state.db_pool.get() else {
-            continue;
-        };
+    let Ok(mut conn) = app_state.db_pool.get() else {
+        tracing::error!("Failed to get DB connection for spend broadcast");
+        return;
+    };
 
-        // Query per-session costs and token usage for this user (active sessions only)
-        type CostRow = (uuid::Uuid, f64, i64, i64, i64, i64);
-        let result: Result<Vec<CostRow>, _> = sessions
-            .filter(user_id.eq(user_id_val))
-            .select((
-                id,
-                total_cost_usd,
-                input_tokens,
-                output_tokens,
-                cache_creation_tokens,
-                cache_read_tokens,
-            ))
-            .load(&mut conn);
+    // Single query: fetch all sessions with cost > 0 for all connected users
+    type CostRow = (uuid::Uuid, uuid::Uuid, f64, i64, i64, i64, i64);
+    let all_sessions: Vec<CostRow> = match schema::sessions::table
+        .filter(schema::sessions::user_id.eq_any(&connected_user_ids))
+        .filter(schema::sessions::total_cost_usd.gt(0.0))
+        .select((
+            schema::sessions::user_id,
+            schema::sessions::id,
+            schema::sessions::total_cost_usd,
+            schema::sessions::input_tokens,
+            schema::sessions::output_tokens,
+            schema::sessions::cache_creation_tokens,
+            schema::sessions::cache_read_tokens,
+        ))
+        .load(&mut conn)
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("Failed to query session costs for spend broadcast: {}", e);
+            return;
+        }
+    };
 
-        // Get total spend including deleted sessions (matches admin dashboard)
-        let total_spend = db::get_user_usage(&mut conn, user_id_val)
-            .map(|u| u.cost_usd)
-            .unwrap_or(0.0);
+    // Single query: fetch deleted session costs for all connected users
+    let deleted_costs: Vec<(uuid::Uuid, f64)> = schema::deleted_session_costs::table
+        .filter(schema::deleted_session_costs::user_id.eq_any(&connected_user_ids))
+        .filter(schema::deleted_session_costs::cost_usd.gt(0.0))
+        .select((
+            schema::deleted_session_costs::user_id,
+            schema::deleted_session_costs::cost_usd,
+        ))
+        .load(&mut conn)
+        .unwrap_or_default();
 
-        if let Ok(session_costs_data) = result {
-            let session_costs_vec: Vec<SessionCost> = session_costs_data
-                .into_iter()
-                .filter(|&(_, cost, ..)| cost > 0.0) // Only include sessions with costs
-                .map(
-                    |(sid, cost, inp, outp, cache_create, cache_read)| SessionCost {
-                        session_id: sid,
-                        total_cost_usd: cost,
-                        input_tokens: inp,
-                        output_tokens: outp,
-                        cache_creation_tokens: cache_create,
-                        cache_read_tokens: cache_read,
-                    },
-                )
-                .collect();
+    // Build a map of user_id -> deleted cost
+    let deleted_cost_map: std::collections::HashMap<uuid::Uuid, f64> =
+        deleted_costs.into_iter().collect();
 
-            // Only broadcast if there's any spend to report
-            if total_spend > 0.0 || !session_costs_vec.is_empty() {
-                app_state.session_manager.broadcast_to_user(
-                    &user_id_val,
-                    ServerToClient::UserSpendUpdate {
-                        total_spend_usd: total_spend,
-                        session_costs: session_costs_vec,
-                    },
-                );
-            }
+    // Group sessions by user_id
+    let mut user_sessions: std::collections::HashMap<uuid::Uuid, Vec<SessionCost>> =
+        std::collections::HashMap::new();
+    let mut user_active_cost: std::collections::HashMap<uuid::Uuid, f64> =
+        std::collections::HashMap::new();
+
+    for (uid, sid, cost, inp, outp, cache_create, cache_read) in all_sessions {
+        *user_active_cost.entry(uid).or_default() += cost;
+        user_sessions.entry(uid).or_default().push(SessionCost {
+            session_id: sid,
+            total_cost_usd: cost,
+            input_tokens: inp,
+            output_tokens: outp,
+            cache_creation_tokens: cache_create,
+            cache_read_tokens: cache_read,
+        });
+    }
+
+    // Broadcast to each connected user
+    for uid in &connected_user_ids {
+        let active_cost = user_active_cost.get(uid).copied().unwrap_or(0.0);
+        let deleted_cost = deleted_cost_map.get(uid).copied().unwrap_or(0.0);
+        let total_spend = active_cost + deleted_cost;
+        let session_costs = user_sessions.remove(uid).unwrap_or_default();
+
+        if total_spend > 0.0 || !session_costs.is_empty() {
+            app_state.session_manager.broadcast_to_user(
+                uid,
+                ServerToClient::UserSpendUpdate {
+                    total_spend_usd: total_spend,
+                    session_costs,
+                },
+            );
         }
     }
 }
