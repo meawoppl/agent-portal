@@ -287,9 +287,10 @@ fn render_portal_content(content: &shared::PortalContent) -> Html {
             data,
             file_path,
             file_size,
+            source_type,
         } => {
             let source = ImageSource {
-                source_type: "base64".to_string(),
+                source_type: source_type.clone().unwrap_or_else(|| "base64".to_string()),
                 media_type: media_type.clone(),
                 data: data.clone(),
             };
@@ -852,7 +853,12 @@ fn render_image_source(source: &ImageSource, filename: Option<String>) -> Html {
             </pre>
         };
     }
-    let src = format!("data:{};base64,{}", source.media_type, source.data);
+    // Support both URL sources (from backend image store) and base64 data URIs
+    let src = if source.source_type == "url" {
+        source.data.clone()
+    } else {
+        format!("data:{};base64,{}", source.media_type, source.data)
+    };
     html! {
         <ImageViewer src={src} media_type={source.media_type.clone()} {filename} />
     }

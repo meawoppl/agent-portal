@@ -60,6 +60,8 @@ pub struct AppState {
     pub session_max_age_days: u32,
     /// Maximum image size in MB that proxies should inline (default: 10)
     pub max_image_mb: u32,
+    /// In-memory image store for serving images via HTTP instead of WebSocket
+    pub image_store: handlers::images::ImageStore,
 }
 
 #[tokio::main]
@@ -356,6 +358,7 @@ async fn main() -> anyhow::Result<()> {
         message_retention_days,
         session_max_age_days,
         max_image_mb,
+        image_store: handlers::images::ImageStore::new(),
     });
 
     // Setup CORS
@@ -455,6 +458,8 @@ async fn main() -> anyhow::Result<()> {
             "/api/proxy-tokens/{id}/renew",
             post(handlers::proxy_tokens::renew_token_handler),
         )
+        // Image serving endpoint (no auth — images are accessed by UUID)
+        .route("/api/images/{id}", get(handlers::images::serve_image))
         // Scheduled task management endpoints
         .route(
             "/api/scheduled-tasks",

@@ -300,6 +300,7 @@ impl PortalMessage {
                 data,
                 file_path: None,
                 file_size: None,
+                source_type: None,
             }],
         }
     }
@@ -317,6 +318,7 @@ impl PortalMessage {
                 data,
                 file_path,
                 file_size,
+                source_type: None,
             }],
         }
     }
@@ -339,6 +341,9 @@ pub enum PortalContent {
         file_path: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file_size: Option<u64>,
+        /// "base64" (default) or "url" (served from /api/images/{id})
+        #[serde(default)]
+        source_type: Option<String>,
     },
 }
 
@@ -351,12 +356,14 @@ impl std::fmt::Debug for PortalContent {
                 data,
                 file_path,
                 file_size,
+                source_type,
             } => f
                 .debug_struct("Image")
                 .field("media_type", media_type)
-                .field("data", &format_args!("<{} bytes base64>", data.len()))
+                .field("data", &format_args!("<{} bytes>", data.len()))
                 .field("file_path", file_path)
                 .field("file_size", file_size)
+                .field("source_type", source_type)
                 .finish(),
         }
     }

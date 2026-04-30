@@ -167,6 +167,7 @@ fn handle_proxy_message(
                 tx,
                 content,
                 None,
+                &app_state.image_store,
             );
         }
         ProxyToServer::SequencedOutput { seq, content } => {
@@ -178,6 +179,7 @@ fn handle_proxy_message(
                 tx,
                 content,
                 Some(seq),
+                &app_state.image_store,
             );
         }
         ProxyToServer::Heartbeat => {

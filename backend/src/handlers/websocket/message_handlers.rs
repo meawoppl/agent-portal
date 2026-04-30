@@ -78,6 +78,7 @@ pub fn replay_pending_inputs_from_db(
 /// Handle Claude output (both legacy ClaudeOutput and new SequencedOutput).
 /// Broadcasts to web clients, deduplicates sequenced messages, stores in DB,
 /// and sends acknowledgments.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_claude_output(
     session_manager: &SessionManager,
     session_key: &Option<String>,
@@ -86,6 +87,7 @@ pub fn handle_claude_output(
     tx: &ProxySender,
     content: serde_json::Value,
     seq: Option<u64>,
+    image_store: &crate::handlers::images::ImageStore,
 ) {
     // Deduplicate sequenced messages before broadcasting
     if let (Some(session_id), Some(seq_num)) = (db_session_id, seq) {
@@ -155,6 +157,10 @@ pub fn handle_claude_output(
             );
         }
     }
+
+    // Extract base64 images from portal messages and replace with URLs.
+    // This keeps WebSocket messages small — browsers fetch images via HTTP.
+    let content = extract_portal_images(content, image_store);
 
     // Broadcast output to all web clients with sender metadata alongside content
     if let Some(ref key) = session_key {
@@ -312,4 +318,49 @@ fn store_result_metadata(
             error!("Failed to update session tokens: {}", e);
         }
     }
+}
+
+/// If the content is a portal message with base64 image data, extract the image
+/// into the store and replace the data field with a URL path.
+fn extract_portal_images(
+    mut content: serde_json::Value,
+    image_store: &crate::handlers::images::ImageStore,
+) -> serde_json::Value {
+    // Only process portal messages
+    if content.get("type").and_then(|t| t.as_str()) != Some("portal") {
+        return content;
+    }
+
+    let Some(content_array) = content.get_mut("content").and_then(|c| c.as_array_mut()) else {
+        return content;
+    };
+
+    for item in content_array.iter_mut() {
+        if item.get("type").and_then(|t| t.as_str()) != Some("image") {
+            continue;
+        }
+
+        let media_type = item
+            .get("media_type")
+            .and_then(|m| m.as_str())
+            .unwrap_or("image/png")
+            .to_string();
+
+        let Some(data_str) = item.get("data").and_then(|d| d.as_str()) else {
+            continue;
+        };
+
+        // Only extract images larger than 64KB base64 (roughly 48KB decoded)
+        if data_str.len() < 65536 {
+            continue;
+        }
+
+        if let Some(id) = image_store.store_base64(&media_type, data_str) {
+            let url = format!("/api/images/{}", id);
+            item["data"] = serde_json::Value::String(url);
+            item["source_type"] = serde_json::Value::String("url".to_string());
+        }
+    }
+
+    content
 }
