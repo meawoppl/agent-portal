@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.32
+
+- Fix splash page not scrollable on mobile (overflow:hidden was on body instead of session container)
+
 ## 2.4.31
 
 - Add stable keys to grouped assistant messages to preserve expanded state on new messages
