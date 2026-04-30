@@ -78,6 +78,7 @@ pub fn replay_pending_inputs_from_db(
 /// Handle Claude output (both legacy ClaudeOutput and new SequencedOutput).
 /// Broadcasts to web clients, deduplicates sequenced messages, stores in DB,
 /// and sends acknowledgments.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_claude_output(
     session_manager: &SessionManager,
     session_key: &Option<String>,
