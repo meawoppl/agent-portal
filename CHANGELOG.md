@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.24
+
+- Limit launcher registrations to 10 per user (#617)
+
 ## 2.4.23
 
 - Reduce spend broadcast interval from 5s to 30s and skip when no clients connected (#618, #614)
