@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.23
+
+- Reduce spend broadcast interval from 5s to 30s and skip when no clients connected (#618, #614)
+- Use single aggregate query instead of per-user queries for spend updates
+
 ## 2.4.22
 
 - Fix stuck reconnect loop: drop pending messages after 5 consecutive replay failures (#650)
