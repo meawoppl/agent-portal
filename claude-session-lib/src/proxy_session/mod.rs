@@ -167,6 +167,8 @@ pub struct SessionState<'a> {
     pub disconnected_at: Option<Instant>,
     /// Whether the last disconnect was a graceful server shutdown
     pub last_disconnect_graceful: bool,
+    /// Consecutive replay failures on the same pending messages
+    pub replay_failures: u32,
 }
 
 impl<'a> SessionState<'a> {
@@ -199,6 +201,7 @@ impl<'a> SessionState<'a> {
             first_connection: true,
             disconnected_at: None,
             last_disconnect_graceful: false,
+            replay_failures: 0,
         })
     }
 
@@ -373,26 +376,46 @@ async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResu
         }
     }
 
-    // Replay pending messages after successful registration
+    // Replay pending messages after successful registration.
+    // If replay fails repeatedly (e.g., backend reset and rejects stale seqs),
+    // drop the pending messages after MAX_REPLAY_FAILURES to avoid an infinite loop.
+    const MAX_REPLAY_FAILURES: u32 = 5;
     {
-        let buf = session.output_buffer.lock().await;
+        let mut buf = session.output_buffer.lock().await;
         let pending_count = buf.pending_count();
         if pending_count > 0 {
-            debug!(
-                "Replaying {} pending messages after reconnect",
-                pending_count
-            );
-            for pending in buf.get_pending() {
-                let msg = ProxyToServer::SequencedOutput {
-                    seq: pending.seq,
-                    content: pending.content.clone(),
-                };
-                if conn.send(msg).await.is_err() {
-                    error!("Failed to replay pending message seq={}", pending.seq);
+            if session.replay_failures >= MAX_REPLAY_FAILURES {
+                error!(
+                    "Dropping {} pending messages after {} consecutive replay failures",
+                    pending_count, session.replay_failures
+                );
+                buf.clear();
+                session.replay_failures = 0;
+            } else {
+                debug!(
+                    "Replaying {} pending messages after reconnect (attempt {})",
+                    pending_count,
+                    session.replay_failures + 1
+                );
+                let mut replay_failed = false;
+                for pending in buf.get_pending() {
+                    let msg = ProxyToServer::SequencedOutput {
+                        seq: pending.seq,
+                        content: pending.content.clone(),
+                    };
+                    if conn.send(msg).await.is_err() {
+                        error!("Failed to replay pending message seq={}", pending.seq);
+                        session.replay_failures += 1;
+                        replay_failed = true;
+                        break;
+                    }
+                }
+                if replay_failed {
                     return ConnectionResult::Disconnected(Duration::ZERO);
                 }
+                debug!("Finished replaying pending messages");
+                session.replay_failures = 0;
             }
-            debug!("Finished replaying pending messages");
         }
     }
 

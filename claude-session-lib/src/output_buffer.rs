@@ -192,6 +192,12 @@ impl PendingOutputBuffer {
         self.state.pending.len()
     }
 
+    /// Drop all pending messages (used when replay fails repeatedly)
+    pub fn clear(&mut self) {
+        self.state.pending.clear();
+        self.dirty = true;
+    }
+
     /// Get the last acknowledged sequence number
     pub fn last_ack_seq(&self) -> u64 {
         self.state.last_ack_seq
