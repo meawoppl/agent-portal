@@ -24,6 +24,14 @@
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 
+    <!-- KaTeX for rendering LaTeX math in messages -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+          integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
+            integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+            integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rF4+Pp4XXUokR6dwXyo" crossorigin="anonymous"></script>
+
     <!-- Loading spinner (inline so it renders before any external assets) -->
     <style>
         #loading {
@@ -75,6 +83,8 @@
     <link data-trunk rel="css" href="styles/admin.css" />
     <link data-trunk rel="css" href="styles/banned.css" />
     <link data-trunk rel="copy-file" href="pcm-processor.js" />
+    <link data-trunk rel="copy-file" href="katex-helper.js" />
+    <script defer src="/katex-helper.js"></script>
     <link data-trunk rel="copy-file" href="assets/wiggum.png" />
     <link data-trunk rel="copy-file" href="assets/og-preview.svg" />
     <link data-trunk rel="copy-file" href="assets/favicon.svg" />
