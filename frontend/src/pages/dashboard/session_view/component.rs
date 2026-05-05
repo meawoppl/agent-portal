@@ -954,12 +954,31 @@ impl Component for SessionView {
                     SessionViewMsg::Noop
                 }
                 "ArrowUp" => {
-                    e.prevent_default();
-                    SessionViewMsg::HistoryUp
+                    // Only trigger history if cursor is on the first line of the textarea.
+                    // Otherwise, let the arrow key move the cursor normally.
+                    let target: HtmlTextAreaElement = e.target_unchecked_into();
+                    let value = target.value();
+                    let cursor = target.selection_start().ok().flatten().unwrap_or(0) as usize;
+                    let on_first_line = !value[..cursor.min(value.len())].contains('\n');
+                    if on_first_line {
+                        e.prevent_default();
+                        SessionViewMsg::HistoryUp
+                    } else {
+                        SessionViewMsg::Noop
+                    }
                 }
                 "ArrowDown" => {
-                    e.prevent_default();
-                    SessionViewMsg::HistoryDown
+                    // Only trigger history if cursor is on the last line of the textarea.
+                    let target: HtmlTextAreaElement = e.target_unchecked_into();
+                    let value = target.value();
+                    let cursor = target.selection_start().ok().flatten().unwrap_or(0) as usize;
+                    let on_last_line = !value[cursor.min(value.len())..].contains('\n');
+                    if on_last_line {
+                        e.prevent_default();
+                        SessionViewMsg::HistoryDown
+                    } else {
+                        SessionViewMsg::Noop
+                    }
                 }
                 _ => SessionViewMsg::Noop,
             }

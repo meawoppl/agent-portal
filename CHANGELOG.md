@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.28
+
+- Up/down arrows in input now move cursor between lines; history navigation only triggers at the first/last line
+
 ## 2.4.27
 
 - Render LaTeX math in messages via KaTeX (`$inline$`, `$$display$$`, `\(...\)`, `\[...\]`)
