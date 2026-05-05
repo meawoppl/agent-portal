@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.27
+
+- Render LaTeX math in messages via KaTeX (`$inline$`, `$$display$$`, `\(...\)`, `\[...\]`)
+
 ## 2.4.26
 
 - Serve large images via HTTP instead of WebSocket (partially addresses #655)

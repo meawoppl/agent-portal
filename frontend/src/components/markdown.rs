@@ -11,16 +11,50 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 use yew::prelude::*;
 
-/// Render markdown text as HTML
+/// Render markdown text as HTML, with a post-render hook that triggers KaTeX
+/// to render any LaTeX math expressions (`$...$`, `$$...$$`).
 pub fn render_markdown(text: &str) -> Html {
+    html! {
+        <MarkdownView text={text.to_string()} />
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct MarkdownViewProps {
+    text: String,
+}
+
+#[function_component(MarkdownView)]
+fn markdown_view(props: &MarkdownViewProps) -> Html {
+    let node_ref = use_node_ref();
+
+    // After render, call the JS helper to render math in this subtree
+    {
+        let node_ref = node_ref.clone();
+        use_effect_with(props.text.clone(), move |_| {
+            if let Some(node) = node_ref.cast::<web_sys::Element>() {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(func) = js_sys::Reflect::get(&window, &"renderMathInNode".into()) {
+                        if let Ok(func) = func.dyn_into::<js_sys::Function>() {
+                            let _ = func.call1(&window, &node);
+                        }
+                    }
+                }
+            }
+            || ()
+        });
+    }
+
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
 
-    let parser = Parser::new_ext(text, options);
+    let parser = Parser::new_ext(&props.text, options);
     let events: Vec<Event> = parser.collect();
 
-    render_events(&events)
+    html! {
+        <span ref={node_ref}>{ render_events(&events) }</span>
+    }
 }
 
 /// Convert pulldown-cmark events to Yew Html
