@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.29
+
+- Clear pending send queue when assistant/result arrives (fixes stuck pending state for slash commands)
+- Match pending sends by content on user echo so lost messages don't consume unrelated entries
+
 ## 2.4.28
 
 - Up/down arrows in input now move cursor between lines; history navigation only triggers at the first/last line

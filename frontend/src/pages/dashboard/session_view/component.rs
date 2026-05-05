@@ -1403,11 +1403,39 @@ impl SessionView {
         } else {
             output
         };
-        // When a confirmed user message arrives from the server, remove the
-        // oldest pending send so it doesn't duplicate. The confirmed version
-        // appends to self.messages at the natural scroll position.
-        if msg_type == "user" && !self.pending_sends.is_empty() {
-            self.pending_sends.remove(0);
+        // Drain pending sends when the server confirms our input.
+        // - "user" echo: match by content so a lost message doesn't consume
+        //   an unrelated pending entry.
+        // - "assistant"/"result": Claude is responding. Slash commands like
+        //   /cost, /status, /clear don't produce a user echo, so we use the
+        //   assistant/result response as the signal that the input was
+        //   received and clear all pending entries.
+        if !self.pending_sends.is_empty() {
+            match msg_type.as_str() {
+                "user" => {
+                    let echo_content = serde_json::from_str::<serde_json::Value>(&output)
+                        .ok()
+                        .and_then(|v| v.get("content").cloned());
+                    if let Some(ref echo) = echo_content {
+                        if let Some(pos) = self.pending_sends.iter().position(|pending| {
+                            serde_json::from_str::<serde_json::Value>(pending)
+                                .ok()
+                                .and_then(|v| v.get("content").cloned())
+                                .as_ref()
+                                == Some(echo)
+                        }) {
+                            self.pending_sends.remove(pos);
+                        }
+                    }
+                }
+                "assistant" | "result" => {
+                    // Claude is responding — any pending input was received.
+                    // Slash commands don't produce a user echo so this is
+                    // the only signal we get.
+                    self.pending_sends.clear();
+                }
+                _ => {}
+            }
         }
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {
