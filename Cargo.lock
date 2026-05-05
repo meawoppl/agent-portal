@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "anyhow",
  "chrono",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -2904,7 +2904,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "anyhow",
  "colored",
@@ -2919,7 +2919,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "anyhow",
  "hex",
@@ -3765,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.4.28"
+version = "2.4.29"
 dependencies = [
  "claude-codes",
  "serde",

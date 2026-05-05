@@ -50,7 +50,11 @@ impl Default for SpeechConfig {
             language_code: "en-US".to_string(),
             encoding: AudioEncoding::Linear16,
             interim_results: true,
-            single_utterance: true, // Auto-end when speaker stops, sends final result immediately
+            // Disabled: Google's single-utterance detector frequently fires
+            // immediately when input audio is quiet (common on macOS when the
+            // browser captures a wrong/silent input device). The client-side
+            // PCM worklet already auto-stops after 2s of silence post-speech.
+            single_utterance: false,
         }
     }
 }
