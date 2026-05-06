@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.30
+
+- Disable Google STT single-utterance mode to prevent immediate session end on quiet/silent mic inputs (common on macOS)
+
 ## 2.4.29
 
 - Clear pending send queue when assistant/result arrives (fixes stuck pending state for slash commands)
