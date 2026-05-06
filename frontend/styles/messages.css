@@ -55,6 +55,14 @@
     margin-left: auto;
 }
 
+/* Live-updating "X minutes ago" label in message headers */
+.time-ago {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    cursor: help;
+    white-space: nowrap;
+}
+
 .claude-message .message-body {
     padding: 0.5rem 1rem;
 }
