@@ -2,6 +2,7 @@
 
 use super::types::*;
 use super::{format_duration, shorten_model_name};
+use crate::components::copy_button::CopyButton;
 use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown;
 use crate::components::tool_renderers::render_tool_use;
@@ -63,6 +64,52 @@ fn build_usage_tooltip(usage: Option<&UsageInfo>) -> String {
         .unwrap_or_default()
 }
 
+/// Extract concatenated raw text from a list of content blocks.
+/// Used for the message header copy button — pulls out text and thinking
+/// blocks as markdown, ignoring tool_use/tool_result internals.
+fn content_blocks_to_text(blocks: &[ContentBlock]) -> String {
+    let mut out = String::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Text { text, .. } => {
+                if !out.is_empty() {
+                    out.push_str("\n\n");
+                }
+                out.push_str(text);
+            }
+            ContentBlock::Thinking { thinking } => {
+                if !out.is_empty() {
+                    out.push_str("\n\n");
+                }
+                out.push_str("<thinking>\n");
+                out.push_str(thinking);
+                out.push_str("\n</thinking>");
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Extract raw text from an assistant group's serialized JSON messages.
+fn extract_assistant_group_text(messages: &[String]) -> String {
+    let mut out = String::new();
+    for json in messages {
+        if let Ok(ClaudeMessage::Assistant(msg)) = serde_json::from_str::<ClaudeMessage>(json) {
+            if let Some(content) = msg.message.and_then(|m| m.content) {
+                let text = content_blocks_to_text(&content);
+                if !text.is_empty() {
+                    if !out.is_empty() {
+                        out.push_str("\n\n");
+                    }
+                    out.push_str(&text);
+                }
+            }
+        }
+    }
+    out
+}
+
 // --- Message renderers ---
 
 pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> Html {
@@ -111,11 +158,15 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
         ));
     }
     let model_tooltip = build_model_tooltip(&model_name, first_usage.as_ref());
+    let copy_text = extract_assistant_group_text(messages);
 
     html! {
         <div class="claude-message assistant-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge assistant">{ "Assistant" }</span>
+                if !copy_text.is_empty() {
+                    <CopyButton text={copy_text} title="Copy assistant text" />
+                }
                 {
                     if count > 1 {
                         html! { <span class="message-count" title={format!("{} consecutive messages", count)}>{ format!("{} messages", count) }</span> }
@@ -190,6 +241,7 @@ pub fn render_user_message(
                     if msg.pending {
                         <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
                     }
+                    <CopyButton text={text.clone()} title="Copy message" />
                 </div>
                 <div class="message-body">
                     <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>
@@ -225,6 +277,7 @@ pub fn render_user_message(
                 <div class="claude-message user-message">
                     <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                         <span class="message-type-badge user">{ &label }</span>
+                        <CopyButton text={text_content.clone()} title="Copy message" />
                     </div>
                     <div class="message-body">
                         <div class="user-text">{ render_markdown(&preserve_user_newlines(&text_content)) }</div>
@@ -267,10 +320,22 @@ pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html
 }
 
 pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Html {
+    let copy_text: String = msg
+        .content
+        .iter()
+        .filter_map(|c| match c {
+            shared::PortalContent::Text { text } => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
     html! {
         <div class="claude-message portal-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge portal">{ "Portal" }</span>
+                if !copy_text.is_empty() {
+                    <CopyButton text={copy_text} title="Copy portal text" />
+                }
             </div>
             <div class="message-body">
                 { for msg.content.iter().map(render_portal_content) }
@@ -723,11 +788,15 @@ pub fn render_assistant_message(msg: &AssistantMessage, timestamp: Option<&str>)
 
     let model_tooltip = build_model_tooltip(model, usage);
     let usage_tooltip = build_usage_tooltip(usage);
+    let copy_text = content_blocks_to_text(&blocks);
 
     html! {
         <div class="claude-message assistant-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge assistant">{ "Assistant" }</span>
+                if !copy_text.is_empty() {
+                    <CopyButton text={copy_text} title="Copy assistant text" />
+                }
                 {
                     if let Some(short_name) = shorten_model_name(model) {
                         html! { <span class="model-name" title={model_tooltip}>{ short_name }</span> }
