@@ -45,8 +45,6 @@ html, body {
     background: var(--bg-dark);
     color: var(--text-primary);
     min-height: 100vh;
-    height: 100%;
-    overflow: hidden;
     overscroll-behavior: none;
 }
 
