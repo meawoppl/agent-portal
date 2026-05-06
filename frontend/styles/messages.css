@@ -47,9 +47,11 @@
     line-height: 1;
 }
 
-/* Push copy button to far right of header. If usage-badge or other
-   margin-left:auto siblings exist, this still aligns it on the right edge. */
-.message-header .copy-button:last-child {
+/* On headers without a usage-badge (user/portal), push the copy button to
+   the right edge. On assistant headers, the copy button sits inline next to
+   the model name, with usage-badge taking margin-left:auto. */
+.user-message .message-header .copy-button,
+.portal-message .message-header .copy-button {
     margin-left: auto;
 }
 

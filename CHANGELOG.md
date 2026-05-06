@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.34
+
+- Place copy button next to model name in assistant headers (was at far right)
+
 ## 2.4.33
 
 - Add clipboard copy button to message headers (assistant, user, portal) to copy raw markdown text
