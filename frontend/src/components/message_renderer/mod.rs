@@ -20,6 +20,13 @@ fn extract_local_timestamp(json: &str) -> Option<String> {
         .as_string()
 }
 
+/// Extract the raw `_created_at` ISO string from a message JSON, for use with
+/// the live-updating TimeAgo component (which parses it itself).
+pub(super) fn extract_raw_iso(json: &str) -> Option<String> {
+    let val: Value = serde_json::from_str(json).ok()?;
+    val.get("_created_at")?.as_str().map(|s| s.to_string())
+}
+
 /// A group of messages to render together
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageGroup {
@@ -112,12 +119,13 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
     }
 
     let ts = extract_local_timestamp(&props.json);
+    let raw_iso = extract_raw_iso(&props.json);
     let parsed: Result<ClaudeMessage, _> = serde_json::from_str(&props.json);
 
     match parsed {
         Ok(ClaudeMessage::System(msg)) => renderers::render_system_message(&msg, ts.as_deref()),
         Ok(ClaudeMessage::Assistant(msg)) => {
-            renderers::render_assistant_message(&msg, ts.as_deref())
+            renderers::render_assistant_message(&msg, ts.as_deref(), raw_iso.as_deref())
         }
         Ok(ClaudeMessage::Result(msg)) => renderers::render_result_message(&msg),
         Ok(ClaudeMessage::User(msg)) => {

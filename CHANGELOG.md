@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.35
+
+- Show live-updating "X minutes ago" label on assistant message headers, with exact local time tooltip
+
 ## 2.4.34
 
 - Place copy button next to model name in assistant headers (was at far right)

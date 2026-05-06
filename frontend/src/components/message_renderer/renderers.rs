@@ -1,10 +1,11 @@
 //! Rendering functions for each message type.
 
 use super::types::*;
-use super::{format_duration, shorten_model_name};
+use super::{extract_raw_iso, format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
 use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown;
+use crate::components::time_ago::TimeAgo;
 use crate::components::tool_renderers::render_tool_use;
 use serde::Deserialize;
 use serde_json::Value;
@@ -159,6 +160,8 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
     }
     let model_tooltip = build_model_tooltip(&model_name, first_usage.as_ref());
     let copy_text = extract_assistant_group_text(messages);
+    // ISO timestamp of the last message in the group, for the live "time ago" label
+    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
 
     html! {
         <div class="claude-message assistant-message">
@@ -191,6 +194,9 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
                     } else {
                         html! {}
                     }
+                }
+                if let Some(iso) = last_iso {
+                    <TimeAgo iso={iso} />
                 }
             </div>
             <div class="message-body">
@@ -768,7 +774,11 @@ fn render_task_notification(msg: &SystemMessage, timestamp: Option<&str>) -> Htm
     }
 }
 
-pub fn render_assistant_message(msg: &AssistantMessage, timestamp: Option<&str>) -> Html {
+pub fn render_assistant_message(
+    msg: &AssistantMessage,
+    timestamp: Option<&str>,
+    raw_iso: Option<&str>,
+) -> Html {
     let blocks = msg
         .message
         .as_ref()
@@ -821,6 +831,9 @@ pub fn render_assistant_message(msg: &AssistantMessage, timestamp: Option<&str>)
                     } else {
                         html! {}
                     }
+                }
+                if let Some(iso) = raw_iso {
+                    <TimeAgo iso={iso.to_string()} />
                 }
             </div>
             <div class="message-body">

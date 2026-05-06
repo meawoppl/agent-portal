@@ -10,6 +10,7 @@ pub mod message_renderer;
 mod proxy_token_setup;
 mod schedule_dialog;
 mod share_dialog;
+pub mod time_ago;
 mod tool_renderers;
 mod voice_input;
 
