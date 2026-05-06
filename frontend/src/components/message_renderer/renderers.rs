@@ -143,8 +143,8 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
                 }
             </div>
             <div class="message-body">
-                { for messages.iter().map(|json| {
-                    html! { <GroupedMessageContent json={json.clone()} /> }
+                { for messages.iter().enumerate().map(|(i, json)| {
+                    html! { <GroupedMessageContent key={format!("m{}", i)} json={json.clone()} /> }
                 })}
             </div>
         </div>
