@@ -164,9 +164,6 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
         <div class="claude-message assistant-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge assistant">{ "Assistant" }</span>
-                if !copy_text.is_empty() {
-                    <CopyButton text={copy_text} title="Copy assistant text" />
-                }
                 {
                     if count > 1 {
                         html! { <span class="message-count" title={format!("{} consecutive messages", count)}>{ format!("{} messages", count) }</span> }
@@ -180,6 +177,9 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
                     } else {
                         html! {}
                     }
+                }
+                if !copy_text.is_empty() {
+                    <CopyButton text={copy_text} title="Copy assistant text" />
                 }
                 {
                     if total_input_tokens > 0 || total_output_tokens > 0 {
@@ -794,15 +794,15 @@ pub fn render_assistant_message(msg: &AssistantMessage, timestamp: Option<&str>)
         <div class="claude-message assistant-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge assistant">{ "Assistant" }</span>
-                if !copy_text.is_empty() {
-                    <CopyButton text={copy_text} title="Copy assistant text" />
-                }
                 {
                     if let Some(short_name) = shorten_model_name(model) {
                         html! { <span class="model-name" title={model_tooltip}>{ short_name }</span> }
                     } else {
                         html! {}
                     }
+                }
+                if !copy_text.is_empty() {
+                    <CopyButton text={copy_text} title="Copy assistant text" />
                 }
                 {
                     if is_truncated {
