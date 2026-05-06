@@ -47,13 +47,9 @@
     line-height: 1;
 }
 
-/* On headers without a usage-badge (user/portal), push the copy button to
-   the right edge. On assistant headers, the copy button sits inline next to
-   the model name, with usage-badge taking margin-left:auto. */
-.user-message .message-header .copy-button,
-.portal-message .message-header .copy-button {
-    margin-left: auto;
-}
+/* Copy button sits inline next to the message badge in all headers,
+   left-justified. On assistant headers the usage-badge has its own
+   margin-left:auto and naturally pushes itself to the right. */
 
 /* Live-updating "X minutes ago" label in message headers */
 .time-ago {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.36
+
+- Left-justify copy button in user/portal message headers (was pushed to far right)
+
 ## 2.4.35
 
 - Show live-updating "X minutes ago" label on assistant message headers, with exact local time tooltip
