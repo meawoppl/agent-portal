@@ -20,6 +20,39 @@
     flex-wrap: wrap;
 }
 
+/* Copy button in message headers */
+.copy-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+    line-height: 0;
+}
+
+.copy-button:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--border);
+}
+
+.copy-button.copied {
+    color: var(--success);
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+/* Push copy button to far right of header. If usage-badge or other
+   margin-left:auto siblings exist, this still aligns it on the right edge. */
+.message-header .copy-button:last-child {
+    margin-left: auto;
+}
+
 .claude-message .message-body {
     padding: 0.5rem 1rem;
 }

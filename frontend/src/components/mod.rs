@@ -1,4 +1,5 @@
 pub mod codex_renderer;
+pub mod copy_button;
 mod copy_command;
 mod cron_describe;
 mod diff;

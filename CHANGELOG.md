@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.33
+
+- Add clipboard copy button to message headers (assistant, user, portal) to copy raw markdown text
+
 ## 2.4.32
 
 - Fix splash page not scrollable on mobile (overflow:hidden was on body instead of session container)
