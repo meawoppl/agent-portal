@@ -195,15 +195,17 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
                         html! {}
                     }
                 }
-                if let Some(iso) = last_iso {
-                    <TimeAgo iso={iso} />
-                }
             </div>
             <div class="message-body">
                 { for messages.iter().enumerate().map(|(i, json)| {
                     html! { <GroupedMessageContent key={format!("m{}", i)} json={json.clone()} /> }
                 })}
             </div>
+            if let Some(iso) = last_iso {
+                <div class="message-footer">
+                    <TimeAgo iso={iso} />
+                </div>
+            }
         </div>
     }
 }
@@ -832,13 +834,15 @@ pub fn render_assistant_message(
                         html! {}
                     }
                 }
-                if let Some(iso) = raw_iso {
-                    <TimeAgo iso={iso.to_string()} />
-                }
             </div>
             <div class="message-body">
                 { render_content_blocks(&blocks) }
             </div>
+            if let Some(iso) = raw_iso {
+                <div class="message-footer">
+                    <TimeAgo iso={iso.to_string()} />
+                </div>
+            }
         </div>
     }
 }
