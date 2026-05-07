@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.37
+
+- Move "time ago" label from message header to small unobtrusive footer at bottom-right of assistant messages
+
 ## 2.4.36
 
 - Left-justify copy button in user/portal message headers (was pushed to far right)
