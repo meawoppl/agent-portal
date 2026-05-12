@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.1
+
+- Add Appearance tab in Settings with a horizontal-vs-vertical toggle for the session pill rail
+- Preference persists in browser localStorage (`claude-portal-rail-orientation`)
+- Vertical layout puts the pill rail down the left side; horizontal keeps the current top-bar layout
+
 ## 2.5.0
 
 - Chunked image uploads over a new `/ws/session/upload` stream (#666)

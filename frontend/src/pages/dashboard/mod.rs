@@ -13,3 +13,4 @@ mod session_view;
 mod types;
 
 pub use page::DashboardPage;
+pub use types::{load_rail_orientation, save_rail_orientation, RailOrientation};

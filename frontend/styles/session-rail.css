@@ -2,6 +2,19 @@
    Session Rail - Horizontal Carousel
    ========================================================================== */
 
+/* Wraps the rail + session views so we can swap the carousel orientation
+   without touching the rail or view components themselves. */
+.dashboard-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.dashboard-body.rail-vertical {
+    flex-direction: row;
+}
+
 .session-rail {
     display: flex;
     gap: 0.5rem;
@@ -9,6 +22,40 @@
     background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
+}
+
+/* Vertical rail: pills stack down the left, the views fill the remainder. */
+.dashboard-body.rail-vertical > .session-rail {
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.75rem 0.5rem;
+    border-right: 1px solid var(--border);
+    border-bottom: none;
+    overflow-x: visible;
+    overflow-y: auto;
+    width: 240px;
+    flex-shrink: 0;
+}
+
+.dashboard-body.rail-vertical > .session-rail .session-pill {
+    width: 100%;
+    white-space: normal;
+}
+
+/* Flip the active/inactive divider so it reads horizontally in vertical mode. */
+.dashboard-body.rail-vertical > .session-rail .session-rail-divider {
+    flex-direction: row;
+    align-self: stretch;
+    justify-content: center;
+    padding: 0.25rem 0;
+}
+
+.dashboard-body.rail-vertical > .session-rail .session-rail-divider .divider-line {
+    width: auto;
+    height: 1px;
+    flex: 1;
+    margin: 0 0.35rem;
+    align-self: center;
 }
 
 /* Divider between active and inactive sessions */

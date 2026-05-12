@@ -19,6 +19,9 @@ pub const INACTIVE_HIDDEN_STORAGE_KEY: &str = "claude-portal-inactive-hidden";
 /// Storage key for cost display visibility in localStorage
 pub const SHOW_COST_STORAGE_KEY: &str = "claude-portal-show-cost";
 
+/// Storage key for session rail orientation in localStorage
+pub const RAIL_ORIENTATION_STORAGE_KEY: &str = "claude-portal-rail-orientation";
+
 /// Maximum number of messages to keep in frontend memory (matches backend limit)
 pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
@@ -118,6 +121,59 @@ pub fn load_show_cost() -> bool {
 pub fn save_show_cost(show: bool) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let _ = storage.set_item(SHOW_COST_STORAGE_KEY, if show { "true" } else { "false" });
+    }
+}
+
+/// Orientation of the session pill rail on the dashboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RailOrientation {
+    Horizontal,
+    Vertical,
+}
+
+impl RailOrientation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "horizontal" => Some(Self::Horizontal),
+            "vertical" => Some(Self::Vertical),
+            _ => None,
+        }
+    }
+
+    /// CSS class applied to the dashboard body wrapper.
+    pub fn body_class(self) -> &'static str {
+        match self {
+            Self::Horizontal => "rail-horizontal",
+            Self::Vertical => "rail-vertical",
+        }
+    }
+}
+
+/// Load rail orientation preference from localStorage (default: horizontal).
+pub fn load_rail_orientation() -> RailOrientation {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(RAIL_ORIENTATION_STORAGE_KEY)
+                .ok()
+                .flatten()
+        })
+        .and_then(|v| RailOrientation::from_str(&v))
+        .unwrap_or(RailOrientation::Horizontal)
+}
+
+/// Save rail orientation preference to localStorage.
+pub fn save_rail_orientation(orientation: RailOrientation) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(RAIL_ORIENTATION_STORAGE_KEY, orientation.as_str());
     }
 }
 
