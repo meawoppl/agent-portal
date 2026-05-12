@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.0
+
+- Chunked image uploads over a new `/ws/session/upload` stream (#666)
+- Large images (>= 1 MB on disk) now stream from proxy to backend as raw binary chunks, bypassing the WS frame size cap that previously stuck sessions in reconnect loops
+- Avoids base64 encoding on the wire for large images — chunks are sent as native binary WebSocket frames
+- Backend reassembles chunks in an in-memory upload buffer, enforces `PORTAL_MAX_IMAGE_MB`, then publishes the image at `/api/images/{uuid}` like before
+- Proxy now rejects images over the cap locally (textual portal message) instead of queueing oversized payloads that fail forever on replay
+
 ## 2.4.37
 
 - Move "time ago" label from message header to small unobtrusive footer at bottom-right of assistant messages

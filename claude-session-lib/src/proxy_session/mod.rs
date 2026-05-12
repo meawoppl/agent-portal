@@ -1,5 +1,6 @@
 //! Proxy session management and WebSocket connection handling.
 
+mod image_uploader;
 mod output_forwarder;
 mod wiggum;
 mod ws_reader;
@@ -643,6 +644,8 @@ async fn run_message_loop(
         output_rx,
         ws_write.clone(),
         session_id,
+        config.backend_url.clone(),
+        config.auth_token.clone(),
         config.working_directory.clone(),
         current_branch,
         current_pr_url,
