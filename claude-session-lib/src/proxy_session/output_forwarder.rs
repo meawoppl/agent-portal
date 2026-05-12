@@ -15,7 +15,14 @@ use uuid::Uuid;
 
 use crate::output_buffer::PendingOutputBuffer;
 
+use super::image_uploader::upload_image;
 use super::{format_duration, truncate, SharedWsWrite};
+
+/// Images at or above this raw-byte size get sent via the chunked upload
+/// stream (`/ws/session/upload`) instead of inlined as base64 on the main
+/// session socket. Below it, the small-image fast path keeps a single
+/// round trip.
+const CHUNK_UPLOAD_THRESHOLD_BYTES: usize = 1024 * 1024;
 
 /// Spawn the output forwarder task
 ///
@@ -25,6 +32,8 @@ pub fn spawn_output_forwarder(
     mut output_rx: mpsc::UnboundedReceiver<ClaudeOutput>,
     ws_write: SharedWsWrite,
     session_id: Uuid,
+    backend_url: String,
+    auth_token: Option<String>,
     working_directory: String,
     current_branch: Arc<Mutex<Option<String>>>,
     current_pr_url: Arc<Mutex<Option<String>>>,
@@ -69,9 +78,9 @@ pub fn spawn_output_forwarder(
             // Track Read tool calls on image files from assistant messages
             track_image_reads(&output, &mut image_read_map);
 
-            // Check for image tool results in user messages and send portal messages
-            let portal_messages =
-                extract_image_portal_messages(&output, &mut image_read_map, max_bytes);
+            // Collect any image work items from user-message tool results
+            // (raw bytes for large images, base64 strings for small ones).
+            let image_items = extract_image_work_items(&output, &mut image_read_map, max_bytes);
 
             // Serialize and buffer with sequence number
             let content = serde_json::to_value(&output)
@@ -94,8 +103,53 @@ pub fn spawn_output_forwarder(
                 }
             }
 
-            // Send any image portal messages after the main output
-            for portal_msg in portal_messages {
+            // Resolve each image item into a portal message — uploading
+            // large images out-of-band first so the on-wire payload stays
+            // small — then send them after the main output.
+            let mut send_failed = false;
+            for item in image_items {
+                let portal_msg = match item {
+                    ImageWorkItem::Inline(msg) => msg,
+                    ImageWorkItem::TooLarge(msg) => msg,
+                    ImageWorkItem::Upload {
+                        file_path,
+                        file_size,
+                        media_type,
+                        bytes,
+                    } => {
+                        let result = match auth_token.as_deref() {
+                            Some(token) => {
+                                upload_image(
+                                    &backend_url,
+                                    session_id,
+                                    token,
+                                    &media_type,
+                                    Some(&file_path),
+                                    &bytes,
+                                )
+                                .await
+                            }
+                            None => Err(anyhow::anyhow!("no auth token available for upload")),
+                        };
+                        match result {
+                            Ok(url) => shared::PortalMessage {
+                                message_type: "portal".to_string(),
+                                content: vec![shared::PortalContent::Image {
+                                    media_type,
+                                    data: url,
+                                    file_path: Some(file_path),
+                                    file_size: Some(file_size),
+                                    source_type: Some("url".to_string()),
+                                }],
+                            },
+                            Err(e) => {
+                                warn!("Chunked image upload failed: {}", e);
+                                shared::PortalMessage::text(format!("Image upload failed: {}", e))
+                            }
+                        }
+                    }
+                };
+
                 let portal_content = portal_msg.to_json();
                 let portal_seq = {
                     let mut buf = output_buffer.lock().await;
@@ -108,12 +162,31 @@ pub fn spawn_output_forwarder(
                 let mut ws = ws_write.lock().await;
                 if ws.send(portal_ws_msg).await.is_err() {
                     error!("Failed to send image portal message");
+                    send_failed = true;
                     break;
                 }
+            }
+            if send_failed {
+                break;
             }
         }
         debug!("Output forwarder ended - channel closed");
     })
+}
+
+/// One unit of image work surfaced from a user-message tool result.
+enum ImageWorkItem {
+    /// Small image: data is already base64-encoded and ready to inline.
+    Inline(shared::PortalMessage),
+    /// Large image: raw bytes need to go through the chunked upload stream.
+    Upload {
+        file_path: String,
+        file_size: u64,
+        media_type: String,
+        bytes: Vec<u8>,
+    },
+    /// Image exceeded the hard cap; this is a textual rejection notice.
+    TooLarge(shared::PortalMessage),
 }
 
 /// Get the current git branch name, if in a git repository
@@ -312,19 +385,21 @@ fn track_image_reads(output: &ClaudeOutput, image_read_map: &mut HashMap<String,
     }
 }
 
-/// Check user messages for tool results that correspond to tracked image reads.
-/// For each match, reads the file from disk, base64-encodes it, and returns a PortalMessage.
-fn extract_image_portal_messages(
+/// Check user messages for tool results that correspond to tracked image
+/// reads. Reads each matching file from disk and classifies it for
+/// downstream delivery: inline base64 for small images, chunked upload
+/// for large ones, or a textual rejection if it exceeds the backend cap.
+fn extract_image_work_items(
     output: &ClaudeOutput,
     image_read_map: &mut HashMap<String, String>,
     max_image_bytes: usize,
-) -> Vec<shared::PortalMessage> {
+) -> Vec<ImageWorkItem> {
     let blocks = match output {
         ClaudeOutput::User(user) => &user.message.content,
         _ => return Vec::new(),
     };
 
-    let mut portal_messages = Vec::new();
+    let mut items = Vec::new();
 
     for block in blocks {
         if let ContentBlock::ToolResult(tr) = block {
@@ -337,26 +412,46 @@ fn extract_image_portal_messages(
 
                 match std::fs::read(&file_path) {
                     Ok(data) => {
+                        let file_size = data.len() as u64;
                         if data.len() > max_image_bytes {
                             let size_mb = data.len() as f64 / (1024.0 * 1024.0);
                             let limit_mb = max_image_bytes as f64 / (1024.0 * 1024.0);
-                            portal_messages.push(shared::PortalMessage::text(format!(
-                                "Image too large to display: **{:.1} MB** (limit is {:.0} MB)",
-                                size_mb, limit_mb
+                            warn!(
+                                "Image {} too large ({:.1} MB > {:.0} MB cap), skipping",
+                                file_path, size_mb, limit_mb
+                            );
+                            items.push(ImageWorkItem::TooLarge(shared::PortalMessage::text(
+                                format!(
+                                    "Image too large to display: **{:.1} MB** (limit is {:.0} MB)",
+                                    size_mb, limit_mb
+                                ),
                             )));
-                        } else {
-                            let file_size = data.len() as u64;
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+                        } else if data.len() >= CHUNK_UPLOAD_THRESHOLD_BYTES {
                             debug!(
-                                "Sending image portal message for {} ({} bytes)",
+                                "Queueing chunked upload for {} ({} bytes)",
                                 file_path,
                                 data.len()
                             );
-                            portal_messages.push(shared::PortalMessage::image_with_info(
-                                mime.to_string(),
-                                encoded,
-                                Some(file_path.clone()),
-                                Some(file_size),
+                            items.push(ImageWorkItem::Upload {
+                                file_path: file_path.clone(),
+                                file_size,
+                                media_type: mime.to_string(),
+                                bytes: data,
+                            });
+                        } else {
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+                            debug!(
+                                "Inlining image portal message for {} ({} bytes)",
+                                file_path,
+                                data.len()
+                            );
+                            items.push(ImageWorkItem::Inline(
+                                shared::PortalMessage::image_with_info(
+                                    mime.to_string(),
+                                    encoded,
+                                    Some(file_path.clone()),
+                                    Some(file_size),
+                                ),
                             ));
                         }
                     }
@@ -368,7 +463,7 @@ fn extract_image_portal_messages(
         }
     }
 
-    portal_messages
+    items
 }
 
 /// Log detailed information about Claude output

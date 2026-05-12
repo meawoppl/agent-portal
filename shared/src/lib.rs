@@ -9,6 +9,10 @@ pub use proxy_tokens::*;
 pub mod endpoints;
 pub use endpoints::*;
 
+// Chunked image upload protocol (mixed JSON + binary WS frames)
+pub mod image_upload;
+pub use image_upload::{ImageUploadClientMsg, ImageUploadEndpoint, ImageUploadServerMsg};
+
 // Protocol constants shared between backend and proxy
 pub mod protocol;
 
