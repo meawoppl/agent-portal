@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.10
+
+- Fix #676 — LaTeX math no longer drops when a message mixes equations with markdown that contains `_` (e.g. `$\sigma_{1D}$`). Math regions (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`) are now extracted before markdown parsing so pulldown-cmark can't split equation text on emphasis-meta characters; the math is restored verbatim in `Event::Text` so KaTeX auto-render can find the delimiters in a single DOM text node. Skips inline-code, fenced-code, and `$5`-style dollar amounts.
+- Fix #675 — Copy button icon swapped to the canonical Lucide two-overlapping-rectangles glyph so the copy affordance is immediately readable.
+- Tighten horizontal spacing between the `>` prompt and the input textarea (negative margin-right of 0.35 rem on `.input-prompt`).
+
 ## 2.5.9
 
 - Expand the rail position setting from horizontal/vertical to four choices: **Top**, **Bottom**, **Left**, **Right**. Top is unchanged (default); Bottom places the rail under the input bar; Left and Right place the rail as a 240 px column on either side. Existing `horizontal`/`vertical` localStorage values are auto-migrated to `top`/`left`.
