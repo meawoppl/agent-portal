@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.6
+
+- Force pills to actually stack vertically in vertical-rail mode (the previous fix laid out the wrapper as a left column but pills inside the rail still flowed horizontally on some browsers). Adds `!important` on `flex-direction: column` and `overflow-x/y` for the vertical rail, plus `align-items: stretch` so pills take full column width.
+
 ## 2.5.4
 
 - Fix vertical pill rail orientation: previous CSS selector targeted the wrong element (`.session-rail` is wrapped in `.session-rail-container`, so a direct-child combinator never matched); now styles the wrapper for the left-column layout
