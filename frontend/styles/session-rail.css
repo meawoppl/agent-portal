@@ -80,8 +80,8 @@
 
 .dashboard-body.rail-left .session-pill,
 .dashboard-body.rail-right .session-pill {
-    width: 100%;
-    align-self: stretch;
+    /* Same 200px width as horizontal mode — set by the base `.session-pill`
+       rule above. We only need to allow per-pill text wrapping here. */
     white-space: normal;
 }
 
@@ -158,6 +158,13 @@
     transition: all 0.2s;
     flex-shrink: 0;
     overflow: hidden;
+    /* Fixed pill width used in both horizontal and vertical rail modes.
+       Earlier attempts at content-driven shrinking were swamped by long
+       folder names hitting their min-content widths inside the flex
+       children — pinning the outer box is the only reliable way to make
+       horizontal/vertical pills look identical. */
+    width: 150px;
+    box-sizing: border-box;
 }
 
 .session-pill:hover {
@@ -202,7 +209,8 @@
 .pill-name {
     display: flex;
     flex-direction: column;
-    width: 100px;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     position: relative;
     z-index: 1;
