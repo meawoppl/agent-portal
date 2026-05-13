@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.7
+
+- Bump `claude-codes` 2.1.117 → 2.1.140 — fixes a latent proxy data-loss bug where the structured `tool_use_result` field (e.g. AskUserQuestion's `{questions, answers}`, Bash's `{stdout, stderr, exit_code}`) was being dropped by the typed serde round-trip in the proxy on the way to the frontend
+- Also picks up `UserMessage.timestamp` (CLI-emitted ISO-8601 timestamp echoed alongside tool results)
+
 ## 2.5.6
 
 - Force pills to actually stack vertically in vertical-rail mode (the previous fix laid out the wrapper as a left column but pills inside the rail still flowed horizontally on some browsers). Adds `!important` on `flex-direction: column` and `overflow-x/y` for the vertical rail, plus `align-items: stretch` so pills take full column width.
