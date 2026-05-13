@@ -144,3 +144,32 @@
     min-width: 0; /* Allow flex child to shrink below content size */
     overscroll-behavior: contain; /* Prevent iOS rubber-banding from escaping this container */
 }
+
+/* Floating "Jump to live" pill shown when the user has scrolled up.
+   Clicking it re-arms auto-tailing and snaps the messages view to bottom. */
+.jump-to-live-pill {
+    position: absolute;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    padding: 0.4rem 0.9rem;
+    background: var(--accent);
+    color: var(--bg-dark);
+    border: none;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.jump-to-live-pill:hover {
+    background: var(--accent-hover);
+    transform: translateX(-50%) translateY(-1px);
+}
+
+.jump-to-live-pill:active {
+    transform: translateX(-50%) translateY(0);
+}
