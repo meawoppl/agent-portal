@@ -166,9 +166,9 @@
 }
 
 .session-pill.focused {
-    border-color: var(--accent);
-    background: rgba(122, 162, 247, 0.2);
-    box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.3);
+    border-color: #ff3b5c;
+    background: rgba(255, 59, 92, 0.18);
+    box-shadow: 0 0 0 2px rgba(255, 59, 92, 0.45);
 }
 
 .session-pill.awaiting {
@@ -202,8 +202,10 @@
 .pill-name {
     display: flex;
     flex-direction: column;
-    width: 150px;
+    width: 120px;
     overflow: hidden;
+    position: relative;
+    z-index: 1;
 }
 
 .pill-folder {
@@ -439,7 +441,8 @@
     color: #f7768e;
 }
 
-/* Pill menu toggle (▼ button) */
+/* Pill menu toggle (▼ button). Positioned above pill-name in stacking order
+   so overflowing folder/branch text can't visually cover the dropdown affordance. */
 .pill-menu-toggle {
     background: transparent;
     border: none;
@@ -450,6 +453,8 @@
     border-radius: 4px;
     transition: color 0.15s, background 0.15s;
     flex-shrink: 0;
+    position: relative;
+    z-index: 2;
 }
 
 .pill-menu-toggle:hover {
