@@ -198,7 +198,14 @@ pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> H
             </div>
             <div class="message-body">
                 { for messages.iter().enumerate().map(|(i, json)| {
-                    html! { <GroupedMessageContent key={format!("m{}", i)} json={json.clone()} /> }
+                    // Key by the message's `_created_at` when available, so
+                    // streaming/insert reordering doesn't reset expandable
+                    // state inside the body. Fall back to positional index
+                    // for messages predating the `_created_at` field.
+                    let key = extract_raw_iso(json)
+                        .map(|iso| format!("m-{}", iso))
+                        .unwrap_or_else(|| format!("m{}", i));
+                    html! { <GroupedMessageContent {key} json={json.clone()} /> }
                 })}
             </div>
             if let Some(iso) = last_iso {

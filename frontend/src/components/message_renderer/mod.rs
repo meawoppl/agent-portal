@@ -37,9 +37,30 @@ pub enum MessageGroup {
 }
 
 impl MessageGroup {
-    /// Stable key for this group based on its position in the message list.
+    /// Stable key for this group derived from the first message's identity.
+    ///
+    /// A positional index would change whenever an earlier group gets added
+    /// or removed, causing Yew to throw away the group component and reset
+    /// internal state of every expandable/collapsible inside it (bash
+    /// command toggle, `ExpandableText`, image viewer, etc.). Using the
+    /// first message's `_created_at` keeps the key stable across reorderings.
+    /// `index` is used only as a fallback when no timestamp is present.
     pub fn key(&self, index: usize) -> yew::virtual_dom::Key {
-        yew::virtual_dom::Key::from(format!("g{}", index))
+        let first = match self {
+            MessageGroup::Single(json) => json,
+            MessageGroup::AssistantGroup(messages) => match messages.first() {
+                Some(j) => j,
+                None => return yew::virtual_dom::Key::from(format!("g{}", index)),
+            },
+        };
+        let prefix = match self {
+            MessageGroup::Single(_) => "s",
+            MessageGroup::AssistantGroup(_) => "g",
+        };
+        match extract_raw_iso(first) {
+            Some(iso) => yew::virtual_dom::Key::from(format!("{}-{}", prefix, iso)),
+            None => yew::virtual_dom::Key::from(format!("{}{}", prefix, index)),
+        }
     }
 }
 

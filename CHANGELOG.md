@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.3
+
+- Stabilize expand/collapse state of message components across new messages: bash command toggle, `ExpandableText` "... more chars", and image viewer no longer reset when later messages arrive
+- Keys for message groups and grouped messages now derive from `_created_at` instead of position, so inserting a user message between assistant groups stops invalidating later groups' identity
+
 ## 2.5.2
 
 - Pause auto-scroll when the user scrolls up to read older output; new messages no longer yank the view to the bottom
