@@ -2,8 +2,16 @@
    Session Rail - Horizontal Carousel
    ========================================================================== */
 
-/* Wraps the rail + session views so we can swap the carousel orientation
-   without touching the rail or view components themselves. */
+/* Wraps the rail + session views so we can swap the rail position without
+   touching the rail or view components themselves. Four positions:
+     rail-top    — rail above messages (default)
+     rail-bottom — rail under everything (below the input bar)
+     rail-left   — rail down the left side
+     rail-right  — rail down the right side
+   The DOM is `.dashboard-body > .session-rail-container > .session-rail`
+   (with `.session-views-container` as the rail-container's sibling). For
+   left/right we make the rail-container the column-sized flex item; for
+   top/bottom we flip the dashboard-body's main axis (column / column-reverse). */
 .dashboard-body {
     flex: 1;
     display: flex;
@@ -11,9 +19,10 @@
     min-height: 0;
 }
 
-.dashboard-body.rail-vertical {
-    flex-direction: row;
-}
+.dashboard-body.rail-top    { flex-direction: column; }
+.dashboard-body.rail-bottom { flex-direction: column-reverse; }
+.dashboard-body.rail-left   { flex-direction: row; }
+.dashboard-body.rail-right  { flex-direction: row-reverse; }
 
 .session-rail {
     display: flex;
@@ -24,31 +33,39 @@
     overflow-x: auto;
 }
 
-/* Vertical rail: pills stack down the left, the views fill the remainder.
+/* In bottom-position mode the rail sits under the views/input so the
+   horizontal divider line lives on its top edge instead of its bottom. */
+.dashboard-body.rail-bottom .session-rail {
+    border-bottom: none;
+    border-top: 1px solid var(--border);
+}
+
+/* Vertical positions (left/right): the rail becomes a 240px-wide column.
    The actual direct child of `.dashboard-body` is `.session-rail-container`
    (which wraps the rail plus the floating dropdown and dialogs), so the
-   left-column box is applied to that wrapper. The inner `.session-rail` is
-   then styled via a descendant combinator to switch its flex direction
-   and scrolling axis.
+   column-sized box is applied to that wrapper. The inner `.session-rail` is
+   then styled via a descendant combinator to switch its flex direction and
+   scrolling axis.
 
-   `!important` markers on the rail's flex-direction and overflow are there
-   because the base `.session-rail { display: flex; overflow-x: auto }` rule
-   would otherwise win against any author override that landed later in
-   user-agent stylesheet processing (e.g. on some mobile browsers we have
-   seen the override silently dropped). They keep the column direction
-   sticky regardless of cascade quirks. */
-.dashboard-body.rail-vertical > .session-rail-container {
+   `!important` on the rail's flex-direction and overflow keeps the column
+   direction sticky against the base rule's `overflow-x: auto`, which on
+   some browser cascades has shadowed the override. */
+.dashboard-body.rail-left  > .session-rail-container,
+.dashboard-body.rail-right > .session-rail-container {
     width: 240px;
     min-width: 240px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border);
     overflow: hidden;
     min-height: 0;
 }
 
-.dashboard-body.rail-vertical .session-rail {
+.dashboard-body.rail-left  > .session-rail-container { border-right: 1px solid var(--border); }
+.dashboard-body.rail-right > .session-rail-container { border-left:  1px solid var(--border); }
+
+.dashboard-body.rail-left .session-rail,
+.dashboard-body.rail-right .session-rail {
     flex: 1;
     flex-direction: column !important;
     align-items: stretch;
@@ -61,14 +78,17 @@
     min-height: 0;
 }
 
-.dashboard-body.rail-vertical .session-pill {
+.dashboard-body.rail-left .session-pill,
+.dashboard-body.rail-right .session-pill {
     width: 100%;
     align-self: stretch;
     white-space: normal;
 }
 
-/* Flip the active/inactive divider so it reads horizontally in vertical mode. */
-.dashboard-body.rail-vertical .session-rail-divider {
+/* Flip the active/inactive divider so it reads horizontally inside the
+   vertical column rather than vertically across it. */
+.dashboard-body.rail-left .session-rail-divider,
+.dashboard-body.rail-right .session-rail-divider {
     flex-direction: row;
     align-self: stretch;
     width: 100%;
@@ -76,7 +96,8 @@
     padding: 0.25rem 0;
 }
 
-.dashboard-body.rail-vertical .session-rail-divider .divider-line {
+.dashboard-body.rail-left .session-rail-divider .divider-line,
+.dashboard-body.rail-right .session-rail-divider .divider-line {
     width: auto;
     height: 1px;
     flex: 1;

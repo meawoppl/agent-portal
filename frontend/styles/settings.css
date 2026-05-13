@@ -769,7 +769,7 @@
     font-weight: 500;
 }
 
-/* Schematic previews for the two orientations */
+/* Schematic previews for each rail position */
 .orientation-preview {
     width: 120px;
     height: 80px;
@@ -780,13 +780,10 @@
     overflow: hidden;
 }
 
-.orientation-preview.horizontal {
-    flex-direction: column;
-}
-
-.orientation-preview.vertical {
-    flex-direction: row;
-}
+.orientation-preview.top    { flex-direction: column; }
+.orientation-preview.bottom { flex-direction: column-reverse; }
+.orientation-preview.left   { flex-direction: row; }
+.orientation-preview.right  { flex-direction: row-reverse; }
 
 .orientation-preview .preview-rail-h {
     height: 16px;
@@ -794,10 +791,20 @@
     border-bottom: 1px solid var(--border);
 }
 
+.orientation-preview.bottom .preview-rail-h {
+    border-bottom: none;
+    border-top: 1px solid var(--border);
+}
+
 .orientation-preview .preview-rail-v {
     width: 26px;
     background: rgba(122, 162, 247, 0.4);
     border-right: 1px solid var(--border);
+}
+
+.orientation-preview.right .preview-rail-v {
+    border-right: none;
+    border-left: 1px solid var(--border);
 }
 
 .orientation-preview .preview-body {

@@ -1,28 +1,16 @@
-use crate::pages::dashboard::{load_rail_orientation, save_rail_orientation, RailOrientation};
+use crate::pages::dashboard::{load_rail_position, save_rail_position, RailPosition};
 use yew::prelude::*;
+
+const ALL_POSITIONS: &[(RailPosition, &str)] = &[
+    (RailPosition::Top, "Top"),
+    (RailPosition::Bottom, "Bottom"),
+    (RailPosition::Left, "Left"),
+    (RailPosition::Right, "Right"),
+];
 
 #[function_component(AppearancePanel)]
 pub fn appearance_panel() -> Html {
-    let orientation = use_state(load_rail_orientation);
-
-    let set_horizontal = {
-        let orientation = orientation.clone();
-        Callback::from(move |_: MouseEvent| {
-            save_rail_orientation(RailOrientation::Horizontal);
-            orientation.set(RailOrientation::Horizontal);
-        })
-    };
-
-    let set_vertical = {
-        let orientation = orientation.clone();
-        Callback::from(move |_: MouseEvent| {
-            save_rail_orientation(RailOrientation::Vertical);
-            orientation.set(RailOrientation::Vertical);
-        })
-    };
-
-    let is_horizontal = *orientation == RailOrientation::Horizontal;
-    let is_vertical = *orientation == RailOrientation::Vertical;
+    let position = use_state(load_rail_position);
 
     html! {
         <section class="appearance-section">
@@ -36,31 +24,47 @@ pub fn appearance_panel() -> Html {
             <div class="appearance-setting">
                 <h3>{ "Session pill menu" }</h3>
                 <p class="setting-description">
-                    { "Place the session pills along the top of the page, or down the left side." }
+                    { "Pick where the session pill rail sits on the dashboard." }
                 </p>
                 <div class="orientation-choices">
-                    <button
-                        class={classes!("orientation-choice", is_horizontal.then_some("active"))}
-                        onclick={set_horizontal}
-                    >
-                        <div class="orientation-preview horizontal">
-                            <div class="preview-rail-h"></div>
-                            <div class="preview-body"></div>
-                        </div>
-                        <span class="orientation-label">{ "Horizontal (top)" }</span>
-                    </button>
-                    <button
-                        class={classes!("orientation-choice", is_vertical.then_some("active"))}
-                        onclick={set_vertical}
-                    >
-                        <div class="orientation-preview vertical">
-                            <div class="preview-rail-v"></div>
-                            <div class="preview-body"></div>
-                        </div>
-                        <span class="orientation-label">{ "Vertical (left)" }</span>
-                    </button>
+                    { for ALL_POSITIONS.iter().copied().map(|(pos, label)| {
+                        let active = *position == pos;
+                        let position_setter = position.clone();
+                        let on_click = Callback::from(move |_: MouseEvent| {
+                            save_rail_position(pos);
+                            position_setter.set(pos);
+                        });
+                        html! {
+                            <button
+                                key={pos.as_str()}
+                                class={classes!("orientation-choice", active.then_some("active"))}
+                                onclick={on_click}
+                            >
+                                <div class={classes!("orientation-preview", pos.as_str())}>
+                                    { preview_inner(pos) }
+                                </div>
+                                <span class="orientation-label">{ label }</span>
+                            </button>
+                        }
+                    })}
                 </div>
             </div>
         </section>
+    }
+}
+
+/// Schematic preview inside each choice button — a tiny mockup of the
+/// dashboard showing where the rail (accent stripe) sits relative to
+/// the message body (hatched pattern).
+fn preview_inner(pos: RailPosition) -> Html {
+    let rail_class = match pos {
+        RailPosition::Top | RailPosition::Bottom => "preview-rail-h",
+        RailPosition::Left | RailPosition::Right => "preview-rail-v",
+    };
+    html! {
+        <>
+            <div class={rail_class}></div>
+            <div class="preview-body"></div>
+        </>
     }
 }
