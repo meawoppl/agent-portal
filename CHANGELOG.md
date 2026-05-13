@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.11
+
+- Trim message stream right/bottom padding to match the previously-halved left side (1.5 rem → 0.75 rem right; bottom 0 → 0.5 rem)
+- Tighten the `>` input prompt on both sides (negative left margin to match the existing negative right margin)
+- Bright-red active pill indicator (was accent blue) so the focused session is immediately obvious
+- Pill text width shrunk by 20 % (150 → 120 px) and the `▼` menu toggle now sits above the text in stacking order (z-index 2) so it stays readable when folder/branch labels are long
+
 ## 2.5.10
 
 - Fix #676 — LaTeX math no longer drops when a message mixes equations with markdown that contains `_` (e.g. `$\sigma_{1D}$`). Math regions (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`) are now extracted before markdown parsing so pulldown-cmark can't split equation text on emphasis-meta characters; the math is restored verbatim in `Event::Text` so KaTeX auto-render can find the delimiters in a single DOM text node. Skips inline-code, fenced-code, and `$5`-style dollar amounts.

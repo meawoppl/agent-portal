@@ -140,7 +140,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 1rem 1.5rem 0 0.75rem;
+    padding: 1rem 0.75rem 0.5rem 0.75rem;
     min-width: 0; /* Allow flex child to shrink below content size */
     overscroll-behavior: contain; /* Prevent iOS rubber-banding from escaping this container */
 }
