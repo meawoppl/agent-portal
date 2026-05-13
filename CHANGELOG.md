@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.13
+
+- Session pills now have an explicit **150 px** width in both horizontal and vertical rail modes — previous content-driven sizing kept getting pushed by long folder names hitting min-content widths inside the flex children. `.pill-name` is `flex: 1; min-width: 0` so it fills the remaining space and ellipsizes cleanly. Vertical-mode `width: 100%` override removed.
+- Trim the gap between the last visible message and the input bar: dropped the 0.5 rem bottom padding I added in 2.5.11 and shrunk the input form's top padding from 0.5 → 0.3 rem.
+
 ## 2.5.12
 
 - Actually shrink the session pill width — #680's `.pill-name` change only knocked ~14% off the outer pill since the surrounding chrome stayed the same size. Pill-name width 120 → 100 px, pill horizontal padding 0.75 → 0.55 rem, and inter-item gap 0.5 → 0.35 rem, for ~25% total outer-width reduction in horizontal mode.
