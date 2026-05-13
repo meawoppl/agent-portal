@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.12
+
+- Actually shrink the session pill width — #680's `.pill-name` change only knocked ~14% off the outer pill since the surrounding chrome stayed the same size. Pill-name width 120 → 100 px, pill horizontal padding 0.75 → 0.55 rem, and inter-item gap 0.5 → 0.35 rem, for ~25% total outer-width reduction in horizontal mode.
+
 ## 2.5.11
 
 - Trim message stream right/bottom padding to match the previously-halved left side (1.5 rem → 0.75 rem right; bottom 0 → 0.5 rem)
