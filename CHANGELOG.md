@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.2
+
+- Pause auto-scroll when the user scrolls up to read older output; new messages no longer yank the view to the bottom
+- Show a floating "Jump to live ↓" pill in the messages area when tailing is paused; click to resume
+
 ## 2.5.1
 
 - Add Appearance tab in Settings with a horizontal-vs-vertical toggle for the session pill rail

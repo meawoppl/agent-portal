@@ -146,6 +146,12 @@ pub enum SessionViewMsg {
     FinishDeparture,
     /// Send an interrupt to stop the current Claude response
     Interrupt,
+    /// Scroll position crossed the at-bottom threshold. Sent by the scroll
+    /// listener only on transitions so we can re-render to show/hide the
+    /// jump-to-live pill. The actual flag lives on `should_autoscroll`.
+    AutoscrollChanged,
+    /// User clicked the "Jump to live" pill: resume tailing and scroll to bottom.
+    JumpToLive,
 }
 
 /// SessionView - Main terminal view for a single session
@@ -323,13 +329,21 @@ impl Component for SessionView {
             if first_render {
                 let should_autoscroll = self.should_autoscroll.clone();
                 let element_clone = element.clone();
+                let link = ctx.link().clone();
 
                 let closure = Closure::new(move || {
                     let scroll_top = element_clone.scroll_top();
                     let scroll_height = element_clone.scroll_height();
                     let client_height = element_clone.client_height();
                     let at_bottom = scroll_height - scroll_top - client_height < 50;
-                    *should_autoscroll.borrow_mut() = at_bottom;
+                    // Only dispatch a Yew re-render on a transition — scroll
+                    // events fire continuously and a per-event update would
+                    // wreck performance on long message lists.
+                    let mut current = should_autoscroll.borrow_mut();
+                    if *current != at_bottom {
+                        *current = at_bottom;
+                        link.send_message(SessionViewMsg::AutoscrollChanged);
+                    }
                 });
 
                 let _ = element
@@ -914,6 +928,18 @@ impl Component for SessionView {
                 }
                 true
             }
+            SessionViewMsg::AutoscrollChanged => {
+                // The scroll listener already updated `should_autoscroll`;
+                // returning true here just re-renders so the jump-to-live
+                // pill appears or disappears.
+                true
+            }
+            SessionViewMsg::JumpToLive => {
+                *self.should_autoscroll.borrow_mut() = true;
+                // rendered() will see the flag and snap to bottom on the
+                // next paint.
+                true
+            }
         }
     }
 
@@ -1033,6 +1059,12 @@ impl Component for SessionView {
             "session-view-input"
         };
 
+        let is_tailing = *self.should_autoscroll.borrow();
+        let on_jump_to_live = link.callback(|e: MouseEvent| {
+            e.stop_propagation();
+            SessionViewMsg::JumpToLive
+        });
+
         html! {
             <div class="session-view" onclick={close_dropdown}>
                 <div class="session-view-scroll-area">
@@ -1047,6 +1079,15 @@ impl Component for SessionView {
                             html! { <MessageRenderer key={format!("p{}", i)} json={json.clone()} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
                         })}
                     </div>
+                    if !is_tailing {
+                        <button
+                            class="jump-to-live-pill"
+                            onclick={on_jump_to_live}
+                            title="Resume live tailing of new messages"
+                        >
+                            { "Jump to live ↓" }
+                        </button>
+                    }
                     { self.render_tasks_sidebar(ctx) }
                 </div>
 
