@@ -45,16 +45,180 @@ fn markdown_view(props: &MarkdownViewProps) -> Html {
         });
     }
 
+    // Protect math regions ($…$, $$…$$, \(…\), \[…\]) from pulldown-cmark by
+    // replacing them with private-use placeholders BEFORE parsing. Otherwise
+    // pulldown-cmark would interpret `_` inside an equation as emphasis (and
+    // `*`, etc.) which splits the math text across DOM elements and prevents
+    // KaTeX's auto-render from matching the surrounding delimiters.
+    let (pre_processed, math_blocks) = extract_math_placeholders(&props.text);
+
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
 
-    let parser = Parser::new_ext(&props.text, options);
+    let parser = Parser::new_ext(&pre_processed, options);
     let events: Vec<Event> = parser.collect();
+    let events = restore_math_in_events(events, &math_blocks);
 
     html! {
         <span ref={node_ref}>{ render_events(&events) }</span>
     }
+}
+
+const MATH_OPEN: char = '\u{E000}';
+const MATH_CLOSE: char = '\u{E001}';
+
+/// Scan `text` for math regions (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`) outside of
+/// inline-code spans and fenced code blocks, and replace each occurrence with a
+/// private-use placeholder of the form `\u{E000}MATH<idx>\u{E001}`. Returns the
+/// rewritten text plus the original math literals indexed by `<idx>`.
+fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
+    let bytes = text.as_bytes();
+    let mut output = String::with_capacity(text.len());
+    let mut math_blocks: Vec<String> = Vec::new();
+    let mut i = 0;
+    let mut in_code_fence = false;
+    let mut in_inline_code = false;
+
+    while i < bytes.len() {
+        // Fenced code block toggle (``` at start of a line or after a newline)
+        if bytes[i] == b'`' && bytes.get(i + 1) == Some(&b'`') && bytes.get(i + 2) == Some(&b'`') {
+            output.push_str("```");
+            i += 3;
+            in_code_fence = !in_code_fence;
+            continue;
+        }
+        if in_code_fence {
+            let c = text[i..].chars().next().unwrap();
+            output.push(c);
+            i += c.len_utf8();
+            continue;
+        }
+        // Inline-code toggle
+        if bytes[i] == b'`' {
+            output.push('`');
+            i += 1;
+            in_inline_code = !in_inline_code;
+            continue;
+        }
+        if in_inline_code {
+            let c = text[i..].chars().next().unwrap();
+            output.push(c);
+            i += c.len_utf8();
+            continue;
+        }
+        // Display math: $$…$$
+        if bytes[i] == b'$' && bytes.get(i + 1) == Some(&b'$') {
+            if let Some(rel) = text[i + 2..].find("$$") {
+                let end = i + 2 + rel + 2;
+                emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
+                i = end;
+                continue;
+            }
+        }
+        // LaTeX-style display: \[…\]
+        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'[') {
+            if let Some(rel) = text[i + 2..].find("\\]") {
+                let end = i + 2 + rel + 2;
+                emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
+                i = end;
+                continue;
+            }
+        }
+        // LaTeX-style inline: \(…\)
+        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'(') {
+            if let Some(rel) = text[i + 2..].find("\\)") {
+                let end = i + 2 + rel + 2;
+                emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
+                i = end;
+                continue;
+            }
+        }
+        // Inline math: $…$ on a single line. Skip dollar amounts ("$5", "$100")
+        // by requiring the character after `$` not to be a digit or whitespace.
+        if bytes[i] == b'$' {
+            let line_end = text[i + 1..]
+                .find('\n')
+                .map(|n| i + 1 + n)
+                .unwrap_or(bytes.len());
+            if let Some(rel) = text[i + 1..line_end].find('$') {
+                let after = bytes.get(i + 1).copied();
+                let before_close_idx = i + 1 + rel;
+                let before_close = bytes.get(before_close_idx.saturating_sub(1)).copied();
+                let looks_like_money =
+                    matches!(after, Some(c) if c.is_ascii_digit() || c == b' ' || c == b'\t');
+                let trailing_money = matches!(before_close, Some(b' ') | Some(b'\t'));
+                if !looks_like_money && !trailing_money {
+                    let end = before_close_idx + 1;
+                    emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
+                    i = end;
+                    continue;
+                }
+            }
+        }
+
+        let c = text[i..].chars().next().unwrap();
+        output.push(c);
+        i += c.len_utf8();
+    }
+
+    (output, math_blocks)
+}
+
+fn emit_placeholder(output: &mut String, math_blocks: &mut Vec<String>, math: &str) {
+    let idx = math_blocks.len();
+    math_blocks.push(math.to_string());
+    output.push(MATH_OPEN);
+    output.push_str("MATH");
+    output.push_str(&idx.to_string());
+    output.push(MATH_CLOSE);
+}
+
+/// Walk the event stream and replace placeholders inside `Event::Text` (or the
+/// related `Event::Code` / `Event::Html` text variants where they may end up)
+/// with the original math literals so that KaTeX can find the `$`/`\(` delimiters.
+fn restore_math_in_events<'a>(events: Vec<Event<'a>>, math_blocks: &[String]) -> Vec<Event<'a>> {
+    events
+        .into_iter()
+        .map(|e| match e {
+            Event::Text(t) => {
+                if t.contains(MATH_OPEN) {
+                    Event::Text(restore_math(&t, math_blocks).into())
+                } else {
+                    Event::Text(t)
+                }
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn restore_math(text: &str, math_blocks: &[String]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == MATH_OPEN {
+            let mut token = String::new();
+            for tc in chars.by_ref() {
+                if tc == MATH_CLOSE {
+                    break;
+                }
+                token.push(tc);
+            }
+            if let Some(n_str) = token.strip_prefix("MATH") {
+                if let Ok(idx) = n_str.parse::<usize>() {
+                    if let Some(math) = math_blocks.get(idx) {
+                        out.push_str(math);
+                        continue;
+                    }
+                }
+            }
+            // Malformed: drop silently
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Convert pulldown-cmark events to Yew Html
@@ -736,5 +900,58 @@ mod tests {
             .iter()
             .any(|e| matches!(e, Event::Start(Tag::TableHead)));
         assert!(has_table_head, "Expected TableHead event");
+    }
+
+    #[test]
+    fn test_extract_math_inline_with_underscore() {
+        // The bug case: pulldown-cmark would otherwise treat `_{1D}` as emphasis,
+        // splitting the equation across an <em> element and breaking KaTeX.
+        let (out, blocks) = extract_math_placeholders("So $\\sigma_{1D}$ is small.");
+        assert_eq!(blocks, vec!["$\\sigma_{1D}$"]);
+        assert!(out.contains(MATH_OPEN));
+        assert!(out.contains(MATH_CLOSE));
+        assert!(!out.contains('_'));
+    }
+
+    #[test]
+    fn test_extract_math_display_block() {
+        let input = "Math: $$X(t)\\sim\\text{Pink}(0,1) \\quad S_{XX}(f)$$\nthen text.";
+        let (out, blocks) = extract_math_placeholders(input);
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].starts_with("$$") && blocks[0].ends_with("$$"));
+        assert!(out.contains("then text."));
+    }
+
+    #[test]
+    fn test_extract_math_round_trip() {
+        let input = "Inline $a_1 + b_2$ and display $$\\sigma_{XX}$$ done.";
+        let (out, blocks) = extract_math_placeholders(input);
+        // Restoring placeholders should reproduce the original text verbatim.
+        assert_eq!(restore_math(&out, &blocks), input);
+    }
+
+    #[test]
+    fn test_extract_math_skips_inline_code() {
+        // Math-looking syntax inside backticks must not be extracted.
+        let input = "Use `$1` as the price marker.";
+        let (out, blocks) = extract_math_placeholders(input);
+        assert!(
+            blocks.is_empty(),
+            "no math should be extracted from inline code: blocks={:?}",
+            blocks
+        );
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn test_extract_math_skips_dollar_amounts() {
+        // "$5 and $10" looks like inline math to a naïve scanner but isn't.
+        let input = "I have $5 and $10 left.";
+        let (_out, blocks) = extract_math_placeholders(input);
+        assert!(
+            blocks.is_empty(),
+            "money amounts shouldn't be extracted: blocks={:?}",
+            blocks
+        );
     }
 }
