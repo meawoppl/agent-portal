@@ -3,8 +3,8 @@
 use super::session_rail::{ActivityRef, SessionRail};
 use super::session_view::SessionView;
 use super::types::{
-    load_hidden_sessions, load_inactive_hidden, load_show_cost, save_hidden_sessions,
-    save_inactive_hidden, save_show_cost,
+    load_hidden_sessions, load_inactive_hidden, load_rail_orientation, load_show_cost,
+    save_hidden_sessions, save_inactive_hidden, save_show_cost,
 };
 use crate::components::LaunchDialog;
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
@@ -49,6 +49,7 @@ pub fn dashboard_page() -> Html {
     let hidden_sessions = use_state(load_hidden_sessions);
     let inactive_hidden = use_state(load_inactive_hidden);
     let show_cost = use_state(load_show_cost);
+    let rail_orientation = use_state(load_rail_orientation);
     let connected_sessions = use_state(HashSet::<Uuid>::new);
     let pending_leave = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
@@ -325,7 +326,14 @@ pub fn dashboard_page() -> Html {
 
     let close_settings = {
         let show_settings = show_settings.clone();
-        Callback::from(move |_: ()| show_settings.set(false))
+        let rail_orientation = rail_orientation.clone();
+        Callback::from(move |_: ()| {
+            // The Appearance panel may have changed this; re-sync from
+            // localStorage so the dashboard picks up the new value when
+            // the user navigates back.
+            rail_orientation.set(load_rail_orientation());
+            show_settings.set(false);
+        })
     };
 
     let do_logout = Callback::from(move |_| {
@@ -708,6 +716,7 @@ pub fn dashboard_page() -> Html {
                 </div>
             } else {
                 <>
+                    <div class={classes!("dashboard-body", rail_orientation.body_class())}>
                     // Session Rail
                     <SessionRail
                         sessions={active_sessions.clone()}
@@ -764,6 +773,7 @@ pub fn dashboard_page() -> Html {
                                 }
                             }).collect::<Html>()
                         }
+                    </div>
                     </div>
 
                     // Keyboard hints

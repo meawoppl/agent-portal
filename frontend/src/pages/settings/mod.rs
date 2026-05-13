@@ -1,8 +1,10 @@
+mod appearance_panel;
 mod launchers_panel;
 mod sessions_panel;
 mod sounds_panel;
 mod tokens_panel;
 
+use appearance_panel::AppearancePanel;
 use launchers_panel::{count_expiring_launchers, LaunchersPanel};
 use sessions_panel::SessionsPanel;
 use shared::{LauncherInfo, ProxyTokenInfo, SessionInfo};
@@ -16,6 +18,7 @@ enum SettingsTab {
     Tokens,
     Launchers,
     Sounds,
+    Appearance,
 }
 
 #[derive(Properties, PartialEq)]
@@ -73,6 +76,11 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         Callback::from(move |_| active_tab.set(SettingsTab::Sounds))
     };
 
+    let on_appearance_tab = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |_| active_tab.set(SettingsTab::Appearance))
+    };
+
     let go_back = {
         let on_close = props.on_close.clone();
         Callback::from(move |_| on_close.emit(()))
@@ -126,6 +134,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 >
                     { "Sounds" }
                 </button>
+                <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Appearance).then_some("active"))}
+                    onclick={on_appearance_tab}
+                >
+                    { "Appearance" }
+                </button>
             </nav>
 
             <main class="settings-content">
@@ -140,6 +154,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Sessions {
                     <SessionsPanel on_sessions_loaded={on_sessions_loaded} />
+                }
+                if *active_tab == SettingsTab::Appearance {
+                    <AppearancePanel />
                 }
             </main>
         </div>

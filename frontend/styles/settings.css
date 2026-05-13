@@ -703,3 +703,111 @@
     }
 }
 
+/* ==========================================================================
+   Appearance panel
+   ========================================================================== */
+
+.appearance-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.appearance-setting {
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+}
+
+.appearance-setting h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.appearance-setting .setting-description {
+    margin: 0 0 1rem 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.orientation-choices {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.orientation-choice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    color: var(--text-secondary);
+    font: inherit;
+}
+
+.orientation-choice:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+}
+
+.orientation-choice.active {
+    border-color: var(--accent);
+    background: rgba(122, 162, 247, 0.1);
+    color: var(--text-primary);
+}
+
+.orientation-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+/* Schematic previews for the two orientations */
+.orientation-preview {
+    width: 120px;
+    height: 80px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    display: flex;
+    overflow: hidden;
+}
+
+.orientation-preview.horizontal {
+    flex-direction: column;
+}
+
+.orientation-preview.vertical {
+    flex-direction: row;
+}
+
+.orientation-preview .preview-rail-h {
+    height: 16px;
+    background: rgba(122, 162, 247, 0.4);
+    border-bottom: 1px solid var(--border);
+}
+
+.orientation-preview .preview-rail-v {
+    width: 26px;
+    background: rgba(122, 162, 247, 0.4);
+    border-right: 1px solid var(--border);
+}
+
+.orientation-preview .preview-body {
+    flex: 1;
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.02),
+        rgba(255, 255, 255, 0.02) 4px,
+        rgba(255, 255, 255, 0.04) 4px,
+        rgba(255, 255, 255, 0.04) 8px
+    );
+}
+
