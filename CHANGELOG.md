@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.4
+
+- Fix vertical pill rail orientation: previous CSS selector targeted the wrong element (`.session-rail` is wrapped in `.session-rail-container`, so a direct-child combinator never matched); now styles the wrapper for the left-column layout
+
 ## 2.5.3
 
 - Stabilize expand/collapse state of message components across new messages: bash command toggle, `ExpandableText` "... more chars", and image viewer no longer reset when later messages arrive

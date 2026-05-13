@@ -24,33 +24,46 @@
     overflow-x: auto;
 }
 
-/* Vertical rail: pills stack down the left, the views fill the remainder. */
-.dashboard-body.rail-vertical > .session-rail {
+/* Vertical rail: pills stack down the left, the views fill the remainder.
+   The actual direct child of `.dashboard-body` is `.session-rail-container`
+   (which wraps the rail plus the floating dropdown and dialogs), so the
+   left-column box is applied to that wrapper. The inner `.session-rail` is
+   then styled via a descendant combinator to switch its flex direction
+   and scrolling axis. */
+.dashboard-body.rail-vertical > .session-rail-container {
+    width: 240px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.dashboard-body.rail-vertical .session-rail {
+    flex: 1;
     flex-direction: column;
     gap: 0.35rem;
     padding: 0.75rem 0.5rem;
-    border-right: 1px solid var(--border);
     border-bottom: none;
     overflow-x: visible;
     overflow-y: auto;
-    width: 240px;
-    flex-shrink: 0;
+    width: auto;
 }
 
-.dashboard-body.rail-vertical > .session-rail .session-pill {
+.dashboard-body.rail-vertical .session-pill {
     width: 100%;
     white-space: normal;
 }
 
 /* Flip the active/inactive divider so it reads horizontally in vertical mode. */
-.dashboard-body.rail-vertical > .session-rail .session-rail-divider {
+.dashboard-body.rail-vertical .session-rail-divider {
     flex-direction: row;
     align-self: stretch;
     justify-content: center;
     padding: 0.25rem 0;
 }
 
-.dashboard-body.rail-vertical > .session-rail .session-rail-divider .divider-line {
+.dashboard-body.rail-vertical .session-rail-divider .divider-line {
     width: auto;
     height: 1px;
     flex: 1;
