@@ -29,29 +29,41 @@
    (which wraps the rail plus the floating dropdown and dialogs), so the
    left-column box is applied to that wrapper. The inner `.session-rail` is
    then styled via a descendant combinator to switch its flex direction
-   and scrolling axis. */
+   and scrolling axis.
+
+   `!important` markers on the rail's flex-direction and overflow are there
+   because the base `.session-rail { display: flex; overflow-x: auto }` rule
+   would otherwise win against any author override that landed later in
+   user-agent stylesheet processing (e.g. on some mobile browsers we have
+   seen the override silently dropped). They keep the column direction
+   sticky regardless of cascade quirks. */
 .dashboard-body.rail-vertical > .session-rail-container {
     width: 240px;
+    min-width: 240px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--border);
     overflow: hidden;
+    min-height: 0;
 }
 
 .dashboard-body.rail-vertical .session-rail {
     flex: 1;
-    flex-direction: column;
+    flex-direction: column !important;
+    align-items: stretch;
     gap: 0.35rem;
     padding: 0.75rem 0.5rem;
     border-bottom: none;
-    overflow-x: visible;
-    overflow-y: auto;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
     width: auto;
+    min-height: 0;
 }
 
 .dashboard-body.rail-vertical .session-pill {
     width: 100%;
+    align-self: stretch;
     white-space: normal;
 }
 
@@ -59,6 +71,7 @@
 .dashboard-body.rail-vertical .session-rail-divider {
     flex-direction: row;
     align-self: stretch;
+    width: 100%;
     justify-content: center;
     padding: 0.25rem 0;
 }
