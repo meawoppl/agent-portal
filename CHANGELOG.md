@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.8
+
+- CI: prepend `$HOME/.cargo/bin` to PATH on macOS jobs in `ci.yml` and `release.yml` to work around a `macos-14` runner image variant where a preinstalled `rustup-init` shadowed the rustup-managed `cargo` shim, causing intermittent `error: unexpected argument 'build' found` failures
+
 ## 2.5.7
 
 - Bump `claude-codes` 2.1.117 → 2.1.140 — fixes a latent proxy data-loss bug where the structured `tool_use_result` field (e.g. AskUserQuestion's `{questions, answers}`, Bash's `{stdout, stderr, exit_code}`) was being dropped by the typed serde round-trip in the proxy on the way to the frontend

@@ -92,6 +92,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
 
+      # Some macos-14 runner image variants ship a preinstalled `rustup-init`
+      # ahead of `~/.cargo/bin` in PATH. When that wins, `cargo build` resolves
+      # to `rustup-init` and dies with `unexpected argument 'build' found`.
+      # Forcing the rustup bin dir to the front of PATH makes the build
+      # robust to that runner-image rollout.
+      - name: Ensure rustup PATH wins over preinstalled shim
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -135,6 +143,11 @@ jobs:
         uses: dtolnay/rust-toolchain@1.92.0
         with:
           targets: x86_64-apple-darwin
+
+      # See `build-macos-arm64` for the rationale — preinstalled `rustup-init`
+      # can shadow the rustup cargo shim on some macos-14 image variants.
+      - name: Ensure rustup PATH wins over preinstalled shim
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
