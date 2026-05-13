@@ -124,25 +124,35 @@ pub fn save_show_cost(show: bool) {
     }
 }
 
-/// Orientation of the session pill rail on the dashboard.
+/// Where the session pill rail sits on the dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RailOrientation {
-    Horizontal,
-    Vertical,
+pub enum RailPosition {
+    Top,
+    Bottom,
+    Left,
+    Right,
 }
 
-impl RailOrientation {
+impl RailPosition {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Horizontal => "horizontal",
-            Self::Vertical => "vertical",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::Left => "left",
+            Self::Right => "right",
         }
     }
 
+    /// Parse a stored preference value. Accepts both the new four-value form
+    /// (`top`/`bottom`/`left`/`right`) and the legacy two-value form
+    /// (`horizontal` → top, `vertical` → left) so older browser local storage
+    /// entries keep working without forcing the user to re-pick.
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "horizontal" => Some(Self::Horizontal),
-            "vertical" => Some(Self::Vertical),
+            "top" | "horizontal" => Some(Self::Top),
+            "bottom" => Some(Self::Bottom),
+            "left" | "vertical" => Some(Self::Left),
+            "right" => Some(Self::Right),
             _ => None,
         }
     }
@@ -150,14 +160,16 @@ impl RailOrientation {
     /// CSS class applied to the dashboard body wrapper.
     pub fn body_class(self) -> &'static str {
         match self {
-            Self::Horizontal => "rail-horizontal",
-            Self::Vertical => "rail-vertical",
+            Self::Top => "rail-top",
+            Self::Bottom => "rail-bottom",
+            Self::Left => "rail-left",
+            Self::Right => "rail-right",
         }
     }
 }
 
-/// Load rail orientation preference from localStorage (default: horizontal).
-pub fn load_rail_orientation() -> RailOrientation {
+/// Load rail position preference from localStorage (default: top).
+pub fn load_rail_position() -> RailPosition {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|storage| {
@@ -166,14 +178,14 @@ pub fn load_rail_orientation() -> RailOrientation {
                 .ok()
                 .flatten()
         })
-        .and_then(|v| RailOrientation::from_str(&v))
-        .unwrap_or(RailOrientation::Horizontal)
+        .and_then(|v| RailPosition::from_str(&v))
+        .unwrap_or(RailPosition::Top)
 }
 
-/// Save rail orientation preference to localStorage.
-pub fn save_rail_orientation(orientation: RailOrientation) {
+/// Save rail position preference to localStorage.
+pub fn save_rail_position(position: RailPosition) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(RAIL_ORIENTATION_STORAGE_KEY, orientation.as_str());
+        let _ = storage.set_item(RAIL_ORIENTATION_STORAGE_KEY, position.as_str());
     }
 }
 

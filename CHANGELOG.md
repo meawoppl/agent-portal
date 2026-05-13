@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.9
+
+- Expand the rail position setting from horizontal/vertical to four choices: **Top**, **Bottom**, **Left**, **Right**. Top is unchanged (default); Bottom places the rail under the input bar; Left and Right place the rail as a 240 px column on either side. Existing `horizontal`/`vertical` localStorage values are auto-migrated to `top`/`left`.
+
 ## 2.5.8
 
 - CI: prepend `$HOME/.cargo/bin` to PATH on macOS jobs in `ci.yml` and `release.yml` to work around a `macos-14` runner image variant where a preinstalled `rustup-init` shadowed the rustup-managed `cargo` shim, causing intermittent `error: unexpected argument 'build' found` failures
