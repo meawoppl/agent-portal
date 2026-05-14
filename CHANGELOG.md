@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.18
+
+- **Bump `codex-codes` 0.101.1 → 0.128.0.** Upstream restructured `ServerMessage` from the loose `{ method, params }` envelope into typed enums (`Notification(Notification)` and `Request { id, request: ServerRequest }`). Adapted the proxy's Codex dispatcher in `claude-session-lib/src/session.rs` to:
+  - Match `ServerMessage::Notification(notif)` and recover `(method, params)` via `notif.into_envelope()` — keeps the existing string-based downstream dispatch intact.
+  - Match `ServerMessage::Request { id, request }`, pull the method via `request.method()`, and serialize the typed param struct (`CmdExecApproval`, `FileChangeApproval`, or `Unknown`) back to a `Value` so the rest of the approval-flow code is unchanged.
+- Three new `Notification` variants are now modeled (`AccountRateLimitsUpdated`, `McpServerStartupStatusUpdated`, `RemoteControlStatusChanged`); they fall through to our existing `_ => Skip` arm via `notif.into_envelope()`, so they're handled implicitly without further code.
+
 ## 2.5.17
 
 - **Inject a "portal features reminder" into the agent at session start and after each context compaction.** Reminds the agent which portal-specific features are available (auto-formatted links, KaTeX, image rendering, AskUserQuestion, session sharing, etc.) so it can actually use them after a fresh start or a compaction-induced amnesia. The reminder is wrapped in `<system-reminder>` tags on the agent side and emitted as a collapsed `PortalContent::Reminder` block on the frontend so it doesn't clutter the transcript.
