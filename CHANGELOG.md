@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.14
+
+- Surface speech-to-text errors instead of silently ending the recording. Previously, when the backend speech recognition task failed early (bad credentials, recognizer setup error, Google API rejecting the stream, …), the result channel just closed and the WebSocket handler blindly emitted `VoiceEnded`, so the user saw the mic button "return immediately" with no explanation. Now the recognition task reports its final status via a oneshot channel, and the handler emits `VoiceError` with the actual error string when something went wrong.
+
 ## 2.5.13
 
 - Session pills now have an explicit **150 px** width in both horizontal and vertical rail modes — previous content-driven sizing kept getting pushed by long folder names hitting min-content widths inside the flex children. `.pill-name` is `flex: 1; min-width: 0` so it fills the remaining space and ellipsizes cleanly. Vertical-mode `width: 100%` override removed.
