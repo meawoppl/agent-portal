@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.16
+
+- **Fix #684 — KaTeX hasn't actually been rendering math on any page load.** The Subresource Integrity hash on the `<script>` tag for KaTeX's `auto-render.min.js` in `index.html` did not match the file the CDN actually serves. Browsers silently refuse to execute scripts whose SRI hash mismatches, so `window.renderMathInElement` never landed on the page, and every call to our `renderMathInNode` helper silently no-op'd. Verified by a standalone harness (`frontend/dev-tools/katex-isolated.html`) that loads the same scripts from the same CDN and reports "renderMathInElement not on window". Replaced the stale hash with the real `sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk`.
+- Also hardened `katex-helper.js` with a queue-and-retry path for the unlikely cold-load case where the helper fires before the CDN scripts finish loading, and added diagnostic logging so future failures surface in the browser console instead of being silently swallowed.
+- Added a regression test confirming math in messages mixing `<thinking>` HTML blocks + fenced ```latex``` code + display `$$…$$` survives the markdown placeholder round-trip into `Event::Text`. This disproved earlier hypotheses that the bug was in our markdown pipeline.
+
 ## 2.5.15
 
 - Pills are now 180 px wide (was 150 px, +20%) and the vertical rail tray shrinks from 240 → 200 px to match — no more dead space on the right of the column.
