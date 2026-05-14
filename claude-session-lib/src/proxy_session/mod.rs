@@ -698,7 +698,7 @@ async fn run_message_loop(
     // already has it; subsequent re-injections happen at compaction
     // boundaries from inside `output_forwarder`.
     if session.first_connection {
-        inject_portal_reminder(session.claude_session, &ws_write, &session.output_buffer).await;
+        inject_portal_reminder(session.claude_session).await;
     }
 
     // Main loop
