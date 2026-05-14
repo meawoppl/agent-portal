@@ -2,8 +2,9 @@
 
 ## 2.5.16
 
-- Fix #684 — KaTeX math now renders even when the Yew effect fires before the deferred KaTeX scripts have finished loading. The previous `renderMathInNode` silently no-op'd if `window.renderMathInElement` wasn't defined yet; since the effect is keyed on `props.text` and doesn't re-fire for a static message, math stayed un-rendered for the lifetime of the page on cold loads. The helper now queues pending nodes and flushes them once KaTeX is available, and surfaces actual render errors to the browser console instead of swallowing them.
-- Added a regression test confirming math in messages mixing `<thinking>` HTML blocks + fenced ```latex``` code + display `$$…$$` survives the markdown placeholder round-trip into `Event::Text`. This disproved an earlier hypothesis that `<thinking>` was swallowing math placeholders into `Event::Html`.
+- **Fix #684 — KaTeX hasn't actually been rendering math on any page load.** The Subresource Integrity hash on the `<script>` tag for KaTeX's `auto-render.min.js` in `index.html` did not match the file the CDN actually serves. Browsers silently refuse to execute scripts whose SRI hash mismatches, so `window.renderMathInElement` never landed on the page, and every call to our `renderMathInNode` helper silently no-op'd. Verified by a standalone harness (`frontend/dev-tools/katex-isolated.html`) that loads the same scripts from the same CDN and reports "renderMathInElement not on window". Replaced the stale hash with the real `sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk`.
+- Also hardened `katex-helper.js` with a queue-and-retry path for the unlikely cold-load case where the helper fires before the CDN scripts finish loading, and added diagnostic logging so future failures surface in the browser console instead of being silently swallowed.
+- Added a regression test confirming math in messages mixing `<thinking>` HTML blocks + fenced ```latex``` code + display `$$…$$` survives the markdown placeholder round-trip into `Event::Text`. This disproved earlier hypotheses that the bug was in our markdown pipeline.
 
 ## 2.5.15
 
