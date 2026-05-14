@@ -538,8 +538,50 @@ fn log_claude_output(output: &ClaudeOutput) {
                     ContentBlock::Image(_) => {
                         debug!("← [assistant] image block");
                     }
-                    _ => {
-                        debug!("← [assistant] other block");
+                    ContentBlock::ServerToolUse(stu) => {
+                        tool_count += 1;
+                        let input_preview = format_tool_input_json(&stu.input);
+                        debug!(
+                            "← [assistant] server_tool_use: {} {}",
+                            stu.name, input_preview
+                        );
+                    }
+                    ContentBlock::WebSearchToolResult(r) => {
+                        debug!("← [assistant] web_search_tool_result: {}", r.tool_use_id);
+                    }
+                    ContentBlock::CodeExecutionToolResult(r) => {
+                        debug!(
+                            "← [assistant] code_execution_tool_result: {}",
+                            r.tool_use_id
+                        );
+                    }
+                    ContentBlock::McpToolUse(mtu) => {
+                        tool_count += 1;
+                        let input_preview = format_tool_input_json(&mtu.input);
+                        let server = mtu.server_name.as_deref().unwrap_or("?");
+                        debug!(
+                            "← [assistant] mcp_tool_use: {}::{} {}",
+                            server, mtu.name, input_preview
+                        );
+                    }
+                    ContentBlock::McpToolResult(r) => {
+                        let status = if r.is_error.unwrap_or(false) {
+                            "error"
+                        } else {
+                            "ok"
+                        };
+                        debug!(
+                            "← [assistant] mcp_tool_result: {} ({})",
+                            r.tool_use_id, status
+                        );
+                    }
+                    ContentBlock::ContainerUpload(_) => {
+                        debug!("← [assistant] container_upload block");
+                    }
+                    ContentBlock::Unknown(v) => {
+                        let block_type =
+                            v.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+                        debug!("← [assistant] unknown block: type={}", block_type);
                     }
                 }
             }
