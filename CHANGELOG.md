@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.24
+
+- **Session pill colors: blue focus ring, no more pulsating red on awaiting pills.** The 2.5.11 "bright-red active pill indicator" was too loud; the awaiting-pulse animation made it worse for any tab the agent was still chewing on. Now:
+  - **Focused pill**: accent-blue border + soft blue background tint + 2 px blue ring.
+  - **Awaiting pill** (agent still working): subtle orange border, no animation. The existing in-pill indicator glyph still picks up an orange tint to flag the state without the page strobing.
+  - **Focused + awaiting**: focus state dominates — keeps the blue ring/background; the indicator glyph alone signals "still working."
+- Dropped the `@keyframes awaitingPulse` rule.
+
 ## 2.5.23
 
 - **Fix #692 — portal reminder no longer bloats the user transcript.** Two parts:
