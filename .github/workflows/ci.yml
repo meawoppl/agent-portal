@@ -216,22 +216,19 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
 
-      # Some macos-14 runner image variants ship a preinstalled `rustup-init`
-      # ahead of `~/.cargo/bin` in PATH. When that wins, `cargo build` resolves
-      # to `rustup-init` instead of the rustup-managed cargo shim and dies
-      # with `error: unexpected argument 'build' found`. Forcing the rustup
-      # bin dir to the front of PATH for subsequent steps makes the build
-      # robust to that runner-image rollout.
-      - name: Ensure rustup PATH wins over preinstalled shim
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: "proxy-macos-arm64"
 
+      # Some `macos-14` runner image variants ship a `cargo` file at
+      # `~/.cargo/bin/cargo` that is actually `rustup-init` rather than the
+      # rustup-managed shim. Calling it with `build` blows up with
+      # `error: unexpected argument 'build' found`. Invoking via
+      # `rustup run` bypasses the shim entirely and dispatches directly
+      # to the toolchain's real cargo. See #678.
       - name: Build proxy
-        run: cargo build -p claude-portal --release
+        run: rustup run 1.92.0 cargo build -p claude-portal --release
 
       - name: Ad-hoc code sign
         run: codesign -s - target/release/claude-portal
@@ -297,20 +294,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
 
-      # See `build-proxy-macos-arm64` for the rationale — some macos-14
-      # runner image variants have `rustup-init` shadowing the rustup cargo
-      # shim in PATH, which makes `cargo build` fail with
-      # `unexpected argument 'build' found`.
-      - name: Ensure rustup PATH wins over preinstalled shim
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: "launcher-macos-arm64"
 
+      # See `build-proxy-macos-arm64` and #678 — `rustup run` bypasses the
+      # broken `~/.cargo/bin/cargo` (which is actually `rustup-init` on
+      # some macos-14 runner image variants).
       - name: Build launcher
-        run: cargo build -p agent-portal --release
+        run: rustup run 1.92.0 cargo build -p agent-portal --release
 
       - name: Ad-hoc code sign
         run: codesign -s - target/release/agent-portal
