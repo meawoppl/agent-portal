@@ -215,11 +215,15 @@ async fn handle_voice_socket(
 
                             // Start streaming recognition
                             match speech_service.start_streaming(Some(language_code)).await {
-                                Ok((audio_tx, mut result_rx)) => {
+                                Ok((audio_tx, mut result_rx, status_rx)) => {
                                     recognition_session =
                                         Some(VoiceRecognitionSession { audio_tx });
 
-                                    // Spawn task to forward transcription results to client
+                                    // Spawn task to forward transcription results to client.
+                                    // When the result stream closes we await the final status
+                                    // from the recognition task — if it errored, emit
+                                    // `VoiceError` so the user sees a real message instead of
+                                    // a silent immediate `VoiceEnded`.
                                     let client_tx_clone = client_tx.clone();
                                     tokio::spawn(async move {
                                         while let Some(result) = result_rx.recv().await {
@@ -238,14 +242,31 @@ async fn handle_voice_socket(
                                                 break;
                                             }
                                         }
-                                        // Recognition stream ended (e.g., single_utterance detected end of speech)
-                                        // Signal the frontend to stop recording
-                                        let _ = client_tx_clone
-                                            .send(VoiceMessage::VoiceEnded { session_id });
-                                        info!(
-                                            "Speech recognition stream ended for session {}",
-                                            session_id
-                                        );
+                                        match status_rx.await {
+                                            Ok(Some(err)) => {
+                                                warn!(
+                                                    "Speech recognition for session {} ended with error: {}",
+                                                    session_id, err
+                                                );
+                                                let _ = client_tx_clone.send(
+                                                    VoiceMessage::VoiceError {
+                                                        session_id,
+                                                        message: format!(
+                                                            "Speech recognition failed: {}",
+                                                            err
+                                                        ),
+                                                    },
+                                                );
+                                            }
+                                            _ => {
+                                                let _ = client_tx_clone
+                                                    .send(VoiceMessage::VoiceEnded { session_id });
+                                                info!(
+                                                    "Speech recognition stream ended for session {}",
+                                                    session_id
+                                                );
+                                            }
+                                        }
                                     });
 
                                     info!("Speech recognition session started for {}", session_id);

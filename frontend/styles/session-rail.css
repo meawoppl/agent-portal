@@ -158,11 +158,6 @@
     transition: all 0.2s;
     flex-shrink: 0;
     overflow: hidden;
-    /* Fixed pill width used in both horizontal and vertical rail modes.
-       Earlier attempts at content-driven shrinking were swamped by long
-       folder names hitting their min-content widths inside the flex
-       children — pinning the outer box is the only reliable way to make
-       horizontal/vertical pills look identical. */
     width: 150px;
     box-sizing: border-box;
 }

@@ -86,6 +86,11 @@ impl SpeechService {
     /// Returns a tuple of:
     /// - A sender to push audio data (PCM16 bytes)
     /// - A receiver to get transcription results
+    /// - A receiver that yields a final status string when the session ends
+    ///   (either an error message or `None` meaning clean shutdown). Used by
+    ///   the WebSocket handler to distinguish "speech stream errored out" from
+    ///   "client stopped recording cleanly" and surface a real `VoiceError`
+    ///   instead of a silent `VoiceEnded`.
     ///
     /// The session ends when the audio sender is dropped.
     pub async fn start_streaming(
@@ -95,6 +100,7 @@ impl SpeechService {
         (
             mpsc::UnboundedSender<Vec<u8>>,
             mpsc::UnboundedReceiver<TranscriptionResult>,
+            tokio::sync::oneshot::Receiver<Option<String>>,
         ),
         String,
     > {
@@ -124,17 +130,26 @@ impl SpeechService {
         // Create channels for audio input and transcription output
         let (audio_tx, audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let (result_tx, result_rx) = mpsc::unbounded_channel::<TranscriptionResult>();
+        let (status_tx, status_rx) = tokio::sync::oneshot::channel::<Option<String>>();
 
         // Spawn the recognition task
         let credentials = credentials_path.clone();
         tokio::spawn(async move {
-            match run_recognition(credentials, streaming_config, audio_rx, result_tx).await {
-                Ok(()) => info!("Speech recognition session completed"),
-                Err(e) => error!("Speech recognition error: {}", e),
-            }
+            let final_status =
+                match run_recognition(credentials, streaming_config, audio_rx, result_tx).await {
+                    Ok(()) => {
+                        info!("Speech recognition session completed");
+                        None
+                    }
+                    Err(e) => {
+                        error!("Speech recognition error: {}", e);
+                        Some(e)
+                    }
+                };
+            let _ = status_tx.send(final_status);
         });
 
-        Ok((audio_tx, result_rx))
+        Ok((audio_tx, result_rx, status_rx))
     }
 }
 
