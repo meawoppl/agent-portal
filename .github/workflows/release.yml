@@ -89,24 +89,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
+      # Some `macos-14` runner image variants ship a broken Rust setup where
+      # the files at `~/.cargo/bin/{cargo,rustc}` are actually `rustup-init`
+      # rather than the toolchain shims. Wipe and reinstall from scratch.
+      # See #678.
+      - name: Install Rust via rustup (clean install)
+        run: |
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.92.0 --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: "release-macos-arm64"
 
-      # Some `macos-14` runner image variants ship a `cargo` file at
-      # `~/.cargo/bin/cargo` that is actually `rustup-init` rather than the
-      # rustup-managed shim. Calling it with `build` blows up with
-      # `error: unexpected argument 'build' found`. Invoking via
-      # `rustup run` bypasses the shim entirely. See #678.
       - name: Build proxy
-        run: rustup run 1.92.0 cargo build -p claude-portal --release
+        run: cargo build -p claude-portal --release
 
       - name: Build launcher
-        run: rustup run 1.92.0 cargo build -p agent-portal --release
+        run: cargo build -p agent-portal --release
 
       - name: Ad-hoc code sign
         run: |
@@ -136,23 +139,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          targets: x86_64-apple-darwin
+      # See `build-macos-arm64` and #678 — wipe and reinstall to defend
+      # against broken preinstalled Rust on affected macos-14 image variants.
+      - name: Install Rust via rustup (clean install)
+        run: |
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.92.0 --profile minimal
+          rustup target add x86_64-apple-darwin
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: "release-macos-intel"
 
-      # See `build-macos-arm64` and #678 — `rustup run` bypasses the broken
-      # `~/.cargo/bin/cargo` shim on affected macos-14 runner image variants.
       - name: Build proxy (cross-compile for x86_64)
-        run: rustup run 1.92.0 cargo build -p claude-portal --release --target x86_64-apple-darwin
+        run: cargo build -p claude-portal --release --target x86_64-apple-darwin
 
       - name: Build launcher (cross-compile for x86_64)
-        run: rustup run 1.92.0 cargo build -p agent-portal --release --target x86_64-apple-darwin
+        run: cargo build -p agent-portal --release --target x86_64-apple-darwin
 
       - name: Ad-hoc code sign
         run: |
