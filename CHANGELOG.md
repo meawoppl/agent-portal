@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.15
+
+- Pills are now 180 px wide (was 150 px, +20%) and the vertical rail tray shrinks from 240 → 200 px to match — no more dead space on the right of the column.
+
 ## 2.5.14
 
 - Surface speech-to-text errors instead of silently ending the recording. Previously, when the backend speech recognition task failed early (bad credentials, recognizer setup error, Google API rejecting the stream, …), the result channel just closed and the WebSocket handler blindly emitted `VoiceEnded`, so the user saw the mic button "return immediately" with no explanation. Now the recognition task reports its final status via a oneshot channel, and the handler emits `VoiceError` with the actual error string when something went wrong.

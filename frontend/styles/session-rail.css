@@ -52,8 +52,8 @@
    some browser cascades has shadowed the override. */
 .dashboard-body.rail-left  > .session-rail-container,
 .dashboard-body.rail-right > .session-rail-container {
-    width: 240px;
-    min-width: 240px;
+    width: 200px;
+    min-width: 200px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -158,7 +158,7 @@
     transition: all 0.2s;
     flex-shrink: 0;
     overflow: hidden;
-    width: 150px;
+    width: 180px;
     box-sizing: border-box;
 }
 
