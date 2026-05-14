@@ -379,6 +379,40 @@
     background: var(--accent-hover);
 }
 
+/* Three-stage update-and-restart button — colors escalate to signal "are you sure?" */
+.update-button {
+    border: none;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-left: 0.5rem;
+    transition: background 0.2s;
+}
+.update-button.stage-0 {
+    background: #7f849c;
+}
+.update-button.stage-0:hover {
+    background: #565f89;
+}
+.update-button.stage-1 {
+    background: #e0af68;
+    color: #1a1b26;
+}
+.update-button.stage-2 {
+    background: var(--error);
+}
+.update-button.stage-3 {
+    background: #565f89;
+    cursor: progress;
+}
+.update-button[disabled] {
+    cursor: not-allowed;
+    opacity: 0.85;
+}
+
 /* Token Created Success */
 .token-created-success {
     text-align: center;

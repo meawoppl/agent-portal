@@ -466,6 +466,10 @@ pub enum ServerToLauncher {
 
     /// Push a renewed auth token to the launcher (auto-renewal or manual)
     TokenRenewed { token: String },
+
+    /// Tell the launcher to pull the latest release, install it, and restart
+    /// the agent-portal service. Triggered from the dashboard Launchers panel.
+    UpdateAndRestart,
 }
 
 #[cfg(test)]

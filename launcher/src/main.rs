@@ -86,7 +86,7 @@ enum ServiceAction {
     Pastebin,
 }
 
-const BINARY_PREFIX: &str = "agent-portal";
+pub(crate) const BINARY_PREFIX: &str = "agent-portal";
 
 fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> String {
     args_url
