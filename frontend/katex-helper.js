@@ -54,14 +54,34 @@
     }
 
     window.renderMathInNode = function (element) {
-        if (!element) return;
+        if (!element) {
+            console.warn('[katex] renderMathInNode called with no element');
+            return;
+        }
+        // Probe whether this subtree actually contains math delimiters. If
+        // it does, but KaTeX doesn't render, the log makes the failure mode
+        // visible in the browser console for diagnosis.
+        const text = (element.textContent || '');
+        const hasDollar = text.includes('$');
+        const hasParen = text.includes('\\(');
+        const hasBracket = text.includes('\\[');
         if (typeof window.renderMathInElement === 'function') {
             try {
                 window.renderMathInElement(element, KATEX_OPTIONS);
+                if (hasDollar || hasParen || hasBracket) {
+                    const after = element.querySelectorAll('.katex').length;
+                    if (after === 0) {
+                        console.warn(
+                            '[katex] no math rendered though delimiters present',
+                            { sample: text.slice(0, 200) }
+                        );
+                    }
+                }
             } catch (e) {
                 console.error('[katex] render failed:', e);
             }
         } else {
+            console.warn('[katex] auto-render not yet loaded — queued');
             pending.add(element);
             schedulePoll();
         }
