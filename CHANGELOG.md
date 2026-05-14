@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.22
+
+- **Fix #695 — codex sessions no longer die on typed-decode errors.** Codex CLI 0.130.0 emits at least one frame type (likely a notification with a `callId` field our bundled `codex-codes` 0.128.0 doesn't model) that fails strict deserialization. Previously the proxy turned that into `SessionError::CommunicationError` and killed the session; from the user's POV the agent just vanished mid-turn. Now `codex_io_task` matches on `codex_codes::Error::Json` specifically, logs a warning, and continues the loop so the rest of the session stays alive. Other error variants (I/O, protocol, server-closed) still terminate as before.
+
 ## 2.5.21
 
 - **Fix #678 — macOS ARM64 CI no longer flakes on broken-shim runner images.** The 2.5.8 PATH workaround was based on a wrong theory: on affected `macos-14` images, the files at `~/.cargo/bin/{cargo,rustc}` are *both* actually `rustup-init`, not toolchain shims. `dtolnay/rust-toolchain@1.92.0` exits 0 on these images but leaves the install half-broken — `rustup run` couldn't help either, because cargo internally invokes `rustc -vV` and got `rustup-init 1.29.0` back. Replaced the dtolnay step on all four macOS jobs (`build-proxy-macos-arm64`, `build-launcher-macos-arm64`, `build-macos-arm64`, `build-macos-intel`) with an explicit `rm -rf ~/.cargo ~/.rustup` followed by a fresh `curl | sh -s -- -y --default-toolchain 1.92.0 --profile minimal` install. Plain `cargo build` works after that. Dropped the obsolete PATH workaround.

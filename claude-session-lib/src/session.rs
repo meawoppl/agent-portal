@@ -743,6 +743,19 @@ impl Session {
                                 let _ = event_tx.send(IoEvent::Exited { code: 0 });
                                 break;
                             }
+                            Err(codex_codes::Error::Json(json_err)) => {
+                                // Newer codex CLI versions sometimes emit frames whose
+                                // typed param struct fails our bundled codex-codes
+                                // schema (e.g. #695 — missing field `callId` in codex
+                                // 0.130.0). Killing the session on every protocol
+                                // skew is too aggressive: skip the frame and stay
+                                // connected so the user doesn't lose the session.
+                                tracing::warn!(
+                                    "Codex frame failed typed decode (skipping): {}",
+                                    json_err
+                                );
+                                continue;
+                            }
                             Err(e) => {
                                 let _ = event_tx.send(IoEvent::Error(
                                     SessionError::CommunicationError(e.to_string()),
