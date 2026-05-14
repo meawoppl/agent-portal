@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.16
+
+- Fix #684 — KaTeX math now renders even when the Yew effect fires before the deferred KaTeX scripts have finished loading. The previous `renderMathInNode` silently no-op'd if `window.renderMathInElement` wasn't defined yet; since the effect is keyed on `props.text` and doesn't re-fire for a static message, math stayed un-rendered for the lifetime of the page on cold loads. The helper now queues pending nodes and flushes them once KaTeX is available, and surfaces actual render errors to the browser console instead of swallowing them.
+- Added a regression test confirming math in messages mixing `<thinking>` HTML blocks + fenced ```latex``` code + display `$$…$$` survives the markdown placeholder round-trip into `Event::Text`. This disproved an earlier hypothesis that `<thinking>` was swallowing math placeholders into `Event::Html`.
+
 ## 2.5.15
 
 - Pills are now 180 px wide (was 150 px, +20%) and the vertical rail tray shrinks from 240 → 200 px to match — no more dead space on the right of the column.

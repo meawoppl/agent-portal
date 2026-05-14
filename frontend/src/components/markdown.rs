@@ -954,4 +954,52 @@ mod tests {
             blocks
         );
     }
+
+    /// Regression for #684 — message shape: empty `<thinking>` HTML block,
+    /// fenced ```latex``` code block (no `$` inside), then real `$$…$$`
+    /// display math, then inline `$…$` math in a list. We verify the math
+    /// placeholders survive the pulldown-cmark round-trip and end up as
+    /// plain `Event::Text` (not `Event::Html`, which we drop). My initial
+    /// hypothesis for #684 was that the `<thinking>` block was swallowing
+    /// the math into raw HTML events — this test disproves that.
+    #[test]
+    fn issue_684_math_survives_thinking_html_block() {
+        let input = "<thinking>\n\n</thinking>\n\n\
+Standard incompressible Newtonian form, vector notation:\n\n\
+```latex\n\
+\\rho \\left( \\frac{\\partial \\mathbf{v}}{\\partial t} \\right)\n\
+```\n\n\
+Renders as:\n\n\
+$$\n\
+\\rho \\left( \\frac{\\partial \\mathbf{v}}{\\partial t} \\right) = -\\nabla p\n\
+$$\n\n\
+Where:\n\
+- $\\rho$ \u{2014} fluid density\n\
+- $\\mathbf{v}$ \u{2014} velocity field\n";
+
+        let (pre_processed, math_blocks) = extract_math_placeholders(input);
+        // Three math regions: one $$…$$ display block plus two inline $…$ items.
+        assert_eq!(math_blocks.len(), 3, "expected 3 math blocks, got {math_blocks:?}");
+
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        let parser = Parser::new_ext(&pre_processed, options);
+        let events: Vec<Event> = parser.collect();
+        let restored = restore_math_in_events(events, &math_blocks);
+
+        // The math content (`\rho`) must land in plain Text events so KaTeX
+        // auto-render can find the delimiters. If it ends up in `Event::Html`
+        // or `Event::InlineHtml`, our catch-all renderer drops it silently.
+        let math_in_text = restored.iter().any(|e| match e {
+            Event::Text(t) => t.contains("\\rho"),
+            _ => false,
+        });
+        let math_in_html = restored.iter().any(|e| match e {
+            Event::Html(t) | Event::InlineHtml(t) => t.contains("\\rho"),
+            _ => false,
+        });
+        assert!(math_in_text, "math should reach Event::Text");
+        assert!(!math_in_html, "math should not leak into Event::Html");
+    }
 }
