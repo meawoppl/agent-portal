@@ -388,12 +388,7 @@ impl Component for SessionView {
                                 {
                                     msg_type = "compaction_start".to_string();
                                 }
-                            } else if sys.is_compact_boundary()
-                                || matches!(
-                                    sys.subtype.as_str(),
-                                    "compaction" | "context_compaction" | "summary"
-                                )
-                            {
+                            } else if shared::is_compaction_boundary(sys) {
                                 msg_type = "compaction_end".to_string();
                             } else if let Some(task) = sys.as_task_started() {
                                 msg_type = "task_start".to_string();
@@ -1251,12 +1246,7 @@ impl SessionView {
                         if status.status.as_ref().map(|s| s.as_str()) == Some("compacting") {
                             msg_type = "compaction_start".to_string();
                         }
-                    } else if sys.is_compact_boundary()
-                        || matches!(
-                            sys.subtype.as_str(),
-                            "compaction" | "context_compaction" | "summary"
-                        )
-                    {
+                    } else if shared::is_compaction_boundary(sys) {
                         msg_type = "compaction_end".to_string();
                     } else if let Some(task) = sys.as_task_started() {
                         msg_type = "task_start".to_string();

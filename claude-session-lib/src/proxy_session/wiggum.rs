@@ -61,10 +61,24 @@ pub(super) async fn handle_session_event_with_wiggum(
                 false
             };
 
+            // If this is a compaction-boundary system message, the agent's
+            // context has just been reset to a summary. Re-inject the portal
+            // features reminder so the agent has it in the fresh context.
+            // We check before forwarding so the reminder lands logically
+            // after the compaction-completed notice in the user's transcript.
+            let is_compaction_boundary = match &**output {
+                ClaudeOutput::System(sys) => shared::is_compaction_boundary(sys),
+                _ => false,
+            };
+
             // Forward the output
             if output_tx.send(*output.clone()).is_err() {
                 error!("Failed to forward Claude output");
                 return Some(ConnectionResult::Disconnected(connection_start.elapsed()));
+            }
+
+            if is_compaction_boundary {
+                super::inject_portal_reminder(claude_session, ws_write, output_buffer).await;
             }
 
             // Handle wiggum loop continuation

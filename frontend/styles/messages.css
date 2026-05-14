@@ -449,3 +449,63 @@
     font-size: 1rem;
     flex-shrink: 0;
 }
+
+/* ==========================================================================
+   Portal features reminder (collapsed-by-default block)
+   ========================================================================== */
+
+.portal-reminder {
+    margin: 0.35rem 0;
+    border: 1px solid rgba(125, 207, 255, 0.3);
+    border-radius: 6px;
+    background: rgba(125, 207, 255, 0.05);
+    overflow: hidden;
+}
+
+.portal-reminder-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0.35rem 0.6rem;
+    color: #7dcfff;
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.portal-reminder-header:hover {
+    background: rgba(125, 207, 255, 0.08);
+}
+
+.portal-reminder-header.expanded {
+    border-bottom: 1px solid rgba(125, 207, 255, 0.2);
+}
+
+.portal-reminder-icon { font-size: 0.9rem; }
+
+.portal-reminder-title {
+    flex: 1;
+    font-weight: 500;
+}
+
+.portal-reminder-toggle {
+    color: rgba(125, 207, 255, 0.7);
+    font-size: 0.75rem;
+}
+
+.portal-reminder-body {
+    padding: 0.5rem 0.9rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.55;
+}
+
+.portal-reminder-body p { margin: 0.35rem 0; }
+.portal-reminder-body p:first-child { margin-top: 0; }
+.portal-reminder-body p:last-child { margin-bottom: 0; }
+.portal-reminder-body code { font-size: 0.8em; }
+.portal-reminder-body ul { margin: 0.35rem 0; padding-left: 1.2rem; }

@@ -50,6 +50,12 @@ EXPOSE 3000
 #   HOST                  Bind address (default: 0.0.0.0)
 #   PORT                  Listen port (default: 3000)
 #   RUST_LOG              Log level, e.g. "info" or "debug" (default: "info")
+#
+# Proxy/launcher-side (read by claude-portal / agent-portal, not the backend):
+#   PORTAL_REMINDER_FILE  Path to a markdown file that overrides the bundled
+#                         "portal features reminder" injected at session start
+#                         and after each context compaction. Falls back to the
+#                         compiled-in default if the path is missing/unreadable.
 # =============================================================================
 
 # Health check

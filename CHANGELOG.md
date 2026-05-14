@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.17
+
+- **Inject a "portal features reminder" into the agent at session start and after each context compaction.** Reminds the agent which portal-specific features are available (auto-formatted links, KaTeX, image rendering, AskUserQuestion, session sharing, etc.) so it can actually use them after a fresh start or a compaction-induced amnesia. The reminder is wrapped in `<system-reminder>` tags on the agent side and emitted as a collapsed `PortalContent::Reminder` block on the frontend so it doesn't clutter the transcript.
+- The reminder body lives in `claude-session-lib/portal_reminder.md` as a readable markdown file (baked into the binary via `include_str!`), and operators can override it at runtime by pointing `PORTAL_REMINDER_FILE` at a readable path. Missing/unreadable overrides log a warning and fall back to the bundled default. Documented in `Dockerfile`, `docs/DEPLOYING.md`, `docs/DOCKER.md`, and `CLAUDE.md`.
+- Extracted the duplicated "is this a compaction-end marker?" predicate into `shared::is_compaction_boundary(&CCSystemMessage)`. The Claude CLI emits this boundary under several subtype spellings (`compact_boundary`, `compaction`, `context_compaction`, `summary`) and three call sites were inlining the disjunction — they now all go through the shared helper.
+
 ## 2.5.16
 
 - **Fix #684 — KaTeX hasn't actually been rendering math on any page load.** The Subresource Integrity hash on the `<script>` tag for KaTeX's `auto-render.min.js` in `index.html` did not match the file the CDN actually serves. Browsers silently refuse to execute scripts whose SRI hash mismatches, so `window.renderMathInElement` never landed on the page, and every call to our `renderMathInNode` helper silently no-op'd. Verified by a standalone harness (`frontend/dev-tools/katex-isolated.html`) that loads the same scripts from the same CDN and reports "renderMathInElement not on window". Replaced the stale hash with the real `sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk`.

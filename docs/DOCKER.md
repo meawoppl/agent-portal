@@ -198,6 +198,7 @@ docker buildx build \
 | `MESSAGE_RETENTION_DAYS` | `30` | Delete messages older than N days (0 = disabled) |
 | `SESSION_MAX_AGE_DAYS` | `14` | Delete sessions older than N days (0 = disabled) |
 | `PORTAL_MAX_IMAGE_MB` | `10` | Max image size in MB for proxy inlining |
+| `PORTAL_REMINDER_FILE` | _(unset)_ | Proxy/launcher-side: path to a markdown file that overrides the bundled portal-features reminder injected at session start and after each compaction. Falls back to default if missing/unreadable. |
 
 ## Troubleshooting
 

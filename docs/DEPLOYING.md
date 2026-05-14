@@ -49,6 +49,10 @@ SESSION_SECRET=generate-a-random-32-char-secret-here
 
 # Optional - Image size limit for proxies
 # PORTAL_MAX_IMAGE_MB=10         # Max image size in MB to inline (default: 10)
+
+# Optional - Override the portal features reminder text (proxy/launcher side)
+# Falls back to the bundled default if the file is missing or unreadable.
+# PORTAL_REMINDER_FILE=/etc/agent-portal/portal_reminder.md
 ```
 
 ## Docker Deployment (Recommended)
