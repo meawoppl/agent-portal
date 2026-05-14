@@ -818,8 +818,14 @@ impl Session {
         event_tx: &mpsc::UnboundedSender<IoEvent>,
     ) -> (bool, bool) {
         match msg {
-            codex_codes::ServerMessage::Notification { method, params } => {
-                let params = params.unwrap_or(serde_json::Value::Null);
+            codex_codes::ServerMessage::Notification(notif) => {
+                let (method, params) = match notif.into_envelope() {
+                    Ok((m, p)) => (m, p.unwrap_or(serde_json::Value::Null)),
+                    Err(e) => {
+                        tracing::warn!("Codex notification envelope error: {}", e);
+                        return (true, false);
+                    }
+                };
 
                 match method.as_str() {
                     "thread/started" | "turn/started" | "thread/status/changed" => {
@@ -889,8 +895,19 @@ impl Session {
                     }
                 }
             }
-            codex_codes::ServerMessage::Request { id, method, params } => {
-                let params = params.unwrap_or_default();
+            codex_codes::ServerMessage::Request { id, request } => {
+                let method = request.method().to_string();
+                let params: serde_json::Value = match &request {
+                    codex_codes::ServerRequest::CmdExecApproval(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::FileChangeApproval(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::Unknown { params, .. } => {
+                        params.clone().unwrap_or_default()
+                    }
+                };
                 let request_id_str = Self::format_request_id(&id);
 
                 match method.as_str() {
