@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.19
+
+- **Fix "Codex Raw" pending messages piling up at the bottom of the transcript.** Codex's app-server protocol doesn't echo user input back the way Claude's CLI does, so the frontend's optimistic-send pending entry never matched anything and accumulated on every send. The pending entries were rendered through the Codex renderer (which doesn't recognize the `{type: "user", _pending: true}` shape) and fell into the "Codex Raw" catch-all. Fix: `codex_io_task` now emits a synthetic user echo (parses as `ClaudeOutput::User` with a top-level `content` field) right before kicking off the Codex turn, so the frontend's existing content-match pending-clear path fires identically for both agents. Portal-reminder injections wrapped in `<system-reminder>` tags are filtered out of the echo path so they stay invisible to the user.
+
 ## 2.5.18
 
 - **Bump `codex-codes` 0.101.1 → 0.128.0.** Upstream restructured `ServerMessage` from the loose `{ method, params }` envelope into typed enums (`Notification(Notification)` and `Request { id, request: ServerRequest }`). Adapted the proxy's Codex dispatcher in `claude-session-lib/src/session.rs` to:

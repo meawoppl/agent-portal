@@ -775,6 +775,25 @@ impl Session {
                             continue;
                         }
 
+                        // Codex's app-server protocol doesn't echo user input, so the
+                        // frontend's optimistic-send pending entry would never clear.
+                        // Synthesize an echo here in a shape that matches both the
+                        // ClaudeOutput::User parse (msg_type = "user") and the frontend's
+                        // content-based pending-match. Skip <system-reminder> wrappers
+                        // (portal reminder injection) — those shouldn't appear in the
+                        // user-facing transcript.
+                        if !prompt.starts_with("<system-reminder>") {
+                            let echo = serde_json::json!({
+                                "type": "user",
+                                "message": {
+                                    "role": "user",
+                                    "content": [{"type": "text", "text": prompt}]
+                                },
+                                "content": prompt,
+                            });
+                            let _ = event_tx.send(IoEvent::RawOutput(echo));
+                        }
+
                         tracing::info!("Starting Codex turn with {} chars", prompt.len());
 
                         match client
