@@ -135,23 +135,17 @@ impl SpeechService {
         // Spawn the recognition task
         let credentials = credentials_path.clone();
         tokio::spawn(async move {
-            let final_status = match run_recognition(
-                credentials,
-                streaming_config,
-                audio_rx,
-                result_tx,
-            )
-            .await
-            {
-                Ok(()) => {
-                    info!("Speech recognition session completed");
-                    None
-                }
-                Err(e) => {
-                    error!("Speech recognition error: {}", e);
-                    Some(e)
-                }
-            };
+            let final_status =
+                match run_recognition(credentials, streaming_config, audio_rx, result_tx).await {
+                    Ok(()) => {
+                        info!("Speech recognition session completed");
+                        None
+                    }
+                    Err(e) => {
+                        error!("Speech recognition error: {}", e);
+                        Some(e)
+                    }
+                };
             let _ = status_tx.send(final_status);
         });
 

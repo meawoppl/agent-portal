@@ -259,9 +259,8 @@ async fn handle_voice_socket(
                                                 );
                                             }
                                             _ => {
-                                                let _ = client_tx_clone.send(
-                                                    VoiceMessage::VoiceEnded { session_id },
-                                                );
+                                                let _ = client_tx_clone
+                                                    .send(VoiceMessage::VoiceEnded { session_id });
                                                 info!(
                                                     "Speech recognition stream ended for session {}",
                                                     session_id
