@@ -12,8 +12,8 @@ serde_json = { workspace = true }
 # UUID
 uuid = { workspace = true }
 
-# Claude Code types (WASM-compatible, no tokio)
-claude-codes = { version = "2.1.140", default-features = false, features = ["types"] }
+# Claude Code types (WASM-compatible, no tokio — inherits types-only from workspace)
+claude-codes = { workspace = true }
 
 # Typed WebSocket endpoints (core traits only — WASM-safe, no features needed)
 ws-bridge = { workspace = true }
