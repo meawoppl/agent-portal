@@ -45,6 +45,19 @@ pub use claude_codes::io::{
 };
 pub use claude_codes::ClaudeOutput;
 
+/// Returns true when a system message marks the END of a context compaction.
+///
+/// The CLI uses several spellings depending on version and code path, so this
+/// helper centralizes the predicate. Callers should use this instead of
+/// inlining the disjunction.
+pub fn is_compaction_boundary(sys: &CCSystemMessage) -> bool {
+    sys.is_compact_boundary()
+        || matches!(
+            sys.subtype.as_str(),
+            "compaction" | "context_compaction" | "summary"
+        )
+}
+
 /// Which agent CLI backs a session
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -327,6 +340,16 @@ impl PortalMessage {
         }
     }
 
+    /// Build a collapsible "portal features reminder" message — same envelope
+    /// as text/image portal messages, rendered with a header bar and a
+    /// click-to-expand body on the frontend.
+    pub fn reminder(title: String, body: String) -> Self {
+        Self {
+            message_type: "portal".to_string(),
+            content: vec![PortalContent::Reminder { title, body }],
+        }
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_default()
     }
@@ -349,6 +372,15 @@ pub enum PortalContent {
         #[serde(default)]
         source_type: Option<String>,
     },
+    /// Collapsible "portal features reminder" emitted at session start and
+    /// after compaction boundaries. The body is markdown — rendered through
+    /// the same pipeline as text portal messages — and lives behind a
+    /// click-to-expand header on the frontend so it doesn't clutter the
+    /// scrollback.
+    Reminder {
+        title: String,
+        body: String,
+    },
 }
 
 impl std::fmt::Debug for PortalContent {
@@ -368,6 +400,11 @@ impl std::fmt::Debug for PortalContent {
                 .field("file_path", file_path)
                 .field("file_size", file_size)
                 .field("source_type", source_type)
+                .finish(),
+            Self::Reminder { title, body } => f
+                .debug_struct("Reminder")
+                .field("title", title)
+                .field("body", &format_args!("<{} bytes>", body.len()))
                 .finish(),
         }
     }

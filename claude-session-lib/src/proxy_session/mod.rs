@@ -2,8 +2,11 @@
 
 mod image_uploader;
 mod output_forwarder;
+mod portal_reminder;
 mod wiggum;
 mod ws_reader;
+
+pub(crate) use portal_reminder::inject_portal_reminder;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -687,6 +690,16 @@ async fn run_message_loop(
         working_directory: config.working_directory.clone(),
         active_uploads: std::collections::HashMap::new(),
     };
+
+    // On the very first connection of this session, inject the portal
+    // features reminder. It primes the agent with a `<system-reminder>` on
+    // its stdin and emits a collapsed portal message for the user. On
+    // reconnects we skip — the agent's context is unchanged so the agent
+    // already has it; subsequent re-injections happen at compaction
+    // boundaries from inside `output_forwarder`.
+    if session.first_connection {
+        inject_portal_reminder(session.claude_session, &ws_write, &session.output_buffer).await;
+    }
 
     // Main loop
     let result = run_main_loop(session.claude_session, session.input_rx, &mut conn_state).await;

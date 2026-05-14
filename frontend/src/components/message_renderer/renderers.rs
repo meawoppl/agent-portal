@@ -385,6 +385,45 @@ fn render_portal_content(content: &shared::PortalContent) -> Html {
                 </>
             }
         }
+        shared::PortalContent::Reminder { title, body } => {
+            html! { <PortalReminder title={title.clone()} body={body.clone()} /> }
+        }
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct PortalReminderProps {
+    title: AttrValue,
+    body: AttrValue,
+}
+
+/// Collapsed-by-default "Portal features reminder" block. Header is always
+/// visible; clicking it toggles the markdown body open/closed.
+#[function_component(PortalReminder)]
+fn portal_reminder(props: &PortalReminderProps) -> Html {
+    let expanded = use_state(|| false);
+    let on_toggle = {
+        let expanded = expanded.clone();
+        Callback::from(move |_: MouseEvent| expanded.set(!*expanded))
+    };
+    let header_class = if *expanded {
+        "portal-reminder-header expanded"
+    } else {
+        "portal-reminder-header"
+    };
+    html! {
+        <div class="portal-reminder">
+            <button type="button" class={header_class} onclick={on_toggle}>
+                <span class="portal-reminder-icon">{ "ⓘ" }</span>
+                <span class="portal-reminder-title">{ &*props.title }</span>
+                <span class="portal-reminder-toggle">{ if *expanded { "▾" } else { "▸" } }</span>
+            </button>
+            if *expanded {
+                <div class="portal-reminder-body">
+                    { render_markdown(&props.body) }
+                </div>
+            }
+        </div>
     }
 }
 
