@@ -89,16 +89,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
-
-      # Some macos-14 runner image variants ship a preinstalled `rustup-init`
-      # ahead of `~/.cargo/bin` in PATH. When that wins, `cargo build` resolves
-      # to `rustup-init` and dies with `unexpected argument 'build' found`.
-      # Forcing the rustup bin dir to the front of PATH makes the build
-      # robust to that runner-image rollout.
-      - name: Ensure rustup PATH wins over preinstalled shim
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      # Some `macos-14` runner image variants ship a broken Rust setup where
+      # the files at `~/.cargo/bin/{cargo,rustc}` are actually `rustup-init`
+      # rather than the toolchain shims. Wipe and reinstall from scratch.
+      # See #678.
+      - name: Install Rust via rustup (clean install)
+        run: |
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.92.0 --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -139,15 +139,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          targets: x86_64-apple-darwin
-
-      # See `build-macos-arm64` for the rationale — preinstalled `rustup-init`
-      # can shadow the rustup cargo shim on some macos-14 image variants.
-      - name: Ensure rustup PATH wins over preinstalled shim
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      # See `build-macos-arm64` and #678 — wipe and reinstall to defend
+      # against broken preinstalled Rust on affected macos-14 image variants.
+      - name: Install Rust via rustup (clean install)
+        run: |
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.92.0 --profile minimal
+          rustup target add x86_64-apple-darwin
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2

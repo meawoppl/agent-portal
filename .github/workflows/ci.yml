@@ -213,17 +213,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
-
-      # Some macos-14 runner image variants ship a preinstalled `rustup-init`
-      # ahead of `~/.cargo/bin` in PATH. When that wins, `cargo build` resolves
-      # to `rustup-init` instead of the rustup-managed cargo shim and dies
-      # with `error: unexpected argument 'build' found`. Forcing the rustup
-      # bin dir to the front of PATH for subsequent steps makes the build
-      # robust to that runner-image rollout.
-      - name: Ensure rustup PATH wins over preinstalled shim
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      # Some `macos-14` runner image variants ship a broken Rust setup where
+      # the files at `~/.cargo/bin/{cargo,rustc}` are actually `rustup-init`
+      # rather than the toolchain shims. `dtolnay/rust-toolchain` exits 0 on
+      # these images but the resulting install is still broken. Nuke any
+      # prior state and do a clean rustup install. See #678.
+      - name: Install Rust via rustup (clean install)
+        run: |
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.92.0 --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -294,15 +294,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
-
-      # See `build-proxy-macos-arm64` for the rationale — some macos-14
-      # runner image variants have `rustup-init` shadowing the rustup cargo
-      # shim in PATH, which makes `cargo build` fail with
-      # `unexpected argument 'build' found`.
-      - name: Ensure rustup PATH wins over preinstalled shim
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      # See `build-proxy-macos-arm64` and #678 — some macos-14 image variants
+      # ship a broken Rust install; wipe and reinstall from scratch.
+      - name: Install Rust via rustup (clean install)
+        run: |
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.92.0 --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2

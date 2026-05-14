@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.21
+
+- **Fix #678 — macOS ARM64 CI no longer flakes on broken-shim runner images.** The 2.5.8 PATH workaround was based on a wrong theory: on affected `macos-14` images, the files at `~/.cargo/bin/{cargo,rustc}` are *both* actually `rustup-init`, not toolchain shims. `dtolnay/rust-toolchain@1.92.0` exits 0 on these images but leaves the install half-broken — `rustup run` couldn't help either, because cargo internally invokes `rustc -vV` and got `rustup-init 1.29.0` back. Replaced the dtolnay step on all four macOS jobs (`build-proxy-macos-arm64`, `build-launcher-macos-arm64`, `build-macos-arm64`, `build-macos-intel`) with an explicit `rm -rf ~/.cargo ~/.rustup` followed by a fresh `curl | sh -s -- -y --default-toolchain 1.92.0 --profile minimal` install. Plain `cargo build` works after that. Dropped the obsolete PATH workaround.
+
 ## 2.5.20
 
 - **Add a triple-click "Update & Restart" button to the Launchers panel.** Lets an operator push a launcher to fetch the latest agent-portal release from GitHub and restart itself, straight from the dashboard. Three-stage confirmation prevents fat-finger accidents:
