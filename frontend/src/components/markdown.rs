@@ -979,7 +979,11 @@ Where:\n\
 
         let (pre_processed, math_blocks) = extract_math_placeholders(input);
         // Three math regions: one $$…$$ display block plus two inline $…$ items.
-        assert_eq!(math_blocks.len(), 3, "expected 3 math blocks, got {math_blocks:?}");
+        assert_eq!(
+            math_blocks.len(),
+            3,
+            "expected 3 math blocks, got {math_blocks:?}"
+        );
 
         let mut options = Options::empty();
         options.insert(Options::ENABLE_TABLES);
