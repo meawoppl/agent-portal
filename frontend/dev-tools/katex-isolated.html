@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>KaTeX isolation harness</title>
+
+    <!-- Same KaTeX scripts production uses, same versions/integrity hashes. -->
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+          integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+"
+          crossorigin="anonymous" />
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
+            integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+            integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rF4+Pp4XXUokR6dwXyo"
+            crossorigin="anonymous"></script>
+
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #1a1b26; color: #c0caf5; }
+        h2 { color: #7aa2f7; margin-top: 2rem; }
+        .panel { background: #16161e; border: 1px solid #292e42; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+        textarea { width: 100%; min-height: 12rem; background: #0e0e15; color: #c0caf5; border: 1px solid #292e42; padding: 0.5rem; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+        button { background: #7aa2f7; color: #1a1b26; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: 500; }
+        button:hover { background: #89b4fa; }
+        .source { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.85rem; color: #a9b1d6; }
+        #log { background: #0e0e15; border: 1px solid #292e42; padding: 0.5rem; font-family: ui-monospace, monospace; font-size: 0.85rem; min-height: 4rem; color: #f7768e; }
+        #log .ok { color: #9ece6a; }
+        #log .warn { color: #e0af68; }
+        #render { font-size: 1rem; line-height: 1.5; }
+        #render p { margin: 0.5em 0; }
+    </style>
+</head>
+<body>
+    <h1>KaTeX isolation harness</h1>
+    <p>
+        Renders a hard-coded sample message through KaTeX's auto-render
+        extension, with the <strong>exact</strong> options/delimiters/ignored
+        classes that production uses. The point: prove (or disprove) whether
+        KaTeX itself can typeset the message, independent of the Yew/WASM
+        pipeline. Open the browser console for full output.
+    </p>
+
+    <h2>Sample (from issue #684)</h2>
+    <textarea id="src">&lt;thinking&gt;
+
+&lt;/thinking&gt;
+
+Standard incompressible Newtonian form, vector notation:
+
+```latex
+\rho \left( \frac{\partial \mathbf{v}}{\partial t} + (\mathbf{v} \cdot \nabla)\mathbf{v} \right)
+  = -\nabla p + \mu \nabla^{2}\mathbf{v} + \mathbf{f}
+\qquad
+\nabla \cdot \mathbf{v} = 0
+```
+
+Renders as:
+
+$$
+\rho \left( \frac{\partial \mathbf{v}}{\partial t} + (\mathbf{v} \cdot \nabla)\mathbf{v} \right)
+  = -\nabla p + \mu \nabla^{2}\mathbf{v} + \mathbf{f}
+\qquad
+\nabla \cdot \mathbf{v} = 0
+$$
+
+Where:
+- $\rho$ — fluid density
+- $\mathbf{v}$ — velocity field
+- $p$ — pressure field
+- $\mu$ — dynamic viscosity
+- $\mathbf{f}$ — body force per unit volume (e.g. gravity $\rho \mathbf{g}$)</textarea>
+    <p style="margin-top: 0.5rem;">
+        <button onclick="run()">Render</button>
+        <button onclick="raw()">Inspect source (no KaTeX call)</button>
+    </p>
+
+    <h2>Diagnostic log</h2>
+    <div id="log"></div>
+
+    <h2>Rendered output</h2>
+    <div id="render" class="panel"></div>
+
+    <h2>Source after escape-conversion</h2>
+    <div id="source" class="source panel"></div>
+
+    <script>
+        const KATEX_OPTIONS = {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true },
+            ],
+            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+            ignoredClasses: ['md-code-block', 'md-inline-code', 'tool-result-content', 'bash-command-inline'],
+            throwOnError: false,
+            errorColor: '#cc6666',
+        };
+
+        function log(msg, cls) {
+            const div = document.createElement('div');
+            if (cls) div.className = cls;
+            div.textContent = msg;
+            document.getElementById('log').appendChild(div);
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[c]);
+        }
+
+        function buildDom(text) {
+            // Approximate what our pipeline ends up emitting: a series of
+            // paragraphs / code blocks / lists with the math as plain text
+            // inside the paragraph or list-item. The point isn't to match
+            // pulldown-cmark's output exactly — it's to give KaTeX a DOM
+            // with the same delimiters in the same positions.
+            const lines = text.split('\n');
+            let html = '';
+            let inCode = false;
+            let codeBuf = [];
+            let inList = false;
+            let para = [];
+            const flushPara = () => {
+                if (para.length) {
+                    html += '<p>' + para.join('\n') + '</p>\n';
+                    para = [];
+                }
+            };
+            const flushList = () => {
+                if (inList) {
+                    html += '</ul>\n';
+                    inList = false;
+                }
+            };
+            for (const raw of lines) {
+                const line = raw.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+                if (line.trim().startsWith('```')) {
+                    flushPara(); flushList();
+                    if (inCode) {
+                        html += '<pre><code class="md-code-block">' + escapeHtml(codeBuf.join('\n')) + '</code></pre>\n';
+                        codeBuf = [];
+                        inCode = false;
+                    } else {
+                        inCode = true;
+                    }
+                    continue;
+                }
+                if (inCode) { codeBuf.push(line); continue; }
+                if (line.trim() === '') { flushPara(); flushList(); continue; }
+                if (line.startsWith('- ')) {
+                    flushPara();
+                    if (!inList) { html += '<ul>\n'; inList = true; }
+                    html += '<li>' + line.slice(2) + '</li>\n';
+                    continue;
+                }
+                para.push(line);
+            }
+            flushPara(); flushList();
+            return html;
+        }
+
+        function run() {
+            document.getElementById('log').innerHTML = '';
+            const src = document.getElementById('src').value;
+            const built = buildDom(src);
+            document.getElementById('source').textContent = built;
+            const target = document.getElementById('render');
+            target.innerHTML = built;
+
+            if (typeof window.renderMathInElement !== 'function') {
+                log('renderMathInElement not on window — auto-render script failed to load.', 'warn');
+                return;
+            }
+            log('renderMathInElement is available.', 'ok');
+            const before = target.querySelectorAll('.katex').length;
+            try {
+                window.renderMathInElement(target, KATEX_OPTIONS);
+            } catch (e) {
+                log('renderMathInElement threw: ' + e.message);
+                return;
+            }
+            const after = target.querySelectorAll('.katex').length;
+            log(`KaTeX produced ${after - before} math elements (was ${before}, now ${after}).`,
+                after > before ? 'ok' : 'warn');
+            const errors = target.querySelectorAll('.katex-error');
+            if (errors.length > 0) {
+                log(`Found ${errors.length} .katex-error elements (rendered in errorColor).`, 'warn');
+            }
+        }
+
+        function raw() {
+            document.getElementById('log').innerHTML = '';
+            const src = document.getElementById('src').value;
+            const built = buildDom(src);
+            document.getElementById('source').textContent = built;
+            document.getElementById('render').innerHTML = built;
+            log('Source DOM rendered without KaTeX. Check whether $$ delimiters survived intact.', 'ok');
+        }
+
+        // Auto-run once on page load so opening the file is enough to see the result.
+        window.addEventListener('load', () => setTimeout(run, 50));
+    </script>
+</body>
+</html>
