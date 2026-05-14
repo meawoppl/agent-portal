@@ -504,8 +504,19 @@
     line-height: 1.55;
 }
 
-.portal-reminder-body p { margin: 0.35rem 0; }
-.portal-reminder-body p:first-child { margin-top: 0; }
-.portal-reminder-body p:last-child { margin-bottom: 0; }
-.portal-reminder-body code { font-size: 0.8em; }
-.portal-reminder-body ul { margin: 0.35rem 0; padding-left: 1.2rem; }
+.portal-reminder-body p {
+    margin: 0.35rem 0;
+}
+.portal-reminder-body p:first-child {
+    margin-top: 0;
+}
+.portal-reminder-body p:last-child {
+    margin-bottom: 0;
+}
+.portal-reminder-body code {
+    font-size: 0.8em;
+}
+.portal-reminder-body ul {
+    margin: 0.35rem 0;
+    padding-left: 1.2rem;
+}
