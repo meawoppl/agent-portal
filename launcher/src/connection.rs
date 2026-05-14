@@ -549,6 +549,36 @@ async fn handle_message(
         ServerToLauncher::ServerShutdown { reason, .. } => {
             info!("Server shutting down: {}", reason);
         }
+        ServerToLauncher::UpdateAndRestart => {
+            info!("Received UpdateAndRestart request from dashboard");
+            tokio::spawn(async move {
+                match portal_update::check_for_update(crate::BINARY_PREFIX, false).await {
+                    Ok(portal_update::UpdateResult::UpToDate) => {
+                        info!("Already up to date; restarting service anyway");
+                    }
+                    Ok(portal_update::UpdateResult::Updated) => {
+                        info!("Update applied; restarting service");
+                    }
+                    Ok(portal_update::UpdateResult::UpdateAvailable { version, .. }) => {
+                        info!(
+                            "Update available ({}) but not applied; restarting anyway",
+                            version
+                        );
+                    }
+                    Err(e) => {
+                        error!("Update check failed: {}; restarting anyway", e);
+                    }
+                }
+                if crate::service::is_installed() {
+                    if let Err(e) = crate::service::restart() {
+                        error!("Service restart failed: {}", e);
+                    }
+                } else {
+                    info!("Service not installed; exiting so a supervisor can respawn");
+                    std::process::exit(0);
+                }
+            });
+        }
         other => {
             debug!("Unhandled message from server: {:?}", other);
         }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.20
+
+- **Add a triple-click "Update & Restart" button to the Launchers panel.** Lets an operator push a launcher to fetch the latest agent-portal release from GitHub and restart itself, straight from the dashboard. Three-stage confirmation prevents fat-finger accidents:
+  - **Click 1**: gray "Update & Restart" → yellow "Wait, really?"
+  - **Click 2**: yellow → red "Are you absolutely positively sure?"
+  - **Click 3**: red → muted "Restarting…" (POSTs `/api/launchers/:id/update`)
+- Backend translates the POST into a new `ServerToLauncher::UpdateAndRestart` WebSocket message; the launcher receives it, calls `portal_update::check_for_update` (the same path as the `agent-portal update` CLI subcommand), then `service::restart()` via systemctl/launchctl. If the launcher isn't running under a service manager it just exits and relies on an external supervisor to respawn.
+
 ## 2.5.19
 
 - **Fix "Codex Raw" pending messages piling up at the bottom of the transcript.** Codex's app-server protocol doesn't echo user input back the way Claude's CLI does, so the frontend's optimistic-send pending entry never matched anything and accumulated on every send. The pending entries were rendered through the Codex renderer (which doesn't recognize the `{type: "user", _pending: true}` shape) and fell into the "Codex Raw" catch-all. Fix: `codex_io_task` now emits a synthetic user echo (parses as `ClaudeOutput::User` with a top-level `content` field) right before kicking off the Codex turn, so the frontend's existing content-match pending-clear path fires identically for both agents. Portal-reminder injections wrapped in `<system-reminder>` tags are filtered out of the echo path so they stay invisible to the user.

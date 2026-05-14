@@ -235,3 +235,33 @@ pub async fn renew_launcher_token(
     info!("Manually renewed token for launcher {}", launcher_id);
     Ok(StatusCode::OK)
 }
+
+/// POST /api/launchers/:launcher_id/update - Tell the launcher to fetch the
+/// latest release, install it, and restart itself.
+pub async fn update_launcher(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(launcher_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = extract_user_id(&app_state, &cookies)?;
+
+    let sender = {
+        let launcher = app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .ok_or(AppError::NotFound("Launcher not found"))?;
+        if launcher.user_id != user_id {
+            return Err(AppError::Forbidden);
+        }
+        launcher.sender.clone()
+    };
+
+    if sender.send(ServerToLauncher::UpdateAndRestart).is_err() {
+        warn!("Launcher {} disconnected while sending update", launcher_id);
+        return Err(AppError::Internal("Launcher disconnected".to_string()));
+    }
+
+    info!("Sent UpdateAndRestart to launcher {}", launcher_id);
+    Ok(StatusCode::OK)
+}
