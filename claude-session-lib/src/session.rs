@@ -1150,11 +1150,43 @@ impl Session {
             }
             codex_codes::ServerMessage::Request { id, request } => {
                 let method = request.method().to_string();
+                // Codex 0.129 added several new server→client request variants
+                // (tool-input prompts, MCP elicitations, permission requests,
+                // tool-call requests, auth-token refresh, attestation, patch
+                // approval, exec approval). Until we add purpose-built UI for
+                // each, serialize the typed param struct back to a Value and
+                // let the downstream string-dispatch route it; unmodeled
+                // methods fall through to the warn! arm and surface as a raw
+                // codex frame, which is the user-visible safety net.
                 let params: serde_json::Value = match &request {
                     codex_codes::ServerRequest::CmdExecApproval(p) => {
                         serde_json::to_value(p).unwrap_or_default()
                     }
                     codex_codes::ServerRequest::FileChangeApproval(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::ToolRequestUserInput(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::McpServerElicitationRequest(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::PermissionsRequestApproval(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::ItemToolCall(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::ChatgptAuthTokensRefresh(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::AttestationGenerate(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::ApplyPatchApproval(p) => {
+                        serde_json::to_value(p).unwrap_or_default()
+                    }
+                    codex_codes::ServerRequest::ExecCommandApproval(p) => {
                         serde_json::to_value(p).unwrap_or_default()
                     }
                     codex_codes::ServerRequest::Unknown { params, .. } => {
