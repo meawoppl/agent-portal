@@ -174,7 +174,7 @@
 }
 
 .session-pill.awaiting {
-    border-color: #e0af68;
+    border-color: var(--error);
 }
 
 .session-pill.focused.awaiting {
@@ -190,7 +190,7 @@
 }
 
 .session-pill.awaiting .pill-indicator {
-    color: #e0af68;
+    color: var(--error);
 }
 
 .pill-name {

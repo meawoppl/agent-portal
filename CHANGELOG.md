@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.25
+
+- Awaiting pill border + indicator back to red (`--error`) instead of orange. The pulse animation stays gone (#684's complaint was the strobing, not the color).
+
 ## 2.5.24
 
 - **Session pill colors: blue focus ring, no more pulsating red on awaiting pills.** The 2.5.11 "bright-red active pill indicator" was too loud; the awaiting-pulse animation made it worse for any tab the agent was still chewing on. Now:
