@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.5.31
+
+- **Probe installed agent CLIs when the launch dialog opens.** Previously the only signal that a launcher was missing `codex` or `claude` was a session that spawned then vanished within a second with a misleading `exited normally (code 0)` log. The launch dialog now asks the selected launcher to scan its PATH the moment the user opens it (and again on every launcher dropdown change), and surfaces the result inline:
+  - Agent dropdown labels show `Claude (not installed)` / `Codex (not installed)` when the binary isn't on the host's PATH.
+  - A red inline warning sits under the agent picker when the selected agent is missing.
+  - A grey "Checking installed agents..." note shows while the probe is in flight.
+- Plumbing:
+  - Extracted the `which` + `--version` probe into `claude_session_lib::probe` so it's reusable outside the spawn-time diagnostic.
+  - New `shared::AgentInstall { agent_type, installed, resolved_path, version }`.
+  - New WS request/response pair: `ServerToLauncher::ProbeAgents { request_id }` → `LauncherToServer::ProbeAgentsResult { request_id, agents }`.
+  - Backend correlates responses via a parallel `pending_probe_requests` map (mirrors the existing directory-listing pattern).
+  - New REST endpoint `GET /api/launchers/{id}/probe-agents` that triggers the round-trip and returns the install state with a 5 s timeout.
+
 ## 2.5.30
 
 - **Attach the raw Codex frame to typed-decode-failure portal messages.** When a codex frame fails our bundled `codex-codes` schema (the canonical `missing field 'callId'` mismatch with codex CLI 0.130.0's approval requests, see #703), the proxy interrupted the turn but left the user without the offending frame's content — making upstream bug reports hard to file. A new `CodexFrameCaptureLayer` tracing layer watches codex-codes' `[CLIENT] Received: <raw>` DEBUG events at runtime and stashes the last 8 frames in a process-wide ring buffer. On `Error::Json` the codex I/O task drains the most-recent entry (overwhelmingly the offending frame, since capture happens microseconds before the typed-decode failure on the same thread) and emits it as a portal message with a fenced JSON block, ready to copy-paste. The layer declares per-callsite `Interest::always()` only for `codex_codes::client_async` DEBUG events, so it sees them even when `RUST_LOG=info,…` would otherwise suppress them — without flooding journald (the fmt-layer EnvFilter is now per-layer, not global). Installed in both `launcher/src/main.rs` and `proxy/src/main.rs`.

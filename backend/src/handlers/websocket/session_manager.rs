@@ -50,6 +50,7 @@ pub struct SessionManager {
     pub pending_truncations: Arc<DashSet<Uuid>>,
     pub launchers: Arc<DashMap<Uuid, LauncherConnection>>,
     pub pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    pub pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     pub last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
     /// Monotonic counter for connection generations (prevents stale cleanup)
@@ -69,6 +70,7 @@ impl Default for SessionManager {
             pending_truncations: Arc::new(DashSet::new()),
             launchers: Arc::new(DashMap::new()),
             pending_dir_requests: Arc::new(DashMap::new()),
+            pending_probe_requests: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
             connection_gen: Arc::new(DashMap::new()),
@@ -368,6 +370,18 @@ impl SessionManager {
 
     pub fn complete_dir_request(&self, request_id: Uuid, msg: LauncherToServer) {
         if let Some((_, tx)) = self.pending_dir_requests.remove(&request_id) {
+            let _ = tx.send(msg);
+        }
+    }
+
+    pub fn register_probe_request(&self, request_id: Uuid) -> oneshot::Receiver<LauncherToServer> {
+        let (tx, rx) = oneshot::channel();
+        self.pending_probe_requests.insert(request_id, tx);
+        rx
+    }
+
+    pub fn complete_probe_request(&self, request_id: Uuid, msg: LauncherToServer) {
+        if let Some((_, tx)) = self.pending_probe_requests.remove(&request_id) {
             let _ = tx.send(msg);
         }
     }

@@ -3,7 +3,7 @@ use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use serde::Deserialize;
 use shared::api::LaunchRequest;
-use shared::{DirectoryEntry, LauncherInfo};
+use shared::{AgentInstall, AgentType, DirectoryEntry, LauncherInfo};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -17,6 +17,45 @@ const CONNECT_NEW: &str = "__install__";
 struct DirectoryListingResponse {
     entries: Vec<DirectoryEntry>,
     resolved_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProbeAgentsResponse {
+    agents: Vec<AgentInstall>,
+}
+
+/// Fetch the current install state for both agent CLIs from the given launcher.
+/// Stores the result in `agents` and clears `probing` when done.
+fn probe_agents_for(
+    launcher_id: Uuid,
+    agents: UseStateHandle<Vec<AgentInstall>>,
+    probing: UseStateHandle<bool>,
+) {
+    probing.set(true);
+    spawn_local(async move {
+        let url = format!("/api/launchers/{}/probe-agents", launcher_id);
+        match Request::get(&url).send().await {
+            Ok(resp) if resp.ok() => {
+                if let Ok(body) = resp.json::<ProbeAgentsResponse>().await {
+                    agents.set(body.agents);
+                }
+            }
+            _ => {
+                // Probe failures: leave the install list empty. The UI will
+                // treat unknown as "not blocking" — better to let the user
+                // try and see the spawn-time error than to over-block.
+                agents.set(Vec::new());
+            }
+        }
+        probing.set(false);
+    });
+}
+
+fn agent_installed(installs: &[AgentInstall], agent_type: AgentType) -> Option<bool> {
+    installs
+        .iter()
+        .find(|a| a.agent_type == agent_type)
+        .map(|a| a.installed)
 }
 
 struct AgentConfig {
@@ -143,6 +182,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let launching = use_state(|| false);
     let error_msg = use_state(|| None::<String>);
     let debounce_handle = use_mut_ref(|| None::<Timeout>);
+    let agent_installs = use_state(Vec::<AgentInstall>::new);
+    let probing_agents = use_state(|| false);
 
     // Fetch launchers on mount; auto-select install mode when none are connected
     {
@@ -150,6 +191,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let selected_launcher = selected_launcher.clone();
         let show_install = show_install.clone();
         let dir = dir.clone();
+        let agent_installs = agent_installs.clone();
+        let probing_agents = probing_agents.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
                 if let Ok(resp) = Request::get("/api/launchers").send().await {
@@ -158,6 +201,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             let lid = first.launcher_id;
                             selected_launcher.set(Some(lid));
                             dir.fetch(lid, "~".to_string(), true);
+                            probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
                         } else {
                             show_install.set(true);
                         }
@@ -257,6 +301,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let selected_launcher = selected_launcher.clone();
         let show_install = show_install.clone();
         let dir = dir.clone();
+        let agent_installs = agent_installs.clone();
+        let probing_agents = probing_agents.clone();
         Callback::from(move |e: Event| {
             if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                 if select.value() == CONNECT_NEW {
@@ -266,6 +312,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     show_install.set(false);
                     selected_launcher.set(Some(id));
                     dir.navigate(Some(id), "~".to_string());
+                    probe_agents_for(id, agent_installs.clone(), probing_agents.clone());
                 }
             }
         })
@@ -391,6 +438,22 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     let cfg = agent_config(*agent_type);
 
+    // Per-agent install hints for the dropdown labels and the inline warning.
+    let claude_label = match agent_installed(&agent_installs, AgentType::Claude) {
+        Some(false) => "Claude (not installed)".to_string(),
+        _ => "Claude".to_string(),
+    };
+    let codex_label = match agent_installed(&agent_installs, AgentType::Codex) {
+        Some(false) => "Codex (not installed)".to_string(),
+        _ => "Codex".to_string(),
+    };
+    let selected_agent_missing = agent_installed(&agent_installs, *agent_type) == Some(false);
+    let still_probing = *probing_agents && agent_installs.is_empty();
+    let selected_agent_label = match *agent_type {
+        AgentType::Claude => "Claude",
+        AgentType::Codex => "Codex",
+    };
+
     // Pre-compute directory listing HTML
     let dir_listing_html = if *dir.loading {
         html! { <div class="dir-loading">{ "Loading..." }</div> }
@@ -502,16 +565,29 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     <div class="launch-field">
                         <label>{ "Agent" }</label>
                         <select class="launcher-select" onchange={on_agent_type_change}>
-                            <option value="claude" selected={*agent_type == shared::AgentType::Claude}>
-                                { "Claude" }
+                            <option value="claude" selected={*agent_type == AgentType::Claude}>
+                                { &claude_label }
                             </option>
-                            <option value="codex" selected={*agent_type == shared::AgentType::Codex}>
-                                { "Codex" }
+                            <option value="codex" selected={*agent_type == AgentType::Codex}>
+                                { &codex_label }
                             </option>
                         </select>
                     </div>
 
-                    if *agent_type == shared::AgentType::Codex {
+                    if selected_agent_missing {
+                        <div class="launch-note launch-note-warn">
+                            { format!(
+                                "{} isn't installed on this launcher — sessions will fail to start. Install it on the host and retry.",
+                                selected_agent_label,
+                            ) }
+                        </div>
+                    } else if still_probing {
+                        <div class="launch-note">
+                            { "Checking installed agents..." }
+                        </div>
+                    }
+
+                    if *agent_type == AgentType::Codex {
                         <div class="launch-note launch-note-warn">
                             { "Codex support is highly experimental." }
                         </div>

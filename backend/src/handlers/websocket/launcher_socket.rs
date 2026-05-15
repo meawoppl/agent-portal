@@ -381,6 +381,11 @@ fn handle_launcher_message(
                 .session_manager
                 .complete_dir_request(request_id, msg);
         }
+        LauncherToServer::ProbeAgentsResult { request_id, .. } => {
+            app_state
+                .session_manager
+                .complete_probe_request(request_id, msg);
+        }
         LauncherToServer::RequestLaunch {
             request_id,
             working_directory,
