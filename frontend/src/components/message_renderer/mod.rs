@@ -133,31 +133,48 @@ pub struct MessageRendererProps {
 
 #[function_component(MessageRenderer)]
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
-    if props.agent_type == shared::AgentType::Codex {
-        return html! {
-            <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} />
-        };
-    }
-
     let ts = extract_local_timestamp(&props.json);
     let raw_iso = extract_raw_iso(&props.json);
     let parsed: Result<ClaudeMessage, _> = serde_json::from_str(&props.json);
 
+    // Dispatch on the message shape, not the agent. `User` (the proxy's
+    // synthetic echo) and `Portal` (the backend's portal-content envelope)
+    // are protocol-agnostic and must render the same way on Claude and
+    // Codex sessions — otherwise the Codex renderer's catch-all turns them
+    // into raw JSON blocks. Codex-specific shapes (`item.started`,
+    // `turn.completed`, …) don't match any `ClaudeMessage` variant and fall
+    // through to the codex renderer below.
     match parsed {
-        Ok(ClaudeMessage::System(msg)) => renderers::render_system_message(&msg, ts.as_deref()),
+        Ok(ClaudeMessage::System(msg)) => {
+            return renderers::render_system_message(&msg, ts.as_deref());
+        }
         Ok(ClaudeMessage::Assistant(msg)) => {
-            renderers::render_assistant_message(&msg, ts.as_deref(), raw_iso.as_deref())
+            return renderers::render_assistant_message(&msg, ts.as_deref(), raw_iso.as_deref());
         }
-        Ok(ClaudeMessage::Result(msg)) => renderers::render_result_message(&msg),
+        Ok(ClaudeMessage::Result(msg)) => return renderers::render_result_message(&msg),
         Ok(ClaudeMessage::User(msg)) => {
-            renderers::render_user_message(&msg, props.current_user_id.as_deref(), ts.as_deref())
+            return renderers::render_user_message(
+                &msg,
+                props.current_user_id.as_deref(),
+                ts.as_deref(),
+            );
         }
-        Ok(ClaudeMessage::Error(msg)) => renderers::render_error_message(&msg, ts.as_deref()),
-        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(&msg, ts.as_deref()),
+        Ok(ClaudeMessage::Error(msg)) => {
+            return renderers::render_error_message(&msg, ts.as_deref());
+        }
+        Ok(ClaudeMessage::Portal(msg)) => {
+            return renderers::render_portal_message(&msg, ts.as_deref());
+        }
         Ok(ClaudeMessage::RateLimitEvent(msg)) => {
-            renderers::render_rate_limit_event(&msg, ts.as_deref())
+            return renderers::render_rate_limit_event(&msg, ts.as_deref());
         }
-        Ok(ClaudeMessage::Unknown) | Err(_) => render_raw_json(&props.json),
+        Ok(ClaudeMessage::Unknown) | Err(_) => {}
+    }
+
+    if props.agent_type == shared::AgentType::Codex {
+        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} /> }
+    } else {
+        render_raw_json(&props.json)
     }
 }
 
