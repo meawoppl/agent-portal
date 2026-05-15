@@ -742,8 +742,14 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             }
         };
 
+        let watermark_class = match session.agent_type {
+            shared::AgentType::Claude => "pill-watermark claude",
+            shared::AgentType::Codex => "pill-watermark codex",
+        };
+
         html! {
             <div class={pill_class} onclick={on_click} key={session.id.to_string()} data-index={index.to_string()}>
+                <span class={watermark_class} aria-hidden="true" />
                 {
                     if let Some(num) = &number_annotation {
                         html! { <span class="pill-number">{ num }</span> }
@@ -768,13 +774,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                         }
                     }
                 </span>
-                {
-                    if session.agent_type == shared::AgentType::Codex {
-                        html! { <span class="pill-agent-badge codex">{ "Codex" }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
+                // Codex text badge removed — the agent-type watermark behind the
+                // pill (anthropic-mark.svg / openai-mark.png) carries this signal.
                 {
                     if session.scheduled_task_id.is_some() {
                         html! { <span class="pill-agent-badge cron">{ "Cron" }</span> }

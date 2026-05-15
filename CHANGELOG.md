@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.27
+
+- **Agent-type watermark behind session pills.** Each pill now shows the actual brand mark of the agent backing it — Anthropic's stylized burst behind Claude sessions, OpenAI's hex-knot behind Codex sessions — anchored to the left edge of the pill, clipped to the rounded silhouette via the existing `overflow: hidden`, sized to overflow the corner a bit. Light grey at 0.22 opacity, sits below the foreground text and indicators so legibility is unchanged. The old "Codex" text badge is removed since the watermark carries the same signal.
+- New static assets: `frontend/assets/anthropic-mark.svg` (recolored to white from the source SVG so it tints down to the Tokyo Night palette cleanly) and `frontend/assets/openai-mark.png` (alpha-cut from the source PNG, RGB-negated so the logo reads light on the dark pill).
+
 ## 2.5.26
 
 - **Fix #703 — codex sessions no longer wedge after a typed-decode failure.** The 2.5.22 patch for #695 kept the session alive after `codex-codes` failed to deserialize a frame, but silently dropped the frame. When the lost frame was a server→client approval request (the `callId`-missing variant in codex 0.130.0's `item/{commandExecution,fileChange}/requestApproval`), codex blocked the turn waiting for a reply it would never get; the proxy stayed in `turn_active = true` and rejected every subsequent user prompt with `Received input while Codex turn is active`. From the user's POV the session looked alive but ignored them. Now, on `codex_codes::Error::Json` during an active turn, `claude-session-lib` (a) emits a `turn.failed` event to the frontend so the hang is visible, and (b) sends `turn/interrupt` so codex unblocks and emits `turn/completed` (Interrupted), which clears the flag through the normal path. If `turn_interrupt` itself errors, the flag is force-cleared to avoid a permanent wedge.

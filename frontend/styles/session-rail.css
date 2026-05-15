@@ -162,6 +162,25 @@
     box-sizing: border-box;
 }
 
+/* Agent-type watermark — large logo anchored to the pill's left edge, clipped
+   by the pill's overflow:hidden, behind all foreground content. */
+.pill-watermark {
+    position: absolute;
+    left: -28px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 88px;
+    height: 88px;
+    pointer-events: none;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.22;
+    z-index: 0;
+}
+.pill-watermark.claude { background-image: url('/anthropic-mark.svg'); }
+.pill-watermark.codex  { background-image: url('/openai-mark.png'); }
+
 .session-pill:hover {
     border-color: var(--accent);
     background: rgba(122, 162, 247, 0.1);
