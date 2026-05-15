@@ -180,6 +180,22 @@ pub struct DirectoryEntry {
     pub is_dir: bool,
 }
 
+/// Result of probing one agent CLI on a launcher host. Built at launcher
+/// startup (sent in `LauncherRegister`) and refreshed on demand via
+/// `ProbeAgents` when the user opens the launch dialog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentInstall {
+    pub agent_type: AgentType,
+    /// True iff `<bin> --version` exited successfully.
+    pub installed: bool,
+    /// Absolute path the launcher's `which` lookup resolved to, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_path: Option<String>,
+    /// `<bin> --version` stdout, trimmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
 /// Info about a connected launcher daemon
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LauncherInfo {

@@ -538,6 +538,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/launchers/{launcher_id}/update",
             post(handlers::launchers::update_launcher),
         )
+        .route(
+            "/api/launchers/{launcher_id}/probe-agents",
+            get(handlers::launchers::probe_agents),
+        )
         // Admin dashboard routes (admin-only)
         .route("/api/admin/stats", get(handlers::admin::get_stats))
         .route("/api/admin/users", get(handlers::admin::list_users))

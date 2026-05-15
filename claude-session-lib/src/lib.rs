@@ -21,6 +21,7 @@ pub mod codex_frame_capture;
 pub mod error;
 pub mod heartbeat;
 pub mod output_buffer;
+pub mod probe;
 pub mod proxy_session;
 pub mod session;
 pub mod snapshot;

@@ -336,6 +336,23 @@ pub async fn run_launcher_loop(
     }
 }
 
+/// Probe both supported agent CLIs and convert into the wire shape used in
+/// `LauncherToServer::ProbeAgentsResult`. Runs `which::which` + `--version`
+/// synchronously, so callers must run this from a `spawn_blocking` task.
+fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
+    claude_session_lib::probe::probe_all_agents()
+        .into_iter()
+        .map(|(agent_type, result)| shared::AgentInstall {
+            agent_type,
+            installed: result.installed,
+            resolved_path: result
+                .resolved_path
+                .map(|p| p.to_string_lossy().to_string()),
+            version: result.version,
+        })
+        .collect()
+}
+
 fn list_directory(path: &str, request_id: Uuid) -> LauncherToServer {
     // Resolve ~ to home directory (trailing slash ensures the dir itself is listed,
     // not treated as a filter prefix against its parent)
@@ -532,6 +549,17 @@ async fn handle_message(
             let response = list_directory(&path, request_id);
             if ws_sender.send(response).await.is_err() {
                 warn!("Failed to send list directories result");
+            }
+        }
+        ServerToLauncher::ProbeAgents { request_id } => {
+            // Synchronous probe in a blocking task so two `--version` spawns
+            // don't hold up the message loop.
+            let agents = tokio::task::spawn_blocking(probe_agents_for_response)
+                .await
+                .unwrap_or_default();
+            let response = shared::LauncherToServer::ProbeAgentsResult { request_id, agents };
+            if ws_sender.send(response).await.is_err() {
+                warn!("Failed to send probe agents result");
             }
         }
         ServerToLauncher::ScheduleSync { tasks } => {

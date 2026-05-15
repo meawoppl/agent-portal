@@ -3,7 +3,8 @@ use uuid::Uuid;
 pub use ws_bridge::WsEndpoint;
 
 use crate::{
-    AgentType, DirectoryEntry, PermissionSuggestion, SendMode, SessionCost, SessionStatus,
+    AgentInstall, AgentType, DirectoryEntry, PermissionSuggestion, SendMode, SessionCost,
+    SessionStatus,
 };
 
 // =============================================================================
@@ -389,6 +390,14 @@ pub enum LauncherToServer {
         resolved_path: Option<String>,
     },
 
+    /// On-demand agent install probe result. The launcher re-runs the
+    /// `which` + `--version` scan and sends back the fresh capabilities.
+    ProbeAgentsResult {
+        request_id: Uuid,
+        #[serde(default)]
+        agents: Vec<AgentInstall>,
+    },
+
     /// Request the backend to mint a token and launch a session
     RequestLaunch {
         request_id: Uuid,
@@ -454,6 +463,10 @@ pub enum ServerToLauncher {
 
     /// Request directory listing
     ListDirectories { request_id: Uuid, path: String },
+
+    /// Ask the launcher to (re-)probe its agent CLIs. The launcher replies
+    /// with `LauncherToServer::ProbeAgentsResult` carrying the fresh state.
+    ProbeAgents { request_id: Uuid },
 
     /// Server is shutting down
     ServerShutdown {

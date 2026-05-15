@@ -265,3 +265,61 @@ pub async fn update_launcher(
     info!("Sent UpdateAndRestart to launcher {}", launcher_id);
     Ok(StatusCode::OK)
 }
+
+#[derive(serde::Serialize)]
+pub struct ProbeAgentsResponse {
+    pub agents: Vec<shared::AgentInstall>,
+}
+
+/// GET /api/launchers/:launcher_id/probe-agents - Ask the launcher to (re-)scan
+/// its agent CLIs (`claude`, `codex`) and return install state. The frontend
+/// calls this when the launch dialog opens.
+pub async fn probe_agents(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(launcher_id): Path<Uuid>,
+) -> Result<Json<ProbeAgentsResponse>, StatusCode> {
+    let user_id = extract_user_id(&app_state, &cookies).map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let sender = {
+        let launcher = app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        if launcher.user_id != user_id {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        launcher.sender.clone()
+    };
+
+    let request_id = Uuid::new_v4();
+    let rx = app_state.session_manager.register_probe_request(request_id);
+
+    if sender
+        .send(ServerToLauncher::ProbeAgents { request_id })
+        .is_err()
+    {
+        app_state
+            .session_manager
+            .pending_probe_requests
+            .remove(&request_id);
+        warn!("Launcher {} disconnected while probing agents", launcher_id);
+        return Err(StatusCode::BAD_GATEWAY);
+    }
+
+    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+        Ok(Ok(LauncherToServer::ProbeAgentsResult { agents, .. })) => {
+            Ok(Json(ProbeAgentsResponse { agents }))
+        }
+        Ok(Ok(_)) | Ok(Err(_)) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(_) => {
+            app_state
+                .session_manager
+                .pending_probe_requests
+                .remove(&request_id);
+            warn!("Probe agents timed out for launcher {}", launcher_id);
+            Err(StatusCode::GATEWAY_TIMEOUT)
+        }
+    }
+}
