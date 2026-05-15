@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use claude_codes::io::ContentBlock;
 use claude_codes::ClaudeOutput;
 use shared::ProxyToServer;
 use tokio::sync::{mpsc, Mutex};
@@ -71,6 +72,16 @@ pub(super) async fn handle_session_event_with_wiggum(
                 _ => false,
             };
 
+            // The portal-features reminder is injected as user input wrapped in
+            // <system-reminder> tags. Claude echoes that back as a User message
+            // on its stdout — if we forward it, the wrapper text leaks into the
+            // user's transcript as if they had typed it. Drop those echoes.
+            if is_system_reminder_echo(output) {
+                debug!("Dropping system-reminder user echo from transcript");
+                // Skip forwarding and skip the rest of the handler.
+                return None;
+            }
+
             // Forward the output
             if output_tx.send(*output.clone()).is_err() {
                 error!("Failed to forward Claude output");
@@ -78,7 +89,7 @@ pub(super) async fn handle_session_event_with_wiggum(
             }
 
             if is_compaction_boundary {
-                super::inject_portal_reminder(claude_session, ws_write, output_buffer).await;
+                super::inject_portal_reminder(claude_session).await;
             }
 
             // Handle wiggum loop continuation
@@ -241,6 +252,19 @@ pub(super) async fn handle_session_event_with_wiggum(
 }
 
 /// Check if Claude's result indicates wiggum completion (responded with "DONE")
+/// Is this Claude output Claude's echo of a `<system-reminder>`-wrapped user
+/// input? Those wrapped messages are how we inject the portal-features
+/// reminder (and similar out-of-band context); they shouldn't leak into the
+/// user's transcript as if the user had typed them.
+fn is_system_reminder_echo(output: &ClaudeOutput) -> bool {
+    let ClaudeOutput::User(user) = output else {
+        return false;
+    };
+    user.message.content.iter().any(|block| {
+        matches!(block, ContentBlock::Text(t) if t.text.trim_start().starts_with("<system-reminder>"))
+    })
+}
+
 fn check_wiggum_done(result: &claude_codes::io::ResultMessage) -> bool {
     // Check if it was an error (don't continue on errors)
     if result.is_error {

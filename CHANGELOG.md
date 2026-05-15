@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.23
+
+- **Fix #692 — portal reminder no longer bloats the user transcript.** Two parts:
+  - Reflowed `claude-session-lib/portal_reminder.md` to single-line paragraphs and bullets. The previous 72-column hand-wrapping turned every continuation into a new visual line in the rendered preview; long-line markdown lets the renderer reflow to the available width.
+  - Dropped the user-bound `PortalMessage::reminder` emission entirely. The collapsed "Portal features" block on the frontend was content the user already knew (they built the portal), and the actually-useful side — re-priming the agent's affordance knowledge after a fresh start / compaction — is the stdin injection, which stays. The `PortalContent::Reminder` enum variant and its frontend renderer are kept around so historical DB rows still deserialize cleanly.
+- **Filter Claude's user-message echo of `<system-reminder>` wrappers.** When the proxy injects the reminder via stdin, Claude echoes it back on stdout as a `ClaudeOutput::User` whose content is the raw `<system-reminder>…</system-reminder>` text. Forwarding that to the frontend leaked the wrapper text into the transcript as if the user had typed it. The output forwarder now detects user-message echoes whose first text block starts with `<system-reminder>` and drops them before forwarding.
+
 ## 2.5.22
 
 - **Fix #695 — codex sessions no longer die on typed-decode errors.** Codex CLI 0.130.0 emits at least one frame type (likely a notification with a `callId` field our bundled `codex-codes` 0.128.0 doesn't model) that fails strict deserialization. Previously the proxy turned that into `SessionError::CommunicationError` and killed the session; from the user's POV the agent just vanished mid-turn. Now `codex_io_task` matches on `codex_codes::Error::Json` specifically, logs a warning, and continues the loop so the rest of the session stays alive. Other error variants (I/O, protocol, server-closed) still terminate as before.
