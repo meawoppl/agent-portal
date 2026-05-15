@@ -928,6 +928,40 @@ impl Session {
                                         )
                                     }
                                 })));
+
+                                // Attach a portal message with the raw JSON of
+                                // the offending frame so the user can copy it
+                                // for a bug report. The frame is captured by
+                                // CodexFrameCaptureLayer just microseconds
+                                // before this typed-decode failure on the same
+                                // thread, so the most-recent entry is the
+                                // offender. If the capture layer wasn't
+                                // installed we surface a note explaining how
+                                // to find it in journald.
+                                let raw_frame = crate::codex_frame_capture::take_most_recent();
+                                let portal_text = match raw_frame {
+                                    Some(raw) => format!(
+                                        "**Codex frame failed to decode** — `{}`\n\n\
+                                         Paste the block below if reporting upstream \
+                                         ([`meawoppl/rust-code-agent-sdks`](https://github.com/meawoppl/rust-code-agent-sdks/issues)):\n\n\
+                                         ```json\n{}\n```",
+                                        json_err, raw
+                                    ),
+                                    None => format!(
+                                        "**Codex frame failed to decode** — `{}`\n\n\
+                                         _Raw frame was not captured. \
+                                         Restart agent-portal so `CodexFrameCaptureLayer` is installed, \
+                                         or grep journald for `codex_codes::client_async` at DEBUG level._",
+                                        json_err
+                                    ),
+                                };
+                                let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
+                                    "type": "portal",
+                                    "content": [{
+                                        "type": "text",
+                                        "text": portal_text
+                                    }]
+                                })));
                                 if let Err(e) = client
                                     .turn_interrupt(&TurnInterruptParams {
                                         thread_id: thread_id.clone(),
