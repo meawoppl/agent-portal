@@ -17,6 +17,7 @@
 //! Handle `Output`, `PermissionRequest`, `Exited`, and `Error` variants as needed.
 
 pub mod buffer;
+pub mod codex_frame_capture;
 pub mod error;
 pub mod heartbeat;
 pub mod output_buffer;
