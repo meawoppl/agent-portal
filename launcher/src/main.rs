@@ -7,7 +7,7 @@ mod service;
 
 use clap::{Parser, Subcommand};
 use tracing::{info, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -102,16 +102,11 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    // EnvFilter is attached to fmt-only so the CodexFrameCaptureLayer can
-    // see codex-codes DEBUG events ("[CLIENT] Received: …") even when
-    // RUST_LOG would otherwise suppress them. Without per-layer filtering
-    // we'd either flood the journal or lose raw frames on typed-decode
-    // failure.
-    let env_filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(env_filter))
-        .with(claude_session_lib::codex_frame_capture::CodexFrameCaptureLayer::new())
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
         .init();
 
     // Handle subcommands before the daemon startup path

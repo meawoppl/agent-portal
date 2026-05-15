@@ -896,24 +896,27 @@ impl Session {
                             Err(codex_codes::Error::Json(json_err)) => {
                                 // Newer codex CLI versions emit frames whose typed
                                 // param struct fails our bundled codex-codes schema
-                                // (e.g. #695 — missing field `callId` in codex 0.130.0
-                                // approval requests). The frame is lost.
+                                // (e.g. #703 — missing field `callId` in codex 0.130.0
+                                // approval requests; #128-on-the-SDK — unknown
+                                // `add|delete|update` variant on file-change events).
+                                // The frame is lost.
                                 //
-                                // If the lost frame was a server→client request (like
-                                // `item/{commandExecution,fileChange}/requestApproval`),
+                                // If the lost frame was a server→client request,
                                 // codex is now blocked on a reply we cannot send,
                                 // because we never saw the request id. Result: the
                                 // turn never completes, `turn_active` stays true, and
                                 // every subsequent user prompt gets dropped at the
                                 // "Received input while Codex turn is active" check.
-                                // (See #703.)
                                 //
                                 // We can't recover the lost reply. Interrupt the turn
                                 // so codex unblocks and emits `turn/completed`
                                 // (Interrupted), which flips `turn_active` back to
                                 // false through the normal path. Surface a
                                 // `turn.failed` event so the frontend doesn't sit on a
-                                // silent hang.
+                                // silent hang. Once codex-codes ships a structured
+                                // ParseError (SDK issue #128), we'll also attach the
+                                // raw frame here — the tracing-layer workaround in
+                                // #707 was retired in favor of waiting for that.
                                 tracing::warn!(
                                     "Codex frame failed typed decode: {}",
                                     json_err
@@ -927,40 +930,6 @@ impl Session {
                                             json_err
                                         )
                                     }
-                                })));
-
-                                // Attach a portal message with the raw JSON of
-                                // the offending frame so the user can copy it
-                                // for a bug report. The frame is captured by
-                                // CodexFrameCaptureLayer just microseconds
-                                // before this typed-decode failure on the same
-                                // thread, so the most-recent entry is the
-                                // offender. If the capture layer wasn't
-                                // installed we surface a note explaining how
-                                // to find it in journald.
-                                let raw_frame = crate::codex_frame_capture::take_most_recent();
-                                let portal_text = match raw_frame {
-                                    Some(raw) => format!(
-                                        "**Codex frame failed to decode** — `{}`\n\n\
-                                         Paste the block below if reporting upstream \
-                                         ([`meawoppl/rust-code-agent-sdks`](https://github.com/meawoppl/rust-code-agent-sdks/issues)):\n\n\
-                                         ```json\n{}\n```",
-                                        json_err, raw
-                                    ),
-                                    None => format!(
-                                        "**Codex frame failed to decode** — `{}`\n\n\
-                                         _Raw frame was not captured. \
-                                         Restart agent-portal so `CodexFrameCaptureLayer` is installed, \
-                                         or grep journald for `codex_codes::client_async` at DEBUG level._",
-                                        json_err
-                                    ),
-                                };
-                                let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-                                    "type": "portal",
-                                    "content": [{
-                                        "type": "text",
-                                        "text": portal_text
-                                    }]
                                 })));
                                 if let Err(e) = client
                                     .turn_interrupt(&TurnInterruptParams {
