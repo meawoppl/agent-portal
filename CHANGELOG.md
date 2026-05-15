@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.32
+
+- **Bump `codex-codes` 0.128.0 → 0.129.1.** Upstream added eight new `ServerRequest` variants and roughly ten new `Notification` variants modeling codex CLI 0.130+ protocol additions (tool-input prompts, MCP elicitations, generic permission requests, dynamic tool calls, ChatGPT auth-token refresh, attestation, apply-patch approval, exec-command approval, plus plan/diff/reasoning delta notifications). Extended the proxy's `ServerRequest` match in `claude-session-lib/src/session.rs` to cover all of them — each new variant serializes its typed param struct back to `Value` so the downstream string-dispatch keeps working. New approval-type methods (`ApplyPatchApproval`, `ExecCommandApproval`, `PermissionsRequestApproval`, etc.) currently fall through to the existing `_ => warn!("Unknown Codex request: {}", method)` arm, which surfaces them as raw codex frames in the transcript — purpose-built UIs for each new approval type are a follow-up. New notifications flow through `notif.into_envelope()` and hit the existing string-dispatch's `_ => debug!` arm without code changes.
+
 ## 2.5.31
 
 - **Probe installed agent CLIs when the launch dialog opens.** Previously the only signal that a launcher was missing `codex` or `claude` was a session that spawned then vanished within a second with a misleading `exited normally (code 0)` log. The launch dialog now asks the selected launcher to scan its PATH the moment the user opens it (and again on every launcher dropdown change), and surfaces the result inline:
