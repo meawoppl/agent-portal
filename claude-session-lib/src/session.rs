@@ -238,15 +238,46 @@ impl Session {
         mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
         event_tx: mpsc::UnboundedSender<IoEvent>,
     ) {
+        use claude_codes::io::ContentBlock;
+        use rand::Rng;
+        use std::time::Duration;
+
+        // Detector for the upstream-429 turn shape (see #?). When Anthropic's
+        // API rate-limits a request, `claude --print` doesn't fail — it streams
+        // an assistant message whose first text block starts with this prefix,
+        // then emits a Result with is_error=true. We retry that turn for the
+        // user with full-jitter exponential backoff.
+        const RATE_LIMIT_TEXT_PREFIX: &str = "API Error: Server is temporarily limiting requests";
+        const MAX_RATE_LIMIT_RETRIES: u32 = 4;
+        const RATE_LIMIT_BACKOFF_CAP_SECS: u64 = 30;
+
         // Take stderr so we can read it if Claude exits unexpectedly
         let mut stderr_reader = client.take_stderr();
+
+        // The most recent user input we sent — kept so we can re-issue it on
+        // a rate-limited turn without bothering the user.
+        let mut last_input: Option<ClaudeInput> = None;
+        // Consecutive rate-limited turns. Resets on success, on a new user
+        // input, and after a max-out give-up.
+        let mut rate_limit_attempts: u32 = 0;
+        // Set while an assistant frame in the current turn matched the
+        // rate-limit text prefix. Latched until the turn's Result frame so we
+        // can classify the whole turn on its terminator.
+        let mut current_turn_was_rate_limited = false;
 
         loop {
             tokio::select! {
                 // Handle incoming commands (input to send to Claude)
                 Some(cmd) = command_rx.recv() => {
                     let result = match cmd {
-                        IoCommand::Input(input) => client.send(&input).await,
+                        IoCommand::Input(input) => {
+                            // Each fresh user input gets its own retry budget.
+                            rate_limit_attempts = 0;
+                            current_turn_was_rate_limited = false;
+                            let r = client.send(&input).await;
+                            last_input = Some(input);
+                            r
+                        }
                         IoCommand::PermissionResponse(response) => {
                             client.send_control_response(response).await
                         }
@@ -261,9 +292,128 @@ impl Session {
                 result = client.receive() => {
                     match result {
                         Ok(output) => {
+                            // Classify the frame before forwarding so we can
+                            // decide whether the turn's terminator triggers an
+                            // auto-retry.
+                            match &output {
+                                ClaudeOutput::Assistant(asst) => {
+                                    let first_text = asst.message.content.iter().find_map(|b| {
+                                        if let ContentBlock::Text(t) = b {
+                                            Some(t.text.as_str())
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                    if let Some(text) = first_text {
+                                        if text.starts_with(RATE_LIMIT_TEXT_PREFIX) {
+                                            current_turn_was_rate_limited = true;
+                                        }
+                                    }
+                                }
+                                ClaudeOutput::Result(r) if !r.is_error => {
+                                    // Successful turn — clear consecutive-failure state.
+                                    rate_limit_attempts = 0;
+                                    current_turn_was_rate_limited = false;
+                                }
+                                _ => {}
+                            }
+
+                            let is_rate_limit_terminator = matches!(
+                                &output,
+                                ClaudeOutput::Result(r) if r.is_error
+                            ) && current_turn_was_rate_limited;
+
                             if event_tx.send(IoEvent::Output(Box::new(output))).is_err() {
                                 // Receiver dropped, session ended
                                 break;
+                            }
+
+                            if !is_rate_limit_terminator {
+                                continue;
+                            }
+
+                            current_turn_was_rate_limited = false;
+                            let Some(input) = last_input.clone() else {
+                                continue;
+                            };
+
+                            if rate_limit_attempts >= MAX_RATE_LIMIT_RETRIES {
+                                let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
+                                    "type": "portal",
+                                    "content": [{
+                                        "type": "text",
+                                        "text": format!(
+                                            "Rate-limited by upstream API {} times in a row \u{2014} not retrying. Send your message again to try once more.",
+                                            rate_limit_attempts
+                                        )
+                                    }]
+                                })));
+                                rate_limit_attempts = 0;
+                                continue;
+                            }
+
+                            rate_limit_attempts += 1;
+                            // Full-jitter exponential backoff:
+                            //   delay ∈ [0, min(cap, 2^attempt)] seconds.
+                            // attempt=1 -> [0,2]; 2 -> [0,4]; 3 -> [0,8]; 4 -> [0,16];
+                            // the cap saturates by attempt 5 but we max-out before that.
+                            let exp_cap = 2u64
+                                .saturating_pow(rate_limit_attempts)
+                                .min(RATE_LIMIT_BACKOFF_CAP_SECS);
+                            let delay_secs = {
+                                let mut rng = rand::thread_rng();
+                                rng.gen_range(0.0..=exp_cap as f64)
+                            };
+                            let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
+                                "type": "portal",
+                                "content": [{
+                                    "type": "text",
+                                    "text": format!(
+                                        "Rate-limited by upstream API. Retrying in {:.1}s (attempt {}/{}).",
+                                        delay_secs, rate_limit_attempts, MAX_RATE_LIMIT_RETRIES
+                                    )
+                                }]
+                            })));
+
+                            // Wait for the backoff window, but let a new user
+                            // input cancel the retry and run normally.
+                            let sleep = tokio::time::sleep(Duration::from_secs_f64(delay_secs));
+                            tokio::pin!(sleep);
+                            tokio::select! {
+                                _ = &mut sleep => {
+                                    if let Err(e) = client.send(&input).await {
+                                        let _ = event_tx.send(IoEvent::Error(
+                                            SessionError::ClaudeError(e),
+                                        ));
+                                    }
+                                }
+                                Some(cmd) = command_rx.recv() => {
+                                    match cmd {
+                                        IoCommand::Input(new_input) => {
+                                            // User typed something while we were waiting
+                                            // — honor that, abandon the retry, and reset
+                                            // the budget for the new prompt.
+                                            rate_limit_attempts = 0;
+                                            let r = client.send(&new_input).await;
+                                            last_input = Some(new_input);
+                                            if let Err(e) = r {
+                                                let _ = event_tx.send(IoEvent::Error(
+                                                    SessionError::ClaudeError(e),
+                                                ));
+                                            }
+                                        }
+                                        IoCommand::PermissionResponse(response) => {
+                                            if let Err(e) =
+                                                client.send_control_response(response).await
+                                            {
+                                                let _ = event_tx.send(IoEvent::Error(
+                                                    SessionError::ClaudeError(e),
+                                                ));
+                                            }
+                                        }
+                                        IoCommand::CodexApproval { .. } => {}
+                                    }
+                                }
                             }
                         }
                         Err(e) => {

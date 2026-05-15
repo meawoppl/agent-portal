@@ -22,3 +22,4 @@ directories = "5.0"
 hostname = "0.4.2"
 which = "8.0.0"
 ws-bridge = { workspace = true, features = ["native-client"] }
+rand = "0.8"

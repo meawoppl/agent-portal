@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.29
+
+- **Auto-retry upstream-429 turns with full-jitter exponential backoff.** When Anthropic's API rate-limits a request, `claude --print` doesn't fail — it streams an assistant message starting with `API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited` and emits a `Result` with `is_error: true`. From the user's POV the session just ate a turn and went quiet. `claude_io_task` now caches the last user input, watches each turn for that exact shape, and on a match auto-retries with `delay ∈ [0, min(30, 2^attempt)]` seconds (full-jitter prevents N concurrent stuck sessions from re-firing in lockstep when the limit window resets). Up to 4 retries per user input; each retry emits a portal message announcing the wait and attempt count; on max-out we surface a final portal note asking the user to resend. If a new user input arrives during the backoff, it cancels the retry and runs normally — the user can always override automation. Counter resets on every fresh user input and on every successful turn.
+
 ## 2.5.28
 
 - **Stop rendering protocol-agnostic messages as "Codex Raw" blocks on Codex sessions.** The synthetic user-echo (PR #691, fixing the "Codex Raw" pile-up) and the backend's `Portal` envelope both have `type: "user"` / `type: "portal"` and parse cleanly as `ClaudeMessage` — but the old dispatch sent every message on a Codex session straight to the Codex renderer, which only knows codex-specific shapes (`item.*`, `turn.*`) and falls anything else through to the "raw JSON" catch-all. The user saw their own input echoed as a JSON dump. Dispatch now matches on the message shape first (any recognized `ClaudeMessage` variant renders the same on both agents) and only routes the remaining unknown-shape messages to the Codex renderer.
