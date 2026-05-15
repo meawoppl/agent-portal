@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.5.33
+
+- **Route the codex 0.130+ message types to user-facing UI instead of letting them fall through to "Unknown Codex request".** Followup to 2.5.32 which got the typing in. Each new message type now has a purpose-built dispatch arm:
+  - **Approval requests** wire into the existing `CodexPermissionRequest` event with sensible \`tool_name\`s and trimmed input payloads, so the user gets the existing approve/deny dialog for each:
+    - \`execCommandApproval\` → \`tool_name: "ExecCommand"\` (command + cwd + parsedCmd)
+    - \`applyPatchApproval\` → \`tool_name: "ApplyPatch"\` (file-change map + grant-root + reason)
+    - \`item/permissions/requestApproval\` → \`tool_name: "Permissions"\` (cwd + permissions profile + reason)
+    - \`item/tool/requestUserInput\` → \`tool_name: "AskUserQuestion"\` (reuses the Claude AskUserQuestion renderer — the Codex question shape is structurally compatible)
+    - \`mcpServer/elicitation/request\` → \`tool_name: "McpElicitation"\` (server name)
+  - **Internal/system requests** (no user action to take) emit a portal text message so the user sees what was requested without blocking the agent:
+    - \`item/tool/call\`, \`account/chatgptAuthTokens/refresh\`, \`attestation/generate\`
+  - **Notifications**:
+    - \`deprecationNotice\` / \`guardianWarning\` → portal text (high-visibility)
+    - \`item/plan/delta\`, \`turn/plan/updated\`, \`turn/diff/updated\`, \`item/reasoning/summaryPartAdded\`, \`item/reasoning/textDelta\`, \`item/fileChange/patchUpdated\` → typed structured events the frontend can opt into rendering (currently fall through to the existing raw-codex display but with a stable \`type\` tag for follow-up renderers)
+    - Pure-status notifications (\`mcpServer/oauthLogin/completed\`, \`account/login/completed\`, etc.) stay silent (debug log)
+- **Frontend**: extended \`format_permission_input\` in \`frontend/src/pages/dashboard/types.rs\` so the new tool_names (\`ExecCommand\`, \`ApplyPatch\`, \`Permissions\`, \`McpElicitation\`) get readable one-line summaries in the permission card instead of dumping a JSON blob.
+
 ## 2.5.32
 
 - **Bump `codex-codes` 0.128.0 → 0.129.1.** Upstream added eight new `ServerRequest` variants and roughly ten new `Notification` variants modeling codex CLI 0.130+ protocol additions (tool-input prompts, MCP elicitations, generic permission requests, dynamic tool calls, ChatGPT auth-token refresh, attestation, apply-patch approval, exec-command approval, plus plan/diff/reasoning delta notifications). Extended the proxy's `ServerRequest` match in `claude-session-lib/src/session.rs` to cover all of them — each new variant serializes its typed param struct back to `Value` so the downstream string-dispatch keeps working. New approval-type methods (`ApplyPatchApproval`, `ExecCommandApproval`, `PermissionsRequestApproval`, etc.) currently fall through to the existing `_ => warn!("Unknown Codex request: {}", method)` arm, which surfaces them as raw codex frames in the transcript — purpose-built UIs for each new approval type are a follow-up. New notifications flow through `notif.into_envelope()` and hit the existing string-dispatch's `_ => debug!` arm without code changes.

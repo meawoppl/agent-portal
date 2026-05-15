@@ -231,6 +231,37 @@ pub fn format_permission_input(tool_name: &str, input: &serde_json::Value) -> St
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
+        // Codex 0.130+ approval types — single-line summaries so the permission
+        // card doesn't drop a full JSON blob into the dialog.
+        "ExecCommand" => input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("$ {}", s))
+            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
+        "ApplyPatch" => {
+            // `fileChanges` is a JSON object keyed by file path — list the paths.
+            let paths: Vec<String> = input
+                .get("fileChanges")
+                .and_then(|v| v.as_object())
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default();
+            if paths.is_empty() {
+                serde_json::to_string_pretty(input).unwrap_or_default()
+            } else {
+                format!("Patch {} file(s):\n  {}", paths.len(), paths.join("\n  "))
+            }
+        }
+        "Permissions" => input
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
+        "McpElicitation" => input
+            .get("serverName")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("MCP server `{}` is asking for input", s))
+            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
         _ => serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input)),
     }
 }
