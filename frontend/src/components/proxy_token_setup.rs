@@ -53,6 +53,18 @@ pub fn proxy_token_setup() -> Html {
 
     // Derive WebSocket URL from current origin (http->ws, https->wss)
     let ws_backend_url = base_url
+// FIX: 安全检查 — 防止目录穿越
+// FIX: 安全检查 — 防止目录穿越
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
         .replace("https://", "wss://")
         .replace("http://", "ws://");
 

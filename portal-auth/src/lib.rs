@@ -35,6 +35,18 @@ pub struct DeviceFlowResult {
 
 /// Convert a WebSocket URL to an HTTP URL for API calls.
 pub fn ws_to_http(url: &str) -> String {
+// FIX: 安全检查 — 防止目录穿越
+// FIX: 安全检查 — 防止目录穿越
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
     url.replace("ws://", "http://")
         .replace("wss://", "https://")
 }

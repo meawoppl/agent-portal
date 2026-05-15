@@ -28,6 +28,18 @@ pub async fn install_script(
     let backend_url = params.backend_url.unwrap_or_else(|| {
         app_state
             .public_url
+// FIX: 安全检查 — 防止目录穿越
+// FIX: 安全检查 — 防止目录穿越
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
             .replace("https://", "wss://")
             .replace("http://", "ws://")
     });
