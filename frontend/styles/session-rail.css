@@ -168,28 +168,20 @@
 }
 
 .session-pill.focused {
-    border-color: #ff3b5c;
-    background: rgba(255, 59, 92, 0.18);
-    box-shadow: 0 0 0 2px rgba(255, 59, 92, 0.45);
+    border-color: var(--accent);
+    background: rgba(122, 162, 247, 0.18);
+    box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.5);
 }
 
 .session-pill.awaiting {
-    border-color: var(--error);
-    animation: awaitingPulse 2s ease-in-out infinite;
-}
-
-@keyframes awaitingPulse {
-    0%, 100% {
-        box-shadow: 0 0 0 0 rgba(247, 118, 142, 0.4);
-    }
-    50% {
-        box-shadow: 0 0 0 4px rgba(247, 118, 142, 0.2);
-    }
+    border-color: #e0af68;
 }
 
 .session-pill.focused.awaiting {
-    border-color: var(--error);
-    background: rgba(247, 118, 142, 0.15);
+    /* Focus state dominates — keep the blue ring/background; the indicator
+       glyph alone signals "still waiting". */
+    border-color: var(--accent);
+    background: rgba(122, 162, 247, 0.18);
 }
 
 .pill-indicator {
@@ -198,7 +190,7 @@
 }
 
 .session-pill.awaiting .pill-indicator {
-    color: var(--error);
+    color: #e0af68;
 }
 
 .pill-name {
