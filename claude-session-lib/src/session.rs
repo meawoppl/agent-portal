@@ -677,8 +677,8 @@ impl Session {
         event_tx: mpsc::UnboundedSender<IoEvent>,
     ) {
         use codex_codes::{
-            AppServerBuilder, AsyncClient as CodexAsyncClient, ThreadStartParams, TurnStartParams,
-            UserInput,
+            AppServerBuilder, AsyncClient as CodexAsyncClient, ThreadStartParams,
+            TurnInterruptParams, TurnStartParams, UserInput,
         };
 
         let codex_path = config.claude_path.as_deref().unwrap_or(Path::new("codex"));
@@ -744,16 +744,53 @@ impl Session {
                                 break;
                             }
                             Err(codex_codes::Error::Json(json_err)) => {
-                                // Newer codex CLI versions sometimes emit frames whose
-                                // typed param struct fails our bundled codex-codes
-                                // schema (e.g. #695 — missing field `callId` in codex
-                                // 0.130.0). Killing the session on every protocol
-                                // skew is too aggressive: skip the frame and stay
-                                // connected so the user doesn't lose the session.
+                                // Newer codex CLI versions emit frames whose typed
+                                // param struct fails our bundled codex-codes schema
+                                // (e.g. #695 — missing field `callId` in codex 0.130.0
+                                // approval requests). The frame is lost.
+                                //
+                                // If the lost frame was a server→client request (like
+                                // `item/{commandExecution,fileChange}/requestApproval`),
+                                // codex is now blocked on a reply we cannot send,
+                                // because we never saw the request id. Result: the
+                                // turn never completes, `turn_active` stays true, and
+                                // every subsequent user prompt gets dropped at the
+                                // "Received input while Codex turn is active" check.
+                                // (See #703.)
+                                //
+                                // We can't recover the lost reply. Interrupt the turn
+                                // so codex unblocks and emits `turn/completed`
+                                // (Interrupted), which flips `turn_active` back to
+                                // false through the normal path. Surface a
+                                // `turn.failed` event so the frontend doesn't sit on a
+                                // silent hang.
                                 tracing::warn!(
-                                    "Codex frame failed typed decode (skipping): {}",
+                                    "Codex frame failed typed decode: {}",
                                     json_err
                                 );
+                                let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
+                                    "type": "turn.failed",
+                                    "error": {
+                                        "message": format!(
+                                            "Codex emitted a frame this client could not parse ({}). \
+                                             Interrupting the turn to recover — please retry.",
+                                            json_err
+                                        )
+                                    }
+                                })));
+                                if let Err(e) = client
+                                    .turn_interrupt(&TurnInterruptParams {
+                                        thread_id: thread_id.clone(),
+                                    })
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "turn_interrupt after decode failure failed: {} \
+                                         — forcing turn_active=false to unwedge",
+                                        e
+                                    );
+                                    turn_active = false;
+                                }
                                 continue;
                             }
                             Err(e) => {
