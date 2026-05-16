@@ -248,8 +248,8 @@ impl Session {
         // then emits a Result with is_error=true. We retry that turn for the
         // user with full-jitter exponential backoff.
         const RATE_LIMIT_TEXT_PREFIX: &str = "API Error: Server is temporarily limiting requests";
-        const MAX_RATE_LIMIT_RETRIES: u32 = 4;
-        const RATE_LIMIT_BACKOFF_CAP_SECS: u64 = 30;
+        const MAX_RATE_LIMIT_RETRIES: u32 = 30;
+        const RATE_LIMIT_BACKOFF_CAP_SECS: u64 = 60;
 
         // Take stderr so we can read it if Claude exits unexpectedly
         let mut stderr_reader = client.take_stderr();

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.35
+
+- **Rate-limit retry: bump cap from 4 attempts/30s to 30 attempts/60s.** The original 2.5.29 settings gave up after ~1 minute of sustained throttling, which was too short for the rate-limit windows Anthropic actually applies (multi-minute holds are common). With 30 attempts at full-jitter exponential backoff capped at 60s, the upper bound on retry wall time is ~30 minutes of patience before we surface the "send your message again" portal note — and any earlier success short-circuits, so well-behaved limits unblock as soon as the window opens. Counter still resets on every fresh user input and every successful turn.
+
 ## 2.5.34
 
 - **Bump `codex-codes` 0.129.1 → 0.129.2** and wire it through `codex_io_task`. The dep bump picks up [SDK #135](https://github.com/meawoppl/rust-code-agent-sdks/issues/135) (`AppServerBuilder::config_override` + `extra_args`). The call-site change parses each codex session's `SessionConfig::extra_args` (the existing "Extra args" launch-dialog text input — already wired through to the launcher) into two buckets:
