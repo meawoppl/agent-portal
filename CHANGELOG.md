@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.36
+
+- Session pill agent-type watermark (Anthropic asterisk / OpenAI knot) is now 10% smaller — 88×88 → 80×80 — with the left offset adjusted from −28px to −24px so the icon's horizontal center stays at the same x=16 in pill coords. Vertical center is unchanged.
+
 ## 2.5.35
 
 - **Rate-limit retry: bump cap from 4 attempts/30s to 30 attempts/60s.** The original 2.5.29 settings gave up after ~1 minute of sustained throttling, which was too short for the rate-limit windows Anthropic actually applies (multi-minute holds are common). With 30 attempts at full-jitter exponential backoff capped at 60s, the upper bound on retry wall time is ~30 minutes of patience before we surface the "send your message again" portal note — and any earlier success short-circuits, so well-behaved limits unblock as soon as the window opens. Counter still resets on every fresh user input and every successful turn.
