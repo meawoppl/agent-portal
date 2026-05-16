@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "anyhow",
  "chrono",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -632,9 +632,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.129.1"
+version = "0.129.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c7f2807b5ab62e25b9f1c5be1c054ff824413ed4c3d991e2c106673e6124dd3"
+checksum = "82fa3783cc1e8aa7f03ea911b8294f315f1c9c835909764c175a6c7bdfe0987c"
 dependencies = [
  "log",
  "serde",
@@ -1171,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -2938,7 +2938,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "anyhow",
  "colored",
@@ -2953,7 +2953,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "anyhow",
  "hex",
@@ -3799,7 +3799,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.5.32"
+version = "2.5.34"
 dependencies = [
  "claude-codes",
  "serde",
