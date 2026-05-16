@@ -2,7 +2,10 @@
 
 ## 2.5.34
 
-- **Bump `codex-codes` 0.129.1 → 0.129.2.** Picks up [SDK #135](https://github.com/meawoppl/rust-code-agent-sdks/issues/135), which added `AppServerBuilder::config_override(key, value)` and `extra_args(IntoIterator)` so the spawned codex command line can carry `-c key=value` global overrides and arbitrary subcommand flags. No call-site changes yet — wiring `sandbox_mode=workspace-write` etc. through `claude-session-lib`'s codex_io_task is a follow-up; this PR is just the dep bump so the API is available.
+- **Bump `codex-codes` 0.129.1 → 0.129.2** and wire it through `codex_io_task`. The dep bump picks up [SDK #135](https://github.com/meawoppl/rust-code-agent-sdks/issues/135) (`AppServerBuilder::config_override` + `extra_args`). The call-site change parses each codex session's `SessionConfig::extra_args` (the existing "Extra args" launch-dialog text input — already wired through to the launcher) into two buckets:
+  - tokens of the form `-c key=value` / `--config key=value` become `builder.config_override(k, v)` (rendered as `-c k=v` **before** the `app-server` subcommand, since `-c` is a global codex flag);
+  - everything else becomes `builder.extra_args(...)` (appended **after** `--listen stdio://`).
+  - Lets a user type e.g. `-c sandbox_mode=workspace-write -c approval_policy=on-request --strict-config` in the launch dialog and have each token land in the right slot on the spawned codex command line. No structured UI for sandbox/approval pickers yet — that's a follow-up.
 
 ## 2.5.33
 

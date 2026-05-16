@@ -833,12 +833,53 @@ impl Session {
 
         let codex_path = config.claude_path.as_deref().unwrap_or(Path::new("codex"));
 
-        let mut builder = AppServerBuilder::new().command(codex_path);
-        builder = builder.working_directory(&config.working_directory);
+        // Parse the user-supplied extra_args into (a) global `-c key=value`
+        // codex config overrides and (b) plain trailing args, because the two
+        // need to land in different positions on the spawned command line:
+        //
+        //   codex  -c k=v  app-server --listen stdio://  <trailing args>
+        //          ^^^^^^^                               ^^^^^^^^^^^^^^^
+        //          global  subcommand + builder-managed  per-subcommand
+        //
+        // (codex-codes 0.129.2 added `config_override` / `extra_args` on
+        // AppServerBuilder; see SDK #135.)
+        let mut overrides: Vec<(String, String)> = Vec::new();
+        let mut trailing: Vec<String> = Vec::new();
+        let mut iter = config.extra_args.iter();
+        while let Some(tok) = iter.next() {
+            if tok == "-c" || tok == "--config" {
+                if let Some(pair) = iter.next() {
+                    if let Some((k, v)) = pair.split_once('=') {
+                        overrides.push((k.to_string(), v.to_string()));
+                        continue;
+                    } else {
+                        // `-c key` with no `=value` — pass through unchanged
+                        // so codex's own error surfaces if it's malformed.
+                        trailing.push(tok.clone());
+                        trailing.push(pair.clone());
+                        continue;
+                    }
+                }
+            }
+            trailing.push(tok.clone());
+        }
+
+        let mut builder = AppServerBuilder::new()
+            .command(codex_path)
+            .working_directory(&config.working_directory);
+        for (k, v) in &overrides {
+            builder = builder.config_override(k, v);
+        }
+        if !trailing.is_empty() {
+            builder = builder.extra_args(trailing.iter().cloned());
+        }
 
         tracing::info!(
-            "Starting Codex app-server: {} app-server --listen stdio://",
-            codex_path.display()
+            "Starting Codex app-server: {} app-server --listen stdio:// \
+             ({} config override(s), {} extra arg(s))",
+            codex_path.display(),
+            overrides.len(),
+            trailing.len(),
         );
 
         let mut client = match CodexAsyncClient::start_with(builder).await {
