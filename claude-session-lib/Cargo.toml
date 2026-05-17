@@ -16,7 +16,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 tracing = "0.1"
-tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 base64 = "0.22"
 directories = "5.0"

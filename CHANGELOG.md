@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.37
+
+- **Bump `codex-codes` 0.129.2 → 0.129.3 and absorb the SDK rewrite.** Upstream 0.129.3 (PR #138) regenerated every wire type from the schema and shipped [SDK #134](https://github.com/meawoppl/rust-code-agent-sdks/issues/134)'s structured `ParseError`. Three concrete consequences for agent-portal:
+  - **`codex_io_task` rewrite** in `claude-session-lib/src/session.rs` against the new API: `ThreadStartParams` lost its `Default` impl (15 Option fields, all `skip_serializing_if`), so we now build it via `serde_json::from_value(json!({}))` matching the SDK's own usage example; `ThreadStartResponse::thread_id()` is gone — use `resp.thread.id`; `TurnInterruptParams` now requires both `thread_id` and `turn_id`, so we track the active turn id from each `turn/started` notification and pass it on interrupt; `TurnStartParams::reasoning_effort` is now `effort` and the struct gained more Option fields, so we build it the same way; `UserInput::Text` gained a required `text_elements: Option<...>` we set to `None`.
+  - **`CodexFrameCaptureLayer` retired** (the tracing-snooping workaround from 2.5.30 — which didn't actually capture in production anyway). The `Error::Json` arm in `codex_io_task` becomes `Error::Deserialization(ParseError)` and reads `raw_line` / `raw_json` / `method` / `error_message` directly off the struct. The portal message gets a real fenced ```json block with the offending frame, complete with the JSON-RPC `method` name. Supersedes the long-pending #708 revert PR.
+  - **Cleanup:** removed `claude-session-lib/src/codex_frame_capture.rs`, its module export from `lib.rs`, the install lines in `launcher/src/main.rs` and `proxy/src/main.rs`, and the `tracing-subscriber` dep from `claude-session-lib/Cargo.toml`. Per-layer EnvFilter rewiring reverted to the original registry-level EnvFilter.
+- **Net diff** is a small set of one-line API shape changes + one architectural pull-out, exactly proportional to a major SDK refactor.
+
 ## 2.5.36
 
 - Session pill agent-type watermark (Anthropic asterisk / OpenAI knot) is now 10% smaller — 88×88 → 80×80 — with the left offset adjusted from −28px to −24px so the icon's horizontal center stays at the same x=16 in pill coords. Vertical center is unchanged.

@@ -893,9 +893,15 @@ impl Session {
             }
         };
 
-        // Start a thread (conversation session)
-        let thread_id = match client.thread_start(&ThreadStartParams::default()).await {
-            Ok(resp) => resp.thread_id().to_string(),
+        // Start a thread (conversation session). codex-codes 0.129.3 removed
+        // the `Default` impl on `ThreadStartParams` (15 Option<...> fields,
+        // all skip_serializing_if Some); the SDK's idiom for an "empty"
+        // params is round-tripping through `{}` JSON. See codex-codes
+        // 0.129.3 src/lib.rs:18-30 example.
+        let thread_params: ThreadStartParams = serde_json::from_value(serde_json::json!({}))
+            .expect("empty JSON object is a valid ThreadStartParams");
+        let thread_id = match client.thread_start(&thread_params).await {
+            Ok(resp) => resp.thread.id.clone(),
             Err(e) => {
                 let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(format!(
                     "Failed to start Codex thread: {}",
@@ -913,6 +919,12 @@ impl Session {
         })));
 
         let mut turn_active = false;
+        // Track the turn currently being driven so we can name it on
+        // `turn/interrupt` requests (codex-codes 0.129.3 made both
+        // `thread_id` and `turn_id` required on `TurnInterruptParams`).
+        // Set when a `turn/started` notification arrives; cleared when
+        // `turn/completed` arrives.
+        let mut current_turn_id: Option<String> = None;
 
         loop {
             if turn_active {
@@ -921,6 +933,32 @@ impl Session {
                     result = client.next_message() => {
                         match result {
                             Ok(Some(msg)) => {
+                                // Peek for turn lifecycle so we can name the
+                                // turn on later `turn/interrupt` requests. We
+                                // can't observe these via the typed handler
+                                // below because it consumes the message.
+                                if let codex_codes::ServerMessage::Notification(notif) = &msg {
+                                    if let Ok((method, params_opt)) =
+                                        notif.clone().into_envelope()
+                                    {
+                                        match method.as_str() {
+                                            "turn/started" => {
+                                                if let Some(turn_id) = params_opt
+                                                    .as_ref()
+                                                    .and_then(|p| p.get("turn"))
+                                                    .and_then(|t| t.get("id"))
+                                                    .and_then(|v| v.as_str())
+                                                {
+                                                    current_turn_id = Some(turn_id.to_string());
+                                                }
+                                            }
+                                            "turn/completed" => {
+                                                current_turn_id = None;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
                                 let (ok, turn_ended) =
                                     Self::handle_codex_server_message(msg, &event_tx);
                                 if turn_ended {
@@ -934,30 +972,47 @@ impl Session {
                                 let _ = event_tx.send(IoEvent::Exited { code: 0 });
                                 break;
                             }
-                            Err(codex_codes::Error::Json(json_err)) => {
-                                // Newer codex CLI versions emit frames whose typed
-                                // param struct fails our bundled codex-codes schema
-                                // (e.g. #695 — missing field `callId` in codex 0.130.0
-                                // approval requests). The frame is lost.
+                            Err(codex_codes::Error::Deserialization(parse_err)) => {
+                                // Newer codex CLI versions emit frames whose
+                                // typed param struct fails our bundled
+                                // codex-codes schema (e.g. #703 — missing
+                                // `callId` in 0.130 approval requests). The
+                                // frame is lost.
                                 //
-                                // If the lost frame was a server→client request (like
-                                // `item/{commandExecution,fileChange}/requestApproval`),
-                                // codex is now blocked on a reply we cannot send,
-                                // because we never saw the request id. Result: the
-                                // turn never completes, `turn_active` stays true, and
-                                // every subsequent user prompt gets dropped at the
-                                // "Received input while Codex turn is active" check.
-                                // (See #703.)
+                                // If the lost frame was a server→client
+                                // request (`item/{commandExecution,fileChange}/requestApproval`),
+                                // codex is now blocked on a reply we cannot
+                                // send, because we never saw the request id.
+                                // Result: the turn never completes,
+                                // `turn_active` stays true, and every
+                                // subsequent user prompt gets dropped at the
+                                // "Received input while Codex turn is active"
+                                // check.
                                 //
-                                // We can't recover the lost reply. Interrupt the turn
-                                // so codex unblocks and emits `turn/completed`
-                                // (Interrupted), which flips `turn_active` back to
-                                // false through the normal path. Surface a
-                                // `turn.failed` event so the frontend doesn't sit on a
-                                // silent hang.
+                                // We can't recover the lost reply. Interrupt
+                                // the turn so codex unblocks and emits
+                                // `turn/completed` (Interrupted), which flips
+                                // `turn_active` back to false through the
+                                // normal path. Surface a `turn.failed` event
+                                // + a portal message carrying the raw frame
+                                // for upstream bug reports.
+                                //
+                                // codex-codes 0.129.3 (SDK #134) replaced the
+                                // bare `Error::Json(serde_json::Error)` path
+                                // with a structured `Error::Deserialization(ParseError)`
+                                // that carries `raw_line`, `raw_json`, and
+                                // `method` — so we can render the offending
+                                // frame directly, no tracing-layer snooping.
+                                let codex_codes::ParseError {
+                                    raw_line,
+                                    raw_json,
+                                    error_message,
+                                    method,
+                                } = &parse_err;
                                 tracing::warn!(
-                                    "Codex frame failed typed decode: {}",
-                                    json_err
+                                    "Codex frame failed typed decode: {} (method={:?})",
+                                    error_message,
+                                    method
                                 );
                                 let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
                                     "type": "turn.failed",
@@ -965,37 +1020,24 @@ impl Session {
                                         "message": format!(
                                             "Codex emitted a frame this client could not parse ({}). \
                                              Interrupting the turn to recover — please retry.",
-                                            json_err
+                                            error_message
                                         )
                                     }
                                 })));
 
-                                // Attach a portal message with the raw JSON of
-                                // the offending frame so the user can copy it
-                                // for a bug report. The frame is captured by
-                                // CodexFrameCaptureLayer just microseconds
-                                // before this typed-decode failure on the same
-                                // thread, so the most-recent entry is the
-                                // offender. If the capture layer wasn't
-                                // installed we surface a note explaining how
-                                // to find it in journald.
-                                let raw_frame = crate::codex_frame_capture::take_most_recent();
-                                let portal_text = match raw_frame {
-                                    Some(raw) => format!(
-                                        "**Codex frame failed to decode** — `{}`\n\n\
-                                         Paste the block below if reporting upstream \
-                                         ([`meawoppl/rust-code-agent-sdks`](https://github.com/meawoppl/rust-code-agent-sdks/issues)):\n\n\
-                                         ```json\n{}\n```",
-                                        json_err, raw
-                                    ),
-                                    None => format!(
-                                        "**Codex frame failed to decode** — `{}`\n\n\
-                                         _Raw frame was not captured. \
-                                         Restart agent-portal so `CodexFrameCaptureLayer` is installed, \
-                                         or grep journald for `codex_codes::client_async` at DEBUG level._",
-                                        json_err
-                                    ),
-                                };
+                                let rendered = raw_json
+                                    .as_ref()
+                                    .and_then(|v| serde_json::to_string_pretty(v).ok())
+                                    .unwrap_or_else(|| raw_line.clone());
+                                let portal_text = format!(
+                                    "**Codex frame failed to decode** \u{2014} `{}`{}\n\n\
+                                     Paste the block below if reporting upstream \
+                                     ([`meawoppl/rust-code-agent-sdks`](https://github.com/meawoppl/rust-code-agent-sdks/issues)):\n\n\
+                                     ```json\n{}\n```",
+                                    error_message,
+                                    method.as_deref().map(|m| format!(" (`{}`)", m)).unwrap_or_default(),
+                                    rendered
+                                );
                                 let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
                                     "type": "portal",
                                     "content": [{
@@ -1003,15 +1045,15 @@ impl Session {
                                         "text": portal_text
                                     }]
                                 })));
-                                if let Err(e) = client
-                                    .turn_interrupt(&TurnInterruptParams {
-                                        thread_id: thread_id.clone(),
-                                    })
-                                    .await
-                                {
+
+                                let interrupt_params = TurnInterruptParams {
+                                    thread_id: thread_id.clone(),
+                                    turn_id: current_turn_id.clone().unwrap_or_default(),
+                                };
+                                if let Err(e) = client.turn_interrupt(&interrupt_params).await {
                                     tracing::error!(
                                         "turn_interrupt after decode failure failed: {} \
-                                         — forcing turn_active=false to unwedge",
+                                         \u{2014} forcing turn_active=false to unwedge",
                                         e
                                     );
                                     turn_active = false;
@@ -1071,16 +1113,27 @@ impl Session {
 
                         tracing::info!("Starting Codex turn with {} chars", prompt.len());
 
-                        match client
-                            .turn_start(&TurnStartParams {
-                                thread_id: thread_id.clone(),
-                                input: vec![UserInput::Text { text: prompt }],
-                                model: None,
-                                reasoning_effort: None,
-                                sandbox_policy: None,
-                            })
-                            .await
-                        {
+                        // codex-codes 0.129.3 generated TurnStartParams from
+                        // its schema: `reasoning_effort` is now `effort`, a
+                        // new required `text_elements` field landed on
+                        // `UserInput::Text`, and the struct has many more
+                        // Option fields with no Default impl. We construct
+                        // the explicit fields and `..` from an empty JSON
+                        // baseline to inherit Nones for the rest (matches
+                        // the SDK's own usage idiom — see lib.rs:18-30).
+                        let turn_params_base: TurnStartParams = serde_json::from_value(
+                            serde_json::json!({"threadId": &thread_id, "input": []}),
+                        )
+                        .expect("threadId + empty input is a valid TurnStartParams base");
+                        let turn_params = TurnStartParams {
+                            thread_id: thread_id.clone(),
+                            input: vec![UserInput::Text {
+                                text: prompt,
+                                text_elements: None,
+                            }],
+                            ..turn_params_base
+                        };
+                        match client.turn_start(&turn_params).await {
                             Ok(_) => {
                                 turn_active = true;
                             }
