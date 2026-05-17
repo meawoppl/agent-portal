@@ -163,27 +163,19 @@ fn init_tracing(session_id_tag: Option<Uuid>, verbose: bool) {
         .unwrap_or_else(|_| default_level.into());
 
     if let Some(sid) = session_id_tag {
-        // Launched by daemon: JSON format with session_id field.
-        //
-        // EnvFilter is attached to fmt-only so the CodexFrameCaptureLayer
-        // can see codex-codes DEBUG events ("[CLIENT] Received: …") even
-        // when RUST_LOG would otherwise drop them.
+        // Launched by daemon: JSON format with session_id field
         let fmt_layer = tracing_subscriber::fmt::layer()
             .json()
             .with_target(false)
             .with_span_list(false);
         tracing_subscriber::registry()
-            .with(fmt_layer.with_filter(env_filter))
-            .with(claude_session_lib::codex_frame_capture::CodexFrameCaptureLayer::new())
+            .with(env_filter)
+            .with(fmt_layer)
             .init();
         tracing::info!(session_id = %sid, "Proxy starting with session tag");
     } else {
         // Interactive: human-readable format
-        let fmt_layer = tracing_subscriber::fmt::layer();
-        tracing_subscriber::registry()
-            .with(fmt_layer.with_filter(env_filter))
-            .with(claude_session_lib::codex_frame_capture::CodexFrameCaptureLayer::new())
-            .init();
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 }
 
