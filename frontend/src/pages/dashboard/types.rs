@@ -251,6 +251,29 @@ pub fn format_permission_input(tool_name: &str, input: &serde_json::Value) -> St
                 format!("Patch {} file(s):\n  {}", paths.len(), paths.join("\n  "))
             }
         }
+        "FileChange" => {
+            // codex 0.130 doesn't inline the diff on the approval request —
+            // the patch was streamed earlier as an `item/started` for the
+            // matching item id. Show the id (so the user can find the diff
+            // in the transcript above) plus reason/grantRoot when present.
+            let item_id = input
+                .get("itemId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(unknown)");
+            let mut lines = vec![format!("File change for item `{}`", item_id)];
+            if let Some(reason) = input.get("reason").and_then(|v| v.as_str()) {
+                if !reason.is_empty() {
+                    lines.push(format!("Reason: {}", reason));
+                }
+            }
+            if let Some(root) = input.get("grantRoot").and_then(|v| v.as_str()) {
+                if !root.is_empty() {
+                    lines.push(format!("Grant root: {}", root));
+                }
+            }
+            lines.push(String::from("(diff streamed above under this item id)"));
+            lines.join("\n")
+        }
         "Permissions" => input
             .get("reason")
             .and_then(|v| v.as_str())

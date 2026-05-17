@@ -1367,8 +1367,18 @@ impl Session {
                         (ok, false)
                     }
                     "item/fileChange/requestApproval" => {
+                        // codex-codes 0.129.3 reshaped this approval params:
+                        // codex no longer inlines the patch. The wire now
+                        // carries `itemId` (reference to the matching
+                        // `item/started` for the fileChange that was streamed
+                        // earlier in this turn), `reason` (why approval is
+                        // needed), and `grantRoot` (what scope of permission
+                        // codex wants). The actual diff is upstream in the
+                        // transcript under the matching item id.
                         let input = serde_json::json!({
-                            "changes": params.get("changes").cloned().unwrap_or_default()
+                            "itemId": params.get("itemId").cloned().unwrap_or(serde_json::Value::Null),
+                            "reason": params.get("reason").cloned().unwrap_or(serde_json::Value::Null),
+                            "grantRoot": params.get("grantRoot").cloned().unwrap_or(serde_json::Value::Null),
                         });
                         let ok = event_tx
                             .send(IoEvent::CodexPermissionRequest {

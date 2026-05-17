@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.38
+
+- **Fix `FileChange` permission dialog showing `{"changes": null}`.** codex-codes 0.129.3 regenerated `FileChangeRequestApprovalParams` from the schema: the fields are now `itemId` / `reason` / `grantRoot` / `threadId` / `turnId` / `startedAtMs` — no `changes` field. Codex doesn't inline the patch on the approval request; the diff was streamed earlier as the `item/started` for the matching `itemId`. agent-portal's dispatch arm for `item/fileChange/requestApproval` was still extracting `params.get("changes")` (returning `null`) and the frontend was rendering the resulting `{"changes": null}` as a raw JSON dump in the permission card.
+  - **Backend (`claude-session-lib/src/session.rs`)**: surface the actual wire fields (`itemId`, `reason`, `grantRoot`) on the `CodexPermissionRequest` event.
+  - **Frontend (`frontend/src/pages/dashboard/types.rs`)**: new `FileChange` arm in `format_permission_input` — shows `File change for item \`<id>\`` plus reason/grant-root when present, with a `(diff streamed above under this item id)` pointer so the user knows the patch is in the transcript. Inlining the diff into the dialog would require correlating `itemId` back to the prior `item/started` payload — left as a follow-up.
+
 ## 2.5.37
 
 - **Bump `codex-codes` 0.129.2 → 0.129.3 and absorb the SDK rewrite.** Upstream 0.129.3 (PR #138) regenerated every wire type from the schema and shipped [SDK #134](https://github.com/meawoppl/rust-code-agent-sdks/issues/134)'s structured `ParseError`. Three concrete consequences for agent-portal:
