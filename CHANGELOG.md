@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.38
+
+- CLAUDE.md: codify typed-interface preference + upstream-first rule, lifted from the codex `item/fileChange/requestApproval` regression in 2.5.38 / PR #721.
+
 ## 2.5.37
 
 - **Bump `codex-codes` 0.129.2 → 0.129.3 and absorb the SDK rewrite.** Upstream 0.129.3 (PR #138) regenerated every wire type from the schema and shipped [SDK #134](https://github.com/meawoppl/rust-code-agent-sdks/issues/134)'s structured `ParseError`. Three concrete consequences for agent-portal:
