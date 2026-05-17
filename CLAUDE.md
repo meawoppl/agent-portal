@@ -575,6 +575,28 @@ let body = AddMemberRequest { email, role };
 Request::post(&url).json(&body)
 ```
 
+### Prefer typed interfaces; push schema gaps upstream
+
+**Match on typed enum variants from `claude-codes` / `codex-codes` — don't poke at JSON field names.** Both SDKs expose typed enums (`ClaudeOutput`, `ServerRequest`, `Notification`, …) with strongly-typed param structs. The typed shape is a compile-time contract: when the SDK regenerates fields, the compiler tells you what to update. JSON-poking silently misses fields and ships broken UI.
+
+```rust
+// ❌ BAD - reads a field that doesn't exist in codex 0.130+; silently null
+let changes = params.get("changes").cloned();
+emit_permission_card(changes);
+
+// ✅ GOOD - dispatch on the typed variant, read typed fields directly
+match server_request {
+    ServerRequest::FileChangeApproval(p) => {
+        emit_permission_card(&p.item_id, &p.reason, p.grant_root);
+    }
+    // …
+}
+```
+
+**When the typed model is missing or wrong, push upstream.** If you reach for `params: serde_json::Value` because the typed enum lacks a variant, has the wrong field name, or doesn't expose what you need: file an issue (or open a PR) against [`meawoppl/rust-code-agent-sdks`](https://github.com/meawoppl/rust-code-agent-sdks) instead of weaving a local workaround. The library is small, the maintainer is responsive, and a typed fix benefits every consumer.
+
+**When a local workaround is OK:** only when (a) you're shipping a hotfix on a clock the SDK turnaround can't meet, **and** (b) you've filed the upstream issue. Tag it with `// TODO(SDK #NNN)` so it's easy to find and rip out when upstream lands.
+
 ### Error Handling
 
 **Backend handlers**:
