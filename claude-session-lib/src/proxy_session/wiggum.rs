@@ -9,8 +9,9 @@ use shared::ProxyToServer;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::output_buffer::PendingOutputBuffer;
-use crate::session::Session as ClaudeSession;
+use session_lib::agent::Agent;
+use session_lib::output_buffer::PendingOutputBuffer;
+use session_lib::session::Session;
 
 use super::{format_duration, ConnectionResult, SharedWsWrite};
 
@@ -30,17 +31,17 @@ pub struct WiggumState {
     pub loop_durations: Vec<Duration>,
 }
 
-/// Handle a session event from claude-session-lib, with wiggum loop support
-pub(super) async fn handle_session_event_with_wiggum(
-    event: Option<crate::session::SessionEvent>,
+/// Handle a session event from session-lib, with wiggum loop support
+pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
+    event: Option<session_lib::SessionEvent>,
     output_tx: &mpsc::UnboundedSender<ClaudeOutput>,
     ws_write: &SharedWsWrite,
     connection_start: Instant,
     wiggum_state: &mut Option<WiggumState>,
     output_buffer: &Arc<Mutex<PendingOutputBuffer>>,
-    claude_session: &mut ClaudeSession,
+    claude_session: &mut Session<A>,
 ) -> Option<ConnectionResult> {
-    use crate::session::SessionEvent;
+    use session_lib::SessionEvent;
 
     match event {
         Some(SessionEvent::Output(ref output)) => {

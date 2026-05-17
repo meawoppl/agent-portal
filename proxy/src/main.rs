@@ -11,7 +11,12 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use claude_session_lib::{Session as ClaudeSession, SessionConfig};
+use claude_session_lib::ClaudeAgent;
+use session_lib::{Session, SessionConfig};
+
+/// Type alias — the proxy binary only ever drives Claude sessions; the
+/// launcher is where heterogeneous (Claude + Codex) dispatch lives.
+type ClaudeSession = Session<ClaudeAgent>;
 use config::{ProxyConfig, SessionAuth};
 use session::ProxySessionConfig;
 use tracing::{info, warn};

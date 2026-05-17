@@ -1,9 +1,20 @@
 [workspace]
-members = ["shared", "backend", "frontend", "proxy", "claude-session-lib", "launcher", "portal-auth", "portal-update"]
+members = [
+    "shared",
+    "backend",
+    "frontend",
+    "proxy",
+    "session-lib",
+    "claude-session-lib",
+    "codex-session-lib",
+    "launcher",
+    "portal-auth",
+    "portal-update",
+]
 resolver = "2"
 
 [workspace.package]
-version = "2.5.38"
+version = "2.5.39"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 

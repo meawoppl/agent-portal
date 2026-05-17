@@ -11,10 +11,12 @@ pub(crate) use portal_reminder::inject_portal_reminder;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::output_buffer::PendingOutputBuffer;
-use crate::session::{Session as ClaudeSession, SessionEvent};
 use anyhow::Result;
 use claude_codes::ClaudeOutput;
+use session_lib::agent::Agent;
+use session_lib::output_buffer::PendingOutputBuffer;
+use session_lib::session::Session;
+use session_lib::SessionEvent;
 use shared::{ProxyToServer, ServerToProxy, SessionEndpoint};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
@@ -152,11 +154,11 @@ pub struct GracefulShutdown {
 
 /// State that persists across WebSocket reconnections for a session.
 /// This includes the input channel, output buffer, and session config.
-pub struct SessionState<'a> {
+pub struct SessionState<'a, A: Agent> {
     /// Session configuration
     pub config: &'a ProxySessionConfig,
-    /// Claude session from claude-session-lib
-    pub claude_session: &'a mut ClaudeSession,
+    /// The agent-backed session (Claude or Codex).
+    pub claude_session: &'a mut Session<A>,
     /// Sender for input messages (cloned per connection)
     pub input_tx: mpsc::UnboundedSender<String>,
     /// Receiver for input messages (persists across connections)
@@ -175,11 +177,11 @@ pub struct SessionState<'a> {
     pub replay_failures: u32,
 }
 
-impl<'a> SessionState<'a> {
+impl<'a, A: Agent> SessionState<'a, A> {
     /// Create a new session state
     pub fn new(
         config: &'a ProxySessionConfig,
-        claude_session: &'a mut ClaudeSession,
+        claude_session: &'a mut Session<A>,
         input_tx: mpsc::UnboundedSender<String>,
         input_rx: &'a mut mpsc::UnboundedReceiver<String>,
     ) -> Result<Self> {
@@ -261,7 +263,7 @@ struct ConnectionState {
     /// Current wiggum state (if active)
     wiggum_state: Option<WiggumState>,
     /// Heartbeat tracker for dead connection detection
-    heartbeat: crate::heartbeat::HeartbeatTracker,
+    heartbeat: session_lib::heartbeat::HeartbeatTracker,
     /// Receiver for file upload events from backend
     file_upload_rx: mpsc::UnboundedReceiver<FileUploadEvent>,
     /// Working directory for file uploads
@@ -271,9 +273,9 @@ struct ConnectionState {
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
-pub async fn run_connection_loop(
+pub async fn run_connection_loop<A: Agent>(
     config: &ProxySessionConfig,
-    claude_session: &mut ClaudeSession,
+    claude_session: &mut Session<A>,
     input_tx: mpsc::UnboundedSender<String>,
     input_rx: &mut mpsc::UnboundedReceiver<String>,
 ) -> Result<LoopResult> {
@@ -341,7 +343,7 @@ pub async fn run_connection_loop(
 }
 
 /// Run a single WebSocket connection until it disconnects or Claude exits
-async fn run_single_connection(session: &mut SessionState<'_>) -> ConnectionResult {
+async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> ConnectionResult {
     // Connect to WebSocket
     let mut conn =
         match connect_to_backend(&session.config.backend_url, session.first_connection).await {
@@ -594,8 +596,8 @@ async fn register_session(
 }
 
 /// Run the main message forwarding loop
-async fn run_message_loop(
-    session: &mut SessionState<'_>,
+async fn run_message_loop<A: Agent>(
+    session: &mut SessionState<'_, A>,
     config: &ProxySessionConfig,
     conn: NativeConnection,
     max_image_mb: u32,
@@ -632,7 +634,7 @@ async fn run_message_loop(
     let ws_write = std::sync::Arc::new(tokio::sync::Mutex::new(ws_write));
 
     // Heartbeat tracker for dead connection detection
-    let heartbeat = crate::heartbeat::HeartbeatTracker::new();
+    let heartbeat = session_lib::heartbeat::HeartbeatTracker::new();
 
     // Channel to signal WebSocket disconnection
     let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
@@ -722,15 +724,15 @@ async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> 
 /// The Claude session internally uses a dedicated drain task to continuously
 /// read stdout, so there's no risk of buffer starvation in this select! loop.
 /// See: https://github.com/meawoppl/agent-portal/issues/278
-async fn run_main_loop(
-    claude_session: &mut ClaudeSession,
+async fn run_main_loop<A: Agent>(
+    claude_session: &mut Session<A>,
     input_rx: &mut mpsc::UnboundedReceiver<String>,
     state: &mut ConnectionState,
 ) -> ConnectionResult {
-    use crate::session::PermissionResponse as LibPermissionResponse;
     use crate::Permission;
+    use session_lib::io::PermissionResponse as LibPermissionResponse;
 
-    let mut heartbeat_interval = tokio::time::interval(crate::heartbeat::HEARTBEAT_INTERVAL);
+    let mut heartbeat_interval = tokio::time::interval(session_lib::heartbeat::HEARTBEAT_INTERVAL);
 
     loop {
         tokio::select! {

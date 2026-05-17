@@ -16,7 +16,8 @@
 
 use tracing::{error, info, warn};
 
-use crate::session::Session as ClaudeSession;
+use session_lib::agent::Agent;
+use session_lib::session::Session;
 
 /// Bundled fallback body (relative to this file).
 const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
@@ -58,7 +59,7 @@ fn agent_facing(body: &str) -> String {
 /// (re-priming the model after a compaction). The companion fix in the proxy
 /// output forwarder also filters Claude's user-message echo of the
 /// `<system-reminder>` text so the wrapper doesn't leak into the transcript.
-pub async fn inject_portal_reminder(claude_session: &mut ClaudeSession) {
+pub async fn inject_portal_reminder<A: Agent>(claude_session: &mut Session<A>) {
     let body = load_reminder_body();
 
     if let Err(e) = claude_session

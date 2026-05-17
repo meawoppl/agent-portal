@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
-use crate::output_buffer::PendingOutputBuffer;
+use session_lib::output_buffer::PendingOutputBuffer;
 
 use super::image_uploader::upload_image;
 use super::{format_duration, truncate, SharedWsWrite};

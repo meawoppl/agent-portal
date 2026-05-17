@@ -1,41 +1,33 @@
 //! Claude Session Library
 //!
-//! A library for managing Claude Code sessions, designed for use in
-//! persistence services that need to manage multiple sessions, handle
-//! restarts, and maintain state across service restarts.
-//!
-//! # Overview
-//!
-//! The library provides:
-//! - `Session` - A managed Claude Code session with event-based API
-//! - `SessionSnapshot` - Serializable session state for persistence
-//! - `OutputBuffer` - Buffer for replay on session restore
-//!
-//! # Usage
-//!
-//! Create a `SessionConfig`, spawn a `Session`, and loop over `SessionEvent`s.
-//! Handle `Output`, `PermissionRequest`, `Exited`, and `Error` variants as needed.
+//! Claude-specific backend for [`session_lib`]: defines [`ClaudeAgent`] (the
+//! per-agent dispatch type) and the `claude_io_task` that owns the `claude`
+//! CLI process. Also re-houses the `proxy_session` connection loop used by
+//! the `claude-portal` proxy binary — that loop is claude-specific (wiggum
+//! mode, portal-reminder injection, image upload, stream-json output
+//! forwarding) and isn't getting split until a future PR.
 
-pub mod buffer;
-pub mod error;
-pub mod heartbeat;
-pub mod output_buffer;
-pub mod probe;
+pub mod agent;
+pub mod io_task;
 pub mod proxy_session;
-pub mod session;
-pub mod snapshot;
+mod spawn;
 
-// Re-export main types at crate root
-pub use buffer::{BufferedOutput, OutputBuffer};
-pub use error::SessionError;
-pub use session::{PermissionResponse, Session, SessionEvent};
-pub use snapshot::{PendingPermission, SessionConfig, SessionSnapshot};
+pub use agent::ClaudeAgent;
 
-// Re-export proxy session types
+// Re-export the proxy session helpers used by the proxy binary.
 pub use proxy_session::{
     run_connection_loop, ConnectionResult, LoopResult, ProxySessionConfig, SessionState,
 };
 
-// Re-export claude_codes types that appear in our public API
+// Convenience re-exports so existing consumers don't all have to add
+// `session-lib` to their Cargo.toml just to grab the basics.
+pub use session_lib::buffer::{BufferedOutput, OutputBuffer};
+pub use session_lib::error::SessionError;
+pub use session_lib::io::{PermissionResponse, SessionEvent};
+pub use session_lib::output_buffer;
+pub use session_lib::session::Session;
+pub use session_lib::snapshot::{PendingPermission, SessionConfig, SessionSnapshot};
+
+// Re-export claude_codes types that appear in our public API.
 pub use claude_codes::io::PermissionSuggestion;
 pub use claude_codes::{ClaudeOutput, Permission};

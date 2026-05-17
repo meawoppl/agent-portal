@@ -5,9 +5,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use claude_session_lib::{
-    run_connection_loop, LoopResult, ProxySessionConfig, Session as ClaudeSession, SessionConfig,
-};
+use claude_session_lib::{run_connection_loop, ClaudeAgent, LoopResult, ProxySessionConfig};
+use codex_session_lib::CodexAgent;
+use session_lib::{Session, SessionConfig};
 
 /// Notification that a session task has finished.
 pub struct SessionExited {
@@ -190,6 +190,32 @@ impl ProcessManager {
     }
 }
 
+/// Heterogeneous wrapper around `Session<A>` so we can store Claude- and
+/// Codex-backed sessions side-by-side. The launcher is the one place
+/// agent-portal needs to dispatch across agent types in the same process.
+enum AnySession {
+    Claude(Session<ClaudeAgent>),
+    Codex(Session<CodexAgent>),
+}
+
+impl AnySession {
+    async fn new(config: SessionConfig) -> Result<Self, session_lib::SessionError> {
+        match config.agent_type {
+            shared::AgentType::Claude => {
+                Ok(Self::Claude(Session::<ClaudeAgent>::new(config).await?))
+            }
+            shared::AgentType::Codex => Ok(Self::Codex(Session::<CodexAgent>::new(config).await?)),
+        }
+    }
+
+    async fn stop(&mut self) -> Result<(), session_lib::SessionError> {
+        match self {
+            Self::Claude(s) => s.stop().await,
+            Self::Codex(s) => s.stop().await,
+        }
+    }
+}
+
 /// Run a single proxy session as an in-process task.
 /// Returns an exit code: Some(0) for normal exit, Some(1) for error, None for abort.
 async fn run_session_task(
@@ -197,7 +223,7 @@ async fn run_session_task(
     cancel: CancellationToken,
 ) -> Option<i32> {
     loop {
-        let claude_config = SessionConfig {
+        let session_config = SessionConfig {
             session_id: config.session_id,
             working_directory: PathBuf::from(&config.working_directory),
             session_name: config.session_name.clone(),
@@ -207,26 +233,38 @@ async fn run_session_task(
             agent_type: config.agent_type,
         };
 
-        let mut claude_session = match ClaudeSession::new(claude_config).await {
+        let mut session = match AnySession::new(session_config).await {
             Ok(s) => s,
             Err(e) => {
-                error!("Failed to create Claude session: {}", e);
+                error!("Failed to create {} session: {}", config.agent_type, e);
                 return Some(1);
             }
         };
 
         let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
+        // run_connection_loop is generic over A: Agent, so we dispatch
+        // here on the AnySession variant. Everything else
+        // (cancellation, retry-on-SessionNotFound) is agent-agnostic.
         let result = tokio::select! {
-            r = run_connection_loop(&config, &mut claude_session, input_tx, &mut input_rx) => r,
+            r = async {
+                match &mut session {
+                    AnySession::Claude(s) => {
+                        run_connection_loop(&config, s, input_tx, &mut input_rx).await
+                    }
+                    AnySession::Codex(s) => {
+                        run_connection_loop(&config, s, input_tx, &mut input_rx).await
+                    }
+                }
+            } => r,
             _ = cancel.cancelled() => {
                 info!("Session {} cancelled by stop request", config.session_id);
-                let _ = claude_session.stop().await;
+                let _ = session.stop().await;
                 return Some(0);
             }
         };
 
-        let _ = claude_session.stop().await;
+        let _ = session.stop().await;
 
         match result {
             Ok(LoopResult::NormalExit) => {

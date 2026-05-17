@@ -1,12 +1,12 @@
-//! Error types for claude-session-lib
+//! Error types for session-lib
 
 /// Errors that can occur during session management
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
-    #[error("Failed to spawn Claude process: {0}")]
+    #[error("Failed to spawn agent process: {0}")]
     SpawnFailed(#[source] std::io::Error),
 
-    #[error("Claude process communication error: {0}")]
+    #[error("Agent process communication error: {0}")]
     CommunicationError(String),
 
     #[error("Session not found locally (expired)")]
@@ -21,8 +21,12 @@ pub enum SessionError {
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 
-    #[error("Claude client error: {0}")]
-    ClaudeError(#[from] claude_codes::Error),
+    /// Agent-specific error that doesn't fit the other variants. Per-agent
+    /// crates (claude-session-lib, codex-session-lib) collapse their typed
+    /// SDK errors into this variant via `to_string()` so session-lib does not
+    /// have to depend on every agent SDK in its error surface.
+    #[error("Agent error: {0}")]
+    Agent(String),
 }
 
 #[cfg(test)]
@@ -46,14 +50,13 @@ mod tests {
         let err = SessionError::CommunicationError("connection lost".to_string());
         assert_eq!(
             format!("{}", err),
-            "Claude process communication error: connection lost"
+            "Agent process communication error: connection lost"
         );
     }
 
     #[test]
     fn test_error_debug() {
         let err = SessionError::SessionNotFound;
-        // Debug representation should include the variant name
         let debug = format!("{:?}", err);
         assert!(debug.contains("SessionNotFound"));
     }

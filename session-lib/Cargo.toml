@@ -1,13 +1,16 @@
 [package]
-name = "claude-session-lib"
+name = "session-lib"
 version.workspace = true
 edition.workspace = true
-description = "Claude Code backend for session-lib (ClaudeAgent + claude_io_task), plus the proxy_session connection loop."
+description = "Agent-agnostic session management primitives (Agent trait, Session<A>, snapshot, buffer)."
 license = "MIT"
 
 [dependencies]
-session-lib = { path = "../session-lib" }
 shared = { path = "../shared" }
+# The cross-agent IoCommand / IoEvent / SessionEvent enums carry a handful of
+# claude-codes types (ClaudeOutput, ControlResponse, PermissionSuggestion).
+# Pulled in as types-only — no native async / tokio bits — so this stays
+# agent-agnostic at the runtime level.
 claude-codes = { workspace = true, features = ["async-client"] }
 tokio = { workspace = true, features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -17,9 +20,5 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 tracing = "0.1"
 anyhow = { workspace = true }
-base64 = "0.22"
 directories = "5.0"
-hostname = "0.4.2"
 which = "8.0.0"
-ws-bridge = { workspace = true, features = ["native-client"] }
-rand = "0.8"
