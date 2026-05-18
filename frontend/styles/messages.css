@@ -192,6 +192,56 @@
     padding-bottom: 0.25rem;
 }
 
+/* ----- Codex item lifecycle ---------------------------------------------
+ * `.codex-item` is the base class on every per-item card; renderers add
+ * `.codex-item-in-progress` for `item.started` / `item.updated` events
+ * before `item.completed` lands. Live in-flight items pulse a small dot
+ * before the tool/message header and dim the text slightly so the user
+ * can tell at a glance which cards are still executing. After completion
+ * (dedup in `render_codex_group` replaces the in-flight card with the
+ * `item.completed` one), the styling disappears.
+ * ----------------------------------------------------------------------- */
+
+@keyframes codex-item-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1.0; }
+}
+
+.codex-item-in-progress .tool-use-header,
+.codex-item-in-progress .message-header {
+    position: relative;
+}
+
+.codex-item-in-progress .tool-use-header::before,
+.codex-item-in-progress .message-header::before {
+    content: "\25CF"; /* filled bullet */
+    color: #e0af68; /* tokyo-night orange — matches portal "in-flight" cues */
+    margin-right: 0.5rem;
+    animation: codex-item-pulse 1.5s ease-in-out infinite;
+    font-size: 0.7em;
+    vertical-align: middle;
+}
+
+.codex-item-in-progress .tool-name,
+.codex-item-in-progress .assistant-text,
+.codex-item-in-progress .thinking-content {
+    opacity: 0.82;
+}
+
+.codex-item-in-progress .tool-meta {
+    color: #e0af68;
+    font-style: italic;
+}
+
+/* Honour reduced-motion: skip the pulse, keep the dot static. */
+@media (prefers-reduced-motion: reduce) {
+    .codex-item-in-progress .tool-use-header::before,
+    .codex-item-in-progress .message-header::before {
+        animation: none;
+        opacity: 0.85;
+    }
+}
+
 .message-type-badge.raw {
     background: rgba(127, 132, 156, 0.2);
     color: var(--text-secondary);
