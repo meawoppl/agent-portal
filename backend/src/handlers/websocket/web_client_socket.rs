@@ -385,9 +385,18 @@ fn replay_history(
         std::collections::HashMap::new()
     };
 
+    // Surface the server-assigned `created_at` for the latest row so the
+    // frontend can use it directly as its reconnect-replay watermark
+    // without re-parsing the per-message `_created_at` injection below
+    // (closes #784). History is ordered ASC, so `last()` is the newest.
+    let last_created_at: Option<String> = history
+        .last()
+        .map(|msg| msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
+
     let messages: Vec<serde_json::Value> = history
         .into_iter()
         .map(|msg| {
+            let created_at_str = msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
             let mut val =
                 serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
                     serde_json::json!({
@@ -395,10 +404,10 @@ fn replay_history(
                         "content": msg.content,
                     })
                 });
-            // Reconstruct _sender for user messages from DB user_id
-            if msg.role == "user" {
-                if let Some(name) = user_names.get(&msg.user_id) {
-                    if let Some(obj) = val.as_object_mut() {
+            if let Some(obj) = val.as_object_mut() {
+                // Reconstruct _sender for user messages from DB user_id
+                if msg.role == "user" {
+                    if let Some(name) = user_names.get(&msg.user_id) {
                         obj.insert(
                             "_sender".to_string(),
                             serde_json::json!({
@@ -408,12 +417,23 @@ fn replay_history(
                         );
                     }
                 }
+                // Inject _created_at so renderers (and the watermark
+                // recovery path on reload) see the server-assigned row
+                // timestamp. Matches the REST list-messages path which
+                // surfaces `created_at` on every `MessageWithSender`.
+                obj.insert(
+                    "_created_at".to_string(),
+                    serde_json::Value::String(created_at_str),
+                );
             }
             val
         })
         .collect();
 
-    let _ = tx.send(ServerToClient::HistoryBatch { messages });
+    let _ = tx.send(ServerToClient::HistoryBatch {
+        messages,
+        last_created_at,
+    });
 }
 
 fn handle_web_input(
@@ -479,17 +499,10 @@ fn handle_web_input(
                 .and_then(|s| s.agent_type.parse::<shared::AgentType>().ok())
                 .unwrap_or_default();
 
-            session_manager.broadcast_to_web_clients(
-                key,
-                ServerToClient::ClaudeOutput {
-                    content: portal.to_json(),
-                    sender_user_id: None,
-                    sender_name: None,
-                    agent_type,
-                },
-            );
-            // Store in DB so it appears in history
-            if let (Some(session), Ok(mut conn)) = (session, db_pool.get()) {
+            // Insert first so the broadcast carries the server-assigned
+            // `created_at` (closes #784 — same fix as handle_claude_output).
+            let mut row_created_at: Option<String> = None;
+            if let (Some(session), Ok(mut conn)) = (session.as_ref(), db_pool.get()) {
                 use crate::schema::messages;
                 let new_message = crate::models::NewMessage {
                     session_id,
@@ -498,10 +511,34 @@ fn handle_web_input(
                     user_id: session.user_id,
                     agent_type: session.agent_type.clone(),
                 };
-                let _ = diesel::insert_into(messages::table)
+                match diesel::insert_into(messages::table)
                     .values(&new_message)
-                    .execute(&mut conn);
+                    .get_result::<crate::models::Message>(&mut conn)
+                {
+                    Ok(inserted) => {
+                        row_created_at = Some(
+                            inserted
+                                .created_at
+                                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                                .to_string(),
+                        );
+                    }
+                    Err(e) => {
+                        error!("Failed to store portal message: {}", e);
+                    }
+                }
             }
+
+            session_manager.broadcast_to_web_clients(
+                key,
+                ServerToClient::ClaudeOutput {
+                    content: portal.to_json(),
+                    sender_user_id: None,
+                    sender_name: None,
+                    agent_type,
+                    created_at: row_created_at,
+                },
+            );
         }
     }
 
@@ -1000,5 +1037,258 @@ mod tests {
             proxy_rx.try_recv().is_err(),
             "aborted chunk was forwarded anyway"
         );
+    }
+}
+
+// =============================================================================
+// DB-backed replay_history regression tests for #784
+// =============================================================================
+//
+// `replay_history` parses the client-supplied `replay_after` ISO timestamp,
+// then runs `messages.created_at.gt(after)`. The whole #784 silent-data-loss
+// chain was: frontend stored `Date.now()` as `last_message_timestamp`, sent
+// it as `replay_after`, and the backend then filtered out perfectly-good
+// rows whose `created_at` happened to land BEFORE the browser's clock-skewed
+// "now". The wire-shape fix in this PR moves the watermark source onto the
+// server so the round-trip is now `server-assigned created_at → frontend
+// stores it verbatim → frontend sends it back → server filters strictly
+// greater than it`. These tests pin the backend half of that round-trip:
+// the precise format we write into the wire (microsecond precision) must
+// parse on the way back in, and the strict-`>` semantics must hold so a
+// message whose `created_at` *equals* the watermark is treated as already
+// seen — same predicate the existing path used, just sourced honestly now.
+//
+// Auto-skip on missing `DATABASE_URL` so this stays CI-friendly (same
+// pattern as `session_access::db_tests`).
+#[cfg(test)]
+mod replay_history_db_tests {
+    use super::*;
+    use crate::models::{NewMessage, NewSessionWithId, NewUser, Session, User};
+    use diesel::r2d2::{ConnectionManager, Pool};
+
+    type PgDbPool = Pool<ConnectionManager<diesel::pg::PgConnection>>;
+
+    fn try_pool() -> Option<PgDbPool> {
+        let url = std::env::var("DATABASE_URL").ok()?;
+        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
+        Pool::builder().build(manager).ok()
+    }
+
+    fn make_user(conn: &mut diesel::pg::PgConnection) -> User {
+        use crate::schema::users;
+        let nonce = Uuid::new_v4();
+        let new_user = NewUser {
+            google_id: format!("test_replay_{}", nonce),
+            email: format!("test_replay_{}@example.invalid", nonce),
+            name: Some("Test Replay".to_string()),
+            avatar_url: None,
+        };
+        diesel::insert_into(users::table)
+            .values(&new_user)
+            .get_result::<User>(conn)
+            .expect("insert test user")
+    }
+
+    fn make_session(conn: &mut diesel::pg::PgConnection, owner_id: Uuid) -> Session {
+        use crate::schema::sessions;
+        let session_id = Uuid::new_v4();
+        let new_session = NewSessionWithId {
+            id: session_id,
+            user_id: owner_id,
+            session_name: format!("replay-{}", session_id),
+            session_key: session_id.to_string(),
+            working_directory: "/tmp".to_string(),
+            status: "active".to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "test-host".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+        };
+        diesel::insert_into(sessions::table)
+            .values(&new_session)
+            .get_result::<Session>(conn)
+            .expect("insert test session")
+    }
+
+    fn insert_message(
+        conn: &mut diesel::pg::PgConnection,
+        session_id: Uuid,
+        user_id: Uuid,
+        text: &str,
+    ) -> crate::models::Message {
+        use crate::schema::messages;
+        let new_message = NewMessage {
+            session_id,
+            role: "assistant".to_string(),
+            content: serde_json::json!({"type": "assistant", "text": text}).to_string(),
+            user_id,
+            agent_type: "claude".to_string(),
+        };
+        diesel::insert_into(messages::table)
+            .values(&new_message)
+            .get_result::<crate::models::Message>(conn)
+            .expect("insert test message")
+    }
+
+    fn cleanup(conn: &mut diesel::pg::PgConnection, session_id: Uuid, user_id: Uuid) {
+        use crate::schema::{messages, session_members, sessions, users};
+        let _ = diesel::delete(messages::table.filter(messages::session_id.eq(session_id)))
+            .execute(conn);
+        let _ = diesel::delete(
+            session_members::table.filter(session_members::session_id.eq(session_id)),
+        )
+        .execute(conn);
+        let _ = diesel::delete(sessions::table.find(session_id)).execute(conn);
+        let _ = diesel::delete(users::table.find(user_id)).execute(conn);
+    }
+
+    /// Capture every `ServerToClient` sent through a `WebClientSender`.
+    fn capture_sender() -> (
+        WebClientSender,
+        tokio::sync::mpsc::UnboundedReceiver<shared::ServerToClient>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<shared::ServerToClient>();
+        (tx, rx)
+    }
+
+    /// The fix's whole point: `replay_history` with a `replay_after`
+    /// equal to a previously-broadcast row's `created_at` must return
+    /// ONLY messages strictly after it. Insert three rows, take the
+    /// middle row's server-assigned `created_at` (formatted exactly the
+    /// way the broadcast path formats it), pass it as `replay_after`,
+    /// and assert: the watermark row itself is excluded, the earlier row
+    /// is excluded, the later row is included. This is the round-trip
+    /// the frontend now performs end-to-end (#784).
+    #[test]
+    fn replay_history_strict_gt_round_trips_server_timestamp() {
+        let Some(pool) = try_pool() else {
+            eprintln!("DATABASE_URL not set, skipping replay_history test");
+            return;
+        };
+        let user;
+        let session;
+        let m2;
+        let m3;
+        {
+            let mut conn = pool.get().expect("conn");
+            user = make_user(&mut conn);
+            session = make_session(&mut conn, user.id);
+            // m1 anchors the "earlier than watermark" row; we only need
+            // its insertion side-effect, not the model.
+            let _m1 = insert_message(&mut conn, session.id, user.id, "one");
+            m2 = insert_message(&mut conn, session.id, user.id, "two");
+            m3 = insert_message(&mut conn, session.id, user.id, "three");
+        }
+
+        // Format the watermark exactly the way the broadcast path
+        // formats `created_at` — microsecond precision, no timezone
+        // suffix. That's the string the frontend will store and replay.
+        let watermark = m2.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+
+        let (tx, mut rx) = capture_sender();
+        replay_history(&pool, &tx, session.id, Some(watermark.clone()));
+        drop(tx);
+
+        let mut got: Option<shared::ServerToClient> = None;
+        while let Ok(msg) = rx.try_recv() {
+            got = Some(msg);
+        }
+        let batch = got.expect("replay_history must send exactly one HistoryBatch");
+
+        let (messages, last_created_at) = match batch {
+            shared::ServerToClient::HistoryBatch {
+                messages,
+                last_created_at,
+            } => (messages, last_created_at),
+            other => panic!("expected HistoryBatch, got {:?}", other),
+        };
+
+        // The strict-`>` predicate must exclude m1 (older) and m2
+        // (equal-to-watermark) and include m3 (newer). The exact-equal
+        // exclusion is the contract that closes the silent-data-loss
+        // window in #784 — a frontend that already rendered m2 is told
+        // by its watermark "I have everything up to and including
+        // m2.created_at", and the backend honors that semantic.
+        assert_eq!(
+            messages.len(),
+            1,
+            "expected only m3 to be replayed; got {} messages: {:?}",
+            messages.len(),
+            messages
+        );
+
+        // The `last_created_at` summary must match m3's server-assigned
+        // timestamp so the frontend's reconnect watermark advances past
+        // the freshly-replayed message.
+        let expected_last = m3.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+        assert_eq!(last_created_at.as_deref(), Some(expected_last.as_str()));
+
+        // Each replayed message must carry the injected `_created_at`
+        // matching the row's actual server-assigned timestamp.
+        let m3_ts = m3.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+        let injected = messages[0]
+            .get("_created_at")
+            .and_then(|v| v.as_str())
+            .expect("each replayed message must carry _created_at");
+        assert_eq!(injected, m3_ts);
+
+        // Cleanup.
+        let mut conn = pool.get().expect("conn");
+        cleanup(&mut conn, session.id, user.id);
+    }
+
+    /// A `None` `replay_after` (initial connect with no prior watermark)
+    /// must return the full history and carry `last_created_at` set to
+    /// the newest row's timestamp so the frontend can start its
+    /// watermark from there. This pins the initial-connect path the
+    /// component takes when REST history returned empty / failed.
+    #[test]
+    fn replay_history_no_watermark_returns_all_and_advances_high_water() {
+        let Some(pool) = try_pool() else {
+            eprintln!("DATABASE_URL not set, skipping replay_history test");
+            return;
+        };
+        let user;
+        let session;
+        let m_last;
+        {
+            let mut conn = pool.get().expect("conn");
+            user = make_user(&mut conn);
+            session = make_session(&mut conn, user.id);
+            insert_message(&mut conn, session.id, user.id, "a");
+            insert_message(&mut conn, session.id, user.id, "b");
+            m_last = insert_message(&mut conn, session.id, user.id, "c");
+        }
+
+        let (tx, mut rx) = capture_sender();
+        replay_history(&pool, &tx, session.id, None);
+        drop(tx);
+
+        let mut batch: Option<shared::ServerToClient> = None;
+        while let Ok(msg) = rx.try_recv() {
+            batch = Some(msg);
+        }
+        let batch = batch.expect("replay_history must send HistoryBatch");
+
+        let (messages, last_created_at) = match batch {
+            shared::ServerToClient::HistoryBatch {
+                messages,
+                last_created_at,
+            } => (messages, last_created_at),
+            other => panic!("expected HistoryBatch, got {:?}", other),
+        };
+
+        assert_eq!(messages.len(), 3, "expected all rows to be replayed");
+        let expected_last = m_last
+            .created_at
+            .format("%Y-%m-%dT%H:%M:%S%.6f")
+            .to_string();
+        assert_eq!(last_created_at.as_deref(), Some(expected_last.as_str()));
+
+        let mut conn = pool.get().expect("conn");
+        cleanup(&mut conn, session.id, user.id);
     }
 }
