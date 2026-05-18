@@ -9,7 +9,6 @@
 //! that into the matching `ClientToServer::PermissionResponse` frame.
 
 use std::collections::{HashMap, HashSet};
-use web_sys::HtmlTextAreaElement;
 use yew::prelude::*;
 
 use shared::api::PermissionAnswers;
@@ -361,16 +360,6 @@ pub fn build_permission_response(
                 reason: None,
             }
         }
-    }
-}
-
-/// Convenience used by the parent's `on_refocus_input` handler: re-focus the
-/// textarea after a permission answer so the user can keep typing without a
-/// stray click. Centralized here so callers can `use` a single helper rather
-/// than recreating the cast at each site.
-pub fn refocus_textarea(input_ref: &NodeRef) {
-    if let Some(input) = input_ref.cast::<HtmlTextAreaElement>() {
-        let _ = input.focus();
     }
 }
 
