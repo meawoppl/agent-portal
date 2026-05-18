@@ -1,0 +1,22 @@
+/* Task tool — subagent dispatch with subagent_type badge + description.
+   The subagent-completion message renderer (`.task-message`) lives in
+   messages.css. */
+
+.task-tool {
+    background: rgba(158, 206, 106, 0.08);
+    border-left-color: var(--success);
+}
+
+.task-agent-type {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: rgba(158, 206, 106, 0.2);
+    color: var(--success);
+}
+
+.task-description {
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    padding: 0.25rem 0;
+}

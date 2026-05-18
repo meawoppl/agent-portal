@@ -1,0 +1,42 @@
+/* Search tools — Glob and Grep share a renderer family and similar visual
+   treatment (pattern + path + option chips). */
+
+.glob-tool {
+    background: rgba(122, 162, 247, 0.08);
+    border-left-color: var(--accent);
+}
+
+.glob-pattern {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    padding: 0.25rem 0;
+}
+
+.glob-path {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+}
+
+.grep-tool {
+    background: rgba(122, 162, 247, 0.08);
+    border-left-color: var(--accent);
+}
+
+.grep-pattern {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    padding: 0.25rem 0;
+}
+
+.grep-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.grep-option {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}

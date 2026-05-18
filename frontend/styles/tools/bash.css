@@ -1,0 +1,49 @@
+/* Bash tool — `$ command` prompt styling and inline / expanded command body.
+   Note: the `.bash-command-inline` base styling (shared with glob/grep header
+   chips) lives in tools/base.css. */
+
+.bash-tool {
+    background: rgba(127, 132, 156, 0.1);
+    border-left-color: var(--text-secondary);
+}
+
+.bash-tool .tool-icon {
+    color: var(--success);
+    font-weight: bold;
+}
+
+.bash-tool .tool-use-header {
+    min-width: 0;
+}
+
+.bash-command-inline {
+    max-width: 70%;
+    cursor: pointer;
+}
+
+.bash-command-inline.expanded {
+    white-space: pre-wrap;
+    overflow: visible;
+    text-overflow: unset;
+    max-width: none;
+    flex-basis: 100%;
+}
+
+.bash-description {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-style: italic;
+    padding: 0.25rem 0;
+    margin-top: 0.25rem;
+}
+
+.bash-command {
+    margin: 0;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}

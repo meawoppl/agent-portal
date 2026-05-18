@@ -654,3 +654,493 @@
     margin: 0.35rem 0;
     padding-left: 1.2rem;
 }
+
+/* ==========================================================================
+   Thinking Block
+   ========================================================================== */
+
+.thinking-block {
+    padding: 0.5rem 0.75rem;
+    margin: 0.5rem 0;
+    border-left: 2px solid var(--border-color);
+    opacity: 0.6;
+}
+
+.thinking-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.thinking-content {
+    font-style: italic;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* ==========================================================================
+   Result Message — compact stats bar
+   ========================================================================== */
+
+.result-message {
+    margin-bottom: 0.5rem;
+    border: none;
+    background: transparent;
+}
+
+.result-message .result-stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.4rem 0.75rem;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.result-message .result-status {
+    font-weight: bold;
+}
+
+.result-message .result-status.success {
+    color: var(--success);
+}
+
+.result-message .result-status.error {
+    color: var(--error);
+}
+
+.result-message .stat-item {
+    color: var(--text-secondary);
+    cursor: help;
+}
+
+.result-message .stat-item.cost {
+    color: var(--success);
+    font-weight: 500;
+}
+
+.result-message .stat-item.tokens {
+    color: var(--text-secondary);
+}
+
+.result-message .stat-item.turns {
+    color: var(--accent);
+}
+
+.result-message.error .stat-item.cost {
+    color: var(--error);
+}
+
+.result-message .stat-item.stop-reason {
+    color: #e0af68;
+    font-weight: 500;
+}
+
+.result-message .stat-item.fast-mode {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.result-message .stat-item.errors {
+    color: var(--error);
+    font-weight: 500;
+}
+
+.result-message .stat-item.denials {
+    color: #e0af68;
+    font-weight: 500;
+}
+
+.result-message.success {
+    border-left: 3px solid var(--success);
+}
+
+.result-message.error {
+    border-left: 3px solid var(--error);
+}
+
+/* ==========================================================================
+   User Message
+   ========================================================================== */
+
+.user-message {
+    border-left: 3px solid var(--accent);
+}
+
+.user-message.pending {
+    opacity: 0.6;
+    border-left-style: dashed;
+}
+
+.pending-indicator {
+    color: var(--accent);
+    font-size: 1.2rem;
+    line-height: 1;
+    animation: pending-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
+.user-message .user-text {
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+/* ==========================================================================
+   Error Message
+   ========================================================================== */
+
+.error-message-display {
+    border-left: 3px solid var(--error);
+}
+
+.error-message-display .error-text {
+    color: var(--error);
+}
+
+.error-type {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    padding: 0.15rem 0.4rem;
+    background: rgba(247, 118, 142, 0.15);
+    border-radius: 3px;
+}
+
+/* ==========================================================================
+   Overload / Busy Message
+   ========================================================================== */
+
+.overload-message {
+    border-left: 3px solid #e0af68;
+    background: rgba(224, 175, 104, 0.08);
+}
+
+.message-type-badge.overload {
+    background: rgba(224, 175, 104, 0.2);
+    color: #e0af68;
+}
+
+.overload-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.overload-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.overload-text {
+    flex: 1;
+}
+
+.overload-title {
+    font-weight: 600;
+    color: #e0af68;
+    margin-bottom: 0.25rem;
+}
+
+.overload-description {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.overload-details {
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.overload-details .request-id {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Rate Limit Event Message
+   ========================================================================== */
+
+.rate-limit-message {
+    border-left: 3px solid #e0af68;
+    background: rgba(224, 175, 104, 0.05);
+}
+
+.message-type-badge.rate-limit {
+    background: rgba(224, 175, 104, 0.2);
+    color: #e0af68;
+}
+
+.utilization-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+
+.utilization-bar {
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.utilization-fill {
+    height: 100%;
+    background: #e0af68;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.utilization-bar.warning .utilization-fill {
+    background: #e0af68;
+}
+
+.utilization-bar.critical .utilization-fill {
+    background: #f7768e;
+}
+
+.utilization-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    min-width: 2.5em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Compaction / Summary Message
+   ========================================================================== */
+
+.compaction-message {
+    border-left: 3px solid #7aa2f7;
+    background: rgba(122, 162, 247, 0.08);
+}
+
+.message-type-badge.compaction {
+    background: rgba(122, 162, 247, 0.2);
+    color: #7aa2f7;
+}
+
+.compaction-stat {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-left: 0.5rem;
+}
+
+.compaction-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.compaction-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.compaction-text {
+    flex: 1;
+}
+
+.compaction-description {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.compaction-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.compaction-summary .summary-label {
+    font-weight: 600;
+    color: #7aa2f7;
+    font-size: 0.85rem;
+}
+
+.compaction-summary .summary-text {
+    color: var(--text);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* ==========================================================================
+   Task / Subagent Message (subagent completion event, not the Task tool
+   renderer — the latter lives in tools/task.css).
+   ========================================================================== */
+
+.task-message {
+    border-left: 3px solid #bb9af7;
+    background: rgba(187, 154, 247, 0.08);
+}
+
+.task-message.failed {
+    border-left-color: var(--error);
+    background: rgba(247, 118, 142, 0.08);
+}
+
+.message-type-badge.task {
+    background: rgba(187, 154, 247, 0.2);
+    color: #bb9af7;
+}
+
+.message-type-badge.task.failed {
+    background: rgba(247, 118, 142, 0.2);
+    color: var(--error);
+}
+
+.task-type-badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: rgba(187, 154, 247, 0.15);
+    color: #bb9af7;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.task-description-inline {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.task-stat {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-left: 0.5rem;
+}
+
+.task-summary {
+    color: var(--text);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* ==========================================================================
+   Raw Message — fallback renderer for unrecognized message types.
+   ========================================================================== */
+
+.raw-message .raw-json {
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 0;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.raw-message .raw-message-hint {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin: 0.5rem 0 0;
+}
+
+.raw-message .raw-message-hint a {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+/* Tooltip styling for native title attribute */
+.claude-message [title] {
+    position: relative;
+}
+
+/* ==========================================================================
+   Content Block Renderers — server tool use, MCP, code execution, etc.
+   ========================================================================== */
+
+.server-tool-use {
+    background: rgba(122, 162, 247, 0.08);
+    border-left-color: #7aa2f7;
+}
+
+.web-search-result {
+    background: rgba(122, 162, 247, 0.05);
+    border-left-color: #7aa2f7;
+}
+
+.mcp-tool-use {
+    background: rgba(187, 154, 247, 0.08);
+    border-left-color: #bb9af7;
+}
+
+.mcp-tool-result {
+    background: rgba(187, 154, 247, 0.05);
+}
+
+.code-execution-result {
+    background: rgba(158, 206, 106, 0.05);
+    border-left-color: var(--success);
+}
+
+.container-upload {
+    background: rgba(224, 175, 104, 0.08);
+    border-left-color: #e0af68;
+}
+
+.unknown-block {
+    background: rgba(127, 132, 156, 0.08);
+    border-left-color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Citations
+   ========================================================================== */
+
+.citation-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
+}
+
+.citation-link {
+    font-size: 0.7rem;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 0.05rem 0.2rem;
+    border-radius: 2px;
+    background: rgba(122, 162, 247, 0.1);
+    transition: background 0.15s;
+}
+
+.citation-link:hover {
+    background: rgba(122, 162, 247, 0.25);
+    text-decoration: underline;
+}

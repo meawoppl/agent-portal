@@ -1,0 +1,12 @@
+/* WebSearch tool — search query preview. */
+
+.websearch-tool {
+    background: rgba(122, 162, 247, 0.08);
+    border-left-color: var(--accent);
+}
+
+.websearch-query {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    padding: 0.25rem 0;
+}

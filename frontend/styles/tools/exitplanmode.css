@@ -1,0 +1,51 @@
+/* ExitPlanMode tool — plan summary + allowed-permissions list. */
+
+.exitplanmode-tool {
+    background: rgba(158, 206, 106, 0.08);
+    border-left-color: var(--success);
+}
+
+.permissions-section {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+}
+
+.permissions-header {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+
+.permissions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.permission-item {
+    display: flex;
+    align-items: baseline;
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+}
+
+.permission-bullet {
+    color: var(--success);
+    margin-right: 0.5rem;
+}
+
+.permission-tool {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.permission-separator {
+    color: var(--text-muted);
+}
+
+.permission-prompt {
+    color: var(--text-primary);
+}

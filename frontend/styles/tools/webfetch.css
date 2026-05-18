@@ -1,0 +1,26 @@
+/* WebFetch tool — clickable URL + italic prompt summary. */
+
+.webfetch-tool {
+    background: rgba(122, 162, 247, 0.08);
+    border-left-color: var(--accent);
+}
+
+.webfetch-url {
+    padding: 0.25rem 0;
+}
+
+.webfetch-url a {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+}
+
+.webfetch-url a:hover {
+    text-decoration: underline;
+}
+
+.webfetch-prompt {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-style: italic;
+}
