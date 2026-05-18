@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.58
+
+- **`render_task_tool` uses typed `ToolInput::Task` instead of JSON-poking (closes #749).** Follow-up to 2.5.48 (#735) / 2.5.49 (#736): the Task subagent renderer in `frontend/src/components/tool_renderers/task.rs` was the third claude-side renderer still reading `input.get("description") / input.get("subagent_type") / input.get("run_in_background")` against `serde_json::Value`. It now deserializes its `serde_json::Value` input into `claude_codes::tool_inputs::ToolInput`, matches `ToolInput::Task(TaskInput)`, and reads the typed `description: String`, `subagent_type: SubagentType` (via `.as_str()`, which handles `Unknown(_)` for forward-compat), and `run_in_background: Option<bool>` fields directly. Same icon, same CSS classes, same `"?"` / `"agent"` / `false` fallbacks when deserialization fails — just no more silent-null bait the next time the SDK renames a field. `shared` now re-exports `TaskInput` alongside the existing `TodoItem` / `TodoStatus` / `TodoWriteInput` / `ToolInput` re-exports.
+
 ## 2.5.57
 
 - **`render_webfetch_tool` / `render_websearch_tool` use typed `ToolInput::WebFetch` / `ToolInput::WebSearch` instead of JSON-poking (closes #748).** Both renderers in `frontend/src/components/tool_renderers/search.rs` now deserialize their `serde_json::Value` input into `claude_codes::tool_inputs::ToolInput`, match the relevant variant, and read typed `WebFetchInput { url: String, prompt: String }` / `WebSearchInput { query: String, … }` fields directly — no more `input.get("url")` / `input.get("prompt")` / `input.get("query")`. Same icons, same CSS classes, same `?` fallback when deserialization fails. `shared` now re-exports `WebFetchInput` and `WebSearchInput` so the frontend can use them without a direct `claude-codes` dep. The Glob/Grep portions of the same file remain JSON-poked under #747.

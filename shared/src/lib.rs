@@ -48,8 +48,8 @@ pub use claude_codes::ClaudeOutput;
 // Re-export typed tool-input types so frontend renderers can match on enum
 // variants instead of poking at JSON field names.
 pub use claude_codes::tool_inputs::{
-    BashInput, EditInput, GlobInput, GrepInput, ReadInput, TodoItem, TodoStatus, TodoWriteInput,
-    ToolInput, WebFetchInput, WebSearchInput, WriteInput,
+    BashInput, EditInput, GlobInput, GrepInput, ReadInput, TaskInput, TodoItem, TodoStatus,
+    TodoWriteInput, ToolInput, WebFetchInput, WebSearchInput, WriteInput,
 };
 pub use claude_codes::{AllowedPrompt, ExitPlanModeInput};
 
