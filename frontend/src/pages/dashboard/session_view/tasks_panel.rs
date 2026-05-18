@@ -518,6 +518,95 @@ fn format_secs(secs: u64) -> String {
     }
 }
 
+/// Derive zero or more typed [`TaskEvent`]s from a parsed `ClaudeOutput`.
+///
+/// Used by both the live `WsEvent::Output` path (with `live == true`, in
+/// which case `created_at_iso` is ignored and timestamps fall back to
+/// `js_sys::Date::now()`) and the REST `LoadHistory` replay path (with
+/// `live == false`, parsing the row's server-assigned `created_at` so
+/// elapsed-time labels reflect when the event actually happened rather
+/// than when the browser hydrated it).
+pub(super) fn derive_task_events(
+    claude_msg: &shared::ClaudeOutput,
+    created_at_iso: &str,
+    live: bool,
+) -> Vec<TaskEvent> {
+    let resolve_ts = || -> f64 {
+        if live {
+            js_sys::Date::now()
+        } else {
+            let ts = js_sys::Date::parse(created_at_iso);
+            if ts.is_finite() {
+                ts
+            } else {
+                0.0
+            }
+        }
+    };
+
+    let mut events = Vec::new();
+    match claude_msg {
+        shared::ClaudeOutput::System(sys) => {
+            if let Some(task) = sys.as_task_started() {
+                let task_type = match task.task_type {
+                    shared::CCTaskType::LocalAgent => "local_agent",
+                    shared::CCTaskType::LocalBash => "local_bash",
+                }
+                .to_string();
+                events.push(TaskEvent::Started {
+                    task_id: task.task_id.clone(),
+                    tool_use_id: task.tool_use_id.clone(),
+                    task_type,
+                    description: task.description.clone(),
+                    started_at: resolve_ts(),
+                });
+            } else if let Some(progress) = sys.as_task_progress() {
+                events.push(TaskEvent::Progress {
+                    task_id: progress.task_id.clone(),
+                    description: progress.description.clone(),
+                    last_tool_name: progress.last_tool_name.clone(),
+                    duration_ms: progress.usage.duration_ms,
+                    tool_uses: progress.usage.tool_uses,
+                    total_tokens: progress.usage.total_tokens,
+                    fallback_started_at: resolve_ts(),
+                });
+            } else if let Some(notif) = sys.as_task_notification() {
+                let status = match notif.status {
+                    shared::CCTaskStatus::Completed => TaskStatus::Completed,
+                    shared::CCTaskStatus::Failed => TaskStatus::Failed,
+                };
+                let usage = notif
+                    .usage
+                    .as_ref()
+                    .map(|u| (u.duration_ms, u.tool_uses, u.total_tokens));
+                events.push(TaskEvent::Notification {
+                    task_id: notif.task_id.clone(),
+                    summary: notif.summary.clone(),
+                    status,
+                    completed_at: resolve_ts(),
+                    usage,
+                });
+            }
+        }
+        shared::ClaudeOutput::User(user_msg) => {
+            // Fallback: --print mode doesn't emit `task_notification`, so
+            // any `tool_result` whose `tool_use_id` matches a tracked task
+            // implicitly closes it. The panel owns the reverse index and
+            // no-ops the event when there's no match.
+            for block in &user_msg.message.content {
+                if let shared::ContentBlock::ToolResult(tr) = block {
+                    events.push(TaskEvent::ToolResult {
+                        tool_use_id: tr.tool_use_id.clone(),
+                        completed_at: resolve_ts(),
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+    events
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

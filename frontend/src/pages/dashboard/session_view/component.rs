@@ -1,6 +1,13 @@
 //! SessionView component - Main terminal view for a single session
+//!
+//! Residual orchestrator after the EPIC #809 decomposition: WebSocket
+//! connect/reconnect, message-buffer rendering, awaiting-input gate, and
+//! glue between the three sub-components (`PermissionHandler`, `TasksPanel`,
+//! `InputBar`). Pure helpers (msg-type classification, metadata injection,
+//! pending-send reconciliation, autoscroll-transition math) live in
+//! `helpers.rs`; task-event derivation lives alongside its consumer in
+//! `tasks_panel.rs`.
 
-use crate::components::message_renderer::types::{ClaudeMessage, ContentBlock};
 use crate::components::message_renderer::MessageRenderer;
 use crate::components::{group_messages, MessageGroupRenderer};
 use crate::utils;
@@ -15,89 +22,15 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::Element;
 use yew::prelude::*;
 
-/// Wire `type` tag for a typed [`ClaudeMessage`] variant. Centralizes the
-/// variant-to-tag mapping so call sites that still trade in `msg_type: String`
-/// can derive it from the typed enum instead of poking `.get("type")`.
-fn message_type_tag(m: &ClaudeMessage) -> &'static str {
-    match m {
-        ClaudeMessage::System(_) => "system",
-        ClaudeMessage::Assistant(_) => "assistant",
-        ClaudeMessage::Result(_) => "result",
-        ClaudeMessage::User(_) => "user",
-        ClaudeMessage::Error(_) => "error",
-        ClaudeMessage::Portal(_) => "portal",
-        ClaudeMessage::RateLimitEvent(_) => "rate_limit_event",
-        ClaudeMessage::Unknown => "unknown",
-    }
-}
-
-/// Extract the user-text payload from a typed user message for pending-send
-/// echo matching. Returns the top-level `content` string when present (used by
-/// the frontend's optimistic-send synthesizer and the codex shim's synthesized
-/// echo) and otherwise concatenates `ContentBlock::Text` blocks from
-/// `message.content` (the shape Claude's `--replay-user-messages` emits).
-fn extract_user_text(m: &ClaudeMessage) -> Option<String> {
-    let ClaudeMessage::User(u) = m else {
-        return None;
-    };
-    if let Some(text) = u.content.as_ref() {
-        return Some(text.clone());
-    }
-    let blocks = u.message.as_ref().and_then(|m| m.content.as_ref())?;
-    let texts: Vec<&str> = blocks
-        .iter()
-        .filter_map(|b| match b {
-            ContentBlock::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect();
-    if texts.is_empty() {
-        None
-    } else {
-        Some(texts.join(""))
-    }
-}
-
-/// Compute the next `should_autoscroll` value when the scroll listener
-/// reports a new at-bottom reading. Returns `None` when no transition has
-/// occurred (caller should skip the re-render) and `Some(new_value)` when
-/// the flag flips. The transition gate lives here, outside the component,
-/// so it can be unit-tested without a Yew `Context`.
-fn autoscroll_transition(current: bool, new_at_bottom: bool) -> Option<bool> {
-    if current == new_at_bottom {
-        None
-    } else {
-        Some(new_at_bottom)
-    }
-}
-
-/// Check if a Claude session is awaiting user input by scanning messages
-/// backwards. Skips noise types (portal, error, system, rate_limit_event)
-/// and returns true if "result" is found before "user" or "assistant".
-fn is_claude_awaiting(messages: impl DoubleEndedIterator<Item = impl AsRef<str>>) -> bool {
-    messages
-        .rev()
-        .find_map(|msg| {
-            serde_json::from_str::<ClaudeMessage>(msg.as_ref())
-                .ok()
-                .filter(|m| {
-                    matches!(
-                        m,
-                        ClaudeMessage::Result(_)
-                            | ClaudeMessage::Assistant(_)
-                            | ClaudeMessage::User(_)
-                    )
-                })
-                .map(|m| message_type_tag(&m).to_string())
-        })
-        .is_some_and(|t| t == "result")
-}
-
+use super::helpers::{
+    autoscroll_transition, classify_output_msg_type, inject_message_metadata, is_claude_awaiting,
+    reconcile_pending_sends,
+};
 use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
 };
-use super::tasks_panel::{TaskEvent, TaskStatus, TasksInbound, TasksPanel};
+use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
 use super::websocket::{connect_websocket, send_message, WsEvent};
 use crate::pages::dashboard::types::{calculate_backoff, MessageData, MessagesResponse};
@@ -322,74 +255,8 @@ impl Component for SessionView {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
-            SessionViewMsg::LoadHistory(mut messages, last_timestamp) => {
-                if messages.len() > MAX_MESSAGES_PER_SESSION {
-                    let excess = messages.len() - MAX_MESSAGES_PER_SESSION;
-                    messages.drain(0..excess);
-                }
-                let session_id = ctx.props().session.id;
-                self.dispatch_tasks(TasksInbound::ClearForReplay);
-                for msg in &messages {
-                    let mut msg_type = "unknown".to_string();
-                    if let Ok(claude_msg) =
-                        serde_json::from_str::<shared::ClaudeOutput>(&msg.content)
-                    {
-                        msg_type = claude_msg.message_type();
-                        if let shared::ClaudeOutput::System(sys) = &claude_msg {
-                            if let Some(status) = sys.as_status() {
-                                if status.status.as_ref().map(|s| s.as_str()) == Some("compacting")
-                                {
-                                    msg_type = "compaction_start".to_string();
-                                }
-                            } else if shared::is_compaction_boundary(sys) {
-                                msg_type = "compaction_end".to_string();
-                            } else if sys.as_task_started().is_some() {
-                                msg_type = "task_start".to_string();
-                            } else if sys.as_task_notification().is_some() {
-                                msg_type = "task_end".to_string();
-                            }
-                        }
-                        for ev in derive_task_events(&claude_msg, &msg.created_at, false) {
-                            self.dispatch_tasks(TasksInbound::Replay(ev));
-                        }
-                    } else if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(&msg.content) {
-                        msg_type = message_type_tag(&parsed).to_string();
-                    }
-                    let ts_ms = js_sys::Date::parse(&msg.created_at);
-                    if ts_ms.is_finite() {
-                        ctx.props().on_activity.emit((session_id, msg_type, ts_ms));
-                    }
-                }
-                self.messages = messages
-                    .into_iter()
-                    .map(|m| {
-                        if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&m.content) {
-                            if let Some(obj) = val.as_object_mut() {
-                                // Inject _sender into user messages from API metadata
-                                if m.role == "user"
-                                    && (m.user_id.is_some() || m.sender_name.is_some())
-                                {
-                                    obj.insert(
-                                        "_sender".to_string(),
-                                        serde_json::json!({
-                                            "user_id": m.user_id.unwrap_or_default(),
-                                            "name": m.sender_name.unwrap_or_default(),
-                                        }),
-                                    );
-                                }
-                                // Inject _created_at for tooltip display
-                                obj.insert(
-                                    "_created_at".to_string(),
-                                    serde_json::Value::String(m.created_at.clone()),
-                                );
-                            }
-                            return val.to_string();
-                        }
-                        m.content
-                    })
-                    .collect();
-                self.last_message_timestamp = last_timestamp;
-                ctx.link().send_message(SessionViewMsg::CheckAwaiting);
+            SessionViewMsg::LoadHistory(messages, last_timestamp) => {
+                self.handle_load_history(ctx, messages, last_timestamp);
                 true
             }
             SessionViewMsg::ReceivedOutput(output) => self.handle_received_output(ctx, output),
@@ -476,7 +343,7 @@ impl Component for SessionView {
                 false
             }
             SessionViewMsg::SendText(input, mode) => {
-                self.send_text_input(ctx, input, mode);
+                self.send_text_input(input, mode);
                 true
             }
             SessionViewMsg::SendFrame(frame) => {
@@ -625,12 +492,57 @@ impl SessionView {
         }
     }
 
+    /// Hydrate the message buffer + task panel from a REST history batch.
+    /// Each message is classified once via [`classify_output_msg_type`],
+    /// task events are forwarded to the panel via [`derive_task_events`],
+    /// and metadata (`_sender` for user messages, `_created_at` for every
+    /// row) is folded into the JSON via [`inject_message_metadata`].
+    fn handle_load_history(
+        &mut self,
+        ctx: &Context<Self>,
+        mut messages: Vec<MessageData>,
+        last_timestamp: Option<String>,
+    ) {
+        if messages.len() > MAX_MESSAGES_PER_SESSION {
+            let excess = messages.len() - MAX_MESSAGES_PER_SESSION;
+            messages.drain(0..excess);
+        }
+        let session_id = ctx.props().session.id;
+        self.dispatch_tasks(TasksInbound::ClearForReplay);
+        for msg in &messages {
+            let msg_type = classify_output_msg_type(&msg.content);
+            if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&msg.content) {
+                for ev in derive_task_events(&claude_msg, &msg.created_at, false) {
+                    self.dispatch_tasks(TasksInbound::Replay(ev));
+                }
+            }
+            let ts_ms = js_sys::Date::parse(&msg.created_at);
+            if ts_ms.is_finite() {
+                ctx.props().on_activity.emit((session_id, msg_type, ts_ms));
+            }
+        }
+        self.messages = messages
+            .into_iter()
+            .map(|m| {
+                inject_message_metadata(
+                    &m.content,
+                    &m.created_at,
+                    m.role == "user",
+                    m.user_id.as_deref(),
+                    m.sender_name.as_deref(),
+                )
+            })
+            .collect();
+        self.last_message_timestamp = last_timestamp;
+        ctx.link().send_message(SessionViewMsg::CheckAwaiting);
+    }
+
     /// Translate a plain-text submission from `InputBar` into the optimistic
     /// local echo + the `ClientToServer::ClaudeInput` WS frame. The bar has
     /// already trimmed and cleared its textarea, and already emitted
     /// `MessageSent` (which we forward to `on_message_sent` separately);
     /// we just package the wire frame and local echo.
-    fn send_text_input(&mut self, _ctx: &Context<Self>, input: String, send_mode: SendMode) {
+    fn send_text_input(&mut self, input: String, send_mode: SendMode) {
         if input.is_empty() {
             return;
         }
@@ -660,22 +572,8 @@ impl SessionView {
     }
 
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: String) -> bool {
-        let mut msg_type = "unknown".to_string();
+        let msg_type = classify_output_msg_type(&output);
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output) {
-            msg_type = claude_msg.message_type();
-            if let shared::ClaudeOutput::System(sys) = &claude_msg {
-                if let Some(status) = sys.as_status() {
-                    if status.status.as_ref().map(|s| s.as_str()) == Some("compacting") {
-                        msg_type = "compaction_start".to_string();
-                    }
-                } else if shared::is_compaction_boundary(sys) {
-                    msg_type = "compaction_end".to_string();
-                } else if sys.as_task_started().is_some() {
-                    msg_type = "task_start".to_string();
-                } else if sys.as_task_notification().is_some() {
-                    msg_type = "task_end".to_string();
-                }
-            }
             if let shared::ClaudeOutput::Result(res) = &claude_msg {
                 let cost = res.total_cost_usd;
                 if cost != self.total_cost {
@@ -698,9 +596,6 @@ impl SessionView {
             for ev in derive_task_events(&claude_msg, "", true) {
                 self.dispatch_tasks(TasksInbound::Live(ev));
             }
-        } else if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(&output) {
-            // Fallback for portal messages and unknown types not in ClaudeOutput
-            msg_type = message_type_tag(&parsed).to_string();
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
         ctx.props().on_activity.emit((
@@ -708,66 +603,23 @@ impl SessionView {
             msg_type.clone(),
             js_sys::Date::now(),
         ));
-        // Inject _created_at for tooltip display
-        let output = if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&output) {
-            if let Some(obj) = val.as_object_mut() {
-                let now_iso = js_sys::Date::new_0()
-                    .to_iso_string()
-                    .as_string()
-                    .unwrap_or_default();
-                obj.insert(
-                    "_created_at".to_string(),
-                    serde_json::Value::String(now_iso),
-                );
-            }
-            val.to_string()
-        } else {
-            output
-        };
-        // Drain pending sends when the server confirms our input.
-        // - "user" echo: match by content so a lost message doesn't consume
-        //   an unrelated pending entry.
-        // - "assistant"/"result": Claude is responding. Slash commands like
-        //   /cost, /status, /clear don't produce a user echo, so we use the
-        //   assistant/result response as the signal that the input was
-        //   received and clear all pending entries.
-        if !self.pending_sends.is_empty() {
-            match msg_type.as_str() {
-                "user" => {
-                    let echo_text = serde_json::from_str::<ClaudeMessage>(&output)
-                        .ok()
-                        .as_ref()
-                        .and_then(extract_user_text);
-                    if let Some(ref echo) = echo_text {
-                        if let Some(pos) = self.pending_sends.iter().position(|pending| {
-                            serde_json::from_str::<ClaudeMessage>(pending)
-                                .ok()
-                                .as_ref()
-                                .and_then(extract_user_text)
-                                .as_ref()
-                                == Some(echo)
-                        }) {
-                            self.pending_sends.remove(pos);
-                        }
-                    }
-                }
-                "assistant" | "result" => {
-                    // Claude is responding — any pending input was received.
-                    // Slash commands don't produce a user echo so this is
-                    // the only signal we get.
-                    self.pending_sends.clear();
-                }
-                _ => {}
-            }
-        }
+        // Inject _created_at for tooltip display. Live path has no server
+        // timestamp on the wire — use browser `now()` for the tooltip only;
+        // the reconnect-replay watermark is set separately from the
+        // server-assigned `created_at` in `WsEvent::Output` (closes #784).
+        let now_iso = js_sys::Date::new_0()
+            .to_iso_string()
+            .as_string()
+            .unwrap_or_default();
+        let output = inject_message_metadata(&output, &now_iso, false, None, None);
+
+        reconcile_pending_sends(&mut self.pending_sends, &msg_type, &output);
+
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {
             let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;
             self.messages.drain(0..excess);
         }
-        // The reconnect-replay watermark (`last_message_timestamp`) is set
-        // by the `WsEvent::Output` handler from the server-assigned
-        // `created_at` — never `Date.now()` (closes #784).
         true
     }
 
@@ -871,119 +723,5 @@ impl SessionView {
         if let Some(ref dispatcher) = self.tasks_dispatcher {
             dispatcher.emit(msg);
         }
-    }
-}
-
-/// Derive zero or more typed [`TaskEvent`]s from a parsed `ClaudeOutput`.
-///
-/// Used by both the live `WsEvent::Output` path (with `live == true`, in
-/// which case `created_at_iso` is ignored and timestamps fall back to
-/// `js_sys::Date::now()`) and the REST `LoadHistory` replay path (with
-/// `live == false`, parsing the row's server-assigned `created_at` so
-/// elapsed-time labels reflect when the event actually happened rather
-/// than when the browser hydrated it).
-fn derive_task_events(
-    claude_msg: &shared::ClaudeOutput,
-    created_at_iso: &str,
-    live: bool,
-) -> Vec<TaskEvent> {
-    let resolve_ts = || -> f64 {
-        if live {
-            js_sys::Date::now()
-        } else {
-            let ts = js_sys::Date::parse(created_at_iso);
-            if ts.is_finite() {
-                ts
-            } else {
-                0.0
-            }
-        }
-    };
-
-    let mut events = Vec::new();
-    match claude_msg {
-        shared::ClaudeOutput::System(sys) => {
-            if let Some(task) = sys.as_task_started() {
-                let task_type = match task.task_type {
-                    shared::CCTaskType::LocalAgent => "local_agent",
-                    shared::CCTaskType::LocalBash => "local_bash",
-                }
-                .to_string();
-                events.push(TaskEvent::Started {
-                    task_id: task.task_id.clone(),
-                    tool_use_id: task.tool_use_id.clone(),
-                    task_type,
-                    description: task.description.clone(),
-                    started_at: resolve_ts(),
-                });
-            } else if let Some(progress) = sys.as_task_progress() {
-                events.push(TaskEvent::Progress {
-                    task_id: progress.task_id.clone(),
-                    description: progress.description.clone(),
-                    last_tool_name: progress.last_tool_name.clone(),
-                    duration_ms: progress.usage.duration_ms,
-                    tool_uses: progress.usage.tool_uses,
-                    total_tokens: progress.usage.total_tokens,
-                    fallback_started_at: resolve_ts(),
-                });
-            } else if let Some(notif) = sys.as_task_notification() {
-                let status = match notif.status {
-                    shared::CCTaskStatus::Completed => TaskStatus::Completed,
-                    shared::CCTaskStatus::Failed => TaskStatus::Failed,
-                };
-                let usage = notif
-                    .usage
-                    .as_ref()
-                    .map(|u| (u.duration_ms, u.tool_uses, u.total_tokens));
-                events.push(TaskEvent::Notification {
-                    task_id: notif.task_id.clone(),
-                    summary: notif.summary.clone(),
-                    status,
-                    completed_at: resolve_ts(),
-                    usage,
-                });
-            }
-        }
-        shared::ClaudeOutput::User(user_msg) => {
-            // Fallback: --print mode doesn't emit `task_notification`, so
-            // any `tool_result` whose `tool_use_id` matches a tracked task
-            // implicitly closes it. The panel owns the reverse index and
-            // no-ops the event when there's no match.
-            for block in &user_msg.message.content {
-                if let shared::ContentBlock::ToolResult(tr) = block {
-                    events.push(TaskEvent::ToolResult {
-                        tool_use_id: tr.tool_use_id.clone(),
-                        completed_at: resolve_ts(),
-                    });
-                }
-            }
-        }
-        _ => {}
-    }
-    events
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn autoscroll_transition_returns_none_when_unchanged() {
-        assert_eq!(autoscroll_transition(true, true), None);
-        assert_eq!(autoscroll_transition(false, false), None);
-    }
-
-    #[test]
-    fn autoscroll_transition_disables_when_user_scrolls_up() {
-        // User was tailing, scrolled away from bottom -> tailing turns off
-        // and the jump-to-live pill should render.
-        assert_eq!(autoscroll_transition(true, false), Some(false));
-    }
-
-    #[test]
-    fn autoscroll_transition_re_enables_when_user_scrolls_back_to_bottom() {
-        // User had scrolled up, now scrolled back to bottom -> tailing
-        // resumes and the jump-to-live pill should disappear.
-        assert_eq!(autoscroll_transition(false, true), Some(true));
     }
 }
