@@ -99,6 +99,7 @@ pub struct Message {
     pub content: String,
     pub created_at: NaiveDateTime,
     pub user_id: Uuid,
+    pub agent_type: String,
 }
 
 #[derive(Debug, Insertable)]
@@ -108,6 +109,7 @@ pub struct NewMessage {
     pub role: String,
     pub content: String,
     pub user_id: Uuid,
+    pub agent_type: String,
 }
 
 // ============================================================================

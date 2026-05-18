@@ -24,6 +24,8 @@ diesel::table! {
         content -> Text,
         created_at -> Timestamp,
         user_id -> Uuid,
+        #[max_length = 16]
+        agent_type -> Varchar,
     }
 }
 

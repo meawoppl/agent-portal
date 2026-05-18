@@ -5,7 +5,7 @@ use super::{ProxySender, SessionId, SessionManager};
 use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
-use shared::{ProxyToServer, ServerToProxy, SessionEndpoint};
+use shared::{AgentType, ProxyToServer, ServerToProxy, SessionEndpoint};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -21,6 +21,10 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     let mut session_key: Option<SessionId> = None;
     let mut db_session_id: Option<Uuid> = None;
     let mut connection_gen: Option<u64> = None;
+    // Captured from the proxy's `Register` so subsequent output messages can be
+    // tagged with the agent's wire format at insert time. Defaults to Claude
+    // for any pre-Register output (none expected in practice).
+    let mut session_agent_type: AgentType = AgentType::Claude;
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -42,6 +46,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     &mut session_key,
                     &mut db_session_id,
                     &mut connection_gen,
+                    &mut session_agent_type,
                 );
             }
             Err(e) => {
@@ -96,6 +101,7 @@ fn handle_proxy_message(
     session_key: &mut Option<SessionId>,
     db_session_id: &mut Option<Uuid>,
     connection_gen: &mut Option<u64>,
+    session_agent_type: &mut AgentType,
 ) {
     match proxy_msg {
         ProxyToServer::Register(shared::RegisterFields {
@@ -116,6 +122,7 @@ fn handle_proxy_message(
         }) => {
             let key = claude_session_id.to_string();
             *session_key = Some(key.clone());
+            *session_agent_type = agent_type;
 
             let gen = session_manager.register_session(key.clone(), tx.clone());
             *connection_gen = Some(gen);
@@ -168,6 +175,7 @@ fn handle_proxy_message(
                 content,
                 None,
                 &app_state.image_store,
+                *session_agent_type,
             );
         }
         ProxyToServer::SequencedOutput { seq, content } => {
@@ -180,6 +188,7 @@ fn handle_proxy_message(
                 content,
                 Some(seq),
                 &app_state.image_store,
+                *session_agent_type,
             );
         }
         ProxyToServer::Heartbeat => {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.40
+
+- **Add `agent_type` column to the `messages` table** (`VARCHAR(16) NOT NULL DEFAULT 'claude'`) so readers know which agent's wire format each message's `content` JSON came from instead of guessing by JSON-poking the `type` field. Migration backfills from the parent session's `agent_type` for every existing row; defensively defaults to `claude` for any orphans. All three insert sites are now populated: `handle_claude_output` in `backend/src/handlers/websocket/message_handlers.rs` takes the agent type as a new parameter threaded from the proxy's `Register` message (captured into `session_agent_type` in `proxy_socket.rs`); the slash-command portal insert in `web_client_socket.rs` and the `create_message` HTTP handler both read it from the parent `Session` row. The new field is exposed to the frontend automatically via `MessageWithSender`'s `#[serde(flatten)] message: Message` and a matching `#[serde(default)] pub agent_type: String` on `MessageData` in `frontend/src/pages/dashboard/types.rs`. Frontend dispatcher gating is deferred — issue #723 will refactor codex dispatch separately, at which point consumers can branch on `agent_type` instead of probing `content.get("type")`.
+
 ## 2.5.39
 
 - **Decommingle `claude-session-lib` into three crates.** `claude-session-lib` previously housed both `claude_io_task` and `codex_io_task` along with codex-specific helpers and an `IoEvent::CodexPermissionRequest` variant — the crate name lied. Split:
