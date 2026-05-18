@@ -49,7 +49,7 @@ pub use claude_codes::ClaudeOutput;
 // variants instead of poking at JSON field names.
 pub use claude_codes::tool_inputs::{
     BashInput, EditInput, GlobInput, GrepInput, ReadInput, TodoItem, TodoStatus, TodoWriteInput,
-    ToolInput, WriteInput,
+    ToolInput, WebFetchInput, WebSearchInput, WriteInput,
 };
 pub use claude_codes::{AllowedPrompt, ExitPlanModeInput};
 
