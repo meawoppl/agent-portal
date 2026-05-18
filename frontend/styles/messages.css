@@ -64,6 +64,16 @@
     padding: 0.5rem 1rem;
 }
 
+.claude-message .grouped-message-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.grouped-message-part {
+    min-width: 0;
+}
+
 /* Footer row for unobtrusive metadata (e.g. time-ago) */
 .claude-message .message-footer {
     display: flex;

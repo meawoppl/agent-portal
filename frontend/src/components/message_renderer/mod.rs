@@ -34,6 +34,12 @@ pub enum MessageGroup {
     Single(String),
     /// Multiple consecutive assistant messages grouped together
     AssistantGroup(Vec<String>),
+    /// One or more consecutive user/agent messages with the same display identity.
+    IdentityGroup {
+        label: String,
+        badge_class: String,
+        messages: Vec<String>,
+    },
 }
 
 impl MessageGroup {
@@ -52,10 +58,15 @@ impl MessageGroup {
                 Some(j) => j,
                 None => return yew::virtual_dom::Key::from(format!("g{}", index)),
             },
+            MessageGroup::IdentityGroup { messages, .. } => match messages.first() {
+                Some(j) => j,
+                None => return yew::virtual_dom::Key::from(format!("i{}", index)),
+            },
         };
         let prefix = match self {
             MessageGroup::Single(_) => "s",
             MessageGroup::AssistantGroup(_) => "g",
+            MessageGroup::IdentityGroup { .. } => "i",
         };
         match extract_raw_iso(first) {
             Some(iso) => yew::virtual_dom::Key::from(format!("{}-{}", prefix, iso)),
@@ -93,15 +104,112 @@ fn should_group_with_assistant(json: &str) -> bool {
     }
 }
 
-/// Group consecutive assistant messages (and their tool results) together
-pub fn group_messages(messages: &[String]) -> Vec<MessageGroup> {
+#[derive(Clone, PartialEq)]
+struct MessageIdentity {
+    label: String,
+    badge_class: String,
+}
+
+fn message_identity(
+    json: &str,
+    agent_type: shared::AgentType,
+    current_user_id: Option<&str>,
+) -> Option<MessageIdentity> {
+    match serde_json::from_str::<ClaudeMessage>(json) {
+        Ok(ClaudeMessage::User(msg)) if msg.content.is_some() => {
+            let label = match &msg.sender {
+                Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
+                    sender.name.clone()
+                }
+                _ => "You".to_string(),
+            };
+            Some(MessageIdentity {
+                label,
+                badge_class: "user".to_string(),
+            })
+        }
+        Ok(ClaudeMessage::Assistant(_)) => Some(MessageIdentity {
+            label: if agent_type == shared::AgentType::Codex {
+                "Codex".to_string()
+            } else {
+                "Assistant".to_string()
+            },
+            badge_class: "assistant".to_string(),
+        }),
+        Ok(ClaudeMessage::Portal(_)) => Some(MessageIdentity {
+            label: "Portal".to_string(),
+            badge_class: "portal".to_string(),
+        }),
+        _ if agent_type == shared::AgentType::Codex
+            && super::codex_renderer::is_codex_agent_message(json) =>
+        {
+            Some(MessageIdentity {
+                label: "Codex".to_string(),
+                badge_class: "assistant".to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn push_identity_group(
+    groups: &mut Vec<MessageGroup>,
+    identity: &mut Option<MessageIdentity>,
+    messages: &mut Vec<String>,
+) {
+    if messages.is_empty() {
+        return;
+    }
+    if let Some(id) = identity.take() {
+        groups.push(MessageGroup::IdentityGroup {
+            label: id.label,
+            badge_class: id.badge_class,
+            messages: std::mem::take(messages),
+        });
+    }
+}
+
+/// Group consecutive user/agent messages by display identity, and group Claude
+/// assistant tool-result runs for the legacy Claude renderer.
+pub fn group_messages(
+    messages: &[String],
+    agent_type: shared::AgentType,
+    current_user_id: Option<&str>,
+) -> Vec<MessageGroup> {
     let mut groups = Vec::new();
     let mut current_assistant_group: Vec<String> = Vec::new();
+    let mut current_identity: Option<MessageIdentity> = None;
+    let mut current_identity_group: Vec<String> = Vec::new();
 
     for json in messages {
-        if should_group_with_assistant(json) {
+        if agent_type != shared::AgentType::Codex && should_group_with_assistant(json) {
+            push_identity_group(
+                &mut groups,
+                &mut current_identity,
+                &mut current_identity_group,
+            );
             current_assistant_group.push(json.clone());
+        } else if let Some(identity) = message_identity(json, agent_type, current_user_id) {
+            if !current_assistant_group.is_empty() {
+                groups.push(MessageGroup::AssistantGroup(std::mem::take(
+                    &mut current_assistant_group,
+                )));
+            }
+            if current_identity.as_ref() != Some(&identity) {
+                push_identity_group(
+                    &mut groups,
+                    &mut current_identity,
+                    &mut current_identity_group,
+                );
+                current_identity = Some(identity);
+            }
+            current_identity_group.push(json.clone());
         } else {
+            push_identity_group(
+                &mut groups,
+                &mut current_identity,
+                &mut current_identity_group,
+            );
             if !current_assistant_group.is_empty() {
                 groups.push(MessageGroup::AssistantGroup(std::mem::take(
                     &mut current_assistant_group,
@@ -111,6 +219,11 @@ pub fn group_messages(messages: &[String]) -> Vec<MessageGroup> {
         }
     }
 
+    push_identity_group(
+        &mut groups,
+        &mut current_identity,
+        &mut current_identity_group,
+    );
     if !current_assistant_group.is_empty() {
         groups.push(MessageGroup::AssistantGroup(current_assistant_group));
     }
@@ -195,12 +308,59 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         MessageGroup::Single(json) => {
             html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} /> }
         }
+        MessageGroup::IdentityGroup {
+            label,
+            badge_class,
+            messages,
+        } => {
+            let ts = messages
+                .first()
+                .and_then(|json| extract_local_timestamp(json));
+            let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
+            html! {
+                <div class={classes!("claude-message", if badge_class == "user" { "user-message" } else { "assistant-message" })}>
+                    <div class="message-header" title={ts.unwrap_or_default()}>
+                        <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
+                        if messages.len() > 1 {
+                            <span class="message-count" title={format!("{} consecutive messages", messages.len())}>
+                                { format!("× {}", messages.len()) }
+                            </span>
+                        }
+                    </div>
+                    <div class="message-body grouped-message-body">
+                        { for messages.iter().enumerate().map(|(i, json)| {
+                            let key = extract_raw_iso(json)
+                                .map(|iso| format!("m-{}", iso))
+                                .unwrap_or_else(|| format!("m{}", i));
+                            html! { <div {key} class="grouped-message-part">{ render_identity_group_part(json, props.agent_type) }</div> }
+                        })}
+                    </div>
+                    if let Some(iso) = last_iso {
+                        <div class="message-footer">
+                            <crate::components::time_ago::TimeAgo iso={iso} />
+                        </div>
+                    }
+                </div>
+            }
+        }
         MessageGroup::AssistantGroup(messages) => {
             let ts = messages
                 .first()
                 .and_then(|json| extract_local_timestamp(json));
             renderers::render_assistant_group(messages, ts.as_deref())
         }
+    }
+}
+
+fn render_identity_group_part(json: &str, agent_type: shared::AgentType) -> Html {
+    match serde_json::from_str::<ClaudeMessage>(json) {
+        Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg),
+        Ok(ClaudeMessage::Assistant(msg)) => renderers::render_assistant_message_content(&msg),
+        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg),
+        _ if agent_type == shared::AgentType::Codex => {
+            super::codex_renderer::render_codex_message_content(json)
+        }
+        _ => html! {},
     }
 }
 

@@ -292,6 +292,34 @@ fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
     }
 }
 
+pub fn is_codex_agent_message(json: &str) -> bool {
+    matches!(
+        serde_json::from_str::<CodexEvent>(json),
+        Ok(CodexEvent::ItemCompleted {
+            item: Some(CodexItem::AgentMessage { .. }),
+        }) | Ok(CodexEvent::ItemStarted {
+            item: Some(CodexItem::AgentMessage { .. }),
+        }) | Ok(CodexEvent::ItemUpdated {
+            item: Some(CodexItem::AgentMessage { .. }),
+        })
+    )
+}
+
+pub fn render_codex_message_content(json: &str) -> Html {
+    match serde_json::from_str::<CodexEvent>(json) {
+        Ok(CodexEvent::ItemCompleted {
+            item: Some(CodexItem::AgentMessage { text, .. }),
+        })
+        | Ok(CodexEvent::ItemStarted {
+            item: Some(CodexItem::AgentMessage { text, .. }),
+        })
+        | Ok(CodexEvent::ItemUpdated {
+            item: Some(CodexItem::AgentMessage { text, .. }),
+        }) => render_agent_message_content(text.as_deref()),
+        _ => html! {},
+    }
+}
+
 fn render_agent_message(text: Option<&str>) -> Html {
     let text = text.unwrap_or("");
     if text.is_empty() {
@@ -302,10 +330,17 @@ fn render_agent_message(text: Option<&str>) -> Html {
             <div class="message-header">
                 <span class="message-type-badge assistant">{ "Codex" }</span>
             </div>
-            <div class="message-body">
-                <div class="assistant-text">{ render_markdown(text) }</div>
-            </div>
+            <div class="message-body">{ render_agent_message_content(Some(text)) }</div>
         </div>
+    }
+}
+
+fn render_agent_message_content(text: Option<&str>) -> Html {
+    let text = text.unwrap_or("");
+    if text.is_empty() {
+        html! {}
+    } else {
+        html! { <div class="assistant-text">{ render_markdown(text) }</div> }
     }
 }
 

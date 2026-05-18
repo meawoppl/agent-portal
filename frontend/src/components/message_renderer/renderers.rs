@@ -258,9 +258,7 @@ pub fn render_user_message(
                     }
                     <CopyButton text={text.clone()} title="Copy message" />
                 </div>
-                <div class="message-body">
-                    <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>
-                </div>
+                <div class="message-body">{ render_user_message_content(msg) }</div>
             </div>
         }
     } else if let Some(message) = &msg.message {
@@ -282,9 +280,7 @@ pub fn render_user_message(
         if has_tool_results {
             html! {
                 <div class="claude-message user-message tool-result-message">
-                    <div class="message-body">
-                        { render_content_blocks(&blocks) }
-                    </div>
+                    <div class="message-body">{ render_user_message_content(msg) }</div>
                 </div>
             }
         } else if !text_content.is_empty() {
@@ -294,9 +290,7 @@ pub fn render_user_message(
                         <span class="message-type-badge user">{ &label }</span>
                         <CopyButton text={text_content.clone()} title="Copy message" />
                     </div>
-                    <div class="message-body">
-                        <div class="user-text">{ render_markdown(&preserve_user_newlines(&text_content)) }</div>
-                    </div>
+                    <div class="message-body">{ render_user_message_content(msg) }</div>
                 </div>
             }
         } else {
@@ -304,6 +298,45 @@ pub fn render_user_message(
         }
     } else {
         html! {}
+    }
+}
+
+pub fn render_user_message_content(msg: &UserMessage) -> Html {
+    if let Some(text) = &msg.content {
+        return html! {
+            <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>
+        };
+    }
+
+    let blocks = msg
+        .message
+        .as_ref()
+        .and_then(|m| m.content.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    let has_tool_results = blocks
+        .iter()
+        .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
+
+    if has_tool_results {
+        render_content_blocks(&blocks)
+    } else {
+        let text_content = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if text_content.is_empty() {
+            html! {}
+        } else {
+            html! {
+                <div class="user-text">{ render_markdown(&preserve_user_newlines(&text_content)) }</div>
+            }
+        }
     }
 }
 
@@ -352,11 +385,13 @@ pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Ht
                     <CopyButton text={copy_text} title="Copy portal text" />
                 }
             </div>
-            <div class="message-body">
-                { for msg.content.iter().map(render_portal_content) }
-            </div>
+            <div class="message-body">{ render_portal_message_content(msg) }</div>
         </div>
     }
+}
+
+pub fn render_portal_message_content(msg: &PortalMessage) -> Html {
+    html! { <>{ for msg.content.iter().map(render_portal_content) }</> }
 }
 
 fn render_portal_content(content: &shared::PortalContent) -> Html {
@@ -881,9 +916,7 @@ pub fn render_assistant_message(
                     }
                 }
             </div>
-            <div class="message-body">
-                { render_content_blocks(&blocks) }
-            </div>
+            <div class="message-body">{ render_assistant_message_content(msg) }</div>
             if let Some(iso) = raw_iso {
                 <div class="message-footer">
                     <TimeAgo iso={iso.to_string()} />
@@ -891,6 +924,16 @@ pub fn render_assistant_message(
             }
         </div>
     }
+}
+
+pub fn render_assistant_message_content(msg: &AssistantMessage) -> Html {
+    let blocks = msg
+        .message
+        .as_ref()
+        .and_then(|m| m.content.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    render_content_blocks(&blocks)
 }
 
 pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
