@@ -6,9 +6,9 @@ use crate::components::{group_messages, MessageGroupRenderer, VoiceInput};
 use crate::utils;
 use gloo::timers::callback::{Interval, Timeout};
 use gloo_net::http::Request;
-use shared::api::{ErrorMessage, PermissionAnswers};
+use shared::api::ErrorMessage;
 use shared::{ClientToServer, SendMode, SessionInfo};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -141,12 +141,12 @@ impl TaskEntry {
 }
 
 use super::history::CommandHistory;
-use super::types::{PendingPermission, QuestionAnswers, WsSender, MAX_MESSAGES_PER_SESSION};
-use super::websocket::{connect_websocket, send_message, WsEvent};
-use crate::pages::dashboard::permission_dialog::PermissionDialog;
-use crate::pages::dashboard::types::{
-    calculate_backoff, parse_ask_user_question, MessageData, MessagesResponse,
+use super::permission_handler::{
+    build_permission_response, refocus_textarea, PermissionHandler, PermissionResponseKind,
 };
+use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
+use super::websocket::{connect_websocket, send_message, WsEvent};
+use crate::pages::dashboard::types::{calculate_backoff, MessageData, MessagesResponse};
 
 /// Props for the SessionView component
 #[derive(Properties, PartialEq)]
@@ -180,15 +180,7 @@ pub enum SessionViewMsg {
     AttemptReconnect,
     CheckAwaiting,
     ClearCostFlash,
-    PermissionRequest(PendingPermission),
-    ApprovePermission,
-    ApprovePermissionAndRemember,
-    DenyPermission,
-    PermissionSelectUp,
-    PermissionSelectDown,
     BranchChanged(Option<String>, Option<String>, Option<String>),
-    PermissionConfirm,
-    PermissionSelectAndConfirm(usize),
     HistoryUp,
     HistoryDown,
     VoiceRecordingChanged(bool),
@@ -196,9 +188,16 @@ pub enum SessionViewMsg {
     VoiceInterimTranscription(String),
     VoiceError(String),
     ToggleVoice,
-    SetQuestionAnswer(usize, String),
-    ToggleQuestionOption(usize, usize),
-    SubmitAllAnswers(QuestionAnswers),
+    /// PermissionHandler is mounted and handed us its inbound-request
+    /// dispatcher. We store it so live `WsEvent::Permission` frames can be
+    /// forwarded without the parent owning any permission state.
+    PermissionDispatcherRegistered(Callback<PendingPermission>),
+    /// PermissionHandler reports a transition in its pending state. We
+    /// track the flag for the `is_awaiting` computation.
+    PermissionPendingChanged(bool),
+    /// PermissionHandler emitted a typed answer for the user. We translate
+    /// it into the wire frame here so the WS plumbing stays in this file.
+    PermissionAnswered(String, PermissionResponseKind),
     /// Handle WebSocket event from connection
     WsEvent(WsEvent),
     /// Toggle send mode dropdown visibility
@@ -249,15 +248,25 @@ pub struct SessionView {
     ws_sender: Option<WsSender>,
     messages_ref: NodeRef,
     input_ref: NodeRef,
-    permission_ref: NodeRef,
     should_autoscroll: bool,
     #[allow(dead_code)]
     scroll_listener: Option<Closure<dyn Fn()>>,
     was_focused: bool,
     total_cost: f64,
     cost_flash: bool,
-    pending_permission: Option<PendingPermission>,
-    permission_selected: usize,
+    /// Dispatcher into the mounted `PermissionHandler`. Stored once at child
+    /// `create` time via `PermissionDispatcherRegistered`; live permission
+    /// frames off the wire are forwarded through it so this component holds
+    /// zero permission UI state itself.
+    permission_dispatcher: Option<Callback<PendingPermission>>,
+    /// Mirror of the handler's pending state, kept in sync via
+    /// `PermissionPendingChanged`. Feeds the `is_awaiting` computation.
+    has_pending_permission: bool,
+    /// Snapshot of the last permission request forwarded to the handler.
+    /// Kept so the wire-frame translation in `PermissionAnswered` can read
+    /// the original `input` / `permission_suggestions` without the child
+    /// having to echo them back across the callback.
+    last_permission_request: Option<PendingPermission>,
     reconnect_attempt: u32,
     #[allow(dead_code)]
     reconnect_timer: Option<Timeout>,
@@ -266,8 +275,6 @@ pub struct SessionView {
     interim_transcription: Option<String>,
     last_message_timestamp: Option<String>,
     voice_button_ref: NodeRef,
-    multi_select_options: HashMap<usize, HashSet<usize>>,
-    question_answers: QuestionAnswers,
     send_mode_dropdown_open: bool,
     file_input_ref: NodeRef,
     upload_progress: Option<f32>,
@@ -334,14 +341,14 @@ impl Component for SessionView {
             ws_sender: None,
             messages_ref: NodeRef::default(),
             input_ref: NodeRef::default(),
-            permission_ref: NodeRef::default(),
             should_autoscroll: true,
             scroll_listener: None,
             was_focused: ctx.props().focused,
             total_cost: 0.0,
             cost_flash: false,
-            pending_permission: None,
-            permission_selected: 0,
+            permission_dispatcher: None,
+            has_pending_permission: false,
+            last_permission_request: None,
             reconnect_attempt: 0,
             reconnect_timer: None,
             command_history: CommandHistory::for_session(ctx.props().session.id),
@@ -349,8 +356,6 @@ impl Component for SessionView {
             interim_transcription: None,
             last_message_timestamp: None,
             voice_button_ref: NodeRef::default(),
-            multi_select_options: HashMap::new(),
-            question_answers: HashMap::new(),
             send_mode_dropdown_open: false,
             file_input_ref: NodeRef::default(),
             upload_progress: None,
@@ -404,12 +409,6 @@ impl Component for SessionView {
                 if el.value().is_empty() {
                     self.set_input_text(&self.input_text.clone());
                 }
-            }
-        }
-
-        if self.pending_permission.is_some() && ctx.props().focused {
-            if let Some(el) = self.permission_ref.cast::<web_sys::HtmlElement>() {
-                let _ = el.focus();
             }
         }
 
@@ -620,31 +619,31 @@ impl Component for SessionView {
                 self.cost_flash = false;
                 true
             }
-            SessionViewMsg::PermissionRequest(perm) => {
-                self.pending_permission = Some(perm);
-                self.permission_selected = 0;
-                self.question_answers.clear();
-                self.multi_select_options.clear();
-                let session_id = ctx.props().session.id;
-                ctx.props().on_awaiting_change.emit((session_id, true));
-                if let Some(el) = self.permission_ref.cast::<web_sys::HtmlElement>() {
-                    let _ = el.focus();
-                }
-                true
-            }
-            SessionViewMsg::PermissionSelectUp => self.handle_permission_select(-1),
-            SessionViewMsg::PermissionSelectDown => self.handle_permission_select(1),
-            SessionViewMsg::PermissionConfirm => self.handle_permission_confirm(ctx),
-            SessionViewMsg::PermissionSelectAndConfirm(index) => {
-                self.permission_selected = index;
-                ctx.link().send_message(SessionViewMsg::PermissionConfirm);
+            SessionViewMsg::PermissionDispatcherRegistered(dispatcher) => {
+                self.permission_dispatcher = Some(dispatcher);
                 false
             }
-            SessionViewMsg::ApprovePermission => self.handle_approve_permission(ctx, false),
-            SessionViewMsg::ApprovePermissionAndRemember => {
-                self.handle_approve_permission(ctx, true)
+            SessionViewMsg::PermissionPendingChanged(pending) => {
+                self.has_pending_permission = pending;
+                if pending {
+                    let session_id = ctx.props().session.id;
+                    ctx.props().on_awaiting_change.emit((session_id, true));
+                } else {
+                    ctx.link().send_message(SessionViewMsg::CheckAwaiting);
+                }
+                false
             }
-            SessionViewMsg::DenyPermission => self.handle_deny_permission(ctx),
+            SessionViewMsg::PermissionAnswered(request_id, kind) => {
+                let Some(perm) = self.last_permission_request.take() else {
+                    return false;
+                };
+                if let Some(ref sender) = self.ws_sender {
+                    let frame = build_permission_response(request_id, kind, &perm);
+                    send_message(sender, ClientToServer::PermissionResponse(frame));
+                }
+                refocus_textarea(&self.input_ref);
+                false
+            }
             SessionViewMsg::WebSocketConnected(sender) => {
                 self.ws_connected = true;
                 self.ws_sender = Some(sender);
@@ -674,7 +673,7 @@ impl Component for SessionView {
                 } else {
                     is_claude_awaiting(self.messages.iter())
                 };
-                let is_awaiting = is_result_awaiting || self.pending_permission.is_some();
+                let is_awaiting = is_result_awaiting || self.has_pending_permission;
                 let session_id = ctx.props().session.id;
                 ctx.props()
                     .on_awaiting_change
@@ -738,21 +737,6 @@ impl Component for SessionView {
                 }
                 false
             }
-            SessionViewMsg::SetQuestionAnswer(question_idx, answer) => {
-                self.question_answers.insert(question_idx, answer);
-                self.multi_select_options.remove(&question_idx);
-                true
-            }
-            SessionViewMsg::ToggleQuestionOption(question_idx, option_idx) => {
-                let options = self.multi_select_options.entry(question_idx).or_default();
-                if options.contains(&option_idx) {
-                    options.remove(&option_idx);
-                } else {
-                    options.insert(option_idx);
-                }
-                true
-            }
-            SessionViewMsg::SubmitAllAnswers(answers) => self.handle_submit_answers(ctx, answers),
             SessionViewMsg::ToggleSendModeDropdown => {
                 self.send_mode_dropdown_open = !self.send_mode_dropdown_open;
                 true
@@ -1154,7 +1138,7 @@ impl Component for SessionView {
                     { self.render_tasks_sidebar(ctx) }
                 </div>
 
-                { self.render_permission_dialog(ctx) }
+                { self.render_permission_handler(ctx) }
                 { self.render_upload_bar() }
 
                 <form
@@ -1263,8 +1247,10 @@ impl SessionView {
                 true
             }
             WsEvent::Permission(perm) => {
-                ctx.link()
-                    .send_message(SessionViewMsg::PermissionRequest(perm));
+                self.last_permission_request = Some(perm.clone());
+                if let Some(ref dispatcher) = self.permission_dispatcher {
+                    dispatcher.emit(perm);
+                }
                 false
             }
             WsEvent::BranchChanged(branch, pr_url, repo_url) => {
@@ -1531,106 +1517,6 @@ impl SessionView {
         true
     }
 
-    fn handle_permission_select(&mut self, delta: i32) -> bool {
-        if let Some(ref perm) = self.pending_permission {
-            let max = if perm.tool_name == "AskUserQuestion" {
-                if let Some(parsed) = parse_ask_user_question(&perm.input) {
-                    parsed
-                        .questions
-                        .first()
-                        .map(|q| q.options.len().saturating_sub(1))
-                        .unwrap_or(0)
-                } else {
-                    0
-                }
-            } else if !perm.permission_suggestions.is_empty() {
-                2
-            } else {
-                1
-            };
-
-            if delta < 0 {
-                if self.permission_selected > 0 {
-                    self.permission_selected -= 1;
-                } else {
-                    self.permission_selected = max;
-                }
-            } else if self.permission_selected < max {
-                self.permission_selected += 1;
-            } else {
-                self.permission_selected = 0;
-            }
-        }
-        true
-    }
-
-    fn handle_permission_confirm(&mut self, ctx: &Context<Self>) -> bool {
-        if let Some(ref perm) = self.pending_permission {
-            if perm.tool_name == "AskUserQuestion" {
-                if !self.question_answers.is_empty() {
-                    ctx.link().send_message(SessionViewMsg::SubmitAllAnswers(
-                        self.question_answers.clone(),
-                    ));
-                }
-            } else {
-                let has_suggestions = !perm.permission_suggestions.is_empty();
-                let msg = match (self.permission_selected, has_suggestions) {
-                    (0, _) => SessionViewMsg::ApprovePermission,
-                    (1, true) => SessionViewMsg::ApprovePermissionAndRemember,
-                    (1, false) => SessionViewMsg::DenyPermission,
-                    (2, true) => SessionViewMsg::DenyPermission,
-                    _ => SessionViewMsg::ApprovePermission,
-                };
-                ctx.link().send_message(msg);
-            }
-        }
-        false
-    }
-
-    fn handle_approve_permission(&mut self, ctx: &Context<Self>, remember: bool) -> bool {
-        if let Some(perm) = self.pending_permission.take() {
-            if let Some(ref sender) = self.ws_sender {
-                let msg = ClientToServer::PermissionResponse(shared::PermissionResponseFields {
-                    request_id: perm.request_id,
-                    allow: true,
-                    input: Some(perm.input),
-                    permissions: if remember {
-                        perm.permission_suggestions
-                    } else {
-                        vec![]
-                    },
-                    reason: None,
-                });
-                send_message(sender, msg);
-            }
-            ctx.link().send_message(SessionViewMsg::CheckAwaiting);
-            if let Some(input) = self.input_ref.cast::<HtmlTextAreaElement>() {
-                let _ = input.focus();
-            }
-        }
-        true
-    }
-
-    fn handle_deny_permission(&mut self, ctx: &Context<Self>) -> bool {
-        if let Some(perm) = self.pending_permission.take() {
-            if let Some(ref sender) = self.ws_sender {
-                let msg = ClientToServer::PermissionResponse(shared::PermissionResponseFields {
-                    request_id: perm.request_id,
-                    allow: false,
-                    input: None,
-                    permissions: vec![],
-                    reason: Some("User denied".to_string()),
-                });
-                send_message(sender, msg);
-            }
-            ctx.link().send_message(SessionViewMsg::CheckAwaiting);
-            if let Some(input) = self.input_ref.cast::<HtmlTextAreaElement>() {
-                let _ = input.focus();
-            }
-        }
-        true
-    }
-
     fn handle_ws_error(&mut self, ctx: &Context<Self>, err: String) -> bool {
         crate::audio::play_sound(crate::audio::SoundEvent::Error);
         self.ws_connected = false;
@@ -1671,74 +1557,22 @@ impl SessionView {
         connect_websocket(session_id, replay_after, true, on_event);
     }
 
-    fn handle_submit_answers(&mut self, ctx: &Context<Self>, answers: QuestionAnswers) -> bool {
-        if let Some(perm) = self.pending_permission.take() {
-            if let Some(ref sender) = self.ws_sender {
-                let answers_json = if let Some(parsed) = parse_ask_user_question(&perm.input) {
-                    let mut pa = PermissionAnswers::empty();
-                    for (idx, answer) in answers.iter() {
-                        if let Some(q) = parsed.questions.get(*idx) {
-                            pa.answers.insert(
-                                q.question.clone(),
-                                serde_json::Value::String(answer.clone()),
-                            );
-                        }
-                    }
-                    serde_json::to_value(&pa).unwrap_or_default()
-                } else {
-                    serde_json::to_value(PermissionAnswers::empty()).unwrap_or_default()
-                };
-
-                let msg = ClientToServer::PermissionResponse(shared::PermissionResponseFields {
-                    request_id: perm.request_id,
-                    allow: true,
-                    input: Some(answers_json),
-                    permissions: vec![],
-                    reason: None,
-                });
-                send_message(sender, msg);
-            }
-            self.multi_select_options.clear();
-            self.question_answers.clear();
-            ctx.link().send_message(SessionViewMsg::CheckAwaiting);
-            if let Some(input) = self.input_ref.cast::<HtmlTextAreaElement>() {
-                let _ = input.focus();
-            }
-        }
-        true
-    }
-
-    fn render_permission_dialog(&self, ctx: &Context<Self>) -> Html {
-        if let Some(ref perm) = self.pending_permission {
-            let link = ctx.link();
-            let on_select_up = link.callback(|_| SessionViewMsg::PermissionSelectUp);
-            let on_select_down = link.callback(|_| SessionViewMsg::PermissionSelectDown);
-            let on_confirm = link.callback(|_| SessionViewMsg::PermissionConfirm);
-            let on_select_and_confirm = link.callback(SessionViewMsg::PermissionSelectAndConfirm);
-            let on_submit_answers = link.callback(SessionViewMsg::SubmitAllAnswers);
-            let on_set_answer =
-                link.callback(|(q_idx, answer)| SessionViewMsg::SetQuestionAnswer(q_idx, answer));
-            let on_toggle_option = link
-                .callback(|(q_idx, opt_idx)| SessionViewMsg::ToggleQuestionOption(q_idx, opt_idx));
-
-            html! {
-                <PermissionDialog
-                    permission={perm.clone()}
-                    selected={self.permission_selected}
-                    multi_select_options={self.multi_select_options.clone()}
-                    question_answers={self.question_answers.clone()}
-                    dialog_ref={self.permission_ref.clone()}
-                    {on_select_up}
-                    {on_select_down}
-                    {on_confirm}
-                    {on_select_and_confirm}
-                    {on_submit_answers}
-                    {on_set_answer}
-                    {on_toggle_option}
-                />
-            }
-        } else {
-            html! {}
+    fn render_permission_handler(&self, ctx: &Context<Self>) -> Html {
+        let link = ctx.link();
+        let on_register = link.callback(SessionViewMsg::PermissionDispatcherRegistered);
+        let on_pending_changed = link.callback(SessionViewMsg::PermissionPendingChanged);
+        let on_response =
+            link.callback(|(rid, kind)| SessionViewMsg::PermissionAnswered(rid, kind));
+        let input_ref = self.input_ref.clone();
+        let on_refocus_input = Callback::from(move |_| refocus_textarea(&input_ref));
+        html! {
+            <PermissionHandler
+                focused={ctx.props().focused}
+                {on_register}
+                {on_pending_changed}
+                {on_response}
+                {on_refocus_input}
+            />
         }
     }
 

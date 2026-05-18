@@ -8,6 +8,7 @@
 
 mod component;
 mod history;
+mod permission_handler;
 mod types;
 mod websocket;
 
