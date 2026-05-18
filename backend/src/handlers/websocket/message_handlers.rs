@@ -161,7 +161,27 @@ pub fn handle_claude_output(
 
     // Extract base64 images from portal messages and replace with URLs.
     // This keeps WebSocket messages small — browsers fetch images via HTTP.
-    let content = extract_portal_images(content, image_store);
+    //
+    // The inserted images need a `user_id` for the auth check on
+    // `/api/images/{id}` (#786). We don't yet have the `Session` row in scope
+    // here — the DB lookup below also reads it — so we do an early, cheap
+    // owner-only `.select` here. If we can't resolve a user_id we *skip*
+    // image extraction rather than silently drop ownership: the original
+    // base64 just stays inline in the broadcast (slower but correct), and
+    // nothing un-owned ever lands in the cache.
+    let inserting_user_id: Option<Uuid> = db_session_id.and_then(|sid| {
+        use crate::schema::sessions;
+        let mut conn = db_pool.get().ok()?;
+        sessions::table
+            .find(sid)
+            .select(sessions::user_id)
+            .first::<Uuid>(&mut conn)
+            .ok()
+    });
+    let content = match inserting_user_id {
+        Some(uid) => extract_portal_images(content, image_store, uid, db_session_id),
+        None => content,
+    };
 
     // Broadcast output to all web clients with sender metadata alongside content
     if let Some(ref key) = session_key {
@@ -325,9 +345,15 @@ fn store_result_metadata(
 
 /// If the content is a portal message with base64 image data, extract the image
 /// into the store and replace the data field with a URL path.
+///
+/// `inserting_user_id` is the session owner (looked up by the caller). Stored
+/// images are bound to that user + the optional `session_id` so the
+/// `/api/images/{id}` route can gate fetches by ownership/membership (#786).
 fn extract_portal_images(
     mut content: serde_json::Value,
     image_store: &crate::handlers::images::ImageStore,
+    inserting_user_id: Uuid,
+    session_id: Option<Uuid>,
 ) -> serde_json::Value {
     // Only process portal messages
     if content.get("type").and_then(|t| t.as_str()) != Some("portal") {
@@ -358,7 +384,9 @@ fn extract_portal_images(
             continue;
         }
 
-        if let Some(id) = image_store.store_base64(&media_type, data_str) {
+        if let Some(id) =
+            image_store.store_base64(&media_type, data_str, inserting_user_id, session_id)
+        {
             let url = format!("/api/images/{}", id);
             item["data"] = serde_json::Value::String(url);
             item["source_type"] = serde_json::Value::String("url".to_string());
