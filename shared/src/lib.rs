@@ -19,7 +19,7 @@ pub mod protocol;
 // API client types and trait
 pub mod api;
 pub use api::{
-    ApiError, CodexPermissionInput, CompactionExtra, InitExtra, SoundSettingsResponse,
+    ApiError, Citation, CodexPermissionInput, CompactionExtra, InitExtra, SoundSettingsResponse,
     TaskNotificationExtra,
 };
 

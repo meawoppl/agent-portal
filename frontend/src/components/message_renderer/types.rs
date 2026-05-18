@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shared::{CacheCreationDetails, ToolResultContent};
+use shared::{CacheCreationDetails, Citation, ToolResultContent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -152,7 +152,7 @@ pub enum ContentBlock {
     Text {
         text: String,
         #[serde(default)]
-        citations: Vec<Value>,
+        citations: Vec<Citation>,
     },
     #[serde(rename = "image")]
     Image { source: ImageSource },
