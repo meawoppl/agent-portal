@@ -2,6 +2,7 @@
 
 use crate::utils;
 use gloo_net::http::Request;
+use shared::api::SessionsResponse;
 use shared::SessionInfo;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -52,14 +53,8 @@ pub fn use_sessions() -> UseSessions {
                             }
                             return;
                         }
-                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                            if let Some(session_list) = data.get("sessions") {
-                                if let Ok(parsed) =
-                                    serde_json::from_value::<Vec<SessionInfo>>(session_list.clone())
-                                {
-                                    sessions.set(parsed);
-                                }
-                            }
+                        if let Ok(data) = response.json::<SessionsResponse>().await {
+                            sessions.set(data.sessions);
                         }
                     }
                     Err(e) => {

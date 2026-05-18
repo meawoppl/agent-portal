@@ -17,7 +17,15 @@ use crate::{
     AppState,
 };
 
-/// Session with the current user's role included
+/// Session with the current user's role included.
+///
+/// Serializes via `#[serde(flatten)]` of the full `Session` row plus a
+/// `my_role` string — this is the on-wire shape consumed by the frontend.
+/// The frontend deserializes the same bytes into `shared::api::SessionsResponse`
+/// (whose `sessions` field is `Vec<shared::SessionInfo>`); `SessionInfo`
+/// silently drops the per-row stats fields it doesn't care about
+/// (`total_cost_usd`, `input_tokens`, `input_seq`, etc.). Don't shrink this
+/// struct without also auditing every other consumer of the wire shape.
 #[derive(Debug, Serialize)]
 pub struct SessionWithRole {
     #[serde(flatten)]

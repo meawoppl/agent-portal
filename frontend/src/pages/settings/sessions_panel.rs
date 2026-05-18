@@ -1,6 +1,7 @@
 use crate::components::ShareDialog;
 use crate::utils;
 use gloo_net::http::Request;
+use shared::api::SessionsResponse;
 use shared::SessionInfo;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -102,15 +103,9 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
                             }
                             return;
                         }
-                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                            if let Some(session_list) = data.get("sessions") {
-                                if let Ok(parsed) =
-                                    serde_json::from_value::<Vec<SessionInfo>>(session_list.clone())
-                                {
-                                    on_sessions_loaded.emit(parsed.clone());
-                                    sessions.set(parsed);
-                                }
-                            }
+                        if let Ok(data) = response.json::<SessionsResponse>().await {
+                            on_sessions_loaded.emit(data.sessions.clone());
+                            sessions.set(data.sessions);
                         }
                     }
                     Err(e) => {
