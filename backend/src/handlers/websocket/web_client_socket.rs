@@ -58,6 +58,7 @@ struct PendingUpload {
 pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState>, user_id: Uuid) {
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
+    let initial_replay_limit = app_state.message_retention_count;
     let conn = ws_bridge::server::into_connection::<ClientEndpoint>(socket);
     let (mut ws_sender, mut ws_receiver) = conn.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerToClient>();
@@ -86,6 +87,7 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
                     &db_pool,
                     &tx,
                     user_id,
+                    initial_replay_limit,
                     &mut session_key,
                     &mut verified_session_id,
                     &mut pending_uploads,
@@ -113,6 +115,7 @@ fn handle_web_client_message(
     db_pool: &crate::db::DbPool,
     tx: &WebClientSender,
     user_id: Uuid,
+    initial_replay_limit: i64,
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
     pending_uploads: &mut HashMap<String, PendingUpload>,
@@ -132,6 +135,7 @@ fn handle_web_client_message(
             session_id,
             &session_name,
             replay_after,
+            initial_replay_limit,
             session_key,
             verified_session_id,
         ),
@@ -280,6 +284,7 @@ fn handle_web_register(
     session_id: Uuid,
     session_name: &str,
     replay_after: Option<String>,
+    initial_replay_limit: i64,
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
 ) -> bool {
@@ -295,7 +300,7 @@ fn handle_web_register(
                 session_name, session_id, user_id
             );
 
-            replay_history(db_pool, tx, session_id, replay_after);
+            replay_history(db_pool, tx, session_id, replay_after, initial_replay_limit);
             replay_pending_permission(db_pool, session_id, tx);
             false
         }
@@ -312,12 +317,28 @@ fn handle_web_register(
     }
 }
 
-/// Send historical messages from DB to a newly connected web client
+/// Send historical messages from DB to a newly connected web client.
+///
+/// When the client supplies `replay_after`, we ship every message strictly
+/// newer than that cursor — that's the reconnect / focus-regain path and the
+/// frontend needs the full delta to stay consistent.
+///
+/// When `replay_after` is `None` (initial connection or hard refresh), we
+/// only ship the trailing `initial_replay_limit` messages. Pre-#788 we
+/// shipped the full session history every time and the frontend trimmed to
+/// `MAX_MESSAGES_PER_SESSION = 100` locally — long sessions paid the full
+/// `O(session_lifetime)` wire cost just to discard most of it. SQL now does
+/// the trim. The DB query is `created_at DESC` with a `LIMIT` (so Postgres
+/// returns the tail without sorting the whole table); the in-memory `.reverse()`
+/// restores the chronological order `ServerToClient::HistoryBatch` consumers
+/// expect (the frontend's `WsEvent::HistoryBatch` arm extends the message
+/// vector and trims from the front).
 fn replay_history(
     db_pool: &crate::db::DbPool,
     tx: &WebClientSender,
     session_id: Uuid,
     replay_after: Option<String>,
+    initial_replay_limit: i64,
 ) {
     let mut conn = match db_pool.get() {
         Ok(conn) => conn,
@@ -346,11 +367,14 @@ fn replay_history(
             .load(&mut conn)
             .unwrap_or_default()
     } else {
-        messages::table
+        let mut tail: Vec<crate::models::Message> = messages::table
             .filter(messages::session_id.eq(session_id))
-            .order(messages::created_at.asc())
+            .order(messages::created_at.desc())
+            .limit(initial_replay_limit)
             .load(&mut conn)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        tail.reverse();
+        tail
     };
 
     info!(
@@ -1000,5 +1024,146 @@ mod tests {
             proxy_rx.try_recv().is_err(),
             "aborted chunk was forwarded anyway"
         );
+    }
+}
+
+// =============================================================================
+// DB-touching test for the initial-replay limit (closes #788).
+//
+// Mirrors the harness in `handlers::messages::db_tests` / `session_access::db_tests`:
+// auto-skips when `DATABASE_URL` is not set so CI without a DB stays green.
+// =============================================================================
+#[cfg(test)]
+mod replay_tests {
+    use crate::models::{NewSessionWithId, NewUser, Session, User};
+    use chrono::Utc;
+    use diesel::prelude::*;
+    use diesel::r2d2::{ConnectionManager, Pool};
+
+    type DbPool = Pool<ConnectionManager<diesel::pg::PgConnection>>;
+
+    fn try_pool() -> Option<DbPool> {
+        let url = std::env::var("DATABASE_URL").ok()?;
+        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
+        Pool::builder().build(manager).ok()
+    }
+
+    fn make_user(conn: &mut diesel::pg::PgConnection, label: &str) -> User {
+        use crate::schema::users;
+        let nonce = uuid::Uuid::new_v4();
+        let new_user = NewUser {
+            google_id: format!("test_replay_{}_{}", label, nonce),
+            email: format!("test_replay_{}_{}@example.invalid", label, nonce),
+            name: Some(format!("Test {}", label)),
+            avatar_url: None,
+        };
+        diesel::insert_into(users::table)
+            .values(&new_user)
+            .get_result::<User>(conn)
+            .expect("insert test user")
+    }
+
+    fn make_session(conn: &mut diesel::pg::PgConnection, owner_id: uuid::Uuid) -> Session {
+        use crate::schema::sessions;
+        let session_id = uuid::Uuid::new_v4();
+        let new_session = NewSessionWithId {
+            id: session_id,
+            user_id: owner_id,
+            session_name: format!("test-replay-{}", session_id),
+            session_key: session_id.to_string(),
+            working_directory: "/tmp".to_string(),
+            status: "active".to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "test-host".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+        };
+        diesel::insert_into(sessions::table)
+            .values(&new_session)
+            .get_result::<Session>(conn)
+            .expect("insert test session")
+    }
+
+    fn seed_messages(
+        conn: &mut diesel::pg::PgConnection,
+        session_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+        count: usize,
+    ) -> Vec<chrono::NaiveDateTime> {
+        use diesel::sql_query;
+        let base = Utc::now().naive_utc();
+        let mut stamps = Vec::with_capacity(count);
+        for i in 0..count {
+            let ts = base + chrono::Duration::microseconds((i as i64 + 1) * 1000);
+            stamps.push(ts);
+            sql_query(
+                "INSERT INTO messages (id, session_id, role, content, created_at, user_id, agent_type)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            )
+            .bind::<diesel::sql_types::Uuid, _>(uuid::Uuid::new_v4())
+            .bind::<diesel::sql_types::Uuid, _>(session_id)
+            .bind::<diesel::sql_types::VarChar, _>("assistant")
+            .bind::<diesel::sql_types::Text, _>(format!("msg #{}", i))
+            .bind::<diesel::sql_types::Timestamp, _>(ts)
+            .bind::<diesel::sql_types::Uuid, _>(user_id)
+            .bind::<diesel::sql_types::VarChar, _>("claude")
+            .execute(conn)
+            .expect("seed message");
+        }
+        stamps
+    }
+
+    fn cleanup(
+        conn: &mut diesel::pg::PgConnection,
+        session_id: uuid::Uuid,
+        user_ids: &[uuid::Uuid],
+    ) {
+        use crate::schema::{messages, sessions, users};
+        let _ = diesel::delete(messages::table.filter(messages::session_id.eq(session_id)))
+            .execute(conn);
+        let _ = diesel::delete(sessions::table.find(session_id)).execute(conn);
+        for uid in user_ids {
+            let _ = diesel::delete(users::table.find(uid)).execute(conn);
+        }
+    }
+
+    /// `replay_after = None` returns at most `initial_replay_limit` rows in
+    /// chronological order — the exact query shape `replay_history` builds.
+    /// Pre-#788 this path loaded the full session history; now SQL trims to
+    /// the render-window default so the wire payload is bounded.
+    #[test]
+    fn replay_after_none_caps_to_retention_count() {
+        let Some(pool) = try_pool() else {
+            eprintln!("DATABASE_URL not set, skipping");
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+
+        let user = make_user(&mut conn, "limit");
+        let session = make_session(&mut conn, user.id);
+        let stamps = seed_messages(&mut conn, session.id, user.id, 200);
+
+        let limit: i64 = 100;
+        use crate::schema::messages;
+        let mut tail: Vec<crate::models::Message> = messages::table
+            .filter(messages::session_id.eq(session.id))
+            .order(messages::created_at.desc())
+            .limit(limit)
+            .load(&mut conn)
+            .expect("load");
+        tail.reverse();
+
+        cleanup(&mut conn, session.id, &[user.id]);
+
+        assert_eq!(tail.len(), limit as usize);
+        // Tail is the newest 100, presented oldest-first.
+        assert_eq!(tail.first().unwrap().created_at, stamps[100]);
+        assert_eq!(tail.last().unwrap().created_at, stamps[199]);
+        for w in tail.windows(2) {
+            assert!(w[0].created_at < w[1].created_at);
+        }
     }
 }
