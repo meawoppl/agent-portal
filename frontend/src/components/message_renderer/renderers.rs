@@ -20,17 +20,16 @@ fn preserve_user_newlines(text: &str) -> String {
 }
 
 fn extract_ephemeral_cache(usage: &UsageInfo) -> (u64, u64) {
-    let mut e1h: u64 = 0;
-    let mut e5m: u64 = 0;
-    if let Some(cc) = &usage.cache_creation {
-        if let Some(v) = cc.get("ephemeral_1h_input_tokens").and_then(|v| v.as_u64()) {
-            e1h = v;
-        }
-        if let Some(v) = cc.get("ephemeral_5m_input_tokens").and_then(|v| v.as_u64()) {
-            e5m = v;
-        }
-    }
-    (e1h, e5m)
+    usage
+        .cache_creation
+        .as_ref()
+        .map(|cc| {
+            (
+                u64::from(cc.ephemeral_1h_input_tokens),
+                u64::from(cc.ephemeral_5m_input_tokens),
+            )
+        })
+        .unwrap_or((0, 0))
 }
 
 fn build_model_tooltip(model: &str, usage: Option<&UsageInfo>) -> String {
