@@ -417,86 +417,13 @@
     padding: 0;
 }
 
-/* Edit Tool Diff Styling */
-.edit-tool {
-    background: rgba(99, 102, 241, 0.05);
-}
-
-.edit-tool .tool-use-header {
-    flex-wrap: wrap;
-}
-
-.edit-file-path,
+/* Read tool path styling — the diff-card / diff-view rules previously
+   colocated here moved to `styles/tools/diff.css` with the rest of the
+   shared `DiffCard` chrome (#823). */
 .read-file-path {
     color: var(--text-primary);
     font-weight: 500;
     word-break: break-all;
-}
-
-.edit-replace-all {
-    color: var(--warning);
-    font-size: 0.75rem;
-    padding: 0.1rem 0.4rem;
-    background: rgba(245, 158, 11, 0.15);
-    border-radius: 3px;
-}
-
-.diff-container {
-    margin-top: 0.5rem;
-    border-radius: 4px;
-    overflow: hidden;
-    background: rgba(0, 0, 0, 0.2);
-}
-
-.diff-view {
-    font-family: var(--font-mono);
-    font-size: 0.8rem;
-    line-height: 1.5;
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.diff-line {
-    display: flex;
-    padding: 0 0.5rem;
-    white-space: pre-wrap;
-    word-break: break-all;
-}
-
-.diff-line.context {
-    background: transparent;
-    color: var(--text-secondary);
-}
-
-.diff-line.removed {
-    background: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
-}
-
-.diff-line.added {
-    background: rgba(34, 197, 94, 0.2);
-    color: #86efac;
-}
-
-.diff-marker {
-    flex-shrink: 0;
-    width: 1.5rem;
-    text-align: center;
-    user-select: none;
-    color: var(--text-muted);
-}
-
-.diff-line.removed .diff-marker {
-    color: #f87171;
-}
-
-.diff-line.added .diff-marker {
-    color: #4ade80;
-}
-
-.diff-content {
-    flex: 1;
-    min-width: 0;
 }
 
 /* Write Tool Styling */

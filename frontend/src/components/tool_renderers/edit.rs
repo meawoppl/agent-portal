@@ -2,7 +2,7 @@ use serde_json::Value;
 use shared::{EditInput, WriteInput};
 use yew::prelude::*;
 
-use crate::components::diff::render_diff_lines;
+use crate::components::diff::{DiffCard, DiffSource};
 use crate::components::expandable::ExpandableLines;
 use crate::components::tool_renderers::extract_tool_input;
 
@@ -15,26 +15,17 @@ pub fn render_edit_tool(input: &Value) -> Html {
     });
     let replace_all = edit.replace_all.unwrap_or(false);
 
-    let diff_html = render_diff_lines(&edit.old_string, &edit.new_string);
+    let source = DiffSource::OldNew {
+        old: edit.old_string,
+        new: edit.new_string,
+    };
 
     html! {
-        <div class="tool-use edit-tool">
-            <div class="tool-use-header">
-                <span class="tool-icon">{ "✏️" }</span>
-                <span class="tool-name">{ "Edit" }</span>
-                <span class="edit-file-path">{ &edit.file_path }</span>
-                {
-                    if replace_all {
-                        html! { <span class="edit-replace-all">{ "(replace all)" }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-            </div>
-            <div class="diff-container">
-                { diff_html }
-            </div>
-        </div>
+        <DiffCard
+            {source}
+            file_path={AttrValue::from(edit.file_path)}
+            {replace_all}
+        />
     }
 }
 

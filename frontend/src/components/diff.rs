@@ -7,21 +7,86 @@ pub enum DiffLine<'a> {
     Added(&'a str),
 }
 
-/// Generate diff view HTML from old and new strings
-pub fn render_diff_lines(old_string: &str, new_string: &str) -> Html {
-    let old_lines: Vec<&str> = old_string.lines().collect();
-    let new_lines: Vec<&str> = new_string.lines().collect();
-
-    let diff = compute_line_diff(&old_lines, &new_lines);
-    render_diff_html(&diff)
+/// Source for a `DiffCard` body: either two snapshots (Claude `Edit` /
+/// `Write`-style: compute the diff via LCS) or a pre-formatted unified-diff
+/// string (Codex `turn/diff/updated` / `item/fileChange/patchUpdated`: parse
+/// the existing patch text). Both paths funnel through `render_diff_html`,
+/// so the per-line styling and parser tests stay shared.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DiffSource {
+    OldNew { old: String, new: String },
+    Unified { text: String },
 }
 
-/// Render a pre-formatted unified-diff string (the format `git diff` produces:
-/// `--- a/path`, `+++ b/path`, `@@ -L,N +L,N @@`, and ` `/`-`/`+`-prefixed lines).
-/// Skips file/hunk headers; emits one `DiffLine` per body line.
-pub fn render_unified_diff(diff: &str) -> Html {
-    let lines = parse_unified_diff(diff);
-    render_diff_html(&lines)
+/// One shared diff card for both Claude (`Edit` tool) and Codex
+/// (`turn/diff/updated`, per-file `item/fileChange/patchUpdated`) — see #823.
+///
+/// The card is the only place that gets the `.diff-card` framed treatment
+/// (background, rounded corners, scrollable body). Header fields are all
+/// optional so the card collapses to just a framed body when called without
+/// labels (e.g. a Codex cumulative turn diff with no file path).
+#[derive(Properties, PartialEq)]
+pub struct DiffCardProps {
+    pub source: DiffSource,
+    /// File path label shown in the header. Omit for cumulative diffs that
+    /// span multiple files.
+    #[prop_or_default]
+    pub file_path: Option<AttrValue>,
+    /// Codex per-file kind: `"add"` / `"update"` / `"delete"`. Renders a
+    /// colored chip next to the path. Ignored when `file_path` is absent.
+    #[prop_or_default]
+    pub kind: Option<AttrValue>,
+    /// Claude `Edit { replace_all: true }` chip. Renders only when set.
+    #[prop_or_default]
+    pub replace_all: bool,
+    /// Codex turn-level cumulative diff label. Renders a `(cumulative)`
+    /// chip next to the title so the wire semantics aren't lost when the
+    /// card is visually identical to a per-file diff.
+    #[prop_or_default]
+    pub cumulative: bool,
+}
+
+#[function_component(DiffCard)]
+pub fn diff_card(props: &DiffCardProps) -> Html {
+    let body = match &props.source {
+        DiffSource::OldNew { old, new } => {
+            let old_lines: Vec<&str> = old.lines().collect();
+            let new_lines: Vec<&str> = new.lines().collect();
+            let diff = compute_line_diff(&old_lines, &new_lines);
+            render_diff_html(&diff)
+        }
+        DiffSource::Unified { text } => {
+            let lines = parse_unified_diff(text);
+            render_diff_html(&lines)
+        }
+    };
+
+    html! {
+        <div class="diff-card">
+            <div class="diff-card-header">
+                <span class="tool-icon">{ "\u{1f4dd}" }</span>
+                if let Some(path) = &props.file_path {
+                    if let Some(kind) = &props.kind {
+                        <span class={classes!("diff-card-kind", kind.to_string())}>{ kind }</span>
+                    }
+                    <span class="diff-card-path">{ path }</span>
+                } else {
+                    <span class="diff-card-title">{ "Diff" }</span>
+                }
+                if props.cumulative {
+                    <span class="diff-card-cumulative" title="Codex turn-level cumulative diff">
+                        { "(cumulative)" }
+                    </span>
+                }
+                if props.replace_all {
+                    <span class="diff-card-replace-all">{ "(replace all)" }</span>
+                }
+            </div>
+            <div class="diff-card-body">
+                { body }
+            </div>
+        </div>
+    }
 }
 
 /// Emit the inner `<div class="diff-view">` block for a sequence of diff lines.
