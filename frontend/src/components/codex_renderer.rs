@@ -297,11 +297,13 @@ fn render_agent_message(text: Option<&str>) -> Html {
     if text.is_empty() {
         return html! {};
     }
+    // The per-item "Codex" badge is omitted — the enclosing `render_codex_group`
+    // wrapper already provides one, so duplicating it here makes the agent
+    // message card show "Codex" twice (once at the group top, once on the card).
+    // Other CodexItem renderers (reasoning, command_execution, file_change, …)
+    // use purpose-specific labels instead of "Codex" for the same reason.
     html! {
         <div class="claude-message assistant-message">
-            <div class="message-header">
-                <span class="message-type-badge assistant">{ "Codex" }</span>
-            </div>
             <div class="message-body">
                 <div class="assistant-text">{ render_markdown(text) }</div>
             </div>
