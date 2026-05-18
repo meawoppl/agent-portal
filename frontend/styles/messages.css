@@ -146,6 +146,52 @@
     padding-bottom: 0.25rem;
 }
 
+.user-group {
+    border-left: 3px solid #e0af68;
+    background: rgba(224, 175, 104, 0.04);
+}
+
+.user-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0;
+}
+
+.user-group-body .user-message {
+    border-left: none;
+    background: transparent;
+    margin: 0;
+}
+
+.user-group-body .user-message .message-header {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+}
+
+.codex-group {
+    border-left: 3px solid #bb9af7;
+    background: rgba(187, 154, 247, 0.04);
+}
+
+.codex-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0;
+}
+
+.codex-group-body .claude-message {
+    border-left: none;
+    background: transparent;
+    margin: 0;
+}
+
+.codex-group-body .claude-message .message-header {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+}
+
 .message-type-badge.raw {
     background: rgba(127, 132, 156, 0.2);
     color: var(--text-secondary);
