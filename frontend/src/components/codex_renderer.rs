@@ -659,16 +659,13 @@ fn render_turn_diff(diff: Option<&str>) -> Html {
         // Empty deltas — don't render an empty block.
         return html! {};
     }
+    let source = super::diff::DiffSource::Unified {
+        text: diff.to_string(),
+    };
     html! {
         <div class="claude-message assistant-message">
             <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ "\u{1f4dd}" }</span>
-                        <span class="tool-name">{ "Turn Diff (cumulative)" }</span>
-                    </div>
-                    { super::diff::render_unified_diff(diff) }
-                </div>
+                <super::diff::DiffCard {source} cumulative=true />
             </div>
         </div>
     }
@@ -676,44 +673,34 @@ fn render_turn_diff(diff: Option<&str>) -> Html {
 
 fn render_file_change_patch(changes: Option<&[FileUpdateChange]>) -> Html {
     let changes = changes.unwrap_or(&[]);
-    let any_diff = changes
+    let cards: Vec<Html> = changes
         .iter()
-        .any(|c| c.diff.as_deref().is_some_and(|d| !d.trim().is_empty()));
-    if !any_diff {
+        .filter_map(|c| {
+            let diff = c.diff.as_deref().unwrap_or("");
+            if diff.trim().is_empty() {
+                return None;
+            }
+            let path = c.path.clone().unwrap_or_else(|| "(unknown)".to_string());
+            let kind = c.kind.clone().unwrap_or_else(|| "update".to_string());
+            let source = super::diff::DiffSource::Unified {
+                text: diff.to_string(),
+            };
+            Some(html! {
+                <super::diff::DiffCard
+                    {source}
+                    file_path={AttrValue::from(path)}
+                    kind={AttrValue::from(kind)}
+                />
+            })
+        })
+        .collect();
+    if cards.is_empty() {
         return html! {};
     }
     html! {
         <div class="claude-message assistant-message">
             <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ "\u{1f4dd}" }</span>
-                        <span class="tool-name">{ "File Changes (patch)" }</span>
-                    </div>
-                    <div class="file-changes-list">
-                        { for changes.iter().map(|c| {
-                            let path = c.path.as_deref().unwrap_or("(unknown)");
-                            let kind = c.kind.as_deref().unwrap_or("update");
-                            let kind_class = format!("file-change-kind {}", kind);
-                            let diff = c.diff.as_deref().unwrap_or("");
-                            html! {
-                                <div class="file-change-entry">
-                                    <div>
-                                        <span class={kind_class}>{ kind }</span>
-                                        <span class="file-change-path">{ path }</span>
-                                    </div>
-                                    {
-                                        if diff.trim().is_empty() {
-                                            html! {}
-                                        } else {
-                                            super::diff::render_unified_diff(diff)
-                                        }
-                                    }
-                                </div>
-                            }
-                        })}
-                    </div>
-                </div>
+                { for cards.into_iter() }
             </div>
         </div>
     }

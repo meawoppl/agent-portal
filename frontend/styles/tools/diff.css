@@ -1,0 +1,133 @@
+/* ==========================================================================
+   Diff Card — shared between Claude Edit and Codex turn/file-patch diffs.
+   See #823 for the unification rationale.
+
+   The shell (`.diff-card` + `.diff-card-header` + `.diff-card-body`) frames
+   any diff body emitted via `frontend/src/components/diff.rs::DiffCard`.
+   The per-line styling (`.diff-view` / `.diff-line` / `.diff-marker` /
+   `.diff-content`) is shared with any direct caller of `render_diff_html`
+   too — older code that built its own card around the bare diff lines has
+   been migrated to the `DiffCard` component.
+   ========================================================================== */
+
+.diff-card {
+    margin: 0.5rem 0;
+    background: rgba(99, 102, 241, 0.05);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+
+.diff-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    flex-wrap: wrap;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.diff-card-title,
+.diff-card-path {
+    color: var(--text-primary);
+    font-weight: 500;
+    word-break: break-all;
+}
+
+.diff-card-cumulative,
+.diff-card-replace-all {
+    color: var(--warning);
+    font-size: 0.75rem;
+    padding: 0.1rem 0.4rem;
+    background: rgba(245, 158, 11, 0.15);
+    border-radius: 3px;
+}
+
+/* Codex per-file kind chip: add / update / delete. Colors mirror the
+   diff-line palette so the chip reads as part of the same visual family. */
+.diff-card-kind {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.diff-card-kind.add {
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.2);
+}
+
+.diff-card-kind.update {
+    color: var(--text-primary);
+    background: rgba(99, 102, 241, 0.2);
+}
+
+.diff-card-kind.delete {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.2);
+}
+
+.diff-card-body {
+    margin: 0 0.75rem 0.5rem;
+    border-radius: 4px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* --- Diff body line styling (shared with any direct render_diff_html caller) --- */
+
+.diff-view {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.diff-line {
+    display: flex;
+    padding: 0 0.5rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.diff-line.context {
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.diff-line.removed {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+}
+
+.diff-line.added {
+    background: rgba(34, 197, 94, 0.2);
+    color: #86efac;
+}
+
+.diff-marker {
+    flex-shrink: 0;
+    width: 1.5rem;
+    text-align: center;
+    user-select: none;
+    color: var(--text-muted);
+}
+
+.diff-line.removed .diff-marker {
+    color: #f87171;
+}
+
+.diff-line.added .diff-marker {
+    color: #4ade80;
+}
+
+.diff-content {
+    flex: 1;
+    min-width: 0;
+}
