@@ -333,6 +333,35 @@ pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html
     }
 }
 
+/// Render a run of consecutive portal messages as a single grouped block.
+///
+/// Each individual portal message is still emitted with its own header +
+/// body via `render_portal_message`, but they share one outer wrapper that
+/// gets the `.portal-group` accent so the run reads as one visual unit.
+/// The group title carries the count for quick scannability.
+pub fn render_portal_group(messages: &[String], timestamp: Option<&str>) -> Html {
+    let count = messages.len();
+    let header_title = timestamp.unwrap_or_default().to_string();
+    html! {
+        <div class="claude-message message-group portal-group">
+            <div class="message-header" title={header_title}>
+                <span class="message-type-badge portal">{ "Portal" }</span>
+                if count > 1 {
+                    <span class="message-count">{ format!("× {}", count) }</span>
+                }
+            </div>
+            <div class="message-body portal-group-body">
+                { for messages.iter().map(|json| {
+                    match serde_json::from_str::<ClaudeMessage>(json) {
+                        Ok(ClaudeMessage::Portal(msg)) => render_portal_message(&msg, None),
+                        _ => html! {},
+                    }
+                }) }
+            </div>
+        </div>
+    }
+}
+
 pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Html {
     let copy_text: String = msg
         .content

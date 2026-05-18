@@ -171,6 +171,8 @@ pub struct SessionState<'a, A: Agent> {
     pub first_connection: bool,
     /// When the last disconnect occurred (for reporting reconnect duration)
     pub disconnected_at: Option<Instant>,
+    /// Wall-clock UTC paired with `disconnected_at` for the reconnect text
+    pub disconnected_at_utc: Option<chrono::DateTime<chrono::Utc>>,
     /// Whether the last disconnect was a graceful server shutdown
     pub last_disconnect_graceful: bool,
     /// Consecutive replay failures on the same pending messages
@@ -206,6 +208,7 @@ impl<'a, A: Agent> SessionState<'a, A> {
             backoff: Backoff::new(),
             first_connection: true,
             disconnected_at: None,
+            disconnected_at_utc: None,
             last_disconnect_graceful: false,
             replay_failures: 0,
         })
@@ -304,7 +307,10 @@ pub async fn run_connection_loop<A: Agent>(
                 return Ok(LoopResult::SessionNotFound);
             }
             ConnectionResult::Disconnected(duration) => {
-                session.disconnected_at.get_or_insert(Instant::now());
+                if session.disconnected_at.is_none() {
+                    session.disconnected_at = Some(Instant::now());
+                    session.disconnected_at_utc = Some(chrono::Utc::now());
+                }
                 session.last_disconnect_graceful = false;
                 session.backoff.reset_if_stable(duration);
                 session.persist_buffer().await;
@@ -320,7 +326,10 @@ pub async fn run_connection_loop<A: Agent>(
                 session.backoff.advance();
             }
             ConnectionResult::ServerShutdown(delay) => {
-                session.disconnected_at.get_or_insert(Instant::now());
+                if session.disconnected_at.is_none() {
+                    session.disconnected_at = Some(Instant::now());
+                    session.disconnected_at_utc = Some(chrono::Utc::now());
+                }
                 session.last_disconnect_graceful = true;
                 // Graceful shutdown - reset backoff and use server's suggested delay
                 session.backoff.reset();
@@ -454,10 +463,24 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
             } else {
                 "unexpected disconnect"
             };
-            if duration_str.is_empty() {
+            let now_utc = chrono::Utc::now();
+            let header = if duration_str.is_empty() {
                 format!("**Proxy reconnected** ({})", reason)
             } else {
                 format!("**Proxy reconnected** after {} ({})", duration_str, reason)
+            };
+            match session.disconnected_at_utc {
+                Some(disc_utc) => format!(
+                    "{}\n  disconnected at {} (UTC)\n  reconnected  at {} (UTC)",
+                    header,
+                    disc_utc.format("%Y-%m-%dT%H:%M:%SZ"),
+                    now_utc.format("%Y-%m-%dT%H:%M:%SZ"),
+                ),
+                None => format!(
+                    "{}\n  reconnected at {} (UTC)",
+                    header,
+                    now_utc.format("%Y-%m-%dT%H:%M:%SZ"),
+                ),
             }
         };
 
@@ -491,6 +514,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     if !session.first_connection {
         info!("Connection restored");
         session.disconnected_at = None;
+        session.disconnected_at_utc = None;
     }
 
     // Run the message loop - split connection for concurrent read/write
