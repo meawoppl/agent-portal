@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.70
+
+- **PR 4/4 of #758: group-level time-ago footer.** Closes the message-grouping roadmap. The three group renderers added by PR 2 (`render_portal_group`) and PR 3 (`render_user_group`, `render_codex_group`) now mirror the assistant-group treatment from PR 1: pull the **last** message's `_created_at` ISO via `extract_raw_iso(messages.last())` and render a `.message-footer` containing a live-updating `<TimeAgo iso={iso} />`. The existing `.claude-message .message-footer { justify-content: flex-end; }` puts the chip in the bottom-right corner exactly as the roadmap spec called for. Mechanical three-line change per renderer, gated on `if let Some(iso)` so pre-`_created_at` messages still render cleanly. All 19 `message_renderer` unit tests continue to pass — no new tests because the change is presence-only and the underlying `TimeAgo` component already has its own coverage.
+
 ## 2.5.69
 
 - **PR 3/4 of #758: User + Codex grouping with explicit predicate ordering.** Extends the categorized `MessageGroup` from PR 1 and the Portal grouping from PR 2 with two new `GroupCategory` variants:
