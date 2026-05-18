@@ -104,6 +104,31 @@ struct TaskEntry {
     last_tool_name: Option<String>,
 }
 
+impl TaskEntry {
+    fn with_started_at(
+        task_type: impl Into<String>,
+        description: impl Into<String>,
+        started_at: f64,
+    ) -> Self {
+        Self {
+            task_type: task_type.into(),
+            description: description.into(),
+            started_at,
+            status: TaskStatus::Running,
+            duration_ms: None,
+            tool_uses: None,
+            total_tokens: None,
+            completed_at: None,
+            current_activity: None,
+            last_tool_name: None,
+        }
+    }
+
+    fn new(task_type: impl Into<String>, description: impl Into<String>) -> Self {
+        Self::with_started_at(task_type, description, js_sys::Date::now())
+    }
+}
+
 use super::history::CommandHistory;
 use super::types::{PendingPermission, QuestionAnswers, WsSender, MAX_MESSAGES_PER_SESSION};
 use super::websocket::{connect_websocket, send_message, WsEvent};
@@ -452,18 +477,11 @@ impl Component for SessionView {
                                 let started_at = if ts.is_finite() { ts } else { 0.0 };
                                 self.active_tasks.insert(
                                     task.task_id.clone(),
-                                    TaskEntry {
+                                    TaskEntry::with_started_at(
                                         task_type,
-                                        description: task.description.clone(),
+                                        task.description.clone(),
                                         started_at,
-                                        status: TaskStatus::Running,
-                                        duration_ms: None,
-                                        tool_uses: None,
-                                        total_tokens: None,
-                                        completed_at: None,
-                                        current_activity: None,
-                                        last_tool_name: None,
-                                    },
+                                    ),
                                 );
                                 self.tool_use_to_task
                                     .insert(task.tool_use_id.clone(), task.task_id.clone());
@@ -473,17 +491,12 @@ impl Component for SessionView {
                                 let entry = self
                                     .active_tasks
                                     .entry(progress.task_id.clone())
-                                    .or_insert_with(|| TaskEntry {
-                                        task_type: "local_agent".to_string(),
-                                        description: progress.description.clone(),
-                                        started_at,
-                                        status: TaskStatus::Running,
-                                        duration_ms: None,
-                                        tool_uses: None,
-                                        total_tokens: None,
-                                        completed_at: None,
-                                        current_activity: None,
-                                        last_tool_name: None,
+                                    .or_insert_with(|| {
+                                        TaskEntry::with_started_at(
+                                            "local_agent",
+                                            progress.description.clone(),
+                                            started_at,
+                                        )
                                     });
                                 entry.current_activity = Some(progress.description.clone());
                                 entry.last_tool_name = Some(progress.last_tool_name.clone());
@@ -497,17 +510,12 @@ impl Component for SessionView {
                                 let entry = self
                                     .active_tasks
                                     .entry(notif.task_id.clone())
-                                    .or_insert_with(|| TaskEntry {
-                                        task_type: "local_agent".to_string(),
-                                        description: notif.summary.clone(),
-                                        started_at: completed_at,
-                                        status: TaskStatus::Running,
-                                        duration_ms: None,
-                                        tool_uses: None,
-                                        total_tokens: None,
-                                        completed_at: None,
-                                        current_activity: None,
-                                        last_tool_name: None,
+                                    .or_insert_with(|| {
+                                        TaskEntry::with_started_at(
+                                            "local_agent",
+                                            notif.summary.clone(),
+                                            completed_at,
+                                        )
                                     });
                                 entry.status = match notif.status {
                                     shared::CCTaskStatus::Completed => TaskStatus::Completed,
@@ -1328,18 +1336,7 @@ impl SessionView {
                         .to_string();
                         self.active_tasks.insert(
                             task.task_id.clone(),
-                            TaskEntry {
-                                task_type,
-                                description: task.description.clone(),
-                                started_at: js_sys::Date::now(),
-                                status: TaskStatus::Running,
-                                duration_ms: None,
-                                tool_uses: None,
-                                total_tokens: None,
-                                completed_at: None,
-                                current_activity: None,
-                                last_tool_name: None,
-                            },
+                            TaskEntry::new(task_type, task.description.clone()),
                         );
                         self.tool_use_to_task
                             .insert(task.tool_use_id.clone(), task.task_id.clone());
@@ -1354,18 +1351,7 @@ impl SessionView {
                         if !self.active_tasks.contains_key(&progress.task_id) {
                             self.active_tasks.insert(
                                 progress.task_id.clone(),
-                                TaskEntry {
-                                    task_type: "local_agent".to_string(),
-                                    description: progress.description.clone(),
-                                    started_at: js_sys::Date::now(),
-                                    status: TaskStatus::Running,
-                                    duration_ms: None,
-                                    tool_uses: None,
-                                    total_tokens: None,
-                                    completed_at: None,
-                                    current_activity: None,
-                                    last_tool_name: None,
-                                },
+                                TaskEntry::new("local_agent", progress.description.clone()),
                             );
                             self.ensure_task_tick(ctx);
                         }
@@ -1383,17 +1369,8 @@ impl SessionView {
                         let entry = self
                             .active_tasks
                             .entry(notif.task_id.clone())
-                            .or_insert_with(|| TaskEntry {
-                                task_type: "local_agent".to_string(),
-                                description: notif.summary.clone(),
-                                started_at: js_sys::Date::now(),
-                                status: TaskStatus::Running,
-                                duration_ms: None,
-                                tool_uses: None,
-                                total_tokens: None,
-                                completed_at: None,
-                                current_activity: None,
-                                last_tool_name: None,
+                            .or_insert_with(|| {
+                                TaskEntry::new("local_agent", notif.summary.clone())
                             });
                         entry.status = match notif.status {
                             shared::CCTaskStatus::Completed => TaskStatus::Completed,
