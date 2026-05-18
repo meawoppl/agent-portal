@@ -109,40 +109,6 @@ impl MessageGroup {
     }
 }
 
-/// Check if a message should be grouped with assistant messages.
-///
-/// Groups together: assistant turns + the user-shaped envelopes that carry
-/// only tool results back to Claude. The decision is made on the **nested**
-/// `message.content` blocks alone — we deliberately do NOT short-circuit on
-/// the top-level `content` field, because that field is the optimistic-send
-/// envelope shape and can leak onto real echoes through the cross-process
-/// wire wrapping. Gating on it broke serial Read tool-use grouping in the
-/// wild (#758).
-fn should_group_with_assistant(json: &str) -> bool {
-    match serde_json::from_str::<ClaudeMessage>(json) {
-        Ok(ClaudeMessage::Assistant(_)) => true,
-        Ok(ClaudeMessage::User(msg)) => {
-            let Some(message) = &msg.message else {
-                return false;
-            };
-            let Some(blocks) = &message.content else {
-                return false;
-            };
-            !blocks.is_empty()
-                && blocks.iter().all(|b| {
-                    matches!(
-                        b,
-                        ContentBlock::ToolResult { .. }
-                            | ContentBlock::WebSearchToolResult { .. }
-                            | ContentBlock::McpToolResult { .. }
-                            | ContentBlock::CodeExecutionToolResult { .. }
-                    )
-                })
-        }
-        _ => false,
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MessageIdentity {
     category: GroupCategory,
@@ -150,17 +116,40 @@ struct MessageIdentity {
     badge_class: String,
 }
 
-/// Check if a message is a plain-text human user prompt — the kind we want
-/// to roll into the User group. Two wire shapes carry this content: the
-/// optimistic-send envelope (`UserMessage.content: Some(String)`) and the
+/// True iff the parsed `UserMessage` carries only tool-result content blocks
+/// — the user-shaped envelope Claude uses to deliver tool output back to the
+/// assistant turn. The decision is made on the **nested** `message.content`
+/// blocks alone — we deliberately do NOT short-circuit on the top-level
+/// `content` field, because that field is the optimistic-send envelope shape
+/// and can leak onto real echoes through the cross-process wire wrapping.
+/// Gating on it broke serial Read tool-use grouping in the wild (#758).
+fn user_is_tool_result_envelope(msg: &types::UserMessage) -> bool {
+    let Some(message) = &msg.message else {
+        return false;
+    };
+    let Some(blocks) = &message.content else {
+        return false;
+    };
+    !blocks.is_empty()
+        && blocks.iter().all(|b| {
+            matches!(
+                b,
+                ContentBlock::ToolResult { .. }
+                    | ContentBlock::WebSearchToolResult { .. }
+                    | ContentBlock::McpToolResult { .. }
+                    | ContentBlock::CodeExecutionToolResult { .. }
+            )
+        })
+}
+
+/// True iff the parsed `UserMessage` is a plain-text human prompt — the kind
+/// we want to roll into the User group. Two wire shapes carry this content:
+/// the optimistic-send envelope (`UserMessage.content: Some(String)`) and the
 /// Claude echo shape (`UserMessage.message.content: Some([Text { .. }, …])`).
 /// We deliberately require *all* nested blocks to be `Text` so we don't
 /// silently roll a tool-result envelope into User — those belong with
-/// Assistant and are caught earlier by `should_group_with_assistant`.
-fn is_plain_text_user(json: &str) -> bool {
-    let Ok(ClaudeMessage::User(msg)) = serde_json::from_str::<ClaudeMessage>(json) else {
-        return false;
-    };
+/// Assistant and are caught by `user_is_tool_result_envelope`.
+fn user_is_plain_text(msg: &types::UserMessage) -> bool {
     if msg.content.is_some() {
         return true;
     }
@@ -176,59 +165,72 @@ fn is_plain_text_user(json: &str) -> bool {
             .all(|b| matches!(b, ContentBlock::Text { .. }))
 }
 
-/// Check if a message is a Codex protocol event (any non-`Unknown`
-/// `CodexEvent` variant). Used to roll consecutive Codex events into one
-/// purple-accented group. Parses lazily and only returns true on a
-/// successfully-recognized variant, so a Claude message that happens to
-/// fail Claude parsing won't accidentally end up here.
-fn is_codex_event(json: &str) -> bool {
-    use crate::components::codex_renderer::CodexEvent;
-    !matches!(
-        serde_json::from_str::<CodexEvent>(json),
-        Err(_) | Ok(CodexEvent::Unknown)
-    )
-}
-
 /// Classify a single wire message into the display identity it belongs to,
 /// or `None` if it shouldn't roll into any group (renders as `Single`).
 ///
 /// Sole entry point for "which identity group does this message belong to"
 /// across the codebase — add new categories here, not at the `group_messages`
-/// loop level.
+/// loop level. The wire JSON is parsed at most twice: once as a
+/// `ClaudeMessage`, and if (and only if) that parse yields no recognized
+/// variant on a Codex session, once as a `CodexEvent`.
 ///
-/// **Predicate ordering matters**:
-///   1. **Assistant** runs first because user-tool-result envelopes are
-///      user-shaped but belong with the surrounding assistant turn. If User
-///      ran first, every Read tool-result would silently land in a User
-///      group instead of continuing the assistant run (the regression
-///      target of PR 1).
-///   2. **Portal** runs next — a portal message is its own shape so it
-///      can't collide with Assistant, but listing it explicitly here keeps
-///      the ordering documented.
-///   3. **User** runs after Assistant so plain-text user prompts land
-///      together while tool-result envelopes have already been claimed. The
-///      sender label is part of the group key, so proxy users don't collapse
-///      under the current user's "You" header.
-///   4. **Codex** runs last — Codex events parse via a different enum and
+/// **Variant ordering matters**:
+///   1. **User-as-tool-result** runs first because user-tool-result envelopes
+///      are user-shaped but belong with the surrounding assistant turn. If
+///      the plain-text branch ran first, every Read tool-result would
+///      silently land in a User group instead of continuing the assistant
+///      run (the regression target of PR 1 of #758).
+///   2. **Assistant** is the other half of the assistant group — covered by
+///      the same `Assistant` category that user-tool-result envelopes map to.
+///   3. **Portal** has its own wire shape so it can't collide with the User
+///      arms, but matching it explicitly keeps the dispatch documented.
+///   4. **User plain-text** runs after the tool-result branch so prose lands
+///      in the User group while tool-result envelopes are already claimed.
+///      The sender label is part of the group key, so proxy users don't
+///      collapse under the current user's "You" header.
+///   5. **Codex** runs last — Codex events parse via a different enum and
 ///      only the messages that don't match any Claude shape get here.
 fn classify(
     json: &str,
     agent_type: shared::AgentType,
     current_user_id: Option<&str>,
 ) -> Option<MessageIdentity> {
-    if should_group_with_assistant(json) {
-        return Some(MessageIdentity {
-            category: GroupCategory::Assistant,
-            label: if agent_type == shared::AgentType::Codex {
-                "Codex".to_string()
-            } else {
-                "Assistant".to_string()
-            },
-            badge_class: "assistant".to_string(),
-        });
-    }
+    let assistant_label = if agent_type == shared::AgentType::Codex {
+        "Codex"
+    } else {
+        "Assistant"
+    };
 
     match serde_json::from_str::<ClaudeMessage>(json) {
+        Ok(ClaudeMessage::Assistant(_)) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Assistant,
+                label: assistant_label.to_string(),
+                badge_class: "assistant".to_string(),
+            });
+        }
+        Ok(ClaudeMessage::User(msg)) => {
+            if user_is_tool_result_envelope(&msg) {
+                return Some(MessageIdentity {
+                    category: GroupCategory::Assistant,
+                    label: assistant_label.to_string(),
+                    badge_class: "assistant".to_string(),
+                });
+            }
+            if user_is_plain_text(&msg) {
+                let label = match &msg.sender {
+                    Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
+                        sender.name.clone()
+                    }
+                    _ => "You".to_string(),
+                };
+                return Some(MessageIdentity {
+                    category: GroupCategory::User,
+                    label,
+                    badge_class: "user".to_string(),
+                });
+            }
+        }
         Ok(ClaudeMessage::Portal(_)) => {
             return Some(MessageIdentity {
                 category: GroupCategory::Portal,
@@ -236,39 +238,21 @@ fn classify(
                 badge_class: "portal".to_string(),
             });
         }
-        Ok(ClaudeMessage::User(msg)) if is_plain_text_user(json) => {
-            let label = match &msg.sender {
-                Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
-                    sender.name.clone()
-                }
-                _ => "You".to_string(),
-            };
-            return Some(MessageIdentity {
-                category: GroupCategory::User,
-                label,
-                badge_class: "user".to_string(),
-            });
-        }
-        Ok(ClaudeMessage::Assistant(_)) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Assistant,
-                label: if agent_type == shared::AgentType::Codex {
-                    "Codex".to_string()
-                } else {
-                    "Assistant".to_string()
-                },
-                badge_class: "assistant".to_string(),
-            });
-        }
         _ => {}
     }
 
-    if agent_type == shared::AgentType::Codex && is_codex_event(json) {
-        return Some(MessageIdentity {
-            category: GroupCategory::Codex,
-            label: "Codex".to_string(),
-            badge_class: "assistant".to_string(),
-        });
+    if agent_type == shared::AgentType::Codex {
+        use crate::components::codex_renderer::CodexEvent;
+        if !matches!(
+            serde_json::from_str::<CodexEvent>(json),
+            Err(_) | Ok(CodexEvent::Unknown)
+        ) {
+            return Some(MessageIdentity {
+                category: GroupCategory::Codex,
+                label: "Codex".to_string(),
+                badge_class: "assistant".to_string(),
+            });
+        }
     }
 
     None
@@ -610,9 +594,10 @@ mod tests {
     #[test]
     fn user_tool_result_classifies_with_assistant() {
         let user_tool_result = read_tool_result_user_message("toolu_01abc");
-        assert!(
-            should_group_with_assistant(&user_tool_result),
-            "user-tool-result message should group with assistant; got false"
+        assert_eq!(
+            classify_category(&user_tool_result),
+            Some(GroupCategory::Assistant),
+            "user-tool-result message should classify into Assistant"
         );
     }
 
@@ -667,10 +652,11 @@ mod tests {
             "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
-        assert!(
-            should_group_with_assistant(&with_top_level_content),
+        assert_eq!(
+            classify_category(&with_top_level_content),
+            Some(GroupCategory::Assistant),
             "user-tool-result with a stale top-level `content` field should \
-             still group with the assistant; the predicate must look at the \
+             still classify into Assistant; the dispatch must look at the \
              nested message blocks, not the envelope's top-level field"
         );
     }
@@ -763,9 +749,10 @@ mod tests {
             "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
-        assert!(
-            !should_group_with_assistant(&plain_user),
-            "plain-text user message must NOT group with assistant"
+        assert_eq!(
+            classify_category(&plain_user),
+            Some(GroupCategory::User),
+            "plain-text user message must classify into User, not Assistant"
         );
     }
 
@@ -894,6 +881,90 @@ mod tests {
                 GroupCategory::Codex,
             ]
         );
+    }
+
+    /// One canonical wire shape per realistic message kind paired with the
+    /// `GroupCategory` the classifier MUST return on a Codex session. The
+    /// Codex agent type is the strictly-larger surface (Claude shapes
+    /// classify identically on both agent types, and Codex events only
+    /// classify on a Codex session), so a single Codex-agent sweep covers
+    /// the whole table.
+    ///
+    /// If a new variant lands in `ClaudeMessage` or `CodexEvent`, extend
+    /// this table — the classifier is the only place that needs to know
+    /// about the new variant.
+    #[test]
+    fn classifier_exhaustive_over_realistic_messages() {
+        let cases: Vec<(&str, String, Option<GroupCategory>)> = vec![
+            (
+                "assistant tool_use",
+                assistant_with_tool_use("toolu_a", "Read"),
+                Some(GroupCategory::Assistant),
+            ),
+            (
+                "user tool_result envelope",
+                read_tool_result_user_message("toolu_a"),
+                Some(GroupCategory::Assistant),
+            ),
+            (
+                "plain-text user prompt",
+                plain_user_text("hello"),
+                Some(GroupCategory::User),
+            ),
+            (
+                "portal frame",
+                portal_text_message("reconnected"),
+                Some(GroupCategory::Portal),
+            ),
+            (
+                "codex item.started",
+                codex_item_started_agent_message("starting"),
+                Some(GroupCategory::Codex),
+            ),
+            (
+                "system message",
+                serde_json::json!({
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": "01890000-0000-7000-8000-000000000001",
+                    "_created_at": "2026-05-17T10:00:00.000Z",
+                })
+                .to_string(),
+                None,
+            ),
+            (
+                "result message",
+                serde_json::json!({
+                    "type": "result",
+                    "subtype": "success",
+                    "session_id": "01890000-0000-7000-8000-000000000001",
+                    "_created_at": "2026-05-17T10:00:00.000Z",
+                })
+                .to_string(),
+                None,
+            ),
+            (
+                "error message: on Codex agent the `{type: error}` shape \
+                 also matches `CodexEvent::Error` and lands in the Codex \
+                 group, preserved from the pre-refactor classifier",
+                serde_json::json!({
+                    "type": "error",
+                    "message": "oops",
+                    "_created_at": "2026-05-17T10:00:00.000Z",
+                })
+                .to_string(),
+                Some(GroupCategory::Codex),
+            ),
+            ("unparseable garbage", "not even json".to_string(), None),
+        ];
+
+        for (label, json, expected) in cases {
+            let got = classify(&json, shared::AgentType::Codex, None).map(|i| i.category);
+            assert_eq!(
+                got, expected,
+                "{label}: classifier returned {got:?}, expected {expected:?}"
+            );
+        }
     }
 
     #[test]
