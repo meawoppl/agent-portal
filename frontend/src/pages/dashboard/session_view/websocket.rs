@@ -14,8 +14,17 @@ use super::types::{PendingPermission, WsSender};
 pub enum WsEvent {
     Connected(WsSender),
     Error(String),
-    Output(String),
-    HistoryBatch(Vec<String>),
+    /// Live `ClaudeOutput`. Second field is the server-assigned `created_at`
+    /// for the persisted DB row (`None` if the backend didn't send one — the
+    /// pre-#784 wire shape and the rare error-envelope paths that don't go
+    /// through a DB insert). The frontend uses it as the reconnect-replay
+    /// watermark rather than `Date.now()` (closes #784).
+    Output(String, Option<String>),
+    /// History replay batch. Second field is the server-assigned `created_at`
+    /// of the latest message in the batch (`None` if the batch is empty or
+    /// the backend is pre-#784). Used to set the reconnect watermark on
+    /// initial load.
+    HistoryBatch(Vec<String>, Option<String>),
     Permission(PendingPermission),
     BranchChanged(Option<String>, Option<String>, Option<String>),
 }
@@ -112,29 +121,44 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             // historical-read path (`MessageData::agent_type`); live
             // dispatch stays agent-agnostic.
             agent_type: _,
+            created_at,
         } => {
-            // Inject _sender into content for the renderer if sender info is present
-            let output = if sender_user_id.is_some() || sender_name.is_some() {
-                if let Some(mut obj) = content.as_object().cloned() {
-                    obj.insert(
-                        "_sender".to_string(),
-                        serde_json::json!({
-                            "user_id": sender_user_id.unwrap_or_default(),
-                            "name": sender_name.unwrap_or_default(),
-                        }),
-                    );
-                    serde_json::Value::Object(obj).to_string()
-                } else {
-                    content.to_string()
+            // Inject _sender into content for the renderer if sender info is
+            // present. Also fold `created_at` into the content as
+            // `_created_at` so per-message renderers (TimeAgo footers, etc.)
+            // see the same shape the historical-read path produces — and so
+            // future replayers downstream of `Output` can read it without
+            // changing the event signature again.
+            let mut content_val = content;
+            let needs_sender = sender_user_id.is_some() || sender_name.is_some();
+            if needs_sender || created_at.is_some() {
+                if let Some(obj) = content_val.as_object_mut() {
+                    if needs_sender {
+                        obj.insert(
+                            "_sender".to_string(),
+                            serde_json::json!({
+                                "user_id": sender_user_id.unwrap_or_default(),
+                                "name": sender_name.unwrap_or_default(),
+                            }),
+                        );
+                    }
+                    if let Some(ref ts) = created_at {
+                        obj.insert(
+                            "_created_at".to_string(),
+                            serde_json::Value::String(ts.clone()),
+                        );
+                    }
                 }
-            } else {
-                content.to_string()
-            };
-            on_event.emit(WsEvent::Output(output));
+            }
+            let output = content_val.to_string();
+            on_event.emit(WsEvent::Output(output, created_at));
         }
-        ServerToClient::HistoryBatch { messages } => {
+        ServerToClient::HistoryBatch {
+            messages,
+            last_created_at,
+        } => {
             let strings: Vec<String> = messages.into_iter().map(|v| v.to_string()).collect();
-            on_event.emit(WsEvent::HistoryBatch(strings));
+            on_event.emit(WsEvent::HistoryBatch(strings, last_created_at));
         }
         ServerToClient::PermissionRequest {
             request_id,
@@ -152,7 +176,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         ServerToClient::Error { message } => {
             let error_msg = ErrorMessage::new(message);
             let error_json = serde_json::to_string(&error_msg).unwrap_or_default();
-            on_event.emit(WsEvent::Output(error_json));
+            // Error envelopes don't go through the DB so they have no
+            // server-assigned `created_at` — leave the watermark unchanged.
+            on_event.emit(WsEvent::Output(error_json, None));
         }
         ServerToClient::SessionUpdate {
             session_id: _,
@@ -273,5 +299,192 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 100, "every interleaved push must reach the receiver");
+    }
+
+    // -----------------------------------------------------------------
+    // #784: server-assigned watermark plumbing
+    //
+    // The bug: the reconnect-replay path used the browser's `Date.now()`
+    // (or the equivalent `js_sys::Date::new_0()`) as `last_message_timestamp`,
+    // then sent that value as `replay_after` on reconnect. The backend
+    // filters `messages.created_at.gt(after)`, so clock skew between the
+    // browser and the server (or messages already in flight at the moment
+    // the client picked its watermark) silently dropped messages from the
+    // replayed history — the user never saw them and there was no warning.
+    //
+    // The fix: the server now sends its DB-row `created_at` alongside
+    // every `ClaudeOutput`, and on `HistoryBatch` as a `last_created_at`
+    // summary field. The frontend stores those values verbatim into the
+    // watermark. These tests pin the WS → WsEvent translation so a future
+    // refactor can't silently drop the server timestamp again.
+
+    use shared::ServerToClient;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use yew::Callback;
+
+    /// Collect emitted `WsEvent`s into a vec. Yew's `Callback::from` runs
+    /// the closure synchronously inside `emit`, so we can just stuff each
+    /// emission into an `Rc<RefCell<Vec<_>>>` and read it back after the
+    /// call returns — no executor, no `spawn_local`, no WASM needed.
+    fn capture() -> (Callback<WsEvent>, Rc<RefCell<Vec<WsEvent>>>) {
+        let sink: Rc<RefCell<Vec<WsEvent>>> = Rc::new(RefCell::new(vec![]));
+        let sink_inner = sink.clone();
+        let cb = Callback::from(move |event: WsEvent| {
+            sink_inner.borrow_mut().push(event);
+        });
+        (cb, sink)
+    }
+
+    /// A `ServerToClient::ClaudeOutput` carrying a `created_at` must be
+    /// translated into a `WsEvent::Output(_, Some(ts))` with the exact
+    /// server-assigned timestamp string. This is the value the component
+    /// pipes into `last_message_timestamp` (#784); if it ever falls back
+    /// to `Date.now()` here the silent-data-loss regression returns.
+    #[test]
+    fn claude_output_with_created_at_emits_server_timestamp() {
+        let (cb, sink) = capture();
+        let server_ts = "2026-05-18T12:34:56.789012".to_string();
+        let msg = ServerToClient::ClaudeOutput {
+            content: serde_json::json!({"type": "assistant", "text": "hi"}),
+            sender_user_id: None,
+            sender_name: None,
+            agent_type: shared::AgentType::Claude,
+            created_at: Some(server_ts.clone()),
+        };
+
+        handle_proxy_message(msg, &cb);
+
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WsEvent::Output(content, ts) => {
+                assert_eq!(
+                    ts.as_deref(),
+                    Some(server_ts.as_str()),
+                    "watermark must be the server's created_at, never Date.now()"
+                );
+                // _created_at must also be folded into the content JSON
+                // so per-message renderers see the same shape the
+                // historical-read path produces.
+                let parsed: serde_json::Value = serde_json::from_str(content).unwrap();
+                assert_eq!(
+                    parsed.get("_created_at").and_then(|v| v.as_str()),
+                    Some(server_ts.as_str()),
+                );
+            }
+            other => panic!("expected Output, got {:?}", debug_event(other)),
+        }
+    }
+
+    /// Backward-compat: a pre-#784 backend doesn't send `created_at`. The
+    /// `WsEvent::Output` watermark is then `None`, and the component is
+    /// expected to keep its prior watermark (never falling back to
+    /// `Date.now()`). The shape that must NOT regress is the second
+    /// tuple element being `None` — the existence of the field is what
+    /// lets the component keep using the previous server timestamp.
+    #[test]
+    fn claude_output_without_created_at_emits_none_watermark() {
+        let (cb, sink) = capture();
+        let msg = ServerToClient::ClaudeOutput {
+            content: serde_json::json!({"type": "assistant"}),
+            sender_user_id: None,
+            sender_name: None,
+            agent_type: shared::AgentType::Claude,
+            created_at: None,
+        };
+
+        handle_proxy_message(msg, &cb);
+
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WsEvent::Output(_, ts) => assert!(ts.is_none()),
+            other => panic!("expected Output, got {:?}", debug_event(other)),
+        }
+    }
+
+    /// `HistoryBatch` must carry the server-supplied `last_created_at`
+    /// through to the component verbatim. The component uses this to
+    /// initialize `last_message_timestamp` after a replay batch lands
+    /// — without it the next reconnect would re-fall-back to whatever
+    /// the component had stored from `Date.now()` (the original bug).
+    #[test]
+    fn history_batch_propagates_server_last_created_at() {
+        let (cb, sink) = capture();
+        let ts = "2026-05-18T00:00:00.000000".to_string();
+        let msg = ServerToClient::HistoryBatch {
+            messages: vec![serde_json::json!({"_created_at": ts.clone()})],
+            last_created_at: Some(ts.clone()),
+        };
+
+        handle_proxy_message(msg, &cb);
+
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WsEvent::HistoryBatch(batch, last) => {
+                assert_eq!(batch.len(), 1);
+                assert_eq!(last.as_deref(), Some(ts.as_str()));
+            }
+            other => panic!("expected HistoryBatch, got {:?}", debug_event(other)),
+        }
+    }
+
+    /// Empty / pre-#784 `HistoryBatch` (no `last_created_at`) must
+    /// translate to `WsEvent::HistoryBatch(_, None)` so the component
+    /// keeps any prior watermark instead of being clobbered.
+    #[test]
+    fn history_batch_without_last_created_at_emits_none() {
+        let (cb, sink) = capture();
+        let msg = ServerToClient::HistoryBatch {
+            messages: vec![],
+            last_created_at: None,
+        };
+
+        handle_proxy_message(msg, &cb);
+
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WsEvent::HistoryBatch(_, last) => assert!(last.is_none()),
+            other => panic!("expected HistoryBatch, got {:?}", debug_event(other)),
+        }
+    }
+
+    /// `ServerToClient::Error` envelopes don't go through the DB so they
+    /// have no server-assigned `created_at`. The translation must emit
+    /// `None` for the watermark slot — the component keeps the prior
+    /// watermark rather than reaching for `Date.now()` (the exact bug
+    /// #784 fixes; this test pins the no-regression contract for the
+    /// non-DB live-message path).
+    #[test]
+    fn error_envelope_emits_none_watermark() {
+        let (cb, sink) = capture();
+        let msg = ServerToClient::Error {
+            message: "boom".to_string(),
+        };
+
+        handle_proxy_message(msg, &cb);
+
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WsEvent::Output(_, ts) => assert!(ts.is_none()),
+            other => panic!("expected Output, got {:?}", debug_event(other)),
+        }
+    }
+
+    /// `WsEvent` doesn't `Debug` (some fields are non-Debug), so use a
+    /// hand-rolled variant tag for assertion failure messages.
+    fn debug_event(ev: &WsEvent) -> &'static str {
+        match ev {
+            WsEvent::Connected(_) => "Connected",
+            WsEvent::Error(_) => "Error",
+            WsEvent::Output(_, _) => "Output",
+            WsEvent::HistoryBatch(_, _) => "HistoryBatch",
+            WsEvent::Permission(_) => "Permission",
+            WsEvent::BranchChanged(_, _, _) => "BranchChanged",
+        }
     }
 }

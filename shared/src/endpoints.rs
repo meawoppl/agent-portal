@@ -301,10 +301,35 @@ pub enum ServerToClient {
         /// (and any hand-rolled JSON) parseable; new code MUST set it.
         #[serde(default)]
         agent_type: AgentType,
+        /// Server-assigned `created_at` of the persisted `messages` row, in
+        /// the ISO-8601 microsecond format the backend's `replay_history`
+        /// parser accepts (`%Y-%m-%dT%H:%M:%S%.f`). Sourced from the DB row
+        /// (via `RETURNING created_at` on the insert) so the frontend can
+        /// remember the **server's** watermark for reconnect replay rather
+        /// than `Date.now()` (closes #784 — silent data-loss on reconnect
+        /// when client/server clocks were skewed). `Option<_>` + `#[serde(
+        /// default, skip_serializing_if = "Option::is_none")]` for the rare
+        /// broadcast paths that don't go through a DB insert (e.g. error
+        /// envelopes injected from in-memory state) and for wire compat
+        /// with older backends.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        created_at: Option<String>,
     },
 
-    /// Batch of historical messages for replay
-    HistoryBatch { messages: Vec<serde_json::Value> },
+    /// Batch of historical messages for replay.
+    ///
+    /// Each entry in `messages` is the raw stored content JSON with `_sender`
+    /// (for user-role messages) and `_created_at` (the server-assigned row
+    /// timestamp) injected by the backend's `replay_history`. The separate
+    /// `last_created_at` is the timestamp of the latest message in this batch
+    /// (or `None` for an empty batch); the frontend uses it directly as its
+    /// reconnect-replay watermark without having to re-parse `_created_at`
+    /// out of the last entry. Both default to absent on older backends.
+    HistoryBatch {
+        messages: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_created_at: Option<String>,
+    },
 
     /// Permission request from Claude (tool wants to execute)
     PermissionRequest {
@@ -622,6 +647,7 @@ mod tests {
             sender_user_id: None,
             sender_name: None,
             agent_type: AgentType::Codex,
+            created_at: Some("2026-05-18T12:34:56.789012".to_string()),
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
@@ -629,10 +655,69 @@ mod tests {
             ServerToClient::ClaudeOutput {
                 content,
                 agent_type,
+                created_at,
                 ..
             } => {
                 assert_eq!(content["text"], "hello");
                 assert_eq!(agent_type, AgentType::Codex);
+                assert_eq!(created_at.as_deref(), Some("2026-05-18T12:34:56.789012"));
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    /// Pre-#784 wire JSON for `ServerToClient::ClaudeOutput` (no `created_at`)
+    /// must still parse. The frontend's reconnect watermark just stays at the
+    /// last value it had (or `None` if it never received a timestamped
+    /// message) — same backward-compat slack we extend for `agent_type`.
+    #[test]
+    fn wire_compat_pre_784_omits_created_at() {
+        let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
+        let parsed: ServerToClient = serde_json::from_str(json).unwrap();
+        match parsed {
+            ServerToClient::ClaudeOutput { created_at, .. } => {
+                assert!(created_at.is_none());
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        // Pre-#784 HistoryBatch without `last_created_at` must also parse.
+        let json = r#"{"type":"HistoryBatch","messages":[]}"#;
+        let parsed: ServerToClient = serde_json::from_str(json).unwrap();
+        match parsed {
+            ServerToClient::HistoryBatch {
+                messages,
+                last_created_at,
+            } => {
+                assert!(messages.is_empty());
+                assert!(last_created_at.is_none());
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    /// New-shape `HistoryBatch` carries the latest server-assigned timestamp
+    /// alongside the messages so the frontend can update the reconnect
+    /// watermark without re-parsing `_created_at` out of the last entry
+    /// (closes #784).
+    #[test]
+    fn history_batch_roundtrip_with_last_created_at() {
+        let msg = ServerToClient::HistoryBatch {
+            messages: vec![serde_json::json!({"_created_at": "2026-05-18T00:00:00.000000"})],
+            last_created_at: Some("2026-05-18T00:00:00.000000".to_string()),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServerToClient::HistoryBatch {
+                messages,
+                last_created_at,
+            } => {
+                assert_eq!(messages.len(), 1);
+                assert_eq!(
+                    last_created_at.as_deref(),
+                    Some("2026-05-18T00:00:00.000000")
+                );
             }
             _ => panic!("Wrong variant"),
         }
