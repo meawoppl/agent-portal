@@ -344,6 +344,7 @@ pub fn render_user_group(
 ) -> Html {
     let count = messages.len();
     let header_title = timestamp.unwrap_or_default().to_string();
+    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
     html! {
         <div class="claude-message message-group user-group">
             <div class="message-header" title={header_title}>
@@ -360,6 +361,11 @@ pub fn render_user_group(
                     }
                 }) }
             </div>
+            if let Some(iso) = last_iso {
+                <div class="message-footer">
+                    <TimeAgo iso={iso} />
+                </div>
+            }
         </div>
     }
 }
@@ -371,6 +377,7 @@ pub fn render_user_group(
 pub fn render_codex_group(messages: &[String], timestamp: Option<&str>) -> Html {
     let count = messages.len();
     let header_title = timestamp.unwrap_or_default().to_string();
+    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
     html! {
         <div class="claude-message message-group codex-group">
             <div class="message-header" title={header_title}>
@@ -384,6 +391,11 @@ pub fn render_codex_group(messages: &[String], timestamp: Option<&str>) -> Html 
                     html! { <crate::components::codex_renderer::CodexMessageRenderer json={json.clone()} /> }
                 }) }
             </div>
+            if let Some(iso) = last_iso {
+                <div class="message-footer">
+                    <TimeAgo iso={iso} />
+                </div>
+            }
         </div>
     }
 }
@@ -397,6 +409,7 @@ pub fn render_codex_group(messages: &[String], timestamp: Option<&str>) -> Html 
 pub fn render_portal_group(messages: &[String], timestamp: Option<&str>) -> Html {
     let count = messages.len();
     let header_title = timestamp.unwrap_or_default().to_string();
+    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
     html! {
         <div class="claude-message message-group portal-group">
             <div class="message-header" title={header_title}>
@@ -413,6 +426,11 @@ pub fn render_portal_group(messages: &[String], timestamp: Option<&str>) -> Html
                     }
                 }) }
             </div>
+            if let Some(iso) = last_iso {
+                <div class="message-footer">
+                    <TimeAgo iso={iso} />
+                </div>
+            }
         </div>
     }
 }
