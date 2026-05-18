@@ -5,6 +5,41 @@ use uuid::Uuid;
 
 use crate::SessionInfo;
 
+/// Typed citation entry attached to an Anthropic text content block.
+///
+/// The Anthropic wire shape carries one of several citation variants
+/// (`char_location`, `page_location`, `content_block_location`,
+/// `web_search_result_location`, …); only a small subset of fields is
+/// shown in the agent-portal UI today (`url`, `title`, and `cited_text`),
+/// so we model just those as a single flat struct with optional fields
+/// rather than re-deriving the full upstream enum here. Unknown fields on
+/// the wire are silently ignored — the UI only needs enough to render a
+/// `[1]`/`[2]`/… link list.
+///
+/// Closes #754: replaces a previous `Vec<serde_json::Value>` field on
+/// `ContentBlock::Text` that the frontend JSON-poked with
+/// `cite.get("url")` / `cite.get("title")` / `cite.get("cited_text")`.
+///
+/// `claude-codes` 2.1.141 also stores citations as `Vec<serde_json::Value>`
+/// on `TextBlock`; upstream issue
+/// <https://github.com/meawoppl/rust-code-agent-sdks/issues/142> proposes
+/// this typed shape so we can eventually drop the local definition and
+/// just re-export from the SDK.
+// TODO(SDK #142): replace with `claude_codes::Citation` once upstream
+// adds a typed model — see agent-portal #754.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Citation {
+    /// URL of the cited source (e.g. a web search result link).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Human-readable title of the cited source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Exact text quoted from the cited source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cited_text: Option<String>,
+}
+
 /// Typed envelope for a Codex permission request's `input` payload.
 ///
 /// Replaces the prior `serde_json::Value` envelope shared between the proxy
@@ -679,6 +714,47 @@ mod tests {
         let parsed: CodexPermissionInput = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, input);
         assert_eq!(parsed.tool_name(), "AskUserQuestion");
+    }
+
+    #[test]
+    fn citation_full_roundtrip() {
+        let cite = Citation {
+            url: Some("https://example.com".to_string()),
+            title: Some("Example".to_string()),
+            cited_text: Some("hello world".to_string()),
+        };
+        let json = serde_json::to_value(&cite).unwrap();
+        assert_eq!(json["url"], "https://example.com");
+        assert_eq!(json["title"], "Example");
+        assert_eq!(json["cited_text"], "hello world");
+        let parsed: Citation = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, cite);
+    }
+
+    /// Wire frame as actually produced by the Anthropic API for a
+    /// `web_search_result_location` citation (per claude-codes
+    /// `test_text_block_with_citations`). Extra fields like `type` must
+    /// be silently ignored.
+    #[test]
+    fn citation_ignores_unknown_fields() {
+        let json = serde_json::json!({
+            "type": "web_search_result_location",
+            "url": "https://example.com",
+            "title": "Example"
+        });
+        let parsed: Citation = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.url.as_deref(), Some("https://example.com"));
+        assert_eq!(parsed.title.as_deref(), Some("Example"));
+        assert!(parsed.cited_text.is_none());
+    }
+
+    /// Empty wire frame must parse to all-`None` so historical content
+    /// blocks that omitted citations stay readable.
+    #[test]
+    fn citation_empty_roundtrip() {
+        let json = serde_json::json!({});
+        let parsed: Citation = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, Citation::default());
     }
 
     /// Regression guard for the pattern that motivated #725/#731: optional

@@ -9,7 +9,7 @@ use crate::components::time_ago::TimeAgo;
 use crate::components::tool_renderers::render_tool_use;
 use serde::Deserialize;
 use serde_json::Value;
-use shared::ToolResultContent;
+use shared::{Citation, ToolResultContent};
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
@@ -1087,16 +1087,16 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     }
 }
 
-fn render_citations(citations: &[Value]) -> Html {
+fn render_citations(citations: &[Citation]) -> Html {
     if citations.is_empty() {
         return html! {};
     }
     html! {
         <div class="citation-list">
             { for citations.iter().enumerate().map(|(i, cite)| {
-                let url = cite.get("url").and_then(|v| v.as_str()).unwrap_or("#");
-                let title = cite.get("title").and_then(|v| v.as_str())
-                    .or_else(|| cite.get("cited_text").and_then(|v| v.as_str()))
+                let url = cite.url.as_deref().unwrap_or("#");
+                let title = cite.title.as_deref()
+                    .or(cite.cited_text.as_deref())
                     .unwrap_or("source");
                 html! {
                     <a class="citation-link"

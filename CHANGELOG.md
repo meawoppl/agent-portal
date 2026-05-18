@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.64
+
+- **Typed `Citation` struct for content-block citations (closes #754).** `frontend/src/components/message_renderer/renderers.rs::render_citations` was iterating a `Vec<serde_json::Value>` and per-entry JSON-poking `cite.get("url")`, `cite.get("title")`, and `cite.get("cited_text")` — the last typed-interface gap left on the assistant text-block render path. The `citations` field on `ContentBlock::Text` in `frontend/src/components/message_renderer/types.rs` is now `Vec<shared::Citation>`, a new `#[derive(Serialize, Deserialize)] struct Citation { url, title, cited_text }` in `shared::api` with all-optional `#[serde(default)]` fields. `claude-codes` 2.1.141 also stores citations as `Vec<serde_json::Value>` on `TextBlock` (`src/io/content_blocks.rs:168`), so the local definition stays for now and SDK issue [meawoppl/rust-code-agent-sdks#142](https://github.com/meawoppl/rust-code-agent-sdks/issues/142) has been filed proposing the typed shape upstream — once it lands we can drop `shared::Citation` and re-export from `claude-codes` per the typed-interfaces rule. Wire shape is unchanged: unknown fields like `type: "web_search_result_location"` are silently dropped (regression-tested), older messages that omit `citations` entirely keep parsing via `#[serde(default)]`, and empty citations still serialize to nothing via `skip_serializing_if = "Option::is_none"`. The renderer's URL/title fallback logic (`title → cited_text → "source"`, `url → "#"`) is preserved exactly. Unit tests cover the full round-trip, the unknown-field-ignored path, and the empty-frame default.
+
 ## 2.5.63
 
 - **Fix #758 (PR 1/4): Categorized `MessageGroup` + Assistant grouping bug fix.** Two things landed together:
