@@ -377,31 +377,45 @@ fn handle_web_input(
     if let serde_json::Value::String(text) = &content {
         if text.starts_with('/') {
             let portal = PortalMessage::text(format!("`{}`", text));
+
+            // Look up session once so the broadcast and DB insert share the
+            // same agent_type (the session row is the source of truth here —
+            // these messages don't originate from a proxy emission).
+            let session = db_pool.get().ok().and_then(|mut conn| {
+                use crate::schema::sessions;
+                sessions::table
+                    .find(session_id)
+                    .first::<crate::models::Session>(&mut conn)
+                    .ok()
+            });
+
+            let agent_type = session
+                .as_ref()
+                .and_then(|s| s.agent_type.parse::<shared::AgentType>().ok())
+                .unwrap_or_default();
+
             session_manager.broadcast_to_web_clients(
                 key,
                 ServerToClient::ClaudeOutput {
                     content: portal.to_json(),
                     sender_user_id: None,
                     sender_name: None,
+                    agent_type,
                 },
             );
             // Store in DB so it appears in history
-            if let Ok(mut conn) = db_pool.get() {
-                use crate::schema::{messages, sessions};
-                if let Ok(session) = sessions::table
-                    .find(session_id)
-                    .first::<crate::models::Session>(&mut conn)
-                {
-                    let new_message = crate::models::NewMessage {
-                        session_id,
-                        role: "portal".to_string(),
-                        content: serde_json::to_string(&portal.to_json()).unwrap_or_default(),
-                        user_id: session.user_id,
-                    };
-                    let _ = diesel::insert_into(messages::table)
-                        .values(&new_message)
-                        .execute(&mut conn);
-                }
+            if let (Some(session), Ok(mut conn)) = (session, db_pool.get()) {
+                use crate::schema::messages;
+                let new_message = crate::models::NewMessage {
+                    session_id,
+                    role: "portal".to_string(),
+                    content: serde_json::to_string(&portal.to_json()).unwrap_or_default(),
+                    user_id: session.user_id,
+                    agent_type: session.agent_type.clone(),
+                };
+                let _ = diesel::insert_into(messages::table)
+                    .values(&new_message)
+                    .execute(&mut conn);
             }
         }
     }

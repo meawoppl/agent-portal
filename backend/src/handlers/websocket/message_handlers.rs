@@ -1,7 +1,7 @@
 use super::{ProxySender, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
-use shared::{ServerToClient, ServerToProxy};
+use shared::{AgentType, ServerToClient, ServerToProxy};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -88,6 +88,7 @@ pub fn handle_claude_output(
     content: serde_json::Value,
     seq: Option<u64>,
     image_store: &crate::handlers::images::ImageStore,
+    agent_type: AgentType,
 ) {
     // Deduplicate sequenced messages before broadcasting
     if let (Some(session_id), Some(seq_num)) = (db_session_id, seq) {
@@ -170,6 +171,7 @@ pub fn handle_claude_output(
                 content: content.clone(),
                 sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
                 sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
+                agent_type,
             },
         );
     }
@@ -200,6 +202,7 @@ pub fn handle_claude_output(
                 role: role.to_string(),
                 content: content.to_string(),
                 user_id: actual_user_id,
+                agent_type: agent_type.as_str().to_string(),
             };
 
             if let Err(e) = diesel::insert_into(messages::table)

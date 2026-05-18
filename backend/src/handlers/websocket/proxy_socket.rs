@@ -158,7 +158,10 @@ fn handle_proxy_message(
                 }
             }
         }
-        ProxyToServer::ClaudeOutput { content } => {
+        ProxyToServer::ClaudeOutput {
+            content,
+            agent_type,
+        } => {
             handle_claude_output(
                 session_manager,
                 session_key,
@@ -168,9 +171,14 @@ fn handle_proxy_message(
                 content,
                 None,
                 &app_state.image_store,
+                agent_type,
             );
         }
-        ProxyToServer::SequencedOutput { seq, content } => {
+        ProxyToServer::SequencedOutput {
+            seq,
+            content,
+            agent_type,
+        } => {
             handle_claude_output(
                 session_manager,
                 session_key,
@@ -180,6 +188,7 @@ fn handle_proxy_message(
                 content,
                 Some(seq),
                 &app_state.image_store,
+                agent_type,
             );
         }
         ProxyToServer::Heartbeat => {

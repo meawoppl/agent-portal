@@ -95,11 +95,19 @@ Proxy → Backend: ProxyToServer::InputAck { session_id, ack_seq }
 **Claude Response (Claude → Frontend)**:
 ```
 Claude → Proxy: JSON line from stdout (ClaudeOutput)
-Proxy → Backend: ProxyToServer::SequencedOutput { seq, content }
-Backend: Stores in DB, broadcasts to web clients
+Proxy → Backend: ProxyToServer::SequencedOutput { seq, content, agent_type }
+Backend: Stores in DB (tagged with agent_type), broadcasts to web clients
 Backend → Proxy: ServerToProxy::OutputAck { session_id, ack_seq }
-Backend → Frontend: ServerToClient::ClaudeOutput { content }
+Backend → Frontend: ServerToClient::ClaudeOutput { content, agent_type, .. }
 ```
+
+The per-message `agent_type` is tagged at the proxy emission boundary (not
+captured from registration) so a future multi-agent session could route
+messages from more than one agent over a single `/ws/session` connection
+without mis-attributing them. Pre-2.5.42 proxies that don't send the field
+parse as `AgentType::Claude` via `#[serde(default)]` — a known-misattribution
+hazard for in-flight codex sessions running an older proxy until the proxy
+upgrades.
 
 ## Async Task Structure
 

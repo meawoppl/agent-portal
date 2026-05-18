@@ -270,6 +270,8 @@ struct ConnectionState {
     working_directory: String,
     /// Active file uploads being received in chunks
     active_uploads: std::collections::HashMap<String, FileReceiveState>,
+    /// Agent type for tagging per-message wire output (proxy emission side)
+    agent_type: shared::AgentType,
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
@@ -408,6 +410,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
                     let msg = ProxyToServer::SequencedOutput {
                         seq: pending.seq,
                         content: pending.content.clone(),
+                        agent_type: config_with_branch.agent_type,
                     };
                     if conn.send(msg).await.is_err() {
                         error!("Failed to replay pending message seq={}", pending.seq);
@@ -477,6 +480,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
         let msg = ProxyToServer::SequencedOutput {
             seq,
             content: portal_content,
+            agent_type: config_with_branch.agent_type,
         };
         if conn.send(msg).await.is_err() {
             error!("Failed to send connection portal message");
@@ -657,6 +661,7 @@ async fn run_message_loop<A: Agent>(
         current_repo_url,
         session.output_buffer.clone(),
         max_image_mb,
+        config.agent_type,
     );
 
     // Spawn WebSocket reader task
@@ -691,6 +696,7 @@ async fn run_message_loop<A: Agent>(
         file_upload_rx,
         working_directory: config.working_directory.clone(),
         active_uploads: std::collections::HashMap::new(),
+        agent_type: config.agent_type,
     };
 
     // On the very first connection of this session, inject the portal
@@ -848,6 +854,7 @@ async fn run_main_loop<A: Agent>(
                     let msg = ProxyToServer::SequencedOutput {
                         seq,
                         content: value.clone(),
+                        agent_type: state.agent_type,
                     };
                     let mut ws = state.ws_write.lock().await;
                     if ws.send(msg).await.is_err() {
@@ -865,6 +872,7 @@ async fn run_main_loop<A: Agent>(
                     &mut state.wiggum_state,
                     &state.output_buffer,
                     claude_session,
+                    state.agent_type,
                 ).await {
                     Some(result) => return result,
                     None => continue,
