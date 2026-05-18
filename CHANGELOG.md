@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.49
+
+- **Typed `ToolInput::ExitPlanMode` access in `frontend/src/pages/dashboard/permission_dialog.rs` (closes #736).** The ExitPlanMode permission card was reading `perm.input.get("allowedPrompts").and_then(|v| v.as_array())` and then per-entry `.get("tool").as_str()` / `.get("prompt").as_str()` on the inner objects — silent regression bait if the wire renames a field. Replaced with `serde_json::from_value::<ToolInput>(perm.input.clone())` matching `ToolInput::ExitPlanMode(epm)` and reading `epm.allowed_prompts: Option<Vec<AllowedPrompt>>` typed; iteration uses typed `p.tool` / `p.prompt` directly. `ToolInput`, `ExitPlanModeInput`, and `AllowedPrompt` are now re-exported from `shared` so the frontend doesn't need a direct `claude-codes` dep. The `perm.input: serde_json::Value` envelope stays — per-tool inputs have different shapes; typed decoding happens at the dispatch site. Render layout, CSS classes, and other permission-tool branches (Bash, Edit, Write) are unchanged — they remain separate issues.
+
 ## 2.5.48
 
 - **`render_todowrite_tool` uses typed `ToolInput::TodoWrite` instead of JSON-poking (closes #735).** The frontend renderer now deserializes its `serde_json::Value` input into `claude_codes::tool_inputs::ToolInput`, matches the `TodoWrite(TodoWriteInput)` variant, and reads each `TodoItem`'s typed `content: String` and `status: TodoStatus` enum (`Completed` / `InProgress` / `Pending` / `Unknown(_)`). Same icons, same CSS classes, same empty-list fallback when deserialization fails — just no more `.get("todos").as_array()` / `.get("status").as_str()`. `shared` now re-exports `TodoItem`, `TodoStatus`, `TodoWriteInput`, and `ToolInput` so the frontend can use them without taking a direct `claude-codes` dependency.

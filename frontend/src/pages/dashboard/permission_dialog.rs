@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use web_sys::KeyboardEvent;
 use yew::prelude::*;
 
+use shared::{AllowedPrompt, ToolInput};
+
 use super::types::{
     format_permission_input, parse_ask_user_question, AskUserQuestionInput, PendingPermission,
     QuestionAnswers,
@@ -377,12 +379,18 @@ fn render_exitplanmode_permission(props: &PermissionDialogProps) -> Html {
         _ => {}
     });
 
-    let allowed_prompts = perm
-        .input
-        .get("allowedPrompts")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    // Decode the per-tool input typed instead of JSON-poking field names.
+    // `perm.input` stays a `serde_json::Value` envelope (it carries different shapes per tool);
+    // we parse to the typed `ToolInput` enum at this dispatch site and pull the
+    // `ExitPlanMode` variant's `allowed_prompts` directly.
+    let allowed_prompts: Vec<AllowedPrompt> =
+        serde_json::from_value::<ToolInput>(perm.input.clone())
+            .ok()
+            .and_then(|t| match t {
+                ToolInput::ExitPlanMode(epm) => epm.allowed_prompts,
+                _ => None,
+            })
+            .unwrap_or_default();
 
     let options: Vec<(&str, &str)> = vec![("allow", "Allow"), ("deny", "Deny")];
 
@@ -404,16 +412,12 @@ fn render_exitplanmode_permission(props: &PermissionDialogProps) -> Html {
                             <div class="exitplan-permissions">
                                 <div class="exitplan-permissions-header">{ "Requested permissions:" }</div>
                                 {
-                                    allowed_prompts.iter().map(|p| {
-                                        let tool = p.get("tool").and_then(|t| t.as_str()).unwrap_or("Unknown");
-                                        let prompt = p.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
-                                        html! {
-                                            <div class="exitplan-permission-item">
-                                                <span class="permission-tool-name">{ tool }</span>
-                                                <span class="permission-separator">{ ": " }</span>
-                                                <span class="permission-description">{ prompt }</span>
-                                            </div>
-                                        }
+                                    allowed_prompts.iter().map(|p| html! {
+                                        <div class="exitplan-permission-item">
+                                            <span class="permission-tool-name">{ &p.tool }</span>
+                                            <span class="permission-separator">{ ": " }</span>
+                                            <span class="permission-description">{ &p.prompt }</span>
+                                        </div>
                                     }).collect::<Html>()
                                 }
                             </div>
