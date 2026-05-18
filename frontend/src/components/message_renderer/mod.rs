@@ -27,15 +27,50 @@ pub(super) fn extract_raw_iso(json: &str) -> Option<String> {
     val.get("_created_at")?.as_str().map(|s| s.to_string())
 }
 
-/// A group of messages to render together
+/// Category for a run of consecutive related messages — drives both the
+/// grouping decision (`classify`) and the wrapper style on the rendered
+/// group (`MessageGroupRenderer`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupCategory {
+    /// Assistant messages and the user-shaped envelopes that carry only
+    /// tool results back to the agent.
+    Assistant,
+    /// Consecutive portal messages (connect/disconnect notices, retry
+    /// announcements, codex raw-frame attachments, etc.).
+    Portal,
+    /// Consecutive plain-text user messages typed by the human. Excludes
+    /// the tool-result user envelopes which group with Assistant.
+    User,
+    /// Consecutive Codex protocol events (any non-Unknown `CodexEvent`).
+    Codex,
+}
+
+impl GroupCategory {
+    /// Short stable prefix for `MessageGroup::key`. Don't change without
+    /// understanding the Yew diff implications — these strings end up in
+    /// virtual-dom keys and switching them mid-flight would re-mount every
+    /// group component on the page.
+    fn key_prefix(self) -> &'static str {
+        match self {
+            GroupCategory::Assistant => "g",
+            GroupCategory::Portal => "p",
+            GroupCategory::User => "u",
+            GroupCategory::Codex => "x",
+        }
+    }
+}
+
+/// A group of messages to render together.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageGroup {
-    /// A single non-assistant message
+    /// A single message that doesn't classify into any group category.
+    /// Kept as a distinct variant (rather than a one-element `Grouped`) so
+    /// the most common case avoids the group-wrapper render path and keeps
+    /// its Yew key stable independent of category.
     Single(String),
-    /// Multiple consecutive assistant messages grouped together
-    AssistantGroup(Vec<String>),
-    /// One or more consecutive user/agent messages with the same display identity.
+    /// One or more consecutive messages with the same display identity.
     IdentityGroup {
+        category: GroupCategory,
         label: String,
         badge_class: String,
         messages: Vec<String>,
@@ -52,21 +87,20 @@ impl MessageGroup {
     /// first message's `_created_at` keeps the key stable across reorderings.
     /// `index` is used only as a fallback when no timestamp is present.
     pub fn key(&self, index: usize) -> yew::virtual_dom::Key {
-        let first = match self {
-            MessageGroup::Single(json) => json,
-            MessageGroup::AssistantGroup(messages) => match messages.first() {
-                Some(j) => j,
-                None => return yew::virtual_dom::Key::from(format!("g{}", index)),
+        let (prefix, first) = match self {
+            MessageGroup::Single(json) => ("s", json.as_str()),
+            MessageGroup::IdentityGroup {
+                category, messages, ..
+            } => match messages.first() {
+                Some(j) => (category.key_prefix(), j.as_str()),
+                None => {
+                    return yew::virtual_dom::Key::from(format!(
+                        "{}{}",
+                        category.key_prefix(),
+                        index
+                    ));
+                }
             },
-            MessageGroup::IdentityGroup { messages, .. } => match messages.first() {
-                Some(j) => j,
-                None => return yew::virtual_dom::Key::from(format!("i{}", index)),
-            },
-        };
-        let prefix = match self {
-            MessageGroup::Single(_) => "s",
-            MessageGroup::AssistantGroup(_) => "g",
-            MessageGroup::IdentityGroup { .. } => "i",
         };
         match extract_raw_iso(first) {
             Some(iso) => yew::virtual_dom::Key::from(format!("{}-{}", prefix, iso)),
@@ -75,159 +109,210 @@ impl MessageGroup {
     }
 }
 
-/// Check if a message should be grouped with assistant messages
-/// This includes assistant messages AND tool result messages (user messages containing only tool results)
+/// Check if a message should be grouped with assistant messages.
+///
+/// Groups together: assistant turns + the user-shaped envelopes that carry
+/// only tool results back to Claude. The decision is made on the **nested**
+/// `message.content` blocks alone — we deliberately do NOT short-circuit on
+/// the top-level `content` field, because that field is the optimistic-send
+/// envelope shape and can leak onto real echoes through the cross-process
+/// wire wrapping. Gating on it broke serial Read tool-use grouping in the
+/// wild (#758).
 fn should_group_with_assistant(json: &str) -> bool {
     match serde_json::from_str::<ClaudeMessage>(json) {
         Ok(ClaudeMessage::Assistant(_)) => true,
         Ok(ClaudeMessage::User(msg)) => {
-            if msg.content.is_some() {
+            let Some(message) = &msg.message else {
                 return false;
-            }
-            if let Some(message) = &msg.message {
-                if let Some(blocks) = &message.content {
-                    return !blocks.is_empty()
-                        && blocks.iter().all(|b| {
-                            matches!(
-                                b,
-                                ContentBlock::ToolResult { .. }
-                                    | ContentBlock::WebSearchToolResult { .. }
-                                    | ContentBlock::McpToolResult { .. }
-                                    | ContentBlock::CodeExecutionToolResult { .. }
-                            )
-                        });
-                }
-            }
-            false
+            };
+            let Some(blocks) = &message.content else {
+                return false;
+            };
+            !blocks.is_empty()
+                && blocks.iter().all(|b| {
+                    matches!(
+                        b,
+                        ContentBlock::ToolResult { .. }
+                            | ContentBlock::WebSearchToolResult { .. }
+                            | ContentBlock::McpToolResult { .. }
+                            | ContentBlock::CodeExecutionToolResult { .. }
+                    )
+                })
         }
         _ => false,
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct MessageIdentity {
+    category: GroupCategory,
     label: String,
     badge_class: String,
 }
 
-fn message_identity(
+/// Check if a message is a plain-text human user prompt — the kind we want
+/// to roll into the User group. Two wire shapes carry this content: the
+/// optimistic-send envelope (`UserMessage.content: Some(String)`) and the
+/// Claude echo shape (`UserMessage.message.content: Some([Text { .. }, …])`).
+/// We deliberately require *all* nested blocks to be `Text` so we don't
+/// silently roll a tool-result envelope into User — those belong with
+/// Assistant and are caught earlier by `should_group_with_assistant`.
+fn is_plain_text_user(json: &str) -> bool {
+    let Ok(ClaudeMessage::User(msg)) = serde_json::from_str::<ClaudeMessage>(json) else {
+        return false;
+    };
+    if msg.content.is_some() {
+        return true;
+    }
+    let Some(message) = &msg.message else {
+        return false;
+    };
+    let Some(blocks) = &message.content else {
+        return false;
+    };
+    !blocks.is_empty()
+        && blocks
+            .iter()
+            .all(|b| matches!(b, ContentBlock::Text { .. }))
+}
+
+/// Check if a message is a Codex protocol event (any non-`Unknown`
+/// `CodexEvent` variant). Used to roll consecutive Codex events into one
+/// purple-accented group. Parses lazily and only returns true on a
+/// successfully-recognized variant, so a Claude message that happens to
+/// fail Claude parsing won't accidentally end up here.
+fn is_codex_event(json: &str) -> bool {
+    use crate::components::codex_renderer::CodexEvent;
+    !matches!(
+        serde_json::from_str::<CodexEvent>(json),
+        Err(_) | Ok(CodexEvent::Unknown)
+    )
+}
+
+/// Classify a single wire message into the display identity it belongs to,
+/// or `None` if it shouldn't roll into any group (renders as `Single`).
+///
+/// Sole entry point for "which identity group does this message belong to"
+/// across the codebase — add new categories here, not at the `group_messages`
+/// loop level.
+///
+/// **Predicate ordering matters**:
+///   1. **Assistant** runs first because user-tool-result envelopes are
+///      user-shaped but belong with the surrounding assistant turn. If User
+///      ran first, every Read tool-result would silently land in a User
+///      group instead of continuing the assistant run (the regression
+///      target of PR 1).
+///   2. **Portal** runs next — a portal message is its own shape so it
+///      can't collide with Assistant, but listing it explicitly here keeps
+///      the ordering documented.
+///   3. **User** runs after Assistant so plain-text user prompts land
+///      together while tool-result envelopes have already been claimed. The
+///      sender label is part of the group key, so proxy users don't collapse
+///      under the current user's "You" header.
+///   4. **Codex** runs last — Codex events parse via a different enum and
+///      only the messages that don't match any Claude shape get here.
+fn classify(
     json: &str,
     agent_type: shared::AgentType,
     current_user_id: Option<&str>,
 ) -> Option<MessageIdentity> {
-    match serde_json::from_str::<ClaudeMessage>(json) {
-        Ok(ClaudeMessage::User(msg)) if msg.content.is_some() => {
-            let label = match &msg.sender {
-                Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
-                    sender.name.clone()
-                }
-                _ => "You".to_string(),
-            };
-            Some(MessageIdentity {
-                label,
-                badge_class: "user".to_string(),
-            })
-        }
-        Ok(ClaudeMessage::Assistant(_)) => Some(MessageIdentity {
+    if should_group_with_assistant(json) {
+        return Some(MessageIdentity {
+            category: GroupCategory::Assistant,
             label: if agent_type == shared::AgentType::Codex {
                 "Codex".to_string()
             } else {
                 "Assistant".to_string()
             },
             badge_class: "assistant".to_string(),
-        }),
-        Ok(ClaudeMessage::Portal(_)) => Some(MessageIdentity {
-            label: "Portal".to_string(),
-            badge_class: "portal".to_string(),
-        }),
-        _ if agent_type == shared::AgentType::Codex
-            && super::codex_renderer::is_codex_agent_message(json) =>
-        {
-            Some(MessageIdentity {
-                label: "Codex".to_string(),
-                badge_class: "assistant".to_string(),
-            })
-        }
-        _ => None,
-    }
-}
-
-fn push_identity_group(
-    groups: &mut Vec<MessageGroup>,
-    identity: &mut Option<MessageIdentity>,
-    messages: &mut Vec<String>,
-) {
-    if messages.is_empty() {
-        return;
-    }
-    if let Some(id) = identity.take() {
-        groups.push(MessageGroup::IdentityGroup {
-            label: id.label,
-            badge_class: id.badge_class,
-            messages: std::mem::take(messages),
         });
     }
+
+    match serde_json::from_str::<ClaudeMessage>(json) {
+        Ok(ClaudeMessage::Portal(_)) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Portal,
+                label: "Portal".to_string(),
+                badge_class: "portal".to_string(),
+            });
+        }
+        Ok(ClaudeMessage::User(msg)) if is_plain_text_user(json) => {
+            let label = match &msg.sender {
+                Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
+                    sender.name.clone()
+                }
+                _ => "You".to_string(),
+            };
+            return Some(MessageIdentity {
+                category: GroupCategory::User,
+                label,
+                badge_class: "user".to_string(),
+            });
+        }
+        Ok(ClaudeMessage::Assistant(_)) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Assistant,
+                label: if agent_type == shared::AgentType::Codex {
+                    "Codex".to_string()
+                } else {
+                    "Assistant".to_string()
+                },
+                badge_class: "assistant".to_string(),
+            });
+        }
+        _ => {}
+    }
+
+    if agent_type == shared::AgentType::Codex && is_codex_event(json) {
+        return Some(MessageIdentity {
+            category: GroupCategory::Codex,
+            label: "Codex".to_string(),
+            badge_class: "assistant".to_string(),
+        });
+    }
+
+    None
 }
 
-/// Group consecutive user/agent messages by display identity, and group Claude
-/// assistant tool-result runs for the legacy Claude renderer.
+/// Walk `messages` and collapse consecutive same-category runs into
+/// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
+/// `MessageGroup::Single`.
 pub fn group_messages(
     messages: &[String],
     agent_type: shared::AgentType,
     current_user_id: Option<&str>,
 ) -> Vec<MessageGroup> {
     let mut groups = Vec::new();
-    let mut current_assistant_group: Vec<String> = Vec::new();
-    let mut current_identity: Option<MessageIdentity> = None;
-    let mut current_identity_group: Vec<String> = Vec::new();
+    let mut current: Option<(MessageIdentity, Vec<String>)> = None;
 
-    for json in messages {
-        if agent_type != shared::AgentType::Codex && should_group_with_assistant(json) {
-            push_identity_group(
-                &mut groups,
-                &mut current_identity,
-                &mut current_identity_group,
-            );
-            current_assistant_group.push(json.clone());
-        } else if let Some(identity) = message_identity(json, agent_type, current_user_id) {
-            if !current_assistant_group.is_empty() {
-                groups.push(MessageGroup::AssistantGroup(std::mem::take(
-                    &mut current_assistant_group,
-                )));
-            }
-            if current_identity.as_ref() != Some(&identity) {
-                push_identity_group(
-                    &mut groups,
-                    &mut current_identity,
-                    &mut current_identity_group,
-                );
-                current_identity = Some(identity);
-            }
-            current_identity_group.push(json.clone());
-        } else {
-            push_identity_group(
-                &mut groups,
-                &mut current_identity,
-                &mut current_identity_group,
-            );
-            if !current_assistant_group.is_empty() {
-                groups.push(MessageGroup::AssistantGroup(std::mem::take(
-                    &mut current_assistant_group,
-                )));
-            }
-            groups.push(MessageGroup::Single(json.clone()));
+    fn flush(out: &mut Vec<MessageGroup>, slot: &mut Option<(MessageIdentity, Vec<String>)>) {
+        if let Some((identity, messages)) = slot.take() {
+            out.push(MessageGroup::IdentityGroup {
+                category: identity.category,
+                label: identity.label,
+                badge_class: identity.badge_class,
+                messages,
+            });
         }
     }
 
-    push_identity_group(
-        &mut groups,
-        &mut current_identity,
-        &mut current_identity_group,
-    );
-    if !current_assistant_group.is_empty() {
-        groups.push(MessageGroup::AssistantGroup(current_assistant_group));
+    for json in messages {
+        match classify(json, agent_type, current_user_id) {
+            Some(identity) => match current.as_mut() {
+                Some((cur_identity, msgs)) if *cur_identity == identity => msgs.push(json.clone()),
+                _ => {
+                    flush(&mut groups, &mut current);
+                    current = Some((identity, vec![json.clone()]));
+                }
+            },
+            None => {
+                flush(&mut groups, &mut current);
+                groups.push(MessageGroup::Single(json.clone()));
+            }
+        }
     }
 
+    flush(&mut groups, &mut current);
     groups
 }
 
@@ -309,6 +394,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} /> }
         }
         MessageGroup::IdentityGroup {
+            category,
             label,
             badge_class,
             messages,
@@ -317,8 +403,13 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 .first()
                 .and_then(|json| extract_local_timestamp(json));
             let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
+            let wrapper_class = match category {
+                GroupCategory::User => "user-message",
+                GroupCategory::Portal => "portal-message",
+                GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
+            };
             html! {
-                <div class={classes!("claude-message", if badge_class == "user" { "user-message" } else { "assistant-message" })}>
+                <div class={classes!("claude-message", wrapper_class)}>
                     <div class="message-header" title={ts.unwrap_or_default()}>
                         <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
                         if messages.len() > 1 {
@@ -342,12 +433,6 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                     }
                 </div>
             }
-        }
-        MessageGroup::AssistantGroup(messages) => {
-            let ts = messages
-                .first()
-                .and_then(|json| extract_local_timestamp(json));
-            renderers::render_assistant_group(messages, ts.as_deref())
         }
     }
 }
@@ -458,6 +543,358 @@ pub fn format_duration(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn classify_category(json: &str) -> Option<GroupCategory> {
+        classify(json, shared::AgentType::Claude, None).map(|identity| identity.category)
+    }
+
+    fn classify_codex_category(json: &str) -> Option<GroupCategory> {
+        classify(json, shared::AgentType::Codex, None).map(|identity| identity.category)
+    }
+
+    fn group_for_tests(messages: &[String]) -> Vec<MessageGroup> {
+        group_messages(messages, shared::AgentType::Claude, None)
+    }
+
+    fn group_for_codex_tests(messages: &[String]) -> Vec<MessageGroup> {
+        group_messages(messages, shared::AgentType::Codex, None)
+    }
+
+    /// Realistic Claude wire shape for a user message containing a single
+    /// `tool_result` content block (the kind Read / Bash / Edit etc. produce).
+    /// Matches `claude-codes` 2.1.x `ClaudeOutput::User(UserMessage)`
+    /// serialization with the backend's wire envelope additions
+    /// (`_created_at` etc.).
+    fn read_tool_result_user_message(tool_use_id: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": "file contents...",
+                }]
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
+    }
+
+    /// Realistic Claude assistant message with a single `tool_use` block.
+    fn assistant_with_tool_use(tool_use_id: &str, tool_name: &str) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": tool_use_id,
+                    "name": tool_name,
+                    "input": {"file_path": "/some/path"},
+                }]
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
+    }
+
+    /// A tool-result user message coming from a Claude session MUST classify
+    /// into the assistant group — otherwise serial Read tool uses don't roll
+    /// together with their preceding assistant turn.
+    ///
+    /// This is the regression target for the "serial Read tool uses don't
+    /// group" symptom on Claude sessions.
+    #[test]
+    fn user_tool_result_classifies_with_assistant() {
+        let user_tool_result = read_tool_result_user_message("toolu_01abc");
+        assert!(
+            should_group_with_assistant(&user_tool_result),
+            "user-tool-result message should group with assistant; got false"
+        );
+    }
+
+    /// Sanity: two consecutive (assistant tool_use + user tool_result) pairs
+    /// must collapse into a single assistant identity group of length 4. If the
+    /// classifier above is broken, this falls apart.
+    #[test]
+    fn serial_read_tool_uses_collapse_into_one_group() {
+        let messages = vec![
+            assistant_with_tool_use("toolu_01", "Read"),
+            read_tool_result_user_message("toolu_01"),
+            assistant_with_tool_use("toolu_02", "Read"),
+            read_tool_result_user_message("toolu_02"),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(
+            groups.len(),
+            1,
+            "expected one Assistant identity group carrying all 4 messages, got {} groups",
+            groups.len()
+        );
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Assistant,
+                messages,
+                ..
+            } => assert_eq!(messages.len(), 4),
+            other => panic!("expected an Assistant identity run, got {:?}", other),
+        }
+    }
+
+    /// Edge case: top-level `content` field on a user-tool-result message
+    /// (e.g. from the optimistic-send envelope leaking onto a real echo)
+    /// trips the existing `msg.content.is_some()` early-bail and breaks the
+    /// run. This is a candidate root cause for the reported regression on
+    /// production Claude sessions even though the canonical wire shape
+    /// doesn't carry top-level `content`.
+    #[test]
+    fn user_tool_result_with_top_level_content_still_groups() {
+        let with_top_level_content = serde_json::json!({
+            "type": "user",
+            "content": "stale optimistic content",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01",
+                    "content": "file contents...",
+                }]
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+        assert!(
+            should_group_with_assistant(&with_top_level_content),
+            "user-tool-result with a stale top-level `content` field should \
+             still group with the assistant; the predicate must look at the \
+             nested message blocks, not the envelope's top-level field"
+        );
+    }
+
+    /// PR 2/4 of #758: portal messages must classify together.
+    fn portal_text_message(text: &str) -> String {
+        serde_json::json!({
+            "type": "portal",
+            "content": [{"type": "text", "text": text}],
+            "_created_at": "2026-05-18T05:00:00.000Z",
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn portal_messages_classify_into_portal_group() {
+        let msg = portal_text_message("Connection restored");
+        assert_eq!(classify_category(&msg), Some(GroupCategory::Portal));
+    }
+
+    #[test]
+    fn serial_portal_messages_collapse_into_one_group() {
+        let messages = vec![
+            portal_text_message("Disconnected at 2026-05-18T05:00:00Z"),
+            portal_text_message("Reconnected at 2026-05-18T05:01:00Z"),
+            portal_text_message("Codex frame attached"),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(
+            groups.len(),
+            1,
+            "expected one Portal group, got {} groups",
+            groups.len()
+        );
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Portal,
+                messages,
+                ..
+            } => assert_eq!(messages.len(), 3),
+            other => panic!("expected Portal identity run, got {:?}", other),
+        }
+    }
+
+    /// An assistant message between two portal messages must split the run —
+    /// portal-group only collapses *consecutive* portal messages.
+    #[test]
+    fn portal_run_breaks_on_intervening_assistant() {
+        let messages = vec![
+            portal_text_message("first portal"),
+            assistant_with_tool_use("toolu_01", "Read"),
+            portal_text_message("second portal"),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(
+            groups.len(),
+            3,
+            "expected 3 groups (Portal, Assistant, Portal), got {}",
+            groups.len()
+        );
+        let cats: Vec<_> = groups
+            .iter()
+            .map(|g| match g {
+                MessageGroup::IdentityGroup { category, .. } => Some(*category),
+                MessageGroup::Single(_) => None,
+            })
+            .collect();
+        assert_eq!(
+            cats,
+            vec![
+                Some(GroupCategory::Portal),
+                Some(GroupCategory::Assistant),
+                Some(GroupCategory::Portal),
+            ]
+        );
+    }
+
+    /// Edge case: real user input (plain text typed by the human, not a
+    /// tool result) must NOT join the assistant group, otherwise prose
+    /// would silently get rolled into a previous assistant block.
+    #[test]
+    fn real_user_text_does_not_group_with_assistant() {
+        let plain_user = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": "hello agent"}]
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+        assert!(
+            !should_group_with_assistant(&plain_user),
+            "plain-text user message must NOT group with assistant"
+        );
+    }
+
+    // ---- PR 3/4 of #758: User + Codex grouping ----
+
+    fn plain_user_text(text: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": text}]
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
+    }
+
+    fn codex_item_started_agent_message(text: &str) -> String {
+        serde_json::json!({
+            "type": "item.started",
+            "item": {
+                "type": "agent_message",
+                "id": "item_abc",
+                "text": text,
+            },
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn plain_text_user_classifies_into_user_group() {
+        let msg = plain_user_text("hello agent");
+        assert_eq!(classify_category(&msg), Some(GroupCategory::User));
+    }
+
+    /// Predicate ordering guard: a tool-result user envelope must STILL go
+    /// into Assistant, not User. If `is_plain_text_user` claimed it first,
+    /// every Read tool-result on Claude would silently break the assistant
+    /// run.
+    #[test]
+    fn tool_result_user_envelope_stays_in_assistant_group() {
+        let msg = read_tool_result_user_message("toolu_01");
+        assert_eq!(classify_category(&msg), Some(GroupCategory::Assistant));
+    }
+
+    #[test]
+    fn serial_user_text_collapses_into_user_group() {
+        let messages = vec![
+            plain_user_text("first prompt"),
+            plain_user_text("follow-up"),
+            plain_user_text("one more thing"),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(groups.len(), 1);
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::User,
+                messages,
+                ..
+            } => assert_eq!(messages.len(), 3),
+            other => panic!("expected User identity run, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn user_run_breaks_on_intervening_assistant() {
+        let messages = vec![
+            plain_user_text("question one"),
+            assistant_with_tool_use("toolu_01", "Read"),
+            plain_user_text("question two"),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(groups.len(), 3);
+    }
+
+    #[test]
+    fn codex_event_classifies_into_codex_group() {
+        let msg = codex_item_started_agent_message("hi");
+        assert_eq!(classify_codex_category(&msg), Some(GroupCategory::Codex));
+    }
+
+    #[test]
+    fn serial_codex_events_collapse_into_codex_group() {
+        let messages = vec![
+            codex_item_started_agent_message("starting"),
+            codex_item_started_agent_message("more progress"),
+            codex_item_started_agent_message("done"),
+        ];
+        let groups = group_for_codex_tests(&messages);
+        assert_eq!(groups.len(), 1);
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Codex,
+                messages,
+                ..
+            } => assert_eq!(messages.len(), 3),
+            other => panic!("expected Codex identity run, got {:?}", other),
+        }
+    }
+
+    /// A portal message between two codex events must split the run —
+    /// codex-group only collapses *consecutive* codex events.
+    #[test]
+    fn codex_run_breaks_on_intervening_portal() {
+        let messages = vec![
+            codex_item_started_agent_message("first"),
+            portal_text_message("reconnected"),
+            codex_item_started_agent_message("second"),
+        ];
+        let groups = group_for_codex_tests(&messages);
+        assert_eq!(groups.len(), 3);
+        let cats: Vec<_> = groups
+            .iter()
+            .filter_map(|g| match g {
+                MessageGroup::IdentityGroup { category, .. } => Some(*category),
+                MessageGroup::Single(_) => None,
+            })
+            .collect();
+        assert_eq!(
+            cats,
+            vec![
+                GroupCategory::Codex,
+                GroupCategory::Portal,
+                GroupCategory::Codex,
+            ]
+        );
+    }
 
     #[test]
     fn test_shorten_model_name() {

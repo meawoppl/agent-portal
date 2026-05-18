@@ -1,18 +1,23 @@
 use serde_json::Value;
+use shared::{TaskInput, ToolInput};
 use yew::prelude::*;
 
 pub fn render_task_tool(input: &Value) -> Html {
-    let description = input
-        .get("description")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let agent_type = input
-        .get("subagent_type")
-        .and_then(|v| v.as_str())
+    let task: Option<TaskInput> = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::Task(task) => Some(task),
+            _ => None,
+        });
+
+    let description: &str = task.as_ref().map(|t| t.description.as_str()).unwrap_or("?");
+    let agent_type: &str = task
+        .as_ref()
+        .map(|t| t.subagent_type.as_str())
         .unwrap_or("agent");
-    let background = input
-        .get("run_in_background")
-        .and_then(|v| v.as_bool())
+    let background: bool = task
+        .as_ref()
+        .and_then(|t| t.run_in_background)
         .unwrap_or(false);
 
     html! {

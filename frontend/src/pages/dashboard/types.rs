@@ -1,9 +1,7 @@
 //! Shared types for the dashboard module
 
 use serde::Deserialize;
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 use uuid::Uuid;
 
 /// Answers for multiple AskUserQuestion questions
@@ -25,8 +23,15 @@ pub const RAIL_ORIENTATION_STORAGE_KEY: &str = "claude-portal-rail-orientation";
 /// Maximum number of messages to keep in frontend memory (matches backend limit)
 pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
-/// Type alias for WebSocket sender to reduce type complexity
-pub type WsSender = Rc<RefCell<Option<ws_bridge::yew_client::Sender<shared::ClientEndpoint>>>>;
+/// Type alias for WebSocket sender.
+///
+/// This is the **producer half** of an unbounded mpsc queue that feeds a
+/// single owner task holding the real `ws_bridge` sink. Multiple callers
+/// can push concurrently without coordination — see
+/// `pages::dashboard::session_view::websocket::send_message`. The previous
+/// `Rc<RefCell<Option<Sender>>>` shape was racy under concurrent producers
+/// (closes #783).
+pub type WsSender = futures_channel::mpsc::UnboundedSender<shared::ClientToServer>;
 
 /// Message data from the API
 #[derive(Clone, PartialEq, Deserialize)]

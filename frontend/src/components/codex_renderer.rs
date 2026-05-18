@@ -256,13 +256,24 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
     }
 }
 
+/// CSS class set for any item-card wrapper. Adds `codex-item-in-progress` for
+/// pre-completion (`item.started` / `item.updated`) renders so the stylesheet
+/// can pulse the indicator and dim the text.
+fn item_card_classes(completed: bool) -> &'static str {
+    if completed {
+        "claude-message assistant-message codex-item"
+    } else {
+        "claude-message assistant-message codex-item codex-item-in-progress"
+    }
+}
+
 fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
     let Some(item) = item else {
         return html! {};
     };
     match item {
-        CodexItem::AgentMessage { text, .. } => render_agent_message(text.as_deref()),
-        CodexItem::Reasoning { text, .. } => render_reasoning(text.as_deref()),
+        CodexItem::AgentMessage { text, .. } => render_agent_message(text.as_deref(), completed),
+        CodexItem::Reasoning { text, .. } => render_reasoning(text.as_deref(), completed),
         CodexItem::CommandExecution {
             command,
             aggregated_output,
@@ -278,31 +289,23 @@ fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
         ),
         CodexItem::FileChange {
             changes, status, ..
-        } => render_file_change(changes.as_deref(), status.as_deref()),
+        } => render_file_change(changes.as_deref(), status.as_deref(), completed),
         CodexItem::McpToolCall {
             server,
             tool,
             status,
             ..
-        } => render_mcp_tool_call(server.as_deref(), tool.as_deref(), status.as_deref()),
-        CodexItem::WebSearch { query, .. } => render_web_search(query.as_deref()),
-        CodexItem::TodoList { items, .. } => render_todo_list(items.as_deref()),
+        } => render_mcp_tool_call(
+            server.as_deref(),
+            tool.as_deref(),
+            status.as_deref(),
+            completed,
+        ),
+        CodexItem::WebSearch { query, .. } => render_web_search(query.as_deref(), completed),
+        CodexItem::TodoList { items, .. } => render_todo_list(items.as_deref(), completed),
         CodexItem::Error { message, .. } => render_item_error(message.as_deref()),
         CodexItem::Unknown => html! {},
     }
-}
-
-pub fn is_codex_agent_message(json: &str) -> bool {
-    matches!(
-        serde_json::from_str::<CodexEvent>(json),
-        Ok(CodexEvent::ItemCompleted {
-            item: Some(CodexItem::AgentMessage { .. }),
-        }) | Ok(CodexEvent::ItemStarted {
-            item: Some(CodexItem::AgentMessage { .. }),
-        }) | Ok(CodexEvent::ItemUpdated {
-            item: Some(CodexItem::AgentMessage { .. }),
-        })
-    )
 }
 
 pub fn render_codex_message_content(json: &str) -> Html {
@@ -316,17 +319,35 @@ pub fn render_codex_message_content(json: &str) -> Html {
         | Ok(CodexEvent::ItemUpdated {
             item: Some(CodexItem::AgentMessage { text, .. }),
         }) => render_agent_message_content(text.as_deref()),
+        Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
+            render_item(item.as_ref(), false)
+        }
+        Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
+        Ok(CodexEvent::TurnCompleted { usage }) => render_turn_completed(usage.as_ref()),
+        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref()),
+        Ok(CodexEvent::Error { message }) => render_thread_error(message.as_deref()),
+        Ok(CodexEvent::TurnDiffUpdated { params }) => {
+            render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
+        }
+        Ok(CodexEvent::FileChangePatchUpdated { params }) => {
+            render_file_change_patch(params.as_ref().and_then(|p| p.changes.as_deref()))
+        }
+        Ok(CodexEvent::TurnPlanUpdated { params }) => render_turn_plan(
+            params.as_ref().and_then(|p| p.plan.as_deref()),
+            params.as_ref().and_then(|p| p.explanation.as_deref()),
+        ),
         _ => html! {},
     }
 }
 
-fn render_agent_message(text: Option<&str>) -> Html {
+fn render_agent_message(text: Option<&str>, completed: bool) -> Html {
     let text = text.unwrap_or("");
     if text.is_empty() {
         return html! {};
     }
+    let class = item_card_classes(completed);
     html! {
-        <div class="claude-message assistant-message">
+        <div class={class}>
             <div class="message-header">
                 <span class="message-type-badge assistant">{ "Codex" }</span>
             </div>
@@ -344,13 +365,14 @@ fn render_agent_message_content(text: Option<&str>) -> Html {
     }
 }
 
-fn render_reasoning(text: Option<&str>) -> Html {
+fn render_reasoning(text: Option<&str>, completed: bool) -> Html {
     let text = text.unwrap_or("");
     if text.is_empty() {
         return html! {};
     }
+    let class = item_card_classes(completed);
     html! {
-        <div class="claude-message assistant-message">
+        <div class={class}>
             <div class="message-body">
                 <div class="thinking-block">
                     <span class="thinking-label">{ "reasoning" }</span>
@@ -382,9 +404,10 @@ fn render_command_execution(
     };
 
     let is_error = exit_code.is_some_and(|c| c != 0);
+    let card_class = item_card_classes(completed);
 
     html! {
-        <div class="claude-message assistant-message">
+        <div class={card_class}>
             <div class="message-body">
                 <div class="tool-use-section">
                     <div class="tool-use-header">
@@ -411,16 +434,25 @@ fn render_command_execution(
     }
 }
 
-fn render_file_change(changes: Option<&[FileChange]>, status: Option<&str>) -> Html {
+fn render_file_change(
+    changes: Option<&[FileChange]>,
+    status: Option<&str>,
+    completed: bool,
+) -> Html {
     let changes = changes.unwrap_or(&[]);
     if changes.is_empty() {
         return html! {};
     }
 
-    let status_label = status.unwrap_or("completed");
+    let status_label = status.unwrap_or(if completed {
+        "completed"
+    } else {
+        "in progress"
+    });
+    let card_class = item_card_classes(completed);
 
     html! {
-        <div class="claude-message assistant-message">
+        <div class={card_class}>
             <div class="message-body">
                 <div class="tool-use-section">
                     <div class="tool-use-header">
@@ -447,13 +479,23 @@ fn render_file_change(changes: Option<&[FileChange]>, status: Option<&str>) -> H
     }
 }
 
-fn render_mcp_tool_call(server: Option<&str>, tool: Option<&str>, status: Option<&str>) -> Html {
+fn render_mcp_tool_call(
+    server: Option<&str>,
+    tool: Option<&str>,
+    status: Option<&str>,
+    completed: bool,
+) -> Html {
     let server = server.unwrap_or("(unknown)");
     let tool = tool.unwrap_or("(unknown)");
-    let status = status.unwrap_or("in_progress");
+    let status = status.unwrap_or(if completed {
+        "completed"
+    } else {
+        "in_progress"
+    });
+    let card_class = item_card_classes(completed);
 
     html! {
-        <div class="claude-message assistant-message">
+        <div class={card_class}>
             <div class="message-body">
                 <div class="tool-use-section">
                     <div class="tool-use-header">
@@ -467,10 +509,11 @@ fn render_mcp_tool_call(server: Option<&str>, tool: Option<&str>, status: Option
     }
 }
 
-fn render_web_search(query: Option<&str>) -> Html {
+fn render_web_search(query: Option<&str>, completed: bool) -> Html {
     let query = query.unwrap_or("(no query)");
+    let card_class = item_card_classes(completed);
     html! {
-        <div class="claude-message assistant-message">
+        <div class={card_class}>
             <div class="message-body">
                 <div class="tool-use-section">
                     <div class="tool-use-header">
@@ -484,13 +527,14 @@ fn render_web_search(query: Option<&str>) -> Html {
     }
 }
 
-fn render_todo_list(items: Option<&[TodoEntry]>) -> Html {
+fn render_todo_list(items: Option<&[TodoEntry]>, completed: bool) -> Html {
     let items = items.unwrap_or(&[]);
     if items.is_empty() {
         return html! {};
     }
+    let card_class = item_card_classes(completed);
     html! {
-        <div class="claude-message assistant-message">
+        <div class={card_class}>
             <div class="message-body">
                 <div class="tool-use-section">
                     <div class="tool-use-header">
@@ -731,14 +775,22 @@ fn render_raw_codex(json: &str) -> Html {
 
 /// Check if a Codex message indicates "awaiting" (turn complete or turn failed)
 pub fn is_codex_terminal_event(json: &str) -> Option<bool> {
-    let val: Value = serde_json::from_str(json).ok()?;
-    let event_type = val.get("type")?.as_str()?;
-    match event_type {
-        "turn.completed" | "turn.failed" => Some(true),
-        "item.started" | "item.updated" | "item.completed" | "turn.started" | "thread.started" => {
-            Some(false)
-        }
-        _ => None,
+    let event: CodexEvent = serde_json::from_str(json).ok()?;
+    match event {
+        CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => Some(true),
+        CodexEvent::ItemStarted { .. }
+        | CodexEvent::ItemUpdated { .. }
+        | CodexEvent::ItemCompleted { .. }
+        | CodexEvent::TurnStarted { .. }
+        | CodexEvent::ThreadStarted { .. } => Some(false),
+        CodexEvent::Error { .. }
+        | CodexEvent::TurnDiffUpdated { .. }
+        | CodexEvent::FileChangePatchUpdated { .. }
+        | CodexEvent::TurnPlanUpdated { .. }
+        | CodexEvent::PlanDelta { .. }
+        | CodexEvent::ReasoningSummaryPartAdded { .. }
+        | CodexEvent::ReasoningTextDelta { .. }
+        | CodexEvent::Unknown => None,
     }
 }
 

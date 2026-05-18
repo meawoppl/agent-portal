@@ -121,16 +121,31 @@ pub async fn delete_session(
 
     use crate::schema::{session_members, sessions};
 
-    let session = sessions::table
-        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+    // Delete remains owner-only — editors can mutate session state but not
+    // destroy the row. We accept either the `sessions.user_id` owner (works
+    // even when no membership row exists) OR a `session_members.role = owner`
+    // row (the post-membership-table canonical owner).
+    let owned_by_user = sessions::table
         .filter(sessions::id.eq(session_id))
-        .filter(session_members::user_id.eq(current_user_id))
-        .filter(session_members::role.eq("owner"))
+        .filter(sessions::user_id.eq(current_user_id))
         .select(Session::as_select())
         .first::<Session>(&mut conn)
         .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
-        .ok_or(AppError::NotFound("Session not found"))?;
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    let session = match owned_by_user {
+        Some(s) => s,
+        None => sessions::table
+            .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+            .filter(sessions::id.eq(session_id))
+            .filter(session_members::user_id.eq(current_user_id))
+            .filter(session_members::role.eq("owner"))
+            .select(Session::as_select())
+            .first::<Session>(&mut conn)
+            .optional()
+            .map_err(|e| AppError::DbQuery(e.to_string()))?
+            .ok_or(AppError::NotFound("Session not found"))?,
+    };
 
     super::helpers::delete_session_with_data(&mut conn, &session, true)
         .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
@@ -147,17 +162,15 @@ pub async fn stop_session(
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
-    use crate::schema::{session_members, sessions};
-
-    sessions::table
-        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
-        .filter(sessions::id.eq(session_id))
-        .filter(session_members::user_id.eq(current_user_id))
-        .select(Session::as_select())
-        .first::<Session>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
-        .ok_or(AppError::NotFound("Session not found"))?;
+    // Stopping a session is a mutation — viewer-role members must not be
+    // able to terminate sessions they only have read access to. The helper
+    // also accepts the session's `sessions.user_id` owner row, so owners
+    // without a `session_members` row still work.
+    crate::handlers::session_access::verify_session_mutator(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
 
     let stopped = app_state.session_manager.disconnect_session(session_id);
     app_state

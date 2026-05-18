@@ -161,22 +161,38 @@ pub fn handle_claude_output(
 
     // Extract base64 images from portal messages and replace with URLs.
     // This keeps WebSocket messages small — browsers fetch images via HTTP.
-    let content = extract_portal_images(content, image_store);
+    //
+    // The inserted images need a `user_id` for the auth check on
+    // `/api/images/{id}` (#786). We don't yet have the `Session` row in scope
+    // here — the DB lookup below also reads it — so we do an early, cheap
+    // owner-only `.select` here. If we can't resolve a user_id we *skip*
+    // image extraction rather than silently drop ownership: the original
+    // base64 just stays inline in the broadcast (slower but correct), and
+    // nothing un-owned ever lands in the cache.
+    let inserting_user_id: Option<Uuid> = db_session_id.and_then(|sid| {
+        use crate::schema::sessions;
+        let mut conn = db_pool.get().ok()?;
+        sessions::table
+            .find(sid)
+            .select(sessions::user_id)
+            .first::<Uuid>(&mut conn)
+            .ok()
+    });
+    let content = match inserting_user_id {
+        Some(uid) => extract_portal_images(content, image_store, uid, db_session_id),
+        None => content,
+    };
 
-    // Broadcast output to all web clients with sender metadata alongside content
-    if let Some(ref key) = session_key {
-        session_manager.broadcast_to_web_clients(
-            key,
-            ServerToClient::ClaudeOutput {
-                content: content.clone(),
-                sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
-                sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
-                agent_type,
-            },
-        );
-    }
-
-    // Store message and update last_activity in DB
+    // Insert the message FIRST and recover the server-assigned `created_at`
+    // so the live broadcast carries the same timestamp the historical-read
+    // path would surface (closes #784 — silent data-loss on reconnect when
+    // the frontend used `Date.now()` as the replay watermark). Doing the
+    // insert before the broadcast is the only way to make the persisted
+    // row's `created_at` available to the wire frame; if the insert fails
+    // we fall back to broadcasting without a timestamp rather than
+    // silently dropping the message (the frontend keeps its prior
+    // watermark and a future message will heal it).
+    let mut row_created_at: Option<String> = None;
     if let (Some(session_id), Ok(mut conn)) = (db_session_id, db_pool.get()) {
         use crate::schema::{messages, sessions};
 
@@ -205,11 +221,24 @@ pub fn handle_claude_output(
                 agent_type: agent_type.as_str().to_string(),
             };
 
-            if let Err(e) = diesel::insert_into(messages::table)
+            match diesel::insert_into(messages::table)
                 .values(&new_message)
-                .execute(&mut conn)
+                .get_result::<crate::models::Message>(&mut conn)
             {
-                error!("Failed to store message: {}", e);
+                Ok(inserted) => {
+                    // Format matches `replay_history`'s parser
+                    // (`%Y-%m-%dT%H:%M:%S%.f`) and the frontend's
+                    // `last_message_timestamp` watermark shape.
+                    row_created_at = Some(
+                        inserted
+                            .created_at
+                            .format("%Y-%m-%dT%H:%M:%S%.6f")
+                            .to_string(),
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to store message: {}", e);
+                }
             }
 
             if role == shared::MessageRole::Result {
@@ -241,6 +270,23 @@ pub fn handle_claude_output(
                 ack_seq: seq_num,
             });
         }
+    }
+
+    // Broadcast output to all web clients with sender metadata + server
+    // timestamp alongside content. The `created_at` here is the same
+    // timestamp the message landed in the DB with; the frontend uses it
+    // as the watermark for reconnect replay (closes #784).
+    if let Some(ref key) = session_key {
+        session_manager.broadcast_to_web_clients(
+            key,
+            ServerToClient::ClaudeOutput {
+                content: content.clone(),
+                sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
+                sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
+                agent_type,
+                created_at: row_created_at,
+            },
+        );
     }
 }
 
@@ -325,9 +371,15 @@ fn store_result_metadata(
 
 /// If the content is a portal message with base64 image data, extract the image
 /// into the store and replace the data field with a URL path.
+///
+/// `inserting_user_id` is the session owner (looked up by the caller). Stored
+/// images are bound to that user + the optional `session_id` so the
+/// `/api/images/{id}` route can gate fetches by ownership/membership (#786).
 fn extract_portal_images(
     mut content: serde_json::Value,
     image_store: &crate::handlers::images::ImageStore,
+    inserting_user_id: Uuid,
+    session_id: Option<Uuid>,
 ) -> serde_json::Value {
     // Only process portal messages
     if content.get("type").and_then(|t| t.as_str()) != Some("portal") {
@@ -358,7 +410,9 @@ fn extract_portal_images(
             continue;
         }
 
-        if let Some(id) = image_store.store_base64(&media_type, data_str) {
+        if let Some(id) =
+            image_store.store_base64(&media_type, data_str, inserting_user_id, session_id)
+        {
             let url = format!("/api/images/{}", id);
             item["data"] = serde_json::Value::String(url);
             item["source_type"] = serde_json::Value::String("url".to_string());

@@ -1,9 +1,45 @@
 //! Shared API request/response types for HTTP endpoints.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::SessionInfo;
+
+/// Typed citation entry attached to an Anthropic text content block.
+///
+/// The Anthropic wire shape carries one of several citation variants
+/// (`char_location`, `page_location`, `content_block_location`,
+/// `web_search_result_location`, …); only a small subset of fields is
+/// shown in the agent-portal UI today (`url`, `title`, and `cited_text`),
+/// so we model just those as a single flat struct with optional fields
+/// rather than re-deriving the full upstream enum here. Unknown fields on
+/// the wire are silently ignored — the UI only needs enough to render a
+/// `[1]`/`[2]`/… link list.
+///
+/// Closes #754: replaces a previous `Vec<serde_json::Value>` field on
+/// `ContentBlock::Text` that the frontend JSON-poked with
+/// `cite.get("url")` / `cite.get("title")` / `cite.get("cited_text")`.
+///
+/// `claude-codes` 2.1.141 also stores citations as `Vec<serde_json::Value>`
+/// on `TextBlock`; upstream issue
+/// <https://github.com/meawoppl/rust-code-agent-sdks/issues/142> proposes
+/// this typed shape so we can eventually drop the local definition and
+/// just re-export from the SDK.
+// TODO(SDK #142): replace with `claude_codes::Citation` once upstream
+// adds a typed model — see agent-portal #754.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Citation {
+    /// URL of the cited source (e.g. a web search result link).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Human-readable title of the cited source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Exact text quoted from the cited source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cited_text: Option<String>,
+}
 
 /// Typed envelope for a Codex permission request's `input` payload.
 ///
@@ -286,6 +322,111 @@ pub struct SoundSettingsResponse {
 }
 
 // =============================================================================
+// Typed shapes for `SystemMessage.extra` per-subtype dispatch
+//
+// Closes agent-portal #752. The local lenient `SystemMessage` type used by the
+// frontend renderer carries a `#[serde(flatten)] extra: Option<serde_json::Value>`
+// for ad-hoc per-subtype metadata. Renderers previously poked `extra.get("…")`
+// by field name; these structs are the typed mirrors so renderers can
+// `serde_json::from_value::<T>(extra.clone())` once per branch and read named
+// fields. The wire shape is unchanged — these structs are deserialize-only
+// views over the same JSON bytes.
+//
+// Where a subtype is already fully covered upstream by `claude-codes`, the
+// renderer uses the SDK type directly (`TaskNotificationMessage`,
+// `TaskStartedMessage`). The remaining structs below cover gaps not yet
+// represented in `claude-codes`:
+//
+// - `CompactionExtra` — `summary`, `leaf_message_count`/`message_count`,
+//   `duration_ms`, `content`, `text`. Filed upstream as
+//   `rust-code-agent-sdks#141`; the SDK's `CompactBoundaryMessage` currently
+//   only exposes `compact_metadata { pre_tokens, trigger }`. Once upstream
+//   lands these, this struct can be deleted and the renderer can switch to
+//   `CCSystemMessage::as_compact_boundary()`.
+// - `InitExtra` — `fast_mode_state`. The SDK's `InitMessage::fast_mode_state`
+//   is already typed `Option<String>`; we keep a narrow local mirror because
+//   `InitMessage` has many required fields and a single-field shape is
+//   friendlier to partial frames the renderer encounters in practice.
+// =============================================================================
+
+/// Typed view of the `compact_boundary` subtype's `SystemMessage.extra`.
+///
+/// All fields are optional with `#[serde(default)]` so any wire shape that
+/// omits them still deserializes (yielding `None`). Read priority for the
+/// summary text is `summary` → `content` → `text` to match the historical
+/// renderer fallback chain.
+//
+// TODO(SDK rust-code-agent-sdks#141): drop this struct once
+// `claude_codes::CompactBoundaryMessage` exposes these fields directly and
+// switch `render_compaction_completed` to `CCSystemMessage::as_compact_boundary`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompactionExtra {
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Primary "messages summarized" count. CLI variants spell this
+    /// `leaf_message_count` (preferred) or `message_count` (legacy).
+    #[serde(default)]
+    pub leaf_message_count: Option<u32>,
+    #[serde(default)]
+    pub message_count: Option<u32>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    /// Legacy aliases for the summary text — older CLI builds emitted under
+    /// `content` or `text` instead of `summary`.
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+impl CompactionExtra {
+    /// First-non-empty summary text, mirroring the historical renderer fallback
+    /// chain `summary` → `content` → `text`.
+    pub fn summary_text(&self) -> Option<&str> {
+        self.summary
+            .as_deref()
+            .or(self.content.as_deref())
+            .or(self.text.as_deref())
+    }
+
+    /// First-set message count, preferring `leaf_message_count` over the
+    /// legacy `message_count` spelling.
+    pub fn message_count(&self) -> Option<u32> {
+        self.leaf_message_count.or(self.message_count)
+    }
+}
+
+/// Typed view of the `init` subtype's `SystemMessage.extra` for fields the
+/// renderer needs that aren't already top-level on the local lenient
+/// `SystemMessage`. `fast_mode_state` matches `claude_codes::InitMessage::fast_mode_state`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InitExtra {
+    #[serde(default)]
+    pub fast_mode_state: Option<String>,
+}
+
+/// Typed view of the `task_notification` subtype's `SystemMessage.extra`.
+///
+/// Mirrors the renderable subset of `claude_codes::TaskNotificationMessage`
+/// (which requires `session_id` + `summary` — both already consumed by the
+/// outer `SystemMessage`'s typed top-level fields, so they would not appear
+/// in `extra` if we deserialized the SDK type directly). All fields optional
+/// so partial frames (e.g. `failed` notifications without `usage` or
+/// `tool_use_id`) still parse.
+///
+/// The nested `status` and `usage` types are re-used from `claude-codes` so
+/// the wire shape stays in lockstep with the SDK enum.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TaskNotificationExtra {
+    #[serde(default)]
+    pub status: Option<claude_codes::io::TaskStatus>,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub usage: Option<claude_codes::io::TaskUsage>,
+}
+
+// =============================================================================
 // Authenticated User Endpoint (GET /api/auth/me)
 // =============================================================================
 
@@ -455,6 +596,54 @@ pub struct ScheduledTaskListResponse {
     pub tasks: Vec<ScheduledTaskInfo>,
 }
 
+// =============================================================================
+// ResultMessage.modelUsage typed shape (closes #756)
+// =============================================================================
+
+/// Per-model usage / cost breakdown carried by Claude's `ResultMessage.modelUsage`
+/// field. Keyed by model name (e.g. `"claude-opus-4-7[1m]"`) in the parent map.
+///
+/// Wire shape from claude-codes' own `test_result_with_new_fields`:
+/// ```json
+/// "modelUsage": {
+///     "claude-opus-4-7[1m]": {
+///         "inputTokens": 3817,
+///         "outputTokens": 14,
+///         "costUSD": 0.06
+///     }
+/// }
+/// ```
+///
+/// TODO(SDK #140): `claude-codes::ResultMessage.model_usage` is currently
+/// `Option<serde_json::Value>` upstream. This local typed mirror exists so the
+/// frontend can iterate the per-model breakdown without poking JSON field
+/// names. When the SDK adopts a typed `BTreeMap<String, ModelUsageEntry>`
+/// itself, callers can `serde_json::from_value::<ModelUsage>(value)` directly
+/// against the upstream type instead, and this struct can be deleted.
+///
+/// All fields default so partial / older frames still parse.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageEntry {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    /// Wire name is `costUSD`, not `costUsd`.
+    #[serde(default, rename = "costUSD")]
+    pub cost_usd: f64,
+    #[serde(default)]
+    pub web_search_requests: u32,
+}
+
+/// Convenience alias for the full `modelUsage` map. The map key is the model
+/// name string as emitted by claude (e.g. `"claude-opus-4-7[1m]"`).
+pub type ModelUsage = BTreeMap<String, ModelUsageEntry>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +763,94 @@ mod tests {
         let parsed: CodexPermissionInput = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, input);
         assert_eq!(parsed.tool_name(), "AskUserQuestion");
+    }
+
+    #[test]
+    fn citation_full_roundtrip() {
+        let cite = Citation {
+            url: Some("https://example.com".to_string()),
+            title: Some("Example".to_string()),
+            cited_text: Some("hello world".to_string()),
+        };
+        let json = serde_json::to_value(&cite).unwrap();
+        assert_eq!(json["url"], "https://example.com");
+        assert_eq!(json["title"], "Example");
+        assert_eq!(json["cited_text"], "hello world");
+        let parsed: Citation = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, cite);
+    }
+
+    /// Wire frame as actually produced by the Anthropic API for a
+    /// `web_search_result_location` citation (per claude-codes
+    /// `test_text_block_with_citations`). Extra fields like `type` must
+    /// be silently ignored.
+    #[test]
+    fn citation_ignores_unknown_fields() {
+        let json = serde_json::json!({
+            "type": "web_search_result_location",
+            "url": "https://example.com",
+            "title": "Example"
+        });
+        let parsed: Citation = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.url.as_deref(), Some("https://example.com"));
+        assert_eq!(parsed.title.as_deref(), Some("Example"));
+        assert!(parsed.cited_text.is_none());
+    }
+
+    /// Empty wire frame must parse to all-`None` so historical content
+    /// blocks that omitted citations stay readable.
+    #[test]
+    fn citation_empty_roundtrip() {
+        let json = serde_json::json!({});
+        let parsed: Citation = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, Citation::default());
+    }
+
+    /// Wire shape lifted verbatim from `claude-codes`'
+    /// `test_result_with_new_fields`: per-model entry with camelCase keys and
+    /// `costUSD` (not `costUsd`). The frontend renderer iterates this map for
+    /// the timing tooltip; the typed parse must accept the live wire shape.
+    #[test]
+    fn model_usage_entry_roundtrip() {
+        let json = serde_json::json!({
+            "inputTokens": 3817,
+            "outputTokens": 14,
+            "costUSD": 0.06,
+        });
+        let parsed: ModelUsageEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.input_tokens, 3817);
+        assert_eq!(parsed.output_tokens, 14);
+        assert!((parsed.cost_usd - 0.06).abs() < 1e-9);
+        // Unset fields default to 0
+        assert_eq!(parsed.cache_read_input_tokens, 0);
+        assert_eq!(parsed.cache_creation_input_tokens, 0);
+        assert_eq!(parsed.web_search_requests, 0);
+    }
+
+    /// The full `modelUsage` map: a `BTreeMap<String, ModelUsageEntry>` keyed
+    /// by model name. Multiple models accumulate when a session uses haiku +
+    /// opus or similar.
+    #[test]
+    fn model_usage_map_roundtrip() {
+        let json = serde_json::json!({
+            "claude-opus-4-7[1m]": {
+                "inputTokens": 3817,
+                "outputTokens": 14,
+                "costUSD": 0.06,
+            },
+            "claude-haiku-4-5": {
+                "inputTokens": 100,
+                "outputTokens": 5,
+                "costUSD": 0.001,
+            },
+        });
+        let parsed: ModelUsage = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.len(), 2);
+        let opus = parsed.get("claude-opus-4-7[1m]").unwrap();
+        assert_eq!(opus.input_tokens, 3817);
+        assert!((opus.cost_usd - 0.06).abs() < 1e-9);
+        let haiku = parsed.get("claude-haiku-4-5").unwrap();
+        assert_eq!(haiku.output_tokens, 5);
     }
 
     /// Regression guard for the pattern that motivated #725/#731: optional

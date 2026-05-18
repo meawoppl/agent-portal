@@ -128,6 +128,130 @@
     border-left: 3px solid #7dcfff;
 }
 
+/* Group wrapper for consecutive portal messages (PR 2/4 of #758). Mirrors
+   the assistant-group treatment: one outer wrapper around N child message
+   blocks so a chatty stretch reads as one visual unit. The inner
+   `.portal-message` children drop their own outer border to avoid double
+   bordering; the teal accent lives on the wrapper. */
+.portal-group {
+    border-left: 3px solid #7dcfff;
+    background: rgba(125, 207, 255, 0.04);
+}
+
+.portal-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0;
+}
+
+.portal-group-body .portal-message {
+    border-left: none;
+    background: transparent;
+    margin: 0;
+}
+
+.portal-group-body .portal-message .message-header {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+}
+
+.user-group {
+    border-left: 3px solid #e0af68;
+    background: rgba(224, 175, 104, 0.04);
+}
+
+.user-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0;
+}
+
+.user-group-body .user-message {
+    border-left: none;
+    background: transparent;
+    margin: 0;
+}
+
+.user-group-body .user-message .message-header {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+}
+
+.codex-group {
+    border-left: 3px solid #bb9af7;
+    background: rgba(187, 154, 247, 0.04);
+}
+
+.codex-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0;
+}
+
+.codex-group-body .claude-message {
+    border-left: none;
+    background: transparent;
+    margin: 0;
+}
+
+.codex-group-body .claude-message .message-header {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+}
+
+/* ----- Codex item lifecycle ---------------------------------------------
+ * `.codex-item` is the base class on every per-item card; renderers add
+ * `.codex-item-in-progress` for `item.started` / `item.updated` events
+ * before `item.completed` lands. Live in-flight items pulse a small dot
+ * before the tool/message header and dim the text slightly so the user
+ * can tell at a glance which cards are still executing. After completion
+ * (dedup in `render_codex_group` replaces the in-flight card with the
+ * `item.completed` one), the styling disappears.
+ * ----------------------------------------------------------------------- */
+
+@keyframes codex-item-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1.0; }
+}
+
+.codex-item-in-progress .tool-use-header,
+.codex-item-in-progress .message-header {
+    position: relative;
+}
+
+.codex-item-in-progress .tool-use-header::before,
+.codex-item-in-progress .message-header::before {
+    content: "\25CF"; /* filled bullet */
+    color: #e0af68; /* tokyo-night orange — matches portal "in-flight" cues */
+    margin-right: 0.5rem;
+    animation: codex-item-pulse 1.5s ease-in-out infinite;
+    font-size: 0.7em;
+    vertical-align: middle;
+}
+
+.codex-item-in-progress .tool-name,
+.codex-item-in-progress .assistant-text,
+.codex-item-in-progress .thinking-content {
+    opacity: 0.82;
+}
+
+.codex-item-in-progress .tool-meta {
+    color: #e0af68;
+    font-style: italic;
+}
+
+/* Honour reduced-motion: skip the pulse, keep the dot static. */
+@media (prefers-reduced-motion: reduce) {
+    .codex-item-in-progress .tool-use-header::before,
+    .codex-item-in-progress .message-header::before {
+        animation: none;
+        opacity: 0.85;
+    }
+}
+
 .message-type-badge.raw {
     background: rgba(127, 132, 156, 0.2);
     color: var(--text-secondary);

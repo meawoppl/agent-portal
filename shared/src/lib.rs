@@ -18,7 +18,10 @@ pub mod protocol;
 
 // API client types and trait
 pub mod api;
-pub use api::{ApiError, CodexPermissionInput, SoundSettingsResponse};
+pub use api::{
+    ApiError, Citation, CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage,
+    ModelUsageEntry, SoundSettingsResponse, TaskNotificationExtra,
+};
 
 /// Default backend URL based on build profile.
 /// Release builds point to `wss://txcl.io`, debug builds to `ws://localhost:3000`.
@@ -43,11 +46,16 @@ pub use claude_codes::io::{
     SystemSubtype as CCSystemSubtype, TaskNotificationMessage, TaskProgressMessage,
     TaskStartedMessage, TaskStatus as CCTaskStatus, TaskType as CCTaskType, TaskUsage,
 };
+pub use claude_codes::CacheCreationDetails;
 pub use claude_codes::ClaudeOutput;
 
 // Re-export typed tool-input types so frontend renderers can match on enum
 // variants instead of poking at JSON field names.
-pub use claude_codes::tool_inputs::{TodoItem, TodoStatus, TodoWriteInput, ToolInput};
+pub use claude_codes::tool_inputs::{
+    AskUserQuestionInput, BashInput, EditInput, GlobInput, GrepInput, Question, QuestionOption,
+    ReadInput, TaskInput, TodoItem, TodoStatus, TodoWriteInput, ToolInput, WebFetchInput,
+    WebSearchInput, WriteInput,
+};
 pub use claude_codes::{AllowedPrompt, ExitPlanModeInput};
 
 /// Returns true when a system message marks the END of a context compaction.

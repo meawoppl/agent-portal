@@ -1,7 +1,7 @@
 //! Rendering functions for each message type.
 
 use super::types::*;
-use super::{extract_raw_iso, format_duration, shorten_model_name};
+use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
 use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown;
@@ -9,7 +9,7 @@ use crate::components::time_ago::TimeAgo;
 use crate::components::tool_renderers::render_tool_use;
 use serde::Deserialize;
 use serde_json::Value;
-use shared::ToolResultContent;
+use shared::{Citation, ToolResultContent};
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
@@ -20,17 +20,16 @@ fn preserve_user_newlines(text: &str) -> String {
 }
 
 fn extract_ephemeral_cache(usage: &UsageInfo) -> (u64, u64) {
-    let mut e1h: u64 = 0;
-    let mut e5m: u64 = 0;
-    if let Some(cc) = &usage.cache_creation {
-        if let Some(v) = cc.get("ephemeral_1h_input_tokens").and_then(|v| v.as_u64()) {
-            e1h = v;
-        }
-        if let Some(v) = cc.get("ephemeral_5m_input_tokens").and_then(|v| v.as_u64()) {
-            e5m = v;
-        }
-    }
-    (e1h, e5m)
+    usage
+        .cache_creation
+        .as_ref()
+        .map(|cc| {
+            (
+                u64::from(cc.ephemeral_1h_input_tokens),
+                u64::from(cc.ephemeral_5m_input_tokens),
+            )
+        })
+        .unwrap_or((0, 0))
 }
 
 fn build_model_tooltip(model: &str, usage: Option<&UsageInfo>) -> String {
@@ -92,150 +91,7 @@ fn content_blocks_to_text(blocks: &[ContentBlock]) -> String {
     out
 }
 
-/// Extract raw text from an assistant group's serialized JSON messages.
-fn extract_assistant_group_text(messages: &[String]) -> String {
-    let mut out = String::new();
-    for json in messages {
-        if let Ok(ClaudeMessage::Assistant(msg)) = serde_json::from_str::<ClaudeMessage>(json) {
-            if let Some(content) = msg.message.and_then(|m| m.content) {
-                let text = content_blocks_to_text(&content);
-                if !text.is_empty() {
-                    if !out.is_empty() {
-                        out.push_str("\n\n");
-                    }
-                    out.push_str(&text);
-                }
-            }
-        }
-    }
-    out
-}
-
 // --- Message renderers ---
-
-pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> Html {
-    let mut total_output_tokens: u64 = 0;
-    let mut total_input_tokens: u64 = 0;
-    let mut total_cache_read: u64 = 0;
-    let mut total_cache_created: u64 = 0;
-    let mut total_ephemeral_1h: u64 = 0;
-    let mut total_ephemeral_5m: u64 = 0;
-    let mut model_name = String::new();
-    let mut first_usage: Option<UsageInfo> = None;
-
-    for json in messages {
-        if let Ok(ClaudeMessage::Assistant(msg)) = serde_json::from_str::<ClaudeMessage>(json) {
-            if let Some(message) = &msg.message {
-                if let Some(usage) = &message.usage {
-                    total_output_tokens += usage.output_tokens.unwrap_or(0);
-                    total_input_tokens += usage.input_tokens.unwrap_or(0);
-                    total_cache_read += usage.cache_read_input_tokens.unwrap_or(0);
-                    total_cache_created += usage.cache_creation_input_tokens.unwrap_or(0);
-                    let (e1h, e5m) = extract_ephemeral_cache(usage);
-                    total_ephemeral_1h += e1h;
-                    total_ephemeral_5m += e5m;
-                    if first_usage.is_none() {
-                        first_usage = Some(usage.clone());
-                    }
-                }
-                if model_name.is_empty() {
-                    if let Some(m) = &message.model {
-                        model_name = m.clone();
-                    }
-                }
-            }
-        }
-    }
-
-    let count = messages.len();
-    let mut usage_tooltip = format!(
-        "Input: {} | Output: {} | Cache read: {} | Cache created: {} | {} messages",
-        total_input_tokens, total_output_tokens, total_cache_read, total_cache_created, count
-    );
-    if total_ephemeral_1h > 0 || total_ephemeral_5m > 0 {
-        usage_tooltip.push_str(&format!(
-            " | Ephemeral 1h: {} | Ephemeral 5m: {}",
-            total_ephemeral_1h, total_ephemeral_5m
-        ));
-    }
-    let model_tooltip = build_model_tooltip(&model_name, first_usage.as_ref());
-    let copy_text = extract_assistant_group_text(messages);
-    // ISO timestamp of the last message in the group, for the live "time ago" label
-    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
-
-    html! {
-        <div class="claude-message assistant-message">
-            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge assistant">{ "Assistant" }</span>
-                {
-                    if count > 1 {
-                        html! { <span class="message-count" title={format!("{} consecutive messages", count)}>{ format!("{} messages", count) }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    if let Some(short_name) = shorten_model_name(&model_name) {
-                        html! { <span class="model-name" title={model_tooltip.clone()}>{ short_name }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                if !copy_text.is_empty() {
-                    <CopyButton text={copy_text} title="Copy assistant text" />
-                }
-                {
-                    if total_input_tokens > 0 || total_output_tokens > 0 {
-                        html! {
-                            <span class="usage-badge" title={usage_tooltip}>
-                                <span class="token-count">{ format!("{}↓ {}↑", total_input_tokens, total_output_tokens) }</span>
-                            </span>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
-            </div>
-            <div class="message-body">
-                { for messages.iter().enumerate().map(|(i, json)| {
-                    // Key by the message's `_created_at` when available, so
-                    // streaming/insert reordering doesn't reset expandable
-                    // state inside the body. Fall back to positional index
-                    // for messages predating the `_created_at` field.
-                    let key = extract_raw_iso(json)
-                        .map(|iso| format!("m-{}", iso))
-                        .unwrap_or_else(|| format!("m{}", i));
-                    html! { <GroupedMessageContent {key} json={json.clone()} /> }
-                })}
-            </div>
-            if let Some(iso) = last_iso {
-                <div class="message-footer">
-                    <TimeAgo iso={iso} />
-                </div>
-            }
-        </div>
-    }
-}
-
-/// Renders the content blocks for a single message within an assistant group.
-/// Each message is its own component so Yew preserves it across re-renders
-/// when new messages are appended to the group.
-#[derive(Properties, PartialEq)]
-struct GroupedMessageContentProps {
-    json: String,
-}
-
-#[function_component(GroupedMessageContent)]
-fn grouped_message_content(props: &GroupedMessageContentProps) -> Html {
-    let blocks = match serde_json::from_str::<ClaudeMessage>(&props.json) {
-        Ok(ClaudeMessage::Assistant(msg)) => {
-            msg.message.and_then(|m| m.content).unwrap_or_default()
-        }
-        Ok(ClaudeMessage::User(msg)) => msg.message.and_then(|m| m.content).unwrap_or_default(),
-        _ => return html! {},
-    };
-    render_content_blocks(&blocks)
-}
 
 pub fn render_user_message(
     msg: &UserMessage,
@@ -647,12 +503,17 @@ fn render_init_bar(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
     let version = msg.claude_code_version.as_deref().unwrap_or("");
     let tool_count = msg.tools.as_ref().map(|t| t.len()).unwrap_or(0);
     let mcp_count = msg.mcp_servers.as_ref().map(|s| s.len()).unwrap_or(0);
-    let fast_mode = msg
+    // Typed dispatch over `extra` (closes #752). `InitExtra::fast_mode_state`
+    // mirrors `claude_codes::InitMessage::fast_mode_state` (already typed
+    // upstream); we use a narrow local mirror because the SDK's full
+    // `InitMessage` has many required fields and a partial frame here would
+    // otherwise fail to deserialize.
+    let init_extra: shared::InitExtra = msg
         .extra
         .as_ref()
-        .and_then(|v| v.get("fast_mode_state"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("off");
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let fast_mode = init_extra.fast_mode_state.as_deref().unwrap_or("off");
 
     html! {
         <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
@@ -687,33 +548,27 @@ fn render_compaction_beginning() -> Html {
 }
 
 fn render_compaction_completed(msg: &SystemMessage) -> Html {
-    let summary_text = msg.summary.as_deref().or_else(|| {
-        msg.extra.as_ref().and_then(|v| {
-            v.get("summary")
-                .and_then(|s| s.as_str())
-                .or_else(|| v.get("content").and_then(|s| s.as_str()))
-                .or_else(|| v.get("text").and_then(|s| s.as_str()))
-        })
-    });
+    // Typed dispatch over `extra` (closes #752). The SDK's
+    // `CompactBoundaryMessage` currently only exposes
+    // `compact_metadata { pre_tokens, trigger }` — not the `summary` /
+    // `leaf_message_count` / `duration_ms` fields the renderer needs.
+    // TODO(SDK rust-code-agent-sdks#141): drop the local `CompactionExtra`
+    // mirror once upstream adds these fields to `CompactBoundaryMessage`,
+    // and switch to `CCSystemMessage::as_compact_boundary()` here.
+    let compact_extra: shared::CompactionExtra = msg
+        .extra
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
 
-    let leaf_count = msg.leaf_message_count.or_else(|| {
-        msg.extra.as_ref().and_then(|v| {
-            v.get("leaf_message_count")
-                .and_then(|n| n.as_u64())
-                .map(|n| n as u32)
-                .or_else(|| {
-                    v.get("message_count")
-                        .and_then(|n| n.as_u64())
-                        .map(|n| n as u32)
-                })
-        })
-    });
-
-    let duration = msg.duration_ms.or_else(|| {
-        msg.extra
-            .as_ref()
-            .and_then(|v| v.get("duration_ms").and_then(|n| n.as_u64()))
-    });
+    let summary_text = msg
+        .summary
+        .as_deref()
+        .or_else(|| compact_extra.summary_text());
+    let leaf_count = msg
+        .leaf_message_count
+        .or_else(|| compact_extra.message_count());
+    let duration = msg.duration_ms.or(compact_extra.duration_ms);
 
     html! {
         <div class="claude-message compaction-message">
@@ -799,26 +654,24 @@ fn render_task_started(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
 }
 
 fn render_task_notification(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
-    let extra = msg.extra.as_ref();
-    let typed_status = extra
-        .and_then(|v| v.get("status"))
-        .and_then(|v| serde_json::from_value::<shared::CCTaskStatus>(v.clone()).ok());
-    let summary_text = msg
-        .summary
-        .as_deref()
-        .or_else(|| extra.and_then(|v| v.get("summary").and_then(|s| s.as_str())));
-    let task_id = extra
-        .and_then(|v| v.get("task_id").and_then(|t| t.as_str()))
-        .unwrap_or("");
+    // Typed dispatch over `extra` (closes #752). `TaskNotificationExtra`
+    // mirrors the renderable subset of `claude_codes::TaskNotificationMessage`
+    // (the SDK type's required `session_id` / `summary` are already consumed
+    // by the outer lenient `SystemMessage`'s typed top-level fields and would
+    // not appear in the flattened `extra` Value).
+    let notif: shared::TaskNotificationExtra = msg
+        .extra
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
 
-    let typed_usage = extra
-        .and_then(|v| v.get("usage"))
-        .and_then(|v| serde_json::from_value::<shared::TaskUsage>(v.clone()).ok());
-    let duration = typed_usage.as_ref().map(|u| u.duration_ms);
-    let tool_uses = typed_usage.as_ref().map(|u| u.tool_uses);
-    let total_tokens = typed_usage.as_ref().map(|u| u.total_tokens);
+    let summary_text = msg.summary.as_deref();
+    let task_id = notif.task_id.as_deref().unwrap_or("");
+    let duration = notif.usage.as_ref().map(|u| u.duration_ms);
+    let tool_uses = notif.usage.as_ref().map(|u| u.tool_uses);
+    let total_tokens = notif.usage.as_ref().map(|u| u.total_tokens);
 
-    let is_failed = matches!(typed_status, Some(shared::CCTaskStatus::Failed));
+    let is_failed = matches!(notif.status, Some(shared::CCTaskStatus::Failed));
     let status_class = if is_failed { "failed" } else { "completed" };
 
     html! {
@@ -966,7 +819,15 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
                                 Some(ToolResultContent::Structured(blocks)) => {
                                     html! {
                                         <div class={class}>
-                                            { for blocks.iter().map(render_structured_block) }
+                                            { for blocks.iter().map(|v| {
+                                                match serde_json::from_value::<shared::ContentBlock>(v.clone()) {
+                                                    Ok(typed) => render_structured_block(&typed),
+                                                    Err(_) => {
+                                                        let json = serde_json::to_string_pretty(v).unwrap_or_default();
+                                                        html! { <pre class="tool-result-content">{ json }</pre> }
+                                                    }
+                                                }
+                                            }) }
                                         </div>
                                     }
                                 }
@@ -1134,16 +995,16 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     }
 }
 
-fn render_citations(citations: &[Value]) -> Html {
+fn render_citations(citations: &[Citation]) -> Html {
     if citations.is_empty() {
         return html! {};
     }
     html! {
         <div class="citation-list">
             { for citations.iter().enumerate().map(|(i, cite)| {
-                let url = cite.get("url").and_then(|v| v.as_str()).unwrap_or("#");
-                let title = cite.get("title").and_then(|v| v.as_str())
-                    .or_else(|| cite.get("cited_text").and_then(|v| v.as_str()))
+                let url = cite.url.as_deref().unwrap_or("#");
+                let title = cite.title.as_deref()
+                    .or(cite.cited_text.as_deref())
                     .unwrap_or("source");
                 html! {
                     <a class="citation-link"
@@ -1293,18 +1154,16 @@ fn summarize_input(input: &Value) -> String {
     }
 }
 
-fn render_structured_block(block: &Value) -> Html {
-    let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    match block_type {
-        "image" => {
+fn render_structured_block(block: &shared::ContentBlock) -> Html {
+    match block {
+        shared::ContentBlock::Image(_) => {
             html! { <span class="tool-result-image-tag">{ "[image]" }</span> }
         }
-        "text" => {
-            let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
-            html! { <ExpandableText full_text={text.to_string()} max_len={500} class="tool-result-content" /> }
+        shared::ContentBlock::Text(t) => {
+            html! { <ExpandableText full_text={t.text.clone()} max_len={500} class="tool-result-content" /> }
         }
-        _ => {
-            let json = serde_json::to_string_pretty(block).unwrap_or_default();
+        other => {
+            let json = serde_json::to_string_pretty(other).unwrap_or_default();
             html! { <pre class="tool-result-content">{ json }</pre> }
         }
     }
@@ -1324,16 +1183,12 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
     );
 
     if let Some(model_usage) = &msg.model_usage {
-        if let Some(obj) = model_usage.as_object() {
-            for (model, cost) in obj {
-                if let Some(c) = cost.as_f64() {
-                    timing_tooltip.push_str(&format!(
-                        " | {}: ${:.4}",
-                        shorten_model_name(model).unwrap_or(model.clone()),
-                        c
-                    ));
-                }
-            }
+        for (model, entry) in model_usage {
+            timing_tooltip.push_str(&format!(
+                " | {}: ${:.4}",
+                shorten_model_name(model).unwrap_or_else(|| model.clone()),
+                entry.cost_usd
+            ));
         }
     }
 
