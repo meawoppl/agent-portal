@@ -1,6 +1,7 @@
 use crate::components::markdown::linkify_urls;
 use crate::components::message_renderer::format_duration;
 use serde_json::Value;
+use shared::{BashInput, ToolInput};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -65,20 +66,26 @@ fn bash_tool(props: &BashToolProps) -> Html {
 }
 
 pub fn render_bash_tool(input: &Value) -> Html {
-    let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-    let description = input.get("description").and_then(|v| v.as_str());
-    let timeout = input.get("timeout").and_then(|v| v.as_u64());
-    let background = input
-        .get("run_in_background")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let bash: BashInput = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::Bash(b) => Some(b),
+            _ => None,
+        })
+        .unwrap_or(BashInput {
+            command: String::new(),
+            description: None,
+            timeout: None,
+            run_in_background: None,
+        });
 
-    let timeout_str = timeout.map(format_duration);
+    let timeout_str = bash.timeout.map(format_duration);
+    let background = bash.run_in_background.unwrap_or(false);
 
     html! {
         <BashTool
-            command={command.to_string()}
-            description={description.map(|s| AttrValue::from(s.to_string()))}
+            command={bash.command}
+            description={bash.description.map(AttrValue::from)}
             timeout_str={timeout_str.map(AttrValue::from)}
             {background}
         />
