@@ -328,6 +328,19 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(10);
 
+    // Image store eviction caps — both required to bound memory on long
+    // image-heavy sessions (see issue #787). Defaults are 256 MiB / 1 h.
+    let image_store_max_mb: u64 = env::var("PORTAL_IMAGE_STORE_MAX_MB")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(handlers::images::DEFAULT_IMAGE_STORE_MAX_BYTES / (1024 * 1024));
+    let image_store_ttl_secs: u64 = env::var("PORTAL_IMAGE_STORE_TTL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(handlers::images::DEFAULT_IMAGE_STORE_TTL.as_secs());
+    let image_store_max_bytes = image_store_max_mb.saturating_mul(1024 * 1024);
+    let image_store_ttl = std::time::Duration::from_secs(image_store_ttl_secs);
+
     tracing::info!(
         "Message retention: max {} messages/session, {} days",
         message_retention_count,
@@ -338,6 +351,11 @@ async fn main() -> anyhow::Result<()> {
         session_max_age_days
     );
     tracing::info!("Max image size: {} MB", max_image_mb);
+    tracing::info!(
+        "Image store cap: {} MB total, {}s TTL per entry",
+        image_store_max_mb,
+        image_store_ttl_secs
+    );
 
     // Create app state
     let app_state = Arc::new(AppState {
@@ -358,7 +376,7 @@ async fn main() -> anyhow::Result<()> {
         message_retention_days,
         session_max_age_days,
         max_image_mb,
-        image_store: handlers::images::ImageStore::new(),
+        image_store: handlers::images::ImageStore::new(image_store_max_bytes, image_store_ttl),
     });
 
     // Setup CORS

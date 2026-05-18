@@ -66,6 +66,9 @@ futures-util = "0.3"
 # Shared state
 dashmap = "6.1"
 
+# Bounded image cache with TTL + LRU eviction (image store)
+mini-moka = "0.10"
+
 # CLI arguments
 clap = { version = "4.5", features = ["derive"] }
 tower-cookies = { version = "0.11", features = ["signed"] }
