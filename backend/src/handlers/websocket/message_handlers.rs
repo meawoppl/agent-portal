@@ -171,6 +171,7 @@ pub fn handle_claude_output(
                 content: content.clone(),
                 sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
                 sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
+                agent_type,
             },
         );
     }

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use claude_codes::io::ContentBlock;
 use claude_codes::ClaudeOutput;
-use shared::ProxyToServer;
+use shared::{AgentType, ProxyToServer};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 
@@ -32,6 +32,7 @@ pub struct WiggumState {
 }
 
 /// Handle a session event from session-lib, with wiggum loop support
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
     event: Option<session_lib::SessionEvent>,
     output_tx: &mpsc::UnboundedSender<ClaudeOutput>,
@@ -40,6 +41,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
     wiggum_state: &mut Option<WiggumState>,
     output_buffer: &Arc<Mutex<PendingOutputBuffer>>,
     claude_session: &mut Session<A>,
+    agent_type: AgentType,
 ) -> Option<ConnectionResult> {
     use session_lib::SessionEvent;
 
@@ -126,6 +128,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                         let msg = ProxyToServer::SequencedOutput {
                             seq,
                             content: portal_content,
+                            agent_type,
                         };
                         let mut ws = ws_write.lock().await;
                         if ws.send(msg).await.is_err() {
@@ -177,6 +180,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                     let msg = ProxyToServer::SequencedOutput {
                         seq,
                         content: portal_content,
+                        agent_type,
                     };
                     let mut ws = ws_write.lock().await;
                     if ws.send(msg).await.is_err() {

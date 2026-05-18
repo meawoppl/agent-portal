@@ -105,9 +105,19 @@ proxy                    backend
 {
   "type": "SequencedOutput",
   "seq": 42,
-  "content": { "type": "assistant", "message": { ... } }
+  "content": { "type": "assistant", "message": { ... } },
+  "agent_type": "claude"
 }
 ```
+
+`agent_type` (added in 2.5.42) is `"claude"` or `"codex"` and identifies the
+wire format the `content` JSON conforms to. It is tagged at the proxy emission
+boundary on each message — not derived from the registration — so a future
+multi-agent session could ferry messages from more than one agent over the
+same `/ws/session` connection without mis-attributing them. Pre-2.5.42
+proxies that don't send this field parse as `"claude"` by default
+(`#[serde(default)]`), which is a presumed misattribution for any in-flight
+codex session running an older proxy until the proxy upgrades.
 
 **`OutputAck`** (backend → proxy): Confirms storage of all messages up to `ack_seq`. The proxy can drop buffered messages with `seq <= ack_seq`.
 
@@ -174,9 +184,13 @@ frontend                 backend                  proxy
 ```json
 {
   "type": "ClaudeOutput",
-  "content": { "type": "assistant", "message": { ... } }
+  "content": { "type": "assistant", "message": { ... } },
+  "agent_type": "claude"
 }
 ```
+
+Carries the same `agent_type` tag as `SequencedOutput` (added in 2.5.42,
+default `"claude"` for pre-2.5.42 proxies).
 
 ### Permission Flow
 

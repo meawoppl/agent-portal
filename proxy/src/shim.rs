@@ -412,6 +412,7 @@ async fn run_shim_loop(
                     let msg = ProxyToServer::SequencedOutput {
                         seq: p.seq,
                         content: p.content.clone(),
+                        agent_type: config.agent_type,
                     };
                     if let Err(e) = conn.send(&msg).await {
                         error!("Failed to replay: {}", e);
@@ -614,7 +615,11 @@ async fn run_shim_connection(
 
             // Claude output ready to send to portal (seq was assigned at buffer push time)
             Some((seq, content)) = output_line_rx.recv() => {
-                let msg = ProxyToServer::SequencedOutput { seq, content };
+                let msg = ProxyToServer::SequencedOutput {
+                    seq,
+                    content,
+                    agent_type: config.agent_type,
+                };
                 let mut ws = ws_write.lock().await;
                 if let Ok(json) = serde_json::to_string(&msg) {
                     if let Err(e) = ws.send(Message::Text(json.into())).await {

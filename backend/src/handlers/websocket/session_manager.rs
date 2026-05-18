@@ -409,6 +409,7 @@ mod tests {
             content: serde_json::json!({"text": "hello"}),
             sender_user_id: None,
             sender_name: None,
+            agent_type: shared::AgentType::Claude,
         }
     }
 

@@ -5,7 +5,7 @@ use super::{ProxySender, SessionId, SessionManager};
 use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
-use shared::{AgentType, ProxyToServer, ServerToProxy, SessionEndpoint};
+use shared::{ProxyToServer, ServerToProxy, SessionEndpoint};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -21,12 +21,6 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     let mut session_key: Option<SessionId> = None;
     let mut db_session_id: Option<Uuid> = None;
     let mut connection_gen: Option<u64> = None;
-    // Captured from the proxy's `Register` so subsequent output messages can be
-    // tagged with the agent's wire format at insert time. Stays `None` until
-    // Register arrives — any pre-Register output is dropped with an error log
-    // rather than silently defaulting to claude (which would mistag codex
-    // messages with the wrong wire format).
-    let mut session_agent_type: Option<AgentType> = None;
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -48,7 +42,6 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     &mut session_key,
                     &mut db_session_id,
                     &mut connection_gen,
-                    &mut session_agent_type,
                 );
             }
             Err(e) => {
@@ -103,7 +96,6 @@ fn handle_proxy_message(
     session_key: &mut Option<SessionId>,
     db_session_id: &mut Option<Uuid>,
     connection_gen: &mut Option<u64>,
-    session_agent_type: &mut Option<AgentType>,
 ) {
     match proxy_msg {
         ProxyToServer::Register(shared::RegisterFields {
@@ -124,7 +116,6 @@ fn handle_proxy_message(
         }) => {
             let key = claude_session_id.to_string();
             *session_key = Some(key.clone());
-            *session_agent_type = Some(agent_type);
 
             let gen = session_manager.register_session(key.clone(), tx.clone());
             *connection_gen = Some(gen);
@@ -167,15 +158,10 @@ fn handle_proxy_message(
                 }
             }
         }
-        ProxyToServer::ClaudeOutput { content } => {
-            let Some(agent_type) = *session_agent_type else {
-                error!(
-                    "Dropping ClaudeOutput received before Register — no agent_type known; \
-                     content type={:?}",
-                    content.get("type").and_then(|t| t.as_str())
-                );
-                return;
-            };
+        ProxyToServer::ClaudeOutput {
+            content,
+            agent_type,
+        } => {
             handle_claude_output(
                 session_manager,
                 session_key,
@@ -188,16 +174,11 @@ fn handle_proxy_message(
                 agent_type,
             );
         }
-        ProxyToServer::SequencedOutput { seq, content } => {
-            let Some(agent_type) = *session_agent_type else {
-                error!(
-                    "Dropping SequencedOutput seq={} received before Register — no agent_type \
-                     known; content type={:?}",
-                    seq,
-                    content.get("type").and_then(|t| t.as_str())
-                );
-                return;
-            };
+        ProxyToServer::SequencedOutput {
+            seq,
+            content,
+            agent_type,
+        } => {
             handle_claude_output(
                 session_manager,
                 session_key,

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use base64::Engine;
 use claude_codes::io::{ContentBlock, ControlRequestPayload, ToolUseBlock};
 use claude_codes::ClaudeOutput;
-use shared::ProxyToServer;
+use shared::{AgentType, ProxyToServer};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, warn};
 use uuid::Uuid;
@@ -40,6 +40,7 @@ pub fn spawn_output_forwarder(
     current_repo_url: Arc<Mutex<Option<String>>>,
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
     max_image_mb: u32,
+    agent_type: AgentType,
 ) -> tokio::task::JoinHandle<()> {
     let max_bytes = max_image_mb as usize * 1024 * 1024;
     tokio::spawn(async move {
@@ -93,7 +94,11 @@ pub fn spawn_output_forwarder(
             };
 
             // Send as sequenced output
-            let msg = ProxyToServer::SequencedOutput { seq, content };
+            let msg = ProxyToServer::SequencedOutput {
+                seq,
+                content,
+                agent_type,
+            };
 
             {
                 let mut ws = ws_write.lock().await;
@@ -158,6 +163,7 @@ pub fn spawn_output_forwarder(
                 let portal_ws_msg = ProxyToServer::SequencedOutput {
                     seq: portal_seq,
                     content: portal_content,
+                    agent_type,
                 };
                 let mut ws = ws_write.lock().await;
                 if ws.send(portal_ws_msg).await.is_err() {

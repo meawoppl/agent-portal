@@ -88,6 +88,12 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             content,
             sender_user_id,
             sender_name,
+            // agent_type is plumbed through the wire (per-message tag) and
+            // available here for future multi-agent UI work — see
+            // #723. For now the frontend reads agent_type off the
+            // historical-read path (`MessageData::agent_type`); live
+            // dispatch stays agent-agnostic.
+            agent_type: _,
         } => {
             // Inject _sender into content for the renderer if sender info is present
             let output = if sender_user_id.is_some() || sender_name.is_some() {

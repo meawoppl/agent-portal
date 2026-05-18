@@ -111,12 +111,46 @@ pub enum ProxyToServer {
     Register(RegisterFields),
 
     /// Raw output from Claude Code (unsequenced fallback)
-    ClaudeOutput { content: serde_json::Value },
+    ClaudeOutput {
+        content: serde_json::Value,
+        /// Which agent's wire format the `content` JSON came from.
+        ///
+        /// Tagged at the proxy emission boundary so the backend can attribute
+        /// each message correctly without needing to remember the
+        /// registration-time agent for the whole connection. Critical for any
+        /// future multi-agent / sub-agent session shape, where a single
+        /// `/ws/session` connection might ferry messages from more than one
+        /// agent type.
+        ///
+        /// `#[serde(default)]` is a backwards-compat hack for pre-2.5.42
+        /// proxies that don't send this field — they get
+        /// `AgentType::default()` (currently `Claude`) and any in-flight
+        /// codex messages from such a proxy will be presumed misattributed
+        /// until the proxy upgrades. New code MUST always set this field.
+        #[serde(default)]
+        agent_type: AgentType,
+    },
 
     /// Sequenced output from Claude Code
     SequencedOutput {
         seq: u64,
         content: serde_json::Value,
+        /// Which agent's wire format the `content` JSON came from.
+        ///
+        /// Tagged at the proxy emission boundary so the backend can attribute
+        /// each message correctly without needing to remember the
+        /// registration-time agent for the whole connection. Critical for any
+        /// future multi-agent / sub-agent session shape, where a single
+        /// `/ws/session` connection might ferry messages from more than one
+        /// agent type.
+        ///
+        /// `#[serde(default)]` is a backwards-compat hack for pre-2.5.42
+        /// proxies that don't send this field — they get
+        /// `AgentType::default()` (currently `Claude`) and any in-flight
+        /// codex messages from such a proxy will be presumed misattributed
+        /// until the proxy upgrades. New code MUST always set this field.
+        #[serde(default)]
+        agent_type: AgentType,
     },
 
     /// Keepalive heartbeat
@@ -256,6 +290,17 @@ pub enum ServerToClient {
         sender_user_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         sender_name: Option<String>,
+        /// Which agent's wire format the `content` JSON came from.
+        ///
+        /// Mirrors the per-message `agent_type` tag on the proxy → backend
+        /// `ProxyToServer::ClaudeOutput` / `SequencedOutput` so the live
+        /// broadcast can be tagged the same way as the historical-read path
+        /// (`MessageWithSender` → `Message.agent_type`). Without it the
+        /// frontend can only learn an in-flight message's agent_type by
+        /// reloading history. `#[serde(default)]` keeps older clients
+        /// (and any hand-rolled JSON) parseable; new code MUST set it.
+        #[serde(default)]
+        agent_type: AgentType,
     },
 
     /// Batch of historical messages for replay
@@ -576,12 +621,51 @@ mod tests {
             content: serde_json::json!({"type": "assistant", "text": "hello"}),
             sender_user_id: None,
             sender_name: None,
+            agent_type: AgentType::Codex,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServerToClient::ClaudeOutput { content, .. } => {
+            ServerToClient::ClaudeOutput {
+                content,
+                agent_type,
+                ..
+            } => {
                 assert_eq!(content["text"], "hello");
+                assert_eq!(agent_type, AgentType::Codex);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    /// Pre-2.5.42 wire JSON for `SequencedOutput` (no `agent_type`) must still
+    /// parse, defaulting to `AgentType::Claude`. Same for `ClaudeOutput` and
+    /// the backend → frontend `ServerToClient::ClaudeOutput` shape.
+    #[test]
+    fn wire_compat_pre_2_5_42_omits_agent_type() {
+        let json = r#"{"type":"SequencedOutput","seq":3,"content":{"hello":"world"}}"#;
+        let parsed: ProxyToServer = serde_json::from_str(json).unwrap();
+        match parsed {
+            ProxyToServer::SequencedOutput { agent_type, .. } => {
+                assert_eq!(agent_type, AgentType::Claude);
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
+        let parsed: ProxyToServer = serde_json::from_str(json).unwrap();
+        match parsed {
+            ProxyToServer::ClaudeOutput { agent_type, .. } => {
+                assert_eq!(agent_type, AgentType::Claude);
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
+        let parsed: ServerToClient = serde_json::from_str(json).unwrap();
+        match parsed {
+            ServerToClient::ClaudeOutput { agent_type, .. } => {
+                assert_eq!(agent_type, AgentType::Claude);
             }
             _ => panic!("Wrong variant"),
         }
