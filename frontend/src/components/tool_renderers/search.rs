@@ -1,5 +1,5 @@
 use serde_json::Value;
-use shared::{GlobInput, GrepInput, ToolInput};
+use shared::{GlobInput, GrepInput, ToolInput, WebFetchInput, WebSearchInput};
 use yew::prelude::*;
 
 use crate::components::expandable::ExpandableText;
@@ -102,8 +102,14 @@ pub fn render_grep_tool(input: &Value) -> Html {
 }
 
 pub fn render_webfetch_tool(input: &Value) -> Html {
-    let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("?");
-    let prompt = input.get("prompt").and_then(|v| v.as_str());
+    let typed: Option<WebFetchInput> = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::WebFetch(wf) => Some(wf),
+            _ => None,
+        });
+    let url = typed.as_ref().map(|wf| wf.url.as_str()).unwrap_or("?");
+    let prompt = typed.as_ref().map(|wf| wf.prompt.as_str());
 
     html! {
         <div class="tool-use webfetch-tool">
@@ -126,7 +132,13 @@ pub fn render_webfetch_tool(input: &Value) -> Html {
 }
 
 pub fn render_websearch_tool(input: &Value) -> Html {
-    let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+    let typed: Option<WebSearchInput> = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::WebSearch(ws) => Some(ws),
+            _ => None,
+        });
+    let query = typed.as_ref().map(|ws| ws.query.as_str()).unwrap_or("?");
 
     html! {
         <div class="tool-use websearch-tool">
