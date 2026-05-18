@@ -49,6 +49,11 @@ pub struct SessionManager {
     pending_messages: Arc<DashMap<SessionId, VecDeque<PendingMessage>>>,
     pub pending_truncations: Arc<DashSet<Uuid>>,
     pub launchers: Arc<DashMap<Uuid, LauncherConnection>>,
+    /// Dedup index: `(user_id, hostname)` → `launcher_id`. Used to atomically
+    /// reject a second launcher connection from the same host for the same
+    /// user. Entries here are kept in lockstep with `launchers`: inserted by
+    /// `try_register_launcher`, removed by `unregister_launcher`.
+    launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
     pub pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     pub pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
@@ -69,6 +74,7 @@ impl Default for SessionManager {
             pending_messages: Arc::new(DashMap::new()),
             pending_truncations: Arc::new(DashSet::new()),
             launchers: Arc::new(DashMap::new()),
+            launcher_dedup: Arc::new(DashMap::new()),
             pending_dir_requests: Arc::new(DashMap::new()),
             pending_probe_requests: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
@@ -274,28 +280,59 @@ impl SessionManager {
         ids
     }
 
-    /// Returns the name of an existing launcher with the same hostname and user_id, if any.
-    pub fn find_duplicate_launcher(&self, hostname: &str, user_id: Uuid) -> Option<String> {
-        self.launchers
-            .iter()
-            .find(|entry| {
-                let c = entry.value();
-                c.user_id == user_id && c.hostname == hostname
-            })
-            .map(|entry| entry.value().launcher_name.clone())
-    }
+    /// Atomically register a launcher, rejecting a duplicate `(user_id, hostname)`
+    /// pair in the same operation.
+    ///
+    /// Race-free: the check-and-claim happens under a single `DashMap` shard
+    /// lock on the dedup index, so two concurrent connections from the same
+    /// `(user_id, hostname)` cannot both pass the check and both insert.
+    ///
+    /// On success, returns `Ok(())` and inserts the connection into
+    /// `launchers`. On a duplicate, returns `Err(existing_launcher_name)` and
+    /// does not touch `launchers`.
+    pub fn try_register_launcher(
+        &self,
+        launcher_id: Uuid,
+        connection: LauncherConnection,
+    ) -> Result<(), String> {
+        let dedup_key = (connection.user_id, connection.hostname.clone());
 
-    pub fn register_launcher(&self, launcher_id: Uuid, connection: LauncherConnection) {
+        // Use `entry().or_insert_with` so the duplicate check and the
+        // reservation are atomic under one shard lock.
+        let entry = self.launcher_dedup.entry(dedup_key).or_insert(launcher_id);
+        let claimed_by = *entry.value();
+
+        if claimed_by != launcher_id {
+            // Someone else won the race for this (user_id, hostname).
+            let existing_name = self
+                .launchers
+                .get(&claimed_by)
+                .map(|c| c.launcher_name.clone())
+                .unwrap_or_else(|| claimed_by.to_string());
+            return Err(existing_name);
+        }
+        // We hold the reservation; drop the shard guard before mutating
+        // `launchers` so other lookups on this shard aren't blocked.
+        drop(entry);
+
         info!(
             "Registering launcher: {} ({})",
             connection.launcher_name, launcher_id
         );
         self.launchers.insert(launcher_id, connection);
+        Ok(())
     }
 
     pub fn unregister_launcher(&self, launcher_id: &Uuid) {
         info!("Unregistering launcher: {}", launcher_id);
-        self.launchers.remove(launcher_id);
+        if let Some((_, connection)) = self.launchers.remove(launcher_id) {
+            // Only release the dedup slot if it still points at us — a
+            // newer-generation registration for the same (user_id, hostname)
+            // would have replaced this entry's value and must not be evicted.
+            let dedup_key = (connection.user_id, connection.hostname);
+            self.launcher_dedup
+                .remove_if(&dedup_key, |_, claimed_by| claimed_by == launcher_id);
+        }
     }
 
     pub fn get_launchers_for_user(&self, user_id: &Uuid) -> Vec<shared::LauncherInfo> {
@@ -692,5 +729,141 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&id1));
         assert!(ids.contains(&id2));
+    }
+
+    fn make_launcher_connection(user_id: Uuid, hostname: &str) -> LauncherConnection {
+        let (sender, _rx) = mpsc::unbounded_channel();
+        LauncherConnection {
+            sender,
+            launcher_name: format!("launcher-{}", hostname),
+            hostname: hostname.to_string(),
+            user_id,
+            running_sessions: Vec::new(),
+            working_directory: None,
+            version: "test".to_string(),
+            token_hash: None,
+            token_expires_at: None,
+        }
+    }
+
+    #[test]
+    fn try_register_launcher_rejects_serial_duplicate() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let id_a = Uuid::new_v4();
+        let id_b = Uuid::new_v4();
+
+        assert!(mgr
+            .try_register_launcher(id_a, make_launcher_connection(user_id, "host1"))
+            .is_ok());
+
+        let err = mgr
+            .try_register_launcher(id_b, make_launcher_connection(user_id, "host1"))
+            .expect_err("second registration for same (user, host) must be rejected");
+        assert_eq!(err, format!("launcher-host1"));
+
+        assert_eq!(mgr.launchers.len(), 1);
+        assert!(mgr.launchers.contains_key(&id_a));
+        assert!(!mgr.launchers.contains_key(&id_b));
+    }
+
+    #[test]
+    fn try_register_launcher_allows_different_user_same_host() {
+        let mgr = SessionManager::new();
+        let user_a = Uuid::new_v4();
+        let user_b = Uuid::new_v4();
+
+        assert!(mgr
+            .try_register_launcher(Uuid::new_v4(), make_launcher_connection(user_a, "host1"))
+            .is_ok());
+        assert!(mgr
+            .try_register_launcher(Uuid::new_v4(), make_launcher_connection(user_b, "host1"))
+            .is_ok());
+        assert_eq!(mgr.launchers.len(), 2);
+    }
+
+    #[test]
+    fn unregister_launcher_releases_dedup_slot() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let id_a = Uuid::new_v4();
+        let id_b = Uuid::new_v4();
+
+        assert!(mgr
+            .try_register_launcher(id_a, make_launcher_connection(user_id, "host1"))
+            .is_ok());
+        mgr.unregister_launcher(&id_a);
+
+        // After unregister the same (user, host) should be claimable again.
+        assert!(mgr
+            .try_register_launcher(id_b, make_launcher_connection(user_id, "host1"))
+            .is_ok());
+        assert_eq!(mgr.launchers.len(), 1);
+        assert!(mgr.launchers.contains_key(&id_b));
+    }
+
+    /// Regression test for #790: concurrent registrations from the same
+    /// `(user_id, hostname)` must result in exactly one launcher being
+    /// registered. Previously `find_duplicate_launcher` + `register_launcher`
+    /// were separate steps, so two simultaneous connections could both pass
+    /// the duplicate check and both insert.
+    #[tokio::test]
+    async fn concurrent_launcher_registrations_dedupe_to_single_entry() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let hostname = "race-host";
+
+        // Spawn 10 concurrent registration attempts for the same (user, host).
+        let mut handles = Vec::with_capacity(10);
+        for _ in 0..10 {
+            let mgr_clone = mgr.clone();
+            let host = hostname.to_string();
+            handles.push(tokio::spawn(async move {
+                let launcher_id = Uuid::new_v4();
+                let conn = {
+                    let (sender, _rx) = mpsc::unbounded_channel();
+                    LauncherConnection {
+                        sender,
+                        launcher_name: format!("launcher-{}", launcher_id),
+                        hostname: host,
+                        user_id,
+                        running_sessions: Vec::new(),
+                        working_directory: None,
+                        version: "test".to_string(),
+                        token_hash: None,
+                        token_expires_at: None,
+                    }
+                };
+                mgr_clone
+                    .try_register_launcher(launcher_id, conn)
+                    .map(|_| launcher_id)
+            }));
+        }
+
+        let mut successes = 0usize;
+        let mut failures = 0usize;
+        for h in handles {
+            match h.await.expect("task panicked") {
+                Ok(_) => successes += 1,
+                Err(_) => failures += 1,
+            }
+        }
+
+        // Exactly one registration must succeed; the other nine must be
+        // rejected as duplicates. And the launchers map must hold exactly
+        // one entry for this (user, host).
+        assert_eq!(successes, 1, "exactly one registration should succeed");
+        assert_eq!(failures, 9, "nine registrations should be rejected");
+        assert_eq!(
+            mgr.launchers.len(),
+            1,
+            "launchers map must contain exactly one entry after the race"
+        );
+        let user_count = mgr
+            .launchers
+            .iter()
+            .filter(|e| e.value().user_id == user_id && e.value().hostname == hostname)
+            .count();
+        assert_eq!(user_count, 1);
     }
 }
