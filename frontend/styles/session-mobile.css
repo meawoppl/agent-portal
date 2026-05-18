@@ -426,13 +426,16 @@
         font-size: 0.8rem;
     }
 
-    /* ---- Server shutdown banner ---- */
-    .server-shutdown-banner {
+    /* ---- Server shutdown / update banners ---- */
+    .server-shutdown-banner,
+    .update-available-banner {
         padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
     }
 
-    .server-shutdown-banner .shutdown-text {
-        font-size: 0.8rem;
+    .update-available-banner .update-banner-button {
+        padding: 0.2rem 0.55rem;
+        font-size: 0.75rem;
     }
 
     /* ---- Share dialog ---- */
