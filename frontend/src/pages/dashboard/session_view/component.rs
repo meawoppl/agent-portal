@@ -2,7 +2,7 @@
 
 use crate::components::message_renderer::types::{ClaudeMessage, ContentBlock};
 use crate::components::message_renderer::MessageRenderer;
-use crate::components::{group_messages, MessageGroupRenderer, VoiceInput};
+use crate::components::{group_messages, MessageGroupRenderer};
 use crate::utils;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{ClipboardEvent, DragEvent, Element, HtmlTextAreaElement, KeyboardEvent};
+use web_sys::Element;
 use yew::prelude::*;
 
 /// Wire `type` tag for a typed [`ClaudeMessage`] variant. Centralizes the
@@ -93,9 +93,9 @@ fn is_claude_awaiting(messages: impl DoubleEndedIterator<Item = impl AsRef<str>>
         .is_some_and(|t| t == "result")
 }
 
-use super::history::CommandHistory;
+use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
-    build_permission_response, refocus_textarea, PermissionHandler, PermissionResponseKind,
+    build_permission_response, PermissionHandler, PermissionResponseKind,
 };
 use super::tasks_panel::{TaskEvent, TaskStatus, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
@@ -125,8 +125,6 @@ pub struct SessionViewProps {
 
 /// Messages for the SessionView component
 pub enum SessionViewMsg {
-    SendInput,
-    UpdateInput(String),
     LoadHistory(Vec<MessageData>, Option<String>),
     ReceivedOutput(String),
     WebSocketConnected(WsSender),
@@ -135,13 +133,6 @@ pub enum SessionViewMsg {
     CheckAwaiting,
     ClearCostFlash,
     BranchChanged(Option<String>, Option<String>, Option<String>),
-    HistoryUp,
-    HistoryDown,
-    VoiceRecordingChanged(bool),
-    VoiceTranscription(String),
-    VoiceInterimTranscription(String),
-    VoiceError(String),
-    ToggleVoice,
     /// PermissionHandler is mounted and handed us its inbound-request
     /// dispatcher. We store it so live `WsEvent::Permission` frames can be
     /// forwarded without the parent owning any permission state.
@@ -154,33 +145,27 @@ pub enum SessionViewMsg {
     PermissionAnswered(String, PermissionResponseKind),
     /// Handle WebSocket event from connection
     WsEvent(WsEvent),
-    /// Toggle send mode dropdown visibility
-    ToggleSendModeDropdown,
-    /// Close send mode dropdown (click outside)
-    CloseSendModeDropdown,
-    /// Send with wiggum mode
-    SendWiggum,
-    /// User selected files via "Send with attachment(s)" dropdown
-    FilesSelected(Vec<web_sys::File>),
-    /// File upload progress (0.0-1.0)
-    FileUploadProgress(f32),
-    /// File upload completed — sends follow-up message
-    FileUploaded(String),
-    /// File upload failed
-    FileUploadError(String),
-    /// User dragged files over the input area
-    DragEnter,
-    /// User dragged files out of the input area
-    DragLeave,
-    /// Dismiss the upload bar after completion
-    UploadDismiss,
-    /// No-op (used by keydown/paste handlers that need to return a message)
-    Noop,
     /// TasksPanel is mounted and handed us its inbound-event dispatcher.
     /// We store it so live `WsEvent::Output` task events and REST replay
     /// task events can be forwarded without the parent owning any task
     /// state.
     TasksDispatcherRegistered(Callback<TasksInbound>),
+    /// InputBar is mounted and handed us its inbound-event dispatcher. We
+    /// store it so `PermissionHandler`'s "refocus textarea after answer"
+    /// hook can be forwarded through to the bar without the parent owning
+    /// the textarea `NodeRef`.
+    InputBarDispatcherRegistered(Callback<InputBarInbound>),
+    /// InputBar emitted a plain-text submission with the chosen send mode.
+    /// We translate this into the optimistic local echo + the WS
+    /// `ClientToServer::ClaudeInput` frame.
+    SendText(String, SendMode),
+    /// InputBar emitted a raw WS frame (used by the file-upload pipeline
+    /// for `FileUploadStart` / `FileUploadChunk` / the final combined
+    /// `ClaudeInput`). We just forward it over the WebSocket.
+    SendFrame(ClientToServer),
+    /// InputBar reports that a submission landed — bumps the parent's
+    /// `on_message_sent` prop.
+    MessageSent,
     /// Send an interrupt to stop the current Claude response
     Interrupt,
     /// Scroll listener reports the current at-bottom state. The `update()`
@@ -198,11 +183,9 @@ pub struct SessionView {
     ws_connected: bool,
     ws_sender: Option<WsSender>,
     messages_ref: NodeRef,
-    input_ref: NodeRef,
     should_autoscroll: bool,
     #[allow(dead_code)]
     scroll_listener: Option<Closure<dyn Fn()>>,
-    was_focused: bool,
     total_cost: f64,
     cost_flash: bool,
     /// Dispatcher into the mounted `PermissionHandler`. Stored once at child
@@ -221,27 +204,18 @@ pub struct SessionView {
     reconnect_attempt: u32,
     #[allow(dead_code)]
     reconnect_timer: Option<Timeout>,
-    command_history: CommandHistory,
-    is_recording: bool,
-    interim_transcription: Option<String>,
     last_message_timestamp: Option<String>,
-    voice_button_ref: NodeRef,
-    send_mode_dropdown_open: bool,
-    file_input_ref: NodeRef,
-    upload_progress: Option<f32>,
-    upload_files: Vec<(String, u64)>,
-    upload_departing: bool,
-    #[allow(dead_code)]
-    upload_dismiss_timer: Option<Timeout>,
-    drag_hover: bool,
     /// Dispatcher into the mounted `TasksPanel`. Stored once at child
     /// `create` time via `TasksDispatcherRegistered`; live task events
     /// derived from `WsEvent::Output` and replay events derived from the
     /// REST `LoadHistory` path are forwarded through it so this component
     /// holds zero task UI state itself.
     tasks_dispatcher: Option<Callback<TasksInbound>>,
-    /// Tracks textarea content so it can be restored after reconnection re-renders
-    input_text: String,
+    /// Dispatcher into the mounted `InputBar`. Stored once at child
+    /// `create` time via `InputBarDispatcherRegistered`; used to forward
+    /// `PermissionHandler`'s "refocus textarea after answer" event so this
+    /// component holds zero textarea / upload / send-mode state itself.
+    input_bar_dispatcher: Option<Callback<InputBarInbound>>,
     /// Messages sent but not yet confirmed by the server echo
     pending_sends: Vec<String>,
 }
@@ -287,10 +261,8 @@ impl Component for SessionView {
             ws_connected: false,
             ws_sender: None,
             messages_ref: NodeRef::default(),
-            input_ref: NodeRef::default(),
             should_autoscroll: true,
             scroll_listener: None,
-            was_focused: ctx.props().focused,
             total_cost: 0.0,
             cost_flash: false,
             permission_dispatcher: None,
@@ -298,37 +270,18 @@ impl Component for SessionView {
             last_permission_request: None,
             reconnect_attempt: 0,
             reconnect_timer: None,
-            command_history: CommandHistory::for_session(ctx.props().session.id),
-            is_recording: false,
-            interim_transcription: None,
             last_message_timestamp: None,
-            voice_button_ref: NodeRef::default(),
-            send_mode_dropdown_open: false,
-            file_input_ref: NodeRef::default(),
-            upload_progress: None,
-            upload_files: Vec::new(),
-            upload_departing: false,
-            upload_dismiss_timer: None,
-            drag_hover: false,
             tasks_dispatcher: None,
-            input_text: String::new(),
+            input_bar_dispatcher: None,
             pending_sends: Vec::new(),
         }
     }
 
     fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
-        let now_focused = ctx.props().focused;
-        let became_focused = now_focused && !self.was_focused;
-        self.was_focused = now_focused;
-
-        if became_focused {
-            if let Some(input) = self.input_ref.cast::<HtmlTextAreaElement>() {
-                let _ = input.focus();
-            }
-        }
-
-        // Detect interrupt signal change on the focused session
-        if now_focused
+        // Detect interrupt signal change on the focused session. Textarea
+        // focus on focused-transition is owned by `InputBar` (it sees the
+        // `focused` prop directly through its own `changed()`).
+        if ctx.props().focused
             && ctx.props().interrupt_signal != old_props.interrupt_signal
             && ctx.props().interrupt_signal > 0
         {
@@ -339,20 +292,7 @@ impl Component for SessionView {
     }
 
     fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
-        if first_render && ctx.props().focused {
-            if let Some(input) = self.input_ref.cast::<HtmlTextAreaElement>() {
-                let _ = input.focus();
-            }
-        }
-
-        // Restore textarea content if it was cleared during a re-render (e.g. reconnection)
-        if !self.input_text.is_empty() {
-            if let Some(el) = self.input_ref.cast::<HtmlTextAreaElement>() {
-                if el.value().is_empty() {
-                    self.set_input_text(&self.input_text.clone());
-                }
-            }
-        }
+        // Textarea focus + content restoration are owned by `InputBar`.
 
         if let Some(element) = self.messages_ref.cast::<Element>() {
             if first_render {
@@ -382,13 +322,6 @@ impl Component for SessionView {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
-            SessionViewMsg::UpdateInput(value) => {
-                // Textarea is uncontrolled — the DOM already has the new value.
-                // Track in state so we can restore after reconnection re-renders.
-                self.input_text = value;
-                false
-            }
-            SessionViewMsg::SendInput => self.handle_send_input_with_mode(ctx, SendMode::Normal),
             SessionViewMsg::LoadHistory(mut messages, last_timestamp) => {
                 if messages.len() > MAX_MESSAGES_PER_SESSION {
                     let excess = messages.len() - MAX_MESSAGES_PER_SESSION;
@@ -486,7 +419,9 @@ impl Component for SessionView {
                     let frame = build_permission_response(request_id, kind, &perm);
                     send_message(sender, ClientToServer::PermissionResponse(frame));
                 }
-                refocus_textarea(&self.input_ref);
+                // Textarea refocus is handled separately via
+                // `PermissionHandlerProps::on_refocus_input`, which the
+                // parent routes through the `InputBar` dispatcher.
                 false
             }
             SessionViewMsg::WebSocketConnected(sender) => {
@@ -532,254 +467,27 @@ impl Component for SessionView {
                     .emit((session_id, branch, pr_url, repo_url));
                 false
             }
-            SessionViewMsg::HistoryUp => {
-                let current = self.get_input_text();
-                if let Some(cmd) = self.command_history.navigate_up(&current) {
-                    self.set_input_text(&cmd);
-                }
-                false
-            }
-            SessionViewMsg::HistoryDown => {
-                if let Some(cmd) = self.command_history.navigate_down() {
-                    self.set_input_text(&cmd);
-                }
-                false
-            }
-            SessionViewMsg::VoiceRecordingChanged(recording) => {
-                self.is_recording = recording;
-                if !recording {
-                    self.interim_transcription = None;
-                }
-                true
-            }
-            SessionViewMsg::VoiceTranscription(text) => {
-                self.interim_transcription = None;
-                if !text.is_empty() {
-                    let current = self.get_input_text();
-                    let new_value = if current.is_empty() {
-                        text
-                    } else {
-                        format!("{} {}", current, text)
-                    };
-                    self.set_input_text(&new_value);
-                    ctx.link().send_message(SessionViewMsg::SendInput);
-                }
-                true
-            }
-            SessionViewMsg::VoiceInterimTranscription(text) => {
-                self.interim_transcription = if text.is_empty() { None } else { Some(text) };
-                true
-            }
-            SessionViewMsg::VoiceError(err) => {
-                log::error!("Voice error: {}", err);
-                self.is_recording = false;
-                self.interim_transcription = None;
-                true
-            }
-            SessionViewMsg::ToggleVoice => {
-                if let Some(button) = self.voice_button_ref.cast::<web_sys::HtmlElement>() {
-                    button.click();
-                }
-                false
-            }
-            SessionViewMsg::ToggleSendModeDropdown => {
-                self.send_mode_dropdown_open = !self.send_mode_dropdown_open;
-                true
-            }
-            SessionViewMsg::CloseSendModeDropdown => {
-                if self.send_mode_dropdown_open {
-                    self.send_mode_dropdown_open = false;
-                    true
-                } else {
-                    false
-                }
-            }
-            SessionViewMsg::SendWiggum => {
-                self.send_mode_dropdown_open = false;
-                self.handle_send_input_with_mode(ctx, SendMode::Wiggum)
-            }
-            SessionViewMsg::FilesSelected(files) => {
-                // Close dropdown, clear drag state, and start uploading all files
-                self.send_mode_dropdown_open = false;
-                self.drag_hover = false;
-                self.upload_progress = Some(0.0);
-                self.upload_files = files.iter().map(|f| (f.name(), f.size() as u64)).collect();
-                let link = ctx.link().clone();
-                let sender = self.ws_sender.clone();
-                let user_input = self.get_input_text().trim().to_string();
-                self.set_input_text("");
-                self.input_text.clear();
-                if !user_input.is_empty() {
-                    self.command_history.push(user_input.clone());
-                }
-                let session_id = ctx.props().session.id;
-                ctx.props().on_message_sent.emit(session_id);
-
-                spawn_local(async move {
-                    let Some(ref ws) = sender else {
-                        link.send_message(SessionViewMsg::FileUploadError(
-                            "WebSocket not connected".into(),
-                        ));
-                        return;
-                    };
-
-                    let mut uploaded_files: Vec<(String, u64)> = Vec::new();
-                    let total_files = files.len();
-
-                    for (file_idx, file) in files.iter().enumerate() {
-                        let file_name = file.name();
-                        let file_size = file.size() as u64;
-                        let content_type = file.type_();
-
-                        let array_buffer =
-                            match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
-                                Ok(buf) => buf,
-                                Err(_) => {
-                                    link.send_message(SessionViewMsg::FileUploadError(format!(
-                                        "Failed to read file: {}",
-                                        file_name
-                                    )));
-                                    return;
-                                }
-                            };
-                        let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-                        let bytes = uint8_array.to_vec();
-
-                        const CHUNK_SIZE: usize = 1024;
-                        let total_chunks = bytes.len().div_ceil(CHUNK_SIZE).max(1) as u32;
-                        let upload_id = Uuid::new_v4().to_string();
-
-                        let ct = if content_type.is_empty() {
-                            "application/octet-stream".to_string()
-                        } else {
-                            content_type
-                        };
-
-                        send_message(
-                            ws,
-                            ClientToServer::FileUploadStart(shared::FileUploadStartFields {
-                                upload_id: upload_id.clone(),
-                                filename: file_name.clone(),
-                                content_type: ct,
-                                total_chunks,
-                                total_size: file_size,
-                            }),
-                        );
-
-                        for i in 0..total_chunks {
-                            let start = i as usize * CHUNK_SIZE;
-                            let end = ((i as usize + 1) * CHUNK_SIZE).min(bytes.len());
-                            let chunk = &bytes[start..end];
-                            let encoded = base64::Engine::encode(
-                                &base64::engine::general_purpose::STANDARD,
-                                chunk,
-                            );
-
-                            send_message(
-                                ws,
-                                ClientToServer::FileUploadChunk(shared::FileUploadChunkFields {
-                                    upload_id: upload_id.clone(),
-                                    chunk_index: i,
-                                    data: encoded,
-                                }),
-                            );
-                        }
-
-                        uploaded_files.push((file_name, file_size));
-
-                        // Update progress across all files
-                        let overall_progress = (file_idx + 1) as f32 / total_files as f32;
-                        link.send_message(SessionViewMsg::FileUploadProgress(overall_progress));
-                    }
-
-                    // Build the combined message: user text + formatted file list
-                    let file_list: Vec<String> = uploaded_files
-                        .iter()
-                        .map(|(name, size)| {
-                            let human_size = if *size < 1024 {
-                                format!("{} B", size)
-                            } else if *size < 1024 * 1024 {
-                                format!("{:.1} KB", *size as f64 / 1024.0)
-                            } else {
-                                format!("{:.1} MB", *size as f64 / (1024.0 * 1024.0))
-                            };
-                            format!("- {} ({})", name, human_size)
-                        })
-                        .collect();
-
-                    let combined = if user_input.is_empty() {
-                        format!(
-                            "I've uploaded the following files to your working directory:\n{}",
-                            file_list.join("\n")
-                        )
-                    } else {
-                        format!(
-                            "{}\n\nI've uploaded the following files to your working directory:\n{}",
-                            user_input,
-                            file_list.join("\n")
-                        )
-                    };
-
-                    send_message(
-                        ws,
-                        ClientToServer::ClaudeInput {
-                            content: serde_json::Value::String(combined),
-                            send_mode: None,
-                        },
-                    );
-
-                    link.send_message(SessionViewMsg::FileUploaded(
-                        uploaded_files
-                            .iter()
-                            .map(|(n, _)| n.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    ));
-                });
-
-                true
-            }
-            SessionViewMsg::FileUploadProgress(progress) => {
-                self.upload_progress = Some(progress);
-                true
-            }
-            SessionViewMsg::FileUploaded(_filename) => {
-                self.upload_progress = Some(1.0);
-                self.upload_departing = false;
-                let link = ctx.link().clone();
-                self.upload_dismiss_timer = Some(Timeout::new(2_000, move || {
-                    link.send_message(SessionViewMsg::UploadDismiss);
-                }));
-                true
-            }
-            SessionViewMsg::UploadDismiss => {
-                self.upload_departing = true;
-                self.upload_dismiss_timer = None;
-                let link = ctx.link().clone();
-                // Clear after the CSS collapse animation finishes
-                self.upload_dismiss_timer = Some(Timeout::new(400, move || {
-                    link.send_message(SessionViewMsg::FileUploadError("dismiss".into()));
-                }));
-                true
-            }
-            SessionViewMsg::FileUploadError(_err) => {
-                self.upload_progress = None;
-                self.upload_files.clear();
-                self.upload_departing = false;
-                self.upload_dismiss_timer = None;
-                true
-            }
-            SessionViewMsg::DragEnter => {
-                self.drag_hover = true;
-                true
-            }
-            SessionViewMsg::DragLeave => {
-                self.drag_hover = false;
-                true
-            }
-            SessionViewMsg::Noop => false,
             SessionViewMsg::TasksDispatcherRegistered(dispatcher) => {
                 self.tasks_dispatcher = Some(dispatcher);
+                false
+            }
+            SessionViewMsg::InputBarDispatcherRegistered(dispatcher) => {
+                self.input_bar_dispatcher = Some(dispatcher);
+                false
+            }
+            SessionViewMsg::SendText(input, mode) => {
+                self.send_text_input(ctx, input, mode);
+                true
+            }
+            SessionViewMsg::SendFrame(frame) => {
+                if let Some(ref sender) = self.ws_sender {
+                    send_message(sender, frame);
+                }
+                false
+            }
+            SessionViewMsg::MessageSent => {
+                let session_id = ctx.props().session.id;
+                ctx.props().on_message_sent.emit(session_id);
                 false
             }
             SessionViewMsg::Interrupt => {
@@ -811,120 +519,6 @@ impl Component for SessionView {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let link = ctx.link();
-
-        let handle_submit = link.callback(|e: SubmitEvent| {
-            e.prevent_default();
-            SessionViewMsg::SendInput
-        });
-
-        let handle_input = link.callback(|e: InputEvent| {
-            let input: HtmlTextAreaElement = e.target_unchecked_into();
-            let el: &Element = input.as_ref();
-            // Measure content height with overflow hidden to prevent scrollbar
-            // from narrowing the text area and causing layout bounce.
-            el.set_attribute("style", "height: 0; overflow-y: hidden")
-                .ok();
-            el.set_attribute("style", &format!("height: {}px", input.scroll_height()))
-                .ok();
-            SessionViewMsg::UpdateInput(input.value())
-        });
-
-        let handle_keydown = link.callback(|e: KeyboardEvent| {
-            if e.ctrl_key() && e.key().to_lowercase() == "m" {
-                e.prevent_default();
-                return SessionViewMsg::ToggleVoice;
-            }
-
-            match e.key().as_str() {
-                "Enter" if !e.shift_key() => {
-                    // Enter without Shift submits
-                    e.prevent_default();
-                    SessionViewMsg::SendInput
-                }
-                "Enter" => {
-                    // Shift+Enter inserts newline (default behavior)
-                    SessionViewMsg::Noop
-                }
-                "ArrowUp" => {
-                    // Only trigger history if cursor is on the first line of the textarea.
-                    // Otherwise, let the arrow key move the cursor normally.
-                    let target: HtmlTextAreaElement = e.target_unchecked_into();
-                    let value = target.value();
-                    let cursor = target.selection_start().ok().flatten().unwrap_or(0) as usize;
-                    let on_first_line = !value[..cursor.min(value.len())].contains('\n');
-                    if on_first_line {
-                        e.prevent_default();
-                        SessionViewMsg::HistoryUp
-                    } else {
-                        SessionViewMsg::Noop
-                    }
-                }
-                "ArrowDown" => {
-                    // Only trigger history if cursor is on the last line of the textarea.
-                    let target: HtmlTextAreaElement = e.target_unchecked_into();
-                    let value = target.value();
-                    let cursor = target.selection_start().ok().flatten().unwrap_or(0) as usize;
-                    let on_last_line = !value[cursor.min(value.len())..].contains('\n');
-                    if on_last_line {
-                        e.prevent_default();
-                        SessionViewMsg::HistoryDown
-                    } else {
-                        SessionViewMsg::Noop
-                    }
-                }
-                _ => SessionViewMsg::Noop,
-            }
-        });
-
-        let close_dropdown = link.callback(|_| SessionViewMsg::CloseSendModeDropdown);
-
-        let handle_paste = link.callback(|e: Event| {
-            let e: ClipboardEvent = e.unchecked_into();
-            if let Some(data) = e.clipboard_data() {
-                let items = data.items();
-                let files: Vec<web_sys::File> = (0..items.length())
-                    .filter_map(|i: u32| items.get(i))
-                    .filter(|item: &web_sys::DataTransferItem| item.kind() == "file")
-                    .filter_map(|item: web_sys::DataTransferItem| item.get_as_file().ok().flatten())
-                    .collect();
-                if !files.is_empty() {
-                    e.prevent_default();
-                    return SessionViewMsg::FilesSelected(files);
-                }
-            }
-            SessionViewMsg::Noop
-        });
-
-        let handle_dragover = link.callback(|e: DragEvent| {
-            e.prevent_default();
-            SessionViewMsg::DragEnter
-        });
-
-        let handle_dragleave = link.callback(|e: DragEvent| {
-            e.prevent_default();
-            SessionViewMsg::DragLeave
-        });
-
-        let handle_drop = link.callback(|e: DragEvent| {
-            e.prevent_default();
-            let files: Vec<web_sys::File> = e
-                .data_transfer()
-                .and_then(|dt| dt.files())
-                .map(|fl| (0..fl.length()).filter_map(|i: u32| fl.get(i)).collect())
-                .unwrap_or_default();
-            if !files.is_empty() {
-                SessionViewMsg::FilesSelected(files)
-            } else {
-                SessionViewMsg::DragLeave
-            }
-        });
-
-        let drag_hint = if self.drag_hover {
-            "session-view-input drag-hover"
-        } else {
-            "session-view-input"
-        };
-
         let is_tailing = self.should_autoscroll;
         let on_jump_to_live = link.callback(|e: MouseEvent| {
             e.stop_propagation();
@@ -932,7 +526,7 @@ impl Component for SessionView {
         });
 
         html! {
-            <div class="session-view" onclick={close_dropdown}>
+            <div class="session-view">
                 <div class="session-view-scroll-area">
                     <div class="session-view-messages" ref={self.messages_ref.clone()}>
                         {
@@ -962,34 +556,7 @@ impl Component for SessionView {
                 </div>
 
                 { self.render_permission_handler(ctx) }
-                { self.render_upload_bar() }
-
-                <form
-                    class={drag_hint}
-                    onsubmit={handle_submit}
-                    ondragover={handle_dragover}
-                    ondragleave={handle_dragleave}
-                    ondrop={handle_drop}
-                >
-                    <span class="input-prompt">{ ">" }</span>
-                    { self.render_interim_transcription() }
-                    <textarea
-                        ref={self.input_ref.clone()}
-                        class={classes!(
-                            "message-input",
-                            self.interim_transcription.is_some().then_some("has-interim")
-                        )}
-                        placeholder="Type your message... (Shift+Enter for new line)"
-                        oninput={handle_input}
-                        onkeydown={handle_keydown}
-                        onpaste={handle_paste}
-                        disabled={!self.ws_connected}
-                        rows="1"
-                    />
-                    { self.render_voice_input(ctx) }
-                    { self.render_send_button(ctx) }
-                    <div class="drop-hint">{ "Drop files here to upload" }</div>
-                </form>
+                { self.render_input_bar(ctx) }
             </div>
         }
     }
@@ -997,32 +564,6 @@ impl Component for SessionView {
 
 // Helper methods extracted from the main impl
 impl SessionView {
-    /// Read the current textarea value directly from the DOM.
-    fn get_input_text(&self) -> String {
-        self.input_ref
-            .cast::<HtmlTextAreaElement>()
-            .map(|el| el.value())
-            .unwrap_or_default()
-    }
-
-    /// Write text to the textarea DOM element and auto-resize it.
-    /// Does NOT trigger a Yew re-render.
-    fn set_input_text(&self, text: &str) {
-        if let Some(el) = self.input_ref.cast::<HtmlTextAreaElement>() {
-            el.set_value(text);
-            // Auto-resize
-            let elem: &Element = el.as_ref();
-            if text.is_empty() {
-                elem.remove_attribute("style").ok();
-            } else {
-                elem.set_attribute("style", "height: 0; overflow-y: hidden")
-                    .ok();
-                elem.set_attribute("style", &format!("height: {}px", el.scroll_height()))
-                    .ok();
-            }
-        }
-    }
-
     fn handle_ws_event(&mut self, ctx: &Context<Self>, event: WsEvent) -> bool {
         match event {
             WsEvent::Connected(sender) => {
@@ -1084,22 +625,15 @@ impl SessionView {
         }
     }
 
-    fn handle_send_input_with_mode(&mut self, ctx: &Context<Self>, send_mode: SendMode) -> bool {
-        crate::audio::ensure_audio_context();
-        let input = self.get_input_text().trim().to_string();
-
+    /// Translate a plain-text submission from `InputBar` into the optimistic
+    /// local echo + the `ClientToServer::ClaudeInput` WS frame. The bar has
+    /// already trimmed and cleared its textarea, and already emitted
+    /// `MessageSent` (which we forward to `on_message_sent` separately);
+    /// we just package the wire frame and local echo.
+    fn send_text_input(&mut self, _ctx: &Context<Self>, input: String, send_mode: SendMode) {
         if input.is_empty() {
-            return false;
+            return;
         }
-
-        self.command_history.push(input.clone());
-        self.set_input_text("");
-        self.input_text.clear();
-
-        let session_id = ctx.props().session.id;
-        ctx.props().on_message_sent.emit(session_id);
-
-        // Optimistic local echo: show in pending queue at bottom of chat
         let now_iso = js_sys::Date::new_0()
             .to_iso_string()
             .as_string()
@@ -1112,7 +646,6 @@ impl SessionView {
         });
         self.pending_sends.push(optimistic_msg.to_string());
 
-        // Send the text
         if let Some(ref sender) = self.ws_sender {
             let msg = ClientToServer::ClaudeInput {
                 content: serde_json::Value::String(input),
@@ -1124,7 +657,6 @@ impl SessionView {
             };
             send_message(sender, msg);
         }
-        true
     }
 
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: String) -> bool {
@@ -1285,8 +817,15 @@ impl SessionView {
         let on_pending_changed = link.callback(SessionViewMsg::PermissionPendingChanged);
         let on_response =
             link.callback(|(rid, kind)| SessionViewMsg::PermissionAnswered(rid, kind));
-        let input_ref = self.input_ref.clone();
-        let on_refocus_input = Callback::from(move |_| refocus_textarea(&input_ref));
+        // Re-focus the textarea after an answer by forwarding through the
+        // `InputBar`'s dispatcher (which we got at the bar's `create` time).
+        // Snapshot the `Option` once so the callback doesn't capture `&self`.
+        let input_bar = self.input_bar_dispatcher.clone();
+        let on_refocus_input = Callback::from(move |_| {
+            if let Some(ref dispatcher) = input_bar {
+                dispatcher.emit(InputBarInbound::FocusTextarea);
+            }
+        });
         html! {
             <PermissionHandler
                 focused={ctx.props().focused}
@@ -1298,196 +837,24 @@ impl SessionView {
         }
     }
 
-    fn render_interim_transcription(&self) -> Html {
-        if let Some(ref interim) = self.interim_transcription {
-            let current = self.get_input_text();
-            let preview = if current.is_empty() {
-                interim.clone()
-            } else {
-                format!("{} {}", current, interim)
-            };
-            html! {
-                <div class="interim-transcription">{ preview }</div>
-            }
-        } else {
-            html! {}
-        }
-    }
-
-    fn render_upload_bar(&self) -> Html {
-        let progress = match self.upload_progress {
-            Some(p) => p,
-            None => return html! {},
-        };
-
-        let complete = progress >= 1.0;
-        let file_count = self.upload_files.len();
-        let header = if complete {
-            "Upload complete".to_string()
-        } else if file_count == 1 {
-            "Uploading 1 file...".to_string()
-        } else {
-            format!("Uploading {} files...", file_count)
-        };
-
-        let files_html = self
-            .upload_files
-            .iter()
-            .map(|(name, size)| {
-                let human_size = if *size < 1024 {
-                    format!("{} B", size)
-                } else if *size < 1024 * 1024 {
-                    format!("{:.1} KB", *size as f64 / 1024.0)
-                } else {
-                    format!("{:.1} MB", *size as f64 / (1024.0 * 1024.0))
-                };
-                html! { <div class="upload-bar-file">{ format!("{} ({})", name, human_size) }</div> }
-            })
-            .collect::<Html>();
-
-        let pct = (progress * 100.0) as u32;
-        let fill_style = format!("width: {}%", pct);
-
-        let bar_class = if self.upload_departing {
-            "upload-bar departing"
-        } else {
-            "upload-bar"
-        };
-
-        html! {
-            <div class={bar_class}>
-                <div class="upload-bar-header">{ header }</div>
-                { files_html }
-                <div class="upload-bar-track">
-                    <div class="upload-bar-fill" style={fill_style} />
-                </div>
-            </div>
-        }
-    }
-
-    fn render_voice_input(&self, ctx: &Context<Self>) -> Html {
-        if ctx.props().voice_enabled {
-            let link = ctx.link();
-            let session_id = ctx.props().session.id;
-            let on_recording_change = link.callback(SessionViewMsg::VoiceRecordingChanged);
-            let on_transcription = link.callback(SessionViewMsg::VoiceTranscription);
-            let on_interim_transcription = link.callback(SessionViewMsg::VoiceInterimTranscription);
-            let on_error = link.callback(SessionViewMsg::VoiceError);
-            let button_ref = self.voice_button_ref.clone();
-
-            html! {
-                <VoiceInput
-                    {session_id}
-                    {on_recording_change}
-                    {on_transcription}
-                    on_interim_transcription={Some(on_interim_transcription)}
-                    {on_error}
-                    disabled={!self.ws_connected}
-                    button_ref={Some(button_ref)}
-                />
-            }
-        } else {
-            html! {}
-        }
-    }
-
-    fn render_send_button(&self, ctx: &Context<Self>) -> Html {
+    fn render_input_bar(&self, ctx: &Context<Self>) -> Html {
         let link = ctx.link();
-        let on_send = link.callback(|_| SessionViewMsg::SendInput);
-        let on_toggle_dropdown = link.callback(|e: MouseEvent| {
-            e.stop_propagation();
-            SessionViewMsg::ToggleSendModeDropdown
-        });
-        let on_wiggum = link.callback(|_| SessionViewMsg::SendWiggum);
-
-        let file_input_ref = self.file_input_ref.clone();
-        let on_attach_dropdown = Callback::from(move |_: MouseEvent| {
-            if let Some(input) = file_input_ref.cast::<web_sys::HtmlInputElement>() {
-                input.click();
-            }
-        });
-        let on_file_change = link.callback(|e: Event| {
-            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            if let Some(files) = input.files() {
-                if files.length() > 0 {
-                    let mut file_list = Vec::new();
-                    for i in 0..files.length() {
-                        if let Some(file) = files.get(i) {
-                            file_list.push(file);
-                        }
-                    }
-                    input.set_value("");
-                    if !file_list.is_empty() {
-                        return SessionViewMsg::FilesSelected(file_list);
-                    }
-                }
-            }
-            SessionViewMsg::FileUploadError("No files selected".into())
-        });
-
-        let dropdown_class = if self.send_mode_dropdown_open {
-            "send-mode-dropdown open"
-        } else {
-            "send-mode-dropdown"
-        };
-
-        let is_uploading = self.upload_progress.is_some_and(|p| p < 1.0);
-
+        let on_register = link.callback(SessionViewMsg::InputBarDispatcherRegistered);
+        let on_send_text =
+            link.callback(|(text, mode): (String, SendMode)| SessionViewMsg::SendText(text, mode));
+        let on_send_frame = link.callback(SessionViewMsg::SendFrame);
+        let on_message_sent = link.callback(|_| SessionViewMsg::MessageSent);
         html! {
-            <div class="send-button-container">
-                <input
-                    ref={self.file_input_ref.clone()}
-                    type="file"
-                    multiple=true
-                    class="hidden-file-input"
-                    onchange={on_file_change}
-                />
-                <button
-                    type="submit"
-                    class="send-button"
-                    disabled={!self.ws_connected || is_uploading}
-                    onclick={on_send}
-                >
-                    { "Send" }
-                </button>
-                <button
-                    type="button"
-                    class="send-mode-toggle"
-                    disabled={!self.ws_connected || is_uploading}
-                    onclick={on_toggle_dropdown}
-                >
-                    { "\u{25bc}" }
-                </button>
-                <div class={dropdown_class}>
-                    <button
-                        type="button"
-                        class="dropdown-option selected"
-                        onclick={link.callback(|_| SessionViewMsg::CloseSendModeDropdown)}
-                    >
-                        { "Send" }
-                        <span class="option-hint">{ "Normal message" }</span>
-                    </button>
-                    <button
-                        type="button"
-                        class="dropdown-option wiggum"
-                        onclick={on_wiggum}
-                    >
-                        <span class="wiggum-label">
-                            <img src="wiggum.png" alt="" class="wiggum-icon" />
-                            { "Wiggum" }
-                        </span>
-                        <span class="option-hint">{ "Loop until DONE" }</span>
-                    </button>
-                    <button
-                        type="button"
-                        class="dropdown-option attachment"
-                        onclick={on_attach_dropdown}
-                    >
-                        { "Send with attachment(s)" }
-                        <span class="option-hint">{ "Upload files + message" }</span>
-                    </button>
-                </div>
-            </div>
+            <InputBar
+                session_id={ctx.props().session.id}
+                focused={ctx.props().focused}
+                ws_connected={self.ws_connected}
+                voice_enabled={ctx.props().voice_enabled}
+                {on_register}
+                {on_send_text}
+                {on_send_frame}
+                {on_message_sent}
+            />
         }
     }
 
