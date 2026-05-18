@@ -45,6 +45,10 @@ pub use claude_codes::io::{
 };
 pub use claude_codes::ClaudeOutput;
 
+// Re-export typed tool-input types so frontend renderers can match on enum
+// variants instead of poking at JSON field names.
+pub use claude_codes::tool_inputs::{TodoItem, TodoStatus, TodoWriteInput, ToolInput};
+
 /// Returns true when a system message marks the END of a context compaction.
 ///
 /// The CLI uses several spellings depending on version and code path, so this
