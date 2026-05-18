@@ -18,7 +18,7 @@ pub mod protocol;
 
 // API client types and trait
 pub mod api;
-pub use api::{ApiError, SoundSettingsResponse};
+pub use api::{ApiError, CodexPermissionInput, SoundSettingsResponse};
 
 /// Default backend URL based on build profile.
 /// Release builds point to `wss://txcl.io`, debug builds to `ws://localhost:3000`.
