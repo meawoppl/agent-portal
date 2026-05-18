@@ -118,6 +118,34 @@
     border-left: 3px solid #7dcfff;
 }
 
+/* Group wrapper for consecutive portal messages (PR 2/4 of #758). Mirrors
+   the assistant-group treatment: one outer wrapper around N child message
+   blocks so a chatty stretch reads as one visual unit. The inner
+   `.portal-message` children drop their own outer border to avoid double
+   bordering; the teal accent lives on the wrapper. */
+.portal-group {
+    border-left: 3px solid #7dcfff;
+    background: rgba(125, 207, 255, 0.04);
+}
+
+.portal-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0;
+}
+
+.portal-group-body .portal-message {
+    border-left: none;
+    background: transparent;
+    margin: 0;
+}
+
+.portal-group-body .portal-message .message-header {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+}
+
 .message-type-badge.raw {
     background: rgba(127, 132, 156, 0.2);
     color: var(--text-secondary);

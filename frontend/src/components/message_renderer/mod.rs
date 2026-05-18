@@ -29,13 +29,18 @@ pub(super) fn extract_raw_iso(json: &str) -> Option<String> {
 
 /// Category for a run of consecutive related messages — drives both the
 /// grouping decision (`classify`) and the wrapper style on the rendered
-/// group (`MessageGroupRenderer`). PR 1 of the roadmap in #758 introduces
-/// `Assistant` only; PR 2 / PR 3 add `Portal`, `User`, `Codex`.
+/// group (`MessageGroupRenderer`). PR 1 of the roadmap in #758 added
+/// `Assistant`; PR 2 adds `Portal`. PR 3 adds `User`, `Codex`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupCategory {
     /// Assistant messages and the user-shaped envelopes that carry only
     /// tool results back to the agent.
     Assistant,
+    /// Consecutive portal messages (connect/disconnect notices, retry
+    /// announcements, codex raw-frame attachments, etc.). Rolled into one
+    /// teal-accented block so a chatty stretch reads as a single visual
+    /// unit instead of N stacked single-line cards.
+    Portal,
 }
 
 impl GroupCategory {
@@ -46,6 +51,7 @@ impl GroupCategory {
     fn key_prefix(self) -> &'static str {
         match self {
             GroupCategory::Assistant => "g",
+            GroupCategory::Portal => "p",
         }
     }
 }
@@ -135,9 +141,21 @@ fn should_group_with_assistant(json: &str) -> bool {
 /// Sole entry point for "what kind of group does this message belong to"
 /// across the codebase — add new categories here, not at the `group_messages`
 /// loop level.
+///
+/// **Predicate ordering matters**: the Assistant check looks at user-shaped
+/// envelopes whose blocks are all tool results — those are *user-typed*
+/// messages from the wire but they belong with the surrounding assistant
+/// turn. The Portal check runs after, so a portal message can never accidentally
+/// get classified as Assistant.
 fn classify(json: &str) -> Option<GroupCategory> {
     if should_group_with_assistant(json) {
         return Some(GroupCategory::Assistant);
+    }
+    if matches!(
+        serde_json::from_str::<ClaudeMessage>(json),
+        Ok(ClaudeMessage::Portal(_))
+    ) {
+        return Some(GroupCategory::Portal);
     }
     None
 }
@@ -259,6 +277,15 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 .first()
                 .and_then(|json| extract_local_timestamp(json));
             renderers::render_assistant_group(messages, ts.as_deref())
+        }
+        MessageGroup::Grouped {
+            category: GroupCategory::Portal,
+            messages,
+        } => {
+            let ts = messages
+                .first()
+                .and_then(|json| extract_local_timestamp(json));
+            renderers::render_portal_group(messages, ts.as_deref())
         }
     }
 }
@@ -469,6 +496,78 @@ mod tests {
             "user-tool-result with a stale top-level `content` field should \
              still group with the assistant; the predicate must look at the \
              nested message blocks, not the envelope's top-level field"
+        );
+    }
+
+    /// PR 2/4 of #758: portal messages must classify together.
+    fn portal_text_message(text: &str) -> String {
+        serde_json::json!({
+            "type": "portal",
+            "content": [{"type": "text", "text": text}],
+            "_created_at": "2026-05-18T05:00:00.000Z",
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn portal_messages_classify_into_portal_group() {
+        let msg = portal_text_message("Connection restored");
+        assert_eq!(classify(&msg), Some(GroupCategory::Portal));
+    }
+
+    #[test]
+    fn serial_portal_messages_collapse_into_one_group() {
+        let messages = vec![
+            portal_text_message("Disconnected at 2026-05-18T05:00:00Z"),
+            portal_text_message("Reconnected at 2026-05-18T05:01:00Z"),
+            portal_text_message("Codex frame attached"),
+        ];
+        let groups = group_messages(&messages);
+        assert_eq!(
+            groups.len(),
+            1,
+            "expected one Portal group, got {} groups",
+            groups.len()
+        );
+        match &groups[0] {
+            MessageGroup::Grouped {
+                category: GroupCategory::Portal,
+                messages,
+            } => assert_eq!(messages.len(), 3),
+            other => panic!("expected Portal Grouped run, got {:?}", other),
+        }
+    }
+
+    /// An assistant message between two portal messages must split the run —
+    /// portal-group only collapses *consecutive* portal messages.
+    #[test]
+    fn portal_run_breaks_on_intervening_assistant() {
+        let messages = vec![
+            portal_text_message("first portal"),
+            assistant_with_tool_use("toolu_01", "Read"),
+            portal_text_message("second portal"),
+        ];
+        let groups = group_messages(&messages);
+        assert_eq!(
+            groups.len(),
+            3,
+            "expected 3 groups (Portal, Assistant, Portal), got {}",
+            groups.len()
+        );
+        let cats: Vec<_> = groups
+            .iter()
+            .map(|g| match g {
+                MessageGroup::Grouped { category, .. } => Some(*category),
+                MessageGroup::Single(_) => None,
+            })
+            .collect();
+        assert_eq!(
+            cats,
+            vec![
+                Some(GroupCategory::Portal),
+                Some(GroupCategory::Assistant),
+                Some(GroupCategory::Portal),
+            ]
         );
     }
 
