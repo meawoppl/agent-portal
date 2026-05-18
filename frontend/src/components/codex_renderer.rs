@@ -203,6 +203,43 @@ pub enum CodexItem {
     Unknown,
 }
 
+impl CodexItem {
+    /// Stable per-item identifier carried through the `started` → `updated` →
+    /// `completed` lifecycle. Used by the message-group dedup pass to collapse
+    /// progressive lifecycle events for the same item into a single rendered
+    /// card (#776 — bash commands were rendering twice as "running" +
+    /// "completed" cards).
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            CodexItem::AgentMessage { id, .. }
+            | CodexItem::Reasoning { id, .. }
+            | CodexItem::CommandExecution { id, .. }
+            | CodexItem::FileChange { id, .. }
+            | CodexItem::McpToolCall { id, .. }
+            | CodexItem::WebSearch { id, .. }
+            | CodexItem::TodoList { id, .. }
+            | CodexItem::Error { id, .. } => id.as_deref(),
+            CodexItem::Unknown => None,
+        }
+    }
+}
+
+/// Extract the `item_id` from a Codex event JSON, if it carries one. Returns
+/// `None` for events without items (turn-level events, deltas, errors) or for
+/// unparseable JSON. The group renderer uses this to dedupe progressive
+/// `ItemStarted` / `ItemUpdated` / `ItemCompleted` events for the same item
+/// into a single rendered card (#776).
+pub fn codex_event_item_id(json: &str) -> Option<String> {
+    let event: CodexEvent = serde_json::from_str(json).ok()?;
+    let item = match event {
+        CodexEvent::ItemStarted { item }
+        | CodexEvent::ItemUpdated { item }
+        | CodexEvent::ItemCompleted { item } => item?,
+        _ => return None,
+    };
+    item.id().map(String::from)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileChange {
     pub path: Option<String>,

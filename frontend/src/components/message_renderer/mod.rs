@@ -300,6 +300,37 @@ pub fn group_messages(
     groups
 }
 
+/// For Codex groups, suppress earlier events that share an `item_id` with a
+/// later event in the same group — they represent the same logical card being
+/// progressively filled in (`item.started` → `item.updated` → `item.completed`),
+/// and rendering all of them creates duplicate near-identical cards (#776 — a
+/// bash command would show up as a "running" card immediately followed by a
+/// near-identical "completed" card). Non-Codex categories pass through
+/// unchanged because their wire shapes don't carry the same lifecycle.
+///
+/// Events that don't carry an `item_id` (turn-level events, deltas, errors)
+/// always pass through — they're standalone signals, not lifecycle stages of
+/// a per-item card.
+fn visible_group_indices(category: GroupCategory, messages: &[String]) -> Vec<usize> {
+    if !matches!(category, GroupCategory::Codex) {
+        return (0..messages.len()).collect();
+    }
+    use crate::components::codex_renderer::codex_event_item_id;
+    use std::collections::HashMap;
+    let mut last_idx: HashMap<String, usize> = HashMap::new();
+    for (i, json) in messages.iter().enumerate() {
+        if let Some(id) = codex_event_item_id(json) {
+            last_idx.insert(id, i);
+        }
+    }
+    (0..messages.len())
+        .filter(|i| match codex_event_item_id(&messages[*i]) {
+            Some(id) => last_idx.get(&id) == Some(i),
+            None => true,
+        })
+        .collect()
+}
+
 // --- Components ---
 
 #[derive(Properties, PartialEq)]
@@ -392,18 +423,21 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 GroupCategory::Portal => "portal-message",
                 GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
             };
+            let visible = visible_group_indices(*category, messages);
+            let visible_count = visible.len();
             html! {
                 <div class={classes!("claude-message", wrapper_class)}>
                     <div class="message-header" title={ts.unwrap_or_default()}>
                         <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
-                        if messages.len() > 1 {
-                            <span class="message-count" title={format!("{} consecutive messages", messages.len())}>
-                                { format!("× {}", messages.len()) }
+                        if visible_count > 1 {
+                            <span class="message-count" title={format!("{} consecutive messages", visible_count)}>
+                                { format!("× {}", visible_count) }
                             </span>
                         }
                     </div>
                     <div class="message-body grouped-message-body">
-                        { for messages.iter().enumerate().map(|(i, json)| {
+                        { for visible.iter().map(|&i| {
+                            let json = &messages[i];
                             let key = extract_raw_iso(json)
                                 .map(|iso| format!("m-{}", iso))
                                 .unwrap_or_else(|| format!("m{}", i));
@@ -784,6 +818,24 @@ mod tests {
         .to_string()
     }
 
+    /// Lifecycle helper: a CommandExecution event at a given lifecycle stage.
+    /// `stage` is one of `"item.started"` / `"item.updated"` / `"item.completed"`.
+    /// All three carry the same `item_id`, mirroring the Codex wire flow that
+    /// produced the duplicate-card regression of #776.
+    fn codex_command_event(stage: &str, item_id: &str, status: &str) -> String {
+        serde_json::json!({
+            "type": stage,
+            "item": {
+                "type": "command_execution",
+                "id": item_id,
+                "command": "echo hello",
+                "status": status,
+            },
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
+    }
+
     #[test]
     fn plain_text_user_classifies_into_user_group() {
         let msg = plain_user_text("hello agent");
@@ -965,6 +1017,124 @@ mod tests {
                 "{label}: classifier returned {got:?}, expected {expected:?}"
             );
         }
+    }
+
+    // ---- #776: codex lifecycle dedup ----
+
+    /// `item.started` + `item.completed` for the same `item_id` should collapse
+    /// to a single visible card (the completed one), not render as two
+    /// near-identical cards. Regression target for #776.
+    #[test]
+    fn codex_command_lifecycle_dedupes_to_completed() {
+        let messages = vec![
+            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.completed", "cmd_1", "completed"),
+        ];
+        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        assert_eq!(
+            visible,
+            vec![1],
+            "expected only the completed event to remain visible (#776), got {:?}",
+            visible
+        );
+    }
+
+    /// A `started → updated → completed` triple for the same item collapses to
+    /// the final completed event. The updated stages add nothing visible past
+    /// what completed already shows.
+    #[test]
+    fn codex_command_started_updated_completed_dedupes_to_completed() {
+        let messages = vec![
+            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.updated", "cmd_1", "running"),
+            codex_command_event("item.completed", "cmd_1", "completed"),
+        ];
+        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        assert_eq!(visible, vec![2]);
+    }
+
+    /// Two distinct items in the same group keep their own cards — dedup is
+    /// per-`item_id`, never collapses different items together.
+    #[test]
+    fn codex_two_distinct_items_each_keep_one_card() {
+        let messages = vec![
+            codex_command_event("item.started", "cmd_a", "running"),
+            codex_command_event("item.completed", "cmd_a", "completed"),
+            codex_command_event("item.started", "cmd_b", "running"),
+            codex_command_event("item.completed", "cmd_b", "completed"),
+        ];
+        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        // Indices 1 (cmd_a completed) and 3 (cmd_b completed) remain.
+        assert_eq!(visible, vec![1, 3]);
+    }
+
+    /// Non-item events in a codex group (turn-level, deltas, errors) carry no
+    /// `item_id` and must always pass through the dedup unchanged — they're
+    /// standalone signals, not lifecycle stages.
+    #[test]
+    fn codex_non_item_events_always_visible() {
+        let turn_completed = serde_json::json!({
+            "type": "turn.completed",
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+        let messages = vec![
+            codex_command_event("item.started", "cmd_1", "running"),
+            turn_completed.clone(),
+            codex_command_event("item.completed", "cmd_1", "completed"),
+        ];
+        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        // turn.completed (index 1) is kept; the started (index 0) drops in
+        // favor of the completed (index 2).
+        assert_eq!(visible, vec![1, 2]);
+    }
+
+    /// Dedup is Codex-only — assistant, portal, user, and non-grouped paths
+    /// must keep every index. Even a degenerate same-id codex-shaped JSON in
+    /// a non-Codex group should still render fully (the predicate only runs
+    /// for `GroupCategory::Codex`).
+    #[test]
+    fn visible_group_indices_is_codex_only() {
+        let messages = vec![
+            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.completed", "cmd_1", "completed"),
+        ];
+        for cat in [
+            GroupCategory::Assistant,
+            GroupCategory::Portal,
+            GroupCategory::User,
+        ] {
+            let visible = visible_group_indices(cat, &messages);
+            assert_eq!(
+                visible,
+                vec![0, 1],
+                "dedup must not fire for {:?}; got {:?}",
+                cat,
+                visible
+            );
+        }
+    }
+
+    /// A Codex item with no `id` field must not collapse into a same-shape
+    /// neighbor — dedup is keyed on `item_id`, so a missing id means
+    /// "definitely not the same item".
+    #[test]
+    fn codex_items_without_id_do_not_collapse() {
+        let no_id_a = serde_json::json!({
+            "type": "item.started",
+            "item": {"type": "agent_message", "text": "first"},
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+        let no_id_b = serde_json::json!({
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "second"},
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+        let visible = visible_group_indices(GroupCategory::Codex, &[no_id_a, no_id_b]);
+        assert_eq!(visible, vec![0, 1]);
     }
 
     #[test]
