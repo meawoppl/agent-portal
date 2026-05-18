@@ -1,5 +1,5 @@
 use serde_json::Value;
-use shared::{AskUserQuestionInput, TodoItem, TodoStatus, ToolInput};
+use shared::{AllowedPrompt, AskUserQuestionInput, TodoItem, TodoStatus, ToolInput};
 use yew::prelude::*;
 
 pub fn render_todowrite_tool(input: &Value) -> Html {
@@ -152,10 +152,18 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
 }
 
 pub fn render_exitplanmode_tool(input: &Value) -> Html {
-    let allowed_prompts = input
-        .get("allowedPrompts")
-        .and_then(|v| v.as_array())
-        .cloned()
+    // Decode the per-tool input typed instead of JSON-poking field names.
+    // `input` stays a `serde_json::Value` envelope (per-tool inputs have
+    // different shapes); typed decoding happens at this dispatch site and
+    // pulls the `ExitPlanMode` variant's `allowed_prompts` directly. Mirrors
+    // the dispatch in `frontend/src/pages/dashboard/permission_dialog.rs`
+    // (landed in #740).
+    let allowed_prompts: Vec<AllowedPrompt> = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::ExitPlanMode(epm) => epm.allowed_prompts,
+            _ => None,
+        })
         .unwrap_or_default();
 
     html! {
@@ -172,14 +180,12 @@ pub fn render_exitplanmode_tool(input: &Value) -> Html {
                             <div class="permissions-list">
                                 {
                                     allowed_prompts.iter().map(|p| {
-                                        let tool = p.get("tool").and_then(|t| t.as_str()).unwrap_or("Unknown");
-                                        let prompt = p.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
                                         html! {
                                             <div class="permission-item">
                                                 <span class="permission-bullet">{ "•" }</span>
-                                                <span class="permission-tool">{ tool }</span>
+                                                <span class="permission-tool">{ &p.tool }</span>
                                                 <span class="permission-separator">{ ": " }</span>
-                                                <span class="permission-prompt">{ prompt }</span>
+                                                <span class="permission-prompt">{ &p.prompt }</span>
                                             </div>
                                         }
                                     }).collect::<Html>()
