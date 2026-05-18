@@ -1,5 +1,5 @@
 use serde_json::Value;
-use shared::{TodoItem, TodoStatus, ToolInput};
+use shared::{AskUserQuestionInput, TodoItem, TodoStatus, ToolInput};
 use yew::prelude::*;
 
 pub fn render_todowrite_tool(input: &Value) -> Html {
@@ -40,13 +40,20 @@ pub fn render_todowrite_tool(input: &Value) -> Html {
 }
 
 pub fn render_askuserquestion_tool(input: &Value) -> Html {
-    let questions = input
-        .get("questions")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let parsed: AskUserQuestionInput = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::AskUserQuestion(a) => Some(a),
+            _ => None,
+        })
+        .unwrap_or(AskUserQuestionInput {
+            questions: Vec::new(),
+            answers: None,
+            metadata: None,
+        });
 
-    let answers = input.get("answers").and_then(|v| v.as_object());
+    let answers = parsed.answers.as_ref();
+    let questions = &parsed.questions;
 
     html! {
         <div class="tool-use askuserquestion-tool">
@@ -58,12 +65,14 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
             <div class="question-list">
                 {
                     questions.iter().map(|q| {
-                        let header = q.get("header").and_then(|h| h.as_str()).unwrap_or("");
-                        let question = q.get("question").and_then(|q| q.as_str()).unwrap_or("");
-                        let multi_select = q.get("multiSelect").and_then(|m| m.as_bool()).unwrap_or(false);
-                        let options = q.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+                        let header = q.header.as_str();
+                        let question = q.question.as_str();
+                        let multi_select = q.multi_select;
+                        let options = &q.options;
 
-                        let answer = answers.and_then(|a| a.get(question)).and_then(|v| v.as_str());
+                        let answer = answers
+                            .and_then(|a| a.get(question))
+                            .map(|s| s.as_str());
 
                         html! {
                             <div class="question-card">
@@ -87,8 +96,8 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
                                 <div class="question-options">
                                     {
                                         options.iter().map(|opt| {
-                                            let label = opt.get("label").and_then(|l| l.as_str()).unwrap_or("");
-                                            let description = opt.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                                            let label = opt.label.as_str();
+                                            let description = opt.description.as_deref().unwrap_or("");
 
                                             let is_selected = answer.map(|a| {
                                                 a.split(',').map(|s| s.trim()).any(|s| s == label)
