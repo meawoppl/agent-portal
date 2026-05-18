@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shared::ToolResultContent;
+use shared::{CacheCreationDetails, ToolResultContent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -232,7 +232,7 @@ pub struct UsageInfo {
     pub cache_creation_input_tokens: Option<u64>,
     pub service_tier: Option<String>,
     pub inference_geo: Option<String>,
-    pub cache_creation: Option<Value>,
+    pub cache_creation: Option<CacheCreationDetails>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

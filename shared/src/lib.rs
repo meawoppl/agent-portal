@@ -46,6 +46,7 @@ pub use claude_codes::io::{
     SystemSubtype as CCSystemSubtype, TaskNotificationMessage, TaskProgressMessage,
     TaskStartedMessage, TaskStatus as CCTaskStatus, TaskType as CCTaskType, TaskUsage,
 };
+pub use claude_codes::CacheCreationDetails;
 pub use claude_codes::ClaudeOutput;
 
 // Re-export typed tool-input types so frontend renderers can match on enum
