@@ -1,11 +1,14 @@
 use serde_json::Value;
+use shared::{TodoItem, TodoStatus, ToolInput};
 use yew::prelude::*;
 
 pub fn render_todowrite_tool(input: &Value) -> Html {
-    let todos = input
-        .get("todos")
-        .and_then(|v| v.as_array())
-        .cloned()
+    let todos: Vec<TodoItem> = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::TodoWrite(tw) => Some(tw.todos),
+            _ => None,
+        })
         .unwrap_or_default();
 
     html! {
@@ -18,17 +21,15 @@ pub fn render_todowrite_tool(input: &Value) -> Html {
             <div class="todo-list">
                 {
                     todos.iter().map(|todo| {
-                        let status = todo.get("status").and_then(|s| s.as_str()).unwrap_or("pending");
-                        let content = todo.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let (icon, class) = match status {
-                            "completed" => ("✓", "completed"),
-                            "in_progress" => ("→", "in-progress"),
-                            _ => ("○", "pending"),
+                        let (icon, class) = match &todo.status {
+                            TodoStatus::Completed => ("✓", "completed"),
+                            TodoStatus::InProgress => ("→", "in-progress"),
+                            TodoStatus::Pending | TodoStatus::Unknown(_) => ("○", "pending"),
                         };
                         html! {
                             <div class={format!("todo-item {}", class)}>
                                 <span class="todo-status">{ icon }</span>
-                                <span class="todo-content">{ content }</span>
+                                <span class="todo-content">{ &todo.content }</span>
                             </div>
                         }
                     }).collect::<Html>()

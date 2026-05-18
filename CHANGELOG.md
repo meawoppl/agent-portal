@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.48
+
+- **`render_todowrite_tool` uses typed `ToolInput::TodoWrite` instead of JSON-poking (closes #735).** The frontend renderer now deserializes its `serde_json::Value` input into `claude_codes::tool_inputs::ToolInput`, matches the `TodoWrite(TodoWriteInput)` variant, and reads each `TodoItem`'s typed `content: String` and `status: TodoStatus` enum (`Completed` / `InProgress` / `Pending` / `Unknown(_)`). Same icons, same CSS classes, same empty-list fallback when deserialization fails — just no more `.get("todos").as_array()` / `.get("status").as_str()`. `shared` now re-exports `TodoItem`, `TodoStatus`, `TodoWriteInput`, and `ToolInput` so the frontend can use them without taking a direct `claude-codes` dependency.
+
 ## 2.5.47
 
 - **Typed query-param parse on the banned page (closes #732).** `frontend/src/pages/banned.rs` no longer pokes `web_sys::UrlSearchParams::get("reason")` against the URL; it uses `yew_router::use_location().query::<BannedQuery>()` with a `#[derive(Deserialize)] struct BannedQuery { reason: Option<String> }`, and `serde_urlencoded` handles URL decoding so the manual `js_sys::decode_uri_component` block is gone.
