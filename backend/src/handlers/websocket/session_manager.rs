@@ -447,6 +447,7 @@ mod tests {
             sender_user_id: None,
             sender_name: None,
             agent_type: shared::AgentType::Claude,
+            created_at: None,
         }
     }
 

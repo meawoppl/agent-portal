@@ -1206,24 +1206,38 @@ impl SessionView {
                 ctx.link().send_message(SessionViewMsg::WebSocketError(err));
                 false
             }
-            WsEvent::Output(content) => {
+            WsEvent::Output(content, created_at) => {
+                // Update the reconnect-replay watermark from the
+                // server-assigned `created_at` (closes #784). Falling back to
+                // `Date.now()` here — the prior behavior — could miss
+                // messages on reconnect when the client/server clocks were
+                // skewed: a message persisted at server time T2 < browser
+                // `now()` T1 would be filtered out by `replay_history`'s
+                // `created_at.gt(T1)` predicate. If the backend didn't send
+                // a timestamp (pre-#784 server or an error envelope), keep
+                // the prior watermark — a future timestamped message will
+                // heal it.
+                if let Some(ts) = created_at {
+                    self.last_message_timestamp = Some(ts);
+                }
                 ctx.link()
                     .send_message(SessionViewMsg::ReceivedOutput(content));
                 ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 false
             }
-            WsEvent::HistoryBatch(messages) => {
+            WsEvent::HistoryBatch(messages, last_created_at) => {
                 self.messages.extend(messages);
                 if self.messages.len() > MAX_MESSAGES_PER_SESSION {
                     let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;
                     self.messages.drain(0..excess);
                 }
-                self.last_message_timestamp = Some(
-                    js_sys::Date::new_0()
-                        .to_iso_string()
-                        .as_string()
-                        .unwrap_or_default(),
-                );
+                // Set the reconnect-replay watermark to the server-assigned
+                // timestamp of the latest message in the batch (closes
+                // #784). Empty batches (or a pre-#784 backend that didn't
+                // send `last_created_at`) leave the watermark unchanged.
+                if let Some(ts) = last_created_at {
+                    self.last_message_timestamp = Some(ts);
+                }
                 ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 true
             }
@@ -1521,12 +1535,9 @@ impl SessionView {
             let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;
             self.messages.drain(0..excess);
         }
-        self.last_message_timestamp = Some(
-            js_sys::Date::new_0()
-                .to_iso_string()
-                .as_string()
-                .unwrap_or_default(),
-        );
+        // The reconnect-replay watermark (`last_message_timestamp`) is set
+        // by the `WsEvent::Output` handler from the server-assigned
+        // `created_at` — never `Date.now()` (closes #784).
         true
     }
 
