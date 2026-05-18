@@ -5,6 +5,7 @@ mod search;
 mod task;
 
 use serde_json::Value;
+use shared::{ReadInput, ToolInput};
 use yew::prelude::*;
 
 use self::bash::render_bash_tool;
@@ -39,14 +40,19 @@ pub fn render_tool_use(name: &str, input: &Value) -> Html {
 
 /// Render Read tool with file path and range info
 fn render_read_tool(input: &Value) -> Html {
-    let file_path = input
-        .get("file_path")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let offset = input.get("offset").and_then(|v| v.as_i64());
-    let limit = input.get("limit").and_then(|v| v.as_i64());
+    let read = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::Read(r) => Some(r),
+            _ => None,
+        })
+        .unwrap_or(ReadInput {
+            file_path: "?".to_string(),
+            offset: None,
+            limit: None,
+        });
 
-    let range_info = match (offset, limit) {
+    let range_info = match (read.offset, read.limit) {
         (Some(o), Some(l)) => Some(format!("lines {}-{}", o, o + l)),
         (Some(o), None) => Some(format!("from line {}", o)),
         (None, Some(l)) => Some(format!("first {} lines", l)),
@@ -58,7 +64,7 @@ fn render_read_tool(input: &Value) -> Html {
             <div class="tool-use-header">
                 <span class="tool-icon">{ "📖" }</span>
                 <span class="tool-name">{ "Read" }</span>
-                <span class="read-file-path">{ file_path }</span>
+                <span class="read-file-path">{ read.file_path }</span>
                 {
                     if let Some(range) = range_info {
                         html! { <span class="tool-meta">{ range }</span> }
