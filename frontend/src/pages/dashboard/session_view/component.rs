@@ -8,9 +8,7 @@ use gloo::timers::callback::{Interval, Timeout};
 use gloo_net::http::Request;
 use shared::api::{ErrorMessage, PermissionAnswers};
 use shared::{ClientToServer, SendMode, SessionInfo};
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -58,6 +56,19 @@ fn extract_user_text(m: &ClaudeMessage) -> Option<String> {
         None
     } else {
         Some(texts.join(""))
+    }
+}
+
+/// Compute the next `should_autoscroll` value when the scroll listener
+/// reports a new at-bottom reading. Returns `None` when no transition has
+/// occurred (caller should skip the re-render) and `Some(new_value)` when
+/// the flag flips. The transition gate lives here, outside the component,
+/// so it can be unit-tested without a Yew `Context`.
+fn autoscroll_transition(current: bool, new_at_bottom: bool) -> Option<bool> {
+    if current == new_at_bottom {
+        None
+    } else {
+        Some(new_at_bottom)
     }
 }
 
@@ -222,10 +233,11 @@ pub enum SessionViewMsg {
     FinishDeparture,
     /// Send an interrupt to stop the current Claude response
     Interrupt,
-    /// Scroll position crossed the at-bottom threshold. Sent by the scroll
-    /// listener only on transitions so we can re-render to show/hide the
-    /// jump-to-live pill. The actual flag lives on `should_autoscroll`.
-    AutoscrollChanged,
+    /// Scroll listener reports the current at-bottom state. The `update()`
+    /// arm flips `should_autoscroll` and re-renders only when the value
+    /// changes, so the closure can dispatch on every scroll event without
+    /// per-event re-renders.
+    AutoscrollChanged(bool),
     /// User clicked the "Jump to live" pill: resume tailing and scroll to bottom.
     JumpToLive,
 }
@@ -238,7 +250,7 @@ pub struct SessionView {
     messages_ref: NodeRef,
     input_ref: NodeRef,
     permission_ref: NodeRef,
-    should_autoscroll: Rc<RefCell<bool>>,
+    should_autoscroll: bool,
     #[allow(dead_code)]
     scroll_listener: Option<Closure<dyn Fn()>>,
     was_focused: bool,
@@ -323,7 +335,7 @@ impl Component for SessionView {
             messages_ref: NodeRef::default(),
             input_ref: NodeRef::default(),
             permission_ref: NodeRef::default(),
-            should_autoscroll: Rc::new(RefCell::new(true)),
+            should_autoscroll: true,
             scroll_listener: None,
             was_focused: ctx.props().focused,
             total_cost: 0.0,
@@ -403,7 +415,6 @@ impl Component for SessionView {
 
         if let Some(element) = self.messages_ref.cast::<Element>() {
             if first_render {
-                let should_autoscroll = self.should_autoscroll.clone();
                 let element_clone = element.clone();
                 let link = ctx.link().clone();
 
@@ -412,14 +423,7 @@ impl Component for SessionView {
                     let scroll_height = element_clone.scroll_height();
                     let client_height = element_clone.client_height();
                     let at_bottom = scroll_height - scroll_top - client_height < 50;
-                    // Only dispatch a Yew re-render on a transition — scroll
-                    // events fire continuously and a per-event update would
-                    // wreck performance on long message lists.
-                    let mut current = should_autoscroll.borrow_mut();
-                    if *current != at_bottom {
-                        *current = at_bottom;
-                        link.send_message(SessionViewMsg::AutoscrollChanged);
-                    }
+                    link.send_message(SessionViewMsg::AutoscrollChanged(at_bottom));
                 });
 
                 let _ = element
@@ -428,7 +432,7 @@ impl Component for SessionView {
                 self.scroll_listener = Some(closure);
             }
 
-            if *self.should_autoscroll.borrow() {
+            if self.should_autoscroll {
                 element.set_scroll_top(element.scroll_height());
             }
         }
@@ -978,14 +982,19 @@ impl Component for SessionView {
                 }
                 true
             }
-            SessionViewMsg::AutoscrollChanged => {
-                // The scroll listener already updated `should_autoscroll`;
-                // returning true here just re-renders so the jump-to-live
-                // pill appears or disappears.
-                true
+            SessionViewMsg::AutoscrollChanged(at_bottom) => {
+                // Scroll events fire continuously; only re-render on a real
+                // transition so long message lists stay performant.
+                match autoscroll_transition(self.should_autoscroll, at_bottom) {
+                    Some(next) => {
+                        self.should_autoscroll = next;
+                        true
+                    }
+                    None => false,
+                }
             }
             SessionViewMsg::JumpToLive => {
-                *self.should_autoscroll.borrow_mut() = true;
+                self.should_autoscroll = true;
                 // rendered() will see the flag and snap to bottom on the
                 // next paint.
                 true
@@ -1109,7 +1118,7 @@ impl Component for SessionView {
             "session-view-input"
         };
 
-        let is_tailing = *self.should_autoscroll.borrow();
+        let is_tailing = self.should_autoscroll;
         let on_jump_to_live = link.callback(|e: MouseEvent| {
             e.stop_propagation();
             SessionViewMsg::JumpToLive
@@ -2083,5 +2092,30 @@ impl SessionView {
                 </div>
             </div>
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autoscroll_transition_returns_none_when_unchanged() {
+        assert_eq!(autoscroll_transition(true, true), None);
+        assert_eq!(autoscroll_transition(false, false), None);
+    }
+
+    #[test]
+    fn autoscroll_transition_disables_when_user_scrolls_up() {
+        // User was tailing, scrolled away from bottom -> tailing turns off
+        // and the jump-to-live pill should render.
+        assert_eq!(autoscroll_transition(true, false), Some(false));
+    }
+
+    #[test]
+    fn autoscroll_transition_re_enables_when_user_scrolls_back_to_bottom() {
+        // User had scrolled up, now scrolled back to bottom -> tailing
+        // resumes and the jump-to-live pill should disappear.
+        assert_eq!(autoscroll_transition(false, true), Some(true));
     }
 }
