@@ -388,7 +388,7 @@ mod tests {
 #[cfg(test)]
 mod db_tests {
     use super::*;
-    use crate::models::{NewMessage, NewSessionWithId, NewUser, Session, User};
+    use crate::models::{NewSessionWithId, NewUser, Session, User};
     use chrono::Utc;
     use diesel::r2d2::{ConnectionManager, Pool};
 
