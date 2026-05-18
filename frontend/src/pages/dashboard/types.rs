@@ -223,8 +223,26 @@ pub fn calculate_backoff(attempt: u32) -> u32 {
         .min(MAX_MS)
 }
 
-/// Format permission input for display
+/// Format permission input for display.
+///
+/// `input` is a `serde_json::Value` because the cross-agent
+/// `ServerToClient::PermissionRequest` wire envelope carries both
+/// claude-side tool inputs (whose typed shape lives in `claude-codes`)
+/// and codex-side typed `CodexPermissionInput` envelopes. The codex
+/// arms try to parse the value into the typed envelope first so the
+/// proxy → frontend contract is enforced by serde, falling back to the
+/// historical JSON-poke arms only if the parse fails (e.g. an in-flight
+/// frame from a proxy older than the rollout).
 pub fn format_permission_input(tool_name: &str, input: &serde_json::Value) -> String {
+    // Codex-side: try to round-trip the typed envelope first. Closes #731.
+    if let Ok(codex_input) = serde_json::from_value::<shared::CodexPermissionInput>(input.clone()) {
+        return format_codex_permission_input(&codex_input);
+    }
+
+    // Claude-side tool inputs (Bash/Read/Edit/Write) follow the
+    // `claude-codes::tool_inputs::ToolInput` shape, which is a different
+    // IPC envelope than `CodexPermissionInput`. Keep the existing
+    // JSON-poke arms; typing this side is a separate refactor (#735/#736).
     match tool_name {
         "Bash" => input
             .get("command")
@@ -236,37 +254,67 @@ pub fn format_permission_input(tool_name: &str, input: &serde_json::Value) -> St
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
-        // Codex 0.130+ approval types — single-line summaries so the permission
-        // card doesn't drop a full JSON blob into the dialog.
-        "ExecCommand" => input
-            .get("command")
-            .and_then(|v| v.as_str())
-            .map(|s| format!("$ {}", s))
-            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
-        "ApplyPatch" => {
-            // `fileChanges` is a JSON object keyed by file path — list the paths.
-            let paths: Vec<String> = input
-                .get("fileChanges")
-                .and_then(|v| v.as_object())
+        _ => serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input)),
+    }
+}
+
+/// Render a typed `CodexPermissionInput` into a one-line (or short
+/// multi-line) summary for the permission card. Mirrors the previous
+/// per-`tool_name` arms in [`format_permission_input`], but dispatches
+/// on the typed variant so field-name changes break at compile time.
+fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String {
+    use shared::CodexPermissionInput as C;
+    match input {
+        C::FileChange {
+            item_id,
+            reason,
+            grant_root,
+        } => {
+            let mut lines = vec![format!("File change for item `{}`", item_id)];
+            if let Some(r) = reason.as_deref().filter(|s| !s.is_empty()) {
+                lines.push(format!("Reason: {}", r));
+            }
+            if let Some(g) = grant_root.as_deref().filter(|s| !s.is_empty()) {
+                lines.push(format!("Grant root: {}", g));
+            }
+            lines.push("(diff streamed above under this item id)".to_string());
+            lines.join("\n")
+        }
+        C::ApplyPatch { file_changes, .. } => {
+            // `file_changes` is a JSON object keyed by file path — list the paths.
+            let paths: Vec<String> = file_changes
+                .as_object()
                 .map(|m| m.keys().cloned().collect())
                 .unwrap_or_default();
             if paths.is_empty() {
-                serde_json::to_string_pretty(input).unwrap_or_default()
+                serde_json::to_string_pretty(file_changes).unwrap_or_default()
             } else {
                 format!("Patch {} file(s):\n  {}", paths.len(), paths.join("\n  "))
             }
         }
-        "Permissions" => input
-            .get("reason")
-            .and_then(|v| v.as_str())
+        C::Bash { command, .. } | C::ExecCommand { command, .. } => {
+            format!("$ {}", command)
+        }
+        C::Permissions { reason, .. } => reason
+            .as_deref()
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
-        "McpElicitation" => input
-            .get("serverName")
-            .and_then(|v| v.as_str())
-            .map(|s| format!("MCP server `{}` is asking for input", s))
-            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
-        _ => serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input)),
+            .unwrap_or_else(|| {
+                serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
+            }),
+        C::McpElicitation { server_name } => {
+            if server_name.is_empty() {
+                "MCP server is asking for input".to_string()
+            } else {
+                format!("MCP server `{}` is asking for input", server_name)
+            }
+        }
+        C::AskUserQuestion { .. } => {
+            // The AskUserQuestion renderer is invoked elsewhere in the
+            // permission dialog; this code path is only hit for the
+            // standard-permission summary preview, so fall back to the
+            // typed pretty-print.
+            serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
+        }
     }
 }

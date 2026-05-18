@@ -6,6 +6,7 @@
 
 use claude_codes::io::{ControlResponse, PermissionSuggestion};
 use claude_codes::{ClaudeInput, ClaudeOutput};
+use shared::CodexPermissionInput;
 
 use crate::error::SessionError;
 
@@ -41,10 +42,14 @@ pub enum IoEvent {
     /// Claude permission requests come up the typed `Output` channel
     /// (`ClaudeOutput::ControlRequest`) and `Session::next_event` handles
     /// the extraction.
+    ///
+    /// The `tool_name` discriminant lives on the `CodexPermissionInput`
+    /// variant — call `input.tool_name()` if a stringly-typed key is
+    /// needed (e.g. for the `SessionEvent::PermissionRequest` envelope
+    /// which still carries one for the cross-agent claude path).
     CodexPermissionRequest {
         request_id: String,
-        tool_name: String,
-        input: serde_json::Value,
+        input: CodexPermissionInput,
     },
     Error(SessionError),
     Exited {

@@ -2,13 +2,16 @@
 //!
 //! Dispatches on the typed `codex_codes::Notification` and
 //! `codex_codes::ServerRequest` enum variants instead of stringly-typed
-//! `method`-based matching (closes issue #723). The frontend-facing JSON
-//! shape is preserved verbatim — `IoEvent::CodexPermissionRequest::input`
-//! keeps the same field names and structural types so the dashboard's
-//! `format_permission_input` keeps working unchanged.
+//! `method`-based matching (closes issue #723). Each `ServerRequest::*Approval`
+//! arm now builds a typed [`shared::CodexPermissionInput`] envelope directly
+//! off the SDK param struct (closes #725 / #731), so the field-name contract
+//! with the frontend's `format_permission_input` is enforced at compile time
+//! on both sides of the wire — the `serde_json::json!({…})` literals the
+//! 2.5.45 / PR #730 refactor still emitted are gone.
 
 use codex_codes::{Notification, ServerMessage, ServerRequest};
 use session_lib::io::IoEvent;
+use shared::CodexPermissionInput;
 use tokio::sync::mpsc;
 
 use crate::helpers::format_request_id;
@@ -228,98 +231,92 @@ fn handle_request(
 ) -> (bool, bool) {
     match request {
         ServerRequest::CmdExecApproval(p) => {
-            // Pre-refactor shape: `{ command: <string>, cwd: <string> }`.
-            // Typed: `command: Option<String>`, `cwd: Option<AbsolutePathBuf>`.
-            let command = p.command.unwrap_or_else(|| "(unknown)".to_string());
-            let cwd = p.cwd.map(|c| c.0).unwrap_or_default();
-            let input = serde_json::json!({
-                "command": command,
-                "cwd": cwd,
-            });
-            send_permission(event_tx, request_id, "Bash", input)
+            // Older `item/commandExecution/requestApproval` form carries a
+            // single-string `command` (vs the 0.130+ argv-vector form on
+            // `execCommandApproval`); no `parsedCmd` here.
+            let input = CodexPermissionInput::Bash {
+                command: p.command.unwrap_or_else(|| "(unknown)".to_string()),
+                cwd: p.cwd.map(|c| c.0).unwrap_or_default(),
+                parsed_cmd: None,
+            };
+            send_permission(event_tx, request_id, input)
         }
 
         ServerRequest::FileChangeApproval(p) => {
-            // Pre-refactor shape (post-#721 band-aid) was `{ changes: <whatever> }`,
-            // but `FileChangeRequestApprovalParams` doesn't expose `changes` in
-            // 0.129.3 — the actual diff arrives via `item/fileChange/patchUpdated`
-            // notifications. Issue #723 calls for emitting the real typed fields:
-            // `itemId`, `reason`, `grantRoot`. The frontend's `format_permission_input`
-            // has a generic-JSON fallback so it'll still render something coherent.
-            let input = serde_json::json!({
-                "itemId": p.item_id,
-                "reason": p.reason,
-                "grantRoot": p.grant_root,
-            });
-            send_permission(event_tx, request_id, "FileChange", input)
+            // codex-codes 0.129.3 dropped the inline `changes` field — the
+            // actual diff is streamed earlier under the matching `itemId`.
+            // Carry `itemId` / `reason` / `grantRoot` so the frontend can
+            // render a pointer + reason instead of the 2.5.38 `{"changes":
+            // null}` regression (band-aided in PR #721).
+            let input = CodexPermissionInput::FileChange {
+                item_id: p.item_id,
+                reason: p.reason,
+                grant_root: p.grant_root,
+            };
+            send_permission(event_tx, request_id, input)
         }
 
         ServerRequest::ExecCommandApproval(p) => {
-            // Pre-refactor shape: `{ command: <joined argv string>, cwd: <string>, parsedCmd: <array> }`.
-            // Typed: `command: Vec<String>` (argv), `cwd: String`, `parsed_cmd: Vec<ParsedCommand>`.
+            // Codex 0.130+ argv-vector form — join for display, keep the
+            // typed parsed_cmd along for future renderers.
             let command = if p.command.is_empty() {
                 "(unknown)".to_string()
             } else {
                 p.command.join(" ")
             };
-            let parsed_cmd = serde_json::to_value(&p.parsed_cmd).unwrap_or(serde_json::Value::Null);
-            let input = serde_json::json!({
-                "command": command,
-                "cwd": p.cwd,
-                "parsedCmd": parsed_cmd,
-            });
-            send_permission(event_tx, request_id, "ExecCommand", input)
+            let parsed_cmd = if p.parsed_cmd.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_value(&p.parsed_cmd).unwrap_or(serde_json::Value::Null))
+            };
+            let input = CodexPermissionInput::ExecCommand {
+                command,
+                cwd: p.cwd,
+                parsed_cmd,
+            };
+            send_permission(event_tx, request_id, input)
         }
 
         ServerRequest::ApplyPatchApproval(p) => {
-            // Pre-refactor shape: `{ fileChanges: <object>, grantRoot: <opt>, reason: <opt> }`.
-            // Typed: `file_changes: BTreeMap<String, FileChange>`, `grant_root: Option<String>`, `reason: Option<String>`.
             let file_changes =
                 serde_json::to_value(&p.file_changes).unwrap_or(serde_json::Value::Null);
-            let input = serde_json::json!({
-                "fileChanges": file_changes,
-                "grantRoot": p.grant_root,
-                "reason": p.reason,
-            });
-            send_permission(event_tx, request_id, "ApplyPatch", input)
+            let input = CodexPermissionInput::ApplyPatch {
+                file_changes,
+                grant_root: p.grant_root,
+                reason: p.reason,
+            };
+            send_permission(event_tx, request_id, input)
         }
 
         ServerRequest::PermissionsRequestApproval(p) => {
-            // Pre-refactor shape: `{ cwd: <string>, permissions: <obj>, reason: <opt> }`.
-            // Typed: `cwd: AbsolutePathBuf`, `permissions: RequestPermissionProfile`, `reason: Option<String>`.
-            let permissions =
-                serde_json::to_value(&p.permissions).unwrap_or(serde_json::Value::Null);
-            let input = serde_json::json!({
-                "cwd": p.cwd.0,
-                "permissions": permissions,
-                "reason": p.reason,
-            });
-            send_permission(event_tx, request_id, "Permissions", input)
+            let permissions = serde_json::to_value(&p.permissions).ok();
+            let input = CodexPermissionInput::Permissions {
+                cwd: Some(p.cwd.0),
+                permissions,
+                reason: p.reason,
+            };
+            send_permission(event_tx, request_id, input)
         }
 
         ServerRequest::ToolRequestUserInput(p) => {
-            // Pre-refactor shape: `{ questions: <array> }`.
-            // Typed: `questions: Vec<ToolRequestUserInputQuestion>`.
             let questions = serde_json::to_value(&p.questions).unwrap_or(serde_json::Value::Null);
-            let input = serde_json::json!({
-                "questions": questions,
-            });
-            send_permission(event_tx, request_id, "AskUserQuestion", input)
+            let input = CodexPermissionInput::AskUserQuestion { questions };
+            send_permission(event_tx, request_id, input)
         }
 
         ServerRequest::McpServerElicitationRequest(_p) => {
-            // Pre-refactor shape: `{ serverName: <string> }` — but `serverName`
-            // never existed on the wire, so the old code always defaulted to
-            // "(unknown)". The typed `McpServerElicitationRequestParams` enum
-            // (Form/Url variants) doesn't expose a server name either; preserve
-            // the existing default so `format_permission_input` keeps rendering
-            // the same fallback string ("MCP server `(unknown)` is asking …").
-            // TODO(SDK): if upstream adds a server identifier to the typed
-            // params, surface it here.
-            let input = serde_json::json!({
-                "serverName": "(unknown)",
-            });
-            send_permission(event_tx, request_id, "McpElicitation", input)
+            // Pre-refactor handler hard-defaulted `serverName` to `"(unknown)"`
+            // because the field never existed on the wire. The typed
+            // `McpServerElicitationRequestParams` enum (Form/Url variants)
+            // doesn't expose a server name either; preserve the existing
+            // default so `format_permission_input`'s "MCP server `(unknown)`
+            // is asking …" rendering is unchanged. TODO(SDK): if upstream
+            // adds a server identifier to the typed params, surface it here
+            // and widen `CodexPermissionInput::McpElicitation` to match.
+            let input = CodexPermissionInput::McpElicitation {
+                server_name: "(unknown)".to_string(),
+            };
+            send_permission(event_tx, request_id, input)
         }
 
         // Internal / system requests (codex 0.130+) — surface a portal message so
@@ -365,15 +362,10 @@ fn handle_request(
 fn send_permission(
     event_tx: &mpsc::UnboundedSender<IoEvent>,
     request_id: String,
-    tool_name: &str,
-    input: serde_json::Value,
+    input: CodexPermissionInput,
 ) -> (bool, bool) {
     let ok = event_tx
-        .send(IoEvent::CodexPermissionRequest {
-            request_id,
-            tool_name: tool_name.to_string(),
-            input,
-        })
+        .send(IoEvent::CodexPermissionRequest { request_id, input })
         .is_ok();
     (ok, false)
 }
@@ -423,21 +415,22 @@ mod tests {
         assert!(!ended);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            IoEvent::CodexPermissionRequest {
-                request_id,
-                tool_name,
-                input,
-            } => {
+            IoEvent::CodexPermissionRequest { request_id, input } => {
                 assert_eq!(request_id, "7");
-                assert_eq!(tool_name, "FileChange");
-                assert_eq!(input.get("itemId").and_then(|v| v.as_str()), Some("item-1"));
-                assert_eq!(
-                    input.get("reason").and_then(|v| v.as_str()),
-                    Some("writes /etc/passwd")
-                );
-                assert!(input.get("grantRoot").is_some());
-                // Critical: the broken `changes: null` field is gone.
-                assert!(input.get("changes").is_none());
+                assert_eq!(input.tool_name(), "FileChange");
+                match input {
+                    CodexPermissionInput::FileChange {
+                        item_id,
+                        reason,
+                        grant_root,
+                    } => {
+                        assert_eq!(item_id, "item-1");
+                        assert_eq!(reason.as_deref(), Some("writes /etc/passwd"));
+                        // grantRoot omitted in source JSON → None
+                        assert!(grant_root.is_none());
+                    }
+                    _ => panic!("expected FileChange variant"),
+                }
             }
             _ => panic!("expected CodexPermissionRequest"),
         }
@@ -462,22 +455,22 @@ mod tests {
         let (events, _, _) = handle(msg);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            IoEvent::CodexPermissionRequest {
-                request_id,
-                tool_name,
-                input,
-            } => {
+            IoEvent::CodexPermissionRequest { request_id, input } => {
                 assert_eq!(request_id, "abc");
-                assert_eq!(tool_name, "ExecCommand");
-                assert_eq!(
-                    input.get("command").and_then(|v| v.as_str()),
-                    Some("ls -la /tmp")
-                );
-                assert_eq!(
-                    input.get("cwd").and_then(|v| v.as_str()),
-                    Some("/home/user")
-                );
-                assert!(input.get("parsedCmd").is_some());
+                assert_eq!(input.tool_name(), "ExecCommand");
+                match input {
+                    CodexPermissionInput::ExecCommand {
+                        command,
+                        cwd,
+                        parsed_cmd,
+                    } => {
+                        assert_eq!(command, "ls -la /tmp");
+                        assert_eq!(cwd, "/home/user");
+                        // empty parsed_cmd in source → None (skipped on serialize)
+                        assert!(parsed_cmd.is_none());
+                    }
+                    _ => panic!("expected ExecCommand variant"),
+                }
             }
             _ => panic!("expected CodexPermissionRequest"),
         }
@@ -503,15 +496,15 @@ mod tests {
         let (events, _, _) = handle(msg);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            IoEvent::CodexPermissionRequest {
-                tool_name, input, ..
-            } => {
-                assert_eq!(tool_name, "Bash");
-                assert_eq!(
-                    input.get("command").and_then(|v| v.as_str()),
-                    Some("echo hello")
-                );
-                assert_eq!(input.get("cwd").and_then(|v| v.as_str()), Some("/work"));
+            IoEvent::CodexPermissionRequest { input, .. } => {
+                assert_eq!(input.tool_name(), "Bash");
+                match input {
+                    CodexPermissionInput::Bash { command, cwd, .. } => {
+                        assert_eq!(command, "echo hello");
+                        assert_eq!(cwd, "/work");
+                    }
+                    _ => panic!("expected Bash variant"),
+                }
             }
             _ => panic!("expected CodexPermissionRequest"),
         }
@@ -538,21 +531,24 @@ mod tests {
         let (events, _, _) = handle(msg);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            IoEvent::CodexPermissionRequest {
-                tool_name, input, ..
-            } => {
-                assert_eq!(tool_name, "ApplyPatch");
-                let keys: Vec<&str> = input
-                    .get("fileChanges")
-                    .and_then(|v| v.as_object())
-                    .map(|m| m.keys().map(String::as_str).collect())
-                    .unwrap_or_default();
-                assert!(keys.contains(&"/tmp/a.rs"));
-                assert!(keys.contains(&"/tmp/b.rs"));
-                assert_eq!(
-                    input.get("reason").and_then(|v| v.as_str()),
-                    Some("tidy up")
-                );
+            IoEvent::CodexPermissionRequest { input, .. } => {
+                assert_eq!(input.tool_name(), "ApplyPatch");
+                match input {
+                    CodexPermissionInput::ApplyPatch {
+                        file_changes,
+                        reason,
+                        ..
+                    } => {
+                        let keys: Vec<&str> = file_changes
+                            .as_object()
+                            .map(|m| m.keys().map(String::as_str).collect())
+                            .unwrap_or_default();
+                        assert!(keys.contains(&"/tmp/a.rs"));
+                        assert!(keys.contains(&"/tmp/b.rs"));
+                        assert_eq!(reason.as_deref(), Some("tidy up"));
+                    }
+                    _ => panic!("expected ApplyPatch variant"),
+                }
             }
             _ => panic!("expected CodexPermissionRequest"),
         }
@@ -652,14 +648,46 @@ mod tests {
         let (events, _, _) = handle(msg);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            IoEvent::CodexPermissionRequest {
-                tool_name, input, ..
-            } => {
-                assert_eq!(tool_name, "McpElicitation");
-                assert_eq!(
-                    input.get("serverName").and_then(|v| v.as_str()),
-                    Some("(unknown)")
-                );
+            IoEvent::CodexPermissionRequest { input, .. } => {
+                assert_eq!(input.tool_name(), "McpElicitation");
+                match input {
+                    CodexPermissionInput::McpElicitation { server_name } => {
+                        assert_eq!(server_name, "(unknown)");
+                    }
+                    _ => panic!("expected McpElicitation variant"),
+                }
+            }
+            _ => panic!("expected CodexPermissionRequest"),
+        }
+    }
+
+    /// The wire envelope serialized from a `CodexPermissionInput` must include
+    /// the `tool` discriminant so the frontend's typed round-trip works (#731).
+    /// Closes the proxy → frontend type contract end-to-end.
+    #[test]
+    fn permission_input_serializes_with_tool_discriminant() {
+        let req: codex_codes::FileChangeRequestApprovalParams = serde_json::from_value(json!({
+            "itemId": "item-x",
+            "threadId": "t",
+            "turnId": "tu",
+            "startedAtMs": 0
+        }))
+        .unwrap();
+        let msg = ServerMessage::Request {
+            id: RequestId::Integer(9),
+            request: ServerRequest::FileChangeApproval(req),
+        };
+        let (events, _, _) = handle(msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            IoEvent::CodexPermissionRequest { input, .. } => {
+                let wire = serde_json::to_value(input).unwrap();
+                assert_eq!(wire["tool"], "fileChange");
+                assert_eq!(wire["itemId"], "item-x");
+                // Round-trip via wire → typed parse must succeed (this is the
+                // frontend's consumption path).
+                let parsed: CodexPermissionInput = serde_json::from_value(wire).unwrap();
+                assert_eq!(parsed.tool_name(), "FileChange");
             }
             _ => panic!("expected CodexPermissionRequest"),
         }

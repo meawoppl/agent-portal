@@ -206,22 +206,30 @@ impl<A: Agent> Session<A> {
                     self.buffer.push(value.clone());
                     return Some(SessionEvent::RawOutput(value));
                 }
-                Some(IoEvent::CodexPermissionRequest {
-                    request_id,
-                    tool_name,
-                    input,
-                }) => {
+                Some(IoEvent::CodexPermissionRequest { request_id, input }) => {
+                    // Derive the stringly-typed `tool_name` from the typed
+                    // variant so the cross-agent `SessionEvent::PermissionRequest`
+                    // and the persisted `PendingPermission` keep the same key
+                    // the claude path provides verbatim from `ToolUseRequest`.
+                    let tool_name = input.tool_name().to_string();
+                    // Re-serialize the typed envelope to JSON for the
+                    // cross-agent boundary (the claude path emits a raw
+                    // `serde_json::Value` from `ToolUseRequest::input` and
+                    // the wire stays `Value` for both). Infallible for a
+                    // serde-derived enum, but fall back to Null defensively.
+                    let input_value =
+                        serde_json::to_value(&input).unwrap_or(serde_json::Value::Null);
                     self.pending_permission = Some(PendingPermission {
                         request_id: request_id.clone(),
                         tool_name: tool_name.clone(),
-                        input: input.clone(),
+                        input: input_value.clone(),
                         requested_at: Utc::now(),
                     });
                     self.state = SessionState::WaitingForPermission;
                     return Some(SessionEvent::PermissionRequest {
                         request_id,
                         tool_name,
-                        input,
+                        input: input_value,
                         permission_suggestions: vec![],
                     });
                 }
