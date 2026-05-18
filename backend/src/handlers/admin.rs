@@ -10,7 +10,7 @@ use axum::{
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Double};
 use serde::Serialize;
-use shared::api::UpdateUserRequest;
+use shared::api::{AdminUserEntry, AdminUsersResponse, UpdateUserRequest};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::{error, info, warn};
@@ -233,29 +233,6 @@ pub async fn get_stats(
 // Users Endpoint - List and manage users
 // ============================================================================
 
-#[derive(Debug, Serialize)]
-pub struct AdminUserInfo {
-    pub id: Uuid,
-    pub email: String,
-    pub name: Option<String>,
-    pub avatar_url: Option<String>,
-    pub is_admin: bool,
-    pub disabled: bool,
-    pub voice_enabled: bool,
-    pub created_at: String,
-    pub session_count: i64,
-    pub total_spend_usd: f64,
-    pub total_input_tokens: i64,
-    pub total_output_tokens: i64,
-    pub total_cache_creation_tokens: i64,
-    pub total_cache_read_tokens: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AdminUsersResponse {
-    pub users: Vec<AdminUserInfo>,
-}
-
 pub async fn list_users(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
@@ -290,7 +267,7 @@ pub async fn list_users(
         // Get aggregated usage via helper
         let usage = get_user_usage(&mut conn, user.id).unwrap_or_default();
 
-        user_infos.push(AdminUserInfo {
+        user_infos.push(AdminUserEntry {
             id: user.id,
             email: user.email,
             name: user.name,

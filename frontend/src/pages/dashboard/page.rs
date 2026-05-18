@@ -12,6 +12,7 @@ use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
 use crate::utils;
 use gloo_net::http::Request;
+use shared::api::MeResponse;
 use shared::{AppConfig, SessionInfo};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -141,16 +142,10 @@ pub fn dashboard_page() -> Html {
             spawn_local(async move {
                 let api_endpoint = utils::api_url("/api/auth/me");
                 if let Ok(response) = Request::get(&api_endpoint).send().await {
-                    if let Ok(data) = response.json::<serde_json::Value>().await {
-                        if let Some(admin) = data.get("is_admin").and_then(|v| v.as_bool()) {
-                            is_admin.set(admin);
-                        }
-                        if let Some(voice) = data.get("voice_enabled").and_then(|v| v.as_bool()) {
-                            voice_enabled.set(voice);
-                        }
-                        if let Some(id) = data.get("id").and_then(|v| v.as_str()) {
-                            current_user_id.set(Some(id.to_string()));
-                        }
+                    if let Ok(me) = response.json::<MeResponse>().await {
+                        is_admin.set(me.is_admin);
+                        voice_enabled.set(me.voice_enabled);
+                        current_user_id.set(Some(me.id.to_string()));
                     }
                 }
             });
@@ -367,15 +362,11 @@ pub fn dashboard_page() -> Html {
                 spawn_local(async move {
                     let me_endpoint = utils::api_url("/api/auth/me");
                     let user_id = match Request::get(&me_endpoint).send().await {
-                        Ok(response) => {
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                data.get("id")
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.to_string())
-                            } else {
-                                None
-                            }
-                        }
+                        Ok(response) => response
+                            .json::<MeResponse>()
+                            .await
+                            .ok()
+                            .map(|me| me.id.to_string()),
                         Err(_) => None,
                     };
 

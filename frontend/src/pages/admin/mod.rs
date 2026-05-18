@@ -15,12 +15,16 @@ use crate::utils;
 use crate::Route;
 use gloo_net::http::Request;
 use serde::Deserialize;
-use shared::api::UpdateUserRequest;
+use shared::api::{AdminUsersResponse, MeResponse, UpdateUserRequest};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 use yew_router::prelude::*;
+
+/// Re-export the shared admin user entry under the legacy frontend name
+/// so this module's sub-tabs can keep importing `super::AdminUserInfo`.
+pub use shared::api::AdminUserEntry as AdminUserInfo;
 
 /// Admin page tabs
 #[derive(Clone, Copy, PartialEq)]
@@ -46,24 +50,6 @@ pub struct AdminStats {
     pub total_spend_usd: f64,
     pub total_input_tokens: i64,
     pub total_output_tokens: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct AdminUserInfo {
-    pub id: Uuid,
-    pub email: String,
-    pub name: Option<String>,
-    pub is_admin: bool,
-    pub disabled: bool,
-    pub voice_enabled: bool,
-    pub created_at: String,
-    pub session_count: i64,
-    pub total_spend_usd: f64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct AdminUsersResponse {
-    users: Vec<AdminUserInfo>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -131,12 +117,8 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                             ));
                             return;
                         }
-                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                            if let Some(id) = data.get("id").and_then(|v| v.as_str()) {
-                                if let Ok(uuid) = id.parse::<Uuid>() {
-                                    current_user_id.set(Some(uuid));
-                                }
-                            }
+                        if let Ok(me) = response.json::<MeResponse>().await {
+                            current_user_id.set(Some(me.id));
                         }
                     }
                     Err(e) => {

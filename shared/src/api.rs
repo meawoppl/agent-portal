@@ -1,6 +1,9 @@
 //! Shared API request/response types for HTTP endpoints.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::SessionInfo;
 
 /// API error types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,6 +167,95 @@ impl PermissionAnswers {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoundSettingsResponse {
     pub sound_config: Option<serde_json::Value>,
+}
+
+// =============================================================================
+// Authenticated User Endpoint (GET /api/auth/me)
+// =============================================================================
+
+/// Response from GET /api/auth/me — the currently authenticated user.
+///
+/// Wire shape matches the legacy `UserResponse` struct that lived in
+/// `backend/src/handlers/auth.rs`. Lifted into `shared` so frontend call sites
+/// can deserialize against the same type the backend serializes from. All
+/// optional/derived fields default so older or partial responses still parse.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MeResponse {
+    pub id: Uuid,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub is_admin: bool,
+    #[serde(default)]
+    pub voice_enabled: bool,
+}
+
+// =============================================================================
+// Sessions List Endpoint (GET /api/sessions)
+// =============================================================================
+
+/// Response from GET /api/sessions — sessions visible to the current user.
+///
+/// Wire shape matches the legacy `SessionListResponse` in
+/// `backend/src/handlers/sessions.rs`. Each entry is a `SessionInfo`
+/// (the existing shared type — wire-compatible with the backend's
+/// `SessionWithRole` flatten projection of `Session` + `my_role`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionsResponse {
+    #[serde(default)]
+    pub sessions: Vec<SessionInfo>,
+}
+
+// =============================================================================
+// Admin Users Endpoint (GET /api/admin/users)
+// =============================================================================
+
+/// One row in the admin users table.
+///
+/// Wire shape matches the backend's `AdminUserInfo` in
+/// `backend/src/handlers/admin.rs`. All non-identifying fields default so a
+/// partial or older response still parses; `id` is required because every
+/// frontend site keys off it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdminUserEntry {
+    pub id: Uuid,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub is_admin: bool,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub voice_enabled: bool,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub session_count: i64,
+    #[serde(default)]
+    pub total_spend_usd: f64,
+    #[serde(default)]
+    pub total_input_tokens: i64,
+    #[serde(default)]
+    pub total_output_tokens: i64,
+    #[serde(default)]
+    pub total_cache_creation_tokens: i64,
+    #[serde(default)]
+    pub total_cache_read_tokens: i64,
+}
+
+/// Response from GET /api/admin/users.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AdminUsersResponse {
+    #[serde(default)]
+    pub users: Vec<AdminUserEntry>,
 }
 
 // =============================================================================

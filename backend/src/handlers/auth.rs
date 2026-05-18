@@ -6,7 +6,8 @@ use axum::{
 };
 use diesel::prelude::*;
 use oauth2::{AuthorizationCode, CsrfToken, Scope, TokenResponse};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use shared::api::MeResponse;
 use std::sync::Arc;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 use tracing::{error, info};
@@ -296,20 +297,10 @@ pub async fn callback(
     Ok(Redirect::temporary("/dashboard"))
 }
 
-#[derive(Debug, Serialize)]
-pub struct UserResponse {
-    pub id: Uuid,
-    pub email: String,
-    pub name: Option<String>,
-    pub avatar_url: Option<String>,
-    pub is_admin: bool,
-    pub voice_enabled: bool,
-}
-
 pub async fn me(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<Json<UserResponse>, StatusCode> {
+) -> Result<Json<MeResponse>, StatusCode> {
     // Extract user ID from signed session cookie
     let cookie = cookies
         .signed(&app_state.cookie_key)
@@ -333,7 +324,7 @@ pub async fn me(
         .first::<User>(&mut conn)
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    Ok(Json(UserResponse {
+    Ok(Json(MeResponse {
         id: user.id,
         email: user.email,
         name: user.name,
