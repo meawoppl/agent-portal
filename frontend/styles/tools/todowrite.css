@@ -1,0 +1,60 @@
+/* TodoWrite tool — task checklist with pending / in-progress / completed states. */
+
+.todowrite-tool {
+    background: rgba(158, 206, 106, 0.08);
+    border-left-color: var(--success);
+}
+
+.todo-list {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+}
+
+.todo-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+
+.todo-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.todo-status {
+    flex-shrink: 0;
+    width: 1.2rem;
+    text-align: center;
+    font-weight: bold;
+}
+
+.todo-content {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.todo-item.pending .todo-status {
+    color: var(--text-muted);
+}
+
+.todo-item.in-progress .todo-status {
+    color: #e0af68;
+}
+
+.todo-item.in-progress {
+    background: rgba(224, 175, 104, 0.1);
+}
+
+.todo-item.completed .todo-status {
+    color: var(--success);
+}
+
+.todo-item.completed .todo-content {
+    color: var(--text-muted);
+    text-decoration: line-through;
+}

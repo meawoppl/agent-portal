@@ -1,0 +1,113 @@
+/* ==========================================================================
+   Shared tool styling — applies to every renderer in tool_renderers/.
+   Per-tool files (bash.css, read.css, …) override these for tool-specific
+   accents. Selectors here must stay tool-agnostic.
+   ========================================================================== */
+
+.tool-meta {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex-shrink: 1;
+}
+
+.tool-meta.timeout {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
+.tool-badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: rgba(127, 132, 156, 0.2);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tool-badge.background {
+    background: rgba(224, 175, 104, 0.2);
+    color: #e0af68;
+}
+
+.tool-badge.server {
+    background: rgba(122, 162, 247, 0.2);
+    color: #7aa2f7;
+}
+
+.tool-badge.mcp {
+    background: rgba(187, 154, 247, 0.2);
+    color: #bb9af7;
+}
+
+.tool-badge.mcp.error {
+    background: rgba(247, 118, 142, 0.2);
+    color: var(--error);
+}
+
+.tool-badge.code-exec {
+    background: rgba(158, 206, 106, 0.2);
+    color: var(--success);
+}
+
+.tool-badge.container {
+    background: rgba(224, 175, 104, 0.2);
+    color: #e0af68;
+}
+
+.tool-badge.unknown {
+    background: rgba(127, 132, 156, 0.2);
+    color: var(--text-secondary);
+}
+
+.tool-header-spacer {
+    flex: 1 1 auto;
+}
+
+/* Inline code snippets in tool headers (commands, patterns, etc.) used by
+   bash, glob, and grep renderers. */
+.bash-command-inline,
+.glob-pattern-inline,
+.grep-pattern-inline {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 0.15rem 0.4rem;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   Expandable Text / Lines
+   ========================================================================== */
+
+.expandable-toggle {
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8em;
+    user-select: none;
+    transition: color 0.15s;
+}
+
+.expandable-toggle:hover {
+    color: var(--accent);
+}
+
+.tool-arg-entry {
+    white-space: nowrap;
+}
+
+.tool-arg-entry + .tool-arg-entry::before {
+    content: ", ";
+    color: var(--text-muted);
+}

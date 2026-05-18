@@ -1,0 +1,12 @@
+/* Read tool — file path + optional line-range badge. */
+
+.read-tool {
+    background: rgba(122, 162, 247, 0.08);
+    border-left-color: var(--accent);
+}
+
+.file-path {
+    color: var(--accent);
+    font-size: 0.85rem;
+    word-break: break-all;
+}
