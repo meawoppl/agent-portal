@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.39
+
+- **Decommingle `claude-session-lib` into three crates.** `claude-session-lib` previously housed both `claude_io_task` and `codex_io_task` along with codex-specific helpers and an `IoEvent::CodexPermissionRequest` variant — the crate name lied. Split:
+  - New **`session-lib`** owns the agent-agnostic core: `Session<A: Agent>` generic, `trait Agent` with `spawn_io_task`, the unified `IoCommand` / `IoEvent` / `SessionEvent` enums, `SessionConfig` / `SessionSnapshot` / `PendingPermission`, `OutputBuffer`, `PendingOutputBuffer`, `HeartbeatTracker`, `probe_all_agents`, `SessionError`.
+  - **`claude-session-lib`** now contains only Claude-specific bits: `pub struct ClaudeAgent` with `impl session_lib::Agent`, `claude_io_task` (incl. the upstream-429 rate-limit retry state machine), `spawn_claude`, and `proxy_session/*` (wiggum mode, portal reminder, image upload, ws_reader). The `proxy_session` connection loop stays here and is now generic over `A: Agent`, so both Claude- and Codex-backed sessions can use it; splitting it is deferred to a future PR.
+  - New **`codex-session-lib`** contains `pub struct CodexAgent`, `codex_io_task`, and `handle_codex_server_message` (the existing stringly-typed `match method.as_str()` dispatch is preserved verbatim — issue #723 will refactor to typed `ServerRequest` matching in a follow-up PR).
+- Launcher's `process_manager.rs` adds an `AnySession` enum (`Claude(Session<ClaudeAgent>)` / `Codex(Session<CodexAgent>)`) so a single in-process map can hold mixed-agent sessions; the dispatch happens at `match config.agent_type` in `AnySession::new`.
+- Proxy keeps using `Session<ClaudeAgent>` directly — the proxy binary never spawns Codex.
+- `SessionError::ClaudeError(claude_codes::Error)` is gone — per-agent crates now collapse SDK errors into `SessionError::Agent(String)` so `session-lib`'s error surface stays SDK-free.
+
 ## 2.5.38
 
 - CLAUDE.md: codify typed-interface preference + upstream-first rule, lifted from the codex `item/fileChange/requestApproval` regression in 2.5.38 / PR #721.

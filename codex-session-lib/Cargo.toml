@@ -1,0 +1,19 @@
+[package]
+name = "codex-session-lib"
+version.workspace = true
+edition.workspace = true
+description = "Codex agent backend for session-lib (CodexAgent + codex_io_task + server message handler)."
+license = "MIT"
+
+[dependencies]
+session-lib = { path = "../session-lib" }
+shared = { path = "../shared" }
+# We touch ClaudeInput here because the cross-agent `IoCommand` enum (defined
+# in session-lib) carries `ClaudeInput` for the Input variant — even Codex
+# sessions read user input through that channel.
+claude-codes = { workspace = true, features = ["async-client"] }
+codex-codes = { workspace = true, features = ["async-client"] }
+tokio = { workspace = true, features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"

@@ -55,7 +55,7 @@ pub(super) fn spawn_ws_reader(
     wiggum_tx: mpsc::UnboundedSender<String>,
     graceful_shutdown_tx: mpsc::UnboundedSender<GracefulShutdown>,
     session_terminated_tx: tokio::sync::oneshot::Sender<()>,
-    heartbeat: crate::heartbeat::HeartbeatTracker,
+    heartbeat: session_lib::heartbeat::HeartbeatTracker,
     file_upload_tx: mpsc::UnboundedSender<FileUploadEvent>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -108,7 +108,7 @@ async fn handle_ws_message(
     ack_tx: &mpsc::UnboundedSender<u64>,
     ws_write: &SharedWsWrite,
     wiggum_tx: &mpsc::UnboundedSender<String>,
-    heartbeat: &crate::heartbeat::HeartbeatTracker,
+    heartbeat: &session_lib::heartbeat::HeartbeatTracker,
     file_upload_tx: &mpsc::UnboundedSender<FileUploadEvent>,
 ) -> WsMessageResult {
     if !matches!(

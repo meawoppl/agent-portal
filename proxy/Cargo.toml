@@ -59,6 +59,7 @@ chrono = { workspace = true, features = ["std", "clock"] }
 
 # Self-update
 portal-update = { path = "../portal-update" }
+session-lib = { path = "../session-lib" }
 claude-session-lib = { path = "../claude-session-lib" }
 portal-auth = { path = "../portal-auth" }
 base64 = "0.22"

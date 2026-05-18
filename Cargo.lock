@@ -10,13 +10,14 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "anyhow",
  "chrono",
  "chrono-tz",
  "clap",
  "claude-session-lib",
+ "codex-session-lib",
  "croner",
  "directories",
  "dirs",
@@ -27,6 +28,7 @@ dependencies = [
  "rustls 0.23.40",
  "serde",
  "serde_json",
+ "session-lib",
  "shared",
  "tokio",
  "tokio-util",
@@ -327,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -579,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -597,6 +599,7 @@ dependencies = [
  "portal-update",
  "serde",
  "serde_json",
+ "session-lib",
  "shared",
  "tokio",
  "tokio-tungstenite 0.28.0",
@@ -608,18 +611,18 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
  "claude-codes",
- "codex-codes",
  "directories",
  "hostname",
  "rand 0.8.6",
  "serde",
  "serde_json",
+ "session-lib",
  "shared",
  "thiserror 1.0.69",
  "tokio",
@@ -641,6 +644,20 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "which 8.0.2",
+]
+
+[[package]]
+name = "codex-session-lib"
+version = "2.5.39"
+dependencies = [
+ "claude-codes",
+ "codex-codes",
+ "serde",
+ "serde_json",
+ "session-lib",
+ "shared",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1170,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -2937,7 +2954,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "anyhow",
  "colored",
@@ -2952,7 +2969,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "anyhow",
  "hex",
@@ -3753,6 +3770,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-lib"
+version = "2.5.39"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "claude-codes",
+ "directories",
+ "serde",
+ "serde_json",
+ "shared",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+ "which 8.0.2",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3798,7 +3833,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.5.38"
+version = "2.5.39"
 dependencies = [
  "claude-codes",
  "serde",

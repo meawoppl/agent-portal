@@ -22,8 +22,8 @@ use claude_codes::io::{
     ControlRequestPayload, ControlResponse, ControlResponseMessage, PermissionResult,
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
-use claude_session_lib::output_buffer::PendingOutputBuffer;
 use futures_util::SinkExt;
+use session_lib::output_buffer::PendingOutputBuffer;
 use shared::ProxyToServer;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;

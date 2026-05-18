@@ -340,7 +340,7 @@ pub async fn run_launcher_loop(
 /// `LauncherToServer::ProbeAgentsResult`. Runs `which::which` + `--version`
 /// synchronously, so callers must run this from a `spawn_blocking` task.
 fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
-    claude_session_lib::probe::probe_all_agents()
+    session_lib::probe::probe_all_agents()
         .into_iter()
         .map(|(agent_type, result)| shared::AgentInstall {
             agent_type,
