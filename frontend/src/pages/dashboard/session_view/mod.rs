@@ -9,6 +9,7 @@
 mod component;
 mod history;
 mod permission_handler;
+mod tasks_panel;
 mod types;
 mod websocket;
 

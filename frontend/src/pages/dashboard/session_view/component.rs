@@ -4,11 +4,10 @@ use crate::components::message_renderer::types::{ClaudeMessage, ContentBlock};
 use crate::components::message_renderer::MessageRenderer;
 use crate::components::{group_messages, MessageGroupRenderer, VoiceInput};
 use crate::utils;
-use gloo::timers::callback::{Interval, Timeout};
+use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::ErrorMessage;
 use shared::{ClientToServer, SendMode, SessionInfo};
-use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -94,56 +93,11 @@ fn is_claude_awaiting(messages: impl DoubleEndedIterator<Item = impl AsRef<str>>
         .is_some_and(|t| t == "result")
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum TaskStatus {
-    Running,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone)]
-struct TaskEntry {
-    task_type: String,
-    description: String,
-    started_at: f64,
-    status: TaskStatus,
-    duration_ms: Option<u64>,
-    tool_uses: Option<u64>,
-    total_tokens: Option<u64>,
-    completed_at: Option<f64>,
-    current_activity: Option<String>,
-    last_tool_name: Option<String>,
-}
-
-impl TaskEntry {
-    fn with_started_at(
-        task_type: impl Into<String>,
-        description: impl Into<String>,
-        started_at: f64,
-    ) -> Self {
-        Self {
-            task_type: task_type.into(),
-            description: description.into(),
-            started_at,
-            status: TaskStatus::Running,
-            duration_ms: None,
-            tool_uses: None,
-            total_tokens: None,
-            completed_at: None,
-            current_activity: None,
-            last_tool_name: None,
-        }
-    }
-
-    fn new(task_type: impl Into<String>, description: impl Into<String>) -> Self {
-        Self::with_started_at(task_type, description, js_sys::Date::now())
-    }
-}
-
 use super::history::CommandHistory;
 use super::permission_handler::{
     build_permission_response, refocus_textarea, PermissionHandler, PermissionResponseKind,
 };
+use super::tasks_panel::{TaskEvent, TaskStatus, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
 use super::websocket::{connect_websocket, send_message, WsEvent};
 use crate::pages::dashboard::types::{calculate_backoff, MessageData, MessagesResponse};
@@ -222,14 +176,11 @@ pub enum SessionViewMsg {
     UploadDismiss,
     /// No-op (used by keydown/paste handlers that need to return a message)
     Noop,
-    /// Toggle the tasks sidebar panel
-    ToggleTasksPanel,
-    /// 1-second tick to update task elapsed times and clean up completed tasks
-    TaskTick,
-    /// Clear the tab pulse animation class
-    ClearTabPulse,
-    /// Finish the departure animation and hide the drawer
-    FinishDeparture,
+    /// TasksPanel is mounted and handed us its inbound-event dispatcher.
+    /// We store it so live `WsEvent::Output` task events and REST replay
+    /// task events can be forwarded without the parent owning any task
+    /// state.
+    TasksDispatcherRegistered(Callback<TasksInbound>),
     /// Send an interrupt to stop the current Claude response
     Interrupt,
     /// Scroll listener reports the current at-bottom state. The `update()`
@@ -283,16 +234,12 @@ pub struct SessionView {
     #[allow(dead_code)]
     upload_dismiss_timer: Option<Timeout>,
     drag_hover: bool,
-    active_tasks: HashMap<String, TaskEntry>,
-    /// Maps tool_use_id → task_id for fallback task completion via tool_result
-    tool_use_to_task: HashMap<String, String>,
-    tasks_panel_open: bool,
-    #[allow(dead_code)]
-    task_tick_handle: Option<Interval>,
-    /// Animation state for the tasks tab: "entering", "progress", or "departing"
-    tab_anim: Option<&'static str>,
-    /// Whether the drawer is still visible during departure animation
-    tab_departing: bool,
+    /// Dispatcher into the mounted `TasksPanel`. Stored once at child
+    /// `create` time via `TasksDispatcherRegistered`; live task events
+    /// derived from `WsEvent::Output` and replay events derived from the
+    /// REST `LoadHistory` path are forwarded through it so this component
+    /// holds zero task UI state itself.
+    tasks_dispatcher: Option<Callback<TasksInbound>>,
     /// Tracks textarea content so it can be restored after reconnection re-renders
     input_text: String,
     /// Messages sent but not yet confirmed by the server echo
@@ -363,12 +310,7 @@ impl Component for SessionView {
             upload_departing: false,
             upload_dismiss_timer: None,
             drag_hover: false,
-            active_tasks: HashMap::new(),
-            tool_use_to_task: HashMap::new(),
-            tasks_panel_open: false,
-            task_tick_handle: None,
-            tab_anim: None,
-            tab_departing: false,
+            tasks_dispatcher: None,
             input_text: String::new(),
             pending_sends: Vec::new(),
         }
@@ -453,8 +395,7 @@ impl Component for SessionView {
                     messages.drain(0..excess);
                 }
                 let session_id = ctx.props().session.id;
-                self.active_tasks.clear();
-                self.tool_use_to_task.clear();
+                self.dispatch_tasks(TasksInbound::ClearForReplay);
                 for msg in &messages {
                     let mut msg_type = "unknown".to_string();
                     if let Ok(claude_msg) =
@@ -469,106 +410,14 @@ impl Component for SessionView {
                                 }
                             } else if shared::is_compaction_boundary(sys) {
                                 msg_type = "compaction_end".to_string();
-                            } else if let Some(task) = sys.as_task_started() {
+                            } else if sys.as_task_started().is_some() {
                                 msg_type = "task_start".to_string();
-                                let task_type = match task.task_type {
-                                    shared::CCTaskType::LocalAgent => "local_agent",
-                                    shared::CCTaskType::LocalBash => "local_bash",
-                                }
-                                .to_string();
-                                let ts = js_sys::Date::parse(&msg.created_at);
-                                let started_at = if ts.is_finite() { ts } else { 0.0 };
-                                self.active_tasks.insert(
-                                    task.task_id.clone(),
-                                    TaskEntry::with_started_at(
-                                        task_type,
-                                        task.description.clone(),
-                                        started_at,
-                                    ),
-                                );
-                                self.tool_use_to_task
-                                    .insert(task.tool_use_id.clone(), task.task_id.clone());
-                            } else if let Some(progress) = sys.as_task_progress() {
-                                let ts = js_sys::Date::parse(&msg.created_at);
-                                let started_at = if ts.is_finite() { ts } else { 0.0 };
-                                let entry = self
-                                    .active_tasks
-                                    .entry(progress.task_id.clone())
-                                    .or_insert_with(|| {
-                                        TaskEntry::with_started_at(
-                                            "local_agent",
-                                            progress.description.clone(),
-                                            started_at,
-                                        )
-                                    });
-                                entry.current_activity = Some(progress.description.clone());
-                                entry.last_tool_name = Some(progress.last_tool_name.clone());
-                                entry.duration_ms = Some(progress.usage.duration_ms);
-                                entry.tool_uses = Some(progress.usage.tool_uses);
-                                entry.total_tokens = Some(progress.usage.total_tokens);
-                            } else if let Some(notif) = sys.as_task_notification() {
+                            } else if sys.as_task_notification().is_some() {
                                 msg_type = "task_end".to_string();
-                                let ts = js_sys::Date::parse(&msg.created_at);
-                                let completed_at = if ts.is_finite() { ts } else { 0.0 };
-                                let entry = self
-                                    .active_tasks
-                                    .entry(notif.task_id.clone())
-                                    .or_insert_with(|| {
-                                        TaskEntry::with_started_at(
-                                            "local_agent",
-                                            notif.summary.clone(),
-                                            completed_at,
-                                        )
-                                    });
-                                entry.status = match notif.status {
-                                    shared::CCTaskStatus::Completed => TaskStatus::Completed,
-                                    shared::CCTaskStatus::Failed => TaskStatus::Failed,
-                                };
-                                entry.completed_at = Some(completed_at);
-                                if let Some(usage) = &notif.usage {
-                                    entry.duration_ms = Some(usage.duration_ms);
-                                    entry.tool_uses = Some(usage.tool_uses);
-                                    entry.total_tokens = Some(usage.total_tokens);
-                                }
                             }
                         }
-                        // Fallback: detect task completion from tool_result in user messages
-                        if let shared::ClaudeOutput::User(user_msg) = &claude_msg {
-                            for block in &user_msg.message.content {
-                                if let shared::ContentBlock::ToolResult(tr) = block {
-                                    if let Some(task_id) =
-                                        self.tool_use_to_task.get(&tr.tool_use_id)
-                                    {
-                                        if let Some(entry) = self.active_tasks.get_mut(task_id) {
-                                            if entry.status == TaskStatus::Running {
-                                                entry.status = TaskStatus::Completed;
-                                                let ts = js_sys::Date::parse(&msg.created_at);
-                                                entry.completed_at =
-                                                    Some(if ts.is_finite() { ts } else { 0.0 });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // Fallback: detect task completion from tool_result in user messages
-                        if let shared::ClaudeOutput::User(user_msg) = &claude_msg {
-                            for block in &user_msg.message.content {
-                                if let shared::ContentBlock::ToolResult(tr) = block {
-                                    if let Some(task_id) =
-                                        self.tool_use_to_task.get(&tr.tool_use_id)
-                                    {
-                                        if let Some(entry) = self.active_tasks.get_mut(task_id) {
-                                            if entry.status == TaskStatus::Running {
-                                                entry.status = TaskStatus::Completed;
-                                                let ts = js_sys::Date::parse(&msg.created_at);
-                                                entry.completed_at =
-                                                    Some(if ts.is_finite() { ts } else { 0.0 });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        for ev in derive_task_events(&claude_msg, &msg.created_at, false) {
+                            self.dispatch_tasks(TasksInbound::Replay(ev));
                         }
                     } else if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(&msg.content) {
                         msg_type = message_type_tag(&parsed).to_string();
@@ -577,10 +426,6 @@ impl Component for SessionView {
                     if ts_ms.is_finite() {
                         ctx.props().on_activity.emit((session_id, msg_type, ts_ms));
                     }
-                }
-                // Start tick interval if we have tasks still running from history
-                if !self.active_tasks.is_empty() {
-                    self.ensure_task_tick(ctx);
                 }
                 self.messages = messages
                     .into_iter()
@@ -933,18 +778,9 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::Noop => false,
-            SessionViewMsg::ToggleTasksPanel => {
-                self.tasks_panel_open = !self.tasks_panel_open;
-                true
-            }
-            SessionViewMsg::ClearTabPulse => {
-                self.tab_anim = None;
-                true
-            }
-            SessionViewMsg::FinishDeparture => {
-                self.tab_departing = false;
-                self.tasks_panel_open = false;
-                true
+            SessionViewMsg::TasksDispatcherRegistered(dispatcher) => {
+                self.tasks_dispatcher = Some(dispatcher);
+                false
             }
             SessionViewMsg::Interrupt => {
                 if let Some(ref sender) = self.ws_sender {
@@ -952,19 +788,6 @@ impl Component for SessionView {
                     send_message(sender, ClientToServer::Interrupt);
                 }
                 false
-            }
-            SessionViewMsg::TaskTick => {
-                let now = js_sys::Date::now();
-                // Remove completed tasks older than 10 seconds
-                self.active_tasks.retain(|_, task| match task.completed_at {
-                    Some(t) => now - t < 10_000.0,
-                    None => true,
-                });
-                // Stop interval if no tasks remain
-                if self.active_tasks.is_empty() {
-                    self.task_tick_handle = None;
-                }
-                true
             }
             SessionViewMsg::AutoscrollChanged(at_bottom) => {
                 // Scroll events fire continuously; only re-render on a real
@@ -1135,7 +958,7 @@ impl Component for SessionView {
                             { "Jump to live ↓" }
                         </button>
                     }
-                    { self.render_tasks_sidebar(ctx) }
+                    { self.render_tasks_panel(ctx) }
                 </div>
 
                 { self.render_permission_handler(ctx) }
@@ -1308,141 +1131,40 @@ impl SessionView {
         let mut msg_type = "unknown".to_string();
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output) {
             msg_type = claude_msg.message_type();
-            match &claude_msg {
-                shared::ClaudeOutput::System(sys) => {
-                    if let Some(status) = sys.as_status() {
-                        if status.status.as_ref().map(|s| s.as_str()) == Some("compacting") {
-                            msg_type = "compaction_start".to_string();
-                        }
-                    } else if shared::is_compaction_boundary(sys) {
-                        msg_type = "compaction_end".to_string();
-                    } else if let Some(task) = sys.as_task_started() {
-                        msg_type = "task_start".to_string();
-                        let was_empty = self
-                            .active_tasks
-                            .values()
-                            .filter(|t| t.status == TaskStatus::Running)
-                            .count()
-                            == 0;
-                        let task_type = match task.task_type {
-                            shared::CCTaskType::LocalAgent => "local_agent",
-                            shared::CCTaskType::LocalBash => "local_bash",
-                        }
-                        .to_string();
-                        self.active_tasks.insert(
-                            task.task_id.clone(),
-                            TaskEntry::new(task_type, task.description.clone()),
-                        );
-                        self.tool_use_to_task
-                            .insert(task.tool_use_id.clone(), task.task_id.clone());
-                        self.ensure_task_tick(ctx);
-                        // Bright pulse when the first task appears
-                        if was_empty {
-                            self.tab_departing = false;
-                            self.tab_anim = Some("entering");
-                            self.schedule_clear_pulse(ctx, 600);
-                        }
-                    } else if let Some(progress) = sys.as_task_progress() {
-                        if !self.active_tasks.contains_key(&progress.task_id) {
-                            self.active_tasks.insert(
-                                progress.task_id.clone(),
-                                TaskEntry::new("local_agent", progress.description.clone()),
-                            );
-                            self.ensure_task_tick(ctx);
-                        }
-                        let entry = self.active_tasks.get_mut(&progress.task_id).unwrap();
-                        entry.current_activity = Some(progress.description.clone());
-                        entry.last_tool_name = Some(progress.last_tool_name.clone());
-                        entry.duration_ms = Some(progress.usage.duration_ms);
-                        entry.tool_uses = Some(progress.usage.tool_uses);
-                        entry.total_tokens = Some(progress.usage.total_tokens);
-                        // Dim pulse on progress
-                        self.tab_anim = Some("progress");
-                        self.schedule_clear_pulse(ctx, 400);
-                    } else if let Some(notif) = sys.as_task_notification() {
-                        msg_type = "task_end".to_string();
-                        let entry = self
-                            .active_tasks
-                            .entry(notif.task_id.clone())
-                            .or_insert_with(|| {
-                                TaskEntry::new("local_agent", notif.summary.clone())
-                            });
-                        entry.status = match notif.status {
-                            shared::CCTaskStatus::Completed => TaskStatus::Completed,
-                            shared::CCTaskStatus::Failed => TaskStatus::Failed,
-                        };
-                        entry.completed_at = Some(js_sys::Date::now());
-                        if let Some(usage) = &notif.usage {
-                            entry.duration_ms = Some(usage.duration_ms);
-                            entry.tool_uses = Some(usage.tool_uses);
-                            entry.total_tokens = Some(usage.total_tokens);
-                        }
-                        // If no running tasks remain, start departure
-                        let still_running = self
-                            .active_tasks
-                            .values()
-                            .any(|t| t.status == TaskStatus::Running);
-                        if !still_running {
-                            self.tab_anim = Some("departing");
-                            self.tab_departing = true;
-                            let link = ctx.link().clone();
-                            spawn_local(async move {
-                                gloo::timers::future::TimeoutFuture::new(500).await;
-                                link.send_message(SessionViewMsg::FinishDeparture);
-                            });
-                        }
+            if let shared::ClaudeOutput::System(sys) = &claude_msg {
+                if let Some(status) = sys.as_status() {
+                    if status.status.as_ref().map(|s| s.as_str()) == Some("compacting") {
+                        msg_type = "compaction_start".to_string();
                     }
+                } else if shared::is_compaction_boundary(sys) {
+                    msg_type = "compaction_end".to_string();
+                } else if sys.as_task_started().is_some() {
+                    msg_type = "task_start".to_string();
+                } else if sys.as_task_notification().is_some() {
+                    msg_type = "task_end".to_string();
                 }
-                shared::ClaudeOutput::Result(res) => {
-                    let cost = res.total_cost_usd;
-                    if cost != self.total_cost {
-                        self.total_cost = cost;
-                        self.cost_flash = true;
+            }
+            if let shared::ClaudeOutput::Result(res) = &claude_msg {
+                let cost = res.total_cost_usd;
+                if cost != self.total_cost {
+                    self.total_cost = cost;
+                    self.cost_flash = true;
 
-                        let session_id = ctx.props().session.id;
-                        ctx.props().on_cost_change.emit((session_id, cost));
+                    let session_id = ctx.props().session.id;
+                    ctx.props().on_cost_change.emit((session_id, cost));
 
-                        let link = ctx.link().clone();
-                        spawn_local(async move {
-                            gloo::timers::future::TimeoutFuture::new(600).await;
-                            link.send_message(SessionViewMsg::ClearCostFlash);
-                        });
-                    }
+                    let link = ctx.link().clone();
+                    spawn_local(async move {
+                        gloo::timers::future::TimeoutFuture::new(600).await;
+                        link.send_message(SessionViewMsg::ClearCostFlash);
+                    });
                 }
-                shared::ClaudeOutput::User(user_msg) => {
-                    // Fallback: detect task completion from tool_result content blocks.
-                    // In --print mode, Claude CLI doesn't emit task_notification,
-                    // so we infer completion when we see a tool_result matching a tracked task.
-                    for block in &user_msg.message.content {
-                        if let shared::ContentBlock::ToolResult(tr) = block {
-                            if let Some(task_id) =
-                                self.tool_use_to_task.get(&tr.tool_use_id).cloned()
-                            {
-                                if let Some(entry) = self.active_tasks.get_mut(&task_id) {
-                                    if entry.status == TaskStatus::Running {
-                                        entry.status = TaskStatus::Completed;
-                                        entry.completed_at = Some(js_sys::Date::now());
-                                        // If no running tasks remain, start departure
-                                        let still_running = self
-                                            .active_tasks
-                                            .values()
-                                            .any(|t| t.status == TaskStatus::Running);
-                                        if !still_running {
-                                            self.tab_anim = Some("departing");
-                                            self.tab_departing = true;
-                                            let link = ctx.link().clone();
-                                            spawn_local(async move {
-                                                gloo::timers::future::TimeoutFuture::new(500).await;
-                                                link.send_message(SessionViewMsg::FinishDeparture);
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
+            }
+            // Live task events: the `created_at` field isn't part of the
+            // live wire envelope, so the panel falls back to `Date.now()`
+            // — see `derive_task_events` for the two paths.
+            for ev in derive_task_events(&claude_msg, "", true) {
+                self.dispatch_tasks(TasksInbound::Live(ev));
             }
         } else if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(&output) {
             // Fallback for portal messages and unknown types not in ClaudeOutput
@@ -1769,164 +1491,109 @@ impl SessionView {
         }
     }
 
-    fn schedule_clear_pulse(&self, ctx: &Context<Self>, ms: u32) {
-        let link = ctx.link().clone();
-        spawn_local(async move {
-            gloo::timers::future::TimeoutFuture::new(ms).await;
-            link.send_message(SessionViewMsg::ClearTabPulse);
-        });
-    }
-
-    fn ensure_task_tick(&mut self, ctx: &Context<Self>) {
-        if self.task_tick_handle.is_some() {
-            return;
-        }
-        let link = ctx.link().clone();
-        self.task_tick_handle = Some(Interval::new(1_000, move || {
-            link.send_message(SessionViewMsg::TaskTick);
-        }));
-    }
-
-    fn render_tasks_sidebar(&self, ctx: &Context<Self>) -> Html {
-        let running_count = self
-            .active_tasks
-            .values()
-            .filter(|t| t.status == TaskStatus::Running)
-            .count();
-
-        // Keep rendering during departure animation, otherwise hide when no running tasks
-        if running_count == 0 && !self.tab_departing {
-            return html! {};
-        }
-
-        let link = ctx.link();
-        let on_toggle = link.callback(|e: MouseEvent| {
-            e.stop_propagation();
-            SessionViewMsg::ToggleTasksPanel
-        });
-
-        let open = self.tasks_panel_open && !self.tab_departing;
-
-        let mut classes = vec!["tasks-drawer"];
-        if open {
-            classes.push("open");
-        }
-        if let Some(anim) = self.tab_anim {
-            classes.push(anim);
-        }
-
-        let mut tasks: Vec<_> = self.active_tasks.iter().collect();
-        tasks.sort_by(|a, b| a.1.started_at.partial_cmp(&b.1.started_at).unwrap());
-
+    fn render_tasks_panel(&self, ctx: &Context<Self>) -> Html {
+        let on_register = ctx
+            .link()
+            .callback(SessionViewMsg::TasksDispatcherRegistered);
         html! {
-            <div class={classes.join(" ")}>
-                <div class="tasks-tab-hint" onclick={on_toggle}>
-                    <span class="tasks-tab-count">{ format!("{}", running_count) }</span>
-                    <span class="tasks-tab-label">{ "Tasks" }</span>
-                </div>
-                <div class="tasks-sidebar-panel">
-                    <div class="tasks-sidebar-list">
-                        { for tasks.iter().map(|(_, task)| self.render_task_pill(task)) }
-                    </div>
-                </div>
-            </div>
+            <TasksPanel {on_register} />
         }
     }
 
-    fn render_task_pill(&self, task: &TaskEntry) -> Html {
-        let status_class = match task.status {
-            TaskStatus::Running => "running",
-            TaskStatus::Completed => "completed",
-            TaskStatus::Failed => "failed",
-        };
+    fn dispatch_tasks(&self, msg: TasksInbound) {
+        if let Some(ref dispatcher) = self.tasks_dispatcher {
+            dispatcher.emit(msg);
+        }
+    }
+}
 
-        let type_label = match task.task_type.as_str() {
-            "local_agent" => "Sub-agent",
-            "local_bash" => "Background Bash",
-            _ => "Task",
-        };
-
-        let elapsed = match task.status {
-            TaskStatus::Running => {
-                let secs = ((js_sys::Date::now() - task.started_at) / 1000.0) as u64;
-                if secs >= 60 {
-                    format!("{}m {}s", secs / 60, secs % 60)
-                } else {
-                    format!("{}s", secs)
-                }
-            }
-            _ => {
-                if let Some(ms) = task.duration_ms {
-                    let secs = ms / 1000;
-                    if secs >= 60 {
-                        format!("{}m {}s", secs / 60, secs % 60)
-                    } else {
-                        format!("{}s", secs)
-                    }
-                } else {
-                    let secs = ((task.completed_at.unwrap_or(task.started_at) - task.started_at)
-                        / 1000.0) as u64;
-                    if secs >= 60 {
-                        format!("{}m {}s", secs / 60, secs % 60)
-                    } else {
-                        format!("{}s", secs)
-                    }
-                }
-            }
-        };
-
-        let fading = if task.completed_at.is_some() {
-            " fading"
+/// Derive zero or more typed [`TaskEvent`]s from a parsed `ClaudeOutput`.
+///
+/// Used by both the live `WsEvent::Output` path (with `live == true`, in
+/// which case `created_at_iso` is ignored and timestamps fall back to
+/// `js_sys::Date::now()`) and the REST `LoadHistory` replay path (with
+/// `live == false`, parsing the row's server-assigned `created_at` so
+/// elapsed-time labels reflect when the event actually happened rather
+/// than when the browser hydrated it).
+fn derive_task_events(
+    claude_msg: &shared::ClaudeOutput,
+    created_at_iso: &str,
+    live: bool,
+) -> Vec<TaskEvent> {
+    let resolve_ts = || -> f64 {
+        if live {
+            js_sys::Date::now()
         } else {
-            ""
-        };
-
-        html! {
-            <div class={format!("task-pill {}{}", status_class, fading)}>
-                <div class="task-pill-header">
-                    <span class={format!("task-status-dot {}", status_class)} />
-                    <span class="task-type-pill">{ type_label }</span>
-                    {
-                        if let Some(ref tool) = task.last_tool_name {
-                            html! { <span class="task-tool-badge">{ tool }</span> }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </div>
-                <div class="task-pill-description">{ &task.description }</div>
-                {
-                    if let Some(ref activity) = task.current_activity {
-                        html! { <div class="task-pill-activity">{ activity }</div> }
-                    } else {
-                        html! {}
-                    }
-                }
-                <div class="task-pill-stats">
-                    <span class="task-pill-stat">{ elapsed }</span>
-                    {
-                        if let Some(tools) = task.tool_uses {
-                            html! { <span class="task-pill-stat">{ format!("{} tools", tools) }</span> }
-                        } else {
-                            html! {}
-                        }
-                    }
-                    {
-                        if let Some(tokens) = task.total_tokens {
-                            let label = if tokens >= 1000 {
-                                format!("{:.1}k tok", tokens as f64 / 1000.0)
-                            } else {
-                                format!("{} tok", tokens)
-                            };
-                            html! { <span class="task-pill-stat">{ label }</span> }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </div>
-            </div>
+            let ts = js_sys::Date::parse(created_at_iso);
+            if ts.is_finite() {
+                ts
+            } else {
+                0.0
+            }
         }
+    };
+
+    let mut events = Vec::new();
+    match claude_msg {
+        shared::ClaudeOutput::System(sys) => {
+            if let Some(task) = sys.as_task_started() {
+                let task_type = match task.task_type {
+                    shared::CCTaskType::LocalAgent => "local_agent",
+                    shared::CCTaskType::LocalBash => "local_bash",
+                }
+                .to_string();
+                events.push(TaskEvent::Started {
+                    task_id: task.task_id.clone(),
+                    tool_use_id: task.tool_use_id.clone(),
+                    task_type,
+                    description: task.description.clone(),
+                    started_at: resolve_ts(),
+                });
+            } else if let Some(progress) = sys.as_task_progress() {
+                events.push(TaskEvent::Progress {
+                    task_id: progress.task_id.clone(),
+                    description: progress.description.clone(),
+                    last_tool_name: progress.last_tool_name.clone(),
+                    duration_ms: progress.usage.duration_ms,
+                    tool_uses: progress.usage.tool_uses,
+                    total_tokens: progress.usage.total_tokens,
+                    fallback_started_at: resolve_ts(),
+                });
+            } else if let Some(notif) = sys.as_task_notification() {
+                let status = match notif.status {
+                    shared::CCTaskStatus::Completed => TaskStatus::Completed,
+                    shared::CCTaskStatus::Failed => TaskStatus::Failed,
+                };
+                let usage = notif
+                    .usage
+                    .as_ref()
+                    .map(|u| (u.duration_ms, u.tool_uses, u.total_tokens));
+                events.push(TaskEvent::Notification {
+                    task_id: notif.task_id.clone(),
+                    summary: notif.summary.clone(),
+                    status,
+                    completed_at: resolve_ts(),
+                    usage,
+                });
+            }
+        }
+        shared::ClaudeOutput::User(user_msg) => {
+            // Fallback: --print mode doesn't emit `task_notification`, so
+            // any `tool_result` whose `tool_use_id` matches a tracked task
+            // implicitly closes it. The panel owns the reverse index and
+            // no-ops the event when there's no match.
+            for block in &user_msg.message.content {
+                if let shared::ContentBlock::ToolResult(tr) = block {
+                    events.push(TaskEvent::ToolResult {
+                        tool_use_id: tr.tool_use_id.clone(),
+                        completed_at: resolve_ts(),
+                    });
+                }
+            }
+        }
+        _ => {}
     }
+    events
 }
 
 #[cfg(test)]
