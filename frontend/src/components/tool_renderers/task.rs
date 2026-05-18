@@ -1,14 +1,11 @@
 use serde_json::Value;
-use shared::{TaskInput, ToolInput};
+use shared::TaskInput;
 use yew::prelude::*;
 
+use crate::components::tool_renderers::extract_tool_input;
+
 pub fn render_task_tool(input: &Value) -> Html {
-    let task: Option<TaskInput> = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::Task(task) => Some(task),
-            _ => None,
-        });
+    let task = extract_tool_input::<TaskInput>(input);
 
     let description: &str = task.as_ref().map(|t| t.description.as_str()).unwrap_or("?");
     let agent_type: &str = task

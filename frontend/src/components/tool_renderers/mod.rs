@@ -5,7 +5,10 @@ mod search;
 mod task;
 
 use serde_json::Value;
-use shared::{ReadInput, ToolInput};
+use shared::{
+    AskUserQuestionInput, BashInput, EditInput, ExitPlanModeInput, GlobInput, GrepInput, ReadInput,
+    TaskInput, TodoWriteInput, ToolInput, WebFetchInput, WebSearchInput, WriteInput,
+};
 use yew::prelude::*;
 
 use self::bash::render_bash_tool;
@@ -18,6 +21,50 @@ use self::search::{
 };
 use self::task::render_task_tool;
 use super::expandable::ExpandableText;
+
+/// Project-local equivalent of `TryFrom<ToolInput>` for the upstream
+/// `claude_codes::tool_inputs::*Input` variant structs. Orphan rules forbid an
+/// `impl TryFrom<ToolInput> for BashInput` here (both sides are foreign), so
+/// each variant struct implements this local trait instead. The blanket impl
+/// in [`extract_tool_input`] keeps call sites to one line.
+pub trait FromToolInput: Sized {
+    fn from_tool_input(input: ToolInput) -> Option<Self>;
+}
+
+macro_rules! impl_from_tool_input {
+    ($variant:ident, $inner:ty) => {
+        impl FromToolInput for $inner {
+            fn from_tool_input(input: ToolInput) -> Option<Self> {
+                match input {
+                    ToolInput::$variant(v) => Some(v),
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+impl_from_tool_input!(Bash, BashInput);
+impl_from_tool_input!(Read, ReadInput);
+impl_from_tool_input!(Edit, EditInput);
+impl_from_tool_input!(Write, WriteInput);
+impl_from_tool_input!(Glob, GlobInput);
+impl_from_tool_input!(Grep, GrepInput);
+impl_from_tool_input!(Task, TaskInput);
+impl_from_tool_input!(WebFetch, WebFetchInput);
+impl_from_tool_input!(WebSearch, WebSearchInput);
+impl_from_tool_input!(TodoWrite, TodoWriteInput);
+impl_from_tool_input!(AskUserQuestion, AskUserQuestionInput);
+impl_from_tool_input!(ExitPlanMode, ExitPlanModeInput);
+
+/// Decode a tool-use `input` JSON envelope into the typed variant struct `T`.
+/// Returns `None` when the JSON does not deserialize as the expected
+/// `ToolInput` variant — callers should fall back to a generic renderer.
+pub fn extract_tool_input<T: FromToolInput>(input: &Value) -> Option<T> {
+    serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(T::from_tool_input)
+}
 
 /// Render a tool use block with special handling for various tools
 pub fn render_tool_use(name: &str, input: &Value) -> Html {
@@ -40,17 +87,11 @@ pub fn render_tool_use(name: &str, input: &Value) -> Html {
 
 /// Render Read tool with file path and range info
 fn render_read_tool(input: &Value) -> Html {
-    let read = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::Read(r) => Some(r),
-            _ => None,
-        })
-        .unwrap_or(ReadInput {
-            file_path: "?".to_string(),
-            offset: None,
-            limit: None,
-        });
+    let read = extract_tool_input::<ReadInput>(input).unwrap_or(ReadInput {
+        file_path: "?".to_string(),
+        offset: None,
+        limit: None,
+    });
 
     let range_info = match (read.offset, read.limit) {
         (Some(o), Some(l)) => Some(format!("lines {}-{}", o, o + l)),
