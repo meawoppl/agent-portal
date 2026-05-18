@@ -1,6 +1,7 @@
 //! WebSocket connection management for SessionView
 
 use crate::utils;
+use futures_util::StreamExt;
 use shared::api::ErrorMessage;
 use shared::{ClientEndpoint, ClientToServer, ServerToClient, WsEndpoint};
 use uuid::Uuid;
@@ -8,8 +9,6 @@ use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
 
 use super::types::{PendingPermission, WsSender};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// Messages that can be sent from WebSocket handlers
 pub enum WsEvent {
@@ -57,8 +56,27 @@ pub fn connect_websocket(
                     return;
                 }
 
-                let sender = Rc::new(RefCell::new(Some(sender)));
-                on_event.emit(WsEvent::Connected(sender));
+                // Queued sender plumbing: previously the underlying split
+                // `Sender` was wrapped in `Rc<RefCell<Option<_>>>` and
+                // `send_message` did a `take`/`await`/restore dance. Two
+                // concurrent callers could land in the `take()`-returned-`None`
+                // gap and silently drop their message (closes #783). The fix:
+                // hand callers an `UnboundedSender<ClientToServer>` and own
+                // the real sink in a single spawn_local task that pulls from
+                // the receiver in order, awaiting each `send` to completion.
+                let (queue_tx, mut queue_rx) = futures_channel::mpsc::unbounded::<ClientToServer>();
+                on_event.emit(WsEvent::Connected(queue_tx));
+
+                let on_event_for_send = on_event.clone();
+                spawn_local(async move {
+                    while let Some(msg) = queue_rx.next().await {
+                        if let Err(e) = sender.send(msg).await {
+                            log::error!("WebSocket send error: {:?}", e);
+                            on_event_for_send.emit(WsEvent::Error(format!("{:?}", e)));
+                            break;
+                        }
+                    }
+                });
 
                 while let Some(result) = receiver.recv().await {
                     match result {
@@ -148,14 +166,112 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     }
 }
 
-/// Send a message over WebSocket
+/// Send a message over WebSocket.
+///
+/// Pushes onto an unbounded mpsc queue drained by a single owner task — see
+/// the `connect_websocket` drain loop. This means concurrent callers (e.g.
+/// the file-upload chunk loop in `component.rs`) can never race each other
+/// into a "sink temporarily missing, drop the message" hole (closes #783).
+/// A failure here only means the WebSocket task already exited (e.g. the
+/// connection closed); the caller doesn't have anywhere useful to surface
+/// that, so we swallow it to match the prior non-erroring signature.
 pub fn send_message(sender: &WsSender, msg: ClientToServer) {
-    let sender_rc = sender.clone();
-    spawn_local(async move {
-        let maybe_sender = sender_rc.borrow_mut().take();
-        if let Some(mut sender) = maybe_sender {
-            let _ = sender.send(msg).await;
-            *sender_rc.borrow_mut() = Some(sender);
+    let _ = sender.unbounded_send(msg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Rapidly push N messages through `send_message` and assert the
+    /// receiver drains exactly N items in the order they were sent. This
+    /// is the regression test for #783: under the old take/restore
+    /// `Rc<RefCell<Option<_>>>` sender, two concurrent producers could
+    /// silently drop a message. With the queued mpsc sender, every push
+    /// must arrive — `try_recv()` returns `Ok(_)` for each enqueued item
+    /// without any executor / await indirection because unbounded mpsc
+    /// pushes are synchronous.
+    #[test]
+    fn send_message_enqueues_all_messages_in_order() {
+        const N: usize = 64;
+        let (tx, mut rx) = futures_channel::mpsc::unbounded::<ClientToServer>();
+
+        for i in 0..N {
+            let msg = ClientToServer::ClaudeInput {
+                content: serde_json::Value::String(format!("msg-{i}")),
+                send_mode: None,
+            };
+            send_message(&tx, msg);
         }
-    });
+        drop(tx);
+
+        for i in 0..N {
+            match rx.try_recv() {
+                Ok(ClientToServer::ClaudeInput { content, .. }) => {
+                    assert_eq!(
+                        content.as_str(),
+                        Some(format!("msg-{i}").as_str()),
+                        "message {i} arrived out of order",
+                    );
+                }
+                Ok(other) => panic!("unexpected variant at index {i}: {other:?}"),
+                Err(e) => panic!("missing message at index {i}: {e:?}"),
+            }
+        }
+
+        // Channel is closed and drained — `try_recv` returns `Err(Closed)`.
+        assert!(rx.try_recv().is_err());
+    }
+
+    /// `send_message` is a non-async, non-blocking push. Verify a single
+    /// call lets the receiver observe the message immediately, without any
+    /// executor spin (the prior `spawn_local` indirection was what created
+    /// the drop window).
+    #[test]
+    fn send_message_is_synchronous_push() {
+        let (tx, mut rx) = futures_channel::mpsc::unbounded::<ClientToServer>();
+        send_message(&tx, ClientToServer::Interrupt);
+
+        assert!(matches!(rx.try_recv(), Ok(ClientToServer::Interrupt)));
+
+        drop(tx);
+        assert!(
+            rx.try_recv().is_err(),
+            "channel must report closed after drop"
+        );
+    }
+
+    /// Bursting many `send_message` calls from "concurrent" producers (here
+    /// modeled as interleaved synchronous pushes from cloned senders, which
+    /// is exactly the semantics of multiple `spawn_local`-spawned upload
+    /// chunk tasks racing into the same queue) must enqueue every message.
+    /// The original `take`/`await`/restore implementation dropped messages
+    /// in this scenario; the queue cannot.
+    #[test]
+    fn concurrent_pushes_from_clones_lose_nothing() {
+        let (tx, mut rx) = futures_channel::mpsc::unbounded::<ClientToServer>();
+        let tx_a = tx.clone();
+        let tx_b = tx.clone();
+        drop(tx);
+
+        // Interleave 100 pushes between two cloned senders.
+        for i in 0..50 {
+            send_message(&tx_a, ClientToServer::Interrupt);
+            send_message(
+                &tx_b,
+                ClientToServer::ClaudeInput {
+                    content: serde_json::Value::String(format!("b-{i}")),
+                    send_mode: None,
+                },
+            );
+        }
+        drop(tx_a);
+        drop(tx_b);
+
+        let mut count = 0;
+        while rx.try_recv().is_ok() {
+            count += 1;
+        }
+        assert_eq!(count, 100, "every interleaved push must reach the receiver");
+    }
 }
