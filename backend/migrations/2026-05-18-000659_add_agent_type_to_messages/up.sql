@@ -10,9 +10,10 @@ SET agent_type = sessions.agent_type
 FROM sessions
 WHERE messages.session_id = sessions.id;
 
--- Defensive: any orphans (shouldn't exist — messages.session_id has ON DELETE
--- CASCADE) default to 'claude'.
-UPDATE messages SET agent_type = 'claude' WHERE agent_type IS NULL;
-
+-- After the join-backfill, every row must have an agent_type. If the NOT NULL
+-- alter fails, you have orphan messages whose session was deleted without
+-- cascading — investigate before re-running. We deliberately do NOT set a
+-- column DEFAULT here: every callsite must specify agent_type explicitly so
+-- future schema changes can't silently inherit a claude default for codex
+-- sessions.
 ALTER TABLE messages ALTER COLUMN agent_type SET NOT NULL;
-ALTER TABLE messages ALTER COLUMN agent_type SET DEFAULT 'claude';
