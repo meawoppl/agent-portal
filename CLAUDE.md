@@ -733,6 +733,8 @@ When making changes, verify:
 | `MESSAGE_RETENTION_DAYS` | Days before message deletion | Optional (default: 30) |
 | `SESSION_MAX_AGE_DAYS` | Days before session deletion | Optional (default: 14) |
 | `PORTAL_MAX_IMAGE_MB` | Max image size for proxies | Optional (default: 10) |
+| `PORTAL_IMAGE_STORE_MAX_MB` | Backend served-image cache total-byte cap (LRU eviction past this) | Optional (default: 256) |
+| `PORTAL_IMAGE_STORE_TTL_SECS` | Backend served-image per-entry TTL in seconds | Optional (default: 3600) |
 | `PORTAL_REMINDER_FILE` | Path to a markdown file overriding the bundled portal-features reminder (proxy/launcher side). Falls back to default if unset/unreadable. | Optional |
 | `GOOGLE_APPLICATION_CREDENTIALS` | GCP Speech-to-Text creds | Optional |
 
