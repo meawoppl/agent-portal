@@ -123,30 +123,6 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         }
     };
 
-    // Reject duplicate: only one launcher per (hostname, user) is allowed
-    if let Some(existing_name) = app_state
-        .session_manager
-        .find_duplicate_launcher(&hostname, user_id)
-    {
-        warn!(
-            "Rejecting duplicate launcher '{}' from {} (user {}) — '{}' already connected",
-            launcher_name, hostname, user_id, existing_name
-        );
-        let _ = ws_sender
-            .send(ServerToLauncher::LauncherRegisterAck {
-                success: false,
-                launcher_id,
-                fatal: true,
-                error: Some(format!(
-                    "A launcher named '{}' is already connected from this host. \
-                     Stop the existing instance before starting a new one.",
-                    existing_name
-                )),
-            })
-            .await;
-        return;
-    }
-
     // Reject if user already has too many launchers
     const MAX_LAUNCHERS_PER_USER: usize = 10;
     let user_launcher_count = app_state
@@ -176,6 +152,50 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         return;
     }
 
+    // Create channel for sending messages to this launcher
+    let (tx, mut rx) = mpsc::unbounded_channel::<ServerToLauncher>();
+    let tx_for_sync = tx.clone();
+
+    // Atomically check for duplicate (user_id, hostname) and register. See
+    // `SessionManager::try_register_launcher` — the check + claim happen under
+    // a single DashMap shard lock to close the TOCTOU window that existed
+    // between separate `find_duplicate_launcher` and `register_launcher`
+    // calls (closes #790).
+    let register_result = app_state.session_manager.try_register_launcher(
+        launcher_id,
+        LauncherConnection {
+            sender: tx,
+            launcher_name: launcher_name.clone(),
+            hostname: hostname.clone(),
+            user_id,
+            running_sessions: Vec::new(),
+            working_directory,
+            version: version.unwrap_or_default(),
+            token_hash: reg_token_hash,
+            token_expires_at: reg_token_expires_at,
+        },
+    );
+
+    if let Err(existing_name) = register_result {
+        warn!(
+            "Rejecting duplicate launcher '{}' from {} (user {}) — '{}' already connected",
+            launcher_name, hostname, user_id, existing_name
+        );
+        let _ = ws_sender
+            .send(ServerToLauncher::LauncherRegisterAck {
+                success: false,
+                launcher_id,
+                fatal: true,
+                error: Some(format!(
+                    "A launcher named '{}' is already connected from this host. \
+                     Stop the existing instance before starting a new one.",
+                    existing_name
+                )),
+            })
+            .await;
+        return;
+    }
+
     // Send RegisterAck
     let _ = ws_sender
         .send(ServerToLauncher::LauncherRegisterAck {
@@ -185,25 +205,6 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             fatal: false,
         })
         .await;
-
-    // Create channel for sending messages to this launcher
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerToLauncher>();
-    let tx_for_sync = tx.clone();
-
-    app_state.session_manager.register_launcher(
-        launcher_id,
-        LauncherConnection {
-            sender: tx,
-            launcher_name: launcher_name.clone(),
-            hostname,
-            user_id,
-            running_sessions: Vec::new(),
-            working_directory,
-            version: version.unwrap_or_default(),
-            token_hash: reg_token_hash,
-            token_expires_at: reg_token_expires_at,
-        },
-    );
 
     info!(
         "Launcher '{}' registered for user {}",
