@@ -41,15 +41,21 @@ pub async fn handle_image_upload_socket(socket: WebSocket, app_state: Arc<AppSta
                 total_bytes,
                 file_path,
             } => {
-                if !authorize_upload(&app_state, &auth_token) {
-                    let _ = ws_sender
-                        .send(ImageUploadServerMsg::Failed {
-                            upload_id,
-                            reason: "authentication failed".into(),
-                        })
-                        .await;
-                    break;
-                }
+                // Authorize and resolve the inserting user in one go — the
+                // upload entry needs a `user_id` for the `serve_image` auth
+                // check (#786), and the proxy token already carries it.
+                let user_id = match authorize_upload(&app_state, &auth_token) {
+                    Some(uid) => uid,
+                    None => {
+                        let _ = ws_sender
+                            .send(ImageUploadServerMsg::Failed {
+                                upload_id,
+                                reason: "authentication failed".into(),
+                            })
+                            .await;
+                        break;
+                    }
+                };
 
                 let max_bytes = (app_state.max_image_mb as u64)
                     .saturating_mul(1024 * 1024)
@@ -60,6 +66,8 @@ pub async fn handle_image_upload_socket(socket: WebSocket, app_state: Arc<AppSta
                     &media_type,
                     total_bytes,
                     max_bytes,
+                    user_id,
+                    Some(session_id),
                 ) {
                     Ok(()) => {
                         info!(
@@ -152,13 +160,18 @@ pub async fn handle_image_upload_socket(socket: WebSocket, app_state: Arc<AppSta
     }
 }
 
-fn authorize_upload(app_state: &AppState, auth_token: &str) -> bool {
+/// Verify the proxy auth token and return the user_id it belongs to.
+/// `None` on any failure (bad token, banned user, DB error) — caller treats
+/// this as "reject the upload".
+fn authorize_upload(app_state: &AppState, auth_token: &str) -> Option<Uuid> {
     let mut conn = match app_state.db_pool.get() {
         Ok(c) => c,
         Err(e) => {
             warn!("Image upload auth: failed to get DB conn: {}", e);
-            return false;
+            return None;
         }
     };
-    crate::handlers::proxy_tokens::verify_and_get_user(app_state, &mut conn, auth_token).is_ok()
+    crate::handlers::proxy_tokens::verify_and_get_user(app_state, &mut conn, auth_token)
+        .ok()
+        .map(|(uid, _email)| uid)
 }

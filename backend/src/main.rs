@@ -476,7 +476,9 @@ async fn main() -> anyhow::Result<()> {
             "/api/proxy-tokens/{id}/renew",
             post(handlers::proxy_tokens::renew_token_handler),
         )
-        // Image serving endpoint (no auth — images are accessed by UUID)
+        // Image serving endpoint — authenticated (closes #786). Auth check
+        // lives in the handler via `extract_user_id`, matching the pattern
+        // every other cookie-gated handler in this router uses.
         .route("/api/images/{id}", get(handlers::images::serve_image))
         // Scheduled task management endpoints
         .route(
