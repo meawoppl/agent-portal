@@ -19,7 +19,8 @@ use crate::session::{
 };
 use anyhow::Result;
 use claude_codes::io::{
-    ControlRequestPayload, ControlResponse, ControlResponseMessage, PermissionResult,
+    ContentBlock, ControlRequestPayload, ControlResponse, ControlResponseMessage,
+    ControlResponsePayload, PermissionResult, UserMessage,
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
 use futures_util::SinkExt;
@@ -217,19 +218,22 @@ async fn run_shim_loop(
                 portal_texts.push(text);
             }
 
-            let parsed = serde_json::from_str::<serde_json::Value>(&line).ok();
+            // Parse the line into a typed ClaudeOutput up front. Lines that aren't
+            // valid JSON or don't match a known ClaudeOutput variant yield None;
+            // those still pass through to VS Code unchanged but skip portal dispatch.
+            let parsed = serde_json::from_str::<ClaudeOutput>(&line).ok();
 
             // Decide if this line should go to VS Code stdout.
             // All non-user messages always go through. For user echoes, check
             // if it came from the portal (tracked text match) or from VS Code (filter it).
             let forward_to_vscode = match &parsed {
-                Some(value) if value.get("type").and_then(|t| t.as_str()) == Some("user") => {
+                Some(ClaudeOutput::User(user)) => {
                     if !filtering_for_reader.load(Ordering::Relaxed) {
                         // Resume replay phase — forward all user echoes
                         true
                     } else {
                         // Check if this echo is from a portal-sent message
-                        match extract_user_text(value) {
+                        match extract_user_text(user) {
                             Some(ref text) => {
                                 if let Some(pos) = portal_texts.iter().position(|t| t == text) {
                                     portal_texts.remove(pos);
@@ -242,7 +246,8 @@ async fn run_shim_loop(
                         }
                     }
                 }
-                _ => true, // Non-user or non-JSON: always forward
+                // Non-user typed variants, unknown JSON, or non-JSON: always forward
+                _ => true,
             };
 
             // Forward to VS Code stdout (when appropriate)
@@ -259,45 +264,63 @@ async fn run_shim_loop(
                 let _ = stdout.flush().await;
             }
 
-            // Parse for portal forwarding (independent of VS Code decision)
-            if let Some(value) = parsed {
-                let msg_type = value.get("type").and_then(|t| t.as_str());
+            // Dispatch for portal forwarding (independent of VS Code decision).
+            match parsed {
+                // Protocol noise the portal doesn't need.
+                Some(ClaudeOutput::ControlResponse(_)) => continue,
+                // Permission request: forward CanUseTool as typed PermissionRequest
+                // so the portal shows an interactive approval dialog. Other control
+                // request kinds (hooks, mcp, init) are skipped.
+                Some(ClaudeOutput::ControlRequest(req)) => {
+                    let mut perms = permissions_for_reader.lock().await;
+                    perms.insert(req.request_id.clone(), PermissionState::Pending);
+                    debug!("Tracking permission request: {}", req.request_id);
 
-                // Skip protocol noise that the portal doesn't need
-                if matches!(msg_type, Some("stream_event") | Some("control_response")) {
+                    if let ControlRequestPayload::CanUseTool(tool_req) = req.request {
+                        let _ = perm_request_tx.send(ProxyToServer::PermissionRequest {
+                            request_id: req.request_id,
+                            tool_name: tool_req.tool_name,
+                            input: tool_req.input,
+                            permission_suggestions: tool_req.permission_suggestions,
+                        });
+                    }
                     continue;
                 }
-
-                // Send control_request (can_use_tool) as a typed PermissionRequest
-                // so the portal shows an interactive approval dialog
-                if msg_type == Some("control_request") {
-                    if let Ok(ClaudeOutput::ControlRequest(req)) =
-                        serde_json::from_value::<ClaudeOutput>(value.clone())
-                    {
-                        let mut perms = permissions_for_reader.lock().await;
-                        perms.insert(req.request_id.clone(), PermissionState::Pending);
-                        debug!("Tracking permission request: {}", req.request_id);
-
-                        if let ControlRequestPayload::CanUseTool(tool_req) = req.request {
-                            let _ = perm_request_tx.send(ProxyToServer::PermissionRequest {
-                                request_id: req.request_id,
-                                tool_name: tool_req.tool_name,
-                                input: tool_req.input,
-                                permission_suggestions: tool_req.permission_suggestions,
-                            });
+                // Other typed variants: buffer and forward to portal as raw Value.
+                Some(output) => {
+                    let value = match serde_json::to_value(&output) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            warn!("Failed to re-serialize ClaudeOutput for portal: {}", e);
                             continue;
                         }
-                    }
-                    // Non-can_use_tool control requests (hooks, mcp, init) — skip
-                    continue;
+                    };
+                    let seq = {
+                        let mut buf = output_buffer_for_reader.lock().await;
+                        buf.push(value.clone())
+                    };
+                    let _ = output_line_tx.send((seq, value));
                 }
-
-                // Buffer regular output for portal delivery (seq assigned here)
-                let seq = {
-                    let mut buf = output_buffer_for_reader.lock().await;
-                    buf.push(value.clone())
-                };
-                let _ = output_line_tx.send((seq, value));
+                // Line did not match ClaudeOutput. Fall back to a raw JSON parse so
+                // valid-JSON-but-unknown-shape lines still reach the portal. Lines
+                // that are not JSON at all skip the portal path entirely (matching
+                // pre-refactor behavior). The `stream_event` filter from before the
+                // refactor is preserved here for parity.
+                None => {
+                    let raw = match serde_json::from_str::<serde_json::Value>(&line) {
+                        Ok(v) => v,
+                        Err(_) => continue, // non-JSON: don't forward to portal
+                    };
+                    let msg_type = raw.get("type").and_then(|t| t.as_str());
+                    if matches!(msg_type, Some("stream_event")) {
+                        continue;
+                    }
+                    let seq = {
+                        let mut buf = output_buffer_for_reader.lock().await;
+                        buf.push(raw.clone())
+                    };
+                    let _ = output_line_tx.send((seq, raw));
+                }
             }
         }
         info!("Claude stdout ended");
@@ -314,24 +337,28 @@ async fn run_shim_loop(
             // Activate user echo filtering after first stdin input.
             // On resume, this marks the end of the replay phase.
             filtering_for_stdin.store(true, Ordering::Relaxed);
-            // Check if this is a permission response from VS Code (for dedup tracking)
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                if value.get("type").and_then(|t| t.as_str()) == Some("control_response") {
-                    if let Some(request_id) = value.get("request_id").and_then(|r| r.as_str()) {
-                        let mut perms = permissions_for_stdin.lock().await;
-                        if let Some(state) = perms.get_mut(request_id) {
-                            if matches!(state, PermissionState::Pending) {
-                                *state = PermissionState::Answered;
-                                debug!("Permission {} answered by VS Code (stdin)", request_id);
-                            } else {
-                                // Already answered by portal — still forward to claude
-                                // (claude handles duplicate gracefully)
-                                debug!(
-                                    "Permission {} already answered, forwarding anyway",
-                                    request_id
-                                );
-                            }
-                        }
+            // Check if this is a permission response from VS Code (for dedup tracking).
+            // Parse via the typed ClaudeOutput enum so the request_id comes from the
+            // nested ControlResponsePayload rather than a top-level field probe.
+            if let Ok(ClaudeOutput::ControlResponse(resp)) =
+                serde_json::from_str::<ClaudeOutput>(&line)
+            {
+                let request_id = match &resp.response {
+                    ControlResponsePayload::Success { request_id, .. } => request_id,
+                    ControlResponsePayload::Error { request_id, .. } => request_id,
+                };
+                let mut perms = permissions_for_stdin.lock().await;
+                if let Some(state) = perms.get_mut(request_id) {
+                    if matches!(state, PermissionState::Pending) {
+                        *state = PermissionState::Answered;
+                        debug!("Permission {} answered by VS Code (stdin)", request_id);
+                    } else {
+                        // Already answered by portal — still forward to claude
+                        // (claude handles duplicate gracefully)
+                        debug!(
+                            "Permission {} already answered, forwarding anyway",
+                            request_id
+                        );
                     }
                 }
             }
@@ -649,20 +676,21 @@ async fn run_shim_connection(
     result
 }
 
-/// Extract the text content from a user message echo JSON.
+/// Extract the text content from a user message echo.
 ///
-/// Expected format: `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}`
-/// Returns None if the structure doesn't match (safe fallback: caller forwards to VS Code).
-fn extract_user_text(value: &serde_json::Value) -> Option<String> {
-    let content = value.get("message")?.get("content")?.as_array()?;
-    let mut texts = Vec::new();
-    for block in content {
-        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                texts.push(text);
-            }
-        }
-    }
+/// Walks `msg.message.content` typed and concatenates the text of every
+/// `ContentBlock::Text` block. Returns `None` if the message has no text blocks
+/// (safe fallback: caller forwards to VS Code).
+fn extract_user_text(msg: &UserMessage) -> Option<String> {
+    let texts: Vec<&str> = msg
+        .message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(t) => Some(t.text.as_str()),
+            _ => None,
+        })
+        .collect();
     if texts.is_empty() {
         None
     } else {
