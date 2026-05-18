@@ -35,6 +35,7 @@ pub fn dashboard_page() -> Html {
     let ws_hook = use_client_websocket();
     let total_user_spend = ws_hook.total_spend;
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
+    let update_available = ws_hook.update_available.clone();
 
     // Track spend tier for timed animations
     let prev_spend_tier = use_state(|| 0u8);
@@ -579,13 +580,36 @@ pub fn dashboard_page() -> Html {
 
     html! {
         <div class="focus-flow-container" onkeydown={keyboard_nav.on_keydown.clone()} tabindex="0">
-            // Server shutdown warning banner
+            // Update-available banner (post-reconnect, server version advanced)
+            // takes precedence over the transient shutdown banner.
             {
-                if let Some(reason) = server_shutdown_reason.as_ref() {
+                if let Some(version) = update_available.as_ref() {
+                    let on_reload = Callback::from(|_: MouseEvent| {
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.location().reload();
+                        }
+                    });
                     html! {
-                        <div class="server-shutdown-banner">
-                            <span class="shutdown-icon">{ "⚠" }</span>
-                            <span class="shutdown-text">{ format!("Server shutting down: {} — reconnecting...", reason) }</span>
+                        <div class="update-available-banner" role="status">
+                            <span class="update-banner-text">
+                                { format!("New version available: v{version}") }
+                            </span>
+                            <button
+                                class="update-banner-button"
+                                onclick={on_reload}
+                                aria-label={format!("Reload to v{version}")}
+                            >
+                                { format!("Reload to v{version}") }
+                            </button>
+                        </div>
+                    }
+                } else if let Some(reason) = server_shutdown_reason.as_ref() {
+                    html! {
+                        <div class="server-shutdown-banner" role="status">
+                            <span class="shutdown-banner-dot" aria-hidden="true"></span>
+                            <span class="shutdown-banner-text">
+                                { format!("Server restarting ({reason}) — reconnecting…") }
+                            </span>
                         </div>
                     }
                 } else {
