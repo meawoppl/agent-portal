@@ -1,6 +1,7 @@
 //! Shared API request/response types for HTTP endpoints.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::SessionInfo;
@@ -595,6 +596,54 @@ pub struct ScheduledTaskListResponse {
     pub tasks: Vec<ScheduledTaskInfo>,
 }
 
+// =============================================================================
+// ResultMessage.modelUsage typed shape (closes #756)
+// =============================================================================
+
+/// Per-model usage / cost breakdown carried by Claude's `ResultMessage.modelUsage`
+/// field. Keyed by model name (e.g. `"claude-opus-4-7[1m]"`) in the parent map.
+///
+/// Wire shape from claude-codes' own `test_result_with_new_fields`:
+/// ```json
+/// "modelUsage": {
+///     "claude-opus-4-7[1m]": {
+///         "inputTokens": 3817,
+///         "outputTokens": 14,
+///         "costUSD": 0.06
+///     }
+/// }
+/// ```
+///
+/// TODO(SDK #140): `claude-codes::ResultMessage.model_usage` is currently
+/// `Option<serde_json::Value>` upstream. This local typed mirror exists so the
+/// frontend can iterate the per-model breakdown without poking JSON field
+/// names. When the SDK adopts a typed `BTreeMap<String, ModelUsageEntry>`
+/// itself, callers can `serde_json::from_value::<ModelUsage>(value)` directly
+/// against the upstream type instead, and this struct can be deleted.
+///
+/// All fields default so partial / older frames still parse.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageEntry {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    /// Wire name is `costUSD`, not `costUsd`.
+    #[serde(default, rename = "costUSD")]
+    pub cost_usd: f64,
+    #[serde(default)]
+    pub web_search_requests: u32,
+}
+
+/// Convenience alias for the full `modelUsage` map. The map key is the model
+/// name string as emitted by claude (e.g. `"claude-opus-4-7[1m]"`).
+pub type ModelUsage = BTreeMap<String, ModelUsageEntry>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,6 +804,53 @@ mod tests {
         let json = serde_json::json!({});
         let parsed: Citation = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, Citation::default());
+    }
+
+    /// Wire shape lifted verbatim from `claude-codes`'
+    /// `test_result_with_new_fields`: per-model entry with camelCase keys and
+    /// `costUSD` (not `costUsd`). The frontend renderer iterates this map for
+    /// the timing tooltip; the typed parse must accept the live wire shape.
+    #[test]
+    fn model_usage_entry_roundtrip() {
+        let json = serde_json::json!({
+            "inputTokens": 3817,
+            "outputTokens": 14,
+            "costUSD": 0.06,
+        });
+        let parsed: ModelUsageEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.input_tokens, 3817);
+        assert_eq!(parsed.output_tokens, 14);
+        assert!((parsed.cost_usd - 0.06).abs() < 1e-9);
+        // Unset fields default to 0
+        assert_eq!(parsed.cache_read_input_tokens, 0);
+        assert_eq!(parsed.cache_creation_input_tokens, 0);
+        assert_eq!(parsed.web_search_requests, 0);
+    }
+
+    /// The full `modelUsage` map: a `BTreeMap<String, ModelUsageEntry>` keyed
+    /// by model name. Multiple models accumulate when a session uses haiku +
+    /// opus or similar.
+    #[test]
+    fn model_usage_map_roundtrip() {
+        let json = serde_json::json!({
+            "claude-opus-4-7[1m]": {
+                "inputTokens": 3817,
+                "outputTokens": 14,
+                "costUSD": 0.06,
+            },
+            "claude-haiku-4-5": {
+                "inputTokens": 100,
+                "outputTokens": 5,
+                "costUSD": 0.001,
+            },
+        });
+        let parsed: ModelUsage = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.len(), 2);
+        let opus = parsed.get("claude-opus-4-7[1m]").unwrap();
+        assert_eq!(opus.input_tokens, 3817);
+        assert!((opus.cost_usd - 0.06).abs() < 1e-9);
+        let haiku = parsed.get("claude-haiku-4-5").unwrap();
+        assert_eq!(haiku.output_tokens, 5);
     }
 
     /// Regression guard for the pattern that motivated #725/#731: optional

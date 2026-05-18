@@ -1283,16 +1283,12 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
     );
 
     if let Some(model_usage) = &msg.model_usage {
-        if let Some(obj) = model_usage.as_object() {
-            for (model, cost) in obj {
-                if let Some(c) = cost.as_f64() {
-                    timing_tooltip.push_str(&format!(
-                        " | {}: ${:.4}",
-                        shorten_model_name(model).unwrap_or(model.clone()),
-                        c
-                    ));
-                }
-            }
+        for (model, entry) in model_usage {
+            timing_tooltip.push_str(&format!(
+                " | {}: ${:.4}",
+                shorten_model_name(model).unwrap_or_else(|| model.clone()),
+                entry.cost_usd
+            ));
         }
     }
 
