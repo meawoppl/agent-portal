@@ -1,11 +1,19 @@
 use serde_json::Value;
+use shared::{GlobInput, GrepInput, ToolInput};
 use yew::prelude::*;
 
 use crate::components::expandable::ExpandableText;
 
 pub fn render_glob_tool(input: &Value) -> Html {
-    let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
-    let path = input.get("path").and_then(|v| v.as_str());
+    let typed: Option<GlobInput> = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::Glob(g) => Some(g),
+            _ => None,
+        });
+
+    let pattern = typed.as_ref().map(|g| g.pattern.as_str()).unwrap_or("?");
+    let path = typed.as_ref().and_then(|g| g.path.as_deref());
 
     html! {
         <div class="tool-use glob-tool">
@@ -26,11 +34,21 @@ pub fn render_glob_tool(input: &Value) -> Html {
 }
 
 pub fn render_grep_tool(input: &Value) -> Html {
-    let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
-    let path = input.get("path").and_then(|v| v.as_str());
-    let glob = input.get("glob").and_then(|v| v.as_str());
-    let file_type = input.get("type").and_then(|v| v.as_str());
-    let case_insensitive = input.get("-i").and_then(|v| v.as_bool()).unwrap_or(false);
+    let typed: Option<GrepInput> = serde_json::from_value::<ToolInput>(input.clone())
+        .ok()
+        .and_then(|t| match t {
+            ToolInput::Grep(g) => Some(g),
+            _ => None,
+        });
+
+    let pattern = typed.as_ref().map(|g| g.pattern.as_str()).unwrap_or("?");
+    let path = typed.as_ref().and_then(|g| g.path.as_deref());
+    let glob = typed.as_ref().and_then(|g| g.glob.as_deref());
+    let file_type = typed.as_ref().and_then(|g| g.file_type.as_deref());
+    let case_insensitive = typed
+        .as_ref()
+        .and_then(|g| g.case_insensitive)
+        .unwrap_or(false);
 
     let has_options = glob.is_some() || file_type.is_some();
 
