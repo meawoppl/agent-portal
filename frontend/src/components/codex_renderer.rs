@@ -308,6 +308,38 @@ fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
     }
 }
 
+pub fn render_codex_message_content(json: &str) -> Html {
+    match serde_json::from_str::<CodexEvent>(json) {
+        Ok(CodexEvent::ItemCompleted {
+            item: Some(CodexItem::AgentMessage { text, .. }),
+        })
+        | Ok(CodexEvent::ItemStarted {
+            item: Some(CodexItem::AgentMessage { text, .. }),
+        })
+        | Ok(CodexEvent::ItemUpdated {
+            item: Some(CodexItem::AgentMessage { text, .. }),
+        }) => render_agent_message_content(text.as_deref()),
+        Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
+            render_item(item.as_ref(), false)
+        }
+        Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
+        Ok(CodexEvent::TurnCompleted { usage }) => render_turn_completed(usage.as_ref()),
+        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref()),
+        Ok(CodexEvent::Error { message }) => render_thread_error(message.as_deref()),
+        Ok(CodexEvent::TurnDiffUpdated { params }) => {
+            render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
+        }
+        Ok(CodexEvent::FileChangePatchUpdated { params }) => {
+            render_file_change_patch(params.as_ref().and_then(|p| p.changes.as_deref()))
+        }
+        Ok(CodexEvent::TurnPlanUpdated { params }) => render_turn_plan(
+            params.as_ref().and_then(|p| p.plan.as_deref()),
+            params.as_ref().and_then(|p| p.explanation.as_deref()),
+        ),
+        _ => html! {},
+    }
+}
+
 fn render_agent_message(text: Option<&str>, completed: bool) -> Html {
     let text = text.unwrap_or("");
     if text.is_empty() {
@@ -319,10 +351,17 @@ fn render_agent_message(text: Option<&str>, completed: bool) -> Html {
             <div class="message-header">
                 <span class="message-type-badge assistant">{ "Codex" }</span>
             </div>
-            <div class="message-body">
-                <div class="assistant-text">{ render_markdown(text) }</div>
-            </div>
+            <div class="message-body">{ render_agent_message_content(Some(text)) }</div>
         </div>
+    }
+}
+
+fn render_agent_message_content(text: Option<&str>) -> Html {
+    let text = text.unwrap_or("");
+    if text.is_empty() {
+        html! {}
+    } else {
+        html! { <div class="assistant-text">{ render_markdown(text) }</div> }
     }
 }
 

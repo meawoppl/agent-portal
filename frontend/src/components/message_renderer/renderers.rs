@@ -1,7 +1,7 @@
 //! Rendering functions for each message type.
 
 use super::types::*;
-use super::{extract_raw_iso, format_duration, shorten_model_name};
+use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
 use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown;
@@ -91,150 +91,7 @@ fn content_blocks_to_text(blocks: &[ContentBlock]) -> String {
     out
 }
 
-/// Extract raw text from an assistant group's serialized JSON messages.
-fn extract_assistant_group_text(messages: &[String]) -> String {
-    let mut out = String::new();
-    for json in messages {
-        if let Ok(ClaudeMessage::Assistant(msg)) = serde_json::from_str::<ClaudeMessage>(json) {
-            if let Some(content) = msg.message.and_then(|m| m.content) {
-                let text = content_blocks_to_text(&content);
-                if !text.is_empty() {
-                    if !out.is_empty() {
-                        out.push_str("\n\n");
-                    }
-                    out.push_str(&text);
-                }
-            }
-        }
-    }
-    out
-}
-
 // --- Message renderers ---
-
-pub fn render_assistant_group(messages: &[String], timestamp: Option<&str>) -> Html {
-    let mut total_output_tokens: u64 = 0;
-    let mut total_input_tokens: u64 = 0;
-    let mut total_cache_read: u64 = 0;
-    let mut total_cache_created: u64 = 0;
-    let mut total_ephemeral_1h: u64 = 0;
-    let mut total_ephemeral_5m: u64 = 0;
-    let mut model_name = String::new();
-    let mut first_usage: Option<UsageInfo> = None;
-
-    for json in messages {
-        if let Ok(ClaudeMessage::Assistant(msg)) = serde_json::from_str::<ClaudeMessage>(json) {
-            if let Some(message) = &msg.message {
-                if let Some(usage) = &message.usage {
-                    total_output_tokens += usage.output_tokens.unwrap_or(0);
-                    total_input_tokens += usage.input_tokens.unwrap_or(0);
-                    total_cache_read += usage.cache_read_input_tokens.unwrap_or(0);
-                    total_cache_created += usage.cache_creation_input_tokens.unwrap_or(0);
-                    let (e1h, e5m) = extract_ephemeral_cache(usage);
-                    total_ephemeral_1h += e1h;
-                    total_ephemeral_5m += e5m;
-                    if first_usage.is_none() {
-                        first_usage = Some(usage.clone());
-                    }
-                }
-                if model_name.is_empty() {
-                    if let Some(m) = &message.model {
-                        model_name = m.clone();
-                    }
-                }
-            }
-        }
-    }
-
-    let count = messages.len();
-    let mut usage_tooltip = format!(
-        "Input: {} | Output: {} | Cache read: {} | Cache created: {} | {} messages",
-        total_input_tokens, total_output_tokens, total_cache_read, total_cache_created, count
-    );
-    if total_ephemeral_1h > 0 || total_ephemeral_5m > 0 {
-        usage_tooltip.push_str(&format!(
-            " | Ephemeral 1h: {} | Ephemeral 5m: {}",
-            total_ephemeral_1h, total_ephemeral_5m
-        ));
-    }
-    let model_tooltip = build_model_tooltip(&model_name, first_usage.as_ref());
-    let copy_text = extract_assistant_group_text(messages);
-    // ISO timestamp of the last message in the group, for the live "time ago" label
-    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
-
-    html! {
-        <div class="claude-message assistant-message">
-            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge assistant">{ "Assistant" }</span>
-                {
-                    if count > 1 {
-                        html! { <span class="message-count" title={format!("{} consecutive messages", count)}>{ format!("{} messages", count) }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    if let Some(short_name) = shorten_model_name(&model_name) {
-                        html! { <span class="model-name" title={model_tooltip.clone()}>{ short_name }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                if !copy_text.is_empty() {
-                    <CopyButton text={copy_text} title="Copy assistant text" />
-                }
-                {
-                    if total_input_tokens > 0 || total_output_tokens > 0 {
-                        html! {
-                            <span class="usage-badge" title={usage_tooltip}>
-                                <span class="token-count">{ format!("{}↓ {}↑", total_input_tokens, total_output_tokens) }</span>
-                            </span>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
-            </div>
-            <div class="message-body">
-                { for messages.iter().enumerate().map(|(i, json)| {
-                    // Key by the message's `_created_at` when available, so
-                    // streaming/insert reordering doesn't reset expandable
-                    // state inside the body. Fall back to positional index
-                    // for messages predating the `_created_at` field.
-                    let key = extract_raw_iso(json)
-                        .map(|iso| format!("m-{}", iso))
-                        .unwrap_or_else(|| format!("m{}", i));
-                    html! { <GroupedMessageContent {key} json={json.clone()} /> }
-                })}
-            </div>
-            if let Some(iso) = last_iso {
-                <div class="message-footer">
-                    <TimeAgo iso={iso} />
-                </div>
-            }
-        </div>
-    }
-}
-
-/// Renders the content blocks for a single message within an assistant group.
-/// Each message is its own component so Yew preserves it across re-renders
-/// when new messages are appended to the group.
-#[derive(Properties, PartialEq)]
-struct GroupedMessageContentProps {
-    json: String,
-}
-
-#[function_component(GroupedMessageContent)]
-fn grouped_message_content(props: &GroupedMessageContentProps) -> Html {
-    let blocks = match serde_json::from_str::<ClaudeMessage>(&props.json) {
-        Ok(ClaudeMessage::Assistant(msg)) => {
-            msg.message.and_then(|m| m.content).unwrap_or_default()
-        }
-        Ok(ClaudeMessage::User(msg)) => msg.message.and_then(|m| m.content).unwrap_or_default(),
-        _ => return html! {},
-    };
-    render_content_blocks(&blocks)
-}
 
 pub fn render_user_message(
     msg: &UserMessage,
@@ -257,9 +114,7 @@ pub fn render_user_message(
                     }
                     <CopyButton text={text.clone()} title="Copy message" />
                 </div>
-                <div class="message-body">
-                    <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>
-                </div>
+                <div class="message-body">{ render_user_message_content(msg) }</div>
             </div>
         }
     } else if let Some(message) = &msg.message {
@@ -281,9 +136,7 @@ pub fn render_user_message(
         if has_tool_results {
             html! {
                 <div class="claude-message user-message tool-result-message">
-                    <div class="message-body">
-                        { render_content_blocks(&blocks) }
-                    </div>
+                    <div class="message-body">{ render_user_message_content(msg) }</div>
                 </div>
             }
         } else if !text_content.is_empty() {
@@ -293,9 +146,7 @@ pub fn render_user_message(
                         <span class="message-type-badge user">{ &label }</span>
                         <CopyButton text={text_content.clone()} title="Copy message" />
                     </div>
-                    <div class="message-body">
-                        <div class="user-text">{ render_markdown(&preserve_user_newlines(&text_content)) }</div>
-                    </div>
+                    <div class="message-body">{ render_user_message_content(msg) }</div>
                 </div>
             }
         } else {
@@ -303,6 +154,45 @@ pub fn render_user_message(
         }
     } else {
         html! {}
+    }
+}
+
+pub fn render_user_message_content(msg: &UserMessage) -> Html {
+    if let Some(text) = &msg.content {
+        return html! {
+            <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>
+        };
+    }
+
+    let blocks = msg
+        .message
+        .as_ref()
+        .and_then(|m| m.content.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    let has_tool_results = blocks
+        .iter()
+        .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
+
+    if has_tool_results {
+        render_content_blocks(&blocks)
+    } else {
+        let text_content = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if text_content.is_empty() {
+            html! {}
+        } else {
+            html! {
+                <div class="user-text">{ render_markdown(&preserve_user_newlines(&text_content)) }</div>
+            }
+        }
     }
 }
 
@@ -333,108 +223,6 @@ pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html
     }
 }
 
-/// Render a run of consecutive plain-text user messages as a single
-/// grouped block. Each prompt is still rendered via `render_user_message`
-/// (so name/copy chrome works), but the outer wrapper carries the
-/// `.user-group` accent.
-pub fn render_user_group(
-    messages: &[String],
-    current_user_id: Option<&str>,
-    timestamp: Option<&str>,
-) -> Html {
-    let count = messages.len();
-    let header_title = timestamp.unwrap_or_default().to_string();
-    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
-    html! {
-        <div class="claude-message message-group user-group">
-            <div class="message-header" title={header_title}>
-                <span class="message-type-badge user">{ "You" }</span>
-                if count > 1 {
-                    <span class="message-count">{ format!("× {}", count) }</span>
-                }
-            </div>
-            <div class="message-body user-group-body">
-                { for messages.iter().map(|json| {
-                    match serde_json::from_str::<ClaudeMessage>(json) {
-                        Ok(ClaudeMessage::User(msg)) => render_user_message(&msg, current_user_id, None),
-                        _ => html! {},
-                    }
-                }) }
-            </div>
-            if let Some(iso) = last_iso {
-                <div class="message-footer">
-                    <TimeAgo iso={iso} />
-                </div>
-            }
-        </div>
-    }
-}
-
-/// Render a run of consecutive Codex protocol events as a single grouped
-/// block. Each event is still dispatched through the existing
-/// `CodexMessageRenderer` (so the per-event rendering stays in one place),
-/// but the outer wrapper carries the `.codex-group` accent.
-pub fn render_codex_group(messages: &[String], timestamp: Option<&str>) -> Html {
-    let count = messages.len();
-    let header_title = timestamp.unwrap_or_default().to_string();
-    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
-    html! {
-        <div class="claude-message message-group codex-group">
-            <div class="message-header" title={header_title}>
-                <span class="message-type-badge assistant">{ "Codex" }</span>
-                if count > 1 {
-                    <span class="message-count">{ format!("× {}", count) }</span>
-                }
-            </div>
-            <div class="message-body codex-group-body">
-                { for messages.iter().map(|json| {
-                    html! { <crate::components::codex_renderer::CodexMessageRenderer json={json.clone()} /> }
-                }) }
-            </div>
-            if let Some(iso) = last_iso {
-                <div class="message-footer">
-                    <TimeAgo iso={iso} />
-                </div>
-            }
-        </div>
-    }
-}
-
-/// Render a run of consecutive portal messages as a single grouped block.
-///
-/// Each individual portal message is still emitted with its own header +
-/// body via `render_portal_message`, but they share one outer wrapper that
-/// gets the `.portal-group` accent so the run reads as one visual unit.
-/// The group title carries the count for quick scannability.
-pub fn render_portal_group(messages: &[String], timestamp: Option<&str>) -> Html {
-    let count = messages.len();
-    let header_title = timestamp.unwrap_or_default().to_string();
-    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
-    html! {
-        <div class="claude-message message-group portal-group">
-            <div class="message-header" title={header_title}>
-                <span class="message-type-badge portal">{ "Portal" }</span>
-                if count > 1 {
-                    <span class="message-count">{ format!("× {}", count) }</span>
-                }
-            </div>
-            <div class="message-body portal-group-body">
-                { for messages.iter().map(|json| {
-                    match serde_json::from_str::<ClaudeMessage>(json) {
-                        Ok(ClaudeMessage::Portal(msg)) => render_portal_message(&msg, None),
-                        _ => html! {},
-                    }
-                }) }
-            </div>
-            if let Some(iso) = last_iso {
-                <div class="message-footer">
-                    <TimeAgo iso={iso} />
-                </div>
-            }
-        </div>
-    }
-}
-
 pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Html {
     let copy_text: String = msg
         .content
@@ -453,11 +241,13 @@ pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Ht
                     <CopyButton text={copy_text} title="Copy portal text" />
                 }
             </div>
-            <div class="message-body">
-                { for msg.content.iter().map(render_portal_content) }
-            </div>
+            <div class="message-body">{ render_portal_message_content(msg) }</div>
         </div>
     }
+}
+
+pub fn render_portal_message_content(msg: &PortalMessage) -> Html {
+    html! { <>{ for msg.content.iter().map(render_portal_content) }</> }
 }
 
 fn render_portal_content(content: &shared::PortalContent) -> Html {
@@ -979,9 +769,7 @@ pub fn render_assistant_message(
                     }
                 }
             </div>
-            <div class="message-body">
-                { render_content_blocks(&blocks) }
-            </div>
+            <div class="message-body">{ render_assistant_message_content(msg) }</div>
             if let Some(iso) = raw_iso {
                 <div class="message-footer">
                     <TimeAgo iso={iso.to_string()} />
@@ -989,6 +777,16 @@ pub fn render_assistant_message(
             }
         </div>
     }
+}
+
+pub fn render_assistant_message_content(msg: &AssistantMessage) -> Html {
+    let blocks = msg
+        .message
+        .as_ref()
+        .and_then(|m| m.content.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    render_content_blocks(&blocks)
 }
 
 pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {

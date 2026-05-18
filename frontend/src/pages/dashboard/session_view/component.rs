@@ -1112,7 +1112,11 @@ impl Component for SessionView {
                 <div class="session-view-scroll-area">
                     <div class="session-view-messages" ref={self.messages_ref.clone()}>
                         {
-                            group_messages(&self.messages).into_iter().enumerate().map(|(i, group)| {
+                            group_messages(
+                                &self.messages,
+                                ctx.props().session.agent_type,
+                                ctx.props().current_user_id.as_deref(),
+                            ).into_iter().enumerate().map(|(i, group)| {
                                 let key = group.key(i);
                                 html! { <MessageGroupRenderer {key} group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
                             }).collect::<Html>()

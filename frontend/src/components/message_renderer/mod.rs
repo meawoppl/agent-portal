@@ -68,9 +68,11 @@ pub enum MessageGroup {
     /// the most common case avoids the group-wrapper render path and keeps
     /// its Yew key stable independent of category.
     Single(String),
-    /// Multiple consecutive messages sharing a `GroupCategory`.
-    Grouped {
+    /// One or more consecutive messages with the same display identity.
+    IdentityGroup {
         category: GroupCategory,
+        label: String,
+        badge_class: String,
         messages: Vec<String>,
     },
 }
@@ -87,7 +89,9 @@ impl MessageGroup {
     pub fn key(&self, index: usize) -> yew::virtual_dom::Key {
         let (prefix, first) = match self {
             MessageGroup::Single(json) => ("s", json.as_str()),
-            MessageGroup::Grouped { category, messages } => match messages.first() {
+            MessageGroup::IdentityGroup {
+                category, messages, ..
+            } => match messages.first() {
                 Some(j) => (category.key_prefix(), j.as_str()),
                 None => {
                     return yew::virtual_dom::Key::from(format!(
@@ -139,6 +143,13 @@ fn should_group_with_assistant(json: &str) -> bool {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MessageIdentity {
+    category: GroupCategory,
+    label: String,
+    badge_class: String,
+}
+
 /// Check if a message is a plain-text human user prompt — the kind we want
 /// to roll into the User group. Two wire shapes carry this content: the
 /// optimistic-send envelope (`UserMessage.content: Some(String)`) and the
@@ -178,10 +189,10 @@ fn is_codex_event(json: &str) -> bool {
     )
 }
 
-/// Classify a single wire message into the group category it belongs to,
+/// Classify a single wire message into the display identity it belongs to,
 /// or `None` if it shouldn't roll into any group (renders as `Single`).
 ///
-/// Sole entry point for "what kind of group does this message belong to"
+/// Sole entry point for "which identity group does this message belong to"
 /// across the codebase — add new categories here, not at the `group_messages`
 /// loop level.
 ///
@@ -195,47 +206,103 @@ fn is_codex_event(json: &str) -> bool {
 ///      can't collide with Assistant, but listing it explicitly here keeps
 ///      the ordering documented.
 ///   3. **User** runs after Assistant so plain-text user prompts land
-///      together while tool-result envelopes have already been claimed.
+///      together while tool-result envelopes have already been claimed. The
+///      sender label is part of the group key, so proxy users don't collapse
+///      under the current user's "You" header.
 ///   4. **Codex** runs last — Codex events parse via a different enum and
 ///      only the messages that don't match any Claude shape get here.
-fn classify(json: &str) -> Option<GroupCategory> {
+fn classify(
+    json: &str,
+    agent_type: shared::AgentType,
+    current_user_id: Option<&str>,
+) -> Option<MessageIdentity> {
     if should_group_with_assistant(json) {
-        return Some(GroupCategory::Assistant);
+        return Some(MessageIdentity {
+            category: GroupCategory::Assistant,
+            label: if agent_type == shared::AgentType::Codex {
+                "Codex".to_string()
+            } else {
+                "Assistant".to_string()
+            },
+            badge_class: "assistant".to_string(),
+        });
     }
-    if matches!(
-        serde_json::from_str::<ClaudeMessage>(json),
-        Ok(ClaudeMessage::Portal(_))
-    ) {
-        return Some(GroupCategory::Portal);
+
+    match serde_json::from_str::<ClaudeMessage>(json) {
+        Ok(ClaudeMessage::Portal(_)) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Portal,
+                label: "Portal".to_string(),
+                badge_class: "portal".to_string(),
+            });
+        }
+        Ok(ClaudeMessage::User(msg)) if is_plain_text_user(json) => {
+            let label = match &msg.sender {
+                Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
+                    sender.name.clone()
+                }
+                _ => "You".to_string(),
+            };
+            return Some(MessageIdentity {
+                category: GroupCategory::User,
+                label,
+                badge_class: "user".to_string(),
+            });
+        }
+        Ok(ClaudeMessage::Assistant(_)) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Assistant,
+                label: if agent_type == shared::AgentType::Codex {
+                    "Codex".to_string()
+                } else {
+                    "Assistant".to_string()
+                },
+                badge_class: "assistant".to_string(),
+            });
+        }
+        _ => {}
     }
-    if is_plain_text_user(json) {
-        return Some(GroupCategory::User);
+
+    if agent_type == shared::AgentType::Codex && is_codex_event(json) {
+        return Some(MessageIdentity {
+            category: GroupCategory::Codex,
+            label: "Codex".to_string(),
+            badge_class: "assistant".to_string(),
+        });
     }
-    if is_codex_event(json) {
-        return Some(GroupCategory::Codex);
-    }
+
     None
 }
 
 /// Walk `messages` and collapse consecutive same-category runs into
-/// `MessageGroup::Grouped`. Mixed / `None` messages become `MessageGroup::Single`.
-pub fn group_messages(messages: &[String]) -> Vec<MessageGroup> {
+/// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
+/// `MessageGroup::Single`.
+pub fn group_messages(
+    messages: &[String],
+    agent_type: shared::AgentType,
+    current_user_id: Option<&str>,
+) -> Vec<MessageGroup> {
     let mut groups = Vec::new();
-    let mut current: Option<(GroupCategory, Vec<String>)> = None;
+    let mut current: Option<(MessageIdentity, Vec<String>)> = None;
 
-    fn flush(out: &mut Vec<MessageGroup>, slot: &mut Option<(GroupCategory, Vec<String>)>) {
-        if let Some((category, messages)) = slot.take() {
-            out.push(MessageGroup::Grouped { category, messages });
+    fn flush(out: &mut Vec<MessageGroup>, slot: &mut Option<(MessageIdentity, Vec<String>)>) {
+        if let Some((identity, messages)) = slot.take() {
+            out.push(MessageGroup::IdentityGroup {
+                category: identity.category,
+                label: identity.label,
+                badge_class: identity.badge_class,
+                messages,
+            });
         }
     }
 
     for json in messages {
-        match classify(json) {
-            Some(cat) => match current.as_mut() {
-                Some((cur_cat, msgs)) if *cur_cat == cat => msgs.push(json.clone()),
+        match classify(json, agent_type, current_user_id) {
+            Some(identity) => match current.as_mut() {
+                Some((cur_identity, msgs)) if *cur_identity == identity => msgs.push(json.clone()),
                 _ => {
                     flush(&mut groups, &mut current);
-                    current = Some((cat, vec![json.clone()]));
+                    current = Some((identity, vec![json.clone()]));
                 }
             },
             None => {
@@ -326,42 +393,59 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         MessageGroup::Single(json) => {
             html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} /> }
         }
-        MessageGroup::Grouped {
-            category: GroupCategory::Assistant,
+        MessageGroup::IdentityGroup {
+            category,
+            label,
+            badge_class,
             messages,
         } => {
             let ts = messages
                 .first()
                 .and_then(|json| extract_local_timestamp(json));
-            renderers::render_assistant_group(messages, ts.as_deref())
+            let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
+            let wrapper_class = match category {
+                GroupCategory::User => "user-message",
+                GroupCategory::Portal => "portal-message",
+                GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
+            };
+            html! {
+                <div class={classes!("claude-message", wrapper_class)}>
+                    <div class="message-header" title={ts.unwrap_or_default()}>
+                        <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
+                        if messages.len() > 1 {
+                            <span class="message-count" title={format!("{} consecutive messages", messages.len())}>
+                                { format!("× {}", messages.len()) }
+                            </span>
+                        }
+                    </div>
+                    <div class="message-body grouped-message-body">
+                        { for messages.iter().enumerate().map(|(i, json)| {
+                            let key = extract_raw_iso(json)
+                                .map(|iso| format!("m-{}", iso))
+                                .unwrap_or_else(|| format!("m{}", i));
+                            html! { <div {key} class="grouped-message-part">{ render_identity_group_part(json, props.agent_type) }</div> }
+                        })}
+                    </div>
+                    if let Some(iso) = last_iso {
+                        <div class="message-footer">
+                            <crate::components::time_ago::TimeAgo iso={iso} />
+                        </div>
+                    }
+                </div>
+            }
         }
-        MessageGroup::Grouped {
-            category: GroupCategory::Portal,
-            messages,
-        } => {
-            let ts = messages
-                .first()
-                .and_then(|json| extract_local_timestamp(json));
-            renderers::render_portal_group(messages, ts.as_deref())
+    }
+}
+
+fn render_identity_group_part(json: &str, agent_type: shared::AgentType) -> Html {
+    match serde_json::from_str::<ClaudeMessage>(json) {
+        Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg),
+        Ok(ClaudeMessage::Assistant(msg)) => renderers::render_assistant_message_content(&msg),
+        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg),
+        _ if agent_type == shared::AgentType::Codex => {
+            super::codex_renderer::render_codex_message_content(json)
         }
-        MessageGroup::Grouped {
-            category: GroupCategory::User,
-            messages,
-        } => {
-            let ts = messages
-                .first()
-                .and_then(|json| extract_local_timestamp(json));
-            renderers::render_user_group(messages, props.current_user_id.as_deref(), ts.as_deref())
-        }
-        MessageGroup::Grouped {
-            category: GroupCategory::Codex,
-            messages,
-        } => {
-            let ts = messages
-                .first()
-                .and_then(|json| extract_local_timestamp(json));
-            renderers::render_codex_group(messages, ts.as_deref())
-        }
+        _ => html! {},
     }
 }
 
@@ -460,6 +544,22 @@ pub fn format_duration(ms: u64) -> String {
 mod tests {
     use super::*;
 
+    fn classify_category(json: &str) -> Option<GroupCategory> {
+        classify(json, shared::AgentType::Claude, None).map(|identity| identity.category)
+    }
+
+    fn classify_codex_category(json: &str) -> Option<GroupCategory> {
+        classify(json, shared::AgentType::Codex, None).map(|identity| identity.category)
+    }
+
+    fn group_for_tests(messages: &[String]) -> Vec<MessageGroup> {
+        group_messages(messages, shared::AgentType::Claude, None)
+    }
+
+    fn group_for_codex_tests(messages: &[String]) -> Vec<MessageGroup> {
+        group_messages(messages, shared::AgentType::Codex, None)
+    }
+
     /// Realistic Claude wire shape for a user message containing a single
     /// `tool_result` content block (the kind Read / Bash / Edit etc. produce).
     /// Matches `claude-codes` 2.1.x `ClaudeOutput::User(UserMessage)`
@@ -517,7 +617,7 @@ mod tests {
     }
 
     /// Sanity: two consecutive (assistant tool_use + user tool_result) pairs
-    /// must collapse into a single `AssistantGroup` of length 4. If the
+    /// must collapse into a single assistant identity group of length 4. If the
     /// classifier above is broken, this falls apart.
     #[test]
     fn serial_read_tool_uses_collapse_into_one_group() {
@@ -527,19 +627,20 @@ mod tests {
             assistant_with_tool_use("toolu_02", "Read"),
             read_tool_result_user_message("toolu_02"),
         ];
-        let groups = group_messages(&messages);
+        let groups = group_for_tests(&messages);
         assert_eq!(
             groups.len(),
             1,
-            "expected one AssistantGroup carrying all 4 messages, got {} groups",
+            "expected one Assistant identity group carrying all 4 messages, got {} groups",
             groups.len()
         );
         match &groups[0] {
-            MessageGroup::Grouped {
+            MessageGroup::IdentityGroup {
                 category: GroupCategory::Assistant,
                 messages,
+                ..
             } => assert_eq!(messages.len(), 4),
-            other => panic!("expected an Assistant Grouped run, got {:?}", other),
+            other => panic!("expected an Assistant identity run, got {:?}", other),
         }
     }
 
@@ -587,7 +688,7 @@ mod tests {
     #[test]
     fn portal_messages_classify_into_portal_group() {
         let msg = portal_text_message("Connection restored");
-        assert_eq!(classify(&msg), Some(GroupCategory::Portal));
+        assert_eq!(classify_category(&msg), Some(GroupCategory::Portal));
     }
 
     #[test]
@@ -597,7 +698,7 @@ mod tests {
             portal_text_message("Reconnected at 2026-05-18T05:01:00Z"),
             portal_text_message("Codex frame attached"),
         ];
-        let groups = group_messages(&messages);
+        let groups = group_for_tests(&messages);
         assert_eq!(
             groups.len(),
             1,
@@ -605,11 +706,12 @@ mod tests {
             groups.len()
         );
         match &groups[0] {
-            MessageGroup::Grouped {
+            MessageGroup::IdentityGroup {
                 category: GroupCategory::Portal,
                 messages,
+                ..
             } => assert_eq!(messages.len(), 3),
-            other => panic!("expected Portal Grouped run, got {:?}", other),
+            other => panic!("expected Portal identity run, got {:?}", other),
         }
     }
 
@@ -622,7 +724,7 @@ mod tests {
             assistant_with_tool_use("toolu_01", "Read"),
             portal_text_message("second portal"),
         ];
-        let groups = group_messages(&messages);
+        let groups = group_for_tests(&messages);
         assert_eq!(
             groups.len(),
             3,
@@ -632,7 +734,7 @@ mod tests {
         let cats: Vec<_> = groups
             .iter()
             .map(|g| match g {
-                MessageGroup::Grouped { category, .. } => Some(*category),
+                MessageGroup::IdentityGroup { category, .. } => Some(*category),
                 MessageGroup::Single(_) => None,
             })
             .collect();
@@ -698,7 +800,7 @@ mod tests {
     #[test]
     fn plain_text_user_classifies_into_user_group() {
         let msg = plain_user_text("hello agent");
-        assert_eq!(classify(&msg), Some(GroupCategory::User));
+        assert_eq!(classify_category(&msg), Some(GroupCategory::User));
     }
 
     /// Predicate ordering guard: a tool-result user envelope must STILL go
@@ -708,7 +810,7 @@ mod tests {
     #[test]
     fn tool_result_user_envelope_stays_in_assistant_group() {
         let msg = read_tool_result_user_message("toolu_01");
-        assert_eq!(classify(&msg), Some(GroupCategory::Assistant));
+        assert_eq!(classify_category(&msg), Some(GroupCategory::Assistant));
     }
 
     #[test]
@@ -718,14 +820,15 @@ mod tests {
             plain_user_text("follow-up"),
             plain_user_text("one more thing"),
         ];
-        let groups = group_messages(&messages);
+        let groups = group_for_tests(&messages);
         assert_eq!(groups.len(), 1);
         match &groups[0] {
-            MessageGroup::Grouped {
+            MessageGroup::IdentityGroup {
                 category: GroupCategory::User,
                 messages,
+                ..
             } => assert_eq!(messages.len(), 3),
-            other => panic!("expected User Grouped run, got {:?}", other),
+            other => panic!("expected User identity run, got {:?}", other),
         }
     }
 
@@ -736,14 +839,14 @@ mod tests {
             assistant_with_tool_use("toolu_01", "Read"),
             plain_user_text("question two"),
         ];
-        let groups = group_messages(&messages);
+        let groups = group_for_tests(&messages);
         assert_eq!(groups.len(), 3);
     }
 
     #[test]
     fn codex_event_classifies_into_codex_group() {
         let msg = codex_item_started_agent_message("hi");
-        assert_eq!(classify(&msg), Some(GroupCategory::Codex));
+        assert_eq!(classify_codex_category(&msg), Some(GroupCategory::Codex));
     }
 
     #[test]
@@ -753,14 +856,15 @@ mod tests {
             codex_item_started_agent_message("more progress"),
             codex_item_started_agent_message("done"),
         ];
-        let groups = group_messages(&messages);
+        let groups = group_for_codex_tests(&messages);
         assert_eq!(groups.len(), 1);
         match &groups[0] {
-            MessageGroup::Grouped {
+            MessageGroup::IdentityGroup {
                 category: GroupCategory::Codex,
                 messages,
+                ..
             } => assert_eq!(messages.len(), 3),
-            other => panic!("expected Codex Grouped run, got {:?}", other),
+            other => panic!("expected Codex identity run, got {:?}", other),
         }
     }
 
@@ -773,12 +877,12 @@ mod tests {
             portal_text_message("reconnected"),
             codex_item_started_agent_message("second"),
         ];
-        let groups = group_messages(&messages);
+        let groups = group_for_codex_tests(&messages);
         assert_eq!(groups.len(), 3);
         let cats: Vec<_> = groups
             .iter()
             .filter_map(|g| match g {
-                MessageGroup::Grouped { category, .. } => Some(*category),
+                MessageGroup::IdentityGroup { category, .. } => Some(*category),
                 MessageGroup::Single(_) => None,
             })
             .collect();

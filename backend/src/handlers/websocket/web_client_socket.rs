@@ -532,7 +532,7 @@ fn handle_web_input(
                     session_id,
                     role: "portal".to_string(),
                     content: serde_json::to_string(&portal.to_json()).unwrap_or_default(),
-                    user_id: session.user_id,
+                    user_id,
                     agent_type: session.agent_type.clone(),
                 };
                 match diesel::insert_into(messages::table)

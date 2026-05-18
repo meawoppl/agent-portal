@@ -143,7 +143,7 @@ pub async fn create_message(
         session_id,
         role: req.role,
         content: req.content,
-        user_id: session.user_id,
+        user_id: current_user_id,
         agent_type: session.agent_type.clone(),
     };
 
