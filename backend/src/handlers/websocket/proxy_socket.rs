@@ -6,6 +6,7 @@ use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
 use shared::{ProxyToServer, ServerToProxy, SessionEndpoint};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -33,7 +34,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     while let Some(result) = ws_receiver.recv().await {
         match result {
             Ok(proxy_msg) => {
-                handle_proxy_message(
+                let flow = handle_proxy_message(
                     proxy_msg,
                     &app_state,
                     &session_manager,
@@ -43,6 +44,13 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     &mut db_session_id,
                     &mut connection_gen,
                 );
+                if flow.is_break() {
+                    // Registration failed (auth bypass / wrong token / no
+                    // token) — RegisterAck { success: false } has already
+                    // been queued; break so the WS closes cleanly without
+                    // accepting any further messages on this connection.
+                    break;
+                }
             }
             Err(e) => {
                 warn!("WebSocket decode error: {}", e);
@@ -83,7 +91,12 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
         }
     }
 
-    send_task.abort();
+    // Drop our owned channel handle first so the send_task naturally
+    // drains any queued messages (e.g. the auth-failure RegisterAck) and
+    // exits when the channel closes, rather than being torn down before
+    // the proxy sees the response.
+    drop(tx);
+    let _ = send_task.await;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -96,7 +109,7 @@ fn handle_proxy_message(
     session_key: &mut Option<SessionId>,
     db_session_id: &mut Option<Uuid>,
     connection_gen: &mut Option<u64>,
-) {
+) -> ControlFlow<()> {
     match proxy_msg {
         ProxyToServer::Register(shared::RegisterFields {
             session_id: claude_session_id,
@@ -115,11 +128,16 @@ fn handle_proxy_message(
             scheduled_task_id,
         }) => {
             let key = claude_session_id.to_string();
-            *session_key = Some(key.clone());
 
-            let gen = session_manager.register_session(key.clone(), tx.clone());
-            *connection_gen = Some(gen);
-
+            // SECURITY (#780): authenticate *before* registering the socket
+            // with the SessionManager. Previously the socket was registered
+            // first, which meant any client that connected with a known or
+            // guessed session UUID could be wired up to receive that
+            // session's input messages *before* the DB rejected them — and
+            // even if the DB rejected the registration, the unregister-on-
+            // drop path could clobber a legitimate proxy that happened to
+            // hold the same session UUID. Registering only after auth
+            // closes both windows.
             let params = RegistrationParams {
                 claude_session_id,
                 session_name: &session_name,
@@ -138,7 +156,18 @@ fn handle_proxy_message(
             };
             let result = register_or_update_session(app_state, &params);
 
-            *db_session_id = result.session_id;
+            if result.success {
+                // Only now do we expose the socket via SessionManager and
+                // bind cleanup state. The send_task in handle_session_socket
+                // owns the WS sender — replies (including the RegisterAck
+                // below) flow through `tx` regardless of session-manager
+                // registration, so the proxy still gets a response on
+                // failure even though we never registered the socket.
+                let gen = session_manager.register_session(key.clone(), tx.clone());
+                *session_key = Some(key);
+                *connection_gen = Some(gen);
+                *db_session_id = result.session_id;
+            }
 
             let _ = tx.send(ServerToProxy::RegisterAck {
                 success: result.success,
@@ -156,6 +185,10 @@ fn handle_proxy_message(
                 if let Some(session_id) = *db_session_id {
                     replay_pending_inputs_from_db(db_pool, session_id, tx);
                 }
+            } else {
+                // Auth bypass / wrong token / no token → tell the caller
+                // to close the WebSocket after the RegisterAck flushes.
+                return ControlFlow::Break(());
             }
         }
         ProxyToServer::ClaudeOutput {
@@ -236,6 +269,7 @@ fn handle_proxy_message(
         }
         ProxyToServer::SessionStatus { .. } => {}
     }
+    ControlFlow::Continue(())
 }
 
 #[allow(clippy::too_many_arguments)]
