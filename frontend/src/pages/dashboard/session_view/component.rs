@@ -1,5 +1,6 @@
 //! SessionView component - Main terminal view for a single session
 
+use crate::components::message_renderer::types::{ClaudeMessage, ContentBlock};
 use crate::components::message_renderer::MessageRenderer;
 use crate::components::{group_messages, MessageGroupRenderer, VoiceInput};
 use crate::utils;
@@ -17,6 +18,49 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{ClipboardEvent, DragEvent, Element, HtmlTextAreaElement, KeyboardEvent};
 use yew::prelude::*;
 
+/// Wire `type` tag for a typed [`ClaudeMessage`] variant. Centralizes the
+/// variant-to-tag mapping so call sites that still trade in `msg_type: String`
+/// can derive it from the typed enum instead of poking `.get("type")`.
+fn message_type_tag(m: &ClaudeMessage) -> &'static str {
+    match m {
+        ClaudeMessage::System(_) => "system",
+        ClaudeMessage::Assistant(_) => "assistant",
+        ClaudeMessage::Result(_) => "result",
+        ClaudeMessage::User(_) => "user",
+        ClaudeMessage::Error(_) => "error",
+        ClaudeMessage::Portal(_) => "portal",
+        ClaudeMessage::RateLimitEvent(_) => "rate_limit_event",
+        ClaudeMessage::Unknown => "unknown",
+    }
+}
+
+/// Extract the user-text payload from a typed user message for pending-send
+/// echo matching. Returns the top-level `content` string when present (used by
+/// the frontend's optimistic-send synthesizer and the codex shim's synthesized
+/// echo) and otherwise concatenates `ContentBlock::Text` blocks from
+/// `message.content` (the shape Claude's `--replay-user-messages` emits).
+fn extract_user_text(m: &ClaudeMessage) -> Option<String> {
+    let ClaudeMessage::User(u) = m else {
+        return None;
+    };
+    if let Some(text) = u.content.as_ref() {
+        return Some(text.clone());
+    }
+    let blocks = u.message.as_ref().and_then(|m| m.content.as_ref())?;
+    let texts: Vec<&str> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    if texts.is_empty() {
+        None
+    } else {
+        Some(texts.join(""))
+    }
+}
+
 /// Check if a Claude session is awaiting user input by scanning messages
 /// backwards. Skips noise types (portal, error, system, rate_limit_event)
 /// and returns true if "result" is found before "user" or "assistant".
@@ -24,10 +68,17 @@ fn is_claude_awaiting(messages: impl DoubleEndedIterator<Item = impl AsRef<str>>
     messages
         .rev()
         .find_map(|msg| {
-            serde_json::from_str::<serde_json::Value>(msg.as_ref())
+            serde_json::from_str::<ClaudeMessage>(msg.as_ref())
                 .ok()
-                .and_then(|p| p.get("type")?.as_str().map(String::from))
-                .filter(|t| t == "result" || t == "assistant" || t == "user")
+                .filter(|m| {
+                    matches!(
+                        m,
+                        ClaudeMessage::Result(_)
+                            | ClaudeMessage::Assistant(_)
+                            | ClaudeMessage::User(_)
+                    )
+                })
+                .map(|m| message_type_tag(&m).to_string())
         })
         .is_some_and(|t| t == "result")
 }
@@ -508,12 +559,8 @@ impl Component for SessionView {
                                 }
                             }
                         }
-                    } else if let Ok(parsed) =
-                        serde_json::from_str::<serde_json::Value>(&msg.content)
-                    {
-                        if let Some(t) = parsed.get("type").and_then(|t| t.as_str()) {
-                            msg_type = t.to_string();
-                        }
+                    } else if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(&msg.content) {
+                        msg_type = message_type_tag(&parsed).to_string();
                     }
                     let ts_ms = js_sys::Date::parse(&msg.created_at);
                     if ts_ms.is_finite() {
@@ -1407,11 +1454,9 @@ impl SessionView {
                 }
                 _ => {}
             }
-        } else if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
+        } else if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(&output) {
             // Fallback for portal messages and unknown types not in ClaudeOutput
-            if let Some(t) = parsed.get("type").and_then(|t| t.as_str()) {
-                msg_type = t.to_string();
-            }
+            msg_type = message_type_tag(&parsed).to_string();
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
         ctx.props().on_activity.emit((
@@ -1445,14 +1490,16 @@ impl SessionView {
         if !self.pending_sends.is_empty() {
             match msg_type.as_str() {
                 "user" => {
-                    let echo_content = serde_json::from_str::<serde_json::Value>(&output)
+                    let echo_text = serde_json::from_str::<ClaudeMessage>(&output)
                         .ok()
-                        .and_then(|v| v.get("content").cloned());
-                    if let Some(ref echo) = echo_content {
+                        .as_ref()
+                        .and_then(extract_user_text);
+                    if let Some(ref echo) = echo_text {
                         if let Some(pos) = self.pending_sends.iter().position(|pending| {
-                            serde_json::from_str::<serde_json::Value>(pending)
+                            serde_json::from_str::<ClaudeMessage>(pending)
                                 .ok()
-                                .and_then(|v| v.get("content").cloned())
+                                .as_ref()
+                                .and_then(extract_user_text)
                                 .as_ref()
                                 == Some(echo)
                         }) {
