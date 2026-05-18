@@ -1,6 +1,7 @@
 use super::markdown::render_markdown;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use yew::prelude::*;
 
 // Local deserialization types mirroring codex-codes, using Option wrappers
@@ -715,6 +716,64 @@ pub fn is_codex_terminal_event(json: &str) -> Option<bool> {
     }
 }
 
+/// Extract a `(item_type_tag, item_id)` dedup key from item-lifecycle events
+/// (`item.started` / `item.updated` / `item.completed`). Non-lifecycle events
+/// and items without an id (e.g. `CodexItem::Unknown`) return `None`.
+fn lifecycle_key(event: &CodexEvent) -> Option<(&'static str, String)> {
+    let item = match event {
+        CodexEvent::ItemStarted { item }
+        | CodexEvent::ItemUpdated { item }
+        | CodexEvent::ItemCompleted { item } => item.as_ref()?,
+        _ => return None,
+    };
+    let (tag, id) = match item {
+        CodexItem::AgentMessage { id, .. } => ("agentMessage", id.as_ref()?),
+        CodexItem::Reasoning { id, .. } => ("reasoning", id.as_ref()?),
+        CodexItem::CommandExecution { id, .. } => ("commandExecution", id.as_ref()?),
+        CodexItem::FileChange { id, .. } => ("fileChange", id.as_ref()?),
+        CodexItem::McpToolCall { id, .. } => ("mcpToolCall", id.as_ref()?),
+        CodexItem::WebSearch { id, .. } => ("webSearch", id.as_ref()?),
+        CodexItem::TodoList { id, .. } => ("todoList", id.as_ref()?),
+        CodexItem::Error { id, .. } => ("error", id.as_ref()?),
+        CodexItem::Unknown => return None,
+    };
+    Some((tag, id.clone()))
+}
+
+/// Collapse `item.started` / `item.updated` / `item.completed` runs that
+/// share the same `(item_type, id)` into the latest occurrence — the running
+/// card and the completed card for one bash command share an id and should
+/// render as one transcript entry, not two.
+///
+/// Each surviving message stays at the position of its latest occurrence so
+/// the transcript reflects when the item *finished*, not when it started.
+/// Events with no id (e.g. `CodexItem::Unknown`) and non-lifecycle events
+/// (TurnCompleted, streaming deltas, etc.) pass through unchanged. Malformed
+/// JSON also passes through unchanged so we never silently drop messages.
+pub fn dedupe_lifecycle(messages: &[String]) -> Vec<String> {
+    let mut latest: HashMap<(&'static str, String), usize> = HashMap::new();
+    let mut keep: Vec<bool> = vec![true; messages.len()];
+
+    for (i, raw) in messages.iter().enumerate() {
+        let Ok(event) = serde_json::from_str::<CodexEvent>(raw) else {
+            continue;
+        };
+        let Some(key) = lifecycle_key(&event) else {
+            continue;
+        };
+        if let Some(prev) = latest.insert(key, i) {
+            keep[prev] = false;
+        }
+    }
+
+    messages
+        .iter()
+        .zip(keep)
+        .filter(|(_, k)| *k)
+        .map(|(m, _)| m.clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1055,5 +1114,78 @@ mod tests {
         let json = r#"{"type":"item/reasoning/textDelta","params":{"contentIndex":0,"delta":"...","itemId":"i","threadId":"t","turnId":"u"}}"#;
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         assert!(matches!(event, CodexEvent::ReasoningTextDelta { .. }));
+    }
+
+    // --- lifecycle dedup ---
+
+    /// The motivating bug (#776): a single bash command lands as
+    /// `item.started` (status: running) + `item.completed` (status: completed,
+    /// with output and exit code). They share `id` and should collapse to one.
+    #[test]
+    fn dedupe_lifecycle_collapses_command_execution_running_completed() {
+        let started = r#"{"type":"item.started","item":{"type":"command_execution","id":"c1","command":"ls","status":"running"}}"#.to_string();
+        let completed = r#"{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"ls","aggregated_output":"foo\nbar","exit_code":0,"status":"completed"}}"#.to_string();
+        let out = dedupe_lifecycle(&[started, completed.clone()]);
+        assert_eq!(out, vec![completed]);
+    }
+
+    /// Streaming updates between started and completed: only the completed
+    /// entry survives, and it sits at the position the completion arrived at.
+    #[test]
+    fn dedupe_lifecycle_collapses_started_updated_completed_run() {
+        let started = r#"{"type":"item.started","item":{"type":"command_execution","id":"c2","command":"sleep 1","status":"running"}}"#.to_string();
+        let updated = r#"{"type":"item.updated","item":{"type":"command_execution","id":"c2","command":"sleep 1","aggregated_output":"...","status":"running"}}"#.to_string();
+        let completed = r#"{"type":"item.completed","item":{"type":"command_execution","id":"c2","command":"sleep 1","aggregated_output":"done","exit_code":0,"status":"completed"}}"#.to_string();
+        let out = dedupe_lifecycle(&[started, updated, completed.clone()]);
+        assert_eq!(out, vec![completed]);
+    }
+
+    /// Independent items must not collapse into each other — different
+    /// `(type, id)` keys stay separate.
+    #[test]
+    fn dedupe_lifecycle_preserves_independent_items() {
+        let cmd_a = r#"{"type":"item.completed","item":{"type":"command_execution","id":"a","command":"ls"}}"#.to_string();
+        let cmd_b = r#"{"type":"item.completed","item":{"type":"command_execution","id":"b","command":"pwd"}}"#.to_string();
+        let file_a = r#"{"type":"item.completed","item":{"type":"file_change","id":"a","status":"completed"}}"#.to_string();
+        // Note: file_change "a" is a DIFFERENT key from command_execution "a"
+        // because the type tag participates in the dedup key.
+        let out = dedupe_lifecycle(&[cmd_a.clone(), cmd_b.clone(), file_a.clone()]);
+        assert_eq!(out, vec![cmd_a, cmd_b, file_a]);
+    }
+
+    /// Non-lifecycle events (turn-level, streaming deltas) and events without
+    /// an id must pass through unchanged.
+    #[test]
+    fn dedupe_lifecycle_passes_through_non_lifecycle_events() {
+        let turn_completed =
+            r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":20}}"#
+                .to_string();
+        let diff_updated = r#"{"type":"turn/diff/updated","params":{"diff":"x"}}"#.to_string();
+        let messages = vec![turn_completed.clone(), diff_updated.clone()];
+        let out = dedupe_lifecycle(&messages);
+        assert_eq!(out, messages);
+    }
+
+    /// Lifecycle events whose item lacks an `id` field still pass through —
+    /// we don't have a dedup key for them so erring on the side of showing
+    /// the message is safer than dropping it.
+    #[test]
+    fn dedupe_lifecycle_passes_through_items_without_id() {
+        let a = r#"{"type":"item.started","item":{"type":"command_execution","command":"ls"}}"#
+            .to_string();
+        let b = r#"{"type":"item.completed","item":{"type":"command_execution","command":"ls"}}"#
+            .to_string();
+        let out = dedupe_lifecycle(&[a.clone(), b.clone()]);
+        assert_eq!(out, vec![a, b]);
+    }
+
+    /// Malformed / non-JSON messages must not be silently dropped — they pass
+    /// through so the upstream renderer can decide what to do with them.
+    #[test]
+    fn dedupe_lifecycle_passes_through_malformed_messages() {
+        let bogus = "not json at all".to_string();
+        let valid = r#"{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"ls"}}"#.to_string();
+        let out = dedupe_lifecycle(&[bogus.clone(), valid.clone()]);
+        assert_eq!(out, vec![bogus, valid]);
     }
 }

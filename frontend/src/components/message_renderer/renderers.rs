@@ -374,10 +374,17 @@ pub fn render_user_group(
 /// block. Each event is still dispatched through the existing
 /// `CodexMessageRenderer` (so the per-event rendering stays in one place),
 /// but the outer wrapper carries the `.codex-group` accent.
+///
+/// Item lifecycle messages (`item.started` / `item.updated` / `item.completed`)
+/// sharing the same `(item_type, id)` are deduplicated to the latest occurrence
+/// before rendering — without this, a single bash command produces two
+/// side-by-side cards ("running" + "completed") and a streaming MCP call can
+/// produce many.
 pub fn render_codex_group(messages: &[String], timestamp: Option<&str>) -> Html {
-    let count = messages.len();
+    let deduped = crate::components::codex_renderer::dedupe_lifecycle(messages);
+    let count = deduped.len();
     let header_title = timestamp.unwrap_or_default().to_string();
-    let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
+    let last_iso = deduped.last().and_then(|json| extract_raw_iso(json));
     html! {
         <div class="claude-message message-group codex-group">
             <div class="message-header" title={header_title}>
@@ -387,7 +394,7 @@ pub fn render_codex_group(messages: &[String], timestamp: Option<&str>) -> Html 
                 }
             </div>
             <div class="message-body codex-group-body">
-                { for messages.iter().map(|json| {
+                { for deduped.iter().map(|json| {
                     html! { <crate::components::codex_renderer::CodexMessageRenderer json={json.clone()} /> }
                 }) }
             </div>
