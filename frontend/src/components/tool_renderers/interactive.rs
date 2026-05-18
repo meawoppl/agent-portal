@@ -1,14 +1,12 @@
 use serde_json::Value;
-use shared::{AllowedPrompt, AskUserQuestionInput, TodoItem, TodoStatus, ToolInput};
+use shared::{AllowedPrompt, AskUserQuestionInput, ExitPlanModeInput, TodoStatus, TodoWriteInput};
 use yew::prelude::*;
 
+use crate::components::tool_renderers::extract_tool_input;
+
 pub fn render_todowrite_tool(input: &Value) -> Html {
-    let todos: Vec<TodoItem> = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::TodoWrite(tw) => Some(tw.todos),
-            _ => None,
-        })
+    let todos = extract_tool_input::<TodoWriteInput>(input)
+        .map(|tw| tw.todos)
         .unwrap_or_default();
 
     html! {
@@ -40,13 +38,8 @@ pub fn render_todowrite_tool(input: &Value) -> Html {
 }
 
 pub fn render_askuserquestion_tool(input: &Value) -> Html {
-    let parsed: AskUserQuestionInput = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::AskUserQuestion(a) => Some(a),
-            _ => None,
-        })
-        .unwrap_or(AskUserQuestionInput {
+    let parsed =
+        extract_tool_input::<AskUserQuestionInput>(input).unwrap_or(AskUserQuestionInput {
             questions: Vec::new(),
             answers: None,
             metadata: None,
@@ -158,12 +151,8 @@ pub fn render_exitplanmode_tool(input: &Value) -> Html {
     // pulls the `ExitPlanMode` variant's `allowed_prompts` directly. Mirrors
     // the dispatch in `frontend/src/pages/dashboard/permission_dialog.rs`
     // (landed in #740).
-    let allowed_prompts: Vec<AllowedPrompt> = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::ExitPlanMode(epm) => epm.allowed_prompts,
-            _ => None,
-        })
+    let allowed_prompts: Vec<AllowedPrompt> = extract_tool_input::<ExitPlanModeInput>(input)
+        .and_then(|epm| epm.allowed_prompts)
         .unwrap_or_default();
 
     html! {

@@ -1,7 +1,8 @@
 use crate::components::markdown::linkify_urls;
 use crate::components::message_renderer::format_duration;
+use crate::components::tool_renderers::extract_tool_input;
 use serde_json::Value;
-use shared::{BashInput, ToolInput};
+use shared::BashInput;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -66,18 +67,12 @@ fn bash_tool(props: &BashToolProps) -> Html {
 }
 
 pub fn render_bash_tool(input: &Value) -> Html {
-    let bash: BashInput = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::Bash(b) => Some(b),
-            _ => None,
-        })
-        .unwrap_or(BashInput {
-            command: String::new(),
-            description: None,
-            timeout: None,
-            run_in_background: None,
-        });
+    let bash = extract_tool_input::<BashInput>(input).unwrap_or(BashInput {
+        command: String::new(),
+        description: None,
+        timeout: None,
+        run_in_background: None,
+    });
 
     let timeout_str = bash.timeout.map(format_duration);
     let background = bash.run_in_background.unwrap_or(false);

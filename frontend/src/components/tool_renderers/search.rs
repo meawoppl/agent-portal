@@ -1,16 +1,12 @@
 use serde_json::Value;
-use shared::{GlobInput, GrepInput, ToolInput, WebFetchInput, WebSearchInput};
+use shared::{GlobInput, GrepInput, WebFetchInput, WebSearchInput};
 use yew::prelude::*;
 
 use crate::components::expandable::ExpandableText;
+use crate::components::tool_renderers::extract_tool_input;
 
 pub fn render_glob_tool(input: &Value) -> Html {
-    let typed: Option<GlobInput> = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::Glob(g) => Some(g),
-            _ => None,
-        });
+    let typed = extract_tool_input::<GlobInput>(input);
 
     let pattern = typed.as_ref().map(|g| g.pattern.as_str()).unwrap_or("?");
     let path = typed.as_ref().and_then(|g| g.path.as_deref());
@@ -34,12 +30,7 @@ pub fn render_glob_tool(input: &Value) -> Html {
 }
 
 pub fn render_grep_tool(input: &Value) -> Html {
-    let typed: Option<GrepInput> = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::Grep(g) => Some(g),
-            _ => None,
-        });
+    let typed = extract_tool_input::<GrepInput>(input);
 
     let pattern = typed.as_ref().map(|g| g.pattern.as_str()).unwrap_or("?");
     let path = typed.as_ref().and_then(|g| g.path.as_deref());
@@ -102,12 +93,7 @@ pub fn render_grep_tool(input: &Value) -> Html {
 }
 
 pub fn render_webfetch_tool(input: &Value) -> Html {
-    let typed: Option<WebFetchInput> = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::WebFetch(wf) => Some(wf),
-            _ => None,
-        });
+    let typed = extract_tool_input::<WebFetchInput>(input);
     let url = typed.as_ref().map(|wf| wf.url.as_str()).unwrap_or("?");
     let prompt = typed.as_ref().map(|wf| wf.prompt.as_str());
 
@@ -132,12 +118,7 @@ pub fn render_webfetch_tool(input: &Value) -> Html {
 }
 
 pub fn render_websearch_tool(input: &Value) -> Html {
-    let typed: Option<WebSearchInput> = serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(|t| match t {
-            ToolInput::WebSearch(ws) => Some(ws),
-            _ => None,
-        });
+    let typed = extract_tool_input::<WebSearchInput>(input);
     let query = typed.as_ref().map(|ws| ws.query.as_str()).unwrap_or("?");
 
     html! {

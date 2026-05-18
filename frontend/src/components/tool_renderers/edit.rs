@@ -1,22 +1,18 @@
 use serde_json::Value;
-use shared::{EditInput, ToolInput, WriteInput};
+use shared::{EditInput, WriteInput};
 use yew::prelude::*;
 
 use crate::components::diff::render_diff_lines;
 use crate::components::expandable::ExpandableLines;
+use crate::components::tool_renderers::extract_tool_input;
 
 pub fn render_edit_tool(input: &Value) -> Html {
-    let edit = match serde_json::from_value::<ToolInput>(input.clone()) {
-        Ok(ToolInput::Edit(e)) => Some(e),
-        _ => None,
-    };
-    let fallback = EditInput {
+    let edit = extract_tool_input::<EditInput>(input).unwrap_or(EditInput {
         file_path: "unknown file".to_string(),
         old_string: String::new(),
         new_string: String::new(),
         replace_all: None,
-    };
-    let edit = edit.unwrap_or(fallback);
+    });
     let replace_all = edit.replace_all.unwrap_or(false);
 
     let diff_html = render_diff_lines(&edit.old_string, &edit.new_string);
@@ -43,11 +39,7 @@ pub fn render_edit_tool(input: &Value) -> Html {
 }
 
 pub fn render_write_tool(input: &Value) -> Html {
-    let write = match serde_json::from_value::<ToolInput>(input.clone()) {
-        Ok(ToolInput::Write(w)) => Some(w),
-        _ => None,
-    };
-    let write = write.unwrap_or(WriteInput {
+    let write = extract_tool_input::<WriteInput>(input).unwrap_or(WriteInput {
         file_path: "unknown file".to_string(),
         content: String::new(),
     });
