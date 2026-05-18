@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shared::{CacheCreationDetails, Citation, ToolResultContent};
+use shared::{CacheCreationDetails, Citation, ModelUsage, ToolResultContent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -251,7 +251,14 @@ pub struct ResultMessage {
     pub fast_mode_state: Option<String>,
     #[serde(default)]
     pub errors: Vec<String>,
-    pub model_usage: Option<Value>,
+    /// Per-model token/cost breakdown keyed by model name. The wire field is
+    /// `modelUsage` (camelCase) — matches the upstream
+    /// `claude-codes::ResultMessage` rename. TODO(SDK #140): upstream is still
+    /// typed as `Option<serde_json::Value>`; once the SDK adopts a typed map
+    /// the local `shared::ModelUsage` alias can be swapped for the SDK's
+    /// directly.
+    #[serde(rename = "modelUsage")]
+    pub model_usage: Option<ModelUsage>,
     pub api_error_status: Option<u16>,
     #[serde(default)]
     pub permission_denials: Vec<Value>,
