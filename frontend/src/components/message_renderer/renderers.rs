@@ -333,6 +333,61 @@ pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html
     }
 }
 
+/// Render a run of consecutive plain-text user messages as a single
+/// grouped block. Each prompt is still rendered via `render_user_message`
+/// (so name/copy chrome works), but the outer wrapper carries the
+/// `.user-group` accent.
+pub fn render_user_group(
+    messages: &[String],
+    current_user_id: Option<&str>,
+    timestamp: Option<&str>,
+) -> Html {
+    let count = messages.len();
+    let header_title = timestamp.unwrap_or_default().to_string();
+    html! {
+        <div class="claude-message message-group user-group">
+            <div class="message-header" title={header_title}>
+                <span class="message-type-badge user">{ "You" }</span>
+                if count > 1 {
+                    <span class="message-count">{ format!("× {}", count) }</span>
+                }
+            </div>
+            <div class="message-body user-group-body">
+                { for messages.iter().map(|json| {
+                    match serde_json::from_str::<ClaudeMessage>(json) {
+                        Ok(ClaudeMessage::User(msg)) => render_user_message(&msg, current_user_id, None),
+                        _ => html! {},
+                    }
+                }) }
+            </div>
+        </div>
+    }
+}
+
+/// Render a run of consecutive Codex protocol events as a single grouped
+/// block. Each event is still dispatched through the existing
+/// `CodexMessageRenderer` (so the per-event rendering stays in one place),
+/// but the outer wrapper carries the `.codex-group` accent.
+pub fn render_codex_group(messages: &[String], timestamp: Option<&str>) -> Html {
+    let count = messages.len();
+    let header_title = timestamp.unwrap_or_default().to_string();
+    html! {
+        <div class="claude-message message-group codex-group">
+            <div class="message-header" title={header_title}>
+                <span class="message-type-badge assistant">{ "Codex" }</span>
+                if count > 1 {
+                    <span class="message-count">{ format!("× {}", count) }</span>
+                }
+            </div>
+            <div class="message-body codex-group-body">
+                { for messages.iter().map(|json| {
+                    html! { <crate::components::codex_renderer::CodexMessageRenderer json={json.clone()} /> }
+                }) }
+            </div>
+        </div>
+    }
+}
+
 /// Render a run of consecutive portal messages as a single grouped block.
 ///
 /// Each individual portal message is still emitted with its own header +
