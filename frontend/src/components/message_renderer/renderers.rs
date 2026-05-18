@@ -919,7 +919,15 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
                                 Some(ToolResultContent::Structured(blocks)) => {
                                     html! {
                                         <div class={class}>
-                                            { for blocks.iter().map(render_structured_block) }
+                                            { for blocks.iter().map(|v| {
+                                                match serde_json::from_value::<shared::ContentBlock>(v.clone()) {
+                                                    Ok(typed) => render_structured_block(&typed),
+                                                    Err(_) => {
+                                                        let json = serde_json::to_string_pretty(v).unwrap_or_default();
+                                                        html! { <pre class="tool-result-content">{ json }</pre> }
+                                                    }
+                                                }
+                                            }) }
                                         </div>
                                     }
                                 }
@@ -1246,18 +1254,16 @@ fn summarize_input(input: &Value) -> String {
     }
 }
 
-fn render_structured_block(block: &Value) -> Html {
-    let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    match block_type {
-        "image" => {
+fn render_structured_block(block: &shared::ContentBlock) -> Html {
+    match block {
+        shared::ContentBlock::Image(_) => {
             html! { <span class="tool-result-image-tag">{ "[image]" }</span> }
         }
-        "text" => {
-            let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
-            html! { <ExpandableText full_text={text.to_string()} max_len={500} class="tool-result-content" /> }
+        shared::ContentBlock::Text(t) => {
+            html! { <ExpandableText full_text={t.text.clone()} max_len={500} class="tool-result-content" /> }
         }
-        _ => {
-            let json = serde_json::to_string_pretty(block).unwrap_or_default();
+        other => {
+            let json = serde_json::to_string_pretty(other).unwrap_or_default();
             html! { <pre class="tool-result-content">{ json }</pre> }
         }
     }
