@@ -38,8 +38,101 @@ pub enum CodexEvent {
     Error {
         message: Option<String>,
     },
+    // Streaming-delta / plan / diff notifications. The proxy forwards these as
+    // `{"type": "<slash-named method>", "params": <inner-payload>}`. The
+    // payload struct field names mirror codex-codes' generated types verbatim
+    // (camelCase via the outer `rename_all = "snake_case"` would not match —
+    // we provide aliases below for the camelCase wire format).
+    #[serde(rename = "turn/diff/updated")]
+    TurnDiffUpdated {
+        params: Option<TurnDiffUpdatedParams>,
+    },
+    #[serde(rename = "item/fileChange/patchUpdated")]
+    FileChangePatchUpdated {
+        params: Option<FileChangePatchUpdatedParams>,
+    },
+    #[serde(rename = "turn/plan/updated")]
+    TurnPlanUpdated {
+        params: Option<TurnPlanUpdatedParams>,
+    },
+    #[serde(rename = "item/plan/delta")]
+    PlanDelta {
+        params: Option<PlanDeltaParams>,
+    },
+    #[serde(rename = "item/reasoning/summaryPartAdded")]
+    ReasoningSummaryPartAdded {
+        params: Option<serde_json::Value>,
+    },
+    #[serde(rename = "item/reasoning/textDelta")]
+    ReasoningTextDelta {
+        params: Option<serde_json::Value>,
+    },
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TurnDiffUpdatedParams {
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default, rename = "threadId", alias = "thread_id")]
+    pub thread_id: Option<String>,
+    #[serde(default, rename = "turnId", alias = "turn_id")]
+    pub turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FileChangePatchUpdatedParams {
+    #[serde(default)]
+    pub changes: Option<Vec<FileUpdateChange>>,
+    #[serde(default, rename = "itemId", alias = "item_id")]
+    pub item_id: Option<String>,
+    #[serde(default, rename = "threadId", alias = "thread_id")]
+    pub thread_id: Option<String>,
+    #[serde(default, rename = "turnId", alias = "turn_id")]
+    pub turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FileUpdateChange {
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TurnPlanUpdatedParams {
+    #[serde(default)]
+    pub explanation: Option<String>,
+    #[serde(default)]
+    pub plan: Option<Vec<TurnPlanStep>>,
+    #[serde(default, rename = "threadId", alias = "thread_id")]
+    pub thread_id: Option<String>,
+    #[serde(default, rename = "turnId", alias = "turn_id")]
+    pub turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TurnPlanStep {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub step: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PlanDeltaParams {
+    #[serde(default)]
+    pub delta: Option<String>,
+    #[serde(default, rename = "itemId", alias = "item_id")]
+    pub item_id: Option<String>,
+    #[serde(default, rename = "threadId", alias = "thread_id")]
+    pub thread_id: Option<String>,
+    #[serde(default, rename = "turnId", alias = "turn_id")]
+    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -143,6 +236,22 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
         }
         Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
         Ok(CodexEvent::Error { message }) => render_thread_error(message.as_deref()),
+        Ok(CodexEvent::TurnDiffUpdated { params }) => {
+            render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
+        }
+        Ok(CodexEvent::FileChangePatchUpdated { params }) => {
+            render_file_change_patch(params.as_ref().and_then(|p| p.changes.as_deref()))
+        }
+        Ok(CodexEvent::TurnPlanUpdated { params }) => render_turn_plan(
+            params.as_ref().and_then(|p| p.plan.as_deref()),
+            params.as_ref().and_then(|p| p.explanation.as_deref()),
+        ),
+        // Per-chunk deltas — the consolidated content lands in `turn/plan/updated`
+        // (for plans) or `item.completed` (for reasoning). Emit nothing for the
+        // streaming chunks to avoid visual noise without losing information.
+        Ok(CodexEvent::PlanDelta { .. })
+        | Ok(CodexEvent::ReasoningSummaryPartAdded { .. })
+        | Ok(CodexEvent::ReasoningTextDelta { .. }) => html! {},
         Ok(CodexEvent::Unknown) | Err(_) => render_raw_codex(&props.json),
     }
 }
@@ -442,6 +551,126 @@ fn render_item_error(message: Option<&str>) -> Html {
             </div>
             <div class="message-body">
                 <div class="error-text">{ message }</div>
+            </div>
+        </div>
+    }
+}
+
+fn render_turn_diff(diff: Option<&str>) -> Html {
+    let diff = diff.unwrap_or("");
+    if diff.trim().is_empty() {
+        // Empty deltas — don't render an empty block.
+        return html! {};
+    }
+    html! {
+        <div class="claude-message assistant-message">
+            <div class="message-body">
+                <div class="tool-use-section">
+                    <div class="tool-use-header">
+                        <span class="tool-icon">{ "\u{1f4dd}" }</span>
+                        <span class="tool-name">{ "Turn Diff (cumulative)" }</span>
+                    </div>
+                    { super::diff::render_unified_diff(diff) }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+fn render_file_change_patch(changes: Option<&[FileUpdateChange]>) -> Html {
+    let changes = changes.unwrap_or(&[]);
+    let any_diff = changes
+        .iter()
+        .any(|c| c.diff.as_deref().is_some_and(|d| !d.trim().is_empty()));
+    if !any_diff {
+        return html! {};
+    }
+    html! {
+        <div class="claude-message assistant-message">
+            <div class="message-body">
+                <div class="tool-use-section">
+                    <div class="tool-use-header">
+                        <span class="tool-icon">{ "\u{1f4dd}" }</span>
+                        <span class="tool-name">{ "File Changes (patch)" }</span>
+                    </div>
+                    <div class="file-changes-list">
+                        { for changes.iter().map(|c| {
+                            let path = c.path.as_deref().unwrap_or("(unknown)");
+                            let kind = c.kind.as_deref().unwrap_or("update");
+                            let kind_class = format!("file-change-kind {}", kind);
+                            let diff = c.diff.as_deref().unwrap_or("");
+                            html! {
+                                <div class="file-change-entry">
+                                    <div>
+                                        <span class={kind_class}>{ kind }</span>
+                                        <span class="file-change-path">{ path }</span>
+                                    </div>
+                                    {
+                                        if diff.trim().is_empty() {
+                                            html! {}
+                                        } else {
+                                            super::diff::render_unified_diff(diff)
+                                        }
+                                    }
+                                </div>
+                            }
+                        })}
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+fn render_turn_plan(plan: Option<&[TurnPlanStep]>, explanation: Option<&str>) -> Html {
+    let plan = plan.unwrap_or(&[]);
+    let explanation = explanation.unwrap_or("");
+    if plan.is_empty() && explanation.trim().is_empty() {
+        return html! {};
+    }
+    html! {
+        <div class="claude-message assistant-message">
+            <div class="message-body">
+                <div class="tool-use-section">
+                    <div class="tool-use-header">
+                        <span class="tool-icon">{ "\u{1f5d2}" }</span>
+                        <span class="tool-name">{ "Plan" }</span>
+                    </div>
+                    {
+                        if !explanation.trim().is_empty() {
+                            html! { <div class="assistant-text">{ explanation }</div> }
+                        } else {
+                            html! {}
+                        }
+                    }
+                    {
+                        if !plan.is_empty() {
+                            html! {
+                                <div class="codex-todo-list">
+                                    { for plan.iter().enumerate().map(|(i, step)| {
+                                        let status = step.status.as_deref().unwrap_or("pending");
+                                        let text = step.step.as_deref().unwrap_or("");
+                                        let (marker, class) = match status {
+                                            "completed" => ("\u{2611}", "codex-todo done"),
+                                            "inProgress" | "in_progress" => ("\u{25b6}", "codex-todo"),
+                                            _ => ("\u{2610}", "codex-todo"),
+                                        };
+                                        html! {
+                                            <div class={class}>
+                                                <span class="codex-todo-marker">{ marker }</span>
+                                                <span class="codex-todo-text">
+                                                    { format!("{}. {}", i + 1, text) }
+                                                </span>
+                                            </div>
+                                        }
+                                    })}
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
+                </div>
             </div>
         </div>
     }
@@ -747,5 +976,76 @@ mod tests {
     fn terminal_event_unknown_returns_none() {
         let json = r#"{"type":"something.else"}"#;
         assert_eq!(is_codex_terminal_event(json), None);
+    }
+
+    // --- Streaming-delta / plan / diff variants ---
+
+    #[test]
+    fn event_turn_diff_updated() {
+        let json = r#"{"type":"turn/diff/updated","params":{"diff":"--- a/foo\n+++ b/foo\n@@ -1 +1 @@\n-bar\n+baz\n","threadId":"x","turnId":"y"}}"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        match event {
+            CodexEvent::TurnDiffUpdated { params: Some(p) } => {
+                assert!(p.diff.as_deref().unwrap().contains("+baz"));
+                assert_eq!(p.thread_id.as_deref(), Some("x"));
+                assert_eq!(p.turn_id.as_deref(), Some("y"));
+            }
+            other => panic!("expected TurnDiffUpdated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_file_change_patch_updated_camel_case() {
+        let json = r#"{"type":"item/fileChange/patchUpdated","params":{"changes":[{"path":"a.rs","kind":"update","diff":"--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n"}],"itemId":"i","threadId":"t","turnId":"u"}}"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        match event {
+            CodexEvent::FileChangePatchUpdated { params: Some(p) } => {
+                let changes = p.changes.unwrap();
+                assert_eq!(changes.len(), 1);
+                assert_eq!(changes[0].path.as_deref(), Some("a.rs"));
+                assert!(changes[0].diff.as_deref().unwrap().contains("+new"));
+            }
+            other => panic!("expected FileChangePatchUpdated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_turn_plan_updated() {
+        let json = r#"{"type":"turn/plan/updated","params":{"plan":[{"status":"completed","step":"first"},{"status":"inProgress","step":"second"}],"explanation":"so far","threadId":"t","turnId":"u"}}"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        match event {
+            CodexEvent::TurnPlanUpdated { params: Some(p) } => {
+                let plan = p.plan.unwrap();
+                assert_eq!(plan.len(), 2);
+                assert_eq!(plan[0].status.as_deref(), Some("completed"));
+                assert_eq!(plan[1].status.as_deref(), Some("inProgress"));
+                assert_eq!(p.explanation.as_deref(), Some("so far"));
+            }
+            other => panic!("expected TurnPlanUpdated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_plan_delta_typed_no_op() {
+        let json = r#"{"type":"item/plan/delta","params":{"delta":"chunk","itemId":"i","threadId":"t","turnId":"u"}}"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        assert!(matches!(event, CodexEvent::PlanDelta { .. }));
+    }
+
+    #[test]
+    fn event_reasoning_summary_part_added_typed_no_op() {
+        let json = r#"{"type":"item/reasoning/summaryPartAdded","params":{"itemId":"i","summaryIndex":0,"threadId":"t","turnId":"u"}}"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            event,
+            CodexEvent::ReasoningSummaryPartAdded { .. }
+        ));
+    }
+
+    #[test]
+    fn event_reasoning_text_delta_typed_no_op() {
+        let json = r#"{"type":"item/reasoning/textDelta","params":{"contentIndex":0,"delta":"...","itemId":"i","threadId":"t","turnId":"u"}}"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        assert!(matches!(event, CodexEvent::ReasoningTextDelta { .. }));
     }
 }
