@@ -4,6 +4,7 @@
 //! manages multi-turn conversations via thread/turn lifecycle. Converts
 //! JSON-RPC notifications into exec-format JSONL events for the frontend.
 
+use std::collections::VecDeque;
 use std::path::Path;
 
 use codex_codes::{
@@ -112,6 +113,7 @@ pub(crate) async fn codex_io_task(
     })));
 
     let mut turn_active = false;
+    let mut queued_prompts: VecDeque<String> = VecDeque::new();
     // Track the turn currently being driven so we can name it on
     // `turn/interrupt` requests (codex-codes 0.129.3 made both
     // `thread_id` and `turn_id` required on `TurnInterruptParams`).
@@ -156,6 +158,11 @@ pub(crate) async fn codex_io_task(
                                 handle_codex_server_message(msg, &event_tx);
                             if turn_ended {
                                 turn_active = false;
+                                if let Some(prompt) = queued_prompts.pop_front() {
+                                    turn_active =
+                                        start_codex_turn(&mut client, &thread_id, prompt, &event_tx)
+                                            .await;
+                                }
                             }
                             if !ok {
                                 break;
@@ -177,10 +184,8 @@ pub(crate) async fn codex_io_task(
                             // codex is now blocked on a reply we cannot
                             // send, because we never saw the request id.
                             // Result: the turn never completes,
-                            // `turn_active` stays true, and every
-                            // subsequent user prompt gets dropped at the
-                            // "Received input while Codex turn is active"
-                            // check.
+                            // `turn_active` stays true, and subsequent user
+                            // prompts wait behind the blocked turn.
                             //
                             // We can't recover the lost reply. Interrupt
                             // the turn so codex unblocks and emits
@@ -269,8 +274,15 @@ pub(crate) async fn codex_io_task(
                                 tracing::error!("Failed to send Codex approval: {}", e);
                             }
                         }
-                        IoCommand::Input(_) => {
-                            tracing::warn!("Received input while Codex turn is active");
+                        IoCommand::Input(input) => {
+                            let prompt = extract_prompt_text(&input);
+                            if !prompt.is_empty() {
+                                tracing::info!(
+                                    "Queued Codex input received during active turn ({} pending)",
+                                    queued_prompts.len() + 1
+                                );
+                                queued_prompts.push_back(prompt);
+                            }
                         }
                         IoCommand::PermissionResponse(_) => {}
                     }
@@ -284,59 +296,8 @@ pub(crate) async fn codex_io_task(
                     if prompt.is_empty() {
                         continue;
                     }
-
-                    // Codex's app-server protocol doesn't echo user input, so the
-                    // frontend's optimistic-send pending entry would never clear.
-                    // Synthesize an echo here in a shape that matches both the
-                    // ClaudeOutput::User parse (msg_type = "user") and the frontend's
-                    // content-based pending-match. Skip <system-reminder> wrappers
-                    // (portal reminder injection) — those shouldn't appear in the
-                    // user-facing transcript.
-                    if !prompt.starts_with("<system-reminder>") {
-                        let echo = serde_json::json!({
-                            "type": "user",
-                            "message": {
-                                "role": "user",
-                                "content": [{"type": "text", "text": prompt}]
-                            },
-                            "content": prompt,
-                        });
-                        let _ = event_tx.send(IoEvent::RawOutput(echo));
-                    }
-
-                    tracing::info!("Starting Codex turn with {} chars", prompt.len());
-
-                    // codex-codes 0.129.3 generated TurnStartParams from
-                    // its schema: `reasoning_effort` is now `effort`, a
-                    // new required `text_elements` field landed on
-                    // `UserInput::Text`, and the struct has many more
-                    // Option fields with no Default impl. We construct
-                    // the explicit fields and `..` from an empty JSON
-                    // baseline to inherit Nones for the rest (matches
-                    // the SDK's own usage idiom — see lib.rs:18-30).
-                    let turn_params_base: TurnStartParams = serde_json::from_value(
-                        serde_json::json!({"threadId": &thread_id, "input": []}),
-                    )
-                    .expect("threadId + empty input is a valid TurnStartParams base");
-                    let turn_params = TurnStartParams {
-                        thread_id: thread_id.clone(),
-                        input: vec![UserInput::Text {
-                            text: prompt,
-                            text_elements: None,
-                        }],
-                        ..turn_params_base
-                    };
-                    match client.turn_start(&turn_params).await {
-                        Ok(_) => {
-                            turn_active = true;
-                        }
-                        Err(e) => {
-                            let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-                                "type": "turn.failed",
-                                "error": { "message": e.to_string() }
-                            })));
-                        }
-                    }
+                    turn_active =
+                        start_codex_turn(&mut client, &thread_id, prompt, &event_tx).await;
                 }
                 Some(IoCommand::PermissionResponse(_)) => continue,
                 Some(IoCommand::CodexApproval { .. }) => {
@@ -347,6 +308,59 @@ pub(crate) async fn codex_io_task(
                     break;
                 }
             }
+        }
+    }
+}
+
+async fn start_codex_turn(
+    client: &mut CodexAsyncClient,
+    thread_id: &str,
+    prompt: String,
+    event_tx: &mpsc::UnboundedSender<IoEvent>,
+) -> bool {
+    // Codex's app-server protocol doesn't echo user input, so the frontend's
+    // optimistic-send pending entry would never clear. Synthesize an echo here
+    // in a shape that matches both the ClaudeOutput::User parse and the
+    // frontend's content-based pending-match. Skip <system-reminder> wrappers
+    // (portal reminder injection) because those shouldn't appear in transcript.
+    if !prompt.starts_with("<system-reminder>") {
+        let echo = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt}]
+            },
+            "content": prompt,
+        });
+        let _ = event_tx.send(IoEvent::RawOutput(echo));
+    }
+
+    tracing::info!("Starting Codex turn with {} chars", prompt.len());
+
+    // codex-codes 0.129.3 generated TurnStartParams from its schema:
+    // `reasoning_effort` is now `effort`, a new required `text_elements` field
+    // landed on `UserInput::Text`, and the struct has many more Option fields
+    // with no Default impl. We construct the explicit fields and `..` from an
+    // empty JSON baseline to inherit Nones for the rest.
+    let turn_params_base: TurnStartParams =
+        serde_json::from_value(serde_json::json!({"threadId": thread_id, "input": []}))
+            .expect("threadId + empty input is a valid TurnStartParams base");
+    let turn_params = TurnStartParams {
+        thread_id: thread_id.to_string(),
+        input: vec![UserInput::Text {
+            text: prompt,
+            text_elements: None,
+        }],
+        ..turn_params_base
+    };
+    match client.turn_start(&turn_params).await {
+        Ok(_) => true,
+        Err(e) => {
+            let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
+                "type": "turn.failed",
+                "error": { "message": e.to_string() }
+            })));
+            false
         }
     }
 }
