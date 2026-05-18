@@ -235,7 +235,7 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
             render_item(item.as_ref(), false)
         }
         Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
-        Ok(CodexEvent::Error { message }) => render_thread_error(message.as_deref()),
+        Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
         Ok(CodexEvent::TurnDiffUpdated { params }) => {
             render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
         }
@@ -264,6 +264,38 @@ fn item_card_classes(completed: bool) -> &'static str {
         "claude-message assistant-message codex-item"
     } else {
         "claude-message assistant-message codex-item codex-item-in-progress"
+    }
+}
+
+/// Wraps a per-variant body in the standard tool-style card chrome:
+/// card wrapper (with in-progress styling), message-body, tool-use-section,
+/// and a tool-use-header with icon + name + optional `status` meta line.
+/// Returns `html! {}` when `body` is empty so callers can short-circuit
+/// empty-data cases by handing in a no-op body.
+fn tool_card(
+    icon: &str,
+    name: String,
+    status: Option<String>,
+    body: Html,
+    completed: bool,
+) -> Html {
+    html! {
+        <div class={item_card_classes(completed)}>
+            <div class="message-body">
+                <div class="tool-use-section">
+                    <div class="tool-use-header">
+                        <span class="tool-icon">{ icon }</span>
+                        <span class="tool-name">{ name }</span>
+                        { if let Some(s) = status {
+                            html! { <span class="tool-meta">{ s }</span> }
+                        } else {
+                            html! {}
+                        } }
+                    </div>
+                    { body }
+                </div>
+            </div>
+        </div>
     }
 }
 
@@ -303,7 +335,7 @@ fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
         ),
         CodexItem::WebSearch { query, .. } => render_web_search(query.as_deref(), completed),
         CodexItem::TodoList { items, .. } => render_todo_list(items.as_deref(), completed),
-        CodexItem::Error { message, .. } => render_item_error(message.as_deref()),
+        CodexItem::Error { message, .. } => render_error_block(message.as_deref()),
         CodexItem::Unknown => html! {},
     }
 }
@@ -325,7 +357,7 @@ pub fn render_codex_message_content(json: &str) -> Html {
         Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
         Ok(CodexEvent::TurnCompleted { usage }) => render_turn_completed(usage.as_ref()),
         Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref()),
-        Ok(CodexEvent::Error { message }) => render_thread_error(message.as_deref()),
+        Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
         Ok(CodexEvent::TurnDiffUpdated { params }) => {
             render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
         }
@@ -404,34 +436,26 @@ fn render_command_execution(
     };
 
     let is_error = exit_code.is_some_and(|c| c != 0);
-    let card_class = item_card_classes(completed);
 
-    html! {
-        <div class={card_class}>
-            <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ "$" }</span>
-                        <span class="tool-name">{ "Bash" }</span>
-                        <span class="tool-meta">{ &status_text }</span>
-                    </div>
-                    <pre class="tool-input-content">{ cmd }</pre>
-                    {
-                        if !out.is_empty() {
-                            let class = if is_error { "tool-result error" } else { "tool-result" };
-                            html! {
-                                <div class={class}>
-                                    <pre class="tool-result-content">{ out }</pre>
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
+    let body = html! {
+        <>
+            <pre class="tool-input-content">{ cmd }</pre>
+            {
+                if !out.is_empty() {
+                    let class = if is_error { "tool-result error" } else { "tool-result" };
+                    html! {
+                        <div class={class}>
+                            <pre class="tool-result-content">{ out }</pre>
+                        </div>
                     }
-                </div>
-            </div>
-        </div>
-    }
+                } else {
+                    html! {}
+                }
+            }
+        </>
+    };
+
+    tool_card("$", "Bash".into(), Some(status_text), body, completed)
 }
 
 fn render_file_change(
@@ -444,39 +468,37 @@ fn render_file_change(
         return html! {};
     }
 
-    let status_label = status.unwrap_or(if completed {
-        "completed"
-    } else {
-        "in progress"
-    });
-    let card_class = item_card_classes(completed);
+    let status_label = status
+        .unwrap_or(if completed {
+            "completed"
+        } else {
+            "in progress"
+        })
+        .to_string();
 
-    html! {
-        <div class={card_class}>
-            <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ "\u{1f4dd}" }</span>
-                        <span class="tool-name">{ "File Changes" }</span>
-                        <span class="tool-meta">{ status_label }</span>
+    let body = html! {
+        <div class="file-changes-list">
+            { for changes.iter().map(|c| {
+                let path = c.path.as_deref().unwrap_or("(unknown)");
+                let kind = c.kind.as_deref().unwrap_or("update");
+                let kind_class = format!("file-change-kind {}", kind);
+                html! {
+                    <div class="file-change-entry">
+                        <span class={kind_class}>{ kind }</span>
+                        <span class="file-change-path">{ path }</span>
                     </div>
-                    <div class="file-changes-list">
-                        { for changes.iter().map(|c| {
-                            let path = c.path.as_deref().unwrap_or("(unknown)");
-                            let kind = c.kind.as_deref().unwrap_or("update");
-                            let kind_class = format!("file-change-kind {}", kind);
-                            html! {
-                                <div class="file-change-entry">
-                                    <span class={kind_class}>{ kind }</span>
-                                    <span class="file-change-path">{ path }</span>
-                                </div>
-                            }
-                        })}
-                    </div>
-                </div>
-            </div>
+                }
+            })}
         </div>
-    }
+    };
+
+    tool_card(
+        "\u{1f4dd}",
+        "File Changes".into(),
+        Some(status_label),
+        body,
+        completed,
+    )
 }
 
 fn render_mcp_tool_call(
@@ -487,44 +509,27 @@ fn render_mcp_tool_call(
 ) -> Html {
     let server = server.unwrap_or("(unknown)");
     let tool = tool.unwrap_or("(unknown)");
-    let status = status.unwrap_or(if completed {
-        "completed"
-    } else {
-        "in_progress"
-    });
-    let card_class = item_card_classes(completed);
+    let status = status
+        .unwrap_or(if completed {
+            "completed"
+        } else {
+            "in_progress"
+        })
+        .to_string();
 
-    html! {
-        <div class={card_class}>
-            <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ "\u{1f50c}" }</span>
-                        <span class="tool-name">{ format!("{} / {}", server, tool) }</span>
-                        <span class="tool-meta">{ status }</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    }
+    tool_card(
+        "\u{1f50c}",
+        format!("{} / {}", server, tool),
+        Some(status),
+        html! {},
+        completed,
+    )
 }
 
 fn render_web_search(query: Option<&str>, completed: bool) -> Html {
     let query = query.unwrap_or("(no query)");
-    let card_class = item_card_classes(completed);
-    html! {
-        <div class={card_class}>
-            <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ "\u{1f50d}" }</span>
-                        <span class="tool-name">{ "Web Search" }</span>
-                    </div>
-                    <pre class="tool-input-content">{ query }</pre>
-                </div>
-            </div>
-        </div>
-    }
+    let body = html! { <pre class="tool-input-content">{ query }</pre> };
+    tool_card("\u{1f50d}", "Web Search".into(), None, body, completed)
 }
 
 fn render_todo_list(items: Option<&[TodoEntry]>, completed: bool) -> Html {
@@ -532,33 +537,23 @@ fn render_todo_list(items: Option<&[TodoEntry]>, completed: bool) -> Html {
     if items.is_empty() {
         return html! {};
     }
-    let card_class = item_card_classes(completed);
-    html! {
-        <div class={card_class}>
-            <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ "\u{2611}" }</span>
-                        <span class="tool-name">{ "Todo List" }</span>
+    let body = html! {
+        <div class="codex-todo-list">
+            { for items.iter().map(|item| {
+                let text = item.text.as_deref().unwrap_or("");
+                let done = item.completed.unwrap_or(false);
+                let marker = if done { "\u{2611}" } else { "\u{2610}" };
+                let class = if done { "codex-todo done" } else { "codex-todo" };
+                html! {
+                    <div class={class}>
+                        <span class="codex-todo-marker">{ marker }</span>
+                        <span class="codex-todo-text">{ text }</span>
                     </div>
-                    <div class="codex-todo-list">
-                        { for items.iter().map(|item| {
-                            let text = item.text.as_deref().unwrap_or("");
-                            let done = item.completed.unwrap_or(false);
-                            let marker = if done { "\u{2611}" } else { "\u{2610}" };
-                            let class = if done { "codex-todo done" } else { "codex-todo" };
-                            html! {
-                                <div class={class}>
-                                    <span class="codex-todo-marker">{ marker }</span>
-                                    <span class="codex-todo-text">{ text }</span>
-                                </div>
-                            }
-                        })}
-                    </div>
-                </div>
-            </div>
+                }
+            })}
         </div>
-    }
+    };
+    tool_card("\u{2611}", "Todo List".into(), None, body, completed)
 }
 
 fn render_turn_completed(usage: Option<&CodexUsage>) -> Html {
@@ -607,21 +602,7 @@ fn render_turn_failed(error: Option<&CodexError>) -> Html {
     }
 }
 
-fn render_thread_error(message: Option<&str>) -> Html {
-    let message = message.unwrap_or("Unknown error");
-    html! {
-        <div class="claude-message error-message-display">
-            <div class="message-header">
-                <span class="message-type-badge result error">{ "Error" }</span>
-            </div>
-            <div class="message-body">
-                <div class="error-text">{ message }</div>
-            </div>
-        </div>
-    }
-}
-
-fn render_item_error(message: Option<&str>) -> Html {
+fn render_error_block(message: Option<&str>) -> Html {
     let message = message.unwrap_or("Unknown error");
     html! {
         <div class="claude-message error-message-display">
