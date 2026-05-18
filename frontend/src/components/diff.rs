@@ -13,11 +13,23 @@ pub fn render_diff_lines(old_string: &str, new_string: &str) -> Html {
     let new_lines: Vec<&str> = new_string.lines().collect();
 
     let diff = compute_line_diff(&old_lines, &new_lines);
+    render_diff_html(&diff)
+}
 
+/// Render a pre-formatted unified-diff string (the format `git diff` produces:
+/// `--- a/path`, `+++ b/path`, `@@ -L,N +L,N @@`, and ` `/`-`/`+`-prefixed lines).
+/// Skips file/hunk headers; emits one `DiffLine` per body line.
+pub fn render_unified_diff(diff: &str) -> Html {
+    let lines = parse_unified_diff(diff);
+    render_diff_html(&lines)
+}
+
+/// Emit the inner `<div class="diff-view">` block for a sequence of diff lines.
+fn render_diff_html(lines: &[DiffLine<'_>]) -> Html {
     html! {
         <div class="diff-view">
             {
-                diff.iter().map(|change| {
+                lines.iter().map(|change| {
                     match change {
                         DiffLine::Context(line) => html! {
                             <div class="diff-line context">
@@ -42,6 +54,25 @@ pub fn render_diff_lines(old_string: &str, new_string: &str) -> Html {
             }
         </div>
     }
+}
+
+/// Best-effort parse of a unified-diff payload. Skips file headers
+/// (`--- `, `+++ `), hunk headers (`@@ `), and the `\ No newline at end of file`
+/// marker. Body lines are classified by their leading character; lines without
+/// a recognized prefix are treated as context (some tools omit the leading
+/// space on context lines).
+fn parse_unified_diff(diff: &str) -> Vec<DiffLine<'_>> {
+    diff.lines()
+        .filter(|l| !l.starts_with("--- ") && !l.starts_with("+++ ") && !l.starts_with("@@ "))
+        .filter_map(|l| match l.as_bytes().first() {
+            Some(b'+') => Some(DiffLine::Added(&l[1..])),
+            Some(b'-') => Some(DiffLine::Removed(&l[1..])),
+            Some(b' ') => Some(DiffLine::Context(&l[1..])),
+            Some(b'\\') => None, // "\ No newline at end of file"
+            None => Some(DiffLine::Context("")),
+            _ => Some(DiffLine::Context(l)),
+        })
+        .collect()
 }
 
 /// Compute a line-based diff between old and new content
@@ -125,4 +156,92 @@ fn longest_common_subsequence(old: &[&str], new: &[&str]) -> Vec<(usize, usize)>
 
     result.reverse();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn classify<'a>(lines: &'a [DiffLine<'a>]) -> Vec<(&'static str, &'a str)> {
+        lines
+            .iter()
+            .map(|l| match l {
+                DiffLine::Context(s) => ("ctx", *s),
+                DiffLine::Added(s) => ("add", *s),
+                DiffLine::Removed(s) => ("rem", *s),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn parse_single_hunk() {
+        let diff =
+            "--- a/foo\n+++ b/foo\n@@ -1,3 +1,3 @@\n line one\n-old line\n+new line\n line three\n";
+        let parsed = parse_unified_diff(diff);
+        assert_eq!(
+            classify(&parsed),
+            vec![
+                ("ctx", "line one"),
+                ("rem", "old line"),
+                ("add", "new line"),
+                ("ctx", "line three"),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_multiple_hunks() {
+        let diff =
+            "--- a/foo\n+++ b/foo\n@@ -1,2 +1,2 @@\n a\n-b\n+B\n@@ -10,2 +10,2 @@\n c\n-d\n+D\n";
+        let parsed = parse_unified_diff(diff);
+        assert_eq!(
+            classify(&parsed),
+            vec![
+                ("ctx", "a"),
+                ("rem", "b"),
+                ("add", "B"),
+                ("ctx", "c"),
+                ("rem", "d"),
+                ("add", "D"),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_blank_context_lines() {
+        // A truly empty line (no leading space) should be treated as context.
+        let diff = "--- a/foo\n+++ b/foo\n@@ -1,3 +1,3 @@\n one\n\n+two\n";
+        let parsed = parse_unified_diff(diff);
+        assert_eq!(
+            classify(&parsed),
+            vec![("ctx", "one"), ("ctx", ""), ("add", "two"),]
+        );
+    }
+
+    #[test]
+    fn parse_no_newline_marker_skipped() {
+        let diff = "--- a/foo\n+++ b/foo\n@@ -1 +1 @@\n-bar\n+baz\n\\ No newline at end of file\n";
+        let parsed = parse_unified_diff(diff);
+        assert_eq!(classify(&parsed), vec![("rem", "bar"), ("add", "baz"),]);
+    }
+
+    #[test]
+    fn parse_without_file_headers() {
+        // Some tools emit only hunk + body; ensure the body still classifies.
+        let diff = "@@ -1 +1 @@\n-old\n+new\n";
+        let parsed = parse_unified_diff(diff);
+        assert_eq!(classify(&parsed), vec![("rem", "old"), ("add", "new"),]);
+    }
+
+    #[test]
+    fn parse_unprefixed_line_falls_back_to_context() {
+        // A body line that lost its leading space (legal in some tooling) is
+        // still surfaced as context rather than dropped.
+        let diff = "@@ -1 +1 @@\ncontext_line\n+added\n";
+        let parsed = parse_unified_diff(diff);
+        assert_eq!(
+            classify(&parsed),
+            vec![("ctx", "context_line"), ("add", "added"),]
+        );
+    }
 }
