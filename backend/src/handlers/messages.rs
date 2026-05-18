@@ -1,5 +1,6 @@
 use crate::auth::extract_user_id;
 use crate::errors::AppError;
+use crate::handlers::session_access::verify_session_mutator;
 use crate::models::{Message, NewMessage};
 use crate::schema::messages;
 use crate::AppState;
@@ -69,7 +70,9 @@ pub async fn create_message(
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
-    let session = verify_session_access(&mut conn, session_id, current_user_id)?;
+    // Creating a message is a mutation — require editor/owner role (or the
+    // session-row owner). See `session_access` for the layered rules.
+    let session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
 
     let new_message = NewMessage {
         session_id,

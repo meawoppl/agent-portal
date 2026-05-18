@@ -1,5 +1,6 @@
 use super::permissions::{handle_permission_response, replay_pending_permission};
 use super::{SessionId, SessionManager, WebClientSender};
+use crate::handlers::session_access::is_session_mutator;
 use crate::models::NewPendingInput;
 use crate::AppState;
 use axum::extract::ws::WebSocket;
@@ -103,6 +104,18 @@ fn handle_web_client_message(
             verified_session_id,
         ),
         ClientToServer::ClaudeInput { content, send_mode } => {
+            // Gate on editor/owner role — re-queried on each input so role
+            // revocations take effect immediately for already-connected viewers.
+            // See `session_access::is_session_mutator` for the layered rules.
+            if let Some(session_id) = *verified_session_id {
+                if !is_session_mutator(app_state, session_id, user_id) {
+                    let _ = tx.send(ServerToClient::Error {
+                        message: "You don't have permission to send input to this session"
+                            .to_string(),
+                    });
+                    return false;
+                }
+            }
             handle_web_input(
                 session_manager,
                 db_pool,
@@ -121,6 +134,17 @@ fn handle_web_client_message(
             total_chunks,
             total_size,
         }) => {
+            // File uploads end up as `ClaudeInput` on the proxy side — they're
+            // mutations too, gate them on editor/owner role.
+            if let Some(session_id) = *verified_session_id {
+                if !is_session_mutator(app_state, session_id, user_id) {
+                    warn!(
+                        "Viewer-role user {} attempted FileUploadStart on session {}",
+                        user_id, session_id
+                    );
+                    return false;
+                }
+            }
             handle_file_upload_start(
                 session_manager,
                 session_key,
@@ -138,6 +162,15 @@ fn handle_web_client_message(
             chunk_index,
             data,
         }) => {
+            if let Some(session_id) = *verified_session_id {
+                if !is_session_mutator(app_state, session_id, user_id) {
+                    warn!(
+                        "Viewer-role user {} attempted FileUploadChunk on session {}",
+                        user_id, session_id
+                    );
+                    return false;
+                }
+            }
             handle_file_upload_chunk(
                 session_manager,
                 session_key,
@@ -156,6 +189,15 @@ fn handle_web_client_message(
             reason,
         }) => {
             if let (Some(ref key), Some(session_id)) = (session_key, *verified_session_id) {
+                // Approving/denying tool permissions decides whether the
+                // proxy executes the tool — that's a mutation, gate it.
+                if !is_session_mutator(app_state, session_id, user_id) {
+                    warn!(
+                        "Viewer-role user {} attempted PermissionResponse on session {}",
+                        user_id, session_id
+                    );
+                    return false;
+                }
                 handle_permission_response(
                     session_manager,
                     key,
@@ -174,6 +216,16 @@ fn handle_web_client_message(
         }
         ClientToServer::Interrupt => {
             if let Some(ref key) = session_key {
+                // Interrupt cancels the in-flight model turn — a mutation.
+                if let Some(session_id) = *verified_session_id {
+                    if !is_session_mutator(app_state, session_id, user_id) {
+                        warn!(
+                            "Viewer-role user {} attempted Interrupt on session {}",
+                            user_id, session_id
+                        );
+                        return false;
+                    }
+                }
                 info!("Web client sending interrupt to session");
                 session_manager.send_to_session(key, ServerToProxy::Interrupt);
             } else {
