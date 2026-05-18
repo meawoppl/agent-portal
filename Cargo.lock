@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "anyhow",
  "chrono",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -564,9 +564,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.140"
+version = "2.1.141"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46aa3a5f22bb526e7d1aba0bea447ece47a023093cd3c353b3c04381eaadb16b"
+checksum = "fc4430abb2bef291e8e1084287aa85d53ebe441ffc6567ad7a6a72e21410f744"
 dependencies = [
  "anyhow",
  "chrono",
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "claude-codes",
  "codex-codes",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -2954,7 +2954,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "anyhow",
  "colored",
@@ -2969,7 +2969,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "anyhow",
  "hex",
@@ -3771,7 +3771,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3833,7 +3833,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.5.42"
+version = "2.5.43"
 dependencies = [
  "claude-codes",
  "serde",

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.43
+
+- **Bump `claude-codes` 2.1.140 → 2.1.141.** Pure addition upstream — adds `ToolPermissionRequest::answer_questions(answers, request_id)`, a typed helper for replying to `AskUserQuestion` approvals that preserves the original `questions` array in the `updatedInput` payload (manual `{answers: {...}}` responses drop it, which crashes downstream viewers that call `tool_use_result.questions.map(...)`). Not yet used by agent-portal — existing AskUserQuestion approval path can switch to the helper in a follow-up.
+
 ## 2.5.42
 
 - **Tag `agent_type` per-message at the proxy emission boundary instead of capturing it from registration.** The 2.5.40/2.5.41 design captured `agent_type` from the proxy's `Register` and threaded it through `proxy_socket.rs` into every insert site. That was functionally correct today (one connection = one io_task = one agent) but wrong shape for any future multi-agent / sub-agent session: every insert site would silently mis-attribute the day a single `/ws/session` connection started ferrying messages from more than one agent. Now `ProxyToServer::SequencedOutput` and `ProxyToServer::ClaudeOutput` carry `agent_type: AgentType` on each message, the proxy reads `config.agent_type` at every emission site (output forwarder, wiggum portal messages, replay loop, codex raw output, connection-portal banner, shim mode), and `proxy_socket.rs` trusts the per-message tag — the `session_agent_type` capture is gone, as is the error-and-drop guard for pre-Register output. The live broadcast `ServerToClient::ClaudeOutput` also grew an `agent_type` field so the frontend's in-flight messages can be tagged the same way as the historical-read path. **Wire compat caveat:** pre-2.5.42 proxies don't send `agent_type` on output messages; `#[serde(default)]` makes them parse as `AgentType::Claude`, which is a presumed misattribution for any in-flight codex session running an older proxy until the proxy upgrades.
