@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.47
+
+- **Typed query-param parse on the banned page (closes #732).** `frontend/src/pages/banned.rs` no longer pokes `web_sys::UrlSearchParams::get("reason")` against the URL; it uses `yew_router::use_location().query::<BannedQuery>()` with a `#[derive(Deserialize)] struct BannedQuery { reason: Option<String> }`, and `serde_urlencoded` handles URL decoding so the manual `js_sys::decode_uri_component` block is gone.
+
 ## 2.5.46
 
 - **Typed frontend renderers for codex streaming-delta events.** `turn/diff/updated`, `item/fileChange/patchUpdated`, and `turn/plan/updated` previously fell through `CodexEvent`'s `#[serde(other)] Unknown` arm and got dumped as raw pretty-printed JSON in the transcript. Now `CodexEvent` carries typed variants for all six slash-named delta methods the proxy forwards (the three above plus `item/plan/delta`, `item/reasoning/summaryPartAdded`, `item/reasoning/textDelta`); the first three render as real cards (cumulative unified diff, per-file patches, numbered plan with status icons) and the latter three are typed no-op stubs that suppress the raw-JSON dump without aggregating delta state. The per-line HTML emission was extracted out of `render_diff_lines` into a private `render_diff_html` helper, and a new public `render_unified_diff(diff: &str)` parses unified-diff strings (skipping `--- `, `+++ `, `@@ ` headers and the `\\ No newline at end of file` marker, classifying body lines by leading char with a context fallback) and feeds the same helper. Both the claude `Edit` tool renderer and the new codex diff renderers go through `render_diff_html`, so styling stays in lockstep. Tests cover `parse_unified_diff` (single hunk, multi-hunk, blank context, no-newline marker, missing file headers, unprefixed lines) and round-trip each new `CodexEvent` variant through `serde_json::from_str`.

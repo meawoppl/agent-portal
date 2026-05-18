@@ -1,24 +1,18 @@
-use gloo::utils::window;
+use serde::{Deserialize, Serialize};
 use yew::prelude::*;
+use yew_router::prelude::*;
+
+#[derive(Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+struct BannedQuery {
+    #[serde(default)]
+    reason: Option<String>,
+}
 
 #[function_component(BannedPage)]
 pub fn banned_page() -> Html {
-    // Extract reason from URL query params
-    let reason = window()
-        .location()
-        .search()
-        .ok()
-        .and_then(|search| {
-            let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
-            params.get("reason")
-        })
-        .map(|r| {
-            // URL decode the reason
-            js_sys::decode_uri_component(&r)
-                .ok()
-                .map(|s| s.as_string().unwrap_or_default())
-                .unwrap_or(r)
-        })
+    let reason = use_location()
+        .and_then(|loc| loc.query::<BannedQuery>().ok())
+        .and_then(|q| q.reason)
         .unwrap_or_else(|| "No reason provided".to_string());
 
     html! {
