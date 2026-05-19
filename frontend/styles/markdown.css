@@ -330,8 +330,12 @@
 }
 
 .tool-result-image {
-    margin: 0.5rem 0;
+    /* Frame hugs the image but never exceeds the message block: a small
+       image stays its natural size, a large one is capped at block width.
+       `margin-inline: auto` centers the frame within the block. */
+    width: fit-content;
     max-width: 100%;
+    margin: 0.5rem auto;
     overflow: hidden;
     border-radius: 4px;
     border: 1px solid var(--border);
