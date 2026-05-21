@@ -301,20 +301,6 @@ impl ErrorMessage {
     }
 }
 
-/// Permission answer payload sent with PermissionResponse
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PermissionAnswers {
-    pub answers: serde_json::Map<String, serde_json::Value>,
-}
-
-impl PermissionAnswers {
-    pub fn empty() -> Self {
-        Self {
-            answers: serde_json::Map::new(),
-        }
-    }
-}
-
 /// Response for GET /api/settings/sound
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoundSettingsResponse {

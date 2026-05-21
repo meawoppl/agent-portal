@@ -11,8 +11,6 @@
 use std::collections::{HashMap, HashSet};
 use yew::prelude::*;
 
-use shared::api::PermissionAnswers;
-
 use crate::pages::dashboard::permission_dialog::PermissionDialog;
 use crate::pages::dashboard::types::{parse_ask_user_question, PendingPermission, QuestionAnswers};
 
@@ -338,24 +336,40 @@ pub fn build_permission_response(
             reason: Some("User denied".to_string()),
         },
         PermissionResponseKind::AnswerQuestions(answers) => {
-            let answers_json = if let Some(parsed) = parse_ask_user_question(&perm.input) {
-                let mut pa = PermissionAnswers::empty();
-                for (idx, answer) in answers.iter() {
-                    if let Some(q) = parsed.questions.get(*idx) {
-                        pa.answers.insert(
-                            q.question.clone(),
-                            serde_json::Value::String(answer.clone()),
-                        );
+            // The Claude CLI echoes this `updatedInput` back into the
+            // `tool_use_result` it emits; its frontend reads
+            // `tool_use_result.questions` and calls `questions.map(...)`.
+            // Returning a bare `{answers: …}` drops `questions` and crashes
+            // that frontend with `undefined is not an object (evaluating
+            // 'q.map')` — see the `answer_questions` helper and the
+            // `test_ask_user_question_answer_preserves_questions_in_updated_input`
+            // regression test in `claude-codes`. So echo the original input
+            // (which carries `questions` and any `metadata`) verbatim and
+            // merge the answers in. `AskUserQuestionInput` keys `answers` by
+            // the question `header`.
+            let mut updated_input = perm.input.clone();
+            if let Some(obj) = updated_input.as_object_mut() {
+                let mut answer_map = serde_json::Map::new();
+                if let Some(parsed) = parse_ask_user_question(&perm.input) {
+                    for (idx, answer) in answers.iter() {
+                        if let Some(q) = parsed.questions.get(*idx) {
+                            // Header is the canonical key; fall back to the
+                            // full question text when a question omits it.
+                            let key = if q.header.is_empty() {
+                                q.question.clone()
+                            } else {
+                                q.header.clone()
+                            };
+                            answer_map.insert(key, serde_json::Value::String(answer.clone()));
+                        }
                     }
                 }
-                serde_json::to_value(&pa).unwrap_or_default()
-            } else {
-                serde_json::to_value(PermissionAnswers::empty()).unwrap_or_default()
-            };
+                obj.insert("answers".to_string(), serde_json::Value::Object(answer_map));
+            }
             shared::PermissionResponseFields {
                 request_id,
                 allow: true,
-                input: Some(answers_json),
+                input: Some(updated_input),
                 permissions: vec![],
                 reason: None,
             }
@@ -539,14 +553,18 @@ mod tests {
     }
 
     #[test]
-    fn build_response_answer_questions_emits_question_keyed_map() {
+    fn build_response_answer_questions_preserves_questions_and_keys_by_header() {
+        // Regression guard: the Claude CLI echoes `updatedInput` into the
+        // `tool_use_result` it emits and its frontend does
+        // `questions.map(...)`. Dropping `questions` crashes it with
+        // `undefined is not an object (evaluating 'q.map')`.
         let perm = PendingPermission {
             request_id: "rid".to_string(),
             tool_name: "AskUserQuestion".to_string(),
             input: serde_json::json!({
                 "questions": [
-                    { "question": "first?", "options": [{ "label": "a" }] },
-                    { "question": "second?", "options": [{ "label": "b" }] },
+                    { "question": "first?", "header": "One", "options": [{ "label": "a" }] },
+                    { "question": "second?", "header": "Two", "options": [{ "label": "b" }] },
                 ]
             }),
             permission_suggestions: vec![],
@@ -562,15 +580,49 @@ mod tests {
         );
         assert!(frame.allow);
         let input = frame.input.expect("answers payload missing");
-        let payload: PermissionAnswers = serde_json::from_value(input).unwrap();
-        // Map keys are the question text, not the index.
-        assert_eq!(
-            payload.answers.get("first?").and_then(|v| v.as_str()),
-            Some("a")
+
+        // `questions` MUST survive in the echoed input — this is the q.map
+        // crash guard.
+        let questions = input.get("questions").and_then(|v| v.as_array());
+        assert_eq!(questions.map(|q| q.len()), Some(2));
+
+        // `answers` is keyed by question `header`, not text or index.
+        let answers_obj = input
+            .get("answers")
+            .and_then(|v| v.as_object())
+            .expect("answers object missing");
+        assert_eq!(answers_obj.get("One").and_then(|v| v.as_str()), Some("a"));
+        assert_eq!(answers_obj.get("Two").and_then(|v| v.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn build_response_answer_questions_falls_back_to_text_when_header_empty() {
+        let perm = PendingPermission {
+            request_id: "rid".to_string(),
+            tool_name: "AskUserQuestion".to_string(),
+            input: serde_json::json!({
+                "questions": [
+                    { "question": "headerless?", "options": [{ "label": "x" }] },
+                ]
+            }),
+            permission_suggestions: vec![],
+        };
+        let mut answers = QuestionAnswers::new();
+        answers.insert(0, "x".to_string());
+
+        let frame = build_permission_response(
+            "rid-1".to_string(),
+            PermissionResponseKind::AnswerQuestions(answers),
+            &perm,
         );
+        let input = frame.input.expect("answers payload missing");
+        let answers_obj = input
+            .get("answers")
+            .and_then(|v| v.as_object())
+            .expect("answers object missing");
         assert_eq!(
-            payload.answers.get("second?").and_then(|v| v.as_str()),
-            Some("b")
+            answers_obj.get("headerless?").and_then(|v| v.as_str()),
+            Some("x")
         );
     }
 }
