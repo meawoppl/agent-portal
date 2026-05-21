@@ -550,13 +550,27 @@ impl SessionView {
             .to_iso_string()
             .as_string()
             .unwrap_or_default();
-        let optimistic_msg = serde_json::json!({
-            "type": "user",
-            "content": input,
-            "_pending": true,
-            "_created_at": now_iso,
-        });
-        self.pending_sends.push(optimistic_msg.to_string());
+        // Local-only stub for the message list while the wire round-trips.
+        // Typed so the wire shape lives in source — the consumer renderer
+        // still parses `pending_sends` as JSON (cleanup tracked separately).
+        #[derive(serde::Serialize)]
+        struct OptimisticUserMessage<'a> {
+            #[serde(rename = "type")]
+            message_type: &'static str,
+            content: &'a str,
+            #[serde(rename = "_pending")]
+            pending: bool,
+            #[serde(rename = "_created_at")]
+            created_at: &'a str,
+        }
+        let optimistic_msg = serde_json::to_string(&OptimisticUserMessage {
+            message_type: "user",
+            content: &input,
+            pending: true,
+            created_at: &now_iso,
+        })
+        .unwrap_or_default();
+        self.pending_sends.push(optimistic_msg);
 
         if let Some(ref sender) = self.ws_sender {
             let msg = ClientToServer::ClaudeInput {

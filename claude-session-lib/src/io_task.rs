@@ -13,6 +13,7 @@ use claude_codes::{AsyncClient as ClaudeAsyncClient, ClaudeInput, ClaudeOutput};
 use rand::Rng;
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
+use shared::PortalMessage;
 use tokio::sync::mpsc;
 
 /// Background task that owns the Claude process and handles all I/O.
@@ -124,16 +125,13 @@ pub(crate) async fn claude_io_task(
                         };
 
                         if rate_limit_attempts >= MAX_RATE_LIMIT_RETRIES {
-                            let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-                                "type": "portal",
-                                "content": [{
-                                    "type": "text",
-                                    "text": format!(
-                                        "Rate-limited by upstream API {} times in a row \u{2014} not retrying. Send your message again to try once more.",
-                                        rate_limit_attempts
-                                    )
-                                }]
-                            })));
+                            let _ = event_tx.send(IoEvent::RawOutput(
+                                PortalMessage::text(format!(
+                                    "Rate-limited by upstream API {} times in a row \u{2014} not retrying. Send your message again to try once more.",
+                                    rate_limit_attempts
+                                ))
+                                .to_json(),
+                            ));
                             rate_limit_attempts = 0;
                             continue;
                         }
@@ -150,16 +148,13 @@ pub(crate) async fn claude_io_task(
                             let mut rng = rand::thread_rng();
                             rng.gen_range(0.0..=exp_cap as f64)
                         };
-                        let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-                            "type": "portal",
-                            "content": [{
-                                "type": "text",
-                                "text": format!(
-                                    "Rate-limited by upstream API. Retrying in {:.1}s (attempt {}/{}).",
-                                    delay_secs, rate_limit_attempts, MAX_RATE_LIMIT_RETRIES
-                                )
-                            }]
-                        })));
+                        let _ = event_tx.send(IoEvent::RawOutput(
+                            PortalMessage::text(format!(
+                                "Rate-limited by upstream API. Retrying in {:.1}s (attempt {}/{}).",
+                                delay_secs, rate_limit_attempts, MAX_RATE_LIMIT_RETRIES
+                            ))
+                            .to_json(),
+                        ));
 
                         // Wait for the backoff window, but let a new user
                         // input cancel the retry and run normally.
@@ -218,20 +213,15 @@ pub(crate) async fn claude_io_task(
                                 .and_then(|v| serde_json::to_string_pretty(v).ok())
                                 .unwrap_or_else(|| parse_err.error_message.clone());
 
-                            let portal_json = serde_json::json!({
-                                "type": "portal",
-                                "content": [{
-                                    "type": "text",
-                                    "text": format!(
-                                        "Received an unrecognized message from the agent CLI. \
-                                        The session will continue normally.\n\n\
-                                        {}\n\n\
-                                        If you believe this is a bug, please report it at:\n\
-                                        https://github.com/meawoppl/rust-code-agent-sdks/issues",
-                                        raw_display
-                                    )
-                                }]
-                            });
+                            let portal_json = PortalMessage::text(format!(
+                                "Received an unrecognized message from the agent CLI. \
+                                The session will continue normally.\n\n\
+                                {}\n\n\
+                                If you believe this is a bug, please report it at:\n\
+                                https://github.com/meawoppl/rust-code-agent-sdks/issues",
+                                raw_display
+                            ))
+                            .to_json();
                             let _ = event_tx.send(IoEvent::RawOutput(portal_json));
                             continue;
                         }
