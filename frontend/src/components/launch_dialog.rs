@@ -60,18 +60,28 @@ fn agent_installed(installs: &[AgentInstall], agent_type: AgentType) -> Option<b
 
 struct AgentConfig {
     args_placeholder: &'static str,
-    skip_permissions_flag: Option<&'static str>,
+    skip_permissions_args: &'static [&'static str],
+    skip_permissions_label: Option<&'static str>,
 }
 
 fn agent_config(agent_type: shared::AgentType) -> AgentConfig {
     match agent_type {
         shared::AgentType::Claude => AgentConfig {
             args_placeholder: "--model sonnet --allowedTools \"Bash Edit\"",
-            skip_permissions_flag: Some("--dangerously-skip-permissions"),
+            skip_permissions_args: &["--dangerously-skip-permissions"],
+            skip_permissions_label: Some("--dangerously-skip-permissions"),
         },
         shared::AgentType::Codex => AgentConfig {
-            args_placeholder: "--model o3 --reasoning-effort high",
-            skip_permissions_flag: Some("--full-auto"),
+            args_placeholder: "-c model=o3 -c model_reasoning_effort=high",
+            skip_permissions_args: &[
+                "-c",
+                "approval_policy=never",
+                "-c",
+                "sandbox_mode=danger-full-access",
+            ],
+            skip_permissions_label: Some(
+                "-c approval_policy=never -c sandbox_mode=danger-full-access",
+            ),
         },
     }
 }
@@ -341,9 +351,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 .collect();
             let cfg = agent_config(*agent_type);
             if *skip_permissions {
-                if let Some(flag) = cfg.skip_permissions_flag {
-                    claude_args.push(flag.to_string());
-                }
+                claude_args.extend(cfg.skip_permissions_args.iter().map(|arg| arg.to_string()));
             }
 
             let launcher_id = *selected_launcher;
@@ -647,7 +655,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     </div>
 
                     // Permission bypass checkbox (agent-specific)
-                    if let Some(flag) = cfg.skip_permissions_flag {
+                    if let Some(label) = cfg.skip_permissions_label {
                         <div class="launch-field launch-checkbox">
                             <label>
                                 <input
@@ -655,7 +663,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                                     checked={*skip_permissions}
                                     onchange={on_skip_permissions.clone()}
                                 />
-                                { format!(" {}", flag) }
+                                { format!(" {}", label) }
                             </label>
                         </div>
                     }
