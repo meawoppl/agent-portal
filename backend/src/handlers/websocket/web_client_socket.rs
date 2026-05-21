@@ -421,12 +421,22 @@ fn replay_history(
         .into_iter()
         .map(|msg| {
             let created_at_str = msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+            // Fallback when the DB row content isn't valid JSON: wrap the raw
+            // string in a typed envelope so the frontend's `ClaudeMessage`
+            // dispatch still finds a `type` and `content`.
+            #[derive(serde::Serialize)]
+            struct FallbackMessageContent<'a> {
+                #[serde(rename = "type")]
+                message_type: &'a str,
+                content: &'a str,
+            }
             let mut val =
                 serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
-                    serde_json::json!({
-                        "type": msg.role,
-                        "content": msg.content,
+                    serde_json::to_value(FallbackMessageContent {
+                        message_type: &msg.role,
+                        content: &msg.content,
                     })
+                    .unwrap_or(serde_json::Value::Null)
                 });
             if let Some(obj) = val.as_object_mut() {
                 // Reconstruct _sender for user messages from DB user_id

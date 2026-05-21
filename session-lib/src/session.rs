@@ -298,11 +298,19 @@ impl<A: Agent> Session<A> {
         if let Some(ref command_tx) = self.command_tx {
             if self.config.agent_type == shared::AgentType::Codex {
                 // Codex approval flow: map allow/deny to accept/decline.
+                // Typed wrapper so the wire shape lives in source rather than
+                // in a `json!` literal.
+                #[derive(serde::Serialize)]
+                struct CodexApprovalResult<'a> {
+                    decision: &'a str,
+                }
                 let decision = if response.allow { "accept" } else { "decline" };
+                let result = serde_json::to_value(CodexApprovalResult { decision })
+                    .unwrap_or(serde_json::Value::Null);
                 command_tx
                     .send(IoCommand::CodexApproval {
                         request_id: request_id.to_string(),
-                        result: serde_json::json!({ "decision": decision }),
+                        result,
                     })
                     .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
             } else {
