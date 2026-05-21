@@ -240,27 +240,29 @@ async fn main() -> anyhow::Result<()> {
         format!("http://localhost:{}", port)
     });
 
-    // Create cookie signing key from SESSION_SECRET or generate random for dev
-    let session_secret = env::var("SESSION_SECRET").ok();
-    let cookie_key = match &session_secret {
-        Some(secret) => {
-            let bytes = secret.as_bytes();
-            if bytes.len() < 64 {
-                tracing::warn!("SESSION_SECRET should be at least 64 bytes, padding with zeros");
-                let mut padded = vec![0u8; 64];
-                padded[..bytes.len()].copy_from_slice(bytes);
-                Key::from(&padded)
-            } else {
-                Key::from(&bytes[..64])
-            }
-        }
-        None => {
-            if args.dev_mode {
-                tracing::warn!("No SESSION_SECRET set, using random key (sessions won't persist across restarts)");
-                Key::generate()
-            } else {
-                panic!("SESSION_SECRET must be set in production mode");
-            }
+    // SESSION_SECRET backs both the signed-cookie key and the proxy/launcher
+    // JWT secret. Set it to a stable 64+ byte value in production so cookies
+    // and tokens survive a redeploy. When it is absent we generate a random
+    // ephemeral secret so the server still boots — at the cost of invalidating
+    // every cookie and token on restart. (It must never be a hard-coded
+    // constant: a known secret lets anyone forge tokens for any user.)
+    let session_secret = env::var("SESSION_SECRET").ok().unwrap_or_else(|| {
+        tracing::warn!(
+            "SESSION_SECRET is not set — generating a random ephemeral secret. \
+             All signed cookies and proxy/launcher JWTs will be invalidated on \
+             restart; set SESSION_SECRET to a stable 64+ byte value in production."
+        );
+        hex::encode(Key::generate().master())
+    });
+    let cookie_key = {
+        let bytes = session_secret.as_bytes();
+        if bytes.len() < 64 {
+            tracing::warn!("SESSION_SECRET should be at least 64 bytes, padding with zeros");
+            let mut padded = vec![0u8; 64];
+            padded[..bytes.len()].copy_from_slice(bytes);
+            Key::from(&padded)
+        } else {
+            Key::from(&bytes[..64])
         }
     };
 
@@ -272,14 +274,8 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Voice input disabled - GOOGLE_APPLICATION_CREDENTIALS not set");
     }
 
-    // JWT secret for proxy tokens (uses SESSION_SECRET or generates for dev)
-    let jwt_secret = session_secret.unwrap_or_else(|| {
-        if args.dev_mode {
-            "dev-mode-jwt-secret-not-for-production".to_string()
-        } else {
-            panic!("SESSION_SECRET must be set in production mode");
-        }
-    });
+    // JWT secret for proxy tokens — same source as the cookie key above.
+    let jwt_secret = session_secret;
 
     // App title (customizable via environment variable)
     // In dev mode, override with a warning to make it obvious
