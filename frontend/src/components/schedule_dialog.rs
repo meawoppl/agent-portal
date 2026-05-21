@@ -12,6 +12,13 @@ use yew::prelude::*;
 
 /// Minimum launcher version that supports scheduled tasks.
 const MIN_LAUNCHER_VERSION: &str = "2.1.2";
+const CLAUDE_SKIP_PERMISSIONS_ARGS: &[&str] = &["--dangerously-skip-permissions"];
+const CODEX_SKIP_PERMISSIONS_ARGS: &[&str] = &[
+    "-c",
+    "approval_policy=never",
+    "-c",
+    "sandbox_mode=danger-full-access",
+];
 
 fn version_sufficient(version: &str) -> bool {
     let parse = |s: &str| -> Option<(u64, u64, u64)> {
@@ -28,6 +35,45 @@ fn version_sufficient(version: &str) -> bool {
         return true;
     };
     have >= need
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn strips_legacy_codex_full_auto() {
+        let (has_skip, other_args) = strip_skip_permissions_args(
+            &args(&["--model", "o3", "--full-auto"]),
+            shared::AgentType::Codex,
+        );
+
+        assert!(has_skip);
+        assert_eq!(other_args, args(&["--model", "o3"]));
+    }
+
+    #[test]
+    fn strips_codex_config_override_skip_args() {
+        let (has_skip, other_args) = strip_skip_permissions_args(
+            &args(&[
+                "-c",
+                "model=o3",
+                "-c",
+                "approval_policy=never",
+                "-c",
+                "sandbox_mode=danger-full-access",
+                "--strict-config",
+            ]),
+            shared::AgentType::Codex,
+        );
+
+        assert!(has_skip);
+        assert_eq!(other_args, args(&["-c", "model=o3", "--strict-config"]));
+    }
 }
 
 #[derive(Properties, PartialEq)]
@@ -53,6 +99,64 @@ enum FormMode {
     Edit(Uuid),
 }
 
+fn skip_permissions_args(agent_type: shared::AgentType) -> &'static [&'static str] {
+    match agent_type {
+        shared::AgentType::Claude => CLAUDE_SKIP_PERMISSIONS_ARGS,
+        shared::AgentType::Codex => CODEX_SKIP_PERMISSIONS_ARGS,
+    }
+}
+
+fn skip_permissions_label(agent_type: shared::AgentType) -> &'static str {
+    match agent_type {
+        shared::AgentType::Claude => "--dangerously-skip-permissions",
+        shared::AgentType::Codex => "-c approval_policy=never -c sandbox_mode=danger-full-access",
+    }
+}
+
+fn strip_skip_permissions_args(
+    args: &[String],
+    agent_type: shared::AgentType,
+) -> (bool, Vec<String>) {
+    let mut has_skip = false;
+    let mut other_args = Vec::new();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = args[i].as_str();
+
+        if arg == "--dangerously-skip-permissions" {
+            has_skip = true;
+            i += 1;
+            continue;
+        }
+
+        // Legacy Codex UI value. Keep recognizing it so editing an existing
+        // task rewrites the removed flag into the current config overrides.
+        if agent_type == shared::AgentType::Codex && arg == "--full-auto" {
+            has_skip = true;
+            i += 1;
+            continue;
+        }
+
+        if i + 1 < args.len()
+            && arg == "-c"
+            && matches!(
+                args[i + 1].as_str(),
+                "approval_policy=never" | "sandbox_mode=danger-full-access"
+            )
+        {
+            has_skip = true;
+            i += 2;
+            continue;
+        }
+
+        other_args.push(args[i].clone());
+        i += 1;
+    }
+
+    (has_skip, other_args)
+}
+
 use super::cron_describe;
 
 #[function_component(ScheduleDialog)]
@@ -67,6 +171,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
 
     let working_directory = props.session.working_directory.clone();
     let hostname = props.session.hostname.clone();
+    let session_agent_type = props.session.agent_type;
 
     let folder = utils::extract_folder(&working_directory);
 
@@ -166,16 +271,8 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let error_msg = error_msg.clone();
         Callback::from(move |task_id: Uuid| {
             if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
-                let has_skip = task
-                    .claude_args
-                    .iter()
-                    .any(|a| a == "--dangerously-skip-permissions" || a == "--full-auto");
-                let other_args: Vec<_> = task
-                    .claude_args
-                    .iter()
-                    .filter(|a| *a != "--dangerously-skip-permissions" && *a != "--full-auto")
-                    .cloned()
-                    .collect();
+                let (has_skip, other_args) =
+                    strip_skip_permissions_args(&task.claude_args, task.agent_type);
                 form.set(TaskForm {
                     name: task.name.clone(),
                     cron_expression: task.cron_expression.clone(),
@@ -203,6 +300,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let error_msg = error_msg.clone();
         let wd = working_directory.clone();
         let host = hostname.clone();
+        let agent_type = session_agent_type;
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
             let data = (*form).clone();
@@ -212,6 +310,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             let error_msg = error_msg.clone();
             let wd = wd.clone();
             let host = host.clone();
+            let agent_type = agent_type;
 
             if data.name.trim().is_empty() || data.cron_expression.trim().is_empty() {
                 return;
@@ -220,7 +319,11 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             spawn_local(async move {
                 let mut claude_args: Vec<String> = Vec::new();
                 if data.skip_permissions {
-                    claude_args.push("--dangerously-skip-permissions".to_string());
+                    claude_args.extend(
+                        skip_permissions_args(agent_type)
+                            .iter()
+                            .map(|arg| arg.to_string()),
+                    );
                 }
                 let extra = data.extra_args.trim();
                 if !extra.is_empty() {
@@ -237,7 +340,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             working_directory: wd,
                             prompt: data.prompt.clone(),
                             claude_args: claude_args.clone(),
-                            agent_type: shared::AgentType::Claude,
+                            agent_type,
                             max_runtime_minutes: data.max_runtime_minutes,
                         };
                         Request::post(&utils::api_url("/api/scheduled-tasks"))
@@ -254,6 +357,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             prompt: Some(data.prompt.clone()),
                             max_runtime_minutes: Some(data.max_runtime_minutes),
                             claude_args: Some(claude_args.clone()),
+                            agent_type: Some(agent_type),
                             ..Default::default()
                         };
                         Request::patch(&utils::api_url(&format!("/api/scheduled-tasks/{}", id)))
@@ -542,7 +646,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                                 checked={form.skip_permissions}
                                                 onchange={on_skip_permissions}
                                             />
-                                            { " --dangerously-skip-permissions" }
+                                            { format!(" {}", skip_permissions_label(session_agent_type)) }
                                         </label>
                                     </div>
                                     <div class="sched-form-actions">
