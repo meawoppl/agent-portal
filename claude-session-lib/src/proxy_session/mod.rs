@@ -871,6 +871,7 @@ async fn run_main_loop<A: Agent>(
                 // Handle raw output directly (Codex JSONL) — bypasses the
                 // ClaudeOutput-typed output forwarder
                 if let Some(SessionEvent::RawOutput(ref value)) = event {
+                    let is_codex_compaction = is_codex_compaction_event(value);
                     let seq = {
                         let mut buf = state.output_buffer.lock().await;
                         buf.push(value.clone())
@@ -884,6 +885,9 @@ async fn run_main_loop<A: Agent>(
                     if ws.send(msg).await.is_err() {
                         error!("Failed to send raw output");
                         return ConnectionResult::Disconnected(state.connection_start.elapsed());
+                    }
+                    if is_codex_compaction {
+                        inject_portal_reminder(claude_session).await;
                     }
                     continue;
                 }
@@ -904,6 +908,13 @@ async fn run_main_loop<A: Agent>(
             }
         }
     }
+}
+
+fn is_codex_compaction_event(value: &serde_json::Value) -> bool {
+    value
+        .get("type")
+        .and_then(|t| t.as_str())
+        .is_some_and(|t| t == "thread/compacted")
 }
 
 /// Handle a file upload event (start or chunk)
