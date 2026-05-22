@@ -67,6 +67,10 @@ pub enum CodexEvent {
     ReasoningTextDelta {
         params: Option<serde_json::Value>,
     },
+    #[serde(rename = "thread/compacted")]
+    ThreadCompacted {
+        params: Option<ContextCompactedParams>,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -129,6 +133,14 @@ pub struct PlanDeltaParams {
     pub delta: Option<String>,
     #[serde(default, rename = "itemId", alias = "item_id")]
     pub item_id: Option<String>,
+    #[serde(default, rename = "threadId", alias = "thread_id")]
+    pub thread_id: Option<String>,
+    #[serde(default, rename = "turnId", alias = "turn_id")]
+    pub turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ContextCompactedParams {
     #[serde(default, rename = "threadId", alias = "thread_id")]
     pub thread_id: Option<String>,
     #[serde(default, rename = "turnId", alias = "turn_id")]
@@ -283,6 +295,7 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
             params.as_ref().and_then(|p| p.plan.as_deref()),
             params.as_ref().and_then(|p| p.explanation.as_deref()),
         ),
+        Ok(CodexEvent::ThreadCompacted { params }) => render_context_compacted(params.as_ref()),
         // Per-chunk deltas — the consolidated content lands in `turn/plan/updated`
         // (for plans) or `item.completed` (for reasoning). Emit nothing for the
         // streaming chunks to avoid visual noise without losing information.
@@ -405,6 +418,7 @@ pub fn render_codex_message_content(json: &str) -> Html {
             params.as_ref().and_then(|p| p.plan.as_deref()),
             params.as_ref().and_then(|p| p.explanation.as_deref()),
         ),
+        Ok(CodexEvent::ThreadCompacted { params }) => render_context_compacted(params.as_ref()),
         _ => html! {},
     }
 }
@@ -760,6 +774,29 @@ fn render_turn_plan(plan: Option<&[TurnPlanStep]>, explanation: Option<&str>) ->
     }
 }
 
+fn render_context_compacted(params: Option<&ContextCompactedParams>) -> Html {
+    let title = params
+        .and_then(|p| p.turn_id.as_deref())
+        .map(|turn_id| format!("Codex compacted context for turn {}", turn_id))
+        .unwrap_or_else(|| "Codex compacted the conversation context".to_string());
+
+    html! {
+        <div class="claude-message compaction-message">
+            <div class="message-header">
+                <span class="message-type-badge compaction">{ "Context Compacted" }</span>
+            </div>
+            <div class="message-body">
+                <div class="compaction-content">
+                    <div class="compaction-icon">{ "\u{1f4e6}" }</div>
+                    <div class="compaction-text">
+                        <div class="compaction-description">{ title }</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
 fn render_raw_codex(json: &str) -> Html {
     let display = serde_json::from_str::<Value>(json)
         .ok()
@@ -792,6 +829,7 @@ pub fn is_codex_terminal_event(json: &str) -> Option<bool> {
         | CodexEvent::TurnDiffUpdated { .. }
         | CodexEvent::FileChangePatchUpdated { .. }
         | CodexEvent::TurnPlanUpdated { .. }
+        | CodexEvent::ThreadCompacted { .. }
         | CodexEvent::PlanDelta { .. }
         | CodexEvent::ReasoningSummaryPartAdded { .. }
         | CodexEvent::ReasoningTextDelta { .. }
@@ -1114,6 +1152,19 @@ mod tests {
                 assert_eq!(p.explanation.as_deref(), Some("so far"));
             }
             other => panic!("expected TurnPlanUpdated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_thread_compacted() {
+        let json = r#"{"type":"thread/compacted","params":{"threadId":"t","turnId":"u"}}"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        match event {
+            CodexEvent::ThreadCompacted { params: Some(p) } => {
+                assert_eq!(p.thread_id.as_deref(), Some("t"));
+                assert_eq!(p.turn_id.as_deref(), Some("u"));
+            }
+            other => panic!("expected ThreadCompacted, got {:?}", other),
         }
     }
 

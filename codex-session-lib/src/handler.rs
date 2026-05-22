@@ -138,6 +138,7 @@ fn handle_notification(
         Notification::FileChangePatchUpdated(p) => {
             emit_passthrough(event_tx, "item/fileChange/patchUpdated", &p)
         }
+        Notification::ContextCompacted(p) => emit_passthrough(event_tx, "thread/compacted", &p),
 
         // Pure-status notifications — not user-facing. Logged via the typed
         // `Notification::method()` accessor so the debug message stays accurate
@@ -184,7 +185,6 @@ fn handle_notification(
         | Notification::ProcessExited(_)
         | Notification::ProcessOutputDelta(_)
         | Notification::ServerRequestResolved(_)
-        | Notification::ContextCompacted(_)
         | Notification::ThreadGoalUpdated(_)
         | Notification::ThreadRealtimeClosed(_)
         | Notification::ThreadRealtimeError(_)
@@ -393,6 +393,29 @@ mod tests {
         let (sent, ended) = handle_codex_server_message(msg, &tx);
         drop(tx);
         (drain(&mut rx), sent, ended)
+    }
+
+    #[test]
+    fn context_compacted_emits_renderable_event() {
+        let notif: codex_codes::ContextCompactedNotification = serde_json::from_value(json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1"
+        }))
+        .unwrap();
+        let msg = ServerMessage::Notification(Notification::ContextCompacted(notif));
+        let (events, sent, ended) = handle(msg);
+
+        assert!(sent);
+        assert!(!ended);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            IoEvent::RawOutput(value) => {
+                assert_eq!(value["type"], "thread/compacted");
+                assert_eq!(value["params"]["threadId"], "thread-1");
+                assert_eq!(value["params"]["turnId"], "turn-1");
+            }
+            _ => panic!("expected RawOutput"),
+        }
     }
 
     /// `FileChangeApproval` should now expose the typed `itemId`/`reason`/`grantRoot`
