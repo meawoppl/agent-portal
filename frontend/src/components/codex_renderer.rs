@@ -1,4 +1,5 @@
 use super::markdown::render_markdown;
+use super::message_renderer::format_duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use yew::prelude::*;
@@ -18,6 +19,12 @@ pub enum CodexEvent {
     #[serde(rename = "turn.completed")]
     TurnCompleted {
         usage: Option<CodexUsage>,
+        #[serde(default, rename = "duration_ms", alias = "durationMs")]
+        duration_ms: Option<u64>,
+        #[serde(default, rename = "turn_id", alias = "turnId")]
+        turn_id: Option<String>,
+        #[serde(default)]
+        status: Option<String>,
     },
     #[serde(rename = "turn.failed")]
     TurnFailed {
@@ -149,9 +156,86 @@ pub struct ContextCompactedParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CodexUsage {
+    #[serde(default)]
+    pub last: Option<CodexTokenUsage>,
+    #[serde(default)]
+    pub total: Option<CodexTokenUsage>,
+    #[serde(default, rename = "model_context_window", alias = "modelContextWindow")]
+    pub model_context_window: Option<u64>,
+    // Legacy flat shape from older portal proxies.
+    #[serde(default)]
     pub input_tokens: Option<u64>,
+    #[serde(default)]
     pub cached_input_tokens: Option<u64>,
+    #[serde(default)]
     pub output_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CodexTokenUsage {
+    #[serde(default, rename = "inputTokens", alias = "input_tokens")]
+    pub input_tokens: Option<u64>,
+    #[serde(default, rename = "cachedInputTokens", alias = "cached_input_tokens")]
+    pub cached_input_tokens: Option<u64>,
+    #[serde(default, rename = "outputTokens", alias = "output_tokens")]
+    pub output_tokens: Option<u64>,
+    #[serde(
+        default,
+        rename = "reasoningOutputTokens",
+        alias = "reasoning_output_tokens"
+    )]
+    pub reasoning_output_tokens: Option<u64>,
+    #[serde(default, rename = "totalTokens", alias = "total_tokens")]
+    pub total_tokens: Option<u64>,
+}
+
+impl CodexUsage {
+    fn input_tokens(&self) -> u64 {
+        self.last
+            .as_ref()
+            .and_then(|u| u.input_tokens)
+            .or(self.input_tokens)
+            .unwrap_or(0)
+    }
+
+    fn cached_input_tokens(&self) -> u64 {
+        self.last
+            .as_ref()
+            .and_then(|u| u.cached_input_tokens)
+            .or(self.cached_input_tokens)
+            .unwrap_or(0)
+    }
+
+    fn output_tokens(&self) -> u64 {
+        self.last
+            .as_ref()
+            .and_then(|u| u.output_tokens)
+            .or(self.output_tokens)
+            .unwrap_or(0)
+    }
+
+    fn reasoning_output_tokens(&self) -> u64 {
+        self.last
+            .as_ref()
+            .and_then(|u| u.reasoning_output_tokens)
+            .unwrap_or(0)
+    }
+
+    fn total_tokens(&self) -> u64 {
+        self.last
+            .as_ref()
+            .and_then(|u| u.total_tokens)
+            .unwrap_or_else(|| {
+                self.input_tokens()
+                    + self.cached_input_tokens()
+                    + self.output_tokens()
+                    + self.reasoning_output_tokens()
+            })
+    }
+
+    fn thread_total_tokens(&self) -> Option<u64> {
+        self.total.as_ref().and_then(|u| u.total_tokens)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -278,7 +362,17 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
     match parsed {
         Ok(CodexEvent::ThreadStarted { .. }) => html! {},
         Ok(CodexEvent::TurnStarted {}) => html! {},
-        Ok(CodexEvent::TurnCompleted { usage }) => render_turn_completed(usage.as_ref()),
+        Ok(CodexEvent::TurnCompleted {
+            usage,
+            duration_ms,
+            turn_id,
+            status,
+        }) => render_turn_completed(
+            usage.as_ref(),
+            duration_ms,
+            turn_id.as_deref(),
+            status.as_deref(),
+        ),
         Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref()),
         Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
             render_item(item.as_ref(), false)
@@ -405,7 +499,17 @@ pub fn render_codex_message_content(json: &str) -> Html {
             render_item(item.as_ref(), false)
         }
         Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
-        Ok(CodexEvent::TurnCompleted { usage }) => render_turn_completed(usage.as_ref()),
+        Ok(CodexEvent::TurnCompleted {
+            usage,
+            duration_ms,
+            turn_id,
+            status,
+        }) => render_turn_completed(
+            usage.as_ref(),
+            duration_ms,
+            turn_id.as_deref(),
+            status.as_deref(),
+        ),
         Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref()),
         Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
         Ok(CodexEvent::TurnDiffUpdated { params }) => {
@@ -607,25 +711,87 @@ fn render_todo_list(items: Option<&[TodoEntry]>, completed: bool) -> Html {
     tool_card("\u{2611}", "Todo List".into(), None, body, completed)
 }
 
-fn render_turn_completed(usage: Option<&CodexUsage>) -> Html {
-    let input = usage.and_then(|u| u.input_tokens).unwrap_or(0);
-    let output = usage.and_then(|u| u.output_tokens).unwrap_or(0);
-    let cached = usage.and_then(|u| u.cached_input_tokens).unwrap_or(0);
+fn render_turn_completed(
+    usage: Option<&CodexUsage>,
+    duration_ms: Option<u64>,
+    turn_id: Option<&str>,
+    status: Option<&str>,
+) -> Html {
+    let input = usage.map(CodexUsage::input_tokens).unwrap_or(0);
+    let output = usage.map(CodexUsage::output_tokens).unwrap_or(0);
+    let cached = usage.map(CodexUsage::cached_input_tokens).unwrap_or(0);
+    let reasoning = usage.map(CodexUsage::reasoning_output_tokens).unwrap_or(0);
+    let total = usage.map(CodexUsage::total_tokens).unwrap_or(0);
+    let thread_total = usage.and_then(CodexUsage::thread_total_tokens);
+    let context_window = usage.and_then(|u| u.model_context_window);
 
-    let tooltip = format!("Input: {} | Output: {} | Cached: {}", input, output, cached);
+    let mut tooltip = format!(
+        "Input: {} | Output: {} | Cached: {} | Reasoning: {} | Total: {}",
+        input, output, cached, reasoning, total
+    );
+    if let Some(thread_total) = thread_total {
+        tooltip.push_str(&format!(" | Thread total: {}", thread_total));
+    }
+    if let Some(context_window) = context_window {
+        tooltip.push_str(&format!(" | Context window: {}", context_window));
+    }
+    let status_title = turn_id.unwrap_or("Codex turn").to_string();
 
     html! {
         <div class="claude-message result-message success">
             <div class="result-stats-bar">
                 <span class="result-status success">{ "\u{2713}" }</span>
                 {
-                    if input > 0 || output > 0 {
+                    if let Some(ms) = duration_ms {
+                        html! {
+                            <span class="stat-item duration" title="Turn duration">
+                                { format_duration(ms) }
+                            </span>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+                {
+                    if input > 0 || output > 0 || cached > 0 || reasoning > 0 {
                         html! {
                             <>
                                 <span class="stat-item tokens" title={tooltip}>
                                     { format!("{}\u{2193} {}\u{2191}", input, output) }
                                 </span>
+                                if cached > 0 {
+                                    <span class="stat-item tokens" title="Cached input tokens">
+                                        { format!("{} cached", cached) }
+                                    </span>
+                                }
+                                if reasoning > 0 {
+                                    <span class="stat-item tokens" title="Reasoning output tokens">
+                                        { format!("{} reasoning", reasoning) }
+                                    </span>
+                                }
                             </>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+                {
+                    if let (Some(thread_total), Some(context_window)) = (thread_total, context_window) {
+                        html! {
+                            <span class="stat-item turns" title="Thread tokens / model context window">
+                                { format!("{} / {} ctx", thread_total, context_window) }
+                            </span>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+                {
+                    if let Some(status) = status {
+                        html! {
+                            <span class="stat-item stop-reason" title={status_title.clone()}>
+                                { status }
+                            </span>
                         }
                     } else {
                         html! {}
@@ -1072,12 +1238,16 @@ mod tests {
                 input_tokens: Some(100),
                 cached_input_tokens: Some(50),
                 output_tokens: Some(200),
+                ..Default::default()
             }),
+            duration_ms: Some(4200),
+            turn_id: Some("turn-1".into()),
+            status: Some("completed".into()),
         };
         let json = serde_json::to_string(&event).unwrap();
         let back: CodexEvent = serde_json::from_str(&json).unwrap();
         assert!(
-            matches!(back, CodexEvent::TurnCompleted { usage: Some(ref u) } if u.output_tokens == Some(200))
+            matches!(back, CodexEvent::TurnCompleted { usage: Some(ref u), duration_ms: Some(4200), .. } if u.output_tokens() == 200)
         );
     }
 

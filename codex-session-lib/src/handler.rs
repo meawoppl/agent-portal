@@ -21,9 +21,12 @@ use crate::helpers::format_request_id;
 pub(crate) fn handle_codex_server_message(
     msg: ServerMessage,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
+    latest_token_usage: Option<&serde_json::Value>,
 ) -> (bool, bool) {
     match msg {
-        ServerMessage::Notification(notif) => handle_notification(notif, event_tx),
+        ServerMessage::Notification(notif) => {
+            handle_notification(notif, event_tx, latest_token_usage)
+        }
         ServerMessage::Request { id, request } => {
             handle_request(format_request_id(&id), request, event_tx)
         }
@@ -33,6 +36,7 @@ pub(crate) fn handle_codex_server_message(
 fn handle_notification(
     notif: Notification,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
+    latest_token_usage: Option<&serde_json::Value>,
 ) -> (bool, bool) {
     match notif {
         // Lifecycle — already handled elsewhere or intentionally silent.
@@ -41,16 +45,16 @@ fn handle_notification(
         | Notification::TurnStarted(_)
         | Notification::ThreadTokenUsageUpdated(_) => (true, false),
 
-        Notification::TurnCompleted(_p) => {
-            // `Turn` has no `usage` field in the typed schema (the pre-refactor
-            // code's `params.get("turn").get("usage")` lookup already returned
-            // null in practice). Preserve that — emit usage: null — and let
-            // `thread/tokenUsage/updated` carry the real usage when codex emits
-            // it. If upstream adds `Turn.usage`, fail-to-compile will surface
-            // here.
+        Notification::TurnCompleted(p) => {
+            let status = serde_json::to_value(&p.turn.status)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string));
             let event = serde_json::json!({
                 "type": "turn.completed",
-                "usage": serde_json::Value::Null,
+                "turn_id": p.turn.id,
+                "status": status,
+                "duration_ms": p.turn.duration_ms,
+                "usage": latest_token_usage.cloned(),
             });
             let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
             (ok, true)
@@ -388,11 +392,18 @@ mod tests {
         out
     }
 
-    fn handle(msg: ServerMessage) -> (Vec<IoEvent>, bool, bool) {
+    fn handle_with_usage(
+        msg: ServerMessage,
+        latest_token_usage: Option<&serde_json::Value>,
+    ) -> (Vec<IoEvent>, bool, bool) {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let (sent, ended) = handle_codex_server_message(msg, &tx);
+        let (sent, ended) = handle_codex_server_message(msg, &tx, latest_token_usage);
         drop(tx);
         (drain(&mut rx), sent, ended)
+    }
+
+    fn handle(msg: ServerMessage) -> (Vec<IoEvent>, bool, bool) {
+        handle_with_usage(msg, None)
     }
 
     #[test]
@@ -413,6 +424,54 @@ mod tests {
                 assert_eq!(value["type"], "thread/compacted");
                 assert_eq!(value["params"]["threadId"], "thread-1");
                 assert_eq!(value["params"]["turnId"], "turn-1");
+            }
+            _ => panic!("expected RawOutput"),
+        }
+    }
+
+    #[test]
+    fn turn_completed_emits_duration_status_and_latest_usage() {
+        let notif: codex_codes::TurnCompletedNotification = serde_json::from_value(json!({
+            "threadId": "thread-1",
+            "turn": {
+                "id": "turn-1",
+                "status": "completed",
+                "durationMs": 4200,
+                "items": []
+            }
+        }))
+        .unwrap();
+        let usage = json!({
+            "last": {
+                "inputTokens": 100,
+                "cachedInputTokens": 25,
+                "outputTokens": 40,
+                "reasoningOutputTokens": 7,
+                "totalTokens": 147
+            },
+            "total": {
+                "inputTokens": 300,
+                "cachedInputTokens": 75,
+                "outputTokens": 90,
+                "reasoningOutputTokens": 17,
+                "totalTokens": 407
+            },
+            "model_context_window": 200000
+        });
+        let msg = ServerMessage::Notification(Notification::TurnCompleted(notif));
+        let (events, sent, ended) = handle_with_usage(msg, Some(&usage));
+
+        assert!(sent);
+        assert!(ended);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            IoEvent::RawOutput(value) => {
+                assert_eq!(value["type"], "turn.completed");
+                assert_eq!(value["turn_id"], "turn-1");
+                assert_eq!(value["status"], "completed");
+                assert_eq!(value["duration_ms"], 4200);
+                assert_eq!(value["usage"]["last"]["inputTokens"], 100);
+                assert_eq!(value["usage"]["model_context_window"], 200000);
             }
             _ => panic!("expected RawOutput"),
         }
