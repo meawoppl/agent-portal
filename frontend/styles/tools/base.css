@@ -103,6 +103,16 @@
     color: var(--accent);
 }
 
+/* When rendered as a block (inside a `pre` or `div` ExpandableText wrapper,
+   or the ExpandableLines `<div class="write-truncated expandable-toggle">`),
+   sit on its own line at the bottom of the output instead of butting up
+   against the preceding content. The inline `<span class="expandable-toggle">`
+   path (used for tool-header chips) keeps its inline flow. */
+div.expandable-toggle {
+    display: block;
+    margin-top: 0.4rem;
+}
+
 .tool-arg-entry {
     white-space: nowrap;
 }
