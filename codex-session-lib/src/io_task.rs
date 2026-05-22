@@ -120,6 +120,7 @@ pub(crate) async fn codex_io_task(
     // Set when a `turn/started` notification arrives; cleared when
     // `turn/completed` arrives.
     let mut current_turn_id: Option<String> = None;
+    let mut latest_token_usage: Option<(String, serde_json::Value)> = None;
 
     loop {
         if turn_active {
@@ -133,6 +134,18 @@ pub(crate) async fn codex_io_task(
                             // can't observe these via the typed handler
                             // below because it consumes the message.
                             if let codex_codes::ServerMessage::Notification(notif) = &msg {
+                                if let codex_codes::Notification::ThreadTokenUsageUpdated(p) =
+                                    notif
+                                {
+                                    latest_token_usage = Some((
+                                        p.turn_id.clone(),
+                                        serde_json::json!({
+                                            "last": &p.token_usage.last,
+                                            "total": &p.token_usage.total,
+                                            "model_context_window": p.token_usage.model_context_window,
+                                        }),
+                                    ));
+                                }
                                 if let Ok((method, params_opt)) =
                                     notif.clone().into_envelope()
                                 {
@@ -154,8 +167,24 @@ pub(crate) async fn codex_io_task(
                                     }
                                 }
                             }
+                            let latest_usage_for_msg =
+                                if let codex_codes::ServerMessage::Notification(
+                                    codex_codes::Notification::TurnCompleted(p),
+                                ) = &msg
+                                {
+                                    latest_token_usage
+                                        .as_ref()
+                                        .filter(|(turn_id, _)| turn_id == &p.turn.id)
+                                        .map(|(_, usage)| usage)
+                                } else {
+                                    None
+                                };
                             let (ok, turn_ended) =
-                                handle_codex_server_message(msg, &event_tx);
+                                handle_codex_server_message(
+                                    msg,
+                                    &event_tx,
+                                    latest_usage_for_msg,
+                                );
                             if turn_ended {
                                 turn_active = false;
                                 if let Some(prompt) = queued_prompts.pop_front() {
