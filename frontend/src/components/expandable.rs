@@ -48,6 +48,11 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
         )
     };
 
+    // Block-context wrappers (`pre`, `div`) render the toggle as a `<div>` so
+    // it sits on its own line at the bottom of the output rather than
+    // butting up against the truncated content. The inline `span` wrapper
+    // keeps the toggle inline — that path is used only for the MCP
+    // key=value chips in tool headers, which must stay on one line.
     match props.tag.as_str() {
         "span" => html! {
             <span class={props.class.clone()}>
@@ -58,13 +63,13 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
         "div" => html! {
             <div class={props.class.clone()}>
                 { linkify_urls(&display) }
-                <span class="expandable-toggle" onclick={toggle}>{ toggle_label }</span>
+                <div class="expandable-toggle" onclick={toggle}>{ toggle_label }</div>
             </div>
         },
         _ => html! {
             <pre class={props.class.clone()}>
                 { linkify_urls(&display) }
-                <span class="expandable-toggle" onclick={toggle}>{ toggle_label }</span>
+                <div class="expandable-toggle" onclick={toggle}>{ toggle_label }</div>
             </pre>
         },
     }
