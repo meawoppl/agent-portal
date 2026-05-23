@@ -1,3 +1,4 @@
+use super::expandable::ExpandableText;
 use super::markdown::render_markdown;
 use super::message_renderer::format_duration;
 use serde::{Deserialize, Serialize};
@@ -594,13 +595,23 @@ fn render_command_execution(
 
     let body = html! {
         <>
-            <pre class="tool-input-content">{ cmd }</pre>
+            <ExpandableText
+                full_text={cmd.to_string()}
+                max_len=500
+                tag="pre"
+                class={classes!("tool-input-content")}
+            />
             {
                 if !out.is_empty() {
                     let class = if is_error { "tool-result error" } else { "tool-result" };
                     html! {
                         <div class={class}>
-                            <pre class="tool-result-content">{ out }</pre>
+                            <ExpandableText
+                                full_text={out.to_string()}
+                                max_len=500
+                                tag="pre"
+                                class={classes!("tool-result-content")}
+                            />
                         </div>
                     }
                 } else {
@@ -975,7 +986,12 @@ fn render_raw_codex(json: &str) -> Html {
                 <span class="message-type-badge raw">{ "Codex Raw" }</span>
             </div>
             <div class="message-body">
-                <pre class="raw-json">{ display }</pre>
+                <ExpandableText
+                    full_text={display}
+                    max_len=500
+                    tag="pre"
+                    class={classes!("raw-json")}
+                />
             </div>
         </div>
     }
