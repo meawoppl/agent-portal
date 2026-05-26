@@ -273,10 +273,9 @@ impl Component for VoiceInput {
                     // Watchdog: iOS sometimes never fires onend after stop().
                     // If Ended hasn't arrived in STOP_WATCHDOG_MS, force-clear.
                     let link = ctx.link().clone();
-                    self.stop_watchdog =
-                        Some(Timeout::new(STOP_WATCHDOG_MS, move || {
-                            link.send_message(VoiceInputMsg::StopWatchdog);
-                        }));
+                    self.stop_watchdog = Some(Timeout::new(STOP_WATCHDOG_MS, move || {
+                        link.send_message(VoiceInputMsg::StopWatchdog);
+                    }));
                     return true;
                 }
 
