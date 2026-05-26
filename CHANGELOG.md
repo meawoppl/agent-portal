@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6.1
+
+- **Fix #782: launcher session-mutation authorization bypass.** `LauncherToServer::InjectInput` and `LauncherToServer::ScheduledRunCompleted` in `backend/src/handlers/websocket/launcher_socket.rs` previously accepted any `session_id` and acted on it (inject input / delete the session) without checking that the session belonged to the launcher's authenticated user or that this launcher had even spawned the session. A compromised, malicious, or buggy launcher could mutate or delete sessions owned by other users by passing arbitrary UUIDs. Added `authorize_launcher_session(...)` which loads the target `Session`, verifies `session.user_id == launcher_user_id` AND `session.launcher_id == this_launcher_id`, and logs a forensic `warn!` (with all four IDs) on failure. Both handlers now precheck through that helper and return early on denial. `ScheduledRunCompleted` additionally verifies `session.scheduled_task_id == reported_task_id` so a launcher can't report completion of *its* task for someone else's session. The only other launcher message that mutates server state, `ScheduledRunStarted`, already filtered `scheduled_tasks` by `user_id` and is unchanged.
+
 ## 2.6.0
 
 - **Replace Google Cloud Speech-to-Text with the browser's Web Speech API.** Voice transcription now runs entirely in the user's browser via `webkitSpeechRecognition` — no server-side STT, no GCP service-account credentials, no `GOOGLE_APPLICATION_CREDENTIALS` env var. The backend no longer ships the `google-cognitive-apis` gRPC client, the `/ws/voice/{session_id}` route, the `pcm-processor.js` AudioWorklet, or the streaming PCM upload path; ~600 LOC of voice plumbing is gone.
