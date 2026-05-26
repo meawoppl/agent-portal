@@ -294,6 +294,51 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     app_state.session_manager.unregister_launcher(&launcher_id);
 }
 
+/// Verify that this launcher is authorized to mutate `session_id`. A
+/// session is mutable by a launcher iff (a) the session's owner matches
+/// the launcher's authenticated user, AND (b) the session was spawned
+/// by this very launcher (matching `launcher_id`).
+///
+/// Without this check, a compromised or buggy launcher could pass any
+/// session UUID and the backend would happily inject input into it or
+/// delete it (see #782). Returns `Ok(Session)` if authorized, else logs
+/// a warn with all the IDs for forensics and returns `Err(())`.
+fn authorize_launcher_session(
+    db_conn: &mut diesel::PgConnection,
+    launcher_id: Uuid,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> Result<crate::models::Session, ()> {
+    use crate::schema::sessions;
+    let session = sessions::table
+        .find(session_id)
+        .first::<crate::models::Session>(db_conn)
+        .map_err(|e| {
+            warn!(
+                "Launcher {} (user {}) referenced unknown session {}: {}",
+                launcher_id, user_id, session_id, e
+            );
+        })?;
+
+    if session.user_id != user_id {
+        warn!(
+            "Launcher {} (user {}) attempted to act on session {} owned by user {} — denied",
+            launcher_id, user_id, session_id, session.user_id
+        );
+        return Err(());
+    }
+
+    if session.launcher_id != Some(launcher_id) {
+        warn!(
+            "Launcher {} (user {}) attempted to act on session {} spawned by launcher {:?} — denied",
+            launcher_id, user_id, session_id, session.launcher_id
+        );
+        return Err(());
+    }
+
+    Ok(session)
+}
+
 fn handle_launcher_message(
     msg: LauncherToServer,
     launcher_id: Uuid,
@@ -437,6 +482,17 @@ fn handle_launcher_message(
                 "InjectInput for session {} from launcher {}",
                 session_id, launcher_id
             );
+
+            let Ok(mut db_conn) = app_state.db_pool.get() else {
+                return;
+            };
+
+            // Ownership precheck: only this launcher (for its own user) may
+            // inject input into a session it itself spawned. See #782.
+            if authorize_launcher_session(&mut db_conn, launcher_id, user_id, session_id).is_err() {
+                return;
+            }
+
             let session_key = session_id.to_string();
             let content_value = serde_json::Value::String(content);
 
@@ -447,35 +503,33 @@ fn handle_launcher_message(
                 .insert(session_id, (user_id, "Scheduler".to_string()));
 
             // Sequence and send (same pipeline as web client input)
-            if let Ok(mut db_conn) = app_state.db_pool.get() {
-                use crate::schema::{pending_inputs, sessions};
+            use crate::schema::{pending_inputs, sessions};
 
-                let next_seq: i64 = diesel::update(sessions::table.find(session_id))
-                    .set(sessions::input_seq.eq(sessions::input_seq + 1))
-                    .returning(sessions::input_seq)
-                    .get_result(&mut db_conn)
-                    .unwrap_or(0);
+            let next_seq: i64 = diesel::update(sessions::table.find(session_id))
+                .set(sessions::input_seq.eq(sessions::input_seq + 1))
+                .returning(sessions::input_seq)
+                .get_result(&mut db_conn)
+                .unwrap_or(0);
 
-                if next_seq > 0 {
-                    let new_input = crate::models::NewPendingInput {
+            if next_seq > 0 {
+                let new_input = crate::models::NewPendingInput {
+                    session_id,
+                    seq_num: next_seq,
+                    content: serde_json::to_string(&content_value).unwrap_or_default(),
+                };
+                let _ = diesel::insert_into(pending_inputs::table)
+                    .values(&new_input)
+                    .execute(&mut db_conn);
+
+                app_state.session_manager.send_to_session(
+                    &session_key,
+                    ServerToProxy::SequencedInput {
                         session_id,
-                        seq_num: next_seq,
-                        content: serde_json::to_string(&content_value).unwrap_or_default(),
-                    };
-                    let _ = diesel::insert_into(pending_inputs::table)
-                        .values(&new_input)
-                        .execute(&mut db_conn);
-
-                    app_state.session_manager.send_to_session(
-                        &session_key,
-                        ServerToProxy::SequencedInput {
-                            session_id,
-                            seq: next_seq,
-                            content: content_value,
-                            send_mode: None,
-                        },
-                    );
-                }
+                        seq: next_seq,
+                        content: content_value,
+                        send_mode: None,
+                    },
+                );
             }
         }
         LauncherToServer::ScheduledRunStarted {
@@ -514,33 +568,38 @@ fn handle_launcher_message(
 
             // Auto-delete completed scheduled sessions to avoid cluttering the UI.
             // Costs are preserved in deleted_session_costs.
-            if let Ok(mut db_conn) = app_state.db_pool.get() {
-                use crate::schema::sessions;
-                match sessions::table
-                    .find(session_id)
-                    .first::<crate::models::Session>(&mut db_conn)
-                {
-                    Ok(session) => {
-                        if let Err(e) = super::super::helpers::delete_session_with_data(
-                            &mut db_conn,
-                            &session,
-                            true,
-                        ) {
-                            error!(
-                                "Failed to auto-delete scheduled session {}: {:?}",
-                                session_id, e
-                            );
-                        } else {
-                            info!("Auto-deleted completed scheduled session {}", session_id);
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Could not find scheduled session {} for cleanup: {}",
-                            session_id, e
-                        );
-                    }
-                }
+            let Ok(mut db_conn) = app_state.db_pool.get() else {
+                return;
+            };
+
+            // Ownership precheck: only this launcher (for its own user) may
+            // mark its own scheduled run complete. The session must also have
+            // been spawned for this exact task — otherwise a launcher could
+            // pass a sibling user's session UUID with its own task_id. See #782.
+            let session =
+                match authorize_launcher_session(&mut db_conn, launcher_id, user_id, session_id) {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+
+            if session.scheduled_task_id != Some(task_id) {
+                warn!(
+                    "Launcher {} (user {}) reported ScheduledRunCompleted with task {} \
+                     for session {} (its scheduled_task_id is {:?}) — denied",
+                    launcher_id, user_id, task_id, session_id, session.scheduled_task_id
+                );
+                return;
+            }
+
+            if let Err(e) =
+                super::super::helpers::delete_session_with_data(&mut db_conn, &session, true)
+            {
+                error!(
+                    "Failed to auto-delete scheduled session {}: {:?}",
+                    session_id, e
+                );
+            } else {
+                info!("Auto-deleted completed scheduled session {}", session_id);
             }
         }
         LauncherToServer::LauncherRegister { .. } => {}
