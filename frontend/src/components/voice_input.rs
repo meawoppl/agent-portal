@@ -148,8 +148,25 @@ pub enum VoiceInputMsg {
     /// started"` from a plain user-initiated abort.
     RecognitionError(String, String),
     Ended,
+    /// Fallback fired by the stop-watchdog when iOS doesn't deliver `onend`
+    /// within a reasonable window after `stop()`. Idempotent with `Ended`.
+    StopWatchdog,
+    /// Max-duration safety stop. Fires once after `MAX_SESSION_MS` even if
+    /// the recognizer is still alive — prevents a leaked session from holding
+    /// the mic forever.
+    MaxDurationReached,
     HideHint,
 }
+
+/// How long after `recognition.stop()` we wait for iOS's `onend` before
+/// force-clearing `pending_stop` ourselves. 1.5s comfortably covers a normal
+/// teardown (~tens of ms on desktop) but unblocks the user when iOS hangs.
+const STOP_WATCHDOG_MS: u32 = 1500;
+
+/// Hard ceiling on a single recording session. After this elapsed, we trigger
+/// a stop even if the user hasn't tapped — defense against a stuck recognizer
+/// holding the mic indicator on iOS.
+const MAX_SESSION_MS: u32 = 60_000;
 
 /// Reasons the async start path can bail before a session is established.
 pub enum StartFailure {
@@ -208,6 +225,12 @@ pub struct VoiceInput {
     session: Option<ActiveSession>,
     hint_message: Option<&'static str>,
     hint_timer: Option<Timeout>,
+    /// Watchdog set when we call `stop()`; clears `pending_stop` if `onend`
+    /// is late. Cleared on `Ended`.
+    stop_watchdog: Option<Timeout>,
+    /// Max-duration timer set when a session is established. Triggers
+    /// `MaxDurationReached` after `MAX_SESSION_MS`. Cleared on `Ended`.
+    max_duration_timer: Option<Timeout>,
 }
 
 impl Component for VoiceInput {
@@ -223,6 +246,8 @@ impl Component for VoiceInput {
             session: None,
             hint_message: None,
             hint_timer: None,
+            stop_watchdog: None,
+            max_duration_timer: None,
         }
     }
 
@@ -245,6 +270,13 @@ impl Component for VoiceInput {
                     self.is_recording = false;
                     self.pending_stop = true;
                     ctx.props().on_recording_change.emit(false);
+                    // Watchdog: iOS sometimes never fires onend after stop().
+                    // If Ended hasn't arrived in STOP_WATCHDOG_MS, force-clear.
+                    let link = ctx.link().clone();
+                    self.stop_watchdog =
+                        Some(Timeout::new(STOP_WATCHDOG_MS, move || {
+                            link.send_message(VoiceInputMsg::StopWatchdog);
+                        }));
                     return true;
                 }
 
@@ -277,6 +309,11 @@ impl Component for VoiceInput {
                     return true;
                 }
                 self.session = Some(session);
+                // Arm the max-duration safety stop.
+                let link = ctx.link().clone();
+                self.max_duration_timer = Some(Timeout::new(MAX_SESSION_MS, move || {
+                    link.send_message(VoiceInputMsg::MaxDurationReached);
+                }));
                 true
             }
             VoiceInputMsg::StartFailed(failure) => {
@@ -333,11 +370,51 @@ impl Component for VoiceInput {
             VoiceInputMsg::Ended => {
                 self.session = None;
                 self.pending_stop = false;
+                self.stop_watchdog = None;
+                self.max_duration_timer = None;
                 if self.is_recording {
                     self.is_recording = false;
                     ctx.props().on_recording_change.emit(false);
                 }
                 true
+            }
+            VoiceInputMsg::StopWatchdog => {
+                self.stop_watchdog = None;
+                if self.pending_stop {
+                    log::warn!(
+                        "SpeechRecognition.stop() didn't deliver onend within \
+                         {}ms — force-clearing pending_stop",
+                        STOP_WATCHDOG_MS
+                    );
+                    self.pending_stop = false;
+                    self.session = None;
+                    self.max_duration_timer = None;
+                    true
+                } else {
+                    false
+                }
+            }
+            VoiceInputMsg::MaxDurationReached => {
+                self.max_duration_timer = None;
+                if self.session.is_some() {
+                    log::warn!(
+                        "Voice session exceeded {}ms — auto-stopping",
+                        MAX_SESSION_MS
+                    );
+                    // Drop the session; its onend (if it fires) clears the
+                    // rest, but install a watchdog regardless.
+                    self.session = None;
+                    self.is_recording = false;
+                    self.pending_stop = true;
+                    ctx.props().on_recording_change.emit(false);
+                    let link = ctx.link().clone();
+                    self.stop_watchdog = Some(Timeout::new(STOP_WATCHDOG_MS, move || {
+                        link.send_message(VoiceInputMsg::StopWatchdog);
+                    }));
+                    true
+                } else {
+                    false
+                }
             }
             VoiceInputMsg::HideHint => {
                 self.hint_timer = None;
@@ -403,6 +480,8 @@ impl Component for VoiceInput {
     fn destroy(&mut self, _ctx: &Context<Self>) {
         self.session = None;
         self.hint_timer = None;
+        self.stop_watchdog = None;
+        self.max_duration_timer = None;
     }
 }
 
@@ -450,7 +529,10 @@ async fn start_session_async(
             &JsValue::from_bool(val),
         );
     };
-    set_bool("continuous", true);
+    // continuous=false: single-utterance per tap. With true, iOS Safari
+    // never auto-ends and our SessionView's "auto-send on Final" already
+    // implies a one-tap-one-utterance UX anyway. See #840 follow-up.
+    set_bool("continuous", false);
     set_bool("interimResults", true);
 
     let lang = web_sys::window()
