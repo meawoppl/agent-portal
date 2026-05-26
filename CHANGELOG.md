@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.6.3
+
+- **iOS voice follow-up to #840: prevent stuck-recording state.** After 2.6.2 shipped, iOS testing surfaced that the recognizer never naturally terminated — the recording icon stayed lit, and a subsequent tap-to-stop sometimes didn't deliver `onend` either, leaving `pending_stop` set forever (so the next tap showed the busy hint indefinitely). Three changes in `frontend/src/components/voice_input.rs`:
+  - **`continuous = false`** universally. iOS Safari does not reliably honor `continuous = true` (the recognizer doesn't auto-end on silence), and our `SessionView::VoiceTranscription` handler already auto-sends on every Final transcript anyway — so a one-tap-one-utterance UX matches the existing send model. Desktop users get a Siri-style "tap, speak one thing, transcript appears" flow.
+  - **Stop watchdog**: when the user taps to stop, a 1500 ms `Timeout` is scheduled alongside the session drop. If `onend` arrives within the window (the normal path), `Ended` cancels the watchdog. If `onend` is late or never fires (the iOS hang case), the watchdog force-clears `pending_stop` so the user can tap again. A `warn!` logs the fallback for forensics.
+  - **Max-duration safety stop**: a 60 s `Timeout` is armed when a session is established. If it fires while a session is still alive, we drop the session, flip back to idle, and arm the same stop watchdog. Prevents a leaked recognizer from holding the mic indicator indefinitely.
+- Two new message variants (`StopWatchdog`, `MaxDurationReached`) handle the fallback paths; both are idempotent with `Ended`.
+
 ## 2.6.2
 
 - **Fix #840: voice transcription on iOS Safari / iOS Chrome.** iOS WebKit allows only one `SpeechRecognition` per page and races the permission prompt against `recognition.start()` — a captured probe on iOS 18.7 showed the recognizer reaching `start` and `audiostart` and then being killed by `{error: "aborted", message: "Another request is started"}`. The previous implementation matched `aborted` as benign and silently flipped the mic icon back to idle, so the user saw "nothing happened." Three fixes in `frontend/src/components/voice_input.rs`:
