@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6.4
+
+- **Portal version surfaced in the agent's `<system-reminder>`.** The reminder injected at session start (and after each compaction) in `claude-session-lib/src/proxy_session/portal_reminder.rs::agent_facing` now leads with `Agent Portal version X.Y.Z`, captured at compile time via `env!("CARGO_PKG_VERSION")`. The agent now knows which portal release it's running on without having to ask, and operator overrides via `PORTAL_REMINDER_FILE` still get the version line auto-prepended.
+
 ## 2.6.3
 
 - **iOS voice follow-up to #840: prevent stuck-recording state.** After 2.6.2 shipped, iOS testing surfaced that the recognizer never naturally terminated — the recording icon stayed lit, and a subsequent tap-to-stop sometimes didn't deliver `onend` either, leaving `pending_stop` set forever (so the next tap showed the busy hint indefinitely). Three changes in `frontend/src/components/voice_input.rs`:

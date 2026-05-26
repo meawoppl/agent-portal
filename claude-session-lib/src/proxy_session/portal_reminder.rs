@@ -22,6 +22,11 @@ use session_lib::session::Session;
 /// Bundled fallback body (relative to this file).
 const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
 
+/// Running portal version, captured at compile time from the workspace
+/// `Cargo.toml`. Surfaced in the system-reminder envelope so the agent
+/// knows which portal features and fixes are in scope.
+const PORTAL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Resolve the reminder body. Honors `PORTAL_REMINDER_FILE` at call time so
 /// operators can hot-edit the file and have the next compaction pick it up
 /// without restarting the proxy.
@@ -50,7 +55,11 @@ pub fn load_reminder_body() -> String {
 }
 
 fn agent_facing(body: &str) -> String {
-    format!("<system-reminder>\n{}\n</system-reminder>", body.trim())
+    format!(
+        "<system-reminder>\nAgent Portal version {}.\n\n{}\n</system-reminder>",
+        PORTAL_VERSION,
+        body.trim()
+    )
 }
 
 /// Inject the reminder into the agent's stdin only. The user-bound copy was
