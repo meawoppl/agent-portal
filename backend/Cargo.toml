@@ -73,7 +73,6 @@ mini-moka = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 tower-cookies = { version = "0.11", features = ["signed"] }
 bigdecimal = "0.4.10"
-google-cognitive-apis = { version = "0.2.2", features = ["speech-to-text"] }
 memory-serve = "2.1"
 ws-bridge = { workspace = true, features = ["server"] }
 tower_governor = "0.8.0"
