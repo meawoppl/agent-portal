@@ -24,8 +24,7 @@ use wasm_bindgen_futures::{spawn_local, JsFuture};
 use yew::prelude::*;
 
 const UNSUPPORTED_HINT: &str = "Voice input needs the Web Speech API. Try Chrome, Edge, or Safari.";
-const BUSY_HINT: &str =
-    "Voice recognizer is busy — wait a moment and tap again.";
+const BUSY_HINT: &str = "Voice recognizer is busy — wait a moment and tap again.";
 const MIC_DENIED_HINT: &str =
     "Microphone permission was denied. Enable it in your browser settings and try again.";
 
@@ -106,8 +105,8 @@ fn stop_media_stream(stream: &JsValue) {
         let Ok(track) = Reflect::get(&tracks_val, &JsValue::from_f64(i as f64)) else {
             continue;
         };
-        if let Ok(stop_fn) = Reflect::get(&track, &JsValue::from_str("stop"))
-            .and_then(|f| f.dyn_into::<Function>())
+        if let Ok(stop_fn) =
+            Reflect::get(&track, &JsValue::from_str("stop")).and_then(|f| f.dyn_into::<Function>())
         {
             let _ = stop_fn.call0(&track);
         }
@@ -308,12 +307,9 @@ impl Component for VoiceInput {
                 false
             }
             VoiceInputMsg::RecognitionError(kind, message) => {
-                let is_ios_singleton_conflict = kind == "aborted"
-                    && message
-                        .to_ascii_lowercase()
-                        .contains("another request");
-                let is_permission =
-                    kind == "not-allowed" || kind == "service-not-allowed";
+                let is_ios_singleton_conflict =
+                    kind == "aborted" && message.to_ascii_lowercase().contains("another request");
+                let is_permission = kind == "not-allowed" || kind == "service-not-allowed";
                 let is_silent_benign = kind == "no-speech" || kind == "aborted";
 
                 if is_ios_singleton_conflict {
