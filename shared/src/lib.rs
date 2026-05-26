@@ -106,41 +106,6 @@ impl std::str::FromStr for AgentType {
     }
 }
 
-/// Voice WebSocket message types (frontend <-> backend via /ws/voice/:id).
-/// These are NOT part of the typed ws-bridge endpoints because voice mixes
-/// binary audio frames with JSON text messages.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum VoiceMessage {
-    /// Start voice recording session (frontend -> backend)
-    StartVoice {
-        session_id: Uuid,
-        #[serde(default = "default_language_code")]
-        language_code: String,
-    },
-
-    /// Stop voice recording (frontend -> backend)
-    StopVoice { session_id: Uuid },
-
-    /// Transcription result from speech-to-text (backend -> frontend)
-    Transcription {
-        session_id: Uuid,
-        transcript: String,
-        is_final: bool,
-        confidence: f32,
-    },
-
-    /// Voice error (backend -> frontend)
-    VoiceError { session_id: Uuid, message: String },
-
-    /// Voice session ended (backend -> frontend)
-    VoiceEnded { session_id: Uuid },
-}
-
-fn default_language_code() -> String {
-    "en-US".to_string()
-}
-
 /// Cost and token usage information for a single session
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionCost {
@@ -273,9 +238,6 @@ pub struct UserInfo {
     pub email: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
-    /// Whether voice input is enabled for this user (admin-controlled)
-    #[serde(default)]
-    pub voice_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

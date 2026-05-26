@@ -43,9 +43,6 @@ SESSION_SECRET=generate-a-random-32-char-secret-here
 # Optional - Customize app title shown in browser (default: "Agent Portal")
 # APP_TITLE=Agent Portal
 
-# Optional - Google Cloud Speech-to-Text (for server-side voice transcription)
-# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-
 # Optional - Path to proxy binary for downloads (auto-detected if not set)
 # PROXY_BINARY_PATH=/app/claude-portal
 
@@ -190,7 +187,6 @@ docker buildx build \
 | `PORT` | `3000` | Bind port |
 | `BASE_URL` | Auto-detected | Public URL for OAuth callbacks |
 | `APP_TITLE` | `Agent Portal` | Title shown in browser tab |
-| `GOOGLE_APPLICATION_CREDENTIALS` | *(none)* | Path to GCP service account JSON for Speech-to-Text |
 | `PROXY_BINARY_PATH` | Auto-detected | Path to `claude-portal` binary for downloads |
 | `ALLOWED_EMAIL_DOMAIN` | *(none)* | Restrict sign-in to emails from this domain |
 | `ALLOWED_EMAILS` | *(none)* | Comma-separated list of allowed email addresses |

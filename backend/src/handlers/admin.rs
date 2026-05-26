@@ -274,7 +274,6 @@ pub async fn list_users(
             avatar_url: user.avatar_url,
             is_admin: user.is_admin,
             disabled: user.disabled,
-            voice_enabled: user.voice_enabled,
             created_at: user.created_at.to_string(),
             session_count,
             total_spend_usd: usage.cost_usd,
@@ -402,20 +401,6 @@ pub async fn update_user(
         info!(
             "Admin {} set ban_reason for user {}",
             admin.email, target_user.email
-        );
-    }
-
-    if let Some(voice_enabled_val) = update.voice_enabled {
-        diesel::update(schema::users::table.find(user_id))
-            .set(schema::users::voice_enabled.eq(voice_enabled_val))
-            .execute(&mut conn)
-            .map_err(|e| {
-                error!("Failed to update user voice_enabled status: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-        info!(
-            "Admin {} set voice_enabled={} for user {}",
-            admin.email, voice_enabled_val, target_user.email
         );
     }
 

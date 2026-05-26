@@ -48,8 +48,6 @@ pub struct SessionViewProps {
     pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>, Option<String>)>,
     #[prop_or_default]
     pub on_activity: Callback<(Uuid, String, f64)>,
-    #[prop_or(false)]
-    pub voice_enabled: bool,
     #[prop_or_default]
     pub current_user_id: Option<String>,
     #[prop_or(0)]
@@ -715,7 +713,6 @@ impl SessionView {
                 session_id={ctx.props().session.id}
                 focused={ctx.props().focused}
                 ws_connected={self.ws_connected}
-                voice_enabled={ctx.props().voice_enabled}
                 {on_register}
                 {on_send_text}
                 {on_send_frame}

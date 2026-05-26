@@ -330,7 +330,6 @@ pub async fn me(
         name: user.name,
         avatar_url: user.avatar_url,
         is_admin: user.is_admin,
-        voice_enabled: user.voice_enabled,
     }))
 }
 

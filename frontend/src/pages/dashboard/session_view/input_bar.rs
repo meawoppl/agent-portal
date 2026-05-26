@@ -35,9 +35,6 @@ pub struct InputBarProps {
     /// Whether the WebSocket is currently connected. Disables the textarea
     /// + send buttons when false.
     pub ws_connected: bool,
-    /// Whether voice input is enabled for this user. When false the
-    /// microphone button does not render.
-    pub voice_enabled: bool,
     /// Fired exactly once on `create`, handing the parent a callback it can
     /// invoke to push inbound events into the bar. Mirrors the
     /// dispatcher-registration pattern used by `PermissionHandler` and
@@ -655,9 +652,6 @@ impl InputBar {
     }
 
     fn render_voice_input(&self, ctx: &Context<Self>) -> Html {
-        if !ctx.props().voice_enabled {
-            return html! {};
-        }
         let link = ctx.link();
         let session_id = ctx.props().session_id;
         let on_recording_change = link.callback(InputBarMsg::VoiceRecordingChanged);
@@ -667,7 +661,7 @@ impl InputBar {
         let button_ref = self.voice_button_ref.clone();
         html! {
             <VoiceInput
-                {session_id}
+                session_id={Some(session_id)}
                 {on_recording_change}
                 {on_transcription}
                 on_interim_transcription={Some(on_interim_transcription)}

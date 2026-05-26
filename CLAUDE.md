@@ -74,7 +74,6 @@ pub struct AppState {
     pub public_url: String,
     pub cookie_key: Key,
     pub jwt_secret: String,
-    pub speech_credentials_path: Option<String>,
     pub app_title: String,
     pub allowed_email_domain: Option<String>,
     pub allowed_emails: Option<Vec<String>>,
@@ -736,9 +735,8 @@ When making changes, verify:
 | `PORTAL_IMAGE_STORE_MAX_MB` | Backend served-image cache total-byte cap (LRU eviction past this) | Optional (default: 256) |
 | `PORTAL_IMAGE_STORE_TTL_SECS` | Backend served-image per-entry TTL in seconds | Optional (default: 3600) |
 | `PORTAL_REMINDER_FILE` | Path to a markdown file overriding the bundled portal-features reminder (proxy/launcher side). Falls back to default if unset/unreadable. | Optional |
-| `GOOGLE_APPLICATION_CREDENTIALS` | GCP Speech-to-Text creds | Optional |
 
-Note: Dev mode is enabled via `--dev-mode` CLI flag, not an environment variable.
+Note: Dev mode is enabled via `--dev-mode` CLI flag, not an environment variable. Voice input is browser-native (Web Speech API on Chromium / Safari); no server-side speech credentials are needed.
 
 ### Common Imports
 

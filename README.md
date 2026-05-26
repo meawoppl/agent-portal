@@ -8,7 +8,7 @@ A web portal that extends [Claude Code](https://docs.anthropic.com/en/docs/claud
 
 - **Remote Access**: Run Claude Code on dedicated machines, access from any browser
 - **Session Sharing**: Share sessions with team members for collaborative coding
-- **Voice Input**: Dictate commands using browser-based speech recognition
+- **Voice Input**: Dictate commands using the browser's built-in Web Speech API (Chrome, Edge, Safari)
 - **Persistent History**: All conversations stored and accessible across devices
 - **Flexible Authentication**: Configure for single-user, organization-only, or public access
 - **Real-time Sync**: Multiple viewers see updates instantly via WebSocket

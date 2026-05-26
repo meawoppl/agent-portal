@@ -85,7 +85,6 @@ struct UserRowProps {
     user: AdminUserInfo,
     on_toggle_admin: Callback<Uuid>,
     on_toggle_disabled: Callback<Uuid>,
-    on_toggle_voice: Callback<Uuid>,
     current_user_id: Uuid,
 }
 
@@ -102,12 +101,6 @@ fn user_row(props: &UserRowProps) -> Html {
 
     let on_toggle_disabled = {
         let callback = props.on_toggle_disabled.clone();
-        let user_id = user.id;
-        Callback::from(move |_: MouseEvent| callback.emit(user_id))
-    };
-
-    let on_toggle_voice = {
-        let callback = props.on_toggle_voice.clone();
         let user_id = user.id;
         Callback::from(move |_: MouseEvent| callback.emit(user_id))
     };
@@ -156,13 +149,6 @@ fn user_row(props: &UserRowProps) -> Html {
                 >
                     { if user.disabled { "Unban" } else { "Ban" } }
                 </button>
-                <button
-                    class={classes!("voice-toggle", if user.voice_enabled { Some("active") } else { None })}
-                    onclick={on_toggle_voice}
-                    title={if user.voice_enabled { "Disable voice input" } else { "Enable voice input" }}
-                >
-                    { if user.voice_enabled { "Voice: On" } else { "Voice: Off" } }
-                </button>
             </td>
         </tr>
     }
@@ -173,7 +159,6 @@ pub struct AdminUsersTabProps {
     pub users: Vec<AdminUserInfo>,
     pub on_toggle_admin: Callback<Uuid>,
     pub on_toggle_disabled: Callback<Uuid>,
-    pub on_toggle_voice: Callback<Uuid>,
     pub current_user_id: Uuid,
 }
 
@@ -239,7 +224,6 @@ pub fn admin_users_tab(props: &AdminUsersTabProps) -> Html {
                                     user={user.clone()}
                                     on_toggle_admin={props.on_toggle_admin.clone()}
                                     on_toggle_disabled={props.on_toggle_disabled.clone()}
-                                    on_toggle_voice={props.on_toggle_voice.clone()}
                                     current_user_id={props.current_user_id}
                                 />
                             }

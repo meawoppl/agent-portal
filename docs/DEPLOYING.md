@@ -30,9 +30,6 @@ SESSION_SECRET=generate-a-random-32-char-secret-here
 # Optional - Customize app title (default: "Agent Portal")
 # APP_TITLE=Agent Portal
 
-# Optional - Google Cloud Speech-to-Text (for server-side voice transcription)
-# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-
 # Optional - Proxy binary path for downloads (auto-detected)
 # PROXY_BINARY_PATH=/app/claude-portal
 

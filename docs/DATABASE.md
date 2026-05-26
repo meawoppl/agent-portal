@@ -19,7 +19,6 @@ Stores authenticated users. Created on first OAuth login.
 | `updated_at` | TIMESTAMP | No | Last profile update |
 | `is_admin` | BOOL | No | Admin privileges flag |
 | `disabled` | BOOL | No | Account disabled flag |
-| `voice_enabled` | BOOL | No | Voice input access flag |
 | `ban_reason` | TEXT | Yes | Reason for ban (if disabled) |
 | `sound_config` | JSONB | Yes | Per-user sound notification settings |
 

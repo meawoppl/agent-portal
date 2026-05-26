@@ -232,15 +232,13 @@ pub struct DeviceFlowActionResponse {
     pub message: String,
 }
 
-/// Request to update a user's admin/ban/voice settings (admin endpoint)
+/// Request to update a user's admin/ban settings (admin endpoint)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateUserRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_admin: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice_enabled: Option<bool>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -433,8 +431,6 @@ pub struct MeResponse {
     pub avatar_url: Option<String>,
     #[serde(default)]
     pub is_admin: bool,
-    #[serde(default)]
-    pub voice_enabled: bool,
 }
 
 // =============================================================================
@@ -476,8 +472,6 @@ pub struct AdminUserEntry {
     pub is_admin: bool,
     #[serde(default)]
     pub disabled: bool,
-    #[serde(default)]
-    pub voice_enabled: bool,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]

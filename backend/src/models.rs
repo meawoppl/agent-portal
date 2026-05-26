@@ -16,7 +16,6 @@ pub struct User {
     pub updated_at: NaiveDateTime,
     pub is_admin: bool,
     pub disabled: bool,
-    pub voice_enabled: bool,
     pub ban_reason: Option<String>,
     pub sound_config: Option<serde_json::Value>,
 }

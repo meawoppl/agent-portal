@@ -156,7 +156,6 @@ diesel::table! {
         updated_at -> Timestamp,
         is_admin -> Bool,
         disabled -> Bool,
-        voice_enabled -> Bool,
         ban_reason -> Nullable<Text>,
         sound_config -> Nullable<Jsonb>,
     }
