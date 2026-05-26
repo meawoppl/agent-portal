@@ -15,8 +15,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use yew::prelude::*;
 
-const UNSUPPORTED_HINT: &str =
-    "Voice input needs the Web Speech API. Try Chrome, Edge, or Safari.";
+const UNSUPPORTED_HINT: &str = "Voice input needs the Web Speech API. Try Chrome, Edge, or Safari.";
 
 /// Return the `SpeechRecognition` (or `webkitSpeechRecognition`) constructor if
 /// available on the current `window`.
@@ -266,7 +265,11 @@ impl VoiceInput {
             .map_err(|_| "Failed to construct SpeechRecognition".to_string())?;
 
         let set_bool = |name: &str, val: bool| {
-            let _ = Reflect::set(&recognition, &JsValue::from_str(name), &JsValue::from_bool(val));
+            let _ = Reflect::set(
+                &recognition,
+                &JsValue::from_str(name),
+                &JsValue::from_bool(val),
+            );
         };
         set_bool("continuous", true);
         set_bool("interimResults", true);
