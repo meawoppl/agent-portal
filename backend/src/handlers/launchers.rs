@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::auth::extract_user_id;
 use crate::errors::AppError;
+use crate::handlers::websocket::SessionManager;
 use crate::AppState;
 
 /// GET /api/launchers - List connected launchers for the current user
@@ -38,17 +39,7 @@ pub async fn launch_session(
 ) -> Result<Json<LaunchResponse>, AppError> {
     let user_id = extract_user_id(&app_state, &cookies)?;
 
-    // Find the right launcher
-    let launcher_id = if let Some(id) = req.launcher_id {
-        id
-    } else {
-        // Auto-select: pick the first connected launcher for this user
-        let launchers = app_state.session_manager.get_launchers_for_user(&user_id);
-        launchers.first().map(|l| l.launcher_id).ok_or_else(|| {
-            error!("No connected launchers for user {}", user_id);
-            AppError::NotFound("No connected launchers")
-        })?
-    };
+    let launcher_id = resolve_launch_target(&app_state.session_manager, req.launcher_id, user_id)?;
 
     // Create a fresh short-lived proxy token for the child process
     let auth_token = mint_launch_token(&app_state, user_id)?;
@@ -81,6 +72,33 @@ pub async fn launch_session(
     );
 
     Ok(Json(LaunchResponse { request_id }))
+}
+
+fn resolve_launch_target(
+    session_manager: &SessionManager,
+    requested_launcher_id: Option<Uuid>,
+    user_id: Uuid,
+) -> Result<Uuid, AppError> {
+    if let Some(launcher_id) = requested_launcher_id {
+        let launcher = session_manager
+            .launchers
+            .get(&launcher_id)
+            .ok_or(AppError::NotFound("Launcher not found"))?;
+        if launcher.user_id != user_id {
+            warn!(
+                "User {} attempted to launch on launcher {} owned by {}",
+                user_id, launcher_id, launcher.user_id
+            );
+            return Err(AppError::Forbidden);
+        }
+        return Ok(launcher_id);
+    }
+
+    let launchers = session_manager.get_launchers_for_user(&user_id);
+    launchers.first().map(|l| l.launcher_id).ok_or_else(|| {
+        error!("No connected launchers for user {}", user_id);
+        AppError::NotFound("No connected launchers")
+    })
 }
 
 #[derive(Deserialize)]
@@ -321,5 +339,68 @@ pub async fn probe_agents(
             warn!("Probe agents timed out for launcher {}", launcher_id);
             Err(StatusCode::GATEWAY_TIMEOUT)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handlers::websocket::LauncherConnection;
+    use tokio::sync::mpsc;
+
+    fn launcher_for(user_id: Uuid, hostname: &str) -> LauncherConnection {
+        let (sender, _rx) = mpsc::unbounded_channel();
+        LauncherConnection {
+            sender,
+            launcher_name: format!("launcher-{}", hostname),
+            hostname: hostname.to_string(),
+            user_id,
+            running_sessions: Vec::new(),
+            working_directory: None,
+            version: "test".to_string(),
+            token_hash: None,
+            token_expires_at: None,
+        }
+    }
+
+    #[test]
+    fn explicit_launcher_must_belong_to_user() {
+        let manager = SessionManager::new();
+        let owner = Uuid::new_v4();
+        let other_user = Uuid::new_v4();
+        let launcher_id = Uuid::new_v4();
+        manager
+            .try_register_launcher(launcher_id, launcher_for(owner, "host-a"))
+            .unwrap();
+
+        assert!(matches!(
+            resolve_launch_target(&manager, Some(launcher_id), other_user),
+            Err(AppError::Forbidden)
+        ));
+    }
+
+    #[test]
+    fn explicit_launcher_owner_is_allowed() {
+        let manager = SessionManager::new();
+        let owner = Uuid::new_v4();
+        let launcher_id = Uuid::new_v4();
+        manager
+            .try_register_launcher(launcher_id, launcher_for(owner, "host-a"))
+            .unwrap();
+
+        assert_eq!(
+            resolve_launch_target(&manager, Some(launcher_id), owner).unwrap(),
+            launcher_id
+        );
+    }
+
+    #[test]
+    fn missing_explicit_launcher_is_not_found() {
+        let manager = SessionManager::new();
+
+        assert!(matches!(
+            resolve_launch_target(&manager, Some(Uuid::new_v4()), Uuid::new_v4()),
+            Err(AppError::NotFound("Launcher not found"))
+        ));
     }
 }
