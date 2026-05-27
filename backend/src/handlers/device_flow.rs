@@ -20,6 +20,7 @@ use crate::{
     errors::AppError,
     jwt::{create_proxy_token, hash_token},
     models::NewProxyAuthToken,
+    routes,
     schema::proxy_auth_tokens,
     AppState,
 };
@@ -293,7 +294,7 @@ pub async fn device_verify_page(
     // Check if user code exists and get device info
     let store = match &app_state.device_flow_store {
         Some(s) => s,
-        None => return Redirect::temporary("/").into_response(),
+        None => return Redirect::temporary(routes::ROOT).into_response(),
     };
     let store_lock = store.read().await;
     let device_info = store_lock
@@ -304,8 +305,11 @@ pub async fn device_verify_page(
         Some(state) => (state.hostname.clone(), state.working_directory.clone()),
         None => {
             drop(store_lock);
-            return Redirect::temporary("/api/auth/device/error?message=Invalid+or+expired+code")
-                .into_response();
+            return Redirect::temporary(&format!(
+                "{}?message=Invalid+or+expired+code",
+                routes::AUTH_DEVICE_ERROR
+            ))
+            .into_response();
         }
     };
     drop(store_lock);
@@ -329,7 +333,8 @@ pub async fn device_verify_page(
     // User not logged in - redirect to device-specific login endpoint
     // This endpoint will handle OAuth and redirect back to the approval page
     Redirect::temporary(&format!(
-        "/api/auth/device-login?device_user_code={}",
+        "{}?device_user_code={}",
+        routes::AUTH_DEVICE_LOGIN,
         user_code
     ))
     .into_response()

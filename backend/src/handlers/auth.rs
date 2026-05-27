@@ -14,26 +14,18 @@ use tracing::{error, info};
 
 use crate::{
     models::{NewUser, User},
-    AppState,
+    routes, AppState,
 };
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
 const OAUTH_CSRF_COOKIE: &str = "oauth_csrf";
 const OAUTH_DEVICE_CSRF_COOKIE: &str = "oauth_device_csrf";
-const OAUTH_CALLBACK_PATH: &str = "/api/auth/google/callback";
-const ROOT_PATH: &str = "/";
-const DASHBOARD_PATH: &str = "/dashboard";
-const BANNED_PATH: &str = "/banned";
-const ACCESS_DENIED_PATH: &str = "/access-denied";
-const DEV_LOGIN_PATH: &str = "/api/auth/dev-login";
-const DEVICE_APPROVAL_PATH: &str = "/api/auth/device";
-
 /// Regular web login - redirects to Google OAuth
 pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
     let client = match &app_state.oauth_basic_client {
         Some(c) => c,
-        None => return Redirect::temporary(DEV_LOGIN_PATH).into_response(),
+        None => return Redirect::temporary(routes::AUTH_DEV_LOGIN).into_response(),
     };
 
     let auth_request = client
@@ -82,7 +74,7 @@ pub async fn device_login(
 
         if user.disabled {
             info!("Banned user {} attempted dev device login", user.email);
-            return Ok(Redirect::temporary(BANNED_PATH).into_response());
+            return Ok(Redirect::temporary(routes::BANNED).into_response());
         }
 
         info!("Dev mode: auto-logged in for device flow");
@@ -289,7 +281,7 @@ pub async fn callback(
 
     add_session_cookie(&cookies, &app_state, &user);
 
-    Ok(Redirect::temporary(DASHBOARD_PATH))
+    Ok(Redirect::temporary(routes::DASHBOARD))
 }
 
 pub async fn me(
@@ -319,7 +311,7 @@ pub async fn logout(State(app_state): State<Arc<AppState>>, cookies: Cookies) ->
         .add(remove_session_cookie());
 
     info!("User logged out");
-    Redirect::temporary(ROOT_PATH)
+    Redirect::temporary(routes::ROOT)
 }
 
 // Development mode handlers (bypass OAuth)
@@ -351,7 +343,7 @@ pub async fn dev_login(
     add_session_cookie(&cookies, &app_state, &user);
 
     // Redirect to dashboard
-    Ok(Redirect::temporary(DASHBOARD_PATH))
+    Ok(Redirect::temporary(routes::DASHBOARD))
 }
 
 /// Check if an email is allowed based on ALLOWED_EMAIL_DOMAIN and ALLOWED_EMAILS
@@ -382,7 +374,7 @@ fn check_email_allowed(app_state: &AppState, email: &str) -> Result<(), Redirect
 
     // Access denied
     info!("Access denied for email: {} (not in allowlist)", email);
-    Err(Redirect::temporary(ACCESS_DENIED_PATH))
+    Err(Redirect::temporary(routes::ACCESS_DENIED))
 }
 
 fn add_session_cookie(cookies: &Cookies, app_state: &AppState, user: &User) {
@@ -393,7 +385,7 @@ fn add_session_cookie(cookies: &Cookies, app_state: &AppState, user: &User) {
 
 fn session_cookie(user: &User, secure: bool) -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
-    cookie.set_path(ROOT_PATH);
+    cookie.set_path(routes::ROOT);
     cookie.set_http_only(true);
     cookie.set_secure(secure);
     cookie.set_same_site(SameSite::Lax);
@@ -402,7 +394,7 @@ fn session_cookie(user: &User, secure: bool) -> Cookie<'static> {
 
 fn remove_session_cookie() -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE_NAME, "");
-    cookie.set_path(ROOT_PATH);
+    cookie.set_path(routes::ROOT);
     cookie.set_http_only(true);
     cookie.set_secure(true);
     cookie.set_same_site(SameSite::Lax);
@@ -413,7 +405,7 @@ fn remove_session_cookie() -> Cookie<'static> {
 fn banned_redirect(reason: &str) -> Redirect {
     Redirect::temporary(&format!(
         "{}?reason={}",
-        BANNED_PATH,
+        routes::BANNED,
         encode_query_value(reason)
     ))
 }
@@ -421,7 +413,7 @@ fn banned_redirect(reason: &str) -> Redirect {
 fn device_approval_redirect(user_code: &str) -> Redirect {
     Redirect::temporary(&format!(
         "{}?user_code={}",
-        DEVICE_APPROVAL_PATH,
+        routes::AUTH_DEVICE,
         encode_query_value(user_code)
     ))
 }
@@ -443,7 +435,7 @@ fn encode_query_value(value: &str) -> String {
 
 fn oauth_csrf_cookie(name: &'static str, value: &str, secure: bool) -> Cookie<'static> {
     let mut cookie = Cookie::new(name, value.to_owned());
-    cookie.set_path(OAUTH_CALLBACK_PATH);
+    cookie.set_path(routes::AUTH_GOOGLE_CALLBACK);
     cookie.set_http_only(true);
     cookie.set_secure(secure);
     cookie.set_same_site(SameSite::Lax);
@@ -453,7 +445,7 @@ fn oauth_csrf_cookie(name: &'static str, value: &str, secure: bool) -> Cookie<'s
 
 fn remove_oauth_csrf_cookie(name: &'static str) -> Cookie<'static> {
     let mut cookie = Cookie::new(name, "");
-    cookie.set_path(OAUTH_CALLBACK_PATH);
+    cookie.set_path(routes::AUTH_GOOGLE_CALLBACK);
     cookie.set_max_age(tower_cookies::cookie::time::Duration::ZERO);
     cookie
 }
