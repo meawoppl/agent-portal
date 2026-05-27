@@ -1,11 +1,13 @@
 mod appearance_panel;
 mod launchers_panel;
+mod performance_panel;
 mod sessions_panel;
 mod sounds_panel;
 mod tokens_panel;
 
 use appearance_panel::AppearancePanel;
 use launchers_panel::{count_expiring_launchers, LaunchersPanel};
+use performance_panel::PerformancePanel;
 use sessions_panel::SessionsPanel;
 use shared::{LauncherInfo, ProxyTokenInfo, SessionInfo};
 use sounds_panel::SoundsPanel;
@@ -18,6 +20,7 @@ enum SettingsTab {
     Tokens,
     Launchers,
     Sounds,
+    Performance,
     Appearance,
 }
 
@@ -74,6 +77,11 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_sounds_tab = {
         let active_tab = active_tab.clone();
         Callback::from(move |_| active_tab.set(SettingsTab::Sounds))
+    };
+
+    let on_performance_tab = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |_| active_tab.set(SettingsTab::Performance))
     };
 
     let on_appearance_tab = {
@@ -135,6 +143,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     { "Sounds" }
                 </button>
                 <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Performance).then_some("active"))}
+                    onclick={on_performance_tab}
+                >
+                    { "Performance" }
+                </button>
+                <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Appearance).then_some("active"))}
                     onclick={on_appearance_tab}
                 >
@@ -154,6 +168,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Sessions {
                     <SessionsPanel on_sessions_loaded={on_sessions_loaded} />
+                }
+                if *active_tab == SettingsTab::Performance {
+                    <PerformancePanel />
                 }
                 if *active_tab == SettingsTab::Appearance {
                     <AppearancePanel />

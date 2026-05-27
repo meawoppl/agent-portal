@@ -732,6 +732,73 @@ pub struct TurnMetricsResponse {
     pub metrics: Vec<TurnMetrics>,
 }
 
+// =============================================================================
+// Aggregated turn-metrics endpoint (`GET /api/metrics/turns`)
+//
+// Powers the Settings → Performance page (PR 4). Bucketed (`hour` | `day`)
+// rollups grouped by `(agent_type, model, service_tier)` over a sliding window
+// (`7d` / `30d` / `48h` / `2h`, …). Each row carries server-side computed
+// counts, p50/p95 latency / throughput aggregates, token sums, cost sum, and
+// the stop-reason histogram for the bucket.
+// =============================================================================
+
+/// One bucket in the `GET /api/metrics/turns` response. Aggregates `turn_metrics`
+/// rows over the time slice keyed by `bucket_start`, grouped by
+/// `(agent_type, model, service_tier)`. Percentiles and throughput are computed
+/// server-side via Postgres `percentile_cont(...)` so the frontend gets ready-
+/// to-plot scalars.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MetricBucket {
+    /// Bucket start timestamp (UTC). `date_trunc('hour' | 'day', started_at)`.
+    pub bucket_start: DateTime<Utc>,
+    pub agent_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    // Counts
+    pub turn_count: i64,
+    pub error_count: i64,
+    // Latency aggregates (millis)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_p50_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_p95_ms: Option<i64>,
+    /// Throughput in output tokens per second (computed server-side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throughput_p50_tps: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throughput_p95_tps: Option<f64>,
+    // Tokens
+    pub input_tokens_sum: i64,
+    pub output_tokens_sum: i64,
+    pub cache_read_tokens_sum: i64,
+    pub cache_creation_tokens_sum: i64,
+    // Cost
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd_sum: Option<f64>,
+    /// Stop-reason mix for this bucket — keyed by the raw `stop_reason` string
+    /// (`end_turn`, `max_tokens`, `tool_use`, …). Rows with `is_error = true`
+    /// fold into the `"error"` key regardless of their `stop_reason` value so
+    /// the stacked-area chart's red band reads as "errors" not as a particular
+    /// reason. Rows with `stop_reason = NULL && is_error = false` fold into
+    /// `"unknown"`.
+    #[serde(default)]
+    pub stop_reason_counts: BTreeMap<String, i64>,
+}
+
+/// Response shape for `GET /api/metrics/turns?bucket=…&window=…`.
+///
+/// Buckets are ordered `(bucket_start ASC, agent_type ASC, model ASC, tier ASC)`
+/// so the frontend can stream-render a stacked area / multi-line chart without
+/// a second sort. The frontend `(model, service_tier)` drop-down filters
+/// client-side.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MetricBucketsResponse {
+    #[serde(default)]
+    pub buckets: Vec<MetricBucket>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1005,6 +1072,72 @@ mod tests {
         assert_eq!(json["total_cost_usd"], 0.0145);
         let parsed: TurnMetrics = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, metrics);
+    }
+
+    /// `MetricBucket` round-trip. Claude row with all fields populated; the
+    /// stop-reason mix has a couple of representative entries.
+    #[test]
+    fn metric_bucket_full_roundtrip() {
+        let bucket_start = chrono::DateTime::parse_from_rfc3339("2026-05-27T18:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut counts = BTreeMap::new();
+        counts.insert("end_turn".to_string(), 5);
+        counts.insert("max_tokens".to_string(), 1);
+        let bucket = MetricBucket {
+            bucket_start,
+            agent_type: "claude".to_string(),
+            model: Some("claude-opus-4-7".to_string()),
+            service_tier: Some("standard".to_string()),
+            turn_count: 6,
+            error_count: 0,
+            ttft_p50_ms: Some(420),
+            ttft_p95_ms: Some(1200),
+            throughput_p50_tps: Some(47.5),
+            throughput_p95_tps: Some(65.0),
+            input_tokens_sum: 12_000,
+            output_tokens_sum: 3_400,
+            cache_read_tokens_sum: 800,
+            cache_creation_tokens_sum: 200,
+            total_cost_usd_sum: Some(0.18),
+            stop_reason_counts: counts,
+        };
+        let json = serde_json::to_value(&bucket).unwrap();
+        assert_eq!(json["agent_type"], "claude");
+        assert_eq!(json["turn_count"], 6);
+        assert_eq!(json["stop_reason_counts"]["end_turn"], 5);
+        let parsed: MetricBucket = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, bucket);
+    }
+
+    /// `MetricBucketsResponse` round-trip via the top-level envelope.
+    #[test]
+    fn metric_buckets_response_roundtrip() {
+        let bucket = MetricBucket {
+            bucket_start: chrono::Utc::now(),
+            agent_type: "codex".to_string(),
+            model: None,
+            service_tier: None,
+            turn_count: 3,
+            error_count: 1,
+            ttft_p50_ms: None,
+            ttft_p95_ms: None,
+            throughput_p50_tps: None,
+            throughput_p95_tps: None,
+            input_tokens_sum: 0,
+            output_tokens_sum: 0,
+            cache_read_tokens_sum: 0,
+            cache_creation_tokens_sum: 0,
+            total_cost_usd_sum: None,
+            stop_reason_counts: BTreeMap::new(),
+        };
+        let resp = MetricBucketsResponse {
+            buckets: vec![bucket.clone()],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert!(json["buckets"].is_array());
+        let parsed: MetricBucketsResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.buckets, vec![bucket]);
     }
 
     /// Codex-shape: cost is `None` and many of the optional fields are also
