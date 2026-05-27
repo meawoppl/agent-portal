@@ -1,3 +1,4 @@
+pub mod charts;
 pub mod codex_renderer;
 pub mod copy_button;
 mod copy_command;
