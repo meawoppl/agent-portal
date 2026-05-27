@@ -16,6 +16,8 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
+    auth,
+    errors::AppError,
     jwt::{create_proxy_token, hash_token},
     models::NewProxyAuthToken,
     schema::proxy_auth_tokens,
@@ -74,6 +76,24 @@ impl IntoResponse for DeviceFlowApiError {
             }),
         )
             .into_response()
+    }
+}
+
+fn auth_error_to_device_flow(error: AppError, action: &str) -> DeviceFlowApiError {
+    match error {
+        AppError::Forbidden => DeviceFlowApiError {
+            status: StatusCode::FORBIDDEN,
+            error: "forbidden".to_string(),
+            message: format!("You are not allowed to {} device authorization", action),
+        },
+        AppError::DbPool | AppError::DbQuery(_) => {
+            DeviceFlowApiError::internal_error("Database connection failed")
+        }
+        _ => DeviceFlowApiError {
+            status: StatusCode::UNAUTHORIZED,
+            error: "unauthorized".to_string(),
+            message: format!("You must be logged in to {} device authorization", action),
+        },
     }
 }
 
@@ -323,21 +343,8 @@ pub async fn device_approve(
     cookies: Cookies,
     Json(req): Json<ApproveRequest>,
 ) -> Result<Json<DeviceFlowActionResponse>, DeviceFlowApiError> {
-    // Verify user is logged in
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or_else(|| DeviceFlowApiError {
-            status: StatusCode::UNAUTHORIZED,
-            error: "unauthorized".to_string(),
-            message: "You must be logged in to approve device authorization".to_string(),
-        })?;
-
-    let user_id: Uuid = cookie.value().parse().map_err(|_| DeviceFlowApiError {
-        status: StatusCode::UNAUTHORIZED,
-        error: "unauthorized".to_string(),
-        message: "Invalid session".to_string(),
-    })?;
+    let user_id = auth::extract_user_id(&app_state, &cookies)
+        .map_err(|e| auth_error_to_device_flow(e, "approve"))?;
 
     let store = app_state
         .device_flow_store
@@ -366,21 +373,8 @@ pub async fn device_deny(
     cookies: Cookies,
     Json(req): Json<ApproveRequest>,
 ) -> Result<Json<DeviceFlowActionResponse>, DeviceFlowApiError> {
-    // Verify user is logged in
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or_else(|| DeviceFlowApiError {
-            status: StatusCode::UNAUTHORIZED,
-            error: "unauthorized".to_string(),
-            message: "You must be logged in to deny device authorization".to_string(),
-        })?;
-
-    let _user_id: Uuid = cookie.value().parse().map_err(|_| DeviceFlowApiError {
-        status: StatusCode::UNAUTHORIZED,
-        error: "unauthorized".to_string(),
-        message: "Invalid session".to_string(),
-    })?;
+    auth::extract_user_id(&app_state, &cookies)
+        .map_err(|e| auth_error_to_device_flow(e, "deny"))?;
 
     let store = app_state
         .device_flow_store
