@@ -1,3 +1,4 @@
+use super::copy_button::CopyButton;
 use super::expandable::ExpandableText;
 use super::markdown::render_markdown;
 use super::message_renderer::format_duration;
@@ -1027,6 +1028,9 @@ fn render_raw_codex(json: &str) -> Html {
         <div class="claude-message raw-message">
             <div class="message-header">
                 <span class="message-type-badge raw">{ "Codex Raw" }</span>
+                // Copy button so the user can paste the raw event into an
+                // issue or chat to request a typed renderer for it.
+                <CopyButton text={display.clone()} title="Copy raw event" />
             </div>
             <div class="message-body">
                 <ExpandableText
