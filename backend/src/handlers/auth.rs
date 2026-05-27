@@ -11,7 +11,6 @@ use shared::api::MeResponse;
 use std::sync::Arc;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 use tracing::{error, info};
-use uuid::Uuid;
 
 use crate::{
     models::{NewUser, User},
@@ -301,28 +300,13 @@ pub async fn me(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<Json<MeResponse>, StatusCode> {
-    // Extract user ID from signed session cookie
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let user_id: Uuid = cookie
-        .value()
-        .parse()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    // Fetch user from database
-    use crate::schema::users::dsl::*;
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let user = users
-        .find(user_id)
-        .first::<User>(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let user = crate::auth::extract_user(&app_state, &cookies).map_err(|e| match e {
+        crate::errors::AppError::Forbidden => StatusCode::FORBIDDEN,
+        crate::errors::AppError::DbPool | crate::errors::AppError::DbQuery(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        _ => StatusCode::UNAUTHORIZED,
+    })?;
 
     Ok(Json(MeResponse {
         id: user.id,
