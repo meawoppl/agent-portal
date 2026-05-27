@@ -115,9 +115,40 @@ pub fn handle_turn_metrics_report(
         total_cost_usd: inserted.total_cost_usd,
     };
 
+    // Per-session broadcast: feeds the `SessionView` per-turn footer (PR 2).
+    // Reaches web clients that explicitly opened the session view.
     if let Some(key) = session_key {
         session_manager
-            .broadcast_to_web_clients(key, ServerToClient::TurnMetrics(Box::new(payload)));
+            .broadcast_to_web_clients(key, ServerToClient::TurnMetrics(Box::new(payload.clone())));
+    }
+    // Per-user broadcast: feeds the dashboard-header sparkline pill (PR 3).
+    // Look up every member of this session and forward the same frame to
+    // their user-level `/ws/client` connections. Dashboards stay on the
+    // user channel (not a session channel) so this is the only path that
+    // reaches them live; without it the pill only refreshes on REST
+    // hydration (mount / reload).
+    let member_ids: Vec<Uuid> = {
+        use crate::schema::session_members;
+        match session_members::table
+            .filter(session_members::session_id.eq(session_id))
+            .select(session_members::user_id)
+            .load::<Uuid>(&mut conn)
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                error!(
+                    "Failed to load session members for turn-metrics fanout (session {}): {}",
+                    session_id, e
+                );
+                Vec::new()
+            }
+        }
+    };
+    for user_id in member_ids {
+        session_manager.broadcast_to_user(
+            &user_id,
+            ServerToClient::TurnMetrics(Box::new(payload.clone())),
+        );
     }
 }
 
