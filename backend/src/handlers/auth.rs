@@ -139,6 +139,13 @@ pub async fn callback(
         .oauth_basic_client
         .as_ref()
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let http_client = oauth2::reqwest::ClientBuilder::new()
+        .redirect(oauth2::reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| {
+            error!("Failed to build OAuth HTTP client: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     // Verify CSRF state token before exchanging the OAuth code.
     let device_state = query.state.as_deref().and_then(parse_device_oauth_state);
@@ -196,7 +203,7 @@ pub async fn callback(
         oauth2::basic::BasicTokenType,
     > = client
         .exchange_code(AuthorizationCode::new(query.code))
-        .request_async(oauth2::reqwest::async_http_client)
+        .request_async(&http_client)
         .await
         .map_err(|e| {
             error!("Failed to exchange code: {}", e);

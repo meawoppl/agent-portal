@@ -13,7 +13,10 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
+use oauth2::{
+    basic::BasicClient, AuthUrl, ClientId, ClientSecret, EndpointNotSet, EndpointSet, RedirectUrl,
+    TokenUrl,
+};
 use shared::WsEndpoint;
 use std::{env, net::SocketAddr, sync::Arc};
 use tower_cookies::{CookieManagerLayer, Key};
@@ -34,12 +37,15 @@ struct Args {
     dev_mode: bool,
 }
 
+type GoogleOAuthClient =
+    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub session_manager: SessionManager,
-    pub oauth_basic_client: Option<BasicClient>,
+    pub oauth_basic_client: Option<GoogleOAuthClient>,
     pub device_flow_store: Option<DeviceFlowStore>,
     pub public_url: String,
     pub cookie_key: Key,
@@ -122,7 +128,10 @@ async fn main() -> anyhow::Result<()> {
         )?;
 
         Some(
-            BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url))
+            BasicClient::new(client_id)
+                .set_client_secret(client_secret)
+                .set_auth_uri(auth_url)
+                .set_token_uri(token_url)
                 .set_redirect_uri(redirect_uri),
         )
     } else {
