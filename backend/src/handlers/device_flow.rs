@@ -402,16 +402,20 @@ fn render_approval_page(
     hostname: Option<&str>,
     working_directory: Option<&str>,
 ) -> String {
-    let hostname_display = hostname.unwrap_or("Unknown device");
-    let working_dir_display = working_directory
-        .map(|wd| {
-            // Extract just the last component (likely repo name)
-            std::path::Path::new(wd)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(wd)
-        })
-        .unwrap_or("Unknown directory");
+    let hostname_display = escape_html_text(hostname.unwrap_or("Unknown device"));
+    let working_dir_display = escape_html_text(
+        working_directory
+            .map(|wd| {
+                // Extract just the last component (likely repo name)
+                std::path::Path::new(wd)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(wd)
+            })
+            .unwrap_or("Unknown directory"),
+    );
+    let user_code_display = escape_html_text(user_code);
+    let user_code_json = serde_json::to_string(user_code).unwrap_or_else(|_| "\"\"".to_string());
 
     format!(
         r#"<!DOCTYPE html>
@@ -563,7 +567,7 @@ fn render_approval_page(
             <div class="value">{working_dir_display}</div>
         </div>
 
-        <div class="code-display">{user_code}</div>
+        <div class="code-display">{user_code_display}</div>
 
         <div class="buttons">
             <button class="deny" onclick="denyDevice()">Deny</button>
@@ -576,7 +580,7 @@ fn render_approval_page(
     </div>
 
     <script>
-        const userCode = "{user_code}";
+        const userCode = {user_code_json};
 
         async function approveDevice() {{
             try {{
@@ -627,6 +631,21 @@ fn render_approval_page(
 </body>
 </html>"#
     )
+}
+
+fn escape_html_text(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 const DEVICE_CODE_FORM_HTML: &str = r#"<!DOCTYPE html>
@@ -1178,5 +1197,32 @@ mod tests {
             DEVICE_CODE_FORM_HTML.contains("pattern="),
             "Should have input validation pattern"
         );
+    }
+
+    #[test]
+    fn approval_page_escapes_device_metadata() {
+        let html = render_approval_page(
+            "ABC-123",
+            Some(r#"<img src=x onerror="alert(1)">"#),
+            Some(r#"repo<script>alert('x')"#),
+        );
+
+        assert!(!html.contains("<img src=x"));
+        assert!(!html.contains("<script>alert"));
+        assert!(html.contains("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"));
+        assert!(html.contains("repo&lt;script&gt;alert(&#39;x&#39;)"));
+    }
+
+    #[test]
+    fn approval_page_serializes_user_code_as_javascript_string() {
+        let html = render_approval_page(r#"ABC-123";alert(1)//"#, None, None);
+
+        assert!(html.contains(r#"const userCode = "ABC-123\";alert(1)//";"#));
+        assert!(!html.contains(r#"const userCode = "ABC-123";alert(1)//";"#));
+    }
+
+    #[test]
+    fn escape_html_text_escapes_text_node_metacharacters() {
+        assert_eq!(escape_html_text(r#"<>&"'"#), "&lt;&gt;&amp;&quot;&#39;");
     }
 }
