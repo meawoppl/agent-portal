@@ -6,6 +6,7 @@ mod permissions;
 mod proxy_socket;
 mod registration;
 mod session_manager;
+mod turn_metrics;
 mod web_client_socket;
 
 pub use session_manager::{

@@ -69,17 +69,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    session_members (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        user_id -> Uuid,
-        #[max_length = 20]
-        role -> Varchar,
-        created_at -> Timestamp,
-    }
-}
-
-diesel::table! {
     scheduled_tasks (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -102,6 +91,17 @@ diesel::table! {
         last_run_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    session_members (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 20]
+        role -> Varchar,
+        created_at -> Timestamp,
     }
 }
 
@@ -143,6 +143,35 @@ diesel::table! {
 }
 
 diesel::table! {
+    turn_metrics (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        user_message_id -> Nullable<Uuid>,
+        agent_type -> Text,
+        model -> Nullable<Text>,
+        service_tier -> Nullable<Text>,
+        started_at -> Timestamptz,
+        first_token_at -> Nullable<Timestamptz>,
+        completed_at -> Nullable<Timestamptz>,
+        ttft_ms -> Nullable<Int8>,
+        total_duration_ms -> Nullable<Int8>,
+        generation_duration_ms -> Nullable<Int8>,
+        max_inter_token_gap_ms -> Nullable<Int8>,
+        input_tokens -> Int8,
+        output_tokens -> Int8,
+        cache_creation_tokens -> Int8,
+        cache_read_tokens -> Int8,
+        thinking_tokens -> Int8,
+        stop_reason -> Nullable<Text>,
+        is_error -> Bool,
+        tool_call_count -> Int4,
+        stream_restarts -> Int4,
+        total_cost_usd -> Nullable<Float8>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     users (id) {
         id -> Uuid,
         #[max_length = 255]
@@ -171,6 +200,8 @@ diesel::joinable!(scheduled_tasks -> users (user_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
+diesel::joinable!(turn_metrics -> messages (user_message_id));
+diesel::joinable!(turn_metrics -> sessions (session_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     deleted_session_costs,
@@ -181,5 +212,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     scheduled_tasks,
     session_members,
     sessions,
+    turn_metrics,
     users,
 );

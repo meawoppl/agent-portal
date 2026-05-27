@@ -12,6 +12,9 @@ serde_json = { workspace = true }
 # UUID
 uuid = { workspace = true }
 
+# Time handling (WASM-compatible with wasmbind)
+chrono = { workspace = true, features = ["wasmbind"] }
+
 # Claude Code types (WASM-compatible, no tokio — inherits types-only from workspace)
 claude-codes = { workspace = true }
 

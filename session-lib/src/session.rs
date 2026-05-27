@@ -233,6 +233,9 @@ impl<A: Agent> Session<A> {
                         permission_suggestions: vec![],
                     });
                 }
+                Some(IoEvent::TurnMetricsReady(metrics)) => {
+                    return Some(SessionEvent::TurnMetricsReady(metrics));
+                }
                 Some(IoEvent::Exited { code }) => {
                     self.state = SessionState::Exited { code };
                     self.command_tx = None;

@@ -1,5 +1,6 @@
 //! Shared API request/response types for HTTP endpoints.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -624,6 +625,94 @@ pub struct ModelUsageEntry {
 /// name string as emitted by claude (e.g. `"claude-opus-4-7[1m]"`).
 pub type ModelUsage = BTreeMap<String, ModelUsageEntry>;
 
+// =============================================================================
+// Per-turn performance metrics (PR 1 of N — capture + persist pipeline)
+// =============================================================================
+
+/// Per-turn performance metrics captured by the proxy and persisted by the
+/// backend. One row per user-input → terminator (`ClaudeOutput::Result` for
+/// Claude, `CodexEvent::TurnCompleted` / `TurnFailed` for Codex).
+///
+/// Shared on the wire in two places:
+///   - proxy → backend: `ProxyToServer::TurnMetricsReport(TurnMetrics)`
+///   - backend → frontend: `ServerToClient::TurnMetrics(TurnMetrics)`
+///
+/// Frontend rendering ships in a follow-up PR; this type is the foundation
+/// the capture pipeline writes to (and the broadcast pipeline reads from).
+///
+/// Field shapes mirror the `turn_metrics` DB columns:
+///   - timestamps are `chrono::DateTime<Utc>` (`Option<_>` for the post-start
+///     ones because an error before any content gives `None`)
+///   - all token counters and derived ms durations are `i64`
+///   - tool/restart counters are `i32`
+///   - `total_cost_usd` is `Option<f64>` because Codex does not surface cost
+///   - `id` and `user_message_id` are server-side (assigned at insert) and
+///     therefore optional on the proxy-emit side; populated by the backend
+///     before broadcast.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurnMetrics {
+    /// DB row id. None on the proxy-emit side; populated by the backend
+    /// after insert and present on the broadcast frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
+
+    pub session_id: Uuid,
+
+    /// Optional foreign key into `messages` for the user prompt that opened
+    /// this turn. The proxy doesn't know the backend's `messages.id`, so
+    /// this stays `None` on the proxy-emit side until the backend wires up
+    /// per-turn linkage in a future PR.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_message_id: Option<Uuid>,
+
+    pub agent_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+
+    pub started_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_token_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_duration_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_duration_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_inter_token_gap_ms: Option<i64>,
+
+    #[serde(default)]
+    pub input_tokens: i64,
+    #[serde(default)]
+    pub output_tokens: i64,
+    #[serde(default)]
+    pub cache_creation_tokens: i64,
+    #[serde(default)]
+    pub cache_read_tokens: i64,
+    #[serde(default)]
+    pub thinking_tokens: i64,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub is_error: bool,
+    #[serde(default)]
+    pub tool_call_count: i32,
+    #[serde(default)]
+    pub stream_restarts: i32,
+
+    /// Cost in USD. Claude provides this on `Result.total_cost_usd`; Codex
+    /// does not surface cost on its wire today, so for codex turns this stays
+    /// `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd: Option<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,5 +946,86 @@ mod tests {
             }
             _ => panic!("Wrong variant"),
         }
+    }
+
+    /// `TurnMetrics` must round-trip with all the optional fields populated
+    /// and with cost present (Claude shape).
+    #[test]
+    fn turn_metrics_full_roundtrip() {
+        let started = chrono::DateTime::parse_from_rfc3339("2026-05-27T18:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let metrics = TurnMetrics {
+            id: None,
+            session_id: Uuid::nil(),
+            user_message_id: None,
+            agent_type: "claude".to_string(),
+            model: Some("claude-opus-4-7".to_string()),
+            service_tier: Some("standard".to_string()),
+            started_at: started,
+            first_token_at: Some(started + chrono::Duration::milliseconds(420)),
+            completed_at: Some(started + chrono::Duration::milliseconds(8000)),
+            ttft_ms: Some(420),
+            total_duration_ms: Some(8000),
+            generation_duration_ms: Some(7580),
+            max_inter_token_gap_ms: Some(150),
+            input_tokens: 1234,
+            output_tokens: 567,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 90,
+            thinking_tokens: 12,
+            stop_reason: Some("end_turn".to_string()),
+            is_error: false,
+            tool_call_count: 3,
+            stream_restarts: 0,
+            total_cost_usd: Some(0.0145),
+        };
+        let json = serde_json::to_value(&metrics).unwrap();
+        assert_eq!(json["agent_type"], "claude");
+        assert_eq!(json["ttft_ms"], 420);
+        assert_eq!(json["total_cost_usd"], 0.0145);
+        let parsed: TurnMetrics = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, metrics);
+    }
+
+    /// Codex-shape: cost is `None` and many of the optional fields are also
+    /// unset. Must serialize without nulls for the skip-if-none fields and
+    /// must round-trip back to the same value.
+    #[test]
+    fn turn_metrics_codex_no_cost_roundtrip() {
+        let started = chrono::DateTime::parse_from_rfc3339("2026-05-27T18:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let metrics = TurnMetrics {
+            id: None,
+            session_id: Uuid::nil(),
+            user_message_id: None,
+            agent_type: "codex".to_string(),
+            model: None,
+            service_tier: None,
+            started_at: started,
+            first_token_at: None,
+            completed_at: Some(started + chrono::Duration::milliseconds(120)),
+            ttft_ms: None,
+            total_duration_ms: Some(120),
+            generation_duration_ms: None,
+            max_inter_token_gap_ms: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            thinking_tokens: 0,
+            stop_reason: Some("failed".to_string()),
+            is_error: true,
+            tool_call_count: 0,
+            stream_restarts: 0,
+            total_cost_usd: None,
+        };
+        let json = serde_json::to_value(&metrics).unwrap();
+        assert_eq!(json["agent_type"], "codex");
+        assert!(json.get("total_cost_usd").is_none());
+        assert!(json.get("ttft_ms").is_none());
+        let parsed: TurnMetrics = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, metrics);
     }
 }

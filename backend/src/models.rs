@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -266,4 +266,69 @@ pub struct NewScheduledTask {
     pub claude_args: serde_json::Value,
     pub agent_type: String,
     pub max_runtime_minutes: i32,
+}
+
+// ============================================================================
+// Turn Metrics Models (per-turn performance metrics; PR 1 of N)
+// ============================================================================
+
+/// One row in `turn_metrics`. Persisted per user-input → terminator. See the
+/// `2026-05-27-184255_add_turn_metrics` migration for column semantics and
+/// the explicit retention note (this table is intentionally outside the
+/// `MESSAGE_RETENTION_DAYS` cleanup sweep).
+#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[diesel(table_name = crate::schema::turn_metrics)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct TurnMetric {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub user_message_id: Option<Uuid>,
+    pub agent_type: String,
+    pub model: Option<String>,
+    pub service_tier: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub first_token_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub ttft_ms: Option<i64>,
+    pub total_duration_ms: Option<i64>,
+    pub generation_duration_ms: Option<i64>,
+    pub max_inter_token_gap_ms: Option<i64>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub thinking_tokens: i64,
+    pub stop_reason: Option<String>,
+    pub is_error: bool,
+    pub tool_call_count: i32,
+    pub stream_restarts: i32,
+    pub total_cost_usd: Option<f64>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::turn_metrics)]
+pub struct NewTurnMetric {
+    pub session_id: Uuid,
+    pub user_message_id: Option<Uuid>,
+    pub agent_type: String,
+    pub model: Option<String>,
+    pub service_tier: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub first_token_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub ttft_ms: Option<i64>,
+    pub total_duration_ms: Option<i64>,
+    pub generation_duration_ms: Option<i64>,
+    pub max_inter_token_gap_ms: Option<i64>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub thinking_tokens: i64,
+    pub stop_reason: Option<String>,
+    pub is_error: bool,
+    pub tool_call_count: i32,
+    pub stream_restarts: i32,
+    pub total_cost_usd: Option<f64>,
 }
