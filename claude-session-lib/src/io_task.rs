@@ -6,15 +6,17 @@
 //! turn-retry state machine (see the `RATE_LIMIT_TEXT_PREFIX` comment
 //! below).
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use claude_codes::io::ContentBlock;
 use claude_codes::{AsyncClient as ClaudeAsyncClient, ClaudeInput, ClaudeOutput};
 use rand::Rng;
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
+use session_lib::{TurnOutcome, TurnTracker};
 use shared::PortalMessage;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Background task that owns the Claude process and handles all I/O.
 ///
@@ -25,6 +27,7 @@ use tokio::sync::mpsc;
 /// By owning the client exclusively, we avoid deadlocks that would occur
 /// if we tried to share it between tasks with a mutex.
 pub(crate) async fn claude_io_task(
+    session_id: Uuid,
     mut client: ClaudeAsyncClient,
     mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
     event_tx: mpsc::UnboundedSender<IoEvent>,
@@ -52,6 +55,17 @@ pub(crate) async fn claude_io_task(
     // can classify the whole turn on its terminator.
     let mut current_turn_was_rate_limited = false;
 
+    // Per-turn performance metrics tracker. `start`ed on each user input,
+    // `record_content_frame`d on assistant/text frames, finalized on
+    // `ClaudeOutput::Result`. See `session_lib::turn_tracker`.
+    let mut turn_tracker = TurnTracker::new(session_id);
+    // Model + service tier observed for the current turn. Picked up from
+    // `ClaudeOutput::System(Init)` (issued at session start) and the
+    // assistant message's `model` field (per-message); the tracker doesn't
+    // know either on its own.
+    let mut current_model: Option<String> = None;
+    let mut current_service_tier: Option<String> = None;
+
     loop {
         tokio::select! {
             // Handle incoming commands (input to send to Claude).
@@ -61,6 +75,10 @@ pub(crate) async fn claude_io_task(
                         // Each fresh user input gets its own retry budget.
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
+                        // Begin per-turn metrics capture. Wall-clock UTC is
+                        // chrono::Utc::now(); the monotonic instant is the
+                        // anchor for TTFT / total / gap durations.
+                        turn_tracker.start(Instant::now(), chrono::Utc::now());
                         let r = client.send(&input).await;
                         last_input = Some(input);
                         r
@@ -81,16 +99,54 @@ pub(crate) async fn claude_io_task(
                     Ok(output) => {
                         // Classify the frame before forwarding so we can
                         // decide whether the turn's terminator triggers an
-                        // auto-retry.
+                        // auto-retry, and feed the per-turn metrics tracker.
                         match &output {
-                            ClaudeOutput::Assistant(asst) => {
-                                let first_text = asst.message.content.iter().find_map(|b| {
-                                    if let ContentBlock::Text(t) = b {
-                                        Some(t.text.as_str())
-                                    } else {
-                                        None
+                            ClaudeOutput::System(sys) => {
+                                // Init frames carry the model name — latch
+                                // it so we can stamp the turn metrics.
+                                if let Some(init) = sys.as_init() {
+                                    if init.model.is_some() {
+                                        current_model = init.model.clone();
                                     }
-                                });
+                                }
+                            }
+                            ClaudeOutput::Assistant(asst) => {
+                                // Any assistant frame counts as a content
+                                // frame for TTFT / inter-token-gap purposes.
+                                // The Result frame carries the *terminator*
+                                // and is excluded from "content".
+                                if turn_tracker.is_running() {
+                                    turn_tracker.record_content_frame(Instant::now());
+                                }
+                                // Refresh per-turn model + service tier from
+                                // the most recent assistant frame.
+                                if !asst.message.model.is_empty() {
+                                    current_model = Some(asst.message.model.clone());
+                                }
+                                if let Some(usage) = &asst.message.usage {
+                                    if let Some(tier) = &usage.service_tier {
+                                        current_service_tier = Some(tier.clone());
+                                    }
+                                }
+                                // Count tool-use blocks for the turn.
+                                for block in &asst.message.content {
+                                    if matches!(
+                                        block,
+                                        ContentBlock::ToolUse(_)
+                                            | ContentBlock::ServerToolUse(_)
+                                            | ContentBlock::McpToolUse(_)
+                                    ) {
+                                        turn_tracker.record_tool_call();
+                                    }
+                                }
+                                let first_text =
+                                    asst.message.content.iter().find_map(|b| {
+                                        if let ContentBlock::Text(t) = b {
+                                            Some(t.text.as_str())
+                                        } else {
+                                            None
+                                        }
+                                    });
                                 if let Some(text) = first_text {
                                     if text.starts_with(RATE_LIMIT_TEXT_PREFIX) {
                                         current_turn_was_rate_limited = true;
@@ -103,6 +159,48 @@ pub(crate) async fn claude_io_task(
                                 current_turn_was_rate_limited = false;
                             }
                             _ => {}
+                        }
+
+                        // Finalize the per-turn metrics on the terminator.
+                        // Done before the auto-retry branch so the metrics
+                        // row reflects this turn, not the eventual retried
+                        // turn (which will get its own row when `start` runs
+                        // again).
+                        if let ClaudeOutput::Result(ref r) = output {
+                            let usage = r.usage.as_ref();
+                            let outcome = TurnOutcome {
+                                agent_type: shared::AgentType::Claude.as_str().to_string(),
+                                model: current_model.clone(),
+                                service_tier: current_service_tier.clone().or_else(|| {
+                                    usage
+                                        .map(|u| u.service_tier.clone())
+                                        .filter(|s| !s.is_empty())
+                                }),
+                                input_tokens: usage
+                                    .map(|u| u.input_tokens as i64)
+                                    .unwrap_or(0),
+                                output_tokens: usage
+                                    .map(|u| u.output_tokens as i64)
+                                    .unwrap_or(0),
+                                cache_creation_tokens: usage
+                                    .map(|u| u.cache_creation_input_tokens as i64)
+                                    .unwrap_or(0),
+                                cache_read_tokens: usage
+                                    .map(|u| u.cache_read_input_tokens as i64)
+                                    .unwrap_or(0),
+                                thinking_tokens: 0,
+                                stop_reason: r.stop_reason.clone(),
+                                is_error: r.is_error,
+                                total_cost_usd: Some(r.total_cost_usd),
+                            };
+                            if let Some(metrics) = turn_tracker.finalize(
+                                Instant::now(),
+                                chrono::Utc::now(),
+                                outcome,
+                            ) {
+                                let _ = event_tx
+                                    .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
+                            }
                         }
 
                         let is_rate_limit_terminator = matches!(
@@ -162,6 +260,12 @@ pub(crate) async fn claude_io_task(
                         tokio::pin!(sleep);
                         tokio::select! {
                             _ = &mut sleep => {
+                                // Auto-retry of the same user input — fresh
+                                // turn from a metrics standpoint, but tag
+                                // the new turn with a stream-restart count
+                                // so the dashboard can spot retried turns.
+                                turn_tracker.start(Instant::now(), chrono::Utc::now());
+                                turn_tracker.record_stream_restart();
                                 if let Err(e) = client.send(&input).await {
                                     let _ = event_tx.send(IoEvent::Error(
                                         SessionError::Agent(e.to_string()),
@@ -175,6 +279,7 @@ pub(crate) async fn claude_io_task(
                                         // — honor that, abandon the retry, and reset
                                         // the budget for the new prompt.
                                         rate_limit_attempts = 0;
+                                        turn_tracker.start(Instant::now(), chrono::Utc::now());
                                         let r = client.send(&new_input).await;
                                         last_input = Some(new_input);
                                         if let Err(e) = r {

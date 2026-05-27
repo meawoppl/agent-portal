@@ -892,6 +892,21 @@ async fn run_main_loop<A: Agent>(
                     continue;
                 }
 
+                // Per-turn metrics: forward as a typed `TurnMetricsReport`
+                // envelope. Doesn't go through the output buffer because
+                // it's not part of the message-replay path — a missed
+                // metrics row is acceptable (next turn replaces it on the
+                // dashboard) but we still want low-latency delivery.
+                if let Some(SessionEvent::TurnMetricsReady(metrics)) = event {
+                    let msg = ProxyToServer::TurnMetricsReport(metrics);
+                    let mut ws = state.ws_write.lock().await;
+                    if ws.send(msg).await.is_err() {
+                        error!("Failed to send turn metrics report");
+                        return ConnectionResult::Disconnected(state.connection_start.elapsed());
+                    }
+                    continue;
+                }
+
                 match handle_session_event_with_wiggum(
                     event,
                     &state.output_tx,

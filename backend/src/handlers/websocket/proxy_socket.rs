@@ -1,6 +1,7 @@
 use super::message_handlers::{handle_claude_output, replay_pending_inputs_from_db};
 use super::permissions::handle_permission_request;
 use super::registration::{register_or_update_session, RegistrationParams};
+use super::turn_metrics::handle_turn_metrics_report;
 use super::{ProxySender, SessionId, SessionManager};
 use crate::AppState;
 use axum::extract::ws::WebSocket;
@@ -266,6 +267,15 @@ fn handle_proxy_message(
             ack_seq,
         } => {
             handle_input_ack(*db_session_id, db_pool, ack_session_id, ack_seq);
+        }
+        ProxyToServer::TurnMetricsReport(metrics) => {
+            handle_turn_metrics_report(
+                session_manager,
+                session_key,
+                *db_session_id,
+                db_pool,
+                *metrics,
+            );
         }
         ProxyToServer::SessionStatus { .. } => {}
     }

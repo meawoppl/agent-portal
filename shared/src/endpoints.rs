@@ -4,7 +4,7 @@ pub use ws_bridge::WsEndpoint;
 
 use crate::{
     AgentInstall, AgentType, DirectoryEntry, PermissionSuggestion, SendMode, SessionCost,
-    SessionStatus,
+    SessionStatus, TurnMetrics,
 };
 
 // =============================================================================
@@ -181,6 +181,18 @@ pub enum ProxyToServer {
 
     /// Session status update
     SessionStatus { status: SessionStatus },
+
+    /// Per-turn performance metrics report (PR 1 of N).
+    ///
+    /// Emitted once per completed turn by the proxy. The backend persists
+    /// the row in `turn_metrics` and broadcasts it to web clients as
+    /// `ServerToClient::TurnMetrics`. See `shared::TurnMetrics` for field
+    /// semantics.
+    ///
+    /// Boxed because `TurnMetrics` is materially larger than the rest of
+    /// the enum's variants; keeps the discriminant small for the
+    /// hot-path frames that fly orders of magnitude more often.
+    TurnMetricsReport(Box<TurnMetrics>),
 }
 
 /// Messages the backend sends to the proxy.
@@ -386,6 +398,17 @@ pub enum ServerToClient {
         session_id: Uuid,
         exit_code: Option<i32>,
     },
+
+    /// Per-turn performance metrics row saved by the backend (PR 1 of N).
+    ///
+    /// Broadcast to all web clients on the matching session immediately
+    /// after the row is inserted, so live dashboards can update without a
+    /// page refresh. Frontend rendering ships in a follow-up PR; current
+    /// frontends silently ignore the frame.
+    ///
+    /// Boxed to keep the rest of the enum compact — see
+    /// `ProxyToServer::TurnMetricsReport` for the same rationale.
+    TurnMetrics(Box<TurnMetrics>),
 }
 
 // =============================================================================

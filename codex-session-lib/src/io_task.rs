@@ -6,6 +6,7 @@
 
 use std::collections::VecDeque;
 use std::path::Path;
+use std::time::Instant;
 
 use codex_codes::{
     AppServerBuilder, AsyncClient as CodexAsyncClient, ThreadStartParams, TurnInterruptParams,
@@ -14,6 +15,7 @@ use codex_codes::{
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
 use session_lib::snapshot::SessionConfig;
+use session_lib::{TurnOutcome, TurnTracker};
 use tokio::sync::mpsc;
 
 use crate::handler::handle_codex_server_message;
@@ -25,6 +27,7 @@ pub(crate) async fn codex_io_task(
     mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
     event_tx: mpsc::UnboundedSender<IoEvent>,
 ) {
+    let session_id = config.session_id;
     let codex_path = config.claude_path.as_deref().unwrap_or(Path::new("codex"));
 
     // Parse the user-supplied extra_args into (a) global `-c key=value`
@@ -121,6 +124,13 @@ pub(crate) async fn codex_io_task(
     // `turn/completed` arrives.
     let mut current_turn_id: Option<String> = None;
     let mut latest_token_usage: Option<(String, serde_json::Value)> = None;
+    // Per-turn metrics tracker. `start`ed inside `start_codex_turn`,
+    // updated as `ItemStarted` / `ItemCompleted` notifications come in,
+    // finalized on `TurnCompleted`.
+    let mut turn_tracker = TurnTracker::new(session_id);
+    // Latest `ThreadTokenUsageUpdated` capture for the current turn so we
+    // can plug it into the finalized `TurnMetrics`.
+    let mut current_turn_usage: Option<codex_codes::TokenUsageBreakdown> = None;
 
     loop {
         if turn_active {
@@ -130,9 +140,10 @@ pub(crate) async fn codex_io_task(
                     match result {
                         Ok(Some(msg)) => {
                             // Peek for turn lifecycle so we can name the
-                            // turn on later `turn/interrupt` requests. We
-                            // can't observe these via the typed handler
-                            // below because it consumes the message.
+                            // turn on later `turn/interrupt` requests, and
+                            // feed the per-turn metrics tracker. We can't
+                            // observe these via the typed handler below
+                            // because it consumes the message.
                             if let codex_codes::ServerMessage::Notification(notif) = &msg {
                                 if let codex_codes::Notification::ThreadTokenUsageUpdated(p) =
                                     notif
@@ -145,6 +156,37 @@ pub(crate) async fn codex_io_task(
                                             "model_context_window": p.token_usage.model_context_window,
                                         }),
                                     ));
+                                    // Latch the per-turn breakdown so the
+                                    // finalized `TurnMetrics` can carry
+                                    // the token counts.
+                                    current_turn_usage = Some(p.token_usage.last.clone());
+                                }
+                                // Content / tool frames for the metrics tracker.
+                                // Pragmatic "first content frame" definition for
+                                // codex: the first `ItemStarted` of an
+                                // `agentMessage` item. Tool-style items
+                                // (CommandExecution / FileChange / McpToolCall /
+                                // DynamicToolCall / WebSearch) bump the tool
+                                // count instead.
+                                if let codex_codes::Notification::ItemStarted(p) = notif {
+                                    use codex_codes::ThreadItem;
+                                    match &p.item {
+                                        ThreadItem::AgentMessage { .. }
+                                        | ThreadItem::Reasoning { .. }
+                                        | ThreadItem::Plan { .. } => {
+                                            if turn_tracker.is_running() {
+                                                turn_tracker
+                                                    .record_content_frame(Instant::now());
+                                            }
+                                        }
+                                        ThreadItem::CommandExecution { .. }
+                                        | ThreadItem::FileChange { .. }
+                                        | ThreadItem::McpToolCall { .. }
+                                        | ThreadItem::DynamicToolCall { .. } => {
+                                            turn_tracker.record_tool_call();
+                                        }
+                                        _ => {}
+                                    }
                                 }
                                 if let Ok((method, params_opt)) =
                                     notif.clone().into_envelope()
@@ -165,6 +207,63 @@ pub(crate) async fn codex_io_task(
                                         }
                                         _ => {}
                                     }
+                                }
+                            }
+
+                            // Finalize the per-turn metrics before handing
+                            // `msg` off to `handle_codex_server_message`
+                            // (which consumes it). `TurnCompleted` carries
+                            // `turn.status` (Completed / Interrupted /
+                            // Failed) which becomes our `stop_reason`.
+                            if let codex_codes::ServerMessage::Notification(
+                                codex_codes::Notification::TurnCompleted(p),
+                            ) = &msg
+                            {
+                                let status = match p.turn.status {
+                                    codex_codes::TurnStatus::Completed => "completed",
+                                    codex_codes::TurnStatus::Interrupted => "interrupted",
+                                    codex_codes::TurnStatus::Failed => "failed",
+                                    codex_codes::TurnStatus::InProgress => "in_progress",
+                                };
+                                let is_error = !matches!(
+                                    p.turn.status,
+                                    codex_codes::TurnStatus::Completed
+                                );
+                                let usage = current_turn_usage.take();
+                                let outcome = TurnOutcome {
+                                    agent_type: shared::AgentType::Codex
+                                        .as_str()
+                                        .to_string(),
+                                    model: None,
+                                    service_tier: None,
+                                    input_tokens: usage
+                                        .as_ref()
+                                        .map(|u| u.input_tokens)
+                                        .unwrap_or(0),
+                                    output_tokens: usage
+                                        .as_ref()
+                                        .map(|u| u.output_tokens)
+                                        .unwrap_or(0),
+                                    cache_creation_tokens: 0,
+                                    cache_read_tokens: usage
+                                        .as_ref()
+                                        .map(|u| u.cached_input_tokens)
+                                        .unwrap_or(0),
+                                    thinking_tokens: usage
+                                        .as_ref()
+                                        .map(|u| u.reasoning_output_tokens)
+                                        .unwrap_or(0),
+                                    stop_reason: Some(status.to_string()),
+                                    is_error,
+                                    total_cost_usd: None,
+                                };
+                                if let Some(metrics) = turn_tracker.finalize(
+                                    Instant::now(),
+                                    chrono::Utc::now(),
+                                    outcome,
+                                ) {
+                                    let _ = event_tx
+                                        .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
                                 }
                             }
                             let latest_usage_for_msg =
@@ -188,6 +287,8 @@ pub(crate) async fn codex_io_task(
                             if turn_ended {
                                 turn_active = false;
                                 if let Some(prompt) = queued_prompts.pop_front() {
+                                    turn_tracker
+                                        .start(Instant::now(), chrono::Utc::now());
                                     turn_active =
                                         start_codex_turn(&mut client, &thread_id, prompt, &event_tx)
                                             .await;
@@ -325,6 +426,7 @@ pub(crate) async fn codex_io_task(
                     if prompt.is_empty() {
                         continue;
                     }
+                    turn_tracker.start(Instant::now(), chrono::Utc::now());
                     turn_active =
                         start_codex_turn(&mut client, &thread_id, prompt, &event_tx).await;
                 }

@@ -6,7 +6,7 @@
 
 use claude_codes::io::{ControlResponse, PermissionSuggestion};
 use claude_codes::{ClaudeInput, ClaudeOutput};
-use shared::CodexPermissionInput;
+use shared::{CodexPermissionInput, TurnMetrics};
 
 use crate::error::SessionError;
 
@@ -51,6 +51,10 @@ pub enum IoEvent {
         request_id: String,
         input: CodexPermissionInput,
     },
+    /// A completed-turn performance metrics payload, ready for the proxy to
+    /// ship to the backend as `ProxyToServer::TurnMetricsReport`. Emitted
+    /// once per finalize by the agent-specific I/O task.
+    TurnMetricsReady(Box<TurnMetrics>),
     Error(SessionError),
     Exited {
         code: i32,
@@ -87,6 +91,11 @@ pub enum SessionEvent {
 
     /// Session encountered an error.
     Error(SessionError),
+
+    /// A completed-turn performance metrics payload. The proxy forwards this
+    /// to the backend as `ProxyToServer::TurnMetricsReport`. See PR-1
+    /// design doc / `shared::TurnMetrics` for field semantics.
+    TurnMetricsReady(Box<TurnMetrics>),
 }
 
 /// Response to a permission request.
