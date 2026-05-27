@@ -20,6 +20,8 @@ use crate::{
 use shared::protocol::SESSION_COOKIE_NAME;
 
 const OAUTH_CSRF_COOKIE: &str = "oauth_csrf";
+const OAUTH_DEVICE_CSRF_COOKIE: &str = "oauth_device_csrf";
+const OAUTH_CALLBACK_PATH: &str = "/api/auth/google/callback";
 
 /// Regular web login - redirects to Google OAuth
 pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
@@ -37,13 +39,11 @@ pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> 
     let (auth_url, csrf_token) = auth_request.url();
 
     // Store the CSRF token in a short-lived signed cookie so we can verify it on callback.
-    let mut csrf_cookie = Cookie::new(OAUTH_CSRF_COOKIE, csrf_token.secret().clone());
-    csrf_cookie.set_path("/api/auth/google/callback");
-    csrf_cookie.set_http_only(true);
-    csrf_cookie.set_secure(!app_state.dev_mode);
-    csrf_cookie.set_same_site(SameSite::Lax);
-    csrf_cookie.set_max_age(tower_cookies::cookie::time::Duration::minutes(10));
-    cookies.signed(&app_state.cookie_key).add(csrf_cookie);
+    cookies.signed(&app_state.cookie_key).add(oauth_csrf_cookie(
+        OAUTH_CSRF_COOKIE,
+        csrf_token.secret(),
+        !app_state.dev_mode,
+    ));
 
     Redirect::temporary(auth_url.as_str()).into_response()
 }
@@ -97,8 +97,13 @@ pub async fn device_login(
 
     let client = app_state.oauth_basic_client.as_ref().unwrap();
 
-    // Use a prefixed state to identify this as a device flow callback
-    let state_value = format!("device:{}", query.device_user_code);
+    let device_csrf = CsrfToken::new_random();
+    let state_value = build_device_oauth_state(&query.device_user_code, device_csrf.secret());
+    cookies.signed(&app_state.cookie_key).add(oauth_csrf_cookie(
+        OAUTH_DEVICE_CSRF_COOKIE,
+        device_csrf.secret(),
+        !app_state.dev_mode,
+    ));
 
     let auth_request = client
         .authorize_url(|| CsrfToken::new(state_value))
@@ -135,14 +140,36 @@ pub async fn callback(
         .as_ref()
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    // Verify CSRF state token for regular web logins.
-    // Device flow uses a deterministic "device:{code}" state so we skip it there.
-    let is_device_flow = query
+    // Verify CSRF state token before exchanging the OAuth code.
+    let device_state = query.state.as_deref().and_then(parse_device_oauth_state);
+    if query
         .state
         .as_deref()
-        .is_some_and(|s| s.starts_with("device:"));
+        .is_some_and(|state| state.starts_with("device:"))
+        && device_state.is_none()
+    {
+        error!("Device OAuth callback: malformed state");
+        return Err(StatusCode::FORBIDDEN);
+    }
 
-    if !is_device_flow {
+    if let Some(ref device_state) = device_state {
+        let csrf_cookie = cookies
+            .signed(&app_state.cookie_key)
+            .get(OAUTH_DEVICE_CSRF_COOKIE)
+            .ok_or_else(|| {
+                error!("Device OAuth callback: missing CSRF cookie");
+                StatusCode::FORBIDDEN
+            })?;
+
+        if csrf_cookie.value() != device_state.csrf_nonce {
+            error!("Device OAuth callback: CSRF token mismatch");
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        cookies
+            .signed(&app_state.cookie_key)
+            .add(remove_oauth_csrf_cookie(OAUTH_DEVICE_CSRF_COOKIE));
+    } else {
         let csrf_cookie = cookies
             .signed(&app_state.cookie_key)
             .get(OAUTH_CSRF_COOKIE)
@@ -158,10 +185,9 @@ pub async fn callback(
         }
 
         // Consume the CSRF cookie
-        let mut remove_csrf = Cookie::new(OAUTH_CSRF_COOKIE, "");
-        remove_csrf.set_path("/api/auth/google/callback");
-        remove_csrf.set_max_age(tower_cookies::cookie::time::Duration::ZERO);
-        cookies.signed(&app_state.cookie_key).add(remove_csrf);
+        cookies
+            .signed(&app_state.cookie_key)
+            .add(remove_oauth_csrf_cookie(OAUTH_CSRF_COOKIE));
     }
 
     // Exchange code for token
@@ -262,27 +288,24 @@ pub async fn callback(
         )));
     }
 
-    // Check if this is part of a device flow (state starts with "device:")
-    if let Some(ref state) = query.state {
-        if let Some(device_user_code) = state.strip_prefix("device:") {
-            // Set session cookie first so user is logged in
-            let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
-            cookie.set_path("/");
-            cookie.set_http_only(true);
-            cookie.set_secure(!app_state.dev_mode);
-            cookie.set_same_site(SameSite::Lax);
-            cookies.signed(&app_state.cookie_key).add(cookie);
+    if let Some(device_state) = device_state {
+        // Set session cookie first so user is logged in
+        let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
+        cookie.set_path("/");
+        cookie.set_http_only(true);
+        cookie.set_secure(!app_state.dev_mode);
+        cookie.set_same_site(SameSite::Lax);
+        cookies.signed(&app_state.cookie_key).add(cookie);
 
-            // Redirect back to device verify page to show approval UI
-            info!(
-                "OAuth complete for device flow, redirecting to approval page for user: {}",
-                user.email
-            );
-            return Ok(Redirect::temporary(&format!(
-                "/api/auth/device?user_code={}",
-                device_user_code
-            )));
-        }
+        // Redirect back to device verify page to show approval UI
+        info!(
+            "OAuth complete for device flow, redirecting to approval page for user: {}",
+            user.email
+        );
+        return Ok(Redirect::temporary(&format!(
+            "/api/auth/device?user_code={}",
+            device_state.user_code
+        )));
     }
 
     // Set session cookie with user ID
@@ -413,4 +436,70 @@ fn check_email_allowed(app_state: &AppState, email: &str) -> Result<(), Redirect
     // Access denied
     info!("Access denied for email: {} (not in allowlist)", email);
     Err(Redirect::temporary("/access-denied"))
+}
+
+fn oauth_csrf_cookie(name: &'static str, value: &str, secure: bool) -> Cookie<'static> {
+    let mut cookie = Cookie::new(name, value.to_owned());
+    cookie.set_path(OAUTH_CALLBACK_PATH);
+    cookie.set_http_only(true);
+    cookie.set_secure(secure);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_max_age(tower_cookies::cookie::time::Duration::minutes(10));
+    cookie
+}
+
+fn remove_oauth_csrf_cookie(name: &'static str) -> Cookie<'static> {
+    let mut cookie = Cookie::new(name, "");
+    cookie.set_path(OAUTH_CALLBACK_PATH);
+    cookie.set_max_age(tower_cookies::cookie::time::Duration::ZERO);
+    cookie
+}
+
+fn build_device_oauth_state(user_code: &str, csrf_nonce: &str) -> String {
+    format!("device:{user_code}:{csrf_nonce}")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct DeviceOAuthState {
+    user_code: String,
+    csrf_nonce: String,
+}
+
+fn parse_device_oauth_state(state: &str) -> Option<DeviceOAuthState> {
+    let state = state.strip_prefix("device:")?;
+    let (user_code, csrf_nonce) = state.rsplit_once(':')?;
+    if user_code.is_empty() || csrf_nonce.is_empty() {
+        return None;
+    }
+
+    Some(DeviceOAuthState {
+        user_code: user_code.to_owned(),
+        csrf_nonce: csrf_nonce.to_owned(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_oauth_state_round_trips_user_code_and_nonce() {
+        let state = build_device_oauth_state("ABC-123", "nonce-value");
+
+        assert_eq!(
+            parse_device_oauth_state(&state),
+            Some(DeviceOAuthState {
+                user_code: "ABC-123".to_string(),
+                csrf_nonce: "nonce-value".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn device_oauth_state_rejects_legacy_or_malformed_state() {
+        assert_eq!(parse_device_oauth_state("device:ABC-123"), None);
+        assert_eq!(parse_device_oauth_state("device::nonce"), None);
+        assert_eq!(parse_device_oauth_state("device:ABC-123:"), None);
+        assert_eq!(parse_device_oauth_state("regular-state"), None);
+    }
 }
