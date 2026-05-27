@@ -3,7 +3,7 @@
 use crate::utils;
 use futures_util::StreamExt;
 use shared::api::ErrorMessage;
-use shared::{ClientEndpoint, ClientToServer, ServerToClient, WsEndpoint};
+use shared::{ClientEndpoint, ClientToServer, ServerToClient, TurnMetrics, WsEndpoint};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
@@ -27,6 +27,10 @@ pub enum WsEvent {
     HistoryBatch(Vec<String>, Option<String>),
     Permission(PendingPermission),
     BranchChanged(Option<String>, Option<String>, Option<String>),
+    /// Live per-turn metrics broadcast for this session (PR 2 of N).
+    /// Boxed to keep `WsEvent` compact — `TurnMetrics` is the largest variant
+    /// payload by a wide margin (~22 fields).
+    TurnMetrics(Box<TurnMetrics>),
 }
 
 /// Connect to WebSocket and start receiving messages.
@@ -188,7 +192,20 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         } => {
             on_event.emit(WsEvent::BranchChanged(git_branch, pr_url, repo_url));
         }
-        _ => {}
+        // PR 2 of N: route the typed per-turn metrics frame into the
+        // SessionView instead of silently dropping it. The previous
+        // `_ => {}` arm here is gone — every new wire variant must claim
+        // an explicit branch or land in `unhandled` below.
+        ServerToClient::TurnMetrics(metrics) => {
+            on_event.emit(WsEvent::TurnMetrics(metrics));
+        }
+        unhandled => {
+            // Variants we haven't wired a UI route for yet (e.g. new
+            // server-pushed frames added since this branch was written).
+            // Logged once at warn so it shows up in the browser console
+            // without spamming a busy session.
+            log::warn!("Unhandled ServerToClient variant: {:?}", unhandled);
+        }
     }
 }
 
@@ -485,6 +502,7 @@ mod tests {
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",
             WsEvent::BranchChanged(_, _, _) => "BranchChanged",
+            WsEvent::TurnMetrics(_) => "TurnMetrics",
         }
     }
 }

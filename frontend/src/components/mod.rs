@@ -16,7 +16,7 @@ mod voice_input;
 
 pub use copy_command::CopyCommand;
 pub use launch_dialog::LaunchDialog;
-pub use message_renderer::{group_messages, MessageGroupRenderer};
+pub use message_renderer::{group_is_turn_terminator, group_messages, MessageGroupRenderer};
 pub use proxy_token_setup::ProxyTokenSetup;
 pub use schedule_dialog::ScheduleDialog;
 pub use share_dialog::ShareDialog;

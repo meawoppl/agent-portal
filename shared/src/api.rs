@@ -713,6 +713,25 @@ pub struct TurnMetrics {
     pub total_cost_usd: Option<f64>,
 }
 
+// =============================================================================
+// Turn-metrics list endpoint (`GET /api/sessions/{id}/turn-metrics`)
+//
+// Hydrates the SessionView's per-turn metrics buffer on initial load. The live
+// path is the existing `ServerToClient::TurnMetrics` WS frame; this endpoint
+// covers the cold-start gap (frontend reload, tab restore) and matches the
+// access gate used by `GET /api/sessions/{id}/messages` (session_members ACL).
+// =============================================================================
+
+/// Response from `GET /api/sessions/{id}/turn-metrics`.
+///
+/// Rows are ordered `started_at ASC` so the SessionView's join walk (pair Nth
+/// terminator message with Nth metrics row) works without a second sort.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TurnMetricsResponse {
+    #[serde(default)]
+    pub metrics: Vec<TurnMetrics>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

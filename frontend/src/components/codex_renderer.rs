@@ -354,6 +354,11 @@ pub struct TodoEntry {
 #[derive(Properties, PartialEq)]
 pub struct CodexMessageRendererProps {
     pub json: String,
+    /// Per-turn metrics for the terminator card, if any. Forwarded down
+    /// into `render_turn_completed` / `render_turn_failed` so the chip-strip
+    /// footer renders beneath the existing result card. PR 2 of N.
+    #[prop_or_default]
+    pub turn_metrics: Option<shared::TurnMetrics>,
 }
 
 #[function_component(CodexMessageRenderer)]
@@ -373,8 +378,11 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
             duration_ms,
             turn_id.as_deref(),
             status.as_deref(),
+            props.turn_metrics.as_ref(),
         ),
-        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref()),
+        Ok(CodexEvent::TurnFailed { error }) => {
+            render_turn_failed(error.as_ref(), props.turn_metrics.as_ref())
+        }
         Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
             render_item(item.as_ref(), false)
         }
@@ -510,8 +518,13 @@ pub fn render_codex_message_content(json: &str) -> Html {
             duration_ms,
             turn_id.as_deref(),
             status.as_deref(),
+            // `render_codex_message_content` is the non-card content path
+            // used by `IdentityGroup` bodies; terminator events never end
+            // up grouped (they render as `Single` everywhere), so this
+            // branch is dead in practice but stays wired for shape symmetry.
+            None,
         ),
-        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref()),
+        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref(), None),
         Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
         Ok(CodexEvent::TurnDiffUpdated { params }) => {
             render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
@@ -727,6 +740,7 @@ fn render_turn_completed(
     duration_ms: Option<u64>,
     turn_id: Option<&str>,
     status: Option<&str>,
+    turn_metrics: Option<&shared::TurnMetrics>,
 ) -> Html {
     let input = usage.map(CodexUsage::input_tokens).unwrap_or(0);
     let output = usage.map(CodexUsage::output_tokens).unwrap_or(0);
@@ -747,6 +761,20 @@ fn render_turn_completed(
         tooltip.push_str(&format!(" | Context window: {}", context_window));
     }
     let status_title = turn_id.unwrap_or("Codex turn").to_string();
+
+    // Per-turn metrics footer (PR 2 of N). Same shape as the Claude
+    // `result-message` footer — see
+    // `crate::components::message_renderer::turn_metrics_footer`. For Codex,
+    // the cost chip universally drops (no per-turn cost on the wire today)
+    // and the cache-hit-% chip universally drops (no cache breakdown on the
+    // wire today); the chips that do render are tok/s, TTFT, tokens-in/out
+    // (and max gap when > 1s).
+    let metrics_footer = match turn_metrics {
+        Some(m) => {
+            crate::components::message_renderer::turn_metrics_footer::render_turn_metrics_footer(m)
+        }
+        None => html! {},
+    };
 
     html! {
         <div class="claude-message result-message success">
@@ -809,14 +837,28 @@ fn render_turn_completed(
                     }
                 }
             </div>
+            { metrics_footer }
         </div>
     }
 }
 
-fn render_turn_failed(error: Option<&CodexError>) -> Html {
+fn render_turn_failed(
+    error: Option<&CodexError>,
+    turn_metrics: Option<&shared::TurnMetrics>,
+) -> Html {
     let message = error
         .and_then(|e| e.message.as_deref())
         .unwrap_or("Turn failed");
+
+    // Even a failed turn carries useful metrics (TTFT before the failure,
+    // tokens consumed, stream_restarts on retried-and-still-failed rate
+    // limits, etc.) — render the footer if we have a row for it.
+    let metrics_footer = match turn_metrics {
+        Some(m) => {
+            crate::components::message_renderer::turn_metrics_footer::render_turn_metrics_footer(m)
+        }
+        None => html! {},
+    };
 
     html! {
         <div class="claude-message error-message-display">
@@ -826,6 +868,7 @@ fn render_turn_failed(error: Option<&CodexError>) -> Html {
             <div class="message-body">
                 <div class="error-text">{ message }</div>
             </div>
+            { metrics_footer }
         </div>
     }
 }

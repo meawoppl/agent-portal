@@ -13,4 +13,5 @@ pub mod scheduled_tasks;
 pub mod session_access;
 pub mod sessions;
 pub mod sound_settings;
+pub mod turn_metrics;
 pub mod websocket;

@@ -21,6 +21,7 @@ pub mod api;
 pub use api::{
     ApiError, Citation, CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage,
     ModelUsageEntry, SoundSettingsResponse, TaskNotificationExtra, TurnMetrics,
+    TurnMetricsResponse,
 };
 
 /// Default backend URL based on build profile.
