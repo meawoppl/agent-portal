@@ -4,6 +4,7 @@ mod errors;
 mod handlers;
 mod jwt;
 mod models;
+mod routes;
 mod schema;
 
 use crate::db::DbPool;
@@ -401,11 +402,11 @@ async fn main() -> anyhow::Result<()> {
     // Rate-limited device flow auth routes
     let auth_device_routes = Router::new()
         .route(
-            "/api/auth/device/code",
+            routes::AUTH_DEVICE_CODE,
             post(handlers::device_flow::device_code),
         )
         .route(
-            "/api/auth/device/poll",
+            routes::AUTH_DEVICE_POLL,
             post(handlers::device_flow::device_poll),
         )
         .layer(GovernorLayer::new(auth_rate_limit))
@@ -508,24 +509,24 @@ async fn main() -> anyhow::Result<()> {
                 .put(handlers::sound_settings::save_sound_settings),
         )
         // Auth routes (under /api/auth)
-        .route("/api/auth/google", get(handlers::auth::login))
-        .route("/api/auth/google/callback", get(handlers::auth::callback))
-        .route("/api/auth/me", get(handlers::auth::me))
-        .route("/api/auth/logout", get(handlers::auth::logout))
-        .route("/api/auth/dev-login", get(handlers::auth::dev_login))
+        .route(routes::AUTH_GOOGLE, get(handlers::auth::login))
+        .route(routes::AUTH_GOOGLE_CALLBACK, get(handlers::auth::callback))
+        .route(routes::AUTH_ME, get(handlers::auth::me))
+        .route(routes::AUTH_LOGOUT, get(handlers::auth::logout))
+        .route(routes::AUTH_DEV_LOGIN, get(handlers::auth::dev_login))
         // Device-specific login endpoint (separate from regular web login)
-        .route("/api/auth/device-login", get(handlers::auth::device_login))
+        .route(routes::AUTH_DEVICE_LOGIN, get(handlers::auth::device_login))
         // Non-rate-limited device flow endpoints (verify page, approve, deny are user-facing)
         .route(
-            "/api/auth/device",
+            routes::AUTH_DEVICE,
             get(handlers::device_flow::device_verify_page),
         )
         .route(
-            "/api/auth/device/approve",
+            routes::AUTH_DEVICE_APPROVE,
             post(handlers::device_flow::device_approve),
         )
         .route(
-            "/api/auth/device/deny",
+            routes::AUTH_DEVICE_DENY,
             post(handlers::device_flow::device_deny),
         )
         // WebSocket routes (paths from ws-bridge endpoint definitions)
