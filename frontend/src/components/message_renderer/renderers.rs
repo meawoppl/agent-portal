@@ -1169,7 +1169,10 @@ fn render_structured_block(block: &shared::ContentBlock) -> Html {
     }
 }
 
-pub fn render_result_message(msg: &ResultMessage) -> Html {
+pub fn render_result_message(
+    msg: &ResultMessage,
+    turn_metrics: Option<&shared::TurnMetrics>,
+) -> Html {
     let is_error = msg.is_error.unwrap_or(false);
     let status_class = if is_error { "error" } else { "success" };
 
@@ -1273,6 +1276,18 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
         </>
     };
 
+    // Per-turn metrics footer (PR 2 of N) — sits directly below the result
+    // stats bar. `None` for sessions on the live path before the first
+    // metrics frame arrives, for pre-PR-1 historical rows, and during the
+    // brief window between a turn's terminator landing and the metrics
+    // broadcast for that turn (the wire order is "Result frame first,
+    // metrics broadcast second"). Renders nothing in those cases — the
+    // chip strip lights up retroactively on the next render.
+    let metrics_footer = match turn_metrics {
+        Some(m) => super::turn_metrics_footer::render_turn_metrics_footer(m),
+        None => html! {},
+    };
+
     if is_error {
         if let Some(error_html) = try_render_api_error(msg.result.as_deref()) {
             return html! {
@@ -1286,6 +1301,7 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
                             </span>
                             { extra_badges.clone() }
                         </div>
+                        { metrics_footer.clone() }
                     </div>
                 </>
             };
@@ -1330,6 +1346,7 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
                 }
                 { extra_badges }
             </div>
+            { metrics_footer }
         </div>
     }
 }

@@ -1,4 +1,5 @@
 mod renderers;
+pub mod turn_metrics_footer;
 pub mod types;
 
 use serde_json::Value;
@@ -258,6 +259,45 @@ fn classify(
     None
 }
 
+/// True iff `json` parses as a per-turn terminator: Claude's
+/// `ClaudeMessage::Result` or one of Codex's terminator events
+/// (`TurnCompleted` / `TurnFailed`).
+///
+/// Used by `SessionView::view()` to pair the Nth terminator card in the
+/// rendered transcript with the Nth row in `SessionView.turn_metrics`. The
+/// pair-by-ordering join is the agreed PR 2 strategy — `user_message_id`
+/// stays `None` on the proxy-emit side until a future PR wires up the
+/// per-turn linkage, so a key-based join would fail on every row today.
+pub fn is_turn_terminator(json: &str) -> bool {
+    // Claude side: a parsed `ClaudeMessage::Result` is the only terminator.
+    // The `User`/`Portal`/`Error`/etc. variants are not terminators (and
+    // there's no Codex `Result` shape — Codex terminators parse through
+    // `CodexEvent` instead).
+    if let Ok(ClaudeMessage::Result(_)) = serde_json::from_str::<ClaudeMessage>(json) {
+        return true;
+    }
+    // Codex side: terminators are `TurnCompleted` and `TurnFailed`. The
+    // explicit match (rather than a substring sniff on the wire) keeps
+    // this in lockstep with the typed enum so a renamed variant fails
+    // loudly at compile time.
+    use crate::components::codex_renderer::CodexEvent;
+    matches!(
+        serde_json::from_str::<CodexEvent>(json),
+        Ok(CodexEvent::TurnCompleted { .. }) | Ok(CodexEvent::TurnFailed { .. })
+    )
+}
+
+/// True iff the group is a `Single` carrying a turn terminator. Identity
+/// groups never contain terminators (Result / TurnCompleted / TurnFailed
+/// don't classify into any identity category — see `classify`), so this
+/// helper only needs to inspect the `Single` arm.
+pub fn group_is_turn_terminator(group: &MessageGroup) -> bool {
+    match group {
+        MessageGroup::Single(json) => is_turn_terminator(json),
+        MessageGroup::IdentityGroup { .. } => false,
+    }
+}
+
 /// Walk `messages` and collapse consecutive same-category runs into
 /// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
 /// `MessageGroup::Single`.
@@ -342,6 +382,16 @@ pub struct MessageRendererProps {
     pub agent_type: shared::AgentType,
     #[prop_or_default]
     pub current_user_id: Option<String>,
+    /// Per-turn metrics for the terminator card this `MessageRenderer` is
+    /// rendering, if any. Populated by `SessionView::view()` when the
+    /// message is the Nth `Result` / `turn.completed` / `turn.failed` and
+    /// `SessionView.turn_metrics` has an Nth entry. The renderer ignores it
+    /// for non-terminator shapes; terminator renderers (`render_result_message`
+    /// for Claude, the dispatch arm for `CodexEvent::TurnCompleted` /
+    /// `TurnFailed` for Codex) append a `<div class="turn-metrics-footer">`
+    /// chip strip below the existing stats bar when present.
+    #[prop_or_default]
+    pub turn_metrics: Option<shared::TurnMetrics>,
 }
 
 #[function_component(MessageRenderer)]
@@ -364,7 +414,9 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
         Ok(ClaudeMessage::Assistant(msg)) => {
             return renderers::render_assistant_message(&msg, ts.as_deref(), raw_iso.as_deref());
         }
-        Ok(ClaudeMessage::Result(msg)) => return renderers::render_result_message(&msg),
+        Ok(ClaudeMessage::Result(msg)) => {
+            return renderers::render_result_message(&msg, props.turn_metrics.as_ref());
+        }
         Ok(ClaudeMessage::User(msg)) => {
             return renderers::render_user_message(
                 &msg,
@@ -385,7 +437,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
     }
 
     if props.agent_type == shared::AgentType::Codex {
-        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} /> }
+        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} turn_metrics={props.turn_metrics.clone()} /> }
     } else {
         render_raw_json(&props.json)
     }
@@ -400,13 +452,20 @@ pub struct MessageGroupRendererProps {
     pub agent_type: shared::AgentType,
     #[prop_or_default]
     pub current_user_id: Option<String>,
+    /// Per-turn metrics for the terminator card in this group, if the group
+    /// is a `Single` carrying a terminator and the SessionView has a matching
+    /// metrics entry. Forwarded to the inner `MessageRenderer` for the
+    /// `Single` variant only — `IdentityGroup`s never contain terminator
+    /// shapes (`Result` / `turn.completed` always render as `Single`).
+    #[prop_or_default]
+    pub turn_metrics: Option<shared::TurnMetrics>,
 }
 
 #[function_component(MessageGroupRenderer)]
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     match &props.group {
         MessageGroup::Single(json) => {
-            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} /> }
+            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} /> }
         }
         MessageGroup::IdentityGroup {
             category,

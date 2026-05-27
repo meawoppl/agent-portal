@@ -767,6 +767,37 @@
 }
 
 /* ==========================================================================
+   Per-turn metrics footer (PR 2 of N)
+   Sits directly beneath the result-stats-bar card. One row of muted "chips"
+   separated by middle-dot. Wraps on narrow viewports. No icons, no emoji —
+   the chip text alone communicates the meaning, and the separator is
+   `\u{00b7}` (· MIDDLE DOT).
+   ========================================================================== */
+
+.turn-metrics-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.75rem 0.1rem 0.75rem;
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--text-muted, var(--text-secondary));
+    line-height: 1.4;
+}
+
+.turn-metric-chip {
+    color: var(--text-muted, var(--text-secondary));
+    white-space: nowrap;
+}
+
+.turn-metric-sep {
+    color: var(--text-muted, var(--text-secondary));
+    opacity: 0.5;
+    user-select: none;
+}
+
+/* ==========================================================================
    User Message
    ========================================================================== */
 
