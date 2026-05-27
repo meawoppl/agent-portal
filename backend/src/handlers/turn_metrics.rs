@@ -1,11 +1,15 @@
-//! `GET /api/sessions/{id}/turn-metrics` — list per-turn performance metrics
-//! for a session, ordered by `started_at ASC`.
+//! Turn-metrics REST handlers.
 //!
-//! Hydrates the `SessionView`'s metrics buffer on initial page load. The live
-//! path is the `ServerToClient::TurnMetrics` WS frame broadcast by
-//! `backend::handlers::websocket::turn_metrics::handle_turn_metrics_report`;
-//! this REST handler covers the cold-start gap (fresh load / tab restore) and
-//! uses the same `session_members` ACL gate as `GET /api/sessions/{id}/messages`.
+//! Two endpoints live here:
+//!
+//! - `GET /api/sessions/{id}/turn-metrics` (PR 2): per-session list for the
+//!   `SessionView` per-turn footer hydration on cold start. Reuses the same
+//!   `session_members` ACL gate as `GET /api/sessions/{id}/messages`.
+//! - `GET /api/metrics/recent` (PR 3): the calling user's most recent N turns
+//!   across all sessions they own, used to seed the dashboard-header
+//!   sparkline pill. Joins through `sessions.user_id` (owner-only — the v1
+//!   pill only summarizes the dashboard user's own sessions; multi-tenant
+//!   member-shared views can land in a later PR alongside multi-pill UI).
 
 use crate::auth::extract_user_id;
 use crate::errors::AppError;
@@ -101,6 +105,48 @@ pub async fn list_turn_metrics(
         .select(TurnMetric::as_select())
         .load(&mut conn)
         .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    let metrics = rows.into_iter().map(row_to_wire).collect();
+    Ok(Json(TurnMetricsResponse { metrics }))
+}
+
+/// Window size for `GET /api/metrics/recent`. Picked to comfortably cover a
+/// day of moderate use (a handful of sessions, ~10 turns each) while staying
+/// small enough that the dashboard pill can plot every point as a sub-pixel
+/// of an 80px-wide sparkline without subsampling.
+const RECENT_TURN_LIMIT: i64 = 50;
+
+/// `GET /api/metrics/recent` — returns the calling user's most recent
+/// `RECENT_TURN_LIMIT` turns across all sessions they own, ordered
+/// `started_at ASC` so the client can spark-plot left→right oldest→newest
+/// without a second sort. Joins `turn_metrics` to `sessions` on
+/// `session_id` and filters by `sessions.user_id = current_user_id`.
+///
+/// We deliberately take the SQL's "newest N" (ORDER BY started_at DESC LIMIT
+/// N) and then reverse the result in Rust rather than ordering ASC in SQL:
+/// ordering ASC would force a full-table scan for a user with thousands of
+/// turns; DESC + LIMIT uses the `started_at DESC` index from PR 1's
+/// migration directly. The reverse is O(50) and a non-event.
+pub async fn list_recent_user_turn_metrics(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+) -> Result<Json<TurnMetricsResponse>, AppError> {
+    let current_user_id = extract_user_id(&app_state, &cookies)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+
+    use crate::schema::{sessions, turn_metrics};
+    let mut rows: Vec<TurnMetric> = turn_metrics::table
+        .inner_join(sessions::table.on(sessions::id.eq(turn_metrics::session_id)))
+        .filter(sessions::user_id.eq(current_user_id))
+        .order(turn_metrics::started_at.desc())
+        .limit(RECENT_TURN_LIMIT)
+        .select(TurnMetric::as_select())
+        .load(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    // SQL gave us newest-first; flip to oldest-first so the sparkline reads
+    // left→right oldest→newest without a second pass on the frontend.
+    rows.reverse();
 
     let metrics = rows.into_iter().map(row_to_wire).collect();
     Ok(Json(TurnMetricsResponse { metrics }))

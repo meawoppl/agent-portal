@@ -451,6 +451,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/sessions/{id}/turn-metrics",
             get(handlers::turn_metrics::list_turn_metrics),
         )
+        .route(
+            "/api/metrics/recent",
+            get(handlers::turn_metrics::list_recent_user_turn_metrics),
+        )
         // Proxy token management endpoints
         .route(
             "/api/proxy-tokens",

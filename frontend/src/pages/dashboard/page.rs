@@ -6,7 +6,7 @@ use super::types::{
     load_hidden_sessions, load_inactive_hidden, load_rail_position, load_show_cost,
     save_hidden_sessions, save_inactive_hidden, save_show_cost,
 };
-use crate::components::LaunchDialog;
+use crate::components::{LaunchDialog, TurnMetricsHeaderPill};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
@@ -618,6 +618,7 @@ pub fn dashboard_page() -> Html {
             <header class="focus-flow-header">
                 <h1>{ (*app_title).clone() }</h1>
                 <div class="header-actions">
+                    <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
                     {
                         if total_user_spend > 0.0 {
                             let tier_class = if total_user_spend >= 10000.0 {
