@@ -71,4 +71,25 @@ mod tests {
             assert_eq!(error.into_response().status(), expected_status);
         }
     }
+
+    #[test]
+    fn handler_failures_map_to_expected_statuses() {
+        let cases = [
+            (AppError::BadRequest("bad input"), StatusCode::BAD_REQUEST),
+            (AppError::NotFound("missing"), StatusCode::NOT_FOUND),
+            (AppError::BadGateway("send failed"), StatusCode::BAD_GATEWAY),
+            (
+                AppError::GatewayTimeout("timed out"),
+                StatusCode::GATEWAY_TIMEOUT,
+            ),
+            (
+                AppError::Internal("disk failed".to_string()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected_status) in cases {
+            assert_eq!(error.into_response().status(), expected_status);
+        }
+    }
 }
