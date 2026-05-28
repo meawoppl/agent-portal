@@ -13,6 +13,7 @@ use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 use tracing::{error, info};
 
 use crate::{
+    errors::AppError,
     models::{NewUser, User},
     routes, AppState,
 };
@@ -42,20 +43,17 @@ pub async fn device_login(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Query(query): Query<DeviceLoginQuery>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     // In dev mode, auto-login and redirect to device approval page
     if app_state.oauth_basic_client.is_none() {
         use crate::schema::users::dsl::*;
 
-        let mut conn = app_state
-            .db_pool
-            .get()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
         let user = users
             .filter(email.eq("testing@testing.local"))
             .first::<User>(&mut conn)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(dev_user_lookup_error)?;
 
         if user.disabled {
             info!("Banned user {} attempted dev device login", user.email);
@@ -212,14 +210,8 @@ pub async fn callback(
 pub async fn me(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<Json<MeResponse>, StatusCode> {
-    let user = crate::auth::extract_user(&app_state, &cookies).map_err(|e| match e {
-        crate::errors::AppError::Forbidden => StatusCode::FORBIDDEN,
-        crate::errors::AppError::DbPool | crate::errors::AppError::DbQuery(_) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-        _ => StatusCode::UNAUTHORIZED,
-    })?;
+) -> Result<Json<MeResponse>, AppError> {
+    let user = crate::auth::extract_user(&app_state, &cookies).map_err(auth_user_error)?;
 
     Ok(Json(MeResponse {
         id: user.id,
@@ -243,18 +235,15 @@ pub async fn logout(State(app_state): State<Arc<AppState>>, cookies: Cookies) ->
 pub async fn dev_login(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     use crate::schema::users::dsl::*;
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     let user = users
         .filter(email.eq("testing@testing.local"))
         .first::<User>(&mut conn)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(dev_user_lookup_error)?;
 
     // Check if user is banned
     if user.disabled {
@@ -269,6 +258,18 @@ pub async fn dev_login(
 
     // Redirect to dashboard
     Ok(Redirect::temporary(routes::DASHBOARD))
+}
+
+fn dev_user_lookup_error(error: diesel::result::Error) -> AppError {
+    AppError::Internal(format!("Failed to look up dev user: {error}"))
+}
+
+fn auth_user_error(error: AppError) -> AppError {
+    match error {
+        AppError::Forbidden => AppError::Forbidden,
+        AppError::DbPool | AppError::DbQuery(_) => error,
+        _ => AppError::Unauthorized,
+    }
 }
 
 /// Check if an email is allowed based on ALLOWED_EMAIL_DOMAIN and ALLOWED_EMAILS
