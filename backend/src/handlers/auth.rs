@@ -342,6 +342,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn auth_user_error_preserves_forbidden_and_database_errors() {
+        assert!(matches!(
+            auth_user_error(AppError::Forbidden),
+            AppError::Forbidden
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::DbPool),
+            AppError::DbPool
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::DbQuery("session lookup failed".to_string())),
+            AppError::DbQuery(message) if message == "session lookup failed"
+        ));
+    }
+
+    #[test]
+    fn auth_user_error_collapses_other_failures_to_unauthorized() {
+        assert!(matches!(
+            auth_user_error(AppError::BadRequest("bad cookie")),
+            AppError::Unauthorized
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::NotFound("user")),
+            AppError::Unauthorized
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::Internal("decode failed".to_string())),
+            AppError::Unauthorized
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::ServiceUnavailable("auth unavailable")),
+            AppError::Unauthorized
+        ));
+    }
+
+    #[test]
     fn encode_query_value_keeps_unreserved_and_encodes_reserved_chars() {
         assert_eq!(
             encode_query_value("ABC-123 reason?/"),

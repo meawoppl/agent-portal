@@ -39,3 +39,32 @@ impl IntoResponse for AppError {
         (status, msg.to_string()).into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_unavailable_maps_to_503() {
+        let response = AppError::ServiceUnavailable("OAuth client not configured").into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn auth_failures_map_to_expected_statuses() {
+        let cases = [
+            (AppError::Unauthorized, StatusCode::UNAUTHORIZED),
+            (AppError::Forbidden, StatusCode::FORBIDDEN),
+            (AppError::DbPool, StatusCode::INTERNAL_SERVER_ERROR),
+            (
+                AppError::DbQuery("lookup failed".to_string()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected_status) in cases {
+            assert_eq!(error.into_response().status(), expected_status);
+        }
+    }
+}
