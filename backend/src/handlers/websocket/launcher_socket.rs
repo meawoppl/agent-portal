@@ -439,11 +439,33 @@ fn handle_launcher_message(
             claude_args,
             agent_type,
             scheduled_task_id,
+            last_session_id,
         } => {
             info!(
                 "Launcher requested launch: dir={}, name={:?}",
                 working_directory, session_name
             );
+
+            if scheduled_task_id.is_none() {
+                if let Some(session_id) = last_session_id {
+                    match is_session_paused(app_state, session_id, user_id) {
+                        Ok(true) => {
+                            info!(
+                                "Skipping launcher auto-resume for paused session {}",
+                                session_id
+                            );
+                            return;
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            warn!(
+                                "Failed to check pause state for session {} before launch: {}",
+                                session_id, e
+                            );
+                        }
+                    }
+                }
+            }
             match crate::handlers::launchers::mint_launch_token(app_state, user_id) {
                 Ok(auth_token) => {
                     let launch_msg = ServerToLauncher::LaunchSession {
@@ -455,6 +477,7 @@ fn handle_launcher_message(
                         claude_args,
                         agent_type,
                         scheduled_task_id,
+                        resume_session_id: last_session_id,
                     };
                     if !app_state
                         .session_manager
@@ -604,6 +627,24 @@ fn handle_launcher_message(
         }
         LauncherToServer::LauncherRegister { .. } => {}
     }
+}
+
+fn is_session_paused(
+    app_state: &AppState,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, String> {
+    use crate::schema::sessions;
+
+    let mut conn = app_state.db_pool.get().map_err(|e| e.to_string())?;
+    sessions::table
+        .find(session_id)
+        .filter(sessions::user_id.eq(user_id))
+        .select(sessions::paused)
+        .first::<bool>(&mut conn)
+        .optional()
+        .map(|value| value.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 /// Mint a new 30-day token for a launcher, revoke the old one, and push it over WS.

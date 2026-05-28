@@ -122,6 +122,7 @@ pub async fn run_launcher_loop(
                             claude_args: expected.claude_args.clone(),
                             agent_type: expected.agent_type,
                             scheduled_task_id: None,
+                            last_session_id: expected.session_id,
                         };
                         if ws_sender.send(request).await.is_err() {
                             warn!("Failed to send expected session launch request");
@@ -266,6 +267,7 @@ pub async fn run_launcher_loop(
                                 claude_args: session.claude_args,
                                 agent_type: session.agent_type,
                                 scheduled_task_id: None,
+                                last_session_id: session.session_id,
                             };
                             if ws_sender.send(request).await.is_err() {
                                 warn!("Failed to send session restart request");
@@ -287,6 +289,7 @@ pub async fn run_launcher_loop(
                                     claude_args: task_to_fire.config.claude_args.clone(),
                                     agent_type: task_to_fire.config.agent_type,
                                     scheduled_task_id: Some(task_to_fire.config.id),
+                                    last_session_id: task_to_fire.config.last_session_id,
                                 };
                                 if ws_sender.send(msg).await.is_err() {
                                     warn!("Failed to send RequestLaunch for scheduled task");
@@ -445,6 +448,7 @@ async fn handle_message(
             session_name,
             claude_args,
             agent_type,
+            resume_session_id,
             ..
         } => {
             // Check if this is a scheduled launch or a relaunch of an expected session
@@ -456,10 +460,12 @@ async fn handle_message(
             {
                 (resume_id, Some(task_id), true)
             } else {
-                let resume_id = expected_sessions
-                    .iter()
-                    .find(|s| s.working_directory == working_directory)
-                    .and_then(|s| s.session_id);
+                let resume_id = resume_session_id.or_else(|| {
+                    expected_sessions
+                        .iter()
+                        .find(|s| s.working_directory == working_directory)
+                        .and_then(|s| s.session_id)
+                });
                 (resume_id, None, false)
             };
 
@@ -544,6 +550,10 @@ async fn handle_message(
                     warn!("Failed to remove session from config: {}", e);
                 }
             }
+        }
+        ServerToLauncher::PauseSession { session_id } => {
+            info!("Pause request for session {}", session_id);
+            process_manager.stop(&session_id).await;
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);

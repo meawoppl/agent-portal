@@ -54,6 +54,7 @@ pub async fn launch_session(
         claude_args: req.claude_args,
         agent_type: req.agent_type,
         scheduled_task_id: None,
+        resume_session_id: None,
     };
 
     if !app_state

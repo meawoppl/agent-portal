@@ -127,6 +127,7 @@ fn handle_proxy_message(
             agent_type,
             repo_url,
             scheduled_task_id,
+            claude_args,
         }) => {
             let key = claude_session_id.to_string();
 
@@ -154,6 +155,7 @@ fn handle_proxy_message(
                 agent_type,
                 repo_url: &repo_url,
                 scheduled_task_id,
+                claude_args: &claude_args,
             };
             let result = register_or_update_session(app_state, &params);
 

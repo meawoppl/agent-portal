@@ -38,6 +38,8 @@ pub struct RegisterFields {
     pub repo_url: Option<String>,
     #[serde(default)]
     pub scheduled_task_id: Option<Uuid>,
+    #[serde(default)]
+    pub claude_args: Vec<String>,
 }
 
 /// Configuration for a scheduled task, sent from backend to launcher via ScheduleSync.
@@ -503,6 +505,11 @@ pub enum LauncherToServer {
         agent_type: AgentType,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scheduled_task_id: Option<Uuid>,
+        /// Existing session this launch would resume, if this is a restart of
+        /// a launcher-persisted session. The backend uses this to suppress
+        /// auto-resume when the session is paused server-side.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_session_id: Option<Uuid>,
     },
 
     /// Inject input into a session on behalf of the scheduler
@@ -549,10 +556,18 @@ pub enum ServerToLauncher {
         agent_type: AgentType,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scheduled_task_id: Option<Uuid>,
+        /// Specific existing session to resume. When omitted, the launcher may
+        /// use its local expected-session mapping for backwards compatibility.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_session_id: Option<Uuid>,
     },
 
     /// Request to stop a running session
     StopSession { session_id: Uuid },
+
+    /// Pause a running session without deleting the launcher's persisted
+    /// expected-session metadata.
+    PauseSession { session_id: Uuid },
 
     /// Request directory listing
     ListDirectories { request_id: Uuid, path: String },
@@ -614,6 +629,7 @@ mod tests {
             agent_type: AgentType::Claude,
             repo_url: None,
             scheduled_task_id: None,
+            claude_args: Vec::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"Register""#));
@@ -811,6 +827,7 @@ mod tests {
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
             scheduled_task_id: None,
+            resume_session_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LaunchSession""#));
@@ -853,6 +870,7 @@ mod tests {
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
             scheduled_task_id: None,
+            last_session_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"RequestLaunch""#));

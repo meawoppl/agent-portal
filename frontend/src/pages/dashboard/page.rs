@@ -20,6 +20,8 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 
+const PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY: &str = "claude-portal-paused-default-unpause-migrated";
+
 // =============================================================================
 // Dashboard Page - Main Orchestrating Component
 // =============================================================================
@@ -188,12 +190,12 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Get active sessions sorted by repo name, then hostname
-    // Disconnected sessions are completely hidden from the UI
+    // Get live or paused sessions sorted by repo name, then hostname.
+    // Disconnected unpaused sessions are hidden from the active dashboard.
     let active_sessions: Vec<SessionInfo> = {
         let mut sorted: Vec<SessionInfo> = sessions
             .iter()
-            .filter(|s| s.status.as_str() == "active")
+            .filter(|s| s.status.as_str() == "active" || s.paused)
             .cloned()
             .collect();
         sorted.sort_by(|a, b| {
@@ -244,6 +246,61 @@ pub fn dashboard_page() -> Html {
                 || ()
             },
         );
+    }
+
+    // One-time migration: the DB migration defaults existing sessions to
+    // paused. Restore the old browser-local visible set by resuming sessions
+    // that are not in the old hidden set.
+    {
+        let sessions = sessions.clone();
+        let hidden_sessions = (*hidden_sessions).clone();
+        let refresh = sessions_hook.refresh.clone();
+        use_effect_with((sessions.len(), hidden_sessions.len()), move |_| {
+            if !sessions.is_empty() {
+                if let Some(storage) =
+                    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
+                {
+                    let already_migrated = storage
+                        .get_item(PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY)
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some("true");
+                    if !already_migrated {
+                        let ids: Vec<Uuid> = sessions
+                            .iter()
+                            .filter(|s| !hidden_sessions.contains(&s.id) && s.paused)
+                            .map(|s| s.id)
+                            .collect();
+                        if ids.is_empty() {
+                            let _ = storage.set_item(PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY, "true");
+                        } else {
+                            spawn_local(async move {
+                                let mut all_ok = true;
+                                for id in ids {
+                                    let url =
+                                        utils::api_url(&format!("/api/sessions/{}/resume", id));
+                                    match Request::post(&url).send().await {
+                                        Ok(resp) if resp.status() == 202 => {}
+                                        _ => all_ok = false,
+                                    }
+                                }
+                                if all_ok {
+                                    if let Some(storage) = web_sys::window()
+                                        .and_then(|w| w.local_storage().ok().flatten())
+                                    {
+                                        let _ = storage
+                                            .set_item(PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY, "true");
+                                    }
+                                }
+                                refresh.emit(());
+                            });
+                        }
+                    }
+                }
+            }
+            || ()
+        });
     }
 
     // Auto-focus newly launched session when it appears in the session list
@@ -490,6 +547,43 @@ pub fn dashboard_page() -> Html {
                     }
                     Err(e) => {
                         log::error!("Failed to stop session: {:?}", e);
+                    }
+                }
+            });
+        })
+    };
+
+    let on_toggle_pause = {
+        let refresh = sessions_hook.refresh.clone();
+        let hidden_sessions = hidden_sessions.clone();
+        Callback::from(move |(session_id, pause): (Uuid, bool)| {
+            let refresh = refresh.clone();
+            let hidden_sessions = hidden_sessions.clone();
+            spawn_local(async move {
+                let action = if pause { "pause" } else { "resume" };
+                let url = utils::api_url(&format!("/api/sessions/{}/{}", session_id, action));
+                match Request::post(&url).send().await {
+                    Ok(resp) if resp.status() == 202 => {
+                        let mut set = (*hidden_sessions).clone();
+                        if pause {
+                            set.insert(session_id);
+                        } else {
+                            set.remove(&session_id);
+                        }
+                        save_hidden_sessions(&set);
+                        hidden_sessions.set(set);
+                        refresh.emit(());
+                    }
+                    Ok(resp) => {
+                        log::error!(
+                            "Failed to {} session {}: status {}",
+                            action,
+                            session_id,
+                            resp.status()
+                        );
+                    }
+                    Err(e) => {
+                        log::error!("Failed to {} session {}: {:?}", action, session_id, e);
                     }
                 }
             });
@@ -770,6 +864,7 @@ pub fn dashboard_page() -> Html {
                         on_toggle_hidden={on_toggle_hidden.clone()}
                         on_toggle_inactive_hidden={on_toggle_inactive_hidden.clone()}
                         on_stop={on_stop.clone()}
+                        on_toggle_pause={on_toggle_pause.clone()}
                     />
 
                     // Session views

@@ -413,6 +413,11 @@
     background: rgba(125, 207, 255, 0.15);
 }
 
+.pill-agent-badge.paused {
+    color: #e0af68;
+    background: rgba(224, 175, 104, 0.15);
+}
+
 /* Version staleness badge */
 .pill-version-badge {
     font-size: 0.6rem;
@@ -660,4 +665,3 @@ a.pill-menu-option.pr-link:hover {
 .pill-share:active {
     background: rgba(122, 162, 247, 0.3);
 }
-

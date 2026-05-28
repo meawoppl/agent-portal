@@ -120,4 +120,19 @@ impl SessionManager {
         }
         false
     }
+
+    /// Stop a running process on its launcher without removing the launcher's
+    /// persisted expected-session metadata.
+    pub fn pause_session_on_launcher(&self, session_id: Uuid) -> bool {
+        for entry in self.launchers.iter() {
+            if entry.value().running_sessions.contains(&session_id) {
+                return entry
+                    .value()
+                    .sender
+                    .send(ServerToLauncher::PauseSession { session_id })
+                    .is_ok();
+            }
+        }
+        false
+    }
 }

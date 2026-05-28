@@ -210,6 +210,8 @@ mod replay_tests {
             agent_type: "claude".to_string(),
             repo_url: None,
             scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(Vec::new()),
         };
         diesel::insert_into(sessions::table)
             .values(&new_session)

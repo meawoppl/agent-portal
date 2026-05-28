@@ -442,6 +442,14 @@ async fn main() -> anyhow::Result<()> {
             "/api/sessions/{id}/stop",
             post(handlers::sessions::stop_session),
         )
+        .route(
+            "/api/sessions/{id}/pause",
+            post(handlers::sessions::pause_session),
+        )
+        .route(
+            "/api/sessions/{id}/resume",
+            post(handlers::sessions::resume_session),
+        )
         // Session member management routes
         .route(
             "/api/sessions/{id}/members",

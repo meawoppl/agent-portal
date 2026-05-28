@@ -100,6 +100,7 @@ pub async fn register_with_backend(
         agent_type: config.agent_type,
         repo_url: get_repo_url(&config.working_directory),
         scheduled_task_id: config.scheduled_task_id,
+        claude_args: config.claude_args.clone(),
     });
 
     if let Err(e) = conn.send(&register_msg).await {

@@ -62,6 +62,7 @@ pub fn connect_websocket(
                     agent_type: Default::default(),
                     repo_url: None,
                     scheduled_task_id: None,
+                    claude_args: Vec::new(),
                 });
 
                 if sender.send(register_msg).await.is_err() {
