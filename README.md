@@ -85,6 +85,7 @@ The **portal** refers to the complete system: backend server, web frontend, and 
 | [Usage Guide](docs/USAGE.md) | Web interface, CLI options, voice input, session sharing |
 | [Local Development](docs/LOCAL_DEVELOPMENT.md) | Quick setup with `dev.sh`, available commands |
 | [Development Guide](docs/DEVELOPING.md) | Full dev workflow, building, testing, contributing |
+| [Architecture Vocabulary](docs/ARCHITECTURE_VOCABULARY.md) | Runtime components, core concepts, and message flow terminology |
 | [Deployment Guide](docs/DEPLOYING.md) | Production deployment, Google OAuth setup, configuration |
 | [Docker Guide](docs/DOCKER.md) | Docker and Kubernetes deployment with 1Password |
 | [VS Code Setup](docs/VSCODE_SETUP.md) | Use Claude Code in VS Code with portal integration |
