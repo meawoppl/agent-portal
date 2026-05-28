@@ -341,26 +341,27 @@ pub fn build_permission_response(
             // `tool_use_result.questions` and calls `questions.map(...)`.
             // Returning a bare `{answers: …}` drops `questions` and crashes
             // that frontend with `undefined is not an object (evaluating
-            // 'q.map')` — see the `answer_questions` helper and the
-            // `test_ask_user_question_answer_preserves_questions_in_updated_input`
-            // regression test in `claude-codes`. So echo the original input
-            // (which carries `questions` and any `metadata`) verbatim and
-            // merge the answers in. `AskUserQuestionInput` keys `answers` by
-            // the question `header`.
+            // 'q.map')` — so echo the original input (which carries
+            // `questions` and any `metadata`) verbatim and merge the
+            // answers in.
+            //
+            // Answer key is the question **text** (`q.question`), not the
+            // header. The CLI's `mapToolResultToToolResultBlockParam`
+            // destructures `({question: z})` from each question object and
+            // looks up `answers[z]`, so the canonical key is whatever sits
+            // in the `question` field. See #873 — using `header` causes the
+            // CLI to read every answer as `undefined`, and the sub-agent
+            // never sees the user's choices.
             let mut updated_input = perm.input.clone();
             if let Some(obj) = updated_input.as_object_mut() {
                 let mut answer_map = serde_json::Map::new();
                 if let Some(parsed) = parse_ask_user_question(&perm.input) {
                     for (idx, answer) in answers.iter() {
                         if let Some(q) = parsed.questions.get(*idx) {
-                            // Header is the canonical key; fall back to the
-                            // full question text when a question omits it.
-                            let key = if q.header.is_empty() {
-                                q.question.clone()
-                            } else {
-                                q.header.clone()
-                            };
-                            answer_map.insert(key, serde_json::Value::String(answer.clone()));
+                            answer_map.insert(
+                                q.question.clone(),
+                                serde_json::Value::String(answer.clone()),
+                            );
                         }
                     }
                 }
@@ -553,11 +554,20 @@ mod tests {
     }
 
     #[test]
-    fn build_response_answer_questions_preserves_questions_and_keys_by_header() {
-        // Regression guard: the Claude CLI echoes `updatedInput` into the
-        // `tool_use_result` it emits and its frontend does
-        // `questions.map(...)`. Dropping `questions` crashes it with
-        // `undefined is not an object (evaluating 'q.map')`.
+    fn build_response_answer_questions_preserves_questions_and_keys_by_question_text() {
+        // Regression guard for two coupled crashes in the Claude CLI:
+        //
+        // 1. The CLI echoes `updatedInput` into the `tool_use_result` it
+        //    emits and its frontend does `questions.map(...)` — dropping
+        //    `questions` crashes it with
+        //    `undefined is not an object (evaluating 'q.map')`.
+        //
+        // 2. The CLI's `mapToolResultToToolResultBlockParam` destructures
+        //    `({question: z})` and reads `answers[z]`, so the answer-map
+        //    key MUST be the question `question` text. Keying by `header`
+        //    (the regression #831 introduced, #873 reports) makes every
+        //    lookup return `undefined` and the sub-agent never sees the
+        //    user's choices.
         let perm = PendingPermission {
             request_id: "rid".to_string(),
             tool_name: "AskUserQuestion".to_string(),
@@ -581,22 +591,33 @@ mod tests {
         assert!(frame.allow);
         let input = frame.input.expect("answers payload missing");
 
-        // `questions` MUST survive in the echoed input — this is the q.map
-        // crash guard.
+        // `questions` MUST survive in the echoed input — q.map crash guard.
         let questions = input.get("questions").and_then(|v| v.as_array());
         assert_eq!(questions.map(|q| q.len()), Some(2));
 
-        // `answers` is keyed by question `header`, not text or index.
+        // `answers` is keyed by question text — the value of the
+        // `question` field, NOT `header` or array index.
         let answers_obj = input
             .get("answers")
             .and_then(|v| v.as_object())
             .expect("answers object missing");
-        assert_eq!(answers_obj.get("One").and_then(|v| v.as_str()), Some("a"));
-        assert_eq!(answers_obj.get("Two").and_then(|v| v.as_str()), Some("b"));
+        assert_eq!(
+            answers_obj.get("first?").and_then(|v| v.as_str()),
+            Some("a")
+        );
+        assert_eq!(
+            answers_obj.get("second?").and_then(|v| v.as_str()),
+            Some("b")
+        );
+        // And specifically NOT by header — guard against the #831 regression.
+        assert!(answers_obj.get("One").is_none());
+        assert!(answers_obj.get("Two").is_none());
     }
 
     #[test]
-    fn build_response_answer_questions_falls_back_to_text_when_header_empty() {
+    fn build_response_answer_questions_keys_by_question_text_even_with_no_header() {
+        // The presence or absence of `header` must not change the key
+        // choice — the CLI never reads `header` for answer lookup.
         let perm = PendingPermission {
             request_id: "rid".to_string(),
             tool_name: "AskUserQuestion".to_string(),
