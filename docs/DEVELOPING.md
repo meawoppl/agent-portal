@@ -1,6 +1,7 @@
 # Development Guide
 
 This guide covers setting up a development environment and contributing to agent-portal.
+For runtime component names and ownership boundaries, see [Architecture Vocabulary](ARCHITECTURE_VOCABULARY.md).
 
 ## Prerequisites
 
