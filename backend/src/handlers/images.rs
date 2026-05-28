@@ -11,7 +11,7 @@
 
 use axum::{
     extract::{Path, State},
-    http::{header, StatusCode},
+    http::header,
     response::IntoResponse,
 };
 use base64::Engine;
@@ -25,6 +25,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::auth::extract_user_id;
+use crate::errors::AppError;
 
 /// Default total-byte cap for the served image cache (256 MiB).
 pub const DEFAULT_IMAGE_STORE_MAX_BYTES: u64 = 256 * 1024 * 1024;
@@ -298,16 +299,15 @@ pub async fn serve_image(
     State(app_state): State<Arc<crate::AppState>>,
     cookies: Cookies,
     Path(id): Path<Uuid>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     // Auth first — if the caller has no session cookie we don't even tell
     // them whether the image exists.
-    let current_user_id =
-        extract_user_id(&app_state, &cookies).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let image = app_state
         .image_store
         .get(&id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or(AppError::NotFound("Image not found"))?;
 
     if image.user_id != current_user_id {
         // Inserter is someone else — fall back to session-member sharing if
@@ -319,7 +319,7 @@ pub async fn serve_image(
             None => false,
         };
         if !allowed {
-            return Err(StatusCode::NOT_FOUND);
+            return Err(AppError::NotFound("Image not found"));
         }
     }
 
