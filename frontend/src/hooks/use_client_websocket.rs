@@ -33,6 +33,13 @@ pub struct UseClientWebSocket {
     /// this buffer ticks live without the dashboard having to subscribe to
     /// individual session WS streams. Capped at [`RECENT_TURN_BUFFER_CAP`].
     pub recent_turn_metrics: Vec<TurnMetrics>,
+    /// Monotonic counter that ticks every time the backend broadcasts a
+    /// `ServerToClient::LaunchSessionResult` frame (proxy registered, or
+    /// the launch failed). Consumers can hang a `use_effect_with` on this
+    /// value to fire a single `/api/sessions` refresh at the exact moment
+    /// the new session becomes findable — no polling burst needed. The
+    /// value itself is opaque; only its *change* is meaningful.
+    pub launch_event_counter: u32,
 }
 
 /// Insert a new metrics row into a sorted-by-`started_at`-ASC buffer,
@@ -114,6 +121,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     let shutdown_reason = use_state(|| None::<String>);
     let update_available = use_state(|| None::<String>);
     let recent_turn_metrics = use_state(Vec::<TurnMetrics>::new);
+    let launch_event_counter = use_state(|| 0u32);
 
     // One-shot REST hydration on hook mount. Fires alongside (not gated on)
     // the WS connect — the dashboard pill shows immediately if the user
@@ -140,12 +148,14 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         let shutdown_reason = shutdown_reason.clone();
         let update_available = update_available.clone();
         let recent_turn_metrics = recent_turn_metrics.clone();
+        let launch_event_counter = launch_event_counter.clone();
 
         use_effect_with((), move |_| {
             let total_spend = total_spend.clone();
             let shutdown_reason = shutdown_reason.clone();
             let update_available = update_available.clone();
             let recent_turn_metrics = recent_turn_metrics.clone();
+            let launch_event_counter = launch_event_counter.clone();
 
             spawn_local(async move {
                 let mut attempt: u32 = 0;
@@ -211,6 +221,26 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                             );
                                             recent_turn_metrics.set(next);
                                         }
+                                        ServerToClient::LaunchSessionResult {
+                                            success,
+                                            error,
+                                            ..
+                                        } => {
+                                            // Push signal from the backend that the
+                                            // launcher finished registering (or failed).
+                                            // Tick the counter so the dashboard refreshes
+                                            // its session list at the exact moment the
+                                            // new row becomes findable, instead of
+                                            // waiting for the next 5s steady-poll tick.
+                                            if !success {
+                                                log::warn!(
+                                                    "Launch failed: {}",
+                                                    error.as_deref().unwrap_or("(no detail)")
+                                                );
+                                            }
+                                            launch_event_counter
+                                                .set(launch_event_counter.wrapping_add(1));
+                                        }
                                         _ => {}
                                     },
                                     Err(e) => {
@@ -249,6 +279,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         shutdown_reason: (*shutdown_reason).clone(),
         update_available: (*update_available).clone(),
         recent_turn_metrics: (*recent_turn_metrics).clone(),
+        launch_event_counter: *launch_event_counter,
     }
 }
 
