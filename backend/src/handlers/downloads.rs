@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     extract::{Query, State},
     http::{header, Method, StatusCode},
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -25,7 +25,7 @@ pub struct InstallScriptParams {
 pub async fn install_script(
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<InstallScriptParams>,
-) -> impl IntoResponse {
+) -> Result<Response<Body>, AppError> {
     // Use provided backend_url or derive from public_url
     let backend_url = params.backend_url.unwrap_or_else(|| {
         app_state
@@ -221,7 +221,7 @@ echo "Or run directly:         agent-portal"
             "attachment; filename=\"install.sh\"",
         )
         .body(Body::from(script))
-        .unwrap()
+        .map_err(|e| AppError::Internal(format!("Failed to build install script response: {e}")))
 }
 
 /// Resolve the path to the portal binary
@@ -285,13 +285,13 @@ pub async fn proxy_binary(
             .await
             .map_err(|e| AppError::Internal(format!("Failed to read metadata: {}", e)))?;
 
-        Ok(Response::builder()
+        Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/octet-stream")
             .header(header::CONTENT_LENGTH, metadata.len())
             .header("X-Binary-SHA256", &sha256_hash)
             .body(Body::empty())
-            .unwrap())
+            .map_err(|e| AppError::Internal(format!("Failed to build HEAD response: {e}")))
     } else {
         // GET request: return the binary with hash header
         let file = tokio::fs::File::open(&binary_path)
@@ -301,7 +301,7 @@ pub async fn proxy_binary(
         let stream = ReaderStream::new(file);
         let body = Body::from_stream(stream);
 
-        Ok(Response::builder()
+        Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/octet-stream")
             .header(
@@ -310,6 +310,6 @@ pub async fn proxy_binary(
             )
             .header("X-Binary-SHA256", &sha256_hash)
             .body(body)
-            .unwrap())
+            .map_err(|e| AppError::Internal(format!("Failed to build binary response: {e}")))
     }
 }
