@@ -7,7 +7,9 @@ description = "Self-update functionality for Claude Portal binaries"
 [dependencies]
 anyhow = "1"
 hex = "0.4"
-reqwest = { version = "0.12", features = ["json"] }
+# rustls (not native-tls) so the released claude-portal / agent-portal
+# binaries don't link against system libssl — see proxy/Cargo.toml.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 tracing = "0.1"
