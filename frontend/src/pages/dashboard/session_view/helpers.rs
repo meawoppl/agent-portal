@@ -23,6 +23,10 @@ pub(crate) enum ActivityTag {
     Assistant,
     /// User input echo (Claude `user`).
     User,
+    /// File-read style tool output. Uses the same green tick as Claude's
+    /// user-shaped read tool-result envelope without participating in
+    /// pending-send reconciliation as a real user echo.
+    Read,
     /// End-of-turn result/summary (Claude `result`, Codex `turn.completed`).
     Result,
     /// Portal frame (connect/disconnect/reconnect notices, raw frame
@@ -55,7 +59,7 @@ impl ActivityTag {
     pub fn tick_css(self) -> Option<&'static str> {
         match self {
             Self::Assistant => Some("assistant"),
-            Self::User => Some("user"),
+            Self::User | Self::Read => Some("user"),
             Self::Result => Some("result"),
             Self::Portal => Some("portal"),
             Self::Error => Some("error"),
@@ -227,6 +231,9 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
             ThreadItem::Error(_) => Some(ActivityTag::Error),
+            ThreadItem::CommandExecution(ref it) if command_execution_reads_file(&it.command) => {
+                Some(ActivityTag::Read)
+            }
             ThreadItem::AgentMessage(_)
             | ThreadItem::Reasoning(_)
             | ThreadItem::CommandExecution(_)
@@ -247,6 +254,28 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
         // so emit no sparkline tick.
         _ => None,
     }
+}
+
+fn command_execution_reads_file(command: &str) -> bool {
+    let command = command.trim();
+    if command.is_empty() {
+        return false;
+    }
+
+    let normalized = command.replace("\\\"", "\"");
+    is_numbered_line_read(&normalized) || is_sed_print_read(&normalized)
+}
+
+fn is_numbered_line_read(command: &str) -> bool {
+    command.contains("nl -ba ") && command.contains("| sed -n ")
+}
+
+fn is_sed_print_read(command: &str) -> bool {
+    if command.contains("sed -i") || !command.contains("sed -n ") {
+        return false;
+    }
+
+    command.contains('p')
 }
 
 /// Inject `_created_at` (and optionally `_sender`) metadata into a wire-JSON
@@ -367,6 +396,7 @@ mod tests {
         // test pins both sides.
         assert_eq!(ActivityTag::Assistant.tick_css(), Some("assistant"));
         assert_eq!(ActivityTag::User.tick_css(), Some("user"));
+        assert_eq!(ActivityTag::Read.tick_css(), Some("user"));
         assert_eq!(ActivityTag::Result.tick_css(), Some("result"));
         assert_eq!(ActivityTag::Portal.tick_css(), Some("portal"));
         assert_eq!(ActivityTag::Error.tick_css(), Some("error"));
@@ -386,6 +416,7 @@ mod tests {
         assert!(ActivityTag::TaskStart.is_range_marker());
         assert!(ActivityTag::TaskEnd.is_range_marker());
         assert!(!ActivityTag::Assistant.is_range_marker());
+        assert!(!ActivityTag::Read.is_range_marker());
         assert!(!ActivityTag::Unknown.is_range_marker());
 
         assert!(ActivityTag::CompactionStart.is_compaction_start());
@@ -443,6 +474,25 @@ mod tests {
         // Tool-use lifecycle events count as "agent working" for sparkline
         // purposes — same color as the agent's text reply.
         let json = r#"{"type":"item.started","item":{"type":"command_execution","id":"c1","command":"echo hi","status":"in_progress"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
+    }
+
+    #[test]
+    fn classify_codex_numbered_file_read_command_is_read() {
+        let json = r#"{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"/bin/bash -lc \"nl -ba claude-session-lib/src/proxy_session/output_forwarder.rs | sed -n '45,82p'\"","aggregated_output":"45\tlet max_bytes = max_image_mb;","exit_code":0,"status":"completed"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Read);
+        assert_eq!(classify_output_msg_type(json).tick_css(), Some("user"));
+    }
+
+    #[test]
+    fn classify_codex_sed_print_file_read_command_is_read() {
+        let json = r#"{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"sed -n '1,40p' frontend/src/pages/dashboard/session_view/helpers.rs","aggregated_output":"//! Pure helpers","exit_code":0,"status":"completed"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Read);
+    }
+
+    #[test]
+    fn classify_codex_non_read_command_execution_stays_assistant() {
+        let json = r#"{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"cargo test -p frontend","aggregated_output":"ok","exit_code":0,"status":"completed"}}"#;
         assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
     }
 
