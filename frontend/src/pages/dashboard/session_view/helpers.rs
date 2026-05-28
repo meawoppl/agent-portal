@@ -10,19 +10,96 @@
 
 use crate::components::message_renderer::types::{ClaudeMessage, ContentBlock};
 
-/// Wire `type` tag for a typed [`ClaudeMessage`] variant. Centralizes the
-/// variant-to-tag mapping so call sites that still trade in `msg_type: String`
-/// can derive it from the typed enum instead of poking `.get("type")`.
-pub(super) fn message_type_tag(m: &ClaudeMessage) -> &'static str {
+/// Cross-agent activity classification used by the session-rail sparkline and
+/// the pending-send reconciler. The same enum bridges Claude wire shapes
+/// (`ClaudeOutput::Assistant` / `User` / etc.) and Codex `CodexEvent` shapes
+/// — so a Codex agent reply lights up the rail in `assistant` color just like
+/// a Claude assistant reply does, instead of falling through to `Unknown` and
+/// rendering as a gray "other" smear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ActivityTag {
+    /// Agent reply (Claude `assistant`, Codex `item.{started,updated,completed}`
+    /// carrying agent / reasoning / tool-use items).
+    Assistant,
+    /// User input echo (Claude `user`).
+    User,
+    /// End-of-turn result/summary (Claude `result`, Codex `turn.completed`).
+    Result,
+    /// Portal frame (connect/disconnect/reconnect notices, raw frame
+    /// attachments). Protocol-agnostic.
+    Portal,
+    /// Error envelope or turn failure.
+    Error,
+    /// System-level message that doesn't fit elsewhere — renders as the
+    /// neutral `tick-other` gray.
+    System,
+    /// Anthropic rate-limit event — neutral.
+    RateLimit,
+    /// Parse failure or completely unrecognized wire shape — neutral.
+    Unknown,
+    /// Start of a compaction range (sparkline range marker).
+    CompactionStart,
+    /// End of a compaction range.
+    CompactionEnd,
+    /// Start of a sub-task range.
+    TaskStart,
+    /// End of a sub-task range.
+    TaskEnd,
+}
+
+impl ActivityTag {
+    /// CSS class suffix for the sparkline tick — `format!("tick-{}", suffix)`
+    /// matches `frontend/styles/session-rail.css:.sparkline-tick.tick-*`.
+    /// Returns `None` for range markers (compaction / task), which are
+    /// rendered as `.sparkline-range` rather than as point ticks.
+    pub fn tick_css(self) -> Option<&'static str> {
+        match self {
+            Self::Assistant => Some("assistant"),
+            Self::User => Some("user"),
+            Self::Result => Some("result"),
+            Self::Portal => Some("portal"),
+            Self::Error => Some("error"),
+            Self::System | Self::RateLimit | Self::Unknown => Some("other"),
+            Self::CompactionStart | Self::CompactionEnd | Self::TaskStart | Self::TaskEnd => None,
+        }
+    }
+
+    /// Range markers don't render as ticks. Used by the sparkline tick-iteration
+    /// to skip them in one pass.
+    pub fn is_range_marker(self) -> bool {
+        matches!(
+            self,
+            Self::CompactionStart | Self::CompactionEnd | Self::TaskStart | Self::TaskEnd
+        )
+    }
+
+    pub fn is_compaction_start(self) -> bool {
+        matches!(self, Self::CompactionStart)
+    }
+    pub fn is_compaction_end(self) -> bool {
+        matches!(self, Self::CompactionEnd)
+    }
+    pub fn is_task_start(self) -> bool {
+        matches!(self, Self::TaskStart)
+    }
+    pub fn is_task_end(self) -> bool {
+        matches!(self, Self::TaskEnd)
+    }
+}
+
+/// Wire `type` tag for a typed [`ClaudeMessage`] variant, expressed as an
+/// [`ActivityTag`]. Returns `Unknown` only for the actual `Unknown` variant —
+/// every other Claude shape maps to a real tag.
+pub(super) fn message_type_tag(m: &ClaudeMessage) -> ActivityTag {
     match m {
-        ClaudeMessage::System(_) => "system",
-        ClaudeMessage::Assistant(_) => "assistant",
-        ClaudeMessage::Result(_) => "result",
-        ClaudeMessage::User(_) => "user",
-        ClaudeMessage::Error(_) => "error",
-        ClaudeMessage::Portal(_) => "portal",
-        ClaudeMessage::RateLimitEvent(_) => "rate_limit_event",
-        ClaudeMessage::Unknown => "unknown",
+        ClaudeMessage::System(_) => ActivityTag::System,
+        ClaudeMessage::Assistant(_) => ActivityTag::Assistant,
+        ClaudeMessage::Result(_) => ActivityTag::Result,
+        ClaudeMessage::User(_) => ActivityTag::User,
+        ClaudeMessage::Error(_) => ActivityTag::Error,
+        ClaudeMessage::Portal(_) => ActivityTag::Portal,
+        ClaudeMessage::RateLimitEvent(_) => ActivityTag::RateLimit,
+        ClaudeMessage::Unknown => ActivityTag::Unknown,
     }
 }
 
@@ -68,7 +145,7 @@ pub(super) fn autoscroll_transition(current: bool, new_at_bottom: bool) -> Optio
 
 /// Check if a Claude session is awaiting user input by scanning messages
 /// backwards. Skips noise types (portal, error, system, rate_limit_event)
-/// and returns true if "result" is found before "user" or "assistant".
+/// and returns true if `Result` is found before `User` or `Assistant`.
 pub(super) fn is_claude_awaiting(
     messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
 ) -> bool {
@@ -85,45 +162,90 @@ pub(super) fn is_claude_awaiting(
                             | ClaudeMessage::User(_)
                     )
                 })
-                .map(|m| message_type_tag(&m).to_string())
+                .map(|m| message_type_tag(&m))
         })
-        .is_some_and(|t| t == "result")
+        .is_some_and(|t| t == ActivityTag::Result)
 }
 
-/// Derive the activity-tag string used by `on_activity` / `CheckAwaiting`
-/// from a raw wire JSON string. Centralizes the two-step parse-and-classify
-/// dance that was previously duplicated between `LoadHistory` (REST replay)
-/// and `handle_received_output` (live wire) — both paths classified
-/// identically but diverged in surrounding code, which made any future
-/// classification change a two-site update.
+/// Derive the [`ActivityTag`] used by `on_activity` / `CheckAwaiting` from a
+/// raw wire JSON string. Centralizes the parse-and-classify dance previously
+/// duplicated between `LoadHistory` (REST replay) and `handle_received_output`
+/// (live wire) so a classification change lands in one place.
 ///
 /// Tries `shared::ClaudeOutput` first (the typed Claude wire shape, where
-/// system messages disambiguate into `compaction_start` / `compaction_end`
-/// / `task_start` / `task_end`), falling back to the local lenient
-/// `ClaudeMessage` (portal frames, error envelopes, unknown shapes) via
-/// [`message_type_tag`]. Returns `"unknown"` when neither parse succeeds.
-pub(super) fn classify_output_msg_type(output: &str) -> String {
+/// system messages disambiguate into the four sparkline range-marker tags),
+/// then falls back to the local lenient `ClaudeMessage`. If both fail and
+/// the wire shape parses as a `CodexEvent`, maps the Codex variant into a
+/// shared [`ActivityTag`] so Codex sessions get a colored sparkline (#TBD).
+/// Returns [`ActivityTag::Unknown`] when nothing parses.
+pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
     if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(output) {
-        let mut msg_type = claude_msg.message_type();
+        let mut tag = match claude_msg.message_type().as_str() {
+            "assistant" => ActivityTag::Assistant,
+            "user" => ActivityTag::User,
+            "result" => ActivityTag::Result,
+            "portal" => ActivityTag::Portal,
+            "error" => ActivityTag::Error,
+            "system" => ActivityTag::System,
+            "rate_limit_event" => ActivityTag::RateLimit,
+            _ => ActivityTag::Unknown,
+        };
         if let shared::ClaudeOutput::System(sys) = &claude_msg {
             if let Some(status) = sys.as_status() {
                 if status.status.as_ref().map(|s| s.as_str()) == Some("compacting") {
-                    msg_type = "compaction_start".to_string();
+                    tag = ActivityTag::CompactionStart;
                 }
             } else if shared::is_compaction_boundary(sys) {
-                msg_type = "compaction_end".to_string();
+                tag = ActivityTag::CompactionEnd;
             } else if sys.as_task_started().is_some() {
-                msg_type = "task_start".to_string();
+                tag = ActivityTag::TaskStart;
             } else if sys.as_task_notification().is_some() {
-                msg_type = "task_end".to_string();
+                tag = ActivityTag::TaskEnd;
             }
         }
-        return msg_type;
+        return tag;
     }
     if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(output) {
-        return message_type_tag(&parsed).to_string();
+        let tag = message_type_tag(&parsed);
+        if tag != ActivityTag::Unknown {
+            return tag;
+        }
     }
-    "unknown".to_string()
+    classify_codex_event(output).unwrap_or(ActivityTag::Unknown)
+}
+
+/// Map a Codex wire frame to a cross-agent [`ActivityTag`] so the sparkline
+/// lights up on Codex sessions the same way it does on Claude. Returns `None`
+/// for thread/turn-started signals and streaming deltas (those don't render
+/// visible cards, so the sparkline stays clean) and for unparseable JSON.
+fn classify_codex_event(output: &str) -> Option<ActivityTag> {
+    use crate::components::codex_renderer::{CodexEvent, CodexItem};
+    let event: CodexEvent = serde_json::from_str(output).ok()?;
+    match event {
+        CodexEvent::ItemStarted { item: Some(item) }
+        | CodexEvent::ItemUpdated { item: Some(item) }
+        | CodexEvent::ItemCompleted { item: Some(item) } => match item {
+            CodexItem::Error { .. } => Some(ActivityTag::Error),
+            CodexItem::AgentMessage { .. }
+            | CodexItem::Reasoning { .. }
+            | CodexItem::CommandExecution { .. }
+            | CodexItem::FileChange { .. }
+            | CodexItem::McpToolCall { .. }
+            | CodexItem::WebSearch { .. }
+            | CodexItem::TodoList { .. } => Some(ActivityTag::Assistant),
+            CodexItem::Unknown => None,
+        },
+        CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => {
+            Some(ActivityTag::Result)
+        }
+        CodexEvent::Error { .. } => Some(ActivityTag::Error),
+        // `thread.started` / `turn.started` and the streaming deltas
+        // (PlanDelta / ReasoningTextDelta / ReasoningSummaryPartAdded) and the
+        // diff/plan/patch updates don't render visible per-event cards (the
+        // consolidated content lands in `item.completed` / `turn/plan/updated`),
+        // so emit no sparkline tick.
+        _ => None,
+    }
 }
 
 /// Inject `_created_at` (and optionally `_sender`) metadata into a wire-JSON
@@ -167,24 +289,24 @@ pub(super) fn inject_message_metadata(
 
 /// Drain pending optimistic-send entries when the server confirms our input.
 ///
-/// - `"user"` echo: match by content (via [`extract_user_text`]) so a lost
-///   message doesn't consume an unrelated pending entry — only the first
-///   matching pending entry is removed.
-/// - `"assistant"` / `"result"`: Claude is responding; slash commands like
-///   `/cost`, `/status`, `/clear` don't produce a user echo, so we treat
-///   the assistant/result response as the signal that the input was
-///   received and clear *all* pending entries.
-/// - Any other `msg_type`: no-op.
+/// - [`ActivityTag::User`] echo: match by content (via [`extract_user_text`])
+///   so a lost message doesn't consume an unrelated pending entry — only the
+///   first matching pending entry is removed.
+/// - [`ActivityTag::Assistant`] / [`ActivityTag::Result`]: agent is responding;
+///   slash commands like `/cost`, `/status`, `/clear` don't produce a user
+///   echo, so the assistant/result response is treated as the signal that
+///   the input was received and clears *all* pending entries.
+/// - Any other tag: no-op.
 pub(super) fn reconcile_pending_sends(
     pending_sends: &mut Vec<String>,
-    msg_type: &str,
+    tag: ActivityTag,
     output: &str,
 ) {
     if pending_sends.is_empty() {
         return;
     }
-    match msg_type {
-        "user" => {
+    match tag {
+        ActivityTag::User => {
             let echo_text = serde_json::from_str::<ClaudeMessage>(output)
                 .ok()
                 .as_ref()
@@ -202,7 +324,7 @@ pub(super) fn reconcile_pending_sends(
                 }
             }
         }
-        "assistant" | "result" => {
+        ActivityTag::Assistant | ActivityTag::Result => {
             pending_sends.clear();
         }
         _ => {}
@@ -235,24 +357,60 @@ mod tests {
         assert_eq!(autoscroll_transition(false, true), Some(true));
     }
 
+    // --- ActivityTag ---
+
+    #[test]
+    fn activity_tag_tick_css_matches_existing_css_classes() {
+        // The string suffixes here must match `.sparkline-tick.tick-*` rules
+        // in `frontend/styles/session-rail.css`. If a rename happens, this
+        // test pins both sides.
+        assert_eq!(ActivityTag::Assistant.tick_css(), Some("assistant"));
+        assert_eq!(ActivityTag::User.tick_css(), Some("user"));
+        assert_eq!(ActivityTag::Result.tick_css(), Some("result"));
+        assert_eq!(ActivityTag::Portal.tick_css(), Some("portal"));
+        assert_eq!(ActivityTag::Error.tick_css(), Some("error"));
+        assert_eq!(ActivityTag::System.tick_css(), Some("other"));
+        assert_eq!(ActivityTag::RateLimit.tick_css(), Some("other"));
+        assert_eq!(ActivityTag::Unknown.tick_css(), Some("other"));
+        assert_eq!(ActivityTag::CompactionStart.tick_css(), None);
+        assert_eq!(ActivityTag::CompactionEnd.tick_css(), None);
+        assert_eq!(ActivityTag::TaskStart.tick_css(), None);
+        assert_eq!(ActivityTag::TaskEnd.tick_css(), None);
+    }
+
+    #[test]
+    fn activity_tag_range_marker_predicates() {
+        assert!(ActivityTag::CompactionStart.is_range_marker());
+        assert!(ActivityTag::CompactionEnd.is_range_marker());
+        assert!(ActivityTag::TaskStart.is_range_marker());
+        assert!(ActivityTag::TaskEnd.is_range_marker());
+        assert!(!ActivityTag::Assistant.is_range_marker());
+        assert!(!ActivityTag::Unknown.is_range_marker());
+
+        assert!(ActivityTag::CompactionStart.is_compaction_start());
+        assert!(ActivityTag::CompactionEnd.is_compaction_end());
+        assert!(ActivityTag::TaskStart.is_task_start());
+        assert!(ActivityTag::TaskEnd.is_task_end());
+    }
+
     // --- classify_output_msg_type ---
 
     #[test]
     fn classify_output_msg_type_returns_unknown_for_garbage() {
-        assert_eq!(classify_output_msg_type("not-json"), "unknown");
-        assert_eq!(classify_output_msg_type(""), "unknown");
+        assert_eq!(classify_output_msg_type("not-json"), ActivityTag::Unknown);
+        assert_eq!(classify_output_msg_type(""), ActivityTag::Unknown);
     }
 
     #[test]
     fn classify_output_msg_type_recognizes_assistant_envelope() {
         let json = r#"{"type":"assistant","message":{"content":[]}}"#;
-        assert_eq!(classify_output_msg_type(json), "assistant");
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
     }
 
     #[test]
     fn classify_output_msg_type_recognizes_user_envelope() {
         let json = r#"{"type":"user","content":"hi"}"#;
-        assert_eq!(classify_output_msg_type(json), "user");
+        assert_eq!(classify_output_msg_type(json), ActivityTag::User);
     }
 
     #[test]
@@ -261,13 +419,82 @@ mod tests {
         // parse fails and the classifier falls through to the local lenient
         // `ClaudeMessage::Portal` shape via `message_type_tag`.
         let json = r#"{"type":"portal","content":[{"type":"text","text":"hi"}]}"#;
-        assert_eq!(classify_output_msg_type(json), "portal");
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Portal);
     }
 
     #[test]
     fn classify_output_msg_type_recognizes_error_envelope() {
         let json = r#"{"type":"error","content":"boom"}"#;
-        assert_eq!(classify_output_msg_type(json), "error");
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Error);
+    }
+
+    // --- classify_codex_event: regression target for "gray ticks on Codex" ---
+
+    #[test]
+    fn classify_codex_item_completed_agent_message_is_assistant() {
+        let json =
+            r#"{"type":"item.completed","item":{"type":"agent_message","id":"i1","text":"hi"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
+    }
+
+    #[test]
+    fn classify_codex_item_started_command_execution_is_assistant() {
+        // Tool-use lifecycle events count as "agent working" for sparkline
+        // purposes — same color as the agent's text reply.
+        let json = r#"{"type":"item.started","item":{"type":"command_execution","id":"c1","command":"echo hi","status":"in_progress"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
+    }
+
+    #[test]
+    fn classify_codex_item_completed_file_change_is_assistant() {
+        let json =
+            r#"{"type":"item.completed","item":{"type":"file_change","id":"f1","changes":[]}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
+    }
+
+    #[test]
+    fn classify_codex_item_completed_error_is_error() {
+        let json =
+            r#"{"type":"item.completed","item":{"type":"error","id":"e1","message":"boom"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Error);
+    }
+
+    #[test]
+    fn classify_codex_turn_completed_is_result() {
+        // Turn-end summary mirrors Claude's `result` semantic (orange tick).
+        let json = r#"{"type":"turn.completed","usage":{}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Result);
+    }
+
+    #[test]
+    fn classify_codex_turn_failed_is_result() {
+        let json = r#"{"type":"turn.failed","error":{"message":"oops"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Result);
+    }
+
+    #[test]
+    fn classify_codex_error_event_is_error() {
+        // Top-level `Error` event (not `item.completed{error}`).
+        let json = r#"{"type":"error","message":"boom"}"#;
+        // This matches BOTH the local `ClaudeMessage::Error` shape and the
+        // typed `CodexEvent::Error` shape. The Claude path wins because it's
+        // checked first and `ClaudeMessage::Error` is a recognized variant —
+        // the result is still `Error`, just sourced from the Claude arm.
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Error);
+    }
+
+    #[test]
+    fn classify_codex_streaming_deltas_are_unknown() {
+        // Streaming deltas don't render visible cards, so they shouldn't
+        // light up the sparkline either — they fall through to Unknown.
+        let json = r#"{"type":"item/reasoning/textDelta","params":{"delta":"…"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
+        let json = r#"{"type":"item/plan/delta","params":{"delta":"…"}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
+        let json = r#"{"type":"thread.started","thread_id":"t1"}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
+        let json = r#"{"type":"turn.started"}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
     }
 
     // --- inject_message_metadata ---
@@ -339,7 +566,11 @@ mod tests {
     #[test]
     fn reconcile_pending_sends_noop_when_empty() {
         let mut pending: Vec<String> = vec![];
-        reconcile_pending_sends(&mut pending, "user", r#"{"type":"user","content":"x"}"#);
+        reconcile_pending_sends(
+            &mut pending,
+            ActivityTag::User,
+            r#"{"type":"user","content":"x"}"#,
+        );
         assert!(pending.is_empty());
     }
 
@@ -349,7 +580,11 @@ mod tests {
             r#"{"type":"user","content":"hello"}"#.to_string(),
             r#"{"type":"user","content":"world"}"#.to_string(),
         ];
-        reconcile_pending_sends(&mut pending, "user", r#"{"type":"user","content":"hello"}"#);
+        reconcile_pending_sends(
+            &mut pending,
+            ActivityTag::User,
+            r#"{"type":"user","content":"hello"}"#,
+        );
         assert_eq!(pending.len(), 1);
         assert!(pending[0].contains("world"));
     }
@@ -362,7 +597,7 @@ mod tests {
         let mut pending = vec![r#"{"type":"user","content":"hello"}"#.to_string()];
         reconcile_pending_sends(
             &mut pending,
-            "user",
+            ActivityTag::User,
             r#"{"type":"user","content":"unrelated"}"#,
         );
         assert_eq!(pending.len(), 1);
@@ -379,7 +614,7 @@ mod tests {
         ];
         reconcile_pending_sends(
             &mut pending,
-            "assistant",
+            ActivityTag::Assistant,
             r#"{"type":"assistant","message":{"content":[]}}"#,
         );
         assert!(pending.is_empty());
@@ -390,16 +625,16 @@ mod tests {
         let mut pending = vec![r#"{"type":"user","content":"a"}"#.to_string()];
         reconcile_pending_sends(
             &mut pending,
-            "result",
+            ActivityTag::Result,
             r#"{"type":"result","total_cost_usd":0.0}"#,
         );
         assert!(pending.is_empty());
     }
 
     #[test]
-    fn reconcile_pending_sends_ignores_other_msg_types() {
+    fn reconcile_pending_sends_ignores_other_tags() {
         let mut pending = vec![r#"{"type":"user","content":"a"}"#.to_string()];
-        reconcile_pending_sends(&mut pending, "system", r#"{"type":"system"}"#);
+        reconcile_pending_sends(&mut pending, ActivityTag::System, r#"{"type":"system"}"#);
         assert_eq!(pending.len(), 1);
     }
 
@@ -476,25 +711,25 @@ mod tests {
     // --- message_type_tag ---
 
     #[test]
-    fn message_type_tag_returns_expected_string_for_each_variant() {
+    fn message_type_tag_returns_expected_variant_for_each_claude_shape() {
         assert_eq!(
             message_type_tag(
                 &serde_json::from_str::<ClaudeMessage>(r#"{"type":"system"}"#).unwrap()
             ),
-            "system"
+            ActivityTag::System
         );
         assert_eq!(
             message_type_tag(
                 &serde_json::from_str::<ClaudeMessage>(r#"{"type":"user","content":"x"}"#).unwrap()
             ),
-            "user"
+            ActivityTag::User
         );
         assert_eq!(
             message_type_tag(
                 &serde_json::from_str::<ClaudeMessage>(r#"{"type":"error","content":"x"}"#)
                     .unwrap()
             ),
-            "error"
+            ActivityTag::Error
         );
     }
 }

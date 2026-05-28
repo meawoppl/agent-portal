@@ -4,6 +4,7 @@
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
 use crate::components::{ScheduleDialog, ShareDialog};
+use crate::pages::dashboard::session_view::ActivityTag;
 use crate::utils;
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
@@ -53,7 +54,7 @@ impl SparklineView {
     }
 }
 
-type EventStore = HashMap<Uuid, Vec<(f64, String)>>;
+type EventStore = HashMap<Uuid, Vec<(f64, ActivityTag)>>;
 
 /// Shared activity event buffer.
 ///
@@ -66,12 +67,12 @@ pub struct ActivityRef(Rc<RefCell<EventStore>>);
 impl ActivityRef {
     /// Record a new event, evicting any entries that have fallen outside the
     /// rolling window relative to `timestamp`.
-    pub fn push(&self, session_id: Uuid, msg_type: String, timestamp: f64) {
+    pub fn push(&self, session_id: Uuid, tag: ActivityTag, timestamp: f64) {
         let cutoff = timestamp - SPARKLINE_WINDOW_MS;
         let mut map = self.0.borrow_mut();
         let events = map.entry(session_id).or_default();
         events.retain(|(t, _)| *t > cutoff);
-        events.push((timestamp, msg_type));
+        events.push((timestamp, tag));
     }
 
     /// Compute the sparkline view for one session at the given wall-clock time.
@@ -88,30 +89,29 @@ impl ActivityRef {
 
         let ticks = events
             .iter()
-            .filter(|(t, kind)| {
-                *t > cutoff
-                    && !matches!(
-                        kind.as_str(),
-                        "compaction_start" | "compaction_end" | "task_start" | "task_end"
-                    )
-            })
-            .map(|(t, kind)| SparklineTick {
-                pct: (t - cutoff) / SPARKLINE_WINDOW_MS * 100.0,
-                css_type: match kind.as_str() {
-                    "assistant" => "assistant",
-                    "user" => "user",
-                    "result" => "result",
-                    "portal" => "portal",
-                    "error" => "error",
-                    _ => "other",
-                },
+            .filter(|(t, tag)| *t > cutoff && !tag.is_range_marker())
+            .filter_map(|(t, tag)| {
+                tag.tick_css().map(|css_type| SparklineTick {
+                    pct: (t - cutoff) / SPARKLINE_WINDOW_MS * 100.0,
+                    css_type,
+                })
             })
             .collect();
 
         SparklineView {
             ticks,
-            compaction_ranges: extract_ranges(events, cutoff, "compaction_start", "compaction_end"),
-            task_ranges: extract_ranges(events, cutoff, "task_start", "task_end"),
+            compaction_ranges: extract_ranges(
+                events,
+                cutoff,
+                ActivityTag::is_compaction_start,
+                ActivityTag::is_compaction_end,
+            ),
+            task_ranges: extract_ranges(
+                events,
+                cutoff,
+                ActivityTag::is_task_start,
+                ActivityTag::is_task_end,
+            ),
         }
     }
 }
@@ -128,21 +128,21 @@ impl Default for ActivityRef {
     }
 }
 
-/// Pair up `start_tag`/`end_tag` events into percentage ranges.
-/// An in-progress range (start with no matching end) extends to 100 %.
+/// Pair up start/end tag events (selected by the given predicates) into
+/// percentage ranges. An in-progress range (start with no matching end)
+/// extends to 100 %.
 fn extract_ranges(
-    events: &[(f64, String)],
+    events: &[(f64, ActivityTag)],
     cutoff: f64,
-    start_tag: &str,
-    end_tag: &str,
+    is_start: fn(ActivityTag) -> bool,
+    is_end: fn(ActivityTag) -> bool,
 ) -> Vec<SparklineRange> {
     let mut ranges = Vec::new();
     let mut pending_start: Option<f64> = None;
-    for (t, kind) in events.iter().filter(|(t, _)| *t > cutoff) {
-        let kind = kind.as_str();
-        if kind == start_tag {
+    for (t, tag) in events.iter().filter(|(t, _)| *t > cutoff) {
+        if is_start(*tag) {
             pending_start = Some((t - cutoff) / SPARKLINE_WINDOW_MS * 100.0);
-        } else if kind == end_tag {
+        } else if is_end(*tag) {
             let end_pct = (t - cutoff) / SPARKLINE_WINDOW_MS * 100.0;
             ranges.push(SparklineRange {
                 start_pct: pending_start.take().unwrap_or(0.0),
