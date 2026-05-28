@@ -881,6 +881,10 @@ mod tests {
     /// `stage` is one of `"item.started"` / `"item.updated"` / `"item.completed"`.
     /// All three carry the same `item_id`, mirroring the Codex wire flow that
     /// produced the duplicate-card regression of #776.
+    ///
+    /// `status` must be a real `CommandExecutionStatus` value (`in_progress`,
+    /// `completed`, `failed`, `declined`) — upstream `codex-codes` types
+    /// are strict here, the pre-#827 local mirror was looser (any string).
     fn codex_command_event(stage: &str, item_id: &str, status: &str) -> String {
         serde_json::json!({
             "type": stage,
@@ -1086,7 +1090,7 @@ mod tests {
     #[test]
     fn codex_command_lifecycle_dedupes_to_completed() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
         let visible = visible_group_indices(GroupCategory::Codex, &messages);
@@ -1104,8 +1108,8 @@ mod tests {
     #[test]
     fn codex_command_started_updated_completed_dedupes_to_completed() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
-            codex_command_event("item.updated", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
+            codex_command_event("item.updated", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
         let visible = visible_group_indices(GroupCategory::Codex, &messages);
@@ -1117,9 +1121,9 @@ mod tests {
     #[test]
     fn codex_two_distinct_items_each_keep_one_card() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_a", "running"),
+            codex_command_event("item.started", "cmd_a", "in_progress"),
             codex_command_event("item.completed", "cmd_a", "completed"),
-            codex_command_event("item.started", "cmd_b", "running"),
+            codex_command_event("item.started", "cmd_b", "in_progress"),
             codex_command_event("item.completed", "cmd_b", "completed"),
         ];
         let visible = visible_group_indices(GroupCategory::Codex, &messages);
@@ -1139,7 +1143,7 @@ mod tests {
         })
         .to_string();
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
             turn_completed.clone(),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
@@ -1156,7 +1160,7 @@ mod tests {
     #[test]
     fn visible_group_indices_is_codex_only() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
         for cat in [

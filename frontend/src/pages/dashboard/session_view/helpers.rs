@@ -219,21 +219,22 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
 /// for thread/turn-started signals and streaming deltas (those don't render
 /// visible cards, so the sparkline stays clean) and for unparseable JSON.
 fn classify_codex_event(output: &str) -> Option<ActivityTag> {
-    use crate::components::codex_renderer::{CodexEvent, CodexItem};
+    use crate::components::codex_renderer::CodexEvent;
+    use codex_codes::io::items::ThreadItem;
     let event: CodexEvent = serde_json::from_str(output).ok()?;
     match event {
         CodexEvent::ItemStarted { item: Some(item) }
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
-            CodexItem::Error { .. } => Some(ActivityTag::Error),
-            CodexItem::AgentMessage { .. }
-            | CodexItem::Reasoning { .. }
-            | CodexItem::CommandExecution { .. }
-            | CodexItem::FileChange { .. }
-            | CodexItem::McpToolCall { .. }
-            | CodexItem::WebSearch { .. }
-            | CodexItem::TodoList { .. } => Some(ActivityTag::Assistant),
-            CodexItem::Unknown => None,
+            ThreadItem::Error(_) => Some(ActivityTag::Error),
+            ThreadItem::AgentMessage(_)
+            | ThreadItem::Reasoning(_)
+            | ThreadItem::CommandExecution(_)
+            | ThreadItem::FileChange(_)
+            | ThreadItem::McpToolCall(_)
+            | ThreadItem::WebSearch(_)
+            | ThreadItem::TodoList(_)
+            | ThreadItem::UserMessage(_) => Some(ActivityTag::Assistant),
         },
         CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => {
             Some(ActivityTag::Result)
@@ -447,8 +448,10 @@ mod tests {
 
     #[test]
     fn classify_codex_item_completed_file_change_is_assistant() {
-        let json =
-            r#"{"type":"item.completed","item":{"type":"file_change","id":"f1","changes":[]}}"#;
+        // FileChange must carry a real `status` (PatchApplyStatus) for the
+        // typed `ThreadItem` to deserialize — upstream's struct is strict
+        // here. Pre-#827 the local mirror tolerated a missing status.
+        let json = r#"{"type":"item.completed","item":{"type":"file_change","id":"f1","changes":[],"status":"completed"}}"#;
         assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
     }
 
