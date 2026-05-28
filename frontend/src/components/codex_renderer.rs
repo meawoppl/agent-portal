@@ -2,12 +2,27 @@ use super::copy_button::CopyButton;
 use super::expandable::ExpandableText;
 use super::markdown::render_markdown;
 use super::message_renderer::format_duration;
+use codex_codes::io::items::{
+    CommandExecutionItem, CommandExecutionStatus, FileChangeItem, FileUpdateChange,
+    McpToolCallItem, McpToolCallStatus, PatchApplyStatus, PatchChangeKind, ThreadItem, TodoItem,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use yew::prelude::*;
 
-// Local deserialization types mirroring codex-codes, using Option wrappers
-// for lenient parsing (same strategy as message_renderer.rs for Claude).
+// Local outer-`CodexEvent` enum is the project-specific wire shape: a hybrid
+// of the codex exec JSONL format (`thread.started`, `item.started`, …) and
+// the app-server JSON-RPC notifications (`turn/diff/updated`,
+// `item/fileChange/patchUpdated`, …) projected into a single `tag = "type"`
+// enum by the proxy. There is no upstream equivalent that covers both wire
+// formats in one enum, so we keep this layer local.
+//
+// **Item-payload types and `FileUpdateChange` come from `codex-codes`** —
+// the local `CodexItem` / `FileChange` / `TodoEntry` mirrors drifted from
+// the actual wire shape and silently dropped `item.started{file_change}`
+// frames (#827) because the local `kind` was typed as `Option<String>`
+// while the wire ships `{"type": "update"}`. Reusing the SDK types makes
+// the next schema bump a compile error rather than a silent runtime drop.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -34,15 +49,15 @@ pub enum CodexEvent {
     },
     #[serde(rename = "item.started")]
     ItemStarted {
-        item: Option<CodexItem>,
+        item: Option<ThreadItem>,
     },
     #[serde(rename = "item.updated")]
     ItemUpdated {
-        item: Option<CodexItem>,
+        item: Option<ThreadItem>,
     },
     #[serde(rename = "item.completed")]
     ItemCompleted {
-        item: Option<CodexItem>,
+        item: Option<ThreadItem>,
     },
     Error {
         message: Option<String>,
@@ -96,6 +111,9 @@ pub struct TurnDiffUpdatedParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FileChangePatchUpdatedParams {
+    /// Typed `Vec<FileUpdateChange>` from `codex-codes`; matches the
+    /// `{"type": "update"}` object shape of `kind` on the wire — the local
+    /// mirror's `Option<String>` for `kind` was the root cause of #827.
     #[serde(default)]
     pub changes: Option<Vec<FileUpdateChange>>,
     #[serde(default, rename = "itemId", alias = "item_id")]
@@ -104,16 +122,6 @@ pub struct FileChangePatchUpdatedParams {
     pub thread_id: Option<String>,
     #[serde(default, rename = "turnId", alias = "turn_id")]
     pub turn_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FileUpdateChange {
-    #[serde(default)]
-    pub diff: Option<String>,
-    #[serde(default)]
-    pub kind: Option<String>,
-    #[serde(default)]
-    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -245,80 +253,26 @@ pub struct CodexError {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum CodexItem {
-    #[serde(alias = "agentMessage")]
-    AgentMessage {
-        id: Option<String>,
-        text: Option<String>,
-    },
-    #[serde(alias = "reasoning")]
-    Reasoning {
-        id: Option<String>,
-        text: Option<String>,
-    },
-    #[serde(alias = "commandExecution")]
-    CommandExecution {
-        id: Option<String>,
-        command: Option<String>,
-        #[serde(alias = "aggregatedOutput")]
-        aggregated_output: Option<String>,
-        #[serde(alias = "exitCode")]
-        exit_code: Option<i32>,
-        status: Option<String>,
-    },
-    #[serde(alias = "fileChange")]
-    FileChange {
-        id: Option<String>,
-        changes: Option<Vec<FileChange>>,
-        status: Option<String>,
-    },
-    #[serde(alias = "mcpToolCall")]
-    McpToolCall {
-        id: Option<String>,
-        server: Option<String>,
-        tool: Option<String>,
-        arguments: Option<Value>,
-        status: Option<String>,
-    },
-    #[serde(alias = "webSearch")]
-    WebSearch {
-        id: Option<String>,
-        query: Option<String>,
-    },
-    #[serde(alias = "todoList")]
-    TodoList {
-        id: Option<String>,
-        items: Option<Vec<TodoEntry>>,
-    },
-    #[serde(alias = "error")]
-    Error {
-        id: Option<String>,
-        message: Option<String>,
-    },
-    #[serde(other)]
-    Unknown,
-}
-
-impl CodexItem {
-    /// Stable per-item identifier carried through the `started` → `updated` →
-    /// `completed` lifecycle. Used by the message-group dedup pass to collapse
-    /// progressive lifecycle events for the same item into a single rendered
-    /// card (#776 — bash commands were rendering twice as "running" +
-    /// "completed" cards).
-    pub fn id(&self) -> Option<&str> {
-        match self {
-            CodexItem::AgentMessage { id, .. }
-            | CodexItem::Reasoning { id, .. }
-            | CodexItem::CommandExecution { id, .. }
-            | CodexItem::FileChange { id, .. }
-            | CodexItem::McpToolCall { id, .. }
-            | CodexItem::WebSearch { id, .. }
-            | CodexItem::TodoList { id, .. }
-            | CodexItem::Error { id, .. } => id.as_deref(),
-            CodexItem::Unknown => None,
-        }
+/// Stable per-item identifier carried through the `started` → `updated` →
+/// `completed` lifecycle. Used by the message-group dedup pass to collapse
+/// progressive lifecycle events for the same item into a single rendered
+/// card (#776 — bash commands were rendering twice as "running" +
+/// "completed" cards).
+///
+/// Returns `&str` rather than wrapping the upstream `id: String` field
+/// directly so the API mirrors the pre-typed-SDK `CodexItem::id()` method
+/// for the existing call sites — no allocation, just a borrow.
+pub fn thread_item_id(item: &ThreadItem) -> &str {
+    match item {
+        ThreadItem::UserMessage(it) => &it.id,
+        ThreadItem::AgentMessage(it) => &it.id,
+        ThreadItem::Reasoning(it) => &it.id,
+        ThreadItem::CommandExecution(it) => &it.id,
+        ThreadItem::FileChange(it) => &it.id,
+        ThreadItem::McpToolCall(it) => &it.id,
+        ThreadItem::WebSearch(it) => &it.id,
+        ThreadItem::TodoList(it) => &it.id,
+        ThreadItem::Error(it) => &it.id,
     }
 }
 
@@ -335,19 +289,7 @@ pub fn codex_event_item_id(json: &str) -> Option<String> {
         | CodexEvent::ItemCompleted { item } => item?,
         _ => return None,
     };
-    item.id().map(String::from)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileChange {
-    pub path: Option<String>,
-    pub kind: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TodoEntry {
-    pub text: Option<String>,
-    pub completed: Option<bool>,
+    Some(thread_item_id(&item).to_string())
 }
 
 // --- Components ---
@@ -453,58 +395,38 @@ fn tool_card(
     }
 }
 
-fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
+fn render_item(item: Option<&ThreadItem>, completed: bool) -> Html {
     let Some(item) = item else {
         return html! {};
     };
     match item {
-        CodexItem::AgentMessage { text, .. } => render_agent_message(text.as_deref(), completed),
-        CodexItem::Reasoning { text, .. } => render_reasoning(text.as_deref(), completed),
-        CodexItem::CommandExecution {
-            command,
-            aggregated_output,
-            exit_code,
-            status,
-            ..
-        } => render_command_execution(
-            command.as_deref(),
-            aggregated_output.as_deref(),
-            *exit_code,
-            status.as_deref(),
-            completed,
-        ),
-        CodexItem::FileChange {
-            changes, status, ..
-        } => render_file_change(changes.as_deref(), status.as_deref(), completed),
-        CodexItem::McpToolCall {
-            server,
-            tool,
-            status,
-            ..
-        } => render_mcp_tool_call(
-            server.as_deref(),
-            tool.as_deref(),
-            status.as_deref(),
-            completed,
-        ),
-        CodexItem::WebSearch { query, .. } => render_web_search(query.as_deref(), completed),
-        CodexItem::TodoList { items, .. } => render_todo_list(items.as_deref(), completed),
-        CodexItem::Error { message, .. } => render_error_block(message.as_deref()),
-        CodexItem::Unknown => html! {},
+        ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed),
+        ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
+        ThreadItem::CommandExecution(it) => render_command_execution(it, completed),
+        ThreadItem::FileChange(it) => render_file_change(it, completed),
+        ThreadItem::McpToolCall(it) => render_mcp_tool_call(it, completed),
+        ThreadItem::WebSearch(it) => render_web_search(&it.query, completed),
+        ThreadItem::TodoList(it) => render_todo_list(&it.items, completed),
+        ThreadItem::Error(it) => render_error_block(Some(&it.message)),
+        // UserMessage is the user's prompt for the turn — emitted by the
+        // app-server protocol as the first item; the portal renders the
+        // user-typed prompt out-of-band (Claude wire shape), so suppress
+        // here to avoid duplication.
+        ThreadItem::UserMessage(_) => html! {},
     }
 }
 
 pub fn render_codex_message_content(json: &str) -> Html {
     match serde_json::from_str::<CodexEvent>(json) {
         Ok(CodexEvent::ItemCompleted {
-            item: Some(CodexItem::AgentMessage { text, .. }),
+            item: Some(ThreadItem::AgentMessage(it)),
         })
         | Ok(CodexEvent::ItemStarted {
-            item: Some(CodexItem::AgentMessage { text, .. }),
+            item: Some(ThreadItem::AgentMessage(it)),
         })
         | Ok(CodexEvent::ItemUpdated {
-            item: Some(CodexItem::AgentMessage { text, .. }),
-        }) => render_agent_message_content(text.as_deref()),
+            item: Some(ThreadItem::AgentMessage(it)),
+        }) => render_agent_message_content(&it.text),
         Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
             render_item(item.as_ref(), false)
         }
@@ -542,8 +464,7 @@ pub fn render_codex_message_content(json: &str) -> Html {
     }
 }
 
-fn render_agent_message(text: Option<&str>, completed: bool) -> Html {
-    let text = text.unwrap_or("");
+fn render_agent_message(text: &str, completed: bool) -> Html {
     if text.is_empty() {
         return html! {};
     }
@@ -553,13 +474,12 @@ fn render_agent_message(text: Option<&str>, completed: bool) -> Html {
             <div class="message-header">
                 <span class="message-type-badge assistant">{ "Codex" }</span>
             </div>
-            <div class="message-body">{ render_agent_message_content(Some(text)) }</div>
+            <div class="message-body">{ render_agent_message_content(text) }</div>
         </div>
     }
 }
 
-fn render_agent_message_content(text: Option<&str>) -> Html {
-    let text = text.unwrap_or("");
+fn render_agent_message_content(text: &str) -> Html {
     if text.is_empty() {
         html! {}
     } else {
@@ -567,8 +487,7 @@ fn render_agent_message_content(text: Option<&str>) -> Html {
     }
 }
 
-fn render_reasoning(text: Option<&str>, completed: bool) -> Html {
-    let text = text.unwrap_or("");
+fn render_reasoning(text: &str, completed: bool) -> Html {
     if text.is_empty() {
         return html! {};
     }
@@ -585,27 +504,25 @@ fn render_reasoning(text: Option<&str>, completed: bool) -> Html {
     }
 }
 
-fn render_command_execution(
-    command: Option<&str>,
-    output: Option<&str>,
-    exit_code: Option<i32>,
-    status: Option<&str>,
-    completed: bool,
-) -> Html {
-    let cmd = command.unwrap_or("(unknown command)");
-    let out = output.unwrap_or("");
+fn render_command_execution(it: &CommandExecutionItem, completed: bool) -> Html {
+    let cmd = if it.command.is_empty() {
+        "(unknown command)"
+    } else {
+        it.command.as_str()
+    };
+    let out = it.aggregated_output.as_deref().unwrap_or("");
 
     let status_text = if completed {
-        match exit_code {
+        match it.exit_code {
             Some(0) => "completed".to_string(),
             Some(code) => format!("exit {}", code),
-            None => status.unwrap_or("completed").to_string(),
+            None => command_status_label(&it.status).to_string(),
         }
     } else {
         "running...".to_string()
     };
 
-    let is_error = exit_code.is_some_and(|c| c != 0);
+    let is_error = it.exit_code.is_some_and(|c| c != 0);
 
     let body = html! {
         <>
@@ -638,40 +555,48 @@ fn render_command_execution(
     tool_card("$", "Bash".into(), Some(status_text), body, completed)
 }
 
-fn render_file_change(
-    changes: Option<&[FileChange]>,
-    status: Option<&str>,
-    completed: bool,
-) -> Html {
-    let changes = changes.unwrap_or(&[]);
-    if changes.is_empty() {
+fn command_status_label(status: &CommandExecutionStatus) -> &'static str {
+    match status {
+        CommandExecutionStatus::InProgress => "in_progress",
+        CommandExecutionStatus::Completed => "completed",
+        CommandExecutionStatus::Failed => "failed",
+        CommandExecutionStatus::Declined => "declined",
+    }
+}
+
+fn patch_status_label(status: &PatchApplyStatus) -> &'static str {
+    match status {
+        PatchApplyStatus::InProgress => "in progress",
+        PatchApplyStatus::Completed => "completed",
+        PatchApplyStatus::Failed => "failed",
+        PatchApplyStatus::Declined => "declined",
+    }
+}
+
+/// Tagged-enum `PatchChangeKind` to a CSS suffix that pairs with the existing
+/// `.diff-card-kind.{add,update,delete}` styles from #823's unified DiffCard.
+fn patch_kind_css(kind: &PatchChangeKind) -> &'static str {
+    match kind {
+        PatchChangeKind::Add => "add",
+        PatchChangeKind::Delete => "delete",
+        PatchChangeKind::Update { .. } => "update",
+    }
+}
+
+fn render_file_change(it: &FileChangeItem, completed: bool) -> Html {
+    if it.changes.is_empty() {
         return html! {};
     }
-
-    let status_label = status
-        .unwrap_or(if completed {
-            "completed"
-        } else {
-            "in progress"
-        })
-        .to_string();
-
+    let status_label = patch_status_label(&it.status).to_string();
+    // Closes #827 part 2 — render the actual diff bodies through the unified
+    // `<DiffCard>` from #823 instead of just chip + path. Each per-file
+    // change becomes its own framed card with kind chip + path + diff body,
+    // matching the layout of `render_file_change_patch`.
     let body = html! {
-        <div class="file-changes-list">
-            { for changes.iter().map(|c| {
-                let path = c.path.as_deref().unwrap_or("(unknown)");
-                let kind = c.kind.as_deref().unwrap_or("update");
-                let kind_class = format!("file-change-kind {}", kind);
-                html! {
-                    <div class="file-change-entry">
-                        <span class={kind_class}>{ kind }</span>
-                        <span class="file-change-path">{ path }</span>
-                    </div>
-                }
-            })}
-        </div>
+        <>
+            { for it.changes.iter().map(render_diff_card) }
+        </>
     };
-
     tool_card(
         "\u{1f4dd}",
         "File Changes".into(),
@@ -681,22 +606,44 @@ fn render_file_change(
     )
 }
 
-fn render_mcp_tool_call(
-    server: Option<&str>,
-    tool: Option<&str>,
-    status: Option<&str>,
-    completed: bool,
-) -> Html {
-    let server = server.unwrap_or("(unknown)");
-    let tool = tool.unwrap_or("(unknown)");
-    let status = status
-        .unwrap_or(if completed {
-            "completed"
-        } else {
-            "in_progress"
-        })
-        .to_string();
+/// Render one `FileUpdateChange` through the shared `<DiffCard>`. Returns
+/// the bare path + kind chip (without a diff body) for empty-diff entries
+/// — `item.started{file_change}` events typically carry the diff text
+/// already, but a defensive empty-diff path still shows the file path.
+fn render_diff_card(c: &FileUpdateChange) -> Html {
+    let kind_css = AttrValue::from(patch_kind_css(&c.kind));
+    let path = AttrValue::from(c.path.clone());
+    if c.diff.trim().is_empty() {
+        return html! {
+            <div class="diff-card">
+                <div class="diff-card-header">
+                    <span class="tool-icon">{ "\u{1f4dd}" }</span>
+                    <span class={classes!("diff-card-kind", kind_css.to_string())}>{ kind_css.clone() }</span>
+                    <span class="diff-card-path">{ path }</span>
+                </div>
+            </div>
+        };
+    }
+    let source = super::diff::DiffSource::Unified {
+        text: c.diff.clone(),
+    };
+    html! {
+        <super::diff::DiffCard {source} file_path={path} kind={kind_css} />
+    }
+}
 
+fn render_mcp_tool_call(it: &McpToolCallItem, completed: bool) -> Html {
+    let server = if it.server.is_empty() {
+        "(unknown)"
+    } else {
+        it.server.as_str()
+    };
+    let tool = if it.tool.is_empty() {
+        "(unknown)"
+    } else {
+        it.tool.as_str()
+    };
+    let status = mcp_status_label(&it.status).to_string();
     tool_card(
         "\u{1f50c}",
         format!("{} / {}", server, tool),
@@ -706,22 +653,33 @@ fn render_mcp_tool_call(
     )
 }
 
-fn render_web_search(query: Option<&str>, completed: bool) -> Html {
-    let query = query.unwrap_or("(no query)");
+fn mcp_status_label(status: &McpToolCallStatus) -> &'static str {
+    match status {
+        McpToolCallStatus::InProgress => "in_progress",
+        McpToolCallStatus::Completed => "completed",
+        McpToolCallStatus::Failed => "failed",
+    }
+}
+
+fn render_web_search(query: &str, completed: bool) -> Html {
+    let query = if query.is_empty() {
+        "(no query)"
+    } else {
+        query
+    };
     let body = html! { <pre class="tool-input-content">{ query }</pre> };
     tool_card("\u{1f50d}", "Web Search".into(), None, body, completed)
 }
 
-fn render_todo_list(items: Option<&[TodoEntry]>, completed: bool) -> Html {
-    let items = items.unwrap_or(&[]);
+fn render_todo_list(items: &[TodoItem], completed: bool) -> Html {
     if items.is_empty() {
         return html! {};
     }
     let body = html! {
         <div class="codex-todo-list">
             { for items.iter().map(|item| {
-                let text = item.text.as_deref().unwrap_or("");
-                let done = item.completed.unwrap_or(false);
+                let text = item.text.as_str();
+                let done = item.completed;
                 let marker = if done { "\u{2611}" } else { "\u{2610}" };
                 let class = if done { "codex-todo done" } else { "codex-todo" };
                 html! {
@@ -910,24 +868,8 @@ fn render_file_change_patch(changes: Option<&[FileUpdateChange]>) -> Html {
     let changes = changes.unwrap_or(&[]);
     let cards: Vec<Html> = changes
         .iter()
-        .filter_map(|c| {
-            let diff = c.diff.as_deref().unwrap_or("");
-            if diff.trim().is_empty() {
-                return None;
-            }
-            let path = c.path.clone().unwrap_or_else(|| "(unknown)".to_string());
-            let kind = c.kind.clone().unwrap_or_else(|| "update".to_string());
-            let source = super::diff::DiffSource::Unified {
-                text: diff.to_string(),
-            };
-            Some(html! {
-                <super::diff::DiffCard
-                    {source}
-                    file_path={AttrValue::from(path)}
-                    kind={AttrValue::from(kind)}
-                />
-            })
-        })
+        .filter(|c| !c.diff.trim().is_empty())
+        .map(render_diff_card)
         .collect();
     if cards.is_empty() {
         return html! {};
@@ -1070,152 +1012,112 @@ pub fn is_codex_terminal_event(json: &str) -> Option<bool> {
 mod tests {
     use super::*;
 
-    // --- CodexItem snake_case deserialization ---
+    // --- ThreadItem deserialization (replaces the pre-#827 local CodexItem) ---
+    //
+    // Both snake_case (`agent_message`) and camelCase (`agentMessage`) type
+    // tags must parse cleanly — the codex exec protocol uses snake_case,
+    // the app-server protocol uses camelCase, and the SDK accepts both.
 
     #[test]
     fn item_agent_message_snake_case() {
         let json = r#"{"type":"agent_message","id":"m1","text":"hello"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::AgentMessage { ref text, .. } if text.as_deref() == Some("hello"))
-        );
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        assert!(matches!(item, ThreadItem::AgentMessage(ref m) if m.text == "hello"));
     }
 
     #[test]
     fn item_reasoning_snake_case() {
         let json = r#"{"type":"reasoning","id":"r1","text":"thinking..."}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::Reasoning { ref text, .. } if text.as_deref() == Some("thinking..."))
-        );
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        assert!(matches!(item, ThreadItem::Reasoning(ref r) if r.text == "thinking..."));
     }
 
     #[test]
     fn item_command_execution_snake_case() {
         let json = r#"{"type":"command_execution","id":"c1","command":"ls","aggregated_output":"foo","exit_code":0,"status":"completed"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
         assert!(matches!(
             item,
-            CodexItem::CommandExecution { ref command, ref aggregated_output, exit_code: Some(0), .. }
-            if command.as_deref() == Some("ls") && aggregated_output.as_deref() == Some("foo")
+            ThreadItem::CommandExecution(ref c)
+                if c.command == "ls"
+                && c.aggregated_output.as_deref() == Some("foo")
+                && c.exit_code == Some(0)
         ));
     }
 
+    /// #827 regression target — the exact wire shape the proxy forwards for
+    /// `item.started{file_change}`: `kind` is the typed `{"type": "update"}`
+    /// object, not a bare string. With the old local mirror this round-trip
+    /// failed (kind: Option<String> couldn't deserialize the object) and the
+    /// whole event silently dropped, leaving the permission dialog blind.
     #[test]
-    fn item_file_change_snake_case() {
-        let json = r#"{"type":"file_change","id":"f1","changes":[{"path":"a.rs","kind":"update"}],"status":"completed"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::FileChange { ref changes, .. } if changes.as_ref().unwrap().len() == 1)
-        );
+    fn item_file_change_snake_case_with_typed_kind_and_diff() {
+        let json = r#"{"type":"file_change","id":"f1","changes":[{"path":"a.rs","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b\n"}],"status":"completed"}"#;
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        let ThreadItem::FileChange(ref fc) = item else {
+            panic!("expected FileChange variant, got {:?}", item);
+        };
+        assert_eq!(fc.changes.len(), 1);
+        assert_eq!(fc.changes[0].path, "a.rs");
+        assert!(matches!(fc.changes[0].kind, PatchChangeKind::Update { .. }));
+        assert!(fc.changes[0].diff.contains("+b"));
     }
 
     #[test]
     fn item_mcp_tool_call_snake_case() {
         let json = r#"{"type":"mcp_tool_call","id":"mcp1","server":"srv","tool":"t","arguments":{},"status":"completed"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
         assert!(
-            matches!(item, CodexItem::McpToolCall { ref server, ref tool, .. } if server.as_deref() == Some("srv") && tool.as_deref() == Some("t"))
+            matches!(item, ThreadItem::McpToolCall(ref m) if m.server == "srv" && m.tool == "t")
         );
     }
 
     #[test]
     fn item_web_search_snake_case() {
         let json = r#"{"type":"web_search","id":"w1","query":"rust serde"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::WebSearch { ref query, .. } if query.as_deref() == Some("rust serde"))
-        );
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        assert!(matches!(item, ThreadItem::WebSearch(ref w) if w.query == "rust serde"));
     }
 
     #[test]
     fn item_todo_list_snake_case() {
         let json =
             r#"{"type":"todo_list","id":"t1","items":[{"text":"fix bug","completed":false}]}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::TodoList { ref items, .. } if items.as_ref().unwrap().len() == 1)
-        );
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        assert!(matches!(item, ThreadItem::TodoList(ref t) if t.items.len() == 1));
     }
 
     #[test]
     fn item_error_snake_case() {
         let json = r#"{"type":"error","id":"e1","message":"oops"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::Error { ref message, .. } if message.as_deref() == Some("oops"))
-        );
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        assert!(matches!(item, ThreadItem::Error(ref e) if e.message == "oops"));
     }
 
-    // --- CodexItem camelCase deserialization ---
+    // --- camelCase aliases ---
 
     #[test]
     fn item_agent_message_camel_case() {
         let json = r#"{"type":"agentMessage","id":"m1","text":"hello"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::AgentMessage { ref text, .. } if text.as_deref() == Some("hello"))
-        );
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        assert!(matches!(item, ThreadItem::AgentMessage(ref m) if m.text == "hello"));
     }
 
+    /// #827 regression target — camelCase variant of the typed-kind + diff
+    /// shape (this is what the wire dump in the issue actually showed).
     #[test]
-    fn item_reasoning_camel_case() {
-        let json = r#"{"type":"reasoning","id":"r1","text":"thinking..."}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::Reasoning { ref text, .. } if text.as_deref() == Some("thinking..."))
-        );
+    fn item_file_change_camel_case_with_typed_kind_and_diff() {
+        let json = r#"{"type":"fileChange","id":"call_abc","changes":[{"path":"/p/x.rs","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b\n"}],"status":"inProgress"}"#;
+        let item: ThreadItem = serde_json::from_str(json).unwrap();
+        let ThreadItem::FileChange(ref fc) = item else {
+            panic!("expected FileChange, got {:?}", item);
+        };
+        assert_eq!(fc.id, "call_abc");
+        assert_eq!(fc.changes.len(), 1);
+        assert_eq!(fc.changes[0].path, "/p/x.rs");
     }
 
-    #[test]
-    fn item_command_execution_camel_case() {
-        let json = r#"{"type":"commandExecution","id":"c1","command":"ls","aggregatedOutput":"foo","exitCode":0,"status":"completed"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(matches!(
-            item,
-            CodexItem::CommandExecution { ref command, ref aggregated_output, exit_code: Some(0), .. }
-            if command.as_deref() == Some("ls") && aggregated_output.as_deref() == Some("foo")
-        ));
-    }
-
-    #[test]
-    fn item_file_change_camel_case() {
-        let json = r#"{"type":"fileChange","id":"f1","changes":[{"path":"a.rs","kind":"update"}],"status":"completed"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::FileChange { ref changes, .. } if changes.as_ref().unwrap().len() == 1)
-        );
-    }
-
-    #[test]
-    fn item_mcp_tool_call_camel_case() {
-        let json = r#"{"type":"mcpToolCall","id":"mcp1","server":"srv","tool":"t","arguments":{},"status":"completed"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::McpToolCall { ref server, ref tool, .. } if server.as_deref() == Some("srv") && tool.as_deref() == Some("t"))
-        );
-    }
-
-    #[test]
-    fn item_web_search_camel_case() {
-        let json = r#"{"type":"webSearch","id":"w1","query":"rust serde"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::WebSearch { ref query, .. } if query.as_deref() == Some("rust serde"))
-        );
-    }
-
-    #[test]
-    fn item_todo_list_camel_case() {
-        let json =
-            r#"{"type":"todoList","id":"t1","items":[{"text":"fix bug","completed":false}]}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(item, CodexItem::TodoList { ref items, .. } if items.as_ref().unwrap().len() == 1)
-        );
-    }
-
-    // --- CodexEvent deserialization ---
+    // --- CodexEvent ↔ ThreadItem composition ---
 
     #[test]
     fn event_item_completed_with_camel_case_item() {
@@ -1225,7 +1127,7 @@ mod tests {
         assert!(matches!(
             event,
             CodexEvent::ItemCompleted {
-                item: Some(CodexItem::AgentMessage { .. })
+                item: Some(ThreadItem::AgentMessage(_))
             }
         ));
     }
@@ -1237,12 +1139,48 @@ mod tests {
         assert!(matches!(
             event,
             CodexEvent::ItemUpdated {
-                item: Some(CodexItem::CommandExecution {
-                    exit_code: Some(1),
-                    ..
-                })
-            }
+                item: Some(ThreadItem::CommandExecution(ref c))
+            } if c.exit_code == Some(1)
         ));
+    }
+
+    /// #827 part 1 — the actual wire frame from the issue's bug report. With
+    /// the old local mirror this parsed to `CodexEvent::Unknown` (the
+    /// `CodexItem` deserialization failed on the typed `kind` object, so the
+    /// outer event also failed and fell through `#[serde(other)]`) and
+    /// rendered nothing in the transcript. Now it parses successfully into
+    /// `ItemStarted { item: Some(FileChange { … }) }` and `render_item`
+    /// dispatches into the diff card.
+    #[test]
+    fn event_item_started_with_file_change_no_longer_silently_drops() {
+        // Verbatim from the issue's wire dump.
+        let json = r#"{
+            "_created_at": "2026-05-18T23:04:21.140Z",
+            "item": {
+                "changes": [{
+                    "diff": "@@ -136,2 +136,3 @@\n     let hostname = props.session.hostname.clone();\n+    let session_agent_type = props.session.agent_type;\n",
+                    "kind": {"type": "update"},
+                    "path": "/home/meawoppl/repos/agent-portal-2/frontend/src/components/schedule_dialog.rs"
+                }],
+                "id": "call_apLovlbfsFz11MCYpiVcv0UK",
+                "status": "inProgress",
+                "type": "fileChange"
+            },
+            "type": "item.started"
+        }"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        let CodexEvent::ItemStarted {
+            item: Some(ThreadItem::FileChange(fc)),
+        } = event
+        else {
+            panic!("expected ItemStarted{{FileChange}}, got {:?}", event);
+        };
+        assert_eq!(fc.changes.len(), 1);
+        assert_eq!(
+            fc.changes[0].path,
+            "/home/meawoppl/repos/agent-portal-2/frontend/src/components/schedule_dialog.rs"
+        );
+        assert!(fc.changes[0].diff.contains("session_agent_type"));
     }
 
     #[test]
@@ -1252,46 +1190,29 @@ mod tests {
         assert!(matches!(event, CodexEvent::Unknown));
     }
 
-    #[test]
-    fn item_unknown_type_falls_through() {
-        let json = r#"{"type":"some_new_item_type","id":"x"}"#;
-        let item: CodexItem = serde_json::from_str(json).unwrap();
-        assert!(matches!(item, CodexItem::Unknown));
-    }
-
-    // --- Round-trip: serialize then deserialize ---
+    // --- thread_item_id ---
 
     #[test]
-    fn round_trip_agent_message() {
-        let item = CodexItem::AgentMessage {
-            id: Some("m1".into()),
-            text: Some("hello".into()),
-        };
-        let json = serde_json::to_string(&item).unwrap();
-        let back: CodexItem = serde_json::from_str(&json).unwrap();
-        assert!(
-            matches!(back, CodexItem::AgentMessage { ref text, .. } if text.as_deref() == Some("hello"))
-        );
-    }
-
-    #[test]
-    fn round_trip_command_execution() {
-        let item = CodexItem::CommandExecution {
-            id: Some("c1".into()),
-            command: Some("echo hi".into()),
-            aggregated_output: Some("hi\n".into()),
-            exit_code: Some(0),
-            status: Some("completed".into()),
-        };
-        let json = serde_json::to_string(&item).unwrap();
-        let back: CodexItem = serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            back,
-            CodexItem::CommandExecution {
-                exit_code: Some(0),
-                ..
-            }
-        ));
+    fn thread_item_id_extracts_id_per_variant() {
+        let cases = [
+            (r#"{"type":"agent_message","id":"m1","text":"x"}"#, "m1"),
+            (r#"{"type":"reasoning","id":"r1","text":"x"}"#, "r1"),
+            (
+                r#"{"type":"command_execution","id":"c1","command":"x","status":"completed"}"#,
+                "c1",
+            ),
+            (
+                r#"{"type":"file_change","id":"f1","changes":[],"status":"completed"}"#,
+                "f1",
+            ),
+            (r#"{"type":"web_search","id":"w1","query":"q"}"#, "w1"),
+            (r#"{"type":"todo_list","id":"t1","items":[]}"#, "t1"),
+            (r#"{"type":"error","id":"e1","message":"x"}"#, "e1"),
+        ];
+        for (json, expected_id) in cases {
+            let item: ThreadItem = serde_json::from_str(json).unwrap();
+            assert_eq!(thread_item_id(&item), expected_id, "json: {}", json);
+        }
     }
 
     #[test]
@@ -1359,14 +1280,20 @@ mod tests {
 
     #[test]
     fn event_file_change_patch_updated_camel_case() {
-        let json = r#"{"type":"item/fileChange/patchUpdated","params":{"changes":[{"path":"a.rs","kind":"update","diff":"--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n"}],"itemId":"i","threadId":"t","turnId":"u"}}"#;
+        // The wire here matches the *upstream* FileUpdateChange shape:
+        // kind is the typed `{"type": "update"}` object, path/diff are
+        // strings (not Option<String>). Pre-#827 the local mirror accepted
+        // `"kind":"update"` as a bare string, but the wire never actually
+        // shipped that shape — upstream's doc explicitly notes it.
+        let json = r#"{"type":"item/fileChange/patchUpdated","params":{"changes":[{"path":"a.rs","kind":{"type":"update"},"diff":"--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n"}],"itemId":"i","threadId":"t","turnId":"u"}}"#;
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         match event {
             CodexEvent::FileChangePatchUpdated { params: Some(p) } => {
                 let changes = p.changes.unwrap();
                 assert_eq!(changes.len(), 1);
-                assert_eq!(changes[0].path.as_deref(), Some("a.rs"));
-                assert!(changes[0].diff.as_deref().unwrap().contains("+new"));
+                assert_eq!(changes[0].path, "a.rs");
+                assert!(matches!(changes[0].kind, PatchChangeKind::Update { .. }));
+                assert!(changes[0].diff.contains("+new"));
             }
             other => panic!("expected FileChangePatchUpdated, got {:?}", other),
         }
