@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -503,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "anyhow",
  "base64",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "anyhow",
  "base64",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -1129,7 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "base64",
  "chrono",
@@ -1950,6 +1950,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -2689,7 +2690,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "anyhow",
  "colored",
@@ -2704,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "anyhow",
  "hex",
@@ -3085,6 +3086,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -3154,6 +3156,18 @@ dependencies = [
  "rustls-webpki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
+dependencies = [
+ "openssl-probe",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
 ]
 
 [[package]]
@@ -3354,7 +3368,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3416,7 +3430,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.6.9"
+version = "2.6.10"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -3804,11 +3818,10 @@ checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
 dependencies = [
  "futures-util",
  "log",
- "native-tls",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
- "tokio-native-tls",
  "tokio-rustls",
  "tungstenite 0.28.0",
  "webpki-roots 0.26.11",
@@ -4137,7 +4150,6 @@ dependencies = [
  "http 1.4.0",
  "httparse",
  "log",
- "native-tls",
  "rand 0.9.4",
  "rustls",
  "rustls-pki-types",
