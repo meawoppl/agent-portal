@@ -37,6 +37,25 @@ pub fn dashboard_page() -> Html {
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
     let update_available = ws_hook.update_available.clone();
 
+    // Push-driven session refresh: the backend broadcasts
+    // `ServerToClient::LaunchSessionResult` the moment the launcher's
+    // proxy registers (or fails). The WS hook ticks
+    // `launch_event_counter` on each such frame; we hang a
+    // `use_effect_with` on it so the freshly-launched session shows up in
+    // the rail at the exact moment it becomes findable, instead of
+    // waiting up to the 5 s steady-poll tick. Initial value 0 is skipped
+    // so the mount doesn't fire a redundant refresh on top of the hook's
+    // own initial fetch.
+    {
+        let refresh = sessions_hook.refresh.clone();
+        use_effect_with(ws_hook.launch_event_counter, move |&c| {
+            if c > 0 {
+                refresh.emit(());
+            }
+            || ()
+        });
+    }
+
     // Track spend tier for timed animations
     let prev_spend_tier = use_state(|| 0u8);
     let spend_animating = use_state(|| false);
