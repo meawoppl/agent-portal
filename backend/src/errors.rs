@@ -11,6 +11,7 @@ pub enum AppError {
     Forbidden,
     BadRequest(&'static str),
     NotFound(&'static str),
+    ServiceUnavailable(&'static str),
     Internal(String),
 }
 
@@ -29,6 +30,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden"),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, *msg),
             AppError::NotFound(what) => (StatusCode::NOT_FOUND, *what),
+            AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, *msg),
             AppError::Internal(e) => {
                 tracing::error!("Internal error: {}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
