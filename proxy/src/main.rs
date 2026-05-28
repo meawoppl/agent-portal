@@ -18,7 +18,7 @@ use shared::api::{ResolveProxySessionRequest, ResolveProxySessionResponse};
 /// Type alias — the proxy binary only ever drives Claude sessions; the
 /// launcher is where heterogeneous (Claude + Codex) dispatch lives.
 type ClaudeSession = Session<ClaudeAgent>;
-use config::{ProxyConfig, SessionAuth};
+use config::{DirectorySession, ProxyConfig, SessionAuth};
 use session::ProxySessionConfig;
 use tracing::{info, warn};
 use tracing_subscriber::prelude::*;
@@ -395,6 +395,45 @@ async fn main() -> Result<()> {
         info!("Detected git branch: {}", branch);
     }
 
+    // Persist-back sink for the codex thread id learned from
+    // `thread.started` / `thread/resume`. The closure captures the
+    // working directory so it can stamp the right DirectorySession row;
+    // load+update+save is atomic via `ProxyConfig::load_locked`. No-op
+    // path for claude sessions (the codex io-task is the only emitter).
+    let codex_thread_id_sink: claude_session_lib::proxy_session::CodexThreadIdSink = {
+        let cwd_for_sink = cwd.clone();
+        std::sync::Arc::new(move |thread_id: String| {
+            let (mut cfg, lock) = match ProxyConfig::load_locked() {
+                Ok(pair) => pair,
+                Err(e) => {
+                    warn!("codex_thread_id_sink: load_locked failed: {}", e);
+                    return;
+                }
+            };
+            let updated = match cfg.get_directory_session(&cwd_for_sink) {
+                Some(existing) => DirectorySession {
+                    codex_thread_id: Some(thread_id),
+                    ..existing.clone()
+                },
+                None => {
+                    // Directory record vanished between launch and the
+                    // codex thread.started event — unusual but recoverable.
+                    // Skip rather than fabricate a session_id row that
+                    // doesn't match the in-memory session.
+                    warn!(
+                        "codex_thread_id_sink: no DirectorySession for {:?}, skipping persist",
+                        cwd_for_sink
+                    );
+                    return;
+                }
+            };
+            cfg.set_directory_session(cwd_for_sink.clone(), updated);
+            if let Err(e) = cfg.save_with_lock(&lock) {
+                warn!("codex_thread_id_sink: save_with_lock failed: {}", e);
+            }
+        })
+    };
+
     // Build session config
     let session_config = ProxySessionConfig {
         backend_url,
@@ -409,6 +448,7 @@ async fn main() -> Result<()> {
         launcher_id: None,
         agent_type,
         scheduled_task_id: None,
+        codex_thread_id_sink: Some(codex_thread_id_sink),
     };
 
     // Branch: shim mode or normal proxy mode
@@ -760,6 +800,16 @@ async fn run_proxy_session(mut config: ProxySessionConfig) -> Result<()> {
 
 /// Create a Claude session using claude-session-lib
 async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSession> {
+    // For codex resumes we need to hand the io-task the app-server
+    // thread id from the prior incarnation. Load it from the per-directory
+    // record the proxy persisted on the previous launch. Missing on a
+    // fresh launch, missing for claude sessions — both fine, the codex
+    // io-task gates resume on `Some` + `config.resume`.
+    let codex_thread_id = ProxyConfig::load().ok().and_then(|cfg| {
+        cfg.get_directory_session(&config.working_directory)
+            .and_then(|s| s.codex_thread_id.clone())
+    });
+
     let claude_config = SessionConfig {
         session_id: config.session_id,
         working_directory: PathBuf::from(&config.working_directory),
@@ -768,6 +818,7 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
         claude_path: None,
         extra_args: config.claude_args.clone(),
         agent_type: config.agent_type,
+        codex_thread_id,
     };
 
     if config.resume {

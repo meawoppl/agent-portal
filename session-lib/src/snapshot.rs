@@ -26,6 +26,15 @@ pub struct SessionConfig {
     /// Which agent CLI to use
     #[serde(default)]
     pub agent_type: shared::AgentType,
+    /// Codex thread id from a prior incarnation of this session, learned
+    /// from `thread.started` on first launch and persisted by the proxy.
+    /// Consumed by the codex io-task: when `resume == true` and this is
+    /// `Some`, call `thread/resume` to re-attach to the app-server's
+    /// existing thread context rather than starting a fresh one.
+    /// Ignored by the claude path (claude's resume keys off `session_id`
+    /// directly via `--resume`).
+    #[serde(default)]
+    pub codex_thread_id: Option<String>,
 }
 
 /// A pending permission request that hasn't been responded to
@@ -104,6 +113,7 @@ mod tests {
             claude_path: None,
             extra_args: vec![],
             agent_type: Default::default(),
+            codex_thread_id: None,
         }
     }
 

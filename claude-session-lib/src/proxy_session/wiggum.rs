@@ -236,6 +236,12 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 "TurnMetricsReady should be handled before calling handle_session_event_with_wiggum"
             );
         }
+        Some(SessionEvent::CodexThreadId(_)) => {
+            // Handled in run_main_loop before calling this function
+            unreachable!(
+                "CodexThreadId should be handled before calling handle_session_event_with_wiggum"
+            );
+        }
         Some(SessionEvent::Error(e)) => {
             let err_msg = e.to_string();
             error!("Session error: {}", err_msg);

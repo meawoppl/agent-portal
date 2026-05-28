@@ -31,6 +31,14 @@ pub struct DirectorySession {
     pub created_at: String,
     /// Last time this session was used
     pub last_used: String,
+    /// Codex app-server thread id, learned from `thread.started` on the
+    /// first launch of a codex session and written back here so the next
+    /// resume can call `thread/resume` with it. Ignored / absent for
+    /// claude sessions (claude resumes via `--resume <session_id>` which
+    /// doesn't need a separate identifier). `#[serde(default)]` keeps
+    /// existing config files on disk readable without manual migration.
+    #[serde(default)]
+    pub codex_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,6 +294,7 @@ impl ProxyConfig {
             session_name,
             created_at: now.clone(),
             last_used: now,
+            codex_thread_id: None,
         }
     }
 }

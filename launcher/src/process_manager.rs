@@ -5,11 +5,56 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use claude_session_lib::proxy_session::CodexThreadIdSink;
 use claude_session_lib::{
     run_connection_loop, ClaudeAgent, LoopResult, PortalInput, ProxySessionConfig,
 };
 use codex_session_lib::CodexAgent;
 use session_lib::{Session, SessionConfig};
+
+/// Path to the launcher's sidecar codex-thread map: `session_id -> thread_id`.
+/// Lives next to `launcher.json` in `ProjectDirs` so it ships with the same
+/// install/uninstall surface and survives across restarts.
+fn codex_threads_path() -> PathBuf {
+    directories::ProjectDirs::from("com", "anthropic", "agent-portal")
+        .map(|p| p.config_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("/tmp/agent-portal"))
+        .join("codex_threads.json")
+}
+
+fn load_codex_threads() -> HashMap<Uuid, String> {
+    std::fs::read_to_string(codex_threads_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_codex_threads(map: &HashMap<Uuid, String>) -> std::io::Result<()> {
+    let path = codex_threads_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = serde_json::to_string_pretty(map)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, body)
+}
+
+fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
+    load_codex_threads().get(&session_id).cloned()
+}
+
+fn make_codex_thread_id_sink(session_id: Uuid) -> CodexThreadIdSink {
+    std::sync::Arc::new(move |thread_id: String| {
+        let mut map = load_codex_threads();
+        map.insert(session_id, thread_id);
+        if let Err(e) = save_codex_threads(&map) {
+            warn!(
+                "Failed to persist codex thread id for session {}: {}",
+                session_id, e
+            );
+        }
+    })
+}
 
 /// Notification that a session task has finished.
 pub struct SessionExited {
@@ -128,6 +173,11 @@ impl ProcessManager {
             launcher_id: self.launcher_id,
             agent_type: params.agent_type,
             scheduled_task_id: params.scheduled_task_id,
+            // Persist the codex app-server thread id under the launcher's
+            // session_id key so the next resume of this session can call
+            // thread/resume. No-op for claude sessions (the codex io-task
+            // is the only emitter).
+            codex_thread_id_sink: Some(make_codex_thread_id_sink(session_id)),
         };
 
         let exit_tx = self.exit_tx.clone();
@@ -217,6 +267,15 @@ async fn run_session_task(
     cancel: CancellationToken,
 ) -> Option<i32> {
     loop {
+        // On resume, look up the codex app-server thread id we persisted
+        // on the previous launch. Missing entry / claude sessions yield
+        // `None` and the codex io-task falls back to `thread_start`.
+        let codex_thread_id = if config.resume {
+            load_codex_thread_id(config.session_id)
+        } else {
+            None
+        };
+
         let session_config = SessionConfig {
             session_id: config.session_id,
             working_directory: PathBuf::from(&config.working_directory),
@@ -225,6 +284,7 @@ async fn run_session_task(
             claude_path: None,
             extra_args: config.claude_args.clone(),
             agent_type: config.agent_type,
+            codex_thread_id,
         };
 
         let mut session = match AnySession::new(session_config).await {

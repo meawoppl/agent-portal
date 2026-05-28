@@ -236,6 +236,9 @@ impl<A: Agent> Session<A> {
                 Some(IoEvent::TurnMetricsReady(metrics)) => {
                     return Some(SessionEvent::TurnMetricsReady(metrics));
                 }
+                Some(IoEvent::CodexThreadId(thread_id)) => {
+                    return Some(SessionEvent::CodexThreadId(thread_id));
+                }
                 Some(IoEvent::Exited { code }) => {
                     self.state = SessionState::Exited { code };
                     self.command_tx = None;
