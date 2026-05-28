@@ -7,6 +7,7 @@ mod proxy_socket;
 mod registration;
 mod session_manager;
 mod turn_metrics;
+mod uploads;
 mod web_client_socket;
 
 pub use session_manager::{
