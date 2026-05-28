@@ -414,4 +414,14 @@ mod tests {
             Err(AppError::NotFound("Launcher not found"))
         ));
     }
+
+    #[test]
+    fn default_launcher_requires_connected_launcher() {
+        let manager = SessionManager::new();
+
+        assert!(matches!(
+            resolve_launch_target(&manager, None, Uuid::new_v4()),
+            Err(AppError::NotFound("No connected launchers"))
+        ));
+    }
 }
