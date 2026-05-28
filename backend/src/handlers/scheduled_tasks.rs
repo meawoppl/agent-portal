@@ -4,7 +4,6 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use diesel::prelude::*;
@@ -20,6 +19,7 @@ use uuid::Uuid;
 
 use crate::{
     errors::AppError,
+    handlers::responses::EmptyResponse,
     models::{NewScheduledTask, ScheduledTask},
     schema::scheduled_tasks,
     AppState,
@@ -248,7 +248,7 @@ pub async fn delete_task_handler(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(task_id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -275,7 +275,7 @@ pub async fn delete_task_handler(
     // Notify connected launchers
     send_schedule_sync(&app_state, user_id);
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 /// GET /api/scheduled-tasks/:id/runs

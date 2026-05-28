@@ -4,7 +4,6 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use diesel::prelude::*;
@@ -16,7 +15,10 @@ use tower_cookies::Cookies;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{db::get_user_usage, errors::AppError, models::User, schema, AppState};
+use crate::{
+    db::get_user_usage, errors::AppError, handlers::responses::EmptyResponse, models::User, schema,
+    AppState,
+};
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
@@ -265,7 +267,7 @@ pub async fn update_user(
     cookies: Cookies,
     Path(user_id): Path<Uuid>,
     Json(update): Json<UpdateUserRequest>,
-) -> Result<StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
 
     // Prevent admin from demoting themselves
@@ -365,7 +367,7 @@ pub async fn update_user(
         );
     }
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 // ============================================================================
@@ -444,7 +446,7 @@ pub async fn delete_session(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -470,7 +472,7 @@ pub async fn delete_session(
         admin.email, session_id, session.session_name, session.total_cost_usd
     );
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 fn admin_db_query(context: &str, error: diesel::result::Error) -> AppError {

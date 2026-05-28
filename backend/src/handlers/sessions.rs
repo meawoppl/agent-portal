@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::{
     auth::extract_user_id,
     errors::AppError,
+    handlers::responses::EmptyResponse,
     models::{Message, NewSessionMember, Session, SessionMember},
     AppState,
 };
@@ -114,7 +115,7 @@ pub async fn delete_session(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -150,14 +151,14 @@ pub async fn delete_session(
     super::helpers::delete_session_with_data(&mut conn, &session, true)
         .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
 
-    Ok(axum::http::StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 pub async fn stop_session(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -178,7 +179,7 @@ pub async fn stop_session(
         .stop_session_on_launcher(session_id);
 
     if stopped {
-        Ok(axum::http::StatusCode::ACCEPTED)
+        Ok(EmptyResponse::ACCEPTED)
     } else {
         Err(AppError::NotFound("Session not connected"))
     }
@@ -262,7 +263,7 @@ pub async fn add_session_member(
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
     Json(req): Json<AddMemberRequest>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     if req.role != "editor" && req.role != "viewer" {
@@ -312,7 +313,7 @@ pub async fn add_session_member(
         .execute(&mut conn)
         .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
-    Ok(axum::http::StatusCode::CREATED)
+    Ok(EmptyResponse::CREATED)
 }
 
 /// Remove a member from a session
@@ -321,7 +322,7 @@ pub async fn remove_session_member(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -360,7 +361,7 @@ pub async fn remove_session_member(
         return Err(AppError::NotFound("Member not found"));
     }
 
-    Ok(axum::http::StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 /// Update a member's role (owner only)
@@ -369,7 +370,7 @@ pub async fn update_session_member_role(
     cookies: Cookies,
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMemberRoleRequest>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     if req.role != "editor" && req.role != "viewer" {
@@ -406,5 +407,5 @@ pub async fn update_session_member_role(
         return Err(AppError::NotFound("Member not found"));
     }
 
-    Ok(axum::http::StatusCode::OK)
+    Ok(EmptyResponse::OK)
 }
