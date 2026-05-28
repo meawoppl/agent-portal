@@ -26,13 +26,6 @@ use crate::utils;
 /// `"all (codex)"` in the dropdown.
 type GroupKey = (Option<String>, Option<String>);
 
-/// Query-string bucket parameter the page sends to the backend. The page
-/// hardcodes `"day"` today (the time-window radio is 7d / 30d / 90d, all of
-/// which are most readable as daily buckets); resolving the param through
-/// [`BucketKind::from_wire`] keeps the round-trip typed so a future hourly
-/// toggle can flip this one constant.
-const BUCKET_PARAM: &str = "day";
-
 /// Pure helper: list the distinct (model, tier) pairs present in the bucket
 /// list, sorted alphabetically with the empty pair last.
 fn distinct_pairs(buckets: &[MetricBucket]) -> Vec<GroupKey> {
@@ -87,17 +80,36 @@ fn bucket_index(buckets: &[DateTime<Utc>], ts: DateTime<Utc>) -> Option<usize> {
 }
 
 /// Build the time-window query string for the selected radio button.
+/// The backend's window parser accepts an `Nh` / `Nd` suffix, so this is
+/// the exact value sent to `GET /api/metrics/turns?window=…`.
 fn window_param(window: TimeWindow) -> &'static str {
     match window {
+        TimeWindow::Hours1 => "1h",
+        TimeWindow::Hours6 => "6h",
+        TimeWindow::Days1 => "1d",
         TimeWindow::Days7 => "7d",
         TimeWindow::Days30 => "30d",
         TimeWindow::Days90 => "90d",
     }
 }
 
+/// Build the bucket-granularity query string for the selected window.
+/// Short windows (≤ 1 day) get hourly buckets so a 1h view doesn't collapse
+/// into a single data point; week-plus windows stay daily so 30 / 90 day
+/// runs don't overwhelm the x-axis with hundreds of ticks.
+fn bucket_param(window: TimeWindow) -> &'static str {
+    match window {
+        TimeWindow::Hours1 | TimeWindow::Hours6 | TimeWindow::Days1 => "hour",
+        TimeWindow::Days7 | TimeWindow::Days30 | TimeWindow::Days90 => "day",
+    }
+}
+
 /// Selectable time window for the radio group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TimeWindow {
+    Hours1,
+    Hours6,
+    Days1,
     Days7,
     Days30,
     Days90,
@@ -106,13 +118,23 @@ enum TimeWindow {
 impl TimeWindow {
     fn label(self) -> &'static str {
         match self {
+            Self::Hours1 => "1h",
+            Self::Hours6 => "6h",
+            Self::Days1 => "1d",
             Self::Days7 => "7d",
             Self::Days30 => "30d",
             Self::Days90 => "90d",
         }
     }
     fn all() -> &'static [TimeWindow] {
-        &[TimeWindow::Days7, TimeWindow::Days30, TimeWindow::Days90]
+        &[
+            TimeWindow::Hours1,
+            TimeWindow::Hours6,
+            TimeWindow::Days1,
+            TimeWindow::Days7,
+            TimeWindow::Days30,
+            TimeWindow::Days90,
+        ]
     }
 }
 
@@ -172,7 +194,7 @@ pub fn performance_panel() -> Html {
             spawn_local(async move {
                 let url = utils::api_url(&format!(
                     "/api/metrics/turns?bucket={}&window={}",
-                    BUCKET_PARAM,
+                    bucket_param(window_val),
                     window_param(window_val)
                 ));
                 match Request::get(&url).send().await {
@@ -231,7 +253,7 @@ pub fn performance_panel() -> Html {
             </div>
         }
     } else {
-        render_charts(&buckets, &group_by, &pairs)
+        render_charts(&buckets, &group_by, &pairs, *window)
     };
 
     html! {
@@ -299,12 +321,17 @@ pub fn performance_panel() -> Html {
 }
 
 /// Render the five charts from a non-empty `buckets` slice.
-fn render_charts(buckets: &[MetricBucket], group_by: &GroupBy, pairs: &[GroupKey]) -> Html {
+fn render_charts(
+    buckets: &[MetricBucket],
+    group_by: &GroupBy,
+    pairs: &[GroupKey],
+    window: TimeWindow,
+) -> Html {
     let bucket_axis = distinct_bucket_starts(buckets);
     // Resolve the bucket-kind from the same wire param we sent on the request,
     // so the time-axis label format stays in lockstep with the data. Defaults
     // to `Day` if the param ever drifts to something `from_wire` doesn't know.
-    let bucket_kind = BucketKind::from_wire(BUCKET_PARAM).unwrap_or(BucketKind::Day);
+    let bucket_kind = BucketKind::from_wire(bucket_param(window)).unwrap_or(BucketKind::Day);
 
     // For per-pair plots: filter pairs by group-by.
     let active_pairs: Vec<GroupKey> = match group_by {
@@ -814,8 +841,34 @@ mod tests {
 
     #[test]
     fn window_param_strings() {
+        assert_eq!(window_param(TimeWindow::Hours1), "1h");
+        assert_eq!(window_param(TimeWindow::Hours6), "6h");
+        assert_eq!(window_param(TimeWindow::Days1), "1d");
         assert_eq!(window_param(TimeWindow::Days7), "7d");
         assert_eq!(window_param(TimeWindow::Days30), "30d");
         assert_eq!(window_param(TimeWindow::Days90), "90d");
+    }
+
+    /// Short windows must request hourly buckets so a 1-hour view doesn't
+    /// collapse into a single daily data point. Week-plus windows stay
+    /// daily so the x-axis tick count stays reasonable.
+    #[test]
+    fn bucket_param_dispatches_on_window_length() {
+        assert_eq!(bucket_param(TimeWindow::Hours1), "hour");
+        assert_eq!(bucket_param(TimeWindow::Hours6), "hour");
+        assert_eq!(bucket_param(TimeWindow::Days1), "hour");
+        assert_eq!(bucket_param(TimeWindow::Days7), "day");
+        assert_eq!(bucket_param(TimeWindow::Days30), "day");
+        assert_eq!(bucket_param(TimeWindow::Days90), "day");
+    }
+
+    #[test]
+    fn time_window_all_lists_every_variant_in_chronological_order() {
+        // The radio button order matches this slice — short windows first
+        // so the most-recent view sits on the left.
+        let all = TimeWindow::all();
+        assert_eq!(all.len(), 6);
+        assert!(matches!(all[0], TimeWindow::Hours1));
+        assert!(matches!(all[5], TimeWindow::Days90));
     }
 }
