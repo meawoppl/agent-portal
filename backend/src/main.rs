@@ -669,6 +669,19 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // Spawn background task for expired proxy token cleanup (runs every hour)
+    {
+        let app_state = app_state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                run_expired_token_cleanup(&app_state).await;
+            }
+        });
+        tracing::info!("Started expired proxy token cleanup task (every hour)");
+    }
+
     // Run the server with graceful shutdown
     let addr = format!("{}:{}", host, port);
 
@@ -897,8 +910,24 @@ async fn run_session_age_cleanup(app_state: &Arc<AppState>) {
         deleted,
         max_days
     );
+}
 
-    // Also clean up tokens expired more than 7 days ago
+/// Delete proxy auth tokens whose expiration is more than 7 days in the past.
+async fn run_expired_token_cleanup(app_state: &Arc<AppState>) {
+    use diesel::prelude::*;
+
+    let Ok(mut conn) = app_state.db_pool.get() else {
+        tracing::error!("Failed to get DB connection for expired token cleanup");
+        return;
+    };
+
+    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
+        tracing::warn!(
+            "Failed to set statement_timeout for expired token cleanup: {}",
+            e
+        );
+    }
+
     let token_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(7);
     match diesel::delete(
         schema::proxy_auth_tokens::table
