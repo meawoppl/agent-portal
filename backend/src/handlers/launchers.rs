@@ -1,6 +1,5 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     Json,
 };
 use serde::Deserialize;
@@ -13,6 +12,7 @@ use uuid::Uuid;
 
 use crate::auth::extract_user_id;
 use crate::errors::AppError;
+use crate::handlers::responses::EmptyResponse;
 use crate::handlers::websocket::SessionManager;
 use crate::AppState;
 
@@ -231,7 +231,7 @@ pub async fn renew_launcher_token(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(launcher_id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let user_id = extract_user_id(&app_state, &cookies)?;
 
     // Verify the launcher belongs to this user and get its current token info
@@ -257,7 +257,7 @@ pub async fn renew_launcher_token(
     .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
 
     info!("Manually renewed token for launcher {}", launcher_id);
-    Ok(StatusCode::OK)
+    Ok(EmptyResponse::OK)
 }
 
 /// POST /api/launchers/:launcher_id/update - Tell the launcher to fetch the
@@ -266,7 +266,7 @@ pub async fn update_launcher(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(launcher_id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let user_id = extract_user_id(&app_state, &cookies)?;
 
     let sender = {
@@ -287,7 +287,7 @@ pub async fn update_launcher(
     }
 
     info!("Sent UpdateAndRestart to launcher {}", launcher_id);
-    Ok(StatusCode::OK)
+    Ok(EmptyResponse::OK)
 }
 
 #[derive(serde::Serialize)]

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::{
     errors::AppError,
+    handlers::responses::EmptyResponse,
     jwt::{create_proxy_token, hash_token},
     models::{NewProxyAuthToken, ProxyAuthToken, User},
     schema::proxy_auth_tokens,
@@ -133,7 +134,7 @@ pub async fn revoke_token_handler(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(token_id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -153,7 +154,7 @@ pub async fn revoke_token_handler(
     }
 
     info!("Revoked proxy token {}", token_id);
-    Ok(StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 /// POST /api/proxy-tokens/:id/renew - Renew a token with a new expiration

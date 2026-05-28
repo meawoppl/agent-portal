@@ -8,6 +8,7 @@ pub mod images;
 pub mod launchers;
 pub mod messages;
 pub mod proxy_tokens;
+pub mod responses;
 pub mod retention;
 pub mod scheduled_tasks;
 pub mod session_access;
