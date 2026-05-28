@@ -13,7 +13,7 @@
 //! - `history.rs` - Command history management
 
 mod component;
-mod helpers;
+pub(super) mod helpers;
 mod history;
 mod input_bar;
 mod permission_handler;
@@ -22,3 +22,4 @@ mod types;
 mod websocket;
 
 pub use component::SessionView;
+pub(crate) use helpers::ActivityTag;

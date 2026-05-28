@@ -24,7 +24,7 @@ use yew::prelude::*;
 
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, inject_message_metadata, is_claude_awaiting,
-    reconcile_pending_sends,
+    reconcile_pending_sends, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
@@ -47,7 +47,7 @@ pub struct SessionViewProps {
     #[allow(clippy::type_complexity)]
     pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>, Option<String>)>,
     #[prop_or_default]
-    pub on_activity: Callback<(Uuid, String, f64)>,
+    pub on_activity: Callback<(Uuid, ActivityTag, f64)>,
     #[prop_or_default]
     pub current_user_id: Option<String>,
     #[prop_or(0)]
@@ -602,7 +602,7 @@ impl SessionView {
         let session_id = ctx.props().session.id;
         self.dispatch_tasks(TasksInbound::ClearForReplay);
         for msg in &messages {
-            let msg_type = classify_output_msg_type(&msg.content);
+            let tag = classify_output_msg_type(&msg.content);
             if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&msg.content) {
                 for ev in derive_task_events(&claude_msg, &msg.created_at, false) {
                     self.dispatch_tasks(TasksInbound::Replay(ev));
@@ -610,7 +610,7 @@ impl SessionView {
             }
             let ts_ms = js_sys::Date::parse(&msg.created_at);
             if ts_ms.is_finite() {
-                ctx.props().on_activity.emit((session_id, msg_type, ts_ms));
+                ctx.props().on_activity.emit((session_id, tag, ts_ms));
             }
         }
         self.messages = messages
@@ -678,7 +678,7 @@ impl SessionView {
     }
 
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: String) -> bool {
-        let msg_type = classify_output_msg_type(&output);
+        let tag = classify_output_msg_type(&output);
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output) {
             if let shared::ClaudeOutput::Result(res) = &claude_msg {
                 let cost = res.total_cost_usd;
@@ -704,11 +704,9 @@ impl SessionView {
             }
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
-        ctx.props().on_activity.emit((
-            ctx.props().session.id,
-            msg_type.clone(),
-            js_sys::Date::now(),
-        ));
+        ctx.props()
+            .on_activity
+            .emit((ctx.props().session.id, tag, js_sys::Date::now()));
         // Inject _created_at for tooltip display. Live path has no server
         // timestamp on the wire — use browser `now()` for the tooltip only;
         // the reconnect-replay watermark is set separately from the
@@ -719,7 +717,7 @@ impl SessionView {
             .unwrap_or_default();
         let output = inject_message_metadata(&output, &now_iso, false, None, None);
 
-        reconcile_pending_sends(&mut self.pending_sends, &msg_type, &output);
+        reconcile_pending_sends(&mut self.pending_sends, tag, &output);
 
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {

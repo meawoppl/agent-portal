@@ -521,8 +521,12 @@ pub fn dashboard_page() -> Html {
     let on_activity = {
         let activity_timestamps = (*activity_timestamps).clone();
         Callback::from(
-            move |(session_id, msg_type, timestamp): (Uuid, String, f64)| {
-                activity_timestamps.push(session_id, msg_type, timestamp);
+            move |(session_id, tag, timestamp): (
+                Uuid,
+                crate::pages::dashboard::session_view::ActivityTag,
+                f64,
+            )| {
+                activity_timestamps.push(session_id, tag, timestamp);
             },
         )
     };
