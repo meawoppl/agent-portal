@@ -185,6 +185,122 @@ pub async fn stop_session(
     }
 }
 
+pub async fn pause_session(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(session_id): Path<Uuid>,
+) -> Result<EmptyResponse, AppError> {
+    let current_user_id = extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    crate::handlers::session_access::verify_session_mutator(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
+
+    use crate::schema::sessions;
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::paused.eq(true),
+            sessions::status.eq("disconnected"),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    app_state.session_manager.disconnect_session(session_id);
+    app_state
+        .session_manager
+        .pause_session_on_launcher(session_id);
+
+    Ok(EmptyResponse::ACCEPTED)
+}
+
+pub async fn resume_session(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(session_id): Path<Uuid>,
+) -> Result<EmptyResponse, AppError> {
+    let current_user_id = extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let session = crate::handlers::session_access::verify_session_mutator(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
+
+    let launcher_id = resolve_resume_launcher(&app_state, &session)
+        .ok_or(AppError::NotFound("Launcher not connected"))?;
+
+    let auth_token = crate::handlers::launchers::mint_launch_token(&app_state, session.user_id)?;
+    let request_id = Uuid::new_v4();
+    let claude_args =
+        serde_json::from_value::<Vec<String>>(session.claude_args.clone()).unwrap_or_default();
+    let agent_type = session
+        .agent_type
+        .parse()
+        .unwrap_or(shared::AgentType::Claude);
+
+    use crate::schema::sessions;
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::paused.eq(false),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    let launch_msg = shared::ServerToLauncher::LaunchSession {
+        request_id,
+        user_id: session.user_id,
+        auth_token,
+        working_directory: session.working_directory.clone(),
+        session_name: Some(session.session_name.clone()),
+        claude_args,
+        agent_type,
+        scheduled_task_id: session.scheduled_task_id,
+        resume_session_id: Some(session.id),
+    };
+
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, launch_msg)
+    {
+        let _ = diesel::update(sessions::table.find(session_id))
+            .set(sessions::paused.eq(true))
+            .execute(&mut conn);
+        return Err(AppError::Internal(
+            "Failed to send resume request to launcher".to_string(),
+        ));
+    }
+
+    Ok(EmptyResponse::ACCEPTED)
+}
+
+fn resolve_resume_launcher(app_state: &AppState, session: &Session) -> Option<Uuid> {
+    if let Some(launcher_id) = session.launcher_id {
+        if app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .is_some_and(|l| l.user_id == session.user_id)
+        {
+            return Some(launcher_id);
+        }
+    }
+
+    app_state
+        .session_manager
+        .launchers
+        .iter()
+        .find(|entry| {
+            entry.value().user_id == session.user_id && entry.value().hostname == session.hostname
+        })
+        .map(|entry| *entry.key())
+}
+
 // ============================================================================
 // Session Member Management
 // ============================================================================

@@ -231,6 +231,13 @@ pub struct SessionInfo {
     /// Scheduled task ID if this session was spawned by a scheduled task
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_task_id: Option<Uuid>,
+    /// Server-side pause flag. Paused sessions are resumable on demand but
+    /// launchers must not auto-restart them during reconnect/startup.
+    #[serde(default)]
+    pub paused: bool,
+    /// Arguments used when launching the agent CLI.
+    #[serde(default)]
+    pub claude_args: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

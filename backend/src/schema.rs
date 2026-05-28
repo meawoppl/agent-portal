@@ -139,6 +139,8 @@ diesel::table! {
         #[max_length = 512]
         repo_url -> Nullable<Varchar>,
         scheduled_task_id -> Nullable<Uuid>,
+        paused -> Bool,
+        claude_args -> Jsonb,
     }
 }
 

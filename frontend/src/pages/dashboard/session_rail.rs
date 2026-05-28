@@ -221,6 +221,7 @@ pub struct SessionRailProps {
     pub on_toggle_hidden: Callback<Uuid>,
     pub on_toggle_inactive_hidden: Callback<MouseEvent>,
     pub on_stop: Callback<Uuid>,
+    pub on_toggle_pause: Callback<(Uuid, bool)>,
 }
 
 /// SessionRail - Horizontal carousel of session pills
@@ -379,6 +380,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let dropdown_content = if let Some(session) = open_session {
         let is_hidden = props.hidden_sessions.contains(&session.id);
         let is_connected = props.connected_sessions.contains(&session.id);
+        let is_paused = session.paused;
 
         let on_stop = {
             let on_stop = props.on_stop.clone();
@@ -407,6 +409,16 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             })
         };
 
+        let on_toggle_pause = {
+            let on_toggle_pause = props.on_toggle_pause.clone();
+            let session_id = session.id;
+            let menu_session = menu_session.clone();
+            Callback::from(move |_: MouseEvent| {
+                on_toggle_pause.emit((session_id, !is_paused));
+                menu_session.set(None);
+            })
+        };
+
         let on_leave = {
             let on_leave = props.on_leave.clone();
             let session_id = session.id;
@@ -428,7 +440,29 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             "Hide from rotation"
         };
 
-        let stop_option = if is_connected && session.status == shared::SessionStatus::Active {
+        let pause_option = if session.my_role != "viewer" {
+            let (pause_label, pause_hint) = if is_paused {
+                ("Resume Session", "Restart from saved session")
+            } else {
+                ("Pause Session", "Stop and suppress auto-resume")
+            };
+            html! {
+                <button type="button"
+                    class={classes!("pill-menu-option", "pause", is_paused.then_some("active"))}
+                    onclick={on_toggle_pause}
+                >
+                    { pause_label }
+                    <span class="option-hint">{ pause_hint }</span>
+                </button>
+            }
+        } else {
+            html! {}
+        };
+
+        let stop_option = if !is_paused
+            && is_connected
+            && session.status == shared::SessionStatus::Active
+        {
             if *stop_has_tasks {
                 // Block stop — open schedule dialog so user can delete tasks first
                 let schedule_session = schedule_session.clone();
@@ -579,6 +613,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 { share_option }
                 { schedule_option }
                 { repo_option }
+                { pause_option }
                 <button
                     type="button"
                     class={classes!("pill-menu-option", "hide", is_hidden.then_some("active"))}
@@ -779,6 +814,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 {
                     if session.scheduled_task_id.is_some() {
                         html! { <span class="pill-agent-badge cron">{ "Cron" }</span> }
+                    } else if session.paused {
+                        html! { <span class="pill-agent-badge paused">{ "Paused" }</span> }
                     } else {
                         html! {}
                     }

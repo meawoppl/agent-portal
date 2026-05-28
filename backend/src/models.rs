@@ -56,6 +56,8 @@ pub struct Session {
     pub agent_type: String,
     pub repo_url: Option<String>,
     pub scheduled_task_id: Option<Uuid>,
+    pub paused: bool,
+    pub claude_args: serde_json::Value,
 }
 
 #[derive(Debug, Insertable)]
@@ -86,6 +88,8 @@ pub struct NewSessionWithId {
     pub agent_type: String,
     pub repo_url: Option<String>,
     pub scheduled_task_id: Option<Uuid>,
+    pub paused: bool,
+    pub claude_args: serde_json::Value,
 }
 
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]

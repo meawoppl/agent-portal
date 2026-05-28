@@ -34,6 +34,7 @@ struct LauncherRowProps {
     launcher: LauncherInfo,
     on_renew: Callback<Uuid>,
     on_update: Callback<Uuid>,
+    update_in_progress: bool,
 }
 
 #[function_component(LauncherRow)]
@@ -42,8 +43,6 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
     let on_renew = props.on_renew.clone();
     let on_update = props.on_update.clone();
     let launcher_id = l.launcher_id;
-    // Triple-click confirmation. 0=idle, 1=first prod, 2=last warning, 3=firing.
-    let update_step = use_state(|| 0u8);
 
     let (status_class, status_text) = if let Some(ref exp) = l.token_expires_at {
         let days = days_until_expiration(exp);
@@ -73,24 +72,25 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
         on_renew.emit(launcher_id);
     });
 
-    let (update_label, update_class) = match *update_step {
-        0 => ("Update & Restart", "update-button stage-0"),
-        1 => ("Wait, really?", "update-button stage-1"),
-        2 => (
-            "Are you absolutely positively sure?",
-            "update-button stage-2",
-        ),
-        _ => ("Restarting…", "update-button stage-3"),
+    let (update_label, update_class) = if props.update_in_progress {
+        ("Restarting...", "update-button stage-3")
+    } else {
+        ("Update & Restart", "update-button stage-0")
     };
-    let update_disabled = *update_step >= 3;
 
     let on_update_click = {
-        let update_step = update_step.clone();
         let on_update = on_update.clone();
         Callback::from(move |_| {
-            let next = (*update_step).saturating_add(1);
-            update_step.set(next);
-            if next >= 3 {
+            let confirmed = web_sys::window()
+                .and_then(|window| {
+                    window
+                        .confirm_with_message(
+                            "Update this launcher to the latest release and restart it?",
+                        )
+                        .ok()
+                })
+                .unwrap_or(false);
+            if confirmed {
                 on_update.emit(launcher_id);
             }
         })
@@ -115,7 +115,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                 <button
                     class={update_class}
                     onclick={on_update_click}
-                    disabled={update_disabled}
+                    disabled={props.update_in_progress}
                     title="Pull the latest agent-portal release and restart this launcher"
                 >
                     { update_label }
@@ -135,6 +135,7 @@ pub fn launchers_panel(props: &LaunchersPanelProps) -> Html {
     let launchers = use_state(Vec::<LauncherInfo>::new);
     let loading = use_state(|| true);
     let renew_result = use_state(|| None::<(bool, String)>);
+    let update_in_progress = use_state(|| None::<Uuid>);
 
     let fetch_launchers = {
         let launchers = launchers.clone();
@@ -203,9 +204,12 @@ pub fn launchers_panel(props: &LaunchersPanelProps) -> Html {
 
     let on_update = {
         let renew_result = renew_result.clone();
+        let update_in_progress = update_in_progress.clone();
         Callback::from(move |launcher_id: Uuid| {
             let renew_result = renew_result.clone();
+            let update_in_progress = update_in_progress.clone();
             spawn_local(async move {
+                update_in_progress.set(Some(launcher_id));
                 let url = utils::api_url(&format!("/api/launchers/{}/update", launcher_id));
                 match Request::post(&url).send().await {
                     Ok(resp) => {
@@ -226,6 +230,7 @@ pub fn launchers_panel(props: &LaunchersPanelProps) -> Html {
                         renew_result.set(Some((false, format!("Update request failed: {:?}", e))));
                     }
                 }
+                update_in_progress.set(None);
             });
         })
     };
@@ -277,6 +282,7 @@ pub fn launchers_panel(props: &LaunchersPanelProps) -> Html {
                                         launcher={l.clone()}
                                         on_renew={on_renew.clone()}
                                         on_update={on_update.clone()}
+                                        update_in_progress={*update_in_progress == Some(l.launcher_id)}
                                     />
                                 }
                             }) }
