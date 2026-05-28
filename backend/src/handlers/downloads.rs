@@ -10,7 +10,9 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio_util::io::ReaderStream;
+use tracing::warn;
 
+use crate::errors::AppError;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -223,7 +225,7 @@ echo "Or run directly:         agent-portal"
 }
 
 /// Resolve the path to the portal binary
-fn resolve_binary_path(dev_mode: bool) -> Result<std::path::PathBuf, (StatusCode, String)> {
+fn resolve_binary_path(dev_mode: bool) -> Result<std::path::PathBuf, AppError> {
     if dev_mode {
         // Try release first, then debug
         let release_path = std::path::Path::new("target/release/claude-portal");
@@ -234,11 +236,10 @@ fn resolve_binary_path(dev_mode: bool) -> Result<std::path::PathBuf, (StatusCode
         } else if debug_path.exists() {
             Ok(debug_path.to_path_buf())
         } else {
-            Err((
-                StatusCode::NOT_FOUND,
-                "Portal binary not found. Run 'cargo build -p claude-portal --release' first."
-                    .to_string(),
-            ))
+            warn!(
+                "Portal binary not found in dev mode; run 'cargo build -p claude-portal --release'"
+            );
+            Err(AppError::NotFound("Portal binary not found"))
         }
     } else {
         // Production: use env var or default location
@@ -247,10 +248,8 @@ fn resolve_binary_path(dev_mode: bool) -> Result<std::path::PathBuf, (StatusCode
         let path = std::path::PathBuf::from(path);
 
         if !path.exists() {
-            Err((
-                StatusCode::NOT_FOUND,
-                format!("Portal binary not found at: {:?}", path),
-            ))
+            warn!("Portal binary not found at: {:?}", path);
+            Err(AppError::NotFound("Portal binary not found"))
         } else {
             Ok(path)
         }
@@ -258,13 +257,10 @@ fn resolve_binary_path(dev_mode: bool) -> Result<std::path::PathBuf, (StatusCode
 }
 
 /// Compute SHA256 hash of a file
-async fn compute_binary_sha256(path: &std::path::Path) -> Result<String, (StatusCode, String)> {
-    let bytes = tokio::fs::read(path).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to read binary: {}", e),
-        )
-    })?;
+async fn compute_binary_sha256(path: &std::path::Path) -> Result<String, AppError> {
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to read binary: {}", e)))?;
 
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
@@ -279,18 +275,15 @@ async fn compute_binary_sha256(path: &std::path::Path) -> Result<String, (Status
 pub async fn proxy_binary(
     method: Method,
     State(app_state): State<Arc<AppState>>,
-) -> Result<Response<Body>, (StatusCode, String)> {
+) -> Result<Response<Body>, AppError> {
     let binary_path = resolve_binary_path(app_state.dev_mode)?;
     let sha256_hash = compute_binary_sha256(&binary_path).await?;
 
     if method == Method::HEAD {
         // HEAD request: return just headers for update check
-        let metadata = tokio::fs::metadata(&binary_path).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to read metadata: {}", e),
-            )
-        })?;
+        let metadata = tokio::fs::metadata(&binary_path)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to read metadata: {}", e)))?;
 
         Ok(Response::builder()
             .status(StatusCode::OK)
@@ -301,12 +294,9 @@ pub async fn proxy_binary(
             .unwrap())
     } else {
         // GET request: return the binary with hash header
-        let file = tokio::fs::File::open(&binary_path).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to open binary: {}", e),
-            )
-        })?;
+        let file = tokio::fs::File::open(&binary_path)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to open binary: {}", e)))?;
 
         let stream = ReaderStream::new(file);
         let body = Body::from_stream(stream);
