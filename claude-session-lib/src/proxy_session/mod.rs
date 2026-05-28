@@ -1,5 +1,6 @@
 //! Proxy session management and WebSocket connection handling.
 
+mod git_metadata;
 mod image_uploader;
 mod output_forwarder;
 mod portal_reminder;
@@ -22,7 +23,11 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use output_forwarder::{get_git_branch, get_pr_url, get_repo_url, spawn_output_forwarder};
+use git_metadata::{
+    check_and_send_branch_update, codex_output_has_git_signal, get_git_branch, get_pr_url,
+    get_repo_url, GitMetadataState, GitRefreshTrigger,
+};
+use output_forwarder::spawn_output_forwarder;
 use wiggum::{handle_session_event_with_wiggum, WiggumState};
 use ws_reader::{spawn_ws_reader, FileReceiveState, FileUploadEvent};
 
@@ -243,6 +248,8 @@ impl<'a, A: Agent> SessionState<'a, A> {
 /// Contains channels and state that are specific to a single connection attempt.
 /// Note: input_rx is passed separately as it persists across reconnections.
 struct ConnectionState {
+    /// Session id for metadata updates.
+    session_id: Uuid,
     /// Receiver for permission responses from frontend
     perm_rx: mpsc::UnboundedReceiver<PermissionResponseData>,
     /// Receiver for output acknowledgments from backend
@@ -275,6 +282,10 @@ struct ConnectionState {
     active_uploads: std::collections::HashMap<String, FileReceiveState>,
     /// Agent type for tagging per-message wire output (proxy emission side)
     agent_type: shared::AgentType,
+    /// Shared git metadata state for branch / PR / repo refreshes.
+    git_metadata: GitMetadataState,
+    /// Refresh cadence for Codex raw-output messages.
+    git_refresh: GitRefreshTrigger,
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
@@ -669,9 +680,7 @@ async fn run_message_loop<A: Agent>(
     let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
 
     // Shared state for tracking git branch, PR URL, and repo URL updates
-    let current_branch = Arc::new(Mutex::new(config.git_branch.clone()));
-    let current_pr_url = Arc::new(Mutex::new(None::<String>));
-    let current_repo_url = Arc::new(Mutex::new(None::<String>));
+    let git_metadata = GitMetadataState::new(config.git_branch.clone());
 
     // Spawn output forwarder task with buffer
     let output_task = spawn_output_forwarder(
@@ -681,9 +690,7 @@ async fn run_message_loop<A: Agent>(
         config.backend_url.clone(),
         config.auth_token.clone(),
         config.working_directory.clone(),
-        current_branch,
-        current_pr_url,
-        current_repo_url,
+        git_metadata.clone(),
         session.output_buffer.clone(),
         max_image_mb,
         config.agent_type,
@@ -706,6 +713,7 @@ async fn run_message_loop<A: Agent>(
 
     // Create connection state (per-connection channels and timing)
     let mut conn_state = ConnectionState {
+        session_id,
         perm_rx,
         ack_rx,
         output_tx,
@@ -722,6 +730,8 @@ async fn run_message_loop<A: Agent>(
         working_directory: config.working_directory.clone(),
         active_uploads: std::collections::HashMap::new(),
         agent_type: config.agent_type,
+        git_metadata,
+        git_refresh: GitRefreshTrigger::default(),
     };
 
     // On the very first connection of this session, inject the portal
@@ -872,6 +882,19 @@ async fn run_main_loop<A: Agent>(
                 // Handle raw output directly (Codex JSONL) — bypasses the
                 // ClaudeOutput-typed output forwarder
                 if let Some(SessionEvent::RawOutput(ref value)) = event {
+                    if state.git_refresh.should_check_before_message() {
+                        check_and_send_branch_update(
+                            &state.ws_write,
+                            state.session_id,
+                            &state.working_directory,
+                            &state.git_metadata,
+                        )
+                        .await;
+                    }
+                    if codex_output_has_git_signal(value) {
+                        state.git_refresh.mark_git_signal();
+                    }
+
                     let is_codex_compaction = is_codex_compaction_event(value);
                     let seq = {
                         let mut buf = state.output_buffer.lock().await;
