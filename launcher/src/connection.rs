@@ -540,9 +540,14 @@ async fn handle_message(
                 warn!("Failed to send launch session result");
             }
         }
-        ServerToLauncher::StopSession { session_id } => {
+        ServerToLauncher::StopSession {
+            session_id,
+            working_directory,
+        } => {
             info!("Stop request for session {}", session_id);
-            let working_dir = process_manager.session_working_directory(&session_id);
+            let working_dir = process_manager
+                .session_working_directory(&session_id)
+                .or(working_directory);
             process_manager.stop(&session_id).await;
             if let Some(dir) = working_dir {
                 expected_sessions.retain(|s| s.working_directory != dir);

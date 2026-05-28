@@ -562,8 +562,13 @@ pub enum ServerToLauncher {
         resume_session_id: Option<Uuid>,
     },
 
-    /// Request to stop a running session
-    StopSession { session_id: Uuid },
+    /// Request to stop a session and remove the launcher's persisted
+    /// expected-session metadata.
+    StopSession {
+        session_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        working_directory: Option<String>,
+    },
 
     /// Pause a running session without deleting the launcher's persisted
     /// expected-session metadata.

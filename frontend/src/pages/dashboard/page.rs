@@ -20,8 +20,6 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 
-const PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY: &str = "claude-portal-paused-default-unpause-migrated";
-
 // =============================================================================
 // Dashboard Page - Main Orchestrating Component
 // =============================================================================
@@ -213,10 +211,19 @@ pub fn dashboard_page() -> Html {
         sorted
     };
 
+    // Paused sessions follow the same frontend convention as manually hidden
+    // sessions: they remain available in the hidden rail section but do not
+    // participate in focus, activation, waiting counts, or keyboard rotation.
+    let effective_hidden_sessions: HashSet<Uuid> = {
+        let mut hidden = (*hidden_sessions).clone();
+        hidden.extend(active_sessions.iter().filter(|s| s.paused).map(|s| s.id));
+        hidden
+    };
+
     // On initial load, focus first non-hidden session and activate all non-hidden sessions
     {
         let active_sessions = active_sessions.clone();
-        let hidden_sessions = hidden_sessions.clone();
+        let effective_hidden_sessions = effective_hidden_sessions.clone();
         let focused_index = focused_index.clone();
         let initial_focus_set = initial_focus_set.clone();
         let activated_sessions = activated_sessions.clone();
@@ -227,7 +234,7 @@ pub fn dashboard_page() -> Html {
                 if !*initial_focus_set && !*is_loading && *session_count > 0 {
                     let first_non_hidden_idx = active_sessions
                         .iter()
-                        .position(|s| !hidden_sessions.contains(&s.id))
+                        .position(|s| !effective_hidden_sessions.contains(&s.id))
                         .unwrap_or(0);
 
                     focused_index.set(first_non_hidden_idx);
@@ -235,7 +242,7 @@ pub fn dashboard_page() -> Html {
                     // Activate all non-hidden sessions so they load in background
                     let mut activated = (*activated_sessions).clone();
                     for s in &active_sessions {
-                        if !hidden_sessions.contains(&s.id) {
+                        if !effective_hidden_sessions.contains(&s.id) {
                             activated.insert(s.id);
                         }
                     }
@@ -246,61 +253,6 @@ pub fn dashboard_page() -> Html {
                 || ()
             },
         );
-    }
-
-    // One-time migration: the DB migration defaults existing sessions to
-    // paused. Restore the old browser-local visible set by resuming sessions
-    // that are not in the old hidden set.
-    {
-        let sessions = sessions.clone();
-        let hidden_sessions = (*hidden_sessions).clone();
-        let refresh = sessions_hook.refresh.clone();
-        use_effect_with((sessions.len(), hidden_sessions.len()), move |_| {
-            if !sessions.is_empty() {
-                if let Some(storage) =
-                    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
-                {
-                    let already_migrated = storage
-                        .get_item(PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY)
-                        .ok()
-                        .flatten()
-                        .as_deref()
-                        == Some("true");
-                    if !already_migrated {
-                        let ids: Vec<Uuid> = sessions
-                            .iter()
-                            .filter(|s| !hidden_sessions.contains(&s.id) && s.paused)
-                            .map(|s| s.id)
-                            .collect();
-                        if ids.is_empty() {
-                            let _ = storage.set_item(PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY, "true");
-                        } else {
-                            spawn_local(async move {
-                                let mut all_ok = true;
-                                for id in ids {
-                                    let url =
-                                        utils::api_url(&format!("/api/sessions/{}/resume", id));
-                                    match Request::post(&url).send().await {
-                                        Ok(resp) if resp.status() == 202 => {}
-                                        _ => all_ok = false,
-                                    }
-                                }
-                                if all_ok {
-                                    if let Some(storage) = web_sys::window()
-                                        .and_then(|w| w.local_storage().ok().flatten())
-                                    {
-                                        let _ = storage
-                                            .set_item(PAUSED_DEFAULT_UNPAUSE_MIGRATION_KEY, "true");
-                                    }
-                                }
-                                refresh.emit(());
-                            });
-                        }
-                    }
-                }
-            }
-            || ()
-        });
     }
 
     // Auto-focus newly launched session when it appears in the session list
@@ -369,7 +321,7 @@ pub fn dashboard_page() -> Html {
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
         focused_index: *focused_index,
-        hidden_sessions: (*hidden_sessions).clone(),
+        hidden_sessions: effective_hidden_sessions.clone(),
         connected_sessions: (*connected_sessions).clone(),
         inactive_hidden: *inactive_hidden,
         on_select: on_select_session.clone(),
@@ -668,7 +620,7 @@ pub fn dashboard_page() -> Html {
     // Computed values
     let waiting_count = awaiting_sessions
         .iter()
-        .filter(|id| !hidden_sessions.contains(id))
+        .filter(|id| !effective_hidden_sessions.contains(id))
         .count();
 
     // Update browser tab title
@@ -852,7 +804,7 @@ pub fn dashboard_page() -> Html {
                         sessions={active_sessions.clone()}
                         focused_index={*focused_index}
                         awaiting_sessions={(*awaiting_sessions).clone()}
-                        hidden_sessions={(*hidden_sessions).clone()}
+                        hidden_sessions={effective_hidden_sessions.clone()}
                         inactive_hidden={*inactive_hidden}
                         connected_sessions={(*connected_sessions).clone()}
                         nav_mode={keyboard_nav.nav_mode}

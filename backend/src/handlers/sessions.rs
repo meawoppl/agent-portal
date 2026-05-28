@@ -167,19 +167,32 @@ pub async fn stop_session(
     // able to terminate sessions they only have read access to. The helper
     // also accepts the session's `sessions.user_id` owner row, so owners
     // without a `session_members` row still work.
-    crate::handlers::session_access::verify_session_mutator(
+    let session = crate::handlers::session_access::verify_session_mutator(
         &mut conn,
         session_id,
         current_user_id,
     )?;
 
     let stopped = app_state.session_manager.disconnect_session(session_id);
-    app_state
-        .session_manager
-        .stop_session_on_launcher(session_id);
+    let launcher_stopped = app_state.session_manager.stop_session_on_launcher(
+        session_id,
+        session.launcher_id,
+        Some(session.working_directory.clone()),
+    );
 
-    if stopped {
+    if stopped || launcher_stopped {
+        use crate::schema::sessions;
+        diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::paused.eq(false),
+                sessions::status.eq("disconnected"),
+                sessions::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(&mut conn)
+            .map_err(|e| AppError::DbQuery(e.to_string()))?;
         Ok(EmptyResponse::ACCEPTED)
+    } else if session.paused {
+        Err(AppError::NotFound("Launcher not connected"))
     } else {
         Err(AppError::NotFound("Session not connected"))
     }
