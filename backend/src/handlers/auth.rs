@@ -1,6 +1,5 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
     response::{IntoResponse, Redirect},
     Json,
 };
@@ -10,7 +9,7 @@ use serde::Deserialize;
 use shared::api::MeResponse;
 use std::sync::Arc;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{
     errors::AppError,
@@ -93,18 +92,15 @@ pub async fn callback(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Query(query): Query<AuthCallbackQuery>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     let client = app_state
         .oauth_basic_client
         .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+        .ok_or(AppError::ServiceUnavailable("OAuth client not configured"))?;
     let http_client = oauth2::reqwest::ClientBuilder::new()
         .redirect(oauth2::reqwest::redirect::Policy::none())
         .build()
-        .map_err(|e| {
-            error!("Failed to build OAuth HTTP client: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::Internal(format!("Failed to build OAuth HTTP client: {e}")))?;
 
     let device_state =
         oauth::validate_callback_state(&cookies, &app_state, query.state.as_deref())?;
@@ -117,10 +113,7 @@ pub async fn callback(
         .exchange_code(AuthorizationCode::new(query.code))
         .request_async(&http_client)
         .await
-        .map_err(|e| {
-            error!("Failed to exchange code: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::Internal(format!("Failed to exchange OAuth code: {e}")))?;
 
     // Fetch user info from Google
     let client = reqwest::Client::new();
@@ -129,16 +122,10 @@ pub async fn callback(
         .bearer_auth(token.access_token().secret())
         .send()
         .await
-        .map_err(|e| {
-            error!("Failed to fetch user info: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(|e| AppError::Internal(format!("Failed to fetch Google user info: {e}")))?
         .json()
         .await
-        .map_err(|e| {
-            error!("Failed to parse user info: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::Internal(format!("Failed to parse Google user info: {e}")))?;
 
     info!("User authenticated: {}", user_info.email);
 
@@ -148,10 +135,7 @@ pub async fn callback(
     }
 
     // Save or update user in database
-    let mut conn = app_state.db_pool.get().map_err(|e| {
-        error!("Failed to get db connection: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     use crate::schema::users::dsl::*;
 
@@ -159,10 +143,7 @@ pub async fn callback(
         .filter(google_id.eq(&user_info.sub))
         .first::<User>(&mut conn)
         .optional()
-        .map_err(|e| {
-            error!("Failed to look up user by google_id: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(format!("Failed to look up user by google_id: {e}")))?;
 
     let user = match user {
         Some(user) => user,
@@ -177,10 +158,7 @@ pub async fn callback(
             diesel::insert_into(users)
                 .values(&new_user)
                 .get_result::<User>(&mut conn)
-                .map_err(|e| {
-                    error!("Failed to create user: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?
+                .map_err(|e| AppError::DbQuery(format!("Failed to create user: {e}")))?
         }
     };
 

@@ -1,9 +1,9 @@
-use axum::{http::StatusCode, response::Redirect};
+use axum::response::Redirect;
 use oauth2::{CsrfToken, Scope};
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 use tracing::error;
 
-use crate::{routes, AppState, GoogleOAuthClient};
+use crate::{errors::AppError, routes, AppState, GoogleOAuthClient};
 
 const OAUTH_CSRF_COOKIE: &str = "oauth_csrf";
 const OAUTH_DEVICE_CSRF_COOKIE: &str = "oauth_device_csrf";
@@ -51,11 +51,11 @@ pub(super) fn validate_callback_state(
     cookies: &Cookies,
     app_state: &AppState,
     state: Option<&str>,
-) -> Result<Option<DeviceOAuthState>, StatusCode> {
+) -> Result<Option<DeviceOAuthState>, AppError> {
     let device_state = state.and_then(parse_device_oauth_state);
     if state.is_some_and(|state| state.starts_with("device:")) && device_state.is_none() {
         error!("Device OAuth callback: malformed state");
-        return Err(StatusCode::FORBIDDEN);
+        return Err(AppError::Forbidden);
     }
 
     if let Some(ref device_state) = device_state {
@@ -64,12 +64,12 @@ pub(super) fn validate_callback_state(
             .get(OAUTH_DEVICE_CSRF_COOKIE)
             .ok_or_else(|| {
                 error!("Device OAuth callback: missing CSRF cookie");
-                StatusCode::FORBIDDEN
+                AppError::Forbidden
             })?;
 
         if csrf_cookie.value() != device_state.csrf_nonce {
             error!("Device OAuth callback: CSRF token mismatch");
-            return Err(StatusCode::FORBIDDEN);
+            return Err(AppError::Forbidden);
         }
 
         cookies
@@ -81,13 +81,13 @@ pub(super) fn validate_callback_state(
             .get(OAUTH_CSRF_COOKIE)
             .ok_or_else(|| {
                 error!("OAuth callback: missing CSRF cookie");
-                StatusCode::FORBIDDEN
+                AppError::Forbidden
             })?;
 
         let state_value = state.unwrap_or("");
         if csrf_cookie.value() != state_value {
             error!("OAuth callback: CSRF token mismatch");
-            return Err(StatusCode::FORBIDDEN);
+            return Err(AppError::Forbidden);
         }
 
         cookies
