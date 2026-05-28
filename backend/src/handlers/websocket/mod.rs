@@ -5,6 +5,7 @@ mod message_handlers;
 mod permissions;
 mod proxy_socket;
 mod registration;
+mod replay;
 mod session_manager;
 mod turn_metrics;
 mod uploads;
