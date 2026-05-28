@@ -1,23 +1,18 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
     response::{IntoResponse, Redirect},
     Json,
 };
 use diesel::prelude::*;
-use rand::{distributions::Alphanumeric, Rng};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use shared::api::{DeviceCodeRequest, DeviceFlowActionResponse, DeviceFlowPollRequest};
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower_cookies::Cookies;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
     auth,
-    errors::AppError,
     jwt::{create_proxy_token, hash_token},
     models::NewProxyAuthToken,
     routes,
@@ -27,159 +22,18 @@ use crate::{
 
 use shared::protocol::{DEVICE_CODE_EXPIRES_SECS, SESSION_COOKIE_NAME};
 
+mod api_error;
 mod render;
+mod state;
+
+#[cfg(test)]
+use api_error::DeviceFlowError;
+use api_error::{auth_error_to_device_flow, DeviceFlowApiError};
 use render::render_approval_page;
-
-/// Error response for device flow endpoints
-#[derive(Debug, Serialize)]
-pub struct DeviceFlowError {
-    pub error: String,
-    pub message: String,
-}
-
-/// Device flow API error that returns JSON
-pub struct DeviceFlowApiError {
-    status: StatusCode,
-    error: String,
-    message: String,
-}
-
-impl DeviceFlowApiError {
-    fn service_unavailable() -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            error: "service_unavailable".to_string(),
-            message: "Device flow authentication is not available. Server may be in dev mode or OAuth is not configured.".to_string(),
-        }
-    }
-
-    fn not_found(msg: &str) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            error: "not_found".to_string(),
-            message: msg.to_string(),
-        }
-    }
-
-    fn internal_error(msg: &str) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            error: "internal_error".to_string(),
-            message: msg.to_string(),
-        }
-    }
-}
-
-impl IntoResponse for DeviceFlowApiError {
-    fn into_response(self) -> axum::response::Response {
-        (
-            self.status,
-            Json(DeviceFlowError {
-                error: self.error,
-                message: self.message,
-            }),
-        )
-            .into_response()
-    }
-}
-
-fn auth_error_to_device_flow(error: AppError, action: &str) -> DeviceFlowApiError {
-    match error {
-        AppError::Forbidden => DeviceFlowApiError {
-            status: StatusCode::FORBIDDEN,
-            error: "forbidden".to_string(),
-            message: format!("You are not allowed to {} device authorization", action),
-        },
-        AppError::DbPool | AppError::DbQuery(_) => {
-            DeviceFlowApiError::internal_error("Database connection failed")
-        }
-        _ => DeviceFlowApiError {
-            status: StatusCode::UNAUTHORIZED,
-            error: "unauthorized".to_string(),
-            message: format!("You must be logged in to {} device authorization", action),
-        },
-    }
-}
-
-// In-memory store for device flow state
-// In production, use Redis or database
-pub type DeviceFlowStore = Arc<RwLock<HashMap<String, DeviceFlowState>>>;
-
-#[derive(Debug, Clone)]
-pub struct DeviceFlowState {
-    pub device_code: String,
-    pub user_code: String,
-    pub user_id: Option<Uuid>,
-    pub access_token: Option<String>,
-    pub expires_at: std::time::SystemTime,
-    pub status: DeviceFlowStatus,
-    /// Hostname of the machine requesting authorization
-    pub hostname: Option<String>,
-    /// Working directory / repository path
-    pub working_directory: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeviceFlowStatus {
-    Pending,
-    Complete,
-    Expired,
-    Denied,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeviceCodeResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub expires_in: u64,
-    pub interval: u64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "status")]
-pub enum PollResponse {
-    #[serde(rename = "pending")]
-    Pending,
-
-    #[serde(rename = "complete")]
-    Complete {
-        access_token: String,
-        user_id: String,
-        user_email: String,
-    },
-
-    #[serde(rename = "expired")]
-    Expired,
-
-    #[serde(rename = "denied")]
-    Denied,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VerifyQuery {
-    pub user_code: Option<String>,
-}
-
-fn generate_user_code() -> String {
-    let chars: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(6)
-        .map(|c| c as char)
-        .collect::<String>()
-        .to_uppercase();
-
-    // Format as XXX-XXX for readability
-    format!("{}-{}", &chars[0..3], &chars[3..6])
-}
-
-fn generate_device_code() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(|c| c as char)
-        .collect()
-}
+use state::{
+    generate_device_code, generate_user_code, DeviceCodeResponse, PollResponse, VerifyQuery,
+};
+pub use state::{DeviceFlowState, DeviceFlowStatus, DeviceFlowStore};
 
 // POST /auth/device/code
 pub async fn device_code(
