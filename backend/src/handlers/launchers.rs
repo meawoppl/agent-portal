@@ -118,17 +118,17 @@ pub async fn list_directories(
     cookies: Cookies,
     Path(launcher_id): Path<Uuid>,
     Query(query): Query<DirectoryQuery>,
-) -> Result<Json<DirectoryListingResponse>, StatusCode> {
-    let user_id = extract_user_id(&app_state, &cookies).map_err(|_| StatusCode::UNAUTHORIZED)?;
+) -> Result<Json<DirectoryListingResponse>, AppError> {
+    let user_id = extract_user_id(&app_state, &cookies)?;
 
     // Verify the launcher belongs to this user
     let launcher = app_state
         .session_manager
         .launchers
         .get(&launcher_id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or(AppError::NotFound("Launcher not found"))?;
     if launcher.user_id != user_id {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(AppError::Forbidden);
     }
     drop(launcher);
 
@@ -149,7 +149,9 @@ pub async fn list_directories(
             .pending_dir_requests
             .remove(&request_id);
         error!("Failed to send ListDirectories to launcher {}", launcher_id);
-        return Err(StatusCode::BAD_GATEWAY);
+        return Err(AppError::BadGateway(
+            "Failed to send directory listing request",
+        ));
     }
 
     match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
@@ -161,22 +163,26 @@ pub async fn list_directories(
         })) => {
             if let Some(err) = error {
                 warn!("Directory listing error: {}", err);
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(AppError::BadRequest("Directory listing failed"));
             }
             Ok(Json(DirectoryListingResponse {
                 entries,
                 resolved_path,
             }))
         }
-        Ok(Ok(_)) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-        Ok(Err(_)) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Ok(Ok(_)) => Err(AppError::Internal(
+            "Unexpected launcher directory response".to_string(),
+        )),
+        Ok(Err(_)) => Err(AppError::Internal(
+            "Directory listing response channel closed".to_string(),
+        )),
         Err(_) => {
             app_state
                 .session_manager
                 .pending_dir_requests
                 .remove(&request_id);
             warn!("Directory listing timed out for launcher {}", launcher_id);
-            Err(StatusCode::GATEWAY_TIMEOUT)
+            Err(AppError::GatewayTimeout("Directory listing timed out"))
         }
     }
 }
@@ -296,17 +302,17 @@ pub async fn probe_agents(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(launcher_id): Path<Uuid>,
-) -> Result<Json<ProbeAgentsResponse>, StatusCode> {
-    let user_id = extract_user_id(&app_state, &cookies).map_err(|_| StatusCode::UNAUTHORIZED)?;
+) -> Result<Json<ProbeAgentsResponse>, AppError> {
+    let user_id = extract_user_id(&app_state, &cookies)?;
 
     let sender = {
         let launcher = app_state
             .session_manager
             .launchers
             .get(&launcher_id)
-            .ok_or(StatusCode::NOT_FOUND)?;
+            .ok_or(AppError::NotFound("Launcher not found"))?;
         if launcher.user_id != user_id {
-            return Err(StatusCode::FORBIDDEN);
+            return Err(AppError::Forbidden);
         }
         launcher.sender.clone()
     };
@@ -323,21 +329,26 @@ pub async fn probe_agents(
             .pending_probe_requests
             .remove(&request_id);
         warn!("Launcher {} disconnected while probing agents", launcher_id);
-        return Err(StatusCode::BAD_GATEWAY);
+        return Err(AppError::BadGateway("Failed to send agent probe request"));
     }
 
     match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
         Ok(Ok(LauncherToServer::ProbeAgentsResult { agents, .. })) => {
             Ok(Json(ProbeAgentsResponse { agents }))
         }
-        Ok(Ok(_)) | Ok(Err(_)) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Ok(Ok(_)) => Err(AppError::Internal(
+            "Unexpected launcher probe response".to_string(),
+        )),
+        Ok(Err(_)) => Err(AppError::Internal(
+            "Agent probe response channel closed".to_string(),
+        )),
         Err(_) => {
             app_state
                 .session_manager
                 .pending_probe_requests
                 .remove(&request_id);
             warn!("Probe agents timed out for launcher {}", launcher_id);
-            Err(StatusCode::GATEWAY_TIMEOUT)
+            Err(AppError::GatewayTimeout("Agent probe timed out"))
         }
     }
 }
