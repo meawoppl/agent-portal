@@ -107,16 +107,26 @@ impl SessionManager {
     }
 
     /// Find the launcher running a given session and send StopSession to it.
+    /// If the session is paused, fall back to the persisted launcher id so
+    /// the launcher can remove its expected-session metadata by directory.
     /// Returns true if the message was sent successfully.
-    pub fn stop_session_on_launcher(&self, session_id: Uuid) -> bool {
+    pub fn stop_session_on_launcher(
+        &self,
+        session_id: Uuid,
+        launcher_id: Option<Uuid>,
+        working_directory: Option<String>,
+    ) -> bool {
+        let msg = || ServerToLauncher::StopSession {
+            session_id,
+            working_directory: working_directory.clone(),
+        };
         for entry in self.launchers.iter() {
             if entry.value().running_sessions.contains(&session_id) {
-                return entry
-                    .value()
-                    .sender
-                    .send(ServerToLauncher::StopSession { session_id })
-                    .is_ok();
+                return entry.value().sender.send(msg()).is_ok();
             }
+        }
+        if let Some(launcher_id) = launcher_id {
+            return self.send_to_launcher(&launcher_id, msg());
         }
         false
     }

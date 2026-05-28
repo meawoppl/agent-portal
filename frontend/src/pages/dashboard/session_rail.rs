@@ -440,6 +440,26 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             "Hide from rotation"
         };
 
+        let hide_option = if is_paused {
+            html! {
+                <span class="pill-menu-option disabled">
+                    { "Hidden While Paused" }
+                    <span class="option-hint">{ "Resume to show in rotation" }</span>
+                </span>
+            }
+        } else {
+            html! {
+                <button
+                    type="button"
+                    class={classes!("pill-menu-option", "hide", is_hidden.then_some("active"))}
+                    onclick={on_hide}
+                >
+                    { hide_label }
+                    <span class="option-hint">{ hide_hint }</span>
+                </button>
+            }
+        };
+
         let pause_option = if session.my_role != "viewer" {
             let (pause_label, pause_hint) = if is_paused {
                 ("Resume Session", "Restart from saved session")
@@ -459,9 +479,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             html! {}
         };
 
-        let stop_option = if !is_paused
-            && is_connected
-            && session.status == shared::SessionStatus::Active
+        let stop_option = if is_paused
+            || (is_connected && session.status == shared::SessionStatus::Active)
         {
             if *stop_has_tasks {
                 // Block stop — open schedule dialog so user can delete tasks first
@@ -480,7 +499,14 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 }
             } else {
                 let (stop_label, stop_hint) = if confirming_stop {
-                    ("Click again to confirm", "This will terminate the process")
+                    let hint = if is_paused {
+                        "This will remove the saved launcher entry"
+                    } else {
+                        "This will terminate the process"
+                    };
+                    ("Click again to confirm", hint)
+                } else if is_paused {
+                    ("Stop Session", "Remove saved launcher entry")
                 } else {
                     ("Stop Session", "Terminate process")
                 };
@@ -614,14 +640,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 { schedule_option }
                 { repo_option }
                 { pause_option }
-                <button
-                    type="button"
-                    class={classes!("pill-menu-option", "hide", is_hidden.then_some("active"))}
-                    onclick={on_hide}
-                >
-                    { hide_label }
-                    <span class="option-hint">{ hide_hint }</span>
-                </button>
+                { hide_option }
                 { leave_option }
                 { stop_option }
             </>
