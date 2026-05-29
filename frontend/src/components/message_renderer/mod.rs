@@ -228,7 +228,14 @@ pub(crate) fn shorten_model_name(model: &str) -> Option<String> {
     let extract_version = |model: &str| -> Option<String> {
         let parts: Vec<&str> = model.split('-').collect();
         for i in 0..parts.len().saturating_sub(1) {
-            if let (Ok(major), Ok(minor)) = (parts[i].parse::<u32>(), parts[i + 1].parse::<u32>()) {
+            let minor_digits: String = parts[i + 1]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if minor_digits.len() >= 8 {
+                continue;
+            }
+            if let (Ok(major), Ok(minor)) = (parts[i].parse::<u32>(), minor_digits.parse::<u32>()) {
                 if parts[i + 1].len() >= 8 {
                     continue;
                 }
@@ -856,6 +863,28 @@ mod tests {
     }
 
     #[test]
+    fn assistant_group_label_uses_claude_model() {
+        let messages = vec![serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-7-20260501",
+                "content": [{"type": "text", "text": "hello"}],
+            },
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()];
+
+        let groups = group_for_tests(&messages);
+        match &groups[0] {
+            MessageGroup::IdentityGroup { label, .. } => {
+                assert_eq!(label, "Claude - Opus 4.7");
+            }
+            other => panic!("expected assistant identity group, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_shorten_model_name() {
         assert_eq!(
             shorten_model_name("claude-opus-4-5-20251101"),
@@ -876,6 +905,10 @@ mod tests {
         assert_eq!(
             shorten_model_name("claude-opus-4-6"),
             Some("Opus 4.6".to_string())
+        );
+        assert_eq!(
+            shorten_model_name("claude-opus-4-7[1m]"),
+            Some("Opus 4.7".to_string())
         );
         assert_eq!(
             shorten_model_name("claude-sonnet-4-5"),

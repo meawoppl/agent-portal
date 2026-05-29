@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use super::renderers::assistant_label;
 use super::types::{self, ClaudeMessage, ContentBlock};
 
 /// Extract the raw `_created_at` ISO string from a message JSON, for use with
@@ -177,17 +178,17 @@ pub(super) fn classify(
     agent_type: shared::AgentType,
     current_user_id: Option<&str>,
 ) -> Option<MessageIdentity> {
-    let assistant_label = if agent_type == shared::AgentType::Codex {
+    let assistant_identity_label = if agent_type == shared::AgentType::Codex {
         "Codex"
     } else {
-        "Assistant"
+        "Claude"
     };
 
     match serde_json::from_str::<ClaudeMessage>(json) {
         Ok(ClaudeMessage::Assistant(_)) => {
             return Some(MessageIdentity {
                 category: GroupCategory::Assistant,
-                label: assistant_label.to_string(),
+                label: assistant_identity_label.to_string(),
                 badge_class: "assistant".to_string(),
             });
         }
@@ -195,7 +196,7 @@ pub(super) fn classify(
             if user_is_tool_result_envelope(&msg) {
                 return Some(MessageIdentity {
                     category: GroupCategory::Assistant,
-                    label: assistant_label.to_string(),
+                    label: assistant_identity_label.to_string(),
                     badge_class: "assistant".to_string(),
                 });
             }
@@ -238,6 +239,25 @@ pub(super) fn classify(
     }
 
     None
+}
+
+fn group_label(identity: &MessageIdentity, messages: &[String]) -> String {
+    if identity.category != GroupCategory::Assistant || identity.label == "Codex" {
+        return identity.label.clone();
+    }
+
+    messages
+        .iter()
+        .filter_map(|json| serde_json::from_str::<ClaudeMessage>(json).ok())
+        .find_map(|msg| match msg {
+            ClaudeMessage::Assistant(msg) => msg
+                .message
+                .as_ref()
+                .and_then(|m| m.model.as_deref())
+                .map(assistant_label),
+            _ => None,
+        })
+        .unwrap_or_else(|| identity.label.clone())
 }
 
 /// True iff `json` parses as a per-turn terminator: Claude's
@@ -292,9 +312,10 @@ pub fn group_messages(
 
     fn flush(out: &mut Vec<MessageGroup>, slot: &mut Option<(MessageIdentity, Vec<String>)>) {
         if let Some((identity, messages)) = slot.take() {
+            let label = group_label(&identity, &messages);
             out.push(MessageGroup::IdentityGroup {
                 category: identity.category,
-                label: identity.label,
+                label,
                 badge_class: identity.badge_class,
                 messages,
             });
