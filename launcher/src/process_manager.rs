@@ -65,14 +65,6 @@ impl ProcessManager {
         self.tasks.keys().copied().collect()
     }
 
-    /// Returns the set of working directories that currently have running sessions.
-    pub fn running_directories(&self) -> Vec<String> {
-        self.tasks
-            .values()
-            .map(|t| t.working_directory.clone())
-            .collect()
-    }
-
     /// Returns the working directory for a given session, if it exists.
     pub fn session_working_directory(&self, session_id: &Uuid) -> Option<String> {
         self.tasks

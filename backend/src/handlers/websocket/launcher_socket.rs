@@ -353,6 +353,11 @@ fn handle_launcher_message(
             pid,
             ref error,
         } => {
+            let desired_session_id = app_state
+                .session_manager
+                .pending_launch_sessions
+                .remove(&request_id)
+                .map(|(_, id)| id);
             if success {
                 info!(
                     "Launch succeeded: request={}, session={:?}, pid={:?}",
@@ -360,6 +365,22 @@ fn handle_launcher_message(
                 );
             } else {
                 warn!("Launch failed: request={}, error={:?}", request_id, error);
+                if let Some(session_id) = desired_session_id {
+                    if let Ok(mut conn) = app_state.db_pool.get() {
+                        use crate::schema::sessions;
+                        use diesel::prelude::*;
+                        if let Err(e) = diesel::update(sessions::table.find(session_id))
+                            .set((
+                                sessions::paused.eq(true),
+                                sessions::status.eq("disconnected"),
+                                sessions::updated_at.eq(diesel::dsl::now),
+                            ))
+                            .execute(&mut conn)
+                        {
+                            warn!("Failed to mark failed launch {} paused: {}", session_id, e);
+                        }
+                    }
+                }
             }
             // Forward to web clients as ServerToClient
             app_state.session_manager.broadcast_to_user(
@@ -397,6 +418,7 @@ fn handle_launcher_message(
                     }
                 }
             }
+            reconcile_desired_sessions(app_state, launcher_id, user_id);
         }
         LauncherToServer::ProxyLog {
             session_id,
@@ -448,15 +470,22 @@ fn handle_launcher_message(
 
             if scheduled_task_id.is_none() {
                 if let Some(session_id) = last_session_id {
-                    match is_session_paused(app_state, session_id, user_id) {
-                        Ok(true) => {
+                    match get_session_paused(app_state, session_id, user_id) {
+                        Ok(Some(true)) => {
                             info!(
                                 "Skipping launcher auto-resume for paused session {}",
                                 session_id
                             );
                             return;
                         }
-                        Ok(false) => {}
+                        Ok(Some(false)) => {}
+                        Ok(None) => {
+                            info!(
+                                "Skipping launcher auto-resume for deleted session {}",
+                                session_id
+                            );
+                            return;
+                        }
                         Err(e) => {
                             warn!(
                                 "Failed to check pause state for session {} before launch: {}",
@@ -629,11 +658,11 @@ fn handle_launcher_message(
     }
 }
 
-fn is_session_paused(
+fn get_session_paused(
     app_state: &AppState,
     session_id: Uuid,
     user_id: Uuid,
-) -> Result<bool, String> {
+) -> Result<Option<bool>, String> {
     use crate::schema::sessions;
 
     let mut conn = app_state.db_pool.get().map_err(|e| e.to_string())?;
@@ -643,8 +672,101 @@ fn is_session_paused(
         .select(sessions::paused)
         .first::<bool>(&mut conn)
         .optional()
-        .map(|value| value.unwrap_or(false))
         .map_err(|e| e.to_string())
+}
+
+fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: Uuid) {
+    use crate::models::Session;
+    use crate::schema::sessions;
+    use diesel::prelude::*;
+
+    let running_sessions = app_state
+        .session_manager
+        .launchers
+        .get(&launcher_id)
+        .map(|launcher| launcher.running_sessions.clone())
+        .unwrap_or_default();
+
+    let Ok(mut conn) = app_state.db_pool.get() else {
+        warn!("Failed to get DB connection for desired-session reconciliation");
+        return;
+    };
+
+    let desired: Vec<Session> = match sessions::table
+        .filter(sessions::user_id.eq(user_id))
+        .filter(sessions::launcher_id.eq(launcher_id))
+        .filter(sessions::paused.eq(false))
+        .filter(sessions::scheduled_task_id.is_null())
+        .filter(sessions::status.ne("replaced"))
+        .select(Session::as_select())
+        .load(&mut conn)
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(
+                "Failed to load desired sessions for launcher {}: {}",
+                launcher_id, e
+            );
+            return;
+        }
+    };
+
+    for session in desired {
+        if running_sessions.contains(&session.id)
+            || app_state
+                .session_manager
+                .pending_launch_sessions
+                .iter()
+                .any(|entry| *entry.value() == session.id)
+        {
+            continue;
+        }
+
+        let Ok(auth_token) = crate::handlers::launchers::mint_launch_token(app_state, user_id)
+        else {
+            warn!("Failed to mint token for desired session {}", session.id);
+            continue;
+        };
+
+        let request_id = Uuid::new_v4();
+        app_state
+            .session_manager
+            .pending_launch_sessions
+            .insert(request_id, session.id);
+
+        let claude_args =
+            serde_json::from_value::<Vec<String>>(session.claude_args.clone()).unwrap_or_default();
+        let agent_type = session
+            .agent_type
+            .parse()
+            .unwrap_or(shared::AgentType::Claude);
+
+        let launch_msg = ServerToLauncher::LaunchSession {
+            request_id,
+            user_id,
+            auth_token,
+            working_directory: session.working_directory.clone(),
+            session_name: Some(session.session_name.clone()),
+            claude_args,
+            agent_type,
+            scheduled_task_id: None,
+            resume_session_id: Some(session.id),
+        };
+
+        if !app_state
+            .session_manager
+            .send_to_launcher(&launcher_id, launch_msg)
+        {
+            app_state
+                .session_manager
+                .pending_launch_sessions
+                .remove(&request_id);
+            warn!(
+                "Failed to send desired session {} to launcher {}",
+                session.id, launcher_id
+            );
+        }
+    }
 }
 
 /// Mint a new 30-day token for a launcher, revoke the old one, and push it over WS.

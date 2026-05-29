@@ -73,6 +73,7 @@ pub fn dashboard_page() -> Html {
     let rail_position = use_state(load_rail_position);
     let connected_sessions = use_state(HashSet::<Uuid>::new);
     let pending_leave = use_state(|| None::<Uuid>);
+    let pending_delete = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
     let current_user_id = use_state(|| None::<String>);
     let app_title = use_state(|| "Agent Portal".to_string());
@@ -188,14 +189,11 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Get live or paused sessions sorted by repo name, then hostname.
-    // Disconnected unpaused sessions are hidden from the active dashboard.
+    // Get DB-authoritative sessions sorted by repo name, then hostname. A
+    // disconnected, unpaused session is desired-running and should stay visible
+    // while the launcher reconciles it.
     let active_sessions: Vec<SessionInfo> = {
-        let mut sorted: Vec<SessionInfo> = sessions
-            .iter()
-            .filter(|s| s.status.as_str() == "active" || s.paused)
-            .cloned()
-            .collect();
+        let mut sorted: Vec<SessionInfo> = sessions.iter().cloned().collect();
         sorted.sort_by(|a, b| {
             let folder_a = utils::extract_folder(&a.working_directory);
             let folder_b = utils::extract_folder(&b.working_directory);
@@ -419,6 +417,46 @@ pub fn dashboard_page() -> Html {
                         log::error!("Failed to get current user ID for leave");
                     }
                     pending_leave.set(None);
+                });
+            }
+        })
+    };
+
+    let on_delete = {
+        let pending_delete = pending_delete.clone();
+        Callback::from(move |session_id: Uuid| {
+            pending_delete.set(Some(session_id));
+        })
+    };
+
+    let on_cancel_delete = {
+        let pending_delete = pending_delete.clone();
+        Callback::from(move |_| {
+            pending_delete.set(None);
+        })
+    };
+
+    let on_confirm_delete = {
+        let pending_delete = pending_delete.clone();
+        let refresh = sessions_hook.refresh.clone();
+        Callback::from(move |_| {
+            if let Some(session_id) = *pending_delete {
+                let refresh = refresh.clone();
+                let pending_delete = pending_delete.clone();
+                spawn_local(async move {
+                    let api_endpoint = utils::api_url(&format!("/api/sessions/{}", session_id));
+                    match Request::delete(&api_endpoint).send().await {
+                        Ok(response) if response.status() == 204 => {
+                            refresh.emit(());
+                        }
+                        Ok(response) => {
+                            log::error!("Failed to delete session: status {}", response.status());
+                        }
+                        Err(e) => {
+                            log::error!("Failed to delete session: {:?}", e);
+                        }
+                    }
+                    pending_delete.set(None);
                 });
             }
         })
@@ -813,6 +851,7 @@ pub fn dashboard_page() -> Html {
                         launcher_token_expiry={(*expiring_launchers).clone()}
                         on_select={on_select_session.clone()}
                         on_leave={on_leave.clone()}
+                        on_delete={on_delete.clone()}
                         on_toggle_hidden={on_toggle_hidden.clone()}
                         on_toggle_inactive_hidden={on_toggle_inactive_hidden.clone()}
                         on_stop={on_stop.clone()}
@@ -899,6 +938,32 @@ pub fn dashboard_page() -> Html {
                         </div>
                     </div>
                 </>
+            }
+
+            // Delete confirmation modal
+            {
+                if let Some(session_id) = *pending_delete {
+                    let session_name = sessions.iter()
+                        .find(|s| s.id == session_id)
+                        .map(|s| utils::extract_folder(&s.working_directory))
+                        .unwrap_or("this session");
+
+                    html! {
+                        <div class="modal-overlay" onclick={on_cancel_delete.clone()}>
+                            <div class="modal-content delete-confirm" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                <h2>{ "Delete Session?" }</h2>
+                                <p>{ format!("Are you sure you want to delete \"{}\"?", session_name) }</p>
+                                <p class="modal-warning">{ "All message history and session metadata will be permanently removed." }</p>
+                                <div class="modal-actions">
+                                    <button class="modal-cancel" onclick={on_cancel_delete.clone()}>{ "Cancel" }</button>
+                                    <button class="modal-confirm" onclick={on_confirm_delete.clone()}>{ "Delete" }</button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
             }
 
             // Admin modal — full-page overlay preserves dashboard state

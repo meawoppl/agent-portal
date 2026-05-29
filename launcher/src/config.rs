@@ -132,38 +132,6 @@ pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn add_session(session: &ExpectedSession) -> anyhow::Result<()> {
-    let mut config = load_config();
-    if config
-        .sessions
-        .iter()
-        .any(|s| s.working_directory == session.working_directory)
-    {
-        tracing::debug!("Session already in config: {}", session.working_directory);
-        return Ok(());
-    }
-    config.sessions.push(session.clone());
-    save_config(&config)
-}
-
-pub fn update_session_id(working_directory: &str, session_id: Uuid) -> anyhow::Result<()> {
-    let mut config = load_config();
-    if let Some(session) = config
-        .sessions
-        .iter_mut()
-        .find(|s| s.working_directory == working_directory)
-    {
-        session.session_id = Some(session_id);
-        save_config(&config)?;
-        tracing::debug!(
-            "Updated session_id for {}: {}",
-            working_directory,
-            session_id
-        );
-    }
-    Ok(())
-}
-
 pub fn remove_session(working_directory: &str) -> anyhow::Result<()> {
     let mut config = load_config();
     let before = config.sessions.len();
@@ -173,6 +141,16 @@ pub fn remove_session(working_directory: &str) -> anyhow::Result<()> {
     if config.sessions.len() < before {
         save_config(&config)?;
         tracing::debug!("Removed session from config: {}", working_directory);
+    }
+    Ok(())
+}
+
+pub fn clear_sessions() -> anyhow::Result<()> {
+    let mut config = load_config();
+    if !config.sessions.is_empty() {
+        config.sessions.clear();
+        save_config(&config)?;
+        tracing::info!("Cleared launcher-local expected sessions from config");
     }
     Ok(())
 }
