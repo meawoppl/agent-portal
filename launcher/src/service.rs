@@ -4,6 +4,7 @@ use anyhow::Result;
 /// location of the native `claude` installer. Prepends it to the supplied PATH
 /// unless already present, so a service installed from a shell that lacked it
 /// (or a unit file predating this logic) can still resolve the agent binary.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn path_with_local_bin(existing: &str, home: Option<&str>) -> String {
     let local_bin = match home {
         Some(h) if !h.is_empty() => format!("{h}/.local/bin"),
@@ -20,6 +21,7 @@ fn path_with_local_bin(existing: &str, home: Option<&str>) -> String {
 
 /// The PATH the installed service should run with: the current environment's
 /// PATH, guaranteed to include `$HOME/.local/bin`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn service_path() -> String {
     path_with_local_bin(
         &std::env::var("PATH").unwrap_or_default(),
@@ -546,7 +548,7 @@ pub fn logs(_lines: u32, _follow: bool) -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::path_with_local_bin;
 
