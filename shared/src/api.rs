@@ -327,7 +327,7 @@ pub struct SoundSettingsResponse {
 //   `rust-code-agent-sdks#141`; the SDK's `CompactBoundaryMessage` currently
 //   only exposes `compact_metadata { pre_tokens, trigger }`. Once upstream
 //   lands these, this struct can be deleted and the renderer can switch to
-//   `CCSystemMessage::as_compact_boundary()`.
+//   `SystemMessage::as_compact_boundary()`.
 // - `InitExtra` — `fast_mode_state`. The SDK's `InitMessage::fast_mode_state`
 //   is already typed `Option<String>`; we keep a narrow local mirror because
 //   `InitMessage` has many required fields and a single-field shape is
@@ -343,7 +343,7 @@ pub struct SoundSettingsResponse {
 //
 // TODO(SDK rust-code-agent-sdks#141): drop this struct once
 // `claude_codes::CompactBoundaryMessage` exposes these fields directly and
-// switch `render_compaction_completed` to `CCSystemMessage::as_compact_boundary`.
+// switch `render_compaction_completed` to `SystemMessage::as_compact_boundary`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompactionExtra {
     #[serde(default)]

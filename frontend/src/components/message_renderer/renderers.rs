@@ -5,7 +5,7 @@ mod portal;
 mod system;
 mod tools;
 
-use super::types::*;
+use super::types::{OptimisticUserMessage, UserMessageMeta};
 use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown;
@@ -28,8 +28,8 @@ fn preserve_user_newlines(text: &str) -> String {
 
 // --- Message renderers ---
 
-pub fn render_user_message(
-    msg: &UserMessage,
+pub fn render_optimistic_user_message(
+    msg: &OptimisticUserMessage,
     current_user_id: Option<&str>,
     timestamp: Option<&str>,
 ) -> Html {
@@ -39,75 +39,81 @@ pub fn render_user_message(
     };
     let pending_class = if msg.pending { " pending" } else { "" };
 
-    if let Some(text) = &msg.content {
+    html! {
+        <div class={format!("claude-message user-message{}", pending_class)}>
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
+                <span class="message-type-badge user">{ &label }</span>
+                if msg.pending {
+                    <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
+                }
+                <CopyButton text={msg.content.clone()} title="Copy message" />
+            </div>
+            <div class="message-body">{ render_optimistic_user_message_content(msg) }</div>
+        </div>
+    }
+}
+
+pub fn render_user_message(
+    msg: &shared::UserMessage,
+    meta: &UserMessageMeta,
+    current_user_id: Option<&str>,
+    timestamp: Option<&str>,
+) -> Html {
+    let label = match &meta.sender {
+        Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
+        _ => "You".to_string(),
+    };
+    let pending_class = if meta.pending { " pending" } else { "" };
+    let blocks = msg.message.content.clone();
+
+    let text_content: String = blocks
+        .iter()
+        .filter_map(|block| match block {
+            shared::ContentBlock::Text(t) => Some(t.text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let has_tool_results = blocks
+        .iter()
+        .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
+
+    if has_tool_results {
+        html! {
+            <div class="claude-message user-message tool-result-message">
+                <div class="message-body">{ render_user_message_content(msg) }</div>
+            </div>
+        }
+    } else if !text_content.is_empty() {
         html! {
             <div class={format!("claude-message user-message{}", pending_class)}>
                 <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                     <span class="message-type-badge user">{ &label }</span>
-                    if msg.pending {
+                    if meta.pending {
                         <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
                     }
-                    <CopyButton text={text.clone()} title="Copy message" />
+                    <CopyButton text={text_content.clone()} title="Copy message" />
                 </div>
                 <div class="message-body">{ render_user_message_content(msg) }</div>
             </div>
-        }
-    } else if let Some(message) = &msg.message {
-        let blocks = message.content.as_ref().cloned().unwrap_or_default();
-
-        let text_content: String = blocks
-            .iter()
-            .filter_map(|block| match block {
-                ContentBlock::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let has_tool_results = blocks
-            .iter()
-            .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
-
-        if has_tool_results {
-            html! {
-                <div class="claude-message user-message tool-result-message">
-                    <div class="message-body">{ render_user_message_content(msg) }</div>
-                </div>
-            }
-        } else if !text_content.is_empty() {
-            html! {
-                <div class="claude-message user-message">
-                    <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                        <span class="message-type-badge user">{ &label }</span>
-                        <CopyButton text={text_content.clone()} title="Copy message" />
-                    </div>
-                    <div class="message-body">{ render_user_message_content(msg) }</div>
-                </div>
-            }
-        } else {
-            html! {}
         }
     } else {
         html! {}
     }
 }
 
-pub fn render_user_message_content(msg: &UserMessage) -> Html {
-    if let Some(text) = &msg.content {
-        return html! {
-            <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>
-        };
+pub fn render_optimistic_user_message_content(msg: &OptimisticUserMessage) -> Html {
+    html! {
+        <div class="user-text">{ render_markdown(&preserve_user_newlines(&msg.content)) }</div>
     }
+}
 
-    let blocks = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .cloned()
-        .unwrap_or_default();
+pub fn render_user_message_content(msg: &shared::UserMessage) -> Html {
+    let blocks = msg.message.content.clone();
     let has_tool_results = blocks
         .iter()
-        .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
+        .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
 
     if has_tool_results {
         render_content_blocks(&blocks)
@@ -115,7 +121,7 @@ pub fn render_user_message_content(msg: &UserMessage) -> Html {
         let text_content = blocks
             .iter()
             .filter_map(|block| match block {
-                ContentBlock::Text { text, .. } => Some(text.clone()),
+                shared::ContentBlock::Text(t) => Some(t.text.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -131,24 +137,20 @@ pub fn render_user_message_content(msg: &UserMessage) -> Html {
     }
 }
 
-pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
-    if msg.is_overload() {
+pub fn render_error_message(msg: &shared::AnthropicError, timestamp: Option<&str>) -> Html {
+    if msg.is_overloaded() {
         return render_overload_error(msg, timestamp);
     }
 
-    let message = msg.display_message();
-    let error_type = msg.error_type();
+    let message = msg.error.message.as_str();
+    let error_type = msg.error.error_type.as_str();
 
     html! {
         <div class="claude-message error-message-display">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge result error">{ "Error" }</span>
                 {
-                    if let Some(err_type) = error_type {
-                        html! { <span class="error-type">{ err_type }</span> }
-                    } else {
-                        html! {}
-                    }
+                    html! { <span class="error-type">{ error_type }</span> }
                 }
             </div>
             <div class="message-body">
@@ -158,7 +160,7 @@ pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html
     }
 }
 
-fn render_overload_error(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
+fn render_overload_error(msg: &shared::AnthropicError, timestamp: Option<&str>) -> Html {
     let request_id = msg.request_id.as_deref().unwrap_or("unknown");
 
     html! {
@@ -184,15 +186,17 @@ fn render_overload_error(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
     }
 }
 
-pub fn render_rate_limit_event(msg: &RateLimitEventMessage, timestamp: Option<&str>) -> Html {
-    let info = msg.rate_limit_info.as_ref();
-    let status = info.and_then(|i| i.status.as_deref()).unwrap_or("unknown");
+pub fn render_rate_limit_event(msg: &shared::RateLimitEvent, timestamp: Option<&str>) -> Html {
+    let info = &msg.rate_limit_info;
+    let status = info.status.as_str();
     let rate_type = info
-        .and_then(|i| i.rate_limit_type.as_deref())
+        .rate_limit_type
+        .as_ref()
+        .map(|t| t.as_str())
         .unwrap_or("unknown");
-    let resets_at = info.and_then(|i| i.resets_at).unwrap_or(0);
-    let using_overage = info.and_then(|i| i.is_using_overage).unwrap_or(false);
-    let utilization = info.and_then(|i| i.utilization);
+    let resets_at = info.resets_at.unwrap_or(0);
+    let using_overage = info.is_using_overage;
+    let utilization = info.utilization;
 
     let reset_text = if resets_at > 0 {
         let now = (js_sys::Date::now() / 1000.0) as u64;
@@ -263,7 +267,7 @@ const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
     "image/svg+xml",
 ];
 
-pub(super) fn render_image_source(source: &ImageSource, filename: Option<String>) -> Html {
+pub(super) fn render_image_source(source: &shared::ImageSource, filename: Option<String>) -> Html {
     if !ALLOWED_IMAGE_MEDIA_TYPES.contains(&source.media_type.as_str()) {
         return html! {
             <pre class="tool-result-content">
@@ -272,13 +276,13 @@ pub(super) fn render_image_source(source: &ImageSource, filename: Option<String>
         };
     }
     // Support both URL sources (from backend image store) and base64 data URIs
-    let src = if source.source_type == "url" {
+    let src = if source.source_type.as_str() == "url" {
         source.data.clone()
     } else {
         format!("data:{};base64,{}", source.media_type, source.data)
     };
     html! {
-        <ImageViewer src={src} media_type={source.media_type.clone()} {filename} />
+        <ImageViewer src={src} media_type={source.media_type.as_str().to_string()} {filename} />
     }
 }
 
@@ -378,26 +382,30 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
 }
 
 pub fn render_result_message(
-    msg: &ResultMessage,
+    msg: &shared::ResultMessage,
     turn_metrics: Option<&shared::TurnMetrics>,
 ) -> Html {
-    let is_error = msg.is_error.unwrap_or(false);
+    let is_error = msg.is_error;
     let status_class = if is_error { "error" } else { "success" };
 
-    let duration_ms = msg.duration_ms.unwrap_or(0);
-    let api_ms = msg.duration_api_ms.unwrap_or(0);
-    let turns = msg.num_turns.unwrap_or(0);
+    let duration_ms = msg.duration_ms;
+    let api_ms = msg.duration_api_ms;
+    let turns = msg.num_turns;
 
     let mut timing_tooltip = format!(
         "Total: {}ms | API: {}ms | Turns: {}",
         duration_ms, api_ms, turns
     );
 
-    if let Some(model_usage) = &msg.model_usage {
+    if let Some(model_usage) = msg
+        .model_usage
+        .as_ref()
+        .and_then(|v| serde_json::from_value::<shared::ModelUsage>(v.clone()).ok())
+    {
         for (model, entry) in model_usage {
             timing_tooltip.push_str(&format!(
                 " | {}: ${:.4}",
-                shorten_model_name(model).unwrap_or_else(|| model.clone()),
+                shorten_model_name(&model).unwrap_or_else(|| model.clone()),
                 entry.cost_usd
             ));
         }
@@ -412,12 +420,7 @@ pub fn render_result_message(
     let denials_tooltip = if !msg.permission_denials.is_empty() {
         msg.permission_denials
             .iter()
-            .filter_map(|v| {
-                v.get("tool_name")
-                    .and_then(|t| t.as_str())
-                    .or_else(|| v.as_str())
-                    .map(|s| s.to_string())
-            })
+            .map(|v| v.tool_name.clone())
             .collect::<Vec<_>>()
             .join(", ")
     } else {
@@ -427,10 +430,10 @@ pub fn render_result_message(
     let extra_badges = html! {
         <>
             {
-                if let Some(cost) = msg.total_cost_usd {
+                    if msg.total_cost_usd > 0.0 {
                     html! {
                         <span class="stat-item cost" title="Total cost">
-                            { format!("${:.2}", cost) }
+                            { format!("${:.2}", msg.total_cost_usd) }
                         </span>
                     }
                 } else {
@@ -530,10 +533,10 @@ pub fn render_result_message(
                         html! {
                             <>
                                 <span class="stat-item tokens" title="Input tokens">
-                                    { format!("{}↓", usage.input_tokens.unwrap_or(0)) }
+                                    { format!("{}↓", usage.input_tokens) }
                                 </span>
                                 <span class="stat-item tokens" title="Output tokens">
-                                    { format!("{}↑", usage.output_tokens.unwrap_or(0)) }
+                                    { format!("{}↑", usage.output_tokens) }
                                 </span>
                             </>
                         }
