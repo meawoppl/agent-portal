@@ -193,7 +193,7 @@ pub fn dashboard_page() -> Html {
     // disconnected, unpaused session is desired-running and should stay visible
     // while the launcher reconciles it.
     let active_sessions: Vec<SessionInfo> = {
-        let mut sorted: Vec<SessionInfo> = sessions.iter().cloned().collect();
+        let mut sorted: Vec<SessionInfo> = sessions.to_vec();
         sorted.sort_by(|a, b| {
             let folder_a = utils::extract_folder(&a.working_directory);
             let folder_b = utils::extract_folder(&b.working_directory);
