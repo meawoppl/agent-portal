@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.6.24
+
+- **Pill watermark: shrink to 80% (80×80 → 64×64), keep horizontal center at x=16.** Continues the gradual size taper started by #719 (which had taken the original 88×88 launch dimensions down to 80×80). New size is exactly 80% of the current main-tree value, with `left: -24px` → `left: -16px` recomputed so the watermark's horizontal center stays at x=16 in pill coordinates — the visual centering doesn't drift across the resize. Vertical center is held by the existing `top: 50%; translateY(-50%)` which is size-agnostic. CSS-only change; no Rust touched.
+
+
+
+- **Session-pill agent-logo watermark: shrink to 80%.** `.pill-watermark` in `frontend/styles/session-rail.css` drops from 80×80 to 64×64 and `left` shifts from `-24px` to `-16px` so the icon's horizontal center stays anchored at `x = 16` in pill coords. Vertical centering uses `top: 50%` + `translateY(-50%)`, which is size-agnostic — no change there. Net visual: same position, same crop, same opacity, just a smaller mark.
+
 ## 2.6.15
 
 - **Performance page: add `1h` / `6h` / `1d` window buttons.** The radio group previously offered only `7d` / `30d` / `90d`; the three new short-window buttons sit before them in chronological order so the most-recent view is on the left. Adds three `TimeWindow` variants (`Hours1` / `Hours6` / `Days1`) and a new `bucket_param(window) -> &'static str` dispatch helper: short windows (≤ 1 day) request `bucket=hour` so a 1-hour view doesn't collapse into a single daily data point; week-plus windows stay `bucket=day` so 30 / 90 day runs don't overwhelm the x-axis. `render_charts` now takes the active `window` and threads it into `BucketKind::from_wire(bucket_param(window))` so the time-axis label format (HH:MM for hourly, "May 5" for daily) stays in lockstep with the requested data. The hardcoded `BUCKET_PARAM: &str = "day"` constant deletes. Backend already accepts `Nh` window suffixes and `bucket=hour` (verified by `parse_window_accepts_d_and_h_suffix` + the existing `BucketKind::from_wire` arms) — no backend changes. Three new tests: `bucket_param_dispatches_on_window_length` pins the short-window → hourly / long-window → daily mapping, `window_param_strings` extends to cover all six variants, `time_window_all_lists_every_variant_in_chronological_order` pins the radio button ordering (Hours1 first, Days90 last). 16 performance-panel tests pass; workspace clippy clean.
