@@ -11,8 +11,8 @@
 //!   pill only summarizes the dashboard user's own sessions; multi-tenant
 //!   member-shared views can land in a later PR alongside multi-pill UI).
 //! - `GET /api/metrics/turns?bucket=…&window=…` (PR 4): aggregated rollups for
-//!   the Settings → Performance drill-in page. Bucketed by `date_trunc` (hour
-//!   or day), grouped by `(agent_type, model, service_tier)`, with p50/p95
+//!   the Settings → Performance drill-in page. Bucketed by `date_bin` over a
+//!   small allowlist of minute/hour/day intervals, grouped by `(agent_type, model, service_tier)`, with p50/p95
 //!   latency + throughput computed via `percentile_cont` server-side. Same
 //!   owner-only gate as `/api/metrics/recent`.
 
@@ -162,7 +162,7 @@ pub async fn list_recent_user_turn_metrics(
 
 // =============================================================================
 // `GET /api/metrics/turns` — aggregated bucketed rollups for the Settings →
-// Performance drill-in page (PR 4). Bucketed by `date_trunc('hour' | 'day',
+// Performance drill-in page (PR 4). Bucketed by `date_bin(<allowed interval>,
 // started_at)` and grouped by `(agent_type, model, service_tier)`; p50/p95
 // latency and throughput are computed server-side via Postgres
 // `percentile_cont(...)`. Stop-reason histogram is built in Rust from a
@@ -171,22 +171,28 @@ pub async fn list_recent_user_turn_metrics(
 // =============================================================================
 
 /// Bucketing granularity for the aggregated endpoint. The wire form is a tiny
-/// allowlist (`"hour" | "day"`) so an attacker can't smuggle arbitrary SQL into
-/// the `date_trunc` argument — only these two values reach the query.
+/// allowlist so an attacker can't smuggle arbitrary SQL into the `date_bin`
+/// interval argument — only these constants reach the query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BucketKind {
+    Minute1,
+    Minute5,
+    Minute15,
     Hour,
     Day,
 }
 
 impl BucketKind {
-    /// String that flows into the `date_trunc($1, ...)` bind parameter. Safe
-    /// because the value is one of two constants — there is no path from
+    /// String that flows into the `date_bin($1::interval, ...)` bind parameter.
+    /// Safe because the value is one of a few constants — there is no path from
     /// untrusted input to this `&'static str`.
-    fn as_pg(self) -> &'static str {
+    fn as_interval(self) -> &'static str {
         match self {
-            BucketKind::Hour => "hour",
-            BucketKind::Day => "day",
+            BucketKind::Minute1 => "1 minute",
+            BucketKind::Minute5 => "5 minutes",
+            BucketKind::Minute15 => "15 minutes",
+            BucketKind::Hour => "1 hour",
+            BucketKind::Day => "1 day",
         }
     }
 }
@@ -202,16 +208,21 @@ pub struct TurnMetricsAggregateQuery {
     pub window: Option<String>,
 }
 
-/// Parse `bucket=hour|day`. Empty / missing → `Day`. Unknown → `Err`.
+/// Parse `bucket=1m|5m|15m|hour|day`. Empty / missing → `Day`. Unknown → `Err`.
 fn parse_bucket(raw: Option<&str>) -> Result<BucketKind, AppError> {
     let trimmed = raw.unwrap_or("").trim();
     if trimmed.is_empty() {
         return Ok(BucketKind::Day);
     }
     match trimmed.to_ascii_lowercase().as_str() {
+        "minute" | "1m" | "m" => Ok(BucketKind::Minute1),
+        "5m" | "5min" | "5minute" | "5minutes" => Ok(BucketKind::Minute5),
+        "15m" | "15min" | "15minute" | "15minutes" => Ok(BucketKind::Minute15),
         "hour" | "h" => Ok(BucketKind::Hour),
         "day" | "d" => Ok(BucketKind::Day),
-        _ => Err(AppError::BadRequest("bucket must be 'hour' or 'day'")),
+        _ => Err(AppError::BadRequest(
+            "bucket must be one of '1m', '5m', '15m', 'hour', or 'day'",
+        )),
     }
 }
 
@@ -305,7 +316,7 @@ struct StopReasonRow {
 /// Owner-only gate (same as `/api/metrics/recent`): joins `turn_metrics` to
 /// `sessions` and filters `sessions.user_id = current_user_id`. Bucket and
 /// window are validated against a small allowlist before any SQL runs; only
-/// the validated constants (`"hour" | "day"`, `"N days" | "N hours"` strings)
+/// the validated constants (`"N minutes" | "N hours" | "N days"` strings)
 /// reach the query.
 pub async fn list_aggregated_turn_metrics(
     State(app_state): State<Arc<AppState>>,
@@ -325,7 +336,7 @@ pub async fn list_aggregated_turn_metrics(
     // explicitly so Diesel can decode them per CLAUDE.md's raw-SQL guidance.
     let aggregate_sql = "\
         SELECT \
-            date_trunc($1, tm.started_at) AS bucket_start, \
+            date_bin($1::interval, tm.started_at, TIMESTAMPTZ '1970-01-01 00:00:00+00') AS bucket_start, \
             tm.agent_type AS agent_type, \
             tm.model AS model, \
             tm.service_tier AS service_tier, \
@@ -360,7 +371,7 @@ pub async fn list_aggregated_turn_metrics(
         ORDER BY bucket_start ASC, tm.agent_type ASC, tm.model ASC, tm.service_tier ASC";
 
     let aggregate_rows: Vec<AggregateRow> = diesel::sql_query(aggregate_sql)
-        .bind::<Text, _>(bucket.as_pg())
+        .bind::<Text, _>(bucket.as_interval())
         .bind::<diesel::sql_types::Uuid, _>(current_user_id)
         .bind::<Text, _>(&interval)
         .load(&mut conn)
@@ -372,7 +383,7 @@ pub async fn list_aggregated_turn_metrics(
     // histogram.
     let stop_reason_sql = "\
         SELECT \
-            date_trunc($1, tm.started_at) AS bucket_start, \
+            date_bin($1::interval, tm.started_at, TIMESTAMPTZ '1970-01-01 00:00:00+00') AS bucket_start, \
             tm.agent_type AS agent_type, \
             tm.model AS model, \
             tm.service_tier AS service_tier, \
@@ -389,7 +400,7 @@ pub async fn list_aggregated_turn_metrics(
         GROUP BY bucket_start, tm.agent_type, tm.model, tm.service_tier, reason_key";
 
     let reason_rows: Vec<StopReasonRow> = diesel::sql_query(stop_reason_sql)
-        .bind::<Text, _>(bucket.as_pg())
+        .bind::<Text, _>(bucket.as_interval())
         .bind::<diesel::sql_types::Uuid, _>(current_user_id)
         .bind::<Text, _>(&interval)
         .load(&mut conn)
@@ -463,11 +474,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_bucket_accepts_hour_and_day_case_insensitive() {
+    fn parse_bucket_accepts_granular_intervals_case_insensitive() {
+        assert_eq!(parse_bucket(Some("1m")).unwrap(), BucketKind::Minute1);
+        assert_eq!(parse_bucket(Some("minute")).unwrap(), BucketKind::Minute1);
+        assert_eq!(parse_bucket(Some("5m")).unwrap(), BucketKind::Minute5);
+        assert_eq!(parse_bucket(Some("15M")).unwrap(), BucketKind::Minute15);
         assert_eq!(parse_bucket(Some("hour")).unwrap(), BucketKind::Hour);
         assert_eq!(parse_bucket(Some("HOUR")).unwrap(), BucketKind::Hour);
         assert_eq!(parse_bucket(Some("day")).unwrap(), BucketKind::Day);
-        // Single-letter aliases for brevity (`?bucket=h`).
+        // Single-letter aliases for brevity (`?bucket=h`, `?bucket=d`).
         assert_eq!(parse_bucket(Some("h")).unwrap(), BucketKind::Hour);
         assert_eq!(parse_bucket(Some("d")).unwrap(), BucketKind::Day);
     }
@@ -479,7 +494,7 @@ mod tests {
             AppError::BadRequest(_) => {}
             other => panic!("expected BadRequest, got {other:?}"),
         }
-        assert!(parse_bucket(Some("minute")).is_err());
+        assert!(parse_bucket(Some("month")).is_err());
         assert!(parse_bucket(Some("'; DROP TABLE turn_metrics; --")).is_err());
     }
 

@@ -12,23 +12,22 @@
 use chrono::{DateTime, Datelike, Timelike, Utc};
 
 /// Bucket granularity, used to pick a date / time format for axis tick labels.
-/// Same enum the backend exposes through the `?bucket=hour|day` query.
-/// `Hour` is currently unused by the frontend (the Performance page only
-/// requests daily buckets), but the helper supports it so a follow-up
-/// hourly-zoom toggle doesn't have to retouch the math.
+/// Same enum shape the backend exposes through the `?bucket=…` query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BucketKind {
+    Minute,
     Hour,
     Day,
 }
 
 impl BucketKind {
-    /// Parse the wire form (`"hour" | "day"`) into a `BucketKind`. Returns
+    /// Parse the wire form into a `BucketKind`. Returns
     /// `None` for any other value; consumers use this to round-trip a server-
     /// chosen bucket from a query-string back into the typed enum. Defensive
     /// fallback to `Day` lives at the call sites.
     pub fn from_wire(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
+            "minute" | "m" | "1m" | "5m" | "15m" => Some(Self::Minute),
             "hour" | "h" => Some(Self::Hour),
             "day" | "d" => Some(Self::Day),
             _ => None,
@@ -108,7 +107,7 @@ fn nice_step(raw: f64) -> f64 {
 ///
 /// Labels:
 /// - `BucketKind::Day` → `"May 5"` (month abbreviation + day-of-month)
-/// - `BucketKind::Hour` → `"14:00"` (24-hour HH:MM)
+/// - `BucketKind::Minute` / `Hour` → `"14:05"` / `"14:00"` (24-hour HH:MM)
 pub fn time_axis_ticks(
     buckets: &[DateTime<Utc>],
     bucket: BucketKind,
@@ -147,6 +146,7 @@ pub fn time_axis_ticks(
 
 fn format_tick_label(ts: DateTime<Utc>, bucket: BucketKind) -> String {
     match bucket {
+        BucketKind::Minute => format!("{:02}:{:02}", ts.hour(), ts.minute()),
         BucketKind::Hour => format!("{:02}:00", ts.hour()),
         BucketKind::Day => {
             let month = match ts.month() {
@@ -331,6 +331,18 @@ mod tests {
         assert_eq!(ticks.len(), 4);
         assert_eq!(ticks[0].label, "00:00");
         assert_eq!(ticks[3].label, "23:00");
+    }
+
+    #[test]
+    fn time_axis_ticks_minute_labels_include_minutes() {
+        let mut buckets = Vec::new();
+        for minute in 0..60 {
+            buckets.push(Utc.with_ymd_and_hms(2026, 5, 5, 14, minute, 0).unwrap());
+        }
+        let ticks = time_axis_ticks(&buckets, BucketKind::Minute, 5);
+        assert_eq!(ticks.len(), 5);
+        assert_eq!(ticks[0].label, "14:00");
+        assert_eq!(ticks[4].label, "14:59");
     }
 
     #[test]
