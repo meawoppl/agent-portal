@@ -1,0 +1,2 @@
+-- Irreversible data reset. Session rows deleted by the up migration cannot be
+-- reconstructed from the remaining schema.

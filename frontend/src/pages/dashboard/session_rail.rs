@@ -218,6 +218,7 @@ pub struct SessionRailProps {
     pub launcher_token_expiry: HashMap<Uuid, String>,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
+    pub on_delete: Callback<Uuid>,
     pub on_toggle_hidden: Callback<Uuid>,
     pub on_toggle_inactive_hidden: Callback<MouseEvent>,
     pub on_stop: Callback<Uuid>,
@@ -429,6 +430,16 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             })
         };
 
+        let on_delete = {
+            let on_delete = props.on_delete.clone();
+            let session_id = session.id;
+            let menu_session = menu_session.clone();
+            Callback::from(move |_: MouseEvent| {
+                on_delete.emit(session_id);
+                menu_session.set(None);
+            })
+        };
+
         let hide_label = if is_hidden {
             "Show Session"
         } else {
@@ -608,6 +619,17 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             html! {}
         };
 
+        let delete_option = if session.my_role == "owner" {
+            html! {
+                <button type="button" class="pill-menu-option stop" onclick={on_delete}>
+                    { "Delete Session" }
+                    <span class="option-hint">{ "Remove history and metadata" }</span>
+                </button>
+            }
+        } else {
+            html! {}
+        };
+
         let schedule_option = if session.my_role == "owner" {
             let schedule_session = schedule_session.clone();
             let session_clone = session.clone();
@@ -643,6 +665,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 { hide_option }
                 { leave_option }
                 { stop_option }
+                { delete_option }
             </>
         }
     } else {

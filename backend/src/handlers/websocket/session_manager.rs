@@ -44,6 +44,7 @@ pub struct SessionManager {
     launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
     pub pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     pub pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    pub pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     pub last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
     /// Monotonic counter for connection generations (prevents stale cleanup)
@@ -65,6 +66,7 @@ impl Default for SessionManager {
             launcher_dedup: Arc::new(DashMap::new()),
             pending_dir_requests: Arc::new(DashMap::new()),
             pending_probe_requests: Arc::new(DashMap::new()),
+            pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
             connection_gen: Arc::new(DashMap::new()),

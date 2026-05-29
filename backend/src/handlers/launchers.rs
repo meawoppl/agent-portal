@@ -2,6 +2,7 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
+use diesel::prelude::*;
 use serde::Deserialize;
 use shared::api::LaunchRequest;
 use shared::{DirectoryEntry, LauncherInfo, LauncherToServer, ServerToLauncher};
@@ -14,6 +15,7 @@ use crate::auth::extract_user_id;
 use crate::errors::AppError;
 use crate::handlers::responses::EmptyResponse;
 use crate::handlers::websocket::SessionManager;
+use crate::models::{NewSessionMember, NewSessionWithId};
 use crate::AppState;
 
 /// GET /api/launchers - List connected launchers for the current user
@@ -40,27 +42,61 @@ pub async fn launch_session(
     let user_id = extract_user_id(&app_state, &cookies)?;
 
     let launcher_id = resolve_launch_target(&app_state.session_manager, req.launcher_id, user_id)?;
+    let (hostname, version) = {
+        let launcher = app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .ok_or(AppError::NotFound("Launcher not found"))?;
+        (launcher.hostname.clone(), launcher.version.clone())
+    };
 
     // Create a fresh short-lived proxy token for the child process
     let auth_token = mint_launch_token(&app_state, user_id)?;
 
     let request_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    create_desired_session(
+        &app_state,
+        DesiredSessionDraft {
+            session_id,
+            user_id,
+            working_directory: req.working_directory.clone(),
+            hostname,
+            launcher_id: Some(launcher_id),
+            client_version: Some(version),
+            agent_type: req.agent_type,
+            claude_args: req.claude_args.clone(),
+        },
+    )?;
+    app_state
+        .session_manager
+        .pending_launch_sessions
+        .insert(request_id, session_id);
+
     let launch_msg = ServerToLauncher::LaunchSession {
         request_id,
         user_id,
         auth_token,
         working_directory: req.working_directory.clone(),
-        session_name: None,
+        session_name: Some(default_session_name(&req.working_directory)),
         claude_args: req.claude_args,
         agent_type: req.agent_type,
         scheduled_task_id: None,
-        resume_session_id: None,
+        resume_session_id: Some(session_id),
     };
 
     if !app_state
         .session_manager
         .send_to_launcher(&launcher_id, launch_msg)
     {
+        app_state
+            .session_manager
+            .pending_launch_sessions
+            .remove(&request_id);
+        let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+        use crate::schema::sessions;
+        let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
         error!("Failed to send launch request to launcher {}", launcher_id);
         return Err(AppError::Internal(
             "Failed to send launch request".to_string(),
@@ -73,6 +109,72 @@ pub async fn launch_session(
     );
 
     Ok(Json(LaunchResponse { request_id }))
+}
+
+fn default_session_name(working_directory: &str) -> String {
+    std::path::Path::new(working_directory)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(working_directory)
+        .to_string()
+}
+
+pub(crate) struct DesiredSessionDraft {
+    session_id: Uuid,
+    user_id: Uuid,
+    working_directory: String,
+    hostname: String,
+    launcher_id: Option<Uuid>,
+    client_version: Option<String>,
+    agent_type: shared::AgentType,
+    claude_args: Vec<String>,
+}
+
+pub(crate) fn create_desired_session(
+    app_state: &AppState,
+    draft: DesiredSessionDraft,
+) -> Result<(), AppError> {
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+
+    use crate::schema::{session_members, sessions};
+    use diesel::prelude::*;
+
+    let session_name = default_session_name(&draft.working_directory);
+    let new_session = NewSessionWithId {
+        id: draft.session_id,
+        user_id: draft.user_id,
+        session_name,
+        session_key: draft.session_id.to_string(),
+        working_directory: draft.working_directory,
+        status: "disconnected".to_string(),
+        git_branch: None,
+        client_version: draft.client_version,
+        hostname: draft.hostname,
+        launcher_id: draft.launcher_id,
+        agent_type: draft.agent_type.as_str().to_string(),
+        repo_url: None,
+        scheduled_task_id: None,
+        paused: false,
+        claude_args: serde_json::to_value(&draft.claude_args)
+            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+    };
+
+    diesel::insert_into(sessions::table)
+        .values(&new_session)
+        .execute(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    diesel::insert_into(session_members::table)
+        .values(NewSessionMember {
+            session_id: draft.session_id,
+            user_id: draft.user_id,
+            role: "owner".to_string(),
+        })
+        .execute(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    Ok(())
 }
 
 fn resolve_launch_target(

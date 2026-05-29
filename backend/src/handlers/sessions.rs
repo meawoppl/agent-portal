@@ -148,6 +148,13 @@ pub async fn delete_session(
             .ok_or(AppError::NotFound("Session not found"))?,
     };
 
+    app_state.session_manager.disconnect_session(session_id);
+    app_state.session_manager.stop_session_on_launcher(
+        session_id,
+        session.launcher_id,
+        Some(session.working_directory.clone()),
+    );
+
     super::helpers::delete_session_with_data(&mut conn, &session, true)
         .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
 
