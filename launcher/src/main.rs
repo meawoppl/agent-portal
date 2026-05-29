@@ -244,6 +244,7 @@ async fn cmd_update() -> anyhow::Result<()> {
             println!("agent-portal updated successfully.");
             // Restart the service if it's installed and running
             if service::is_installed() {
+                service::sync()?;
                 println!("Restarting system service...");
                 service::restart()?;
                 println!("Service restarted.");
