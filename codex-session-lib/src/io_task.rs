@@ -70,6 +70,7 @@ pub(crate) async fn codex_io_task(
     if !trailing.is_empty() {
         builder = builder.extra_args(trailing.iter().cloned());
     }
+    let configured_model_fallback = configured_codex_model(&overrides, &trailing);
 
     tracing::info!(
         "Starting Codex app-server: {} app-server --listen stdio:// \
@@ -97,8 +98,17 @@ pub(crate) async fn codex_io_task(
     // 0.129.3 src/lib.rs:18-30 example.
     let thread_params: ThreadStartParams = serde_json::from_value(serde_json::json!({}))
         .expect("empty JSON object is a valid ThreadStartParams");
-    let thread_id = match client.thread_start(&thread_params).await {
-        Ok(resp) => resp.thread.id.clone(),
+    let (thread_id, thread_model) = match client.thread_start(&thread_params).await {
+        Ok(resp) => {
+            let model = non_empty_string(resp.model).or_else(|| configured_model_fallback.clone());
+            if model.is_none() {
+                tracing::warn!(
+                    "Codex thread {} started without a detectable model; turn metrics will warn until model metadata is available",
+                    resp.thread.id
+                );
+            }
+            (resp.thread.id.clone(), model)
+        }
         Err(e) => {
             let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(format!(
                 "Failed to start Codex thread: {}",
@@ -131,6 +141,7 @@ pub(crate) async fn codex_io_task(
     // Latest `ThreadTokenUsageUpdated` capture for the current turn so we
     // can plug it into the finalized `TurnMetrics`.
     let mut current_turn_usage: Option<codex_codes::TokenUsageBreakdown> = None;
+    let mut current_turn_model: Option<String> = None;
 
     loop {
         if turn_active {
@@ -145,6 +156,23 @@ pub(crate) async fn codex_io_task(
                             // observe these via the typed handler below
                             // because it consumes the message.
                             if let codex_codes::ServerMessage::Notification(notif) = &msg {
+                                if let codex_codes::Notification::TurnStarted(p) = notif {
+                                    current_turn_id = Some(p.turn.id.clone());
+                                    current_turn_model = thread_model.clone();
+                                }
+                                if let codex_codes::Notification::ModelRerouted(p) = notif {
+                                    let matches_current_turn = current_turn_id
+                                        .as_deref()
+                                        .is_some_and(|turn_id| turn_id == p.turn_id);
+                                    if p.thread_id == thread_id && matches_current_turn {
+                                        current_turn_model =
+                                            non_empty_string(p.to_model.clone()).or_else(|| {
+                                                current_turn_model.clone().or_else(|| {
+                                                    thread_model.clone()
+                                                })
+                                            });
+                                    }
+                                }
                                 if let codex_codes::Notification::ThreadTokenUsageUpdated(p) =
                                     notif
                                 {
@@ -230,11 +258,15 @@ pub(crate) async fn codex_io_task(
                                     codex_codes::TurnStatus::Completed
                                 );
                                 let usage = current_turn_usage.take();
+                                let model = current_turn_model
+                                    .clone()
+                                    .or_else(|| thread_model.clone())
+                                    .or_else(|| configured_model_fallback.clone());
                                 let outcome = TurnOutcome {
                                     agent_type: shared::AgentType::Codex
                                         .as_str()
                                         .to_string(),
-                                    model: None,
+                                    model,
                                     service_tier: None,
                                     input_tokens: usage
                                         .as_ref()
@@ -262,9 +294,18 @@ pub(crate) async fn codex_io_task(
                                     chrono::Utc::now(),
                                     outcome,
                                 ) {
-                                    let _ = event_tx
-                                        .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
+                                    if metrics.model.is_some() {
+                                        let _ = event_tx
+                                            .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
+                                    } else {
+                                        tracing::warn!(
+                                            "Codex turn {} completed without model metadata for session {}; dropping turn metrics",
+                                            p.turn.id,
+                                            session_id
+                                        );
+                                    }
                                 }
+                                current_turn_model = None;
                             }
                             let latest_usage_for_msg =
                                 if let codex_codes::ServerMessage::Notification(
@@ -493,5 +534,104 @@ async fn start_codex_turn(
             })));
             false
         }
+    }
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn configured_codex_model(overrides: &[(String, String)], trailing: &[String]) -> Option<String> {
+    overrides
+        .iter()
+        .find_map(|(key, value)| {
+            key.eq_ignore_ascii_case("model")
+                .then(|| non_empty_string(value.clone()))
+                .flatten()
+        })
+        .or_else(|| trailing_codex_model(trailing))
+}
+
+fn trailing_codex_model(args: &[String]) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--model" || arg == "-m" {
+            if let Some(value) = iter.next() {
+                if let Some(model) = non_empty_string(value.clone()) {
+                    return Some(model);
+                }
+            }
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("--model=") {
+            if let Some(model) = non_empty_string(value.to_string()) {
+                return Some(model);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn configured_codex_model_prefers_config_override() {
+        let overrides = vec![("model".to_string(), "gpt-5.4".to_string())];
+        let trailing = strings(&["--model", "gpt-5.3"]);
+
+        assert_eq!(
+            configured_codex_model(&overrides, &trailing).as_deref(),
+            Some("gpt-5.4")
+        );
+    }
+
+    #[test]
+    fn configured_codex_model_reads_long_flag() {
+        let overrides = Vec::new();
+        let trailing = strings(&["--model", "gpt-5.3-codex"]);
+
+        assert_eq!(
+            configured_codex_model(&overrides, &trailing).as_deref(),
+            Some("gpt-5.3-codex")
+        );
+    }
+
+    #[test]
+    fn configured_codex_model_reads_equals_flag() {
+        let overrides = Vec::new();
+        let trailing = strings(&["--model=gpt-5.3-codex-spark"]);
+
+        assert_eq!(
+            configured_codex_model(&overrides, &trailing).as_deref(),
+            Some("gpt-5.3-codex-spark")
+        );
+    }
+
+    #[test]
+    fn configured_codex_model_ignores_blank_values() {
+        let overrides = vec![("model".to_string(), " ".to_string())];
+        let trailing = strings(&["--model", ""]);
+
+        assert!(configured_codex_model(&overrides, &trailing).is_none());
+    }
+
+    #[test]
+    fn configured_codex_model_ignores_unknown_values() {
+        let overrides = vec![("model".to_string(), "unknown".to_string())];
+        let trailing = strings(&[]);
+
+        assert!(configured_codex_model(&overrides, &trailing).is_none());
     }
 }
