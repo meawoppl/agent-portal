@@ -549,8 +549,8 @@ pub(super) fn derive_task_events(
         shared::ClaudeOutput::System(sys) => {
             if let Some(task) = sys.as_task_started() {
                 let task_type = match task.task_type {
-                    shared::CCTaskType::LocalAgent => "local_agent",
-                    shared::CCTaskType::LocalBash => "local_bash",
+                    shared::TaskType::LocalAgent => "local_agent",
+                    shared::TaskType::LocalBash => "local_bash",
                 }
                 .to_string();
                 events.push(TaskEvent::Started {
@@ -572,8 +572,8 @@ pub(super) fn derive_task_events(
                 });
             } else if let Some(notif) = sys.as_task_notification() {
                 let status = match notif.status {
-                    shared::CCTaskStatus::Completed => TaskStatus::Completed,
-                    shared::CCTaskStatus::Failed => TaskStatus::Failed,
+                    shared::TaskStatus::Completed => TaskStatus::Completed,
+                    shared::TaskStatus::Failed => TaskStatus::Failed,
                 };
                 let usage = notif
                     .usage

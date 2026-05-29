@@ -8,7 +8,7 @@
 //! See the per-function docstrings for which `SessionViewMsg` arm each helper
 //! was extracted from.
 
-use crate::components::message_renderer::types::{ClaudeMessage, ContentBlock};
+use crate::components::message_renderer::types::ClaudeMessage;
 
 /// Cross-agent activity classification used by the session-rail sparkline and
 /// the pending-send reconciler. The same enum bridges Claude wire shapes
@@ -99,7 +99,7 @@ pub(super) fn message_type_tag(m: &ClaudeMessage) -> ActivityTag {
         ClaudeMessage::System(_) => ActivityTag::System,
         ClaudeMessage::Assistant(_) => ActivityTag::Assistant,
         ClaudeMessage::Result(_) => ActivityTag::Result,
-        ClaudeMessage::User(_) => ActivityTag::User,
+        ClaudeMessage::User(_) | ClaudeMessage::OptimisticUser(_) => ActivityTag::User,
         ClaudeMessage::Error(_) => ActivityTag::Error,
         ClaudeMessage::Portal(_) => ActivityTag::Portal,
         ClaudeMessage::RateLimitEvent(_) => ActivityTag::RateLimit,
@@ -114,16 +114,16 @@ pub(super) fn message_type_tag(m: &ClaudeMessage) -> ActivityTag {
 /// `message.content` (the shape Claude's `--replay-user-messages` emits).
 pub(super) fn extract_user_text(m: &ClaudeMessage) -> Option<String> {
     let ClaudeMessage::User(u) = m else {
+        if let ClaudeMessage::OptimisticUser(u) = m {
+            return Some(u.content.clone());
+        }
         return None;
     };
-    if let Some(text) = u.content.as_ref() {
-        return Some(text.clone());
-    }
-    let blocks = u.message.as_ref().and_then(|m| m.content.as_ref())?;
+    let blocks = &u.message.content;
     let texts: Vec<&str> = blocks
         .iter()
         .filter_map(|b| match b {
-            ContentBlock::Text { text, .. } => Some(text.as_str()),
+            shared::ContentBlock::Text(t) => Some(t.text.as_str()),
             _ => None,
         })
         .collect();
@@ -156,7 +156,7 @@ pub(super) fn is_claude_awaiting(
     messages
         .rev()
         .find_map(|msg| {
-            serde_json::from_str::<ClaudeMessage>(msg.as_ref())
+            ClaudeMessage::parse(msg.as_ref())
                 .ok()
                 .filter(|m| {
                     matches!(
@@ -164,6 +164,7 @@ pub(super) fn is_claude_awaiting(
                         ClaudeMessage::Result(_)
                             | ClaudeMessage::Assistant(_)
                             | ClaudeMessage::User(_)
+                            | ClaudeMessage::OptimisticUser(_)
                     )
                 })
                 .map(|m| message_type_tag(&m))
@@ -209,7 +210,7 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
         }
         return tag;
     }
-    if let Ok(parsed) = serde_json::from_str::<ClaudeMessage>(output) {
+    if let Ok(parsed) = ClaudeMessage::parse(output) {
         let tag = message_type_tag(&parsed);
         if tag != ActivityTag::Unknown {
             return tag;
@@ -337,13 +338,13 @@ pub(super) fn reconcile_pending_sends(
     }
     match tag {
         ActivityTag::User => {
-            let echo_text = serde_json::from_str::<ClaudeMessage>(output)
+            let echo_text = ClaudeMessage::parse(output)
                 .ok()
                 .as_ref()
                 .and_then(extract_user_text);
             if let Some(ref echo) = echo_text {
                 if let Some(pos) = pending_sends.iter().position(|pending| {
-                    serde_json::from_str::<ClaudeMessage>(pending)
+                    ClaudeMessage::parse(pending)
                         .ok()
                         .as_ref()
                         .and_then(extract_user_text)
@@ -435,7 +436,7 @@ mod tests {
 
     #[test]
     fn classify_output_msg_type_recognizes_assistant_envelope() {
-        let json = r#"{"type":"assistant","message":{"content":[]}}"#;
+        let json = r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#;
         assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
     }
 
@@ -456,7 +457,7 @@ mod tests {
 
     #[test]
     fn classify_output_msg_type_recognizes_error_envelope() {
-        let json = r#"{"type":"error","content":"boom"}"#;
+        let json = r#"{"type":"error","error":{"type":"api_error","message":"boom"}}"#;
         assert_eq!(classify_output_msg_type(json), ActivityTag::Error);
     }
 
@@ -697,8 +698,8 @@ mod tests {
     fn is_claude_awaiting_true_when_last_signal_is_result() {
         let msgs = [
             r#"{"type":"user","content":"q"}"#.to_string(),
-            r#"{"type":"assistant","message":{"content":[]}}"#.to_string(),
-            r#"{"type":"result","total_cost_usd":0.0}"#.to_string(),
+            r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
+            r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"01890000-0000-7000-8000-000000000001","total_cost_usd":0.0}"#.to_string(),
         ];
         assert!(is_claude_awaiting(msgs.iter()));
     }
@@ -707,7 +708,7 @@ mod tests {
     fn is_claude_awaiting_false_when_last_signal_is_assistant() {
         let msgs = [
             r#"{"type":"user","content":"q"}"#.to_string(),
-            r#"{"type":"assistant","message":{"content":[]}}"#.to_string(),
+            r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
         ];
         assert!(!is_claude_awaiting(msgs.iter()));
     }
@@ -717,9 +718,9 @@ mod tests {
         // Portal / error / system messages don't gate awaiting — the last
         // result before any of those still counts.
         let msgs = [
-            r#"{"type":"result","total_cost_usd":0.0}"#.to_string(),
+            r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"01890000-0000-7000-8000-000000000001","total_cost_usd":0.0}"#.to_string(),
             r#"{"type":"portal","content":[{"type":"text","text":"x"}]}"#.to_string(),
-            r#"{"type":"error","content":"y"}"#.to_string(),
+            r#"{"type":"error","error":{"type":"api_error","message":"y"}}"#.to_string(),
         ];
         assert!(is_claude_awaiting(msgs.iter()));
     }
@@ -742,7 +743,7 @@ mod tests {
     #[test]
     fn extract_user_text_falls_back_to_concatenated_text_blocks() {
         let m: ClaudeMessage = serde_json::from_str(
-            r#"{"type":"user","message":{"content":[{"type":"text","text":"foo"},{"type":"text","text":"bar"}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"foo"},{"type":"text","text":"bar"}]},"session_id":"01890000-0000-7000-8000-000000000001"}"#,
         )
         .unwrap();
         assert_eq!(extract_user_text(&m).as_deref(), Some("foobar"));
@@ -750,14 +751,17 @@ mod tests {
 
     #[test]
     fn extract_user_text_returns_none_for_non_user_variant() {
-        let m: ClaudeMessage = serde_json::from_str(r#"{"type":"system"}"#).unwrap();
+        let m: ClaudeMessage = serde_json::from_str(
+            r#"{"type":"system","subtype":"init","session_id":"01890000-0000-7000-8000-000000000001"}"#,
+        )
+        .unwrap();
         assert_eq!(extract_user_text(&m), None);
     }
 
     #[test]
     fn extract_user_text_returns_none_when_no_text_blocks_and_no_top_level_content() {
         let m: ClaudeMessage =
-            serde_json::from_str(r#"{"type":"user","message":{"content":[]}}"#).unwrap();
+            serde_json::from_str(r#"{"type":"user","message":{"role":"user","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#).unwrap();
         assert_eq!(extract_user_text(&m), None);
     }
 
@@ -767,7 +771,10 @@ mod tests {
     fn message_type_tag_returns_expected_variant_for_each_claude_shape() {
         assert_eq!(
             message_type_tag(
-                &serde_json::from_str::<ClaudeMessage>(r#"{"type":"system"}"#).unwrap()
+                &serde_json::from_str::<ClaudeMessage>(
+                    r#"{"type":"system","subtype":"init","session_id":"01890000-0000-7000-8000-000000000001"}"#
+                )
+                .unwrap()
             ),
             ActivityTag::System
         );
@@ -779,8 +786,10 @@ mod tests {
         );
         assert_eq!(
             message_type_tag(
-                &serde_json::from_str::<ClaudeMessage>(r#"{"type":"error","content":"x"}"#)
-                    .unwrap()
+                &serde_json::from_str::<ClaudeMessage>(
+                    r#"{"type":"error","error":{"type":"api_error","message":"x"}}"#
+                )
+                .unwrap()
             ),
             ActivityTag::Error
         );

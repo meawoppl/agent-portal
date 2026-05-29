@@ -36,16 +36,15 @@ pub fn default_backend_url() -> &'static str {
 
 // Re-export claude-codes types for frontend message parsing
 pub use claude_codes::io::{
-    ContentBlock, ImageBlock, ImageSource, PermissionSuggestion, TextBlock, ThinkingBlock,
-    ToolResultBlock, ToolResultContent, ToolUseBlock,
+    ContentBlock, ImageBlock, ImageSource, ImageSourceType, MediaType, PermissionSuggestion,
+    TextBlock, ThinkingBlock, ToolResultBlock, ToolResultContent, ToolUseBlock,
 };
 
-// Re-export claude-codes output types for typed parsing (aliased to avoid conflicts with
-// frontend's local lenient types in message_renderer/types.rs)
+// Re-export claude-codes output types for typed parsing.
 pub use claude_codes::io::{
-    ResultMessage as CCResultMessage, SystemMessage as CCSystemMessage,
-    SystemSubtype as CCSystemSubtype, TaskNotificationMessage, TaskProgressMessage,
-    TaskStartedMessage, TaskStatus as CCTaskStatus, TaskType as CCTaskType, TaskUsage,
+    AnthropicError, AssistantMessage, AssistantUsage, MessageContent, RateLimitEvent,
+    ResultMessage, ServerToolUse, SystemMessage, SystemSubtype, TaskNotificationMessage,
+    TaskProgressMessage, TaskStartedMessage, TaskStatus, TaskType, TaskUsage, UserMessage,
 };
 pub use claude_codes::CacheCreationDetails;
 pub use claude_codes::ClaudeOutput;
@@ -64,7 +63,7 @@ pub use claude_codes::{AllowedPrompt, ExitPlanModeInput};
 /// The CLI uses several spellings depending on version and code path, so this
 /// helper centralizes the predicate. Callers should use this instead of
 /// inlining the disjunction.
-pub fn is_compaction_boundary(sys: &CCSystemMessage) -> bool {
+pub fn is_compaction_boundary(sys: &SystemMessage) -> bool {
     sys.is_compact_boundary()
         || matches!(
             sys.subtype.as_str(),

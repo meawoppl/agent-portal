@@ -11,7 +11,7 @@ use yew::prelude::*;
 use grouping::classify;
 use grouping::{extract_raw_iso, visible_group_indices, GroupCategory};
 pub use grouping::{group_is_turn_terminator, group_messages, MessageGroup};
-use types::ClaudeMessage;
+use types::{user_meta_from_json, ClaudeMessage};
 
 /// Extract `_created_at` from a raw JSON message string and format it as local time.
 fn extract_local_timestamp(json: &str) -> Option<String> {
@@ -53,7 +53,7 @@ pub struct MessageRendererProps {
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
     let ts = extract_local_timestamp(&props.json);
     let raw_iso = extract_raw_iso(&props.json);
-    let parsed: Result<ClaudeMessage, _> = serde_json::from_str(&props.json);
+    let parsed = ClaudeMessage::parse(&props.json);
 
     // Dispatch on the message shape, not the agent. `User` (the proxy's
     // synthetic echo) and `Portal` (the backend's portal-content envelope)
@@ -73,7 +73,16 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
             return renderers::render_result_message(&msg, props.turn_metrics.as_ref());
         }
         Ok(ClaudeMessage::User(msg)) => {
+            let meta = user_meta_from_json(&props.json);
             return renderers::render_user_message(
+                &msg,
+                &meta,
+                props.current_user_id.as_deref(),
+                ts.as_deref(),
+            );
+        }
+        Ok(ClaudeMessage::OptimisticUser(msg)) => {
+            return renderers::render_optimistic_user_message(
                 &msg,
                 props.current_user_id.as_deref(),
                 ts.as_deref(),
@@ -170,8 +179,11 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
 }
 
 fn render_identity_group_part(json: &str, agent_type: shared::AgentType) -> Html {
-    match serde_json::from_str::<ClaudeMessage>(json) {
+    match ClaudeMessage::parse(json) {
         Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg),
+        Ok(ClaudeMessage::OptimisticUser(msg)) => {
+            renderers::render_optimistic_user_message_content(&msg)
+        }
         Ok(ClaudeMessage::Assistant(msg)) => renderers::render_assistant_message_content(&msg),
         Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg),
         _ if agent_type == shared::AgentType::Codex => {
@@ -326,7 +338,9 @@ mod tests {
         serde_json::json!({
             "type": "assistant",
             "message": {
+                "id": format!("msg_{tool_use_id}"),
                 "role": "assistant",
+                "model": "claude-sonnet-4-5-20250929",
                 "content": [{
                     "type": "tool_use",
                     "id": tool_use_id,
@@ -714,7 +728,12 @@ mod tests {
                 serde_json::json!({
                     "type": "result",
                     "subtype": "success",
+                    "is_error": false,
+                    "duration_ms": 100,
+                    "duration_api_ms": 80,
+                    "num_turns": 1,
                     "session_id": "01890000-0000-7000-8000-000000000001",
+                    "total_cost_usd": 0.0,
                     "_created_at": "2026-05-17T10:00:00.000Z",
                 })
                 .to_string(),
@@ -867,10 +886,12 @@ mod tests {
         let messages = vec![serde_json::json!({
             "type": "assistant",
             "message": {
+                "id": "msg_1",
                 "role": "assistant",
                 "model": "claude-opus-4-7-20260501",
                 "content": [{"type": "text", "text": "hello"}],
             },
+            "session_id": "01890000-0000-7000-8000-000000000001",
             "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()];

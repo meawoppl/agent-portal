@@ -1,27 +1,22 @@
-//! Message type definitions for parsing Claude Code JSON output.
+//! Thin frontend-only wrappers around the shared Claude Code wire types.
+//!
+//! Claude messages should parse through `shared::ClaudeOutput`, which re-exports
+//! `claude-codes` types. The local shapes below exist only for Portal's
+//! frontend-specific envelope and optimistic user messages synthesized before
+//! the proxy echoes a typed Claude user frame.
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use shared::{CacheCreationDetails, Citation, ModelUsage, ToolResultContent};
+use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, Serialize)]
 pub enum ClaudeMessage {
-    #[serde(rename = "system")]
-    System(SystemMessage),
-    #[serde(rename = "assistant")]
-    Assistant(AssistantMessage),
-    #[serde(rename = "result")]
-    Result(ResultMessage),
-    #[serde(rename = "user")]
-    User(UserMessage),
-    #[serde(rename = "error")]
-    Error(ErrorMessage),
-    #[serde(rename = "portal")]
+    System(shared::SystemMessage),
+    Assistant(shared::AssistantMessage),
+    Result(shared::ResultMessage),
+    User(shared::UserMessage),
+    Error(shared::AnthropicError),
     Portal(PortalMessage),
-    #[serde(rename = "rate_limit_event")]
-    RateLimitEvent(RateLimitEventMessage),
-    #[serde(other)]
+    RateLimitEvent(shared::RateLimitEvent),
+    OptimisticUser(OptimisticUserMessage),
     Unknown,
 }
 
@@ -38,9 +33,8 @@ pub struct MessageSender {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UserMessage {
-    pub content: Option<String>,
-    pub message: Option<UserMessageContent>,
+pub struct OptimisticUserMessage {
+    pub content: String,
     #[serde(default, rename = "_sender")]
     pub sender: Option<MessageSender>,
     #[serde(default, rename = "_pending")]
@@ -48,273 +42,77 @@ pub struct UserMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UserMessageContent {
-    pub content: Option<Vec<ContentBlock>>,
+pub struct UserMessageMeta {
+    #[serde(default, rename = "_sender")]
+    pub sender: Option<MessageSender>,
+    #[serde(default, rename = "_pending")]
+    pub pending: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ErrorDetails {
-    #[serde(rename = "type")]
-    pub error_type: Option<String>,
-    pub message: Option<String>,
+pub fn user_meta_from_json(json: &str) -> UserMessageMeta {
+    serde_json::from_str(json).unwrap_or_default()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ErrorMessage {
-    pub message: Option<String>,
-    pub error: Option<ErrorDetails>,
-    pub request_id: Option<String>,
-}
+impl ClaudeMessage {
+    pub fn parse(json: &str) -> Result<Self, serde_json::Error> {
+        if let Ok(output) = serde_json::from_str::<shared::ClaudeOutput>(json) {
+            return Ok(match output {
+                shared::ClaudeOutput::System(msg) => Self::System(msg),
+                shared::ClaudeOutput::User(msg) => Self::User(msg),
+                shared::ClaudeOutput::Assistant(msg) => Self::Assistant(msg),
+                shared::ClaudeOutput::Result(msg) => Self::Result(msg),
+                shared::ClaudeOutput::Error(msg) => Self::Error(msg),
+                shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
+                shared::ClaudeOutput::ControlRequest(_)
+                | shared::ClaudeOutput::ControlResponse(_) => Self::Unknown,
+            });
+        }
 
-impl ErrorMessage {
-    pub fn is_overload(&self) -> bool {
-        self.error
-            .as_ref()
-            .and_then(|e| e.error_type.as_deref())
-            .map(|t| t == "overloaded_error")
-            .unwrap_or(false)
-    }
-
-    pub fn display_message(&self) -> &str {
-        self.error
-            .as_ref()
-            .and_then(|e| e.message.as_deref())
-            .or(self.message.as_deref())
-            .unwrap_or("Unknown error")
-    }
-
-    pub fn error_type(&self) -> Option<&str> {
-        self.error.as_ref().and_then(|e| e.error_type.as_deref())
+        serde_json::from_str::<LocalMessage>(json).map(Into::into)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RateLimitEventMessage {
-    pub rate_limit_info: Option<RateLimitInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RateLimitInfo {
-    pub status: Option<String>,
-    #[serde(rename = "resetsAt")]
-    pub resets_at: Option<u64>,
-    #[serde(rename = "rateLimitType")]
-    pub rate_limit_type: Option<String>,
-    pub utilization: Option<f64>,
-    #[serde(rename = "overageStatus")]
-    pub overage_status: Option<String>,
-    #[serde(rename = "overageDisabledReason")]
-    pub overage_disabled_reason: Option<String>,
-    #[serde(rename = "isUsingOverage")]
-    pub is_using_overage: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SystemMessage {
-    pub subtype: Option<String>,
-    pub session_id: Option<String>,
-    pub model: Option<String>,
-    pub cwd: Option<String>,
-    pub claude_code_version: Option<String>,
-    pub tools: Option<Vec<String>>,
-    pub agents: Option<Vec<String>>,
-    pub skills: Option<Vec<String>>,
-    pub slash_commands: Option<Vec<String>>,
-    pub mcp_servers: Option<Vec<Value>>,
-    pub plugins: Option<Vec<Value>>,
-    pub summary: Option<String>,
-    pub leaf_message_count: Option<u32>,
-    pub duration_ms: Option<u64>,
-    #[serde(flatten)]
-    pub extra: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AssistantMessage {
-    pub message: Option<MessageContent>,
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MessageContent {
-    pub id: Option<String>,
-    pub model: Option<String>,
-    pub role: Option<String>,
-    pub stop_reason: Option<String>,
-    pub content: Option<Vec<ContentBlock>>,
-    pub usage: Option<UsageInfo>,
+impl<'de> Deserialize<'de> for ClaudeMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Ok(output) = serde_json::from_value::<shared::ClaudeOutput>(value.clone()) {
+            return Ok(match output {
+                shared::ClaudeOutput::System(msg) => Self::System(msg),
+                shared::ClaudeOutput::User(msg) => Self::User(msg),
+                shared::ClaudeOutput::Assistant(msg) => Self::Assistant(msg),
+                shared::ClaudeOutput::Result(msg) => Self::Result(msg),
+                shared::ClaudeOutput::Error(msg) => Self::Error(msg),
+                shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
+                shared::ClaudeOutput::ControlRequest(_)
+                | shared::ClaudeOutput::ControlResponse(_) => Self::Unknown,
+            });
+        }
+        serde_json::from_value::<LocalMessage>(value)
+            .map(Into::into)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ContentBlock {
-    #[serde(rename = "text")]
-    Text {
-        text: String,
-        #[serde(default)]
-        citations: Vec<Citation>,
-    },
-    #[serde(rename = "image")]
-    Image { source: ImageSource },
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-    },
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        tool_use_id: String,
-        content: Option<ToolResultContent>,
-        #[serde(default)]
-        is_error: bool,
-    },
-    #[serde(rename = "thinking")]
-    Thinking { thinking: String },
-    #[serde(rename = "server_tool_use")]
-    ServerToolUse {
-        id: String,
-        name: String,
-        #[serde(default)]
-        input: Value,
-    },
-    #[serde(rename = "web_search_tool_result")]
-    WebSearchToolResult {
-        tool_use_id: String,
-        #[serde(default)]
-        content: Value,
-    },
-    #[serde(rename = "code_execution_tool_result")]
-    CodeExecutionToolResult {
-        tool_use_id: String,
-        #[serde(default)]
-        content: Value,
-    },
-    #[serde(rename = "mcp_tool_use")]
-    McpToolUse {
-        id: String,
-        name: String,
-        #[serde(default)]
-        server_name: Option<String>,
-        #[serde(default)]
-        input: Value,
-    },
-    #[serde(rename = "mcp_tool_result")]
-    McpToolResult {
-        tool_use_id: String,
-        #[serde(default)]
-        content: Value,
-        #[serde(default)]
-        is_error: Option<bool>,
-    },
-    #[serde(rename = "container_upload")]
-    ContainerUpload {
-        #[serde(flatten)]
-        data: Value,
-    },
-    #[serde(untagged)]
-    Unknown(Value),
+enum LocalMessage {
+    #[serde(rename = "portal")]
+    Portal(PortalMessage),
+    #[serde(rename = "user")]
+    OptimisticUser(OptimisticUserMessage),
+    #[serde(other)]
+    Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageSource {
-    #[serde(rename = "type")]
-    pub source_type: String,
-    pub media_type: String,
-    pub data: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UsageInfo {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub cache_read_input_tokens: Option<u64>,
-    pub cache_creation_input_tokens: Option<u64>,
-    pub service_tier: Option<String>,
-    pub inference_geo: Option<String>,
-    pub cache_creation: Option<CacheCreationDetails>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ResultMessage {
-    pub subtype: Option<String>,
-    pub session_id: Option<String>,
-    pub result: Option<String>,
-    pub is_error: Option<bool>,
-    pub duration_ms: Option<u64>,
-    pub duration_api_ms: Option<u64>,
-    pub total_cost_usd: Option<f64>,
-    pub num_turns: Option<u64>,
-    pub usage: Option<UsageInfo>,
-    pub stop_reason: Option<String>,
-    pub terminal_reason: Option<String>,
-    pub fast_mode_state: Option<String>,
-    #[serde(default)]
-    pub errors: Vec<String>,
-    /// Per-model token/cost breakdown keyed by model name. The wire field is
-    /// `modelUsage` (camelCase) — matches the upstream
-    /// `claude-codes::ResultMessage` rename. TODO(SDK #140): upstream is still
-    /// typed as `Option<serde_json::Value>`; once the SDK adopts a typed map
-    /// the local `shared::ModelUsage` alias can be swapped for the SDK's
-    /// directly.
-    #[serde(rename = "modelUsage")]
-    pub model_usage: Option<ModelUsage>,
-    pub api_error_status: Option<u16>,
-    #[serde(default)]
-    pub permission_denials: Vec<Value>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_message_overload_detection() {
-        let msg = ErrorMessage {
-            message: None,
-            error: Some(ErrorDetails {
-                error_type: Some("overloaded_error".to_string()),
-                message: Some("Overloaded".to_string()),
-            }),
-            request_id: Some("req_123".to_string()),
-        };
-        assert!(msg.is_overload());
-        assert_eq!(msg.display_message(), "Overloaded");
-        assert_eq!(msg.error_type(), Some("overloaded_error"));
-    }
-
-    #[test]
-    fn test_error_message_regular_error() {
-        let msg = ErrorMessage {
-            message: Some("Something went wrong".to_string()),
-            error: None,
-            request_id: None,
-        };
-        assert!(!msg.is_overload());
-        assert_eq!(msg.display_message(), "Something went wrong");
-        assert_eq!(msg.error_type(), None);
-    }
-
-    #[test]
-    fn test_error_message_api_error() {
-        let msg = ErrorMessage {
-            message: None,
-            error: Some(ErrorDetails {
-                error_type: Some("invalid_request_error".to_string()),
-                message: Some("Invalid API key".to_string()),
-            }),
-            request_id: Some("req_456".to_string()),
-        };
-        assert!(!msg.is_overload());
-        assert_eq!(msg.display_message(), "Invalid API key");
-        assert_eq!(msg.error_type(), Some("invalid_request_error"));
-    }
-
-    #[test]
-    fn test_error_message_empty() {
-        let msg = ErrorMessage::default();
-        assert!(!msg.is_overload());
-        assert_eq!(msg.display_message(), "Unknown error");
-        assert_eq!(msg.error_type(), None);
+impl From<LocalMessage> for ClaudeMessage {
+    fn from(value: LocalMessage) -> Self {
+        match value {
+            LocalMessage::Portal(msg) => Self::Portal(msg),
+            LocalMessage::OptimisticUser(msg) => Self::OptimisticUser(msg),
+            LocalMessage::Unknown => Self::Unknown,
+        }
     }
 }

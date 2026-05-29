@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use super::renderers::assistant_label;
-use super::types::{self, ClaudeMessage, ContentBlock};
+use super::types::{user_meta_from_json, ClaudeMessage};
 
 /// Extract the raw `_created_at` ISO string from a message JSON, for use with
 /// the live-updating TimeAgo component (which parses it itself).
@@ -106,21 +106,16 @@ pub(super) struct MessageIdentity {
 /// `content` field, because that field is the optimistic-send envelope shape
 /// and can leak onto real echoes through the cross-process wire wrapping.
 /// Gating on it broke serial Read tool-use grouping in the wild (#758).
-fn user_is_tool_result_envelope(msg: &types::UserMessage) -> bool {
-    let Some(message) = &msg.message else {
-        return false;
-    };
-    let Some(blocks) = &message.content else {
-        return false;
-    };
+fn user_is_tool_result_envelope(msg: &shared::UserMessage) -> bool {
+    let blocks = &msg.message.content;
     !blocks.is_empty()
         && blocks.iter().all(|b| {
             matches!(
                 b,
-                ContentBlock::ToolResult { .. }
-                    | ContentBlock::WebSearchToolResult { .. }
-                    | ContentBlock::McpToolResult { .. }
-                    | ContentBlock::CodeExecutionToolResult { .. }
+                shared::ContentBlock::ToolResult(_)
+                    | shared::ContentBlock::WebSearchToolResult(_)
+                    | shared::ContentBlock::McpToolResult(_)
+                    | shared::ContentBlock::CodeExecutionToolResult(_)
             )
         })
 }
@@ -132,20 +127,12 @@ fn user_is_tool_result_envelope(msg: &types::UserMessage) -> bool {
 /// We deliberately require *all* nested blocks to be `Text` so we don't
 /// silently roll a tool-result envelope into User — those belong with
 /// Assistant and are caught by `user_is_tool_result_envelope`.
-fn user_is_plain_text(msg: &types::UserMessage) -> bool {
-    if msg.content.is_some() {
-        return true;
-    }
-    let Some(message) = &msg.message else {
-        return false;
-    };
-    let Some(blocks) = &message.content else {
-        return false;
-    };
+fn user_is_plain_text(msg: &shared::UserMessage) -> bool {
+    let blocks = &msg.message.content;
     !blocks.is_empty()
         && blocks
             .iter()
-            .all(|b| matches!(b, ContentBlock::Text { .. }))
+            .all(|b| matches!(b, shared::ContentBlock::Text(_)))
 }
 
 /// Classify a single wire message into the display identity it belongs to,
@@ -184,7 +171,7 @@ pub(super) fn classify(
         "Claude"
     };
 
-    match serde_json::from_str::<ClaudeMessage>(json) {
+    match ClaudeMessage::parse(json) {
         Ok(ClaudeMessage::Assistant(_)) => {
             return Some(MessageIdentity {
                 category: GroupCategory::Assistant,
@@ -201,7 +188,8 @@ pub(super) fn classify(
                 });
             }
             if user_is_plain_text(&msg) {
-                let label = match &msg.sender {
+                let meta = user_meta_from_json(json);
+                let label = match &meta.sender {
                     Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
                         sender.name.clone()
                     }
@@ -213,6 +201,19 @@ pub(super) fn classify(
                     badge_class: "user".to_string(),
                 });
             }
+        }
+        Ok(ClaudeMessage::OptimisticUser(msg)) => {
+            let label = match &msg.sender {
+                Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
+                    sender.name.clone()
+                }
+                _ => "You".to_string(),
+            };
+            return Some(MessageIdentity {
+                category: GroupCategory::User,
+                label,
+                badge_class: "user".to_string(),
+            });
         }
         Ok(ClaudeMessage::Portal(_)) => {
             return Some(MessageIdentity {
@@ -248,13 +249,9 @@ fn group_label(identity: &MessageIdentity, messages: &[String]) -> String {
 
     messages
         .iter()
-        .filter_map(|json| serde_json::from_str::<ClaudeMessage>(json).ok())
+        .filter_map(|json| ClaudeMessage::parse(json).ok())
         .find_map(|msg| match msg {
-            ClaudeMessage::Assistant(msg) => msg
-                .message
-                .as_ref()
-                .and_then(|m| m.model.as_deref())
-                .map(assistant_label),
+            ClaudeMessage::Assistant(msg) => Some(assistant_label(&msg.message.model)),
             _ => None,
         })
         .unwrap_or_else(|| identity.label.clone())
@@ -274,7 +271,7 @@ pub fn is_turn_terminator(json: &str) -> bool {
     // The `User`/`Portal`/`Error`/etc. variants are not terminators (and
     // there's no Codex `Result` shape — Codex terminators parse through
     // `CodexEvent` instead).
-    if let Ok(ClaudeMessage::Result(_)) = serde_json::from_str::<ClaudeMessage>(json) {
+    if let Ok(ClaudeMessage::Result(_)) = ClaudeMessage::parse(json) {
         return true;
     }
     // Codex side: terminators are `TurnCompleted` and `TurnFailed`. The

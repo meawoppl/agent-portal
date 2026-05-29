@@ -1,5 +1,4 @@
 use super::super::shorten_model_name;
-use super::super::types::{AssistantMessage, ContentBlock, UsageInfo};
 use super::render_image_source;
 use super::tools::{
     render_code_execution_result, render_container_upload, render_mcp_tool_result,
@@ -11,7 +10,8 @@ use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown;
 use crate::components::time_ago::TimeAgo;
 use crate::components::tool_renderers::render_tool_use;
-use shared::{Citation, ToolResultContent};
+use shared::{AssistantMessage, AssistantUsage as UsageInfo};
+use shared::{Citation, ContentBlock, ToolResultContent};
 use yew::prelude::*;
 
 fn extract_ephemeral_cache(usage: &UsageInfo) -> (u64, u64) {
@@ -45,10 +45,10 @@ fn build_usage_tooltip(usage: Option<&UsageInfo>) -> String {
         .map(|u| {
             let mut tooltip = format!(
                 "Input: {} | Output: {} | Cache read: {} | Cache created: {}",
-                u.input_tokens.unwrap_or(0),
-                u.output_tokens.unwrap_or(0),
-                u.cache_read_input_tokens.unwrap_or(0),
-                u.cache_creation_input_tokens.unwrap_or(0)
+                u.input_tokens,
+                u.output_tokens,
+                u.cache_read_input_tokens,
+                u.cache_creation_input_tokens
             );
             let (e1h, e5m) = extract_ephemeral_cache(u);
             if e1h > 0 || e5m > 0 {
@@ -73,18 +73,18 @@ fn content_blocks_to_text(blocks: &[ContentBlock]) -> String {
     let mut out = String::new();
     for block in blocks {
         match block {
-            ContentBlock::Text { text, .. } => {
+            ContentBlock::Text(t) => {
                 if !out.is_empty() {
                     out.push_str("\n\n");
                 }
-                out.push_str(text);
+                out.push_str(&t.text);
             }
-            ContentBlock::Thinking { thinking } => {
+            ContentBlock::Thinking(th) => {
                 if !out.is_empty() {
                     out.push_str("\n\n");
                 }
                 out.push_str("<thinking>\n");
-                out.push_str(thinking);
+                out.push_str(&th.thinking);
                 out.push_str("\n</thinking>");
             }
             _ => {}
@@ -98,22 +98,11 @@ pub fn render_assistant_message(
     timestamp: Option<&str>,
     raw_iso: Option<&str>,
 ) -> Html {
-    let blocks = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .cloned()
-        .unwrap_or_default();
+    let blocks = msg.message.content.clone();
 
-    let usage = msg.message.as_ref().and_then(|m| m.usage.as_ref());
-    let model = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.model.as_ref())
-        .map(|s| s.as_str())
-        .unwrap_or("");
-    let stop_reason = msg.message.as_ref().and_then(|m| m.stop_reason.as_deref());
-    let is_truncated = stop_reason == Some("max_tokens");
+    let usage = msg.message.usage.as_ref();
+    let model = msg.message.model.as_str();
+    let is_truncated = msg.message.stop_reason.as_ref().map(|r| r.as_str()) == Some("max_tokens");
 
     let model_tooltip = build_model_tooltip(model, usage);
     let usage_tooltip = build_usage_tooltip(usage);
@@ -138,7 +127,7 @@ pub fn render_assistant_message(
                     if let Some(u) = usage {
                         html! {
                             <span class="usage-badge" title={usage_tooltip}>
-                                <span class="token-count">{ format!("{}↓ {}↑", u.input_tokens.unwrap_or(0), u.output_tokens.unwrap_or(0)) }</span>
+                                <span class="token-count">{ format!("{}↓ {}↑", u.input_tokens, u.output_tokens) }</span>
                             </span>
                         }
                     } else {
@@ -157,12 +146,7 @@ pub fn render_assistant_message(
 }
 
 pub fn render_assistant_message_content(msg: &AssistantMessage) -> Html {
-    let blocks = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .cloned()
-        .unwrap_or_default();
+    let blocks = msg.message.content.clone();
     render_content_blocks(&blocks)
 }
 
@@ -172,20 +156,20 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
             {
                 blocks.iter().map(|block| {
                     match block {
-                        ContentBlock::Text { text, citations } => {
+                        ContentBlock::Text(t) => {
                             html! {
                                 <div class="assistant-text">
-                                    { render_markdown(text) }
-                                    { render_citations(citations) }
+                                    { render_markdown(&t.text) }
+                                    { render_citations(&t.citations) }
                                 </div>
                             }
                         }
-                        ContentBlock::ToolUse { id: _, name, input } => {
-                            render_tool_use(name, input)
+                        ContentBlock::ToolUse(tu) => {
+                            render_tool_use(&tu.name, &tu.input)
                         }
-                        ContentBlock::ToolResult { tool_use_id: _, content, is_error } => {
-                            let class = if *is_error { "tool-result error" } else { "tool-result" };
-                            match content {
+                        ContentBlock::ToolResult(tr) => {
+                            let class = if tr.is_error.unwrap_or(false) { "tool-result error" } else { "tool-result" };
+                            match &tr.content {
                                 Some(ToolResultContent::Text(s)) => {
                                     html! {
                                         <div class={class}>
@@ -211,34 +195,40 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
                                 None => html! { <div class={class}></div> },
                             }
                         }
-                        ContentBlock::Image { source } => {
-                            render_image_source(source, None)
+                        ContentBlock::Image(img) => {
+                            render_image_source(&img.source, None)
                         }
-                        ContentBlock::Thinking { thinking } => {
+                        ContentBlock::Thinking(th) => {
                             html! {
                                 <div class="thinking-block">
                                     <span class="thinking-label">{ "thinking" }</span>
-                                    <div class="thinking-content">{ crate::components::markdown::linkify_urls(thinking) }</div>
+                                    if th.thinking.trim().is_empty() {
+                                        <div class="thinking-content muted" title="Thinking text was omitted by the model; the encrypted signature is preserved in the raw message.">
+                                            { "thinking omitted" }
+                                        </div>
+                                    } else {
+                                        <div class="thinking-content">{ crate::components::markdown::linkify_urls(&th.thinking) }</div>
+                                    }
                                 </div>
                             }
                         }
-                        ContentBlock::ServerToolUse { id: _, name, input } => {
-                            render_server_tool_use(name, input)
+                        ContentBlock::ServerToolUse(stu) => {
+                            render_server_tool_use(&stu.name, &stu.input)
                         }
-                        ContentBlock::WebSearchToolResult { tool_use_id: _, content } => {
-                            render_web_search_result(content)
+                        ContentBlock::WebSearchToolResult(r) => {
+                            render_web_search_result(&r.content)
                         }
-                        ContentBlock::CodeExecutionToolResult { tool_use_id: _, content } => {
-                            render_code_execution_result(content)
+                        ContentBlock::CodeExecutionToolResult(r) => {
+                            render_code_execution_result(&r.content)
                         }
-                        ContentBlock::McpToolUse { id: _, name, server_name, input } => {
-                            render_mcp_tool_use(name, server_name.as_deref(), input)
+                        ContentBlock::McpToolUse(mtu) => {
+                            render_mcp_tool_use(&mtu.name, mtu.server_name.as_deref(), &mtu.input)
                         }
-                        ContentBlock::McpToolResult { tool_use_id: _, content, is_error } => {
-                            render_mcp_tool_result(content, is_error.unwrap_or(false))
+                        ContentBlock::McpToolResult(r) => {
+                            render_mcp_tool_result(&r.content, r.is_error.unwrap_or(false))
                         }
-                        ContentBlock::ContainerUpload { data } => {
-                            render_container_upload(data)
+                        ContentBlock::ContainerUpload(upload) => {
+                            render_container_upload(&upload.data)
                         }
                         ContentBlock::Unknown(value) => {
                             render_unknown_block(value)
@@ -250,16 +240,17 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
     }
 }
 
-fn render_citations(citations: &[Citation]) -> Html {
+fn render_citations(citations: &[serde_json::Value]) -> Html {
     if citations.is_empty() {
         return html! {};
     }
     html! {
         <div class="citation-list">
             { for citations.iter().enumerate().map(|(i, cite)| {
-                let url = cite.url.as_deref().unwrap_or("#");
-                let title = cite.title.as_deref()
-                    .or(cite.cited_text.as_deref())
+                let cite = serde_json::from_value::<Citation>(cite.clone()).ok();
+                let url = cite.as_ref().and_then(|c| c.url.as_deref()).unwrap_or("#");
+                let title = cite.as_ref().and_then(|c| c.title.as_deref()
+                    .or(c.cited_text.as_deref()))
                     .unwrap_or("source");
                 html! {
                     <a class="citation-link"

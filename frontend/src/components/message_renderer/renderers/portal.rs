@@ -1,4 +1,4 @@
-use super::super::types::{ImageSource, PortalMessage};
+use super::super::types::PortalMessage;
 use super::render_image_source;
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown;
@@ -41,9 +41,11 @@ fn render_portal_content(content: &shared::PortalContent) -> Html {
             file_size,
             source_type,
         } => {
-            let source = ImageSource {
-                source_type: source_type.clone().unwrap_or_else(|| "base64".to_string()),
-                media_type: media_type.clone(),
+            let source = shared::ImageSource {
+                source_type: shared::ImageSourceType::from(
+                    source_type.as_deref().unwrap_or("base64"),
+                ),
+                media_type: shared::MediaType::from(media_type.as_str()),
                 data: data.clone(),
             };
             let filename = file_path
