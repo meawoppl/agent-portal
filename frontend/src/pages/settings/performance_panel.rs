@@ -94,12 +94,14 @@ fn window_param(window: TimeWindow) -> &'static str {
 }
 
 /// Build the bucket-granularity query string for the selected window.
-/// Short windows (≤ 1 day) get hourly buckets so a 1h view doesn't collapse
-/// into a single data point; week-plus windows stay daily so 30 / 90 day
-/// runs don't overwhelm the x-axis with hundreds of ticks.
+/// Pick enough buckets to show shape without turning sparse per-turn metrics
+/// into comb noise: roughly 60 buckets for 1h, 72 for 6h, 96 for 1d, and
+/// daily for week-plus windows.
 fn bucket_param(window: TimeWindow) -> &'static str {
     match window {
-        TimeWindow::Hours1 | TimeWindow::Hours6 | TimeWindow::Days1 => "hour",
+        TimeWindow::Hours1 => "1m",
+        TimeWindow::Hours6 => "5m",
+        TimeWindow::Days1 => "15m",
         TimeWindow::Days7 | TimeWindow::Days30 | TimeWindow::Days90 => "day",
     }
 }
@@ -849,14 +851,13 @@ mod tests {
         assert_eq!(window_param(TimeWindow::Days90), "90d");
     }
 
-    /// Short windows must request hourly buckets so a 1-hour view doesn't
-    /// collapse into a single daily data point. Week-plus windows stay
-    /// daily so the x-axis tick count stays reasonable.
+    /// Short windows should stay granular enough to show shape; week-plus
+    /// windows stay daily so the query and x-axis remain readable.
     #[test]
     fn bucket_param_dispatches_on_window_length() {
-        assert_eq!(bucket_param(TimeWindow::Hours1), "hour");
-        assert_eq!(bucket_param(TimeWindow::Hours6), "hour");
-        assert_eq!(bucket_param(TimeWindow::Days1), "hour");
+        assert_eq!(bucket_param(TimeWindow::Hours1), "1m");
+        assert_eq!(bucket_param(TimeWindow::Hours6), "5m");
+        assert_eq!(bucket_param(TimeWindow::Days1), "15m");
         assert_eq!(bucket_param(TimeWindow::Days7), "day");
         assert_eq!(bucket_param(TimeWindow::Days30), "day");
         assert_eq!(bucket_param(TimeWindow::Days90), "day");
