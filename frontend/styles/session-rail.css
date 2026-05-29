@@ -164,17 +164,17 @@
 
 /* Agent-type watermark — large logo anchored to the pill's left edge,
    clipped by the pill's overflow:hidden, behind all foreground content.
-   Sized 10% under the 2.5.27 launch dimensions (88×88, left:-28px); the
-   new offset keeps the icon's horizontal center at x=16 in pill coords so
-   the visual centering doesn't drift. Vertical center is held by top:50%
-   + translateY(-50%). */
+   Sized at 80% of the previous 80×80 (so 64×64); the new `left: -16px`
+   keeps the icon's horizontal center at x=16 in pill coords so the visual
+   centering doesn't drift across the resize. Vertical center is held by
+   `top: 50%` + `translateY(-50%)`, which is size-agnostic. */
 .pill-watermark {
     position: absolute;
-    left: -24px;
+    left: -16px;
     top: 50%;
     transform: translateY(-50%);
-    width: 80px;
-    height: 80px;
+    width: 64px;
+    height: 64px;
     pointer-events: none;
     background-repeat: no-repeat;
     background-position: center;
