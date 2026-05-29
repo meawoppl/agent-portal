@@ -52,7 +52,7 @@ pub struct LinePlotProps {
 const VIEW_W: f32 = 800.0;
 const VIEW_H: f32 = 260.0;
 /// Padding on each side of the plot area to leave room for axis labels.
-const PAD_L: f32 = 48.0;
+const PAD_L: f32 = 66.0;
 const PAD_R: f32 = 12.0;
 const PAD_T: f32 = 12.0;
 const PAD_B: f32 = 36.0;
@@ -201,9 +201,11 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
                 preserveAspectRatio="xMidYMid meet"
             >
                 <text
-                    x="4"
-                    y={format!("{:.2}", PAD_T + 4.0)}
+                    x={format!("{:.2}", 14.0)}
+                    y={format!("{:.2}", PAD_T + plot_h / 2.0)}
                     class="chart-y-axis-title"
+                    text-anchor="middle"
+                    transform={format!("rotate(-90 14 {:.2})", PAD_T + plot_h / 2.0)}
                 >
                     { &props.y_label }
                 </text>
