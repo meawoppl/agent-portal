@@ -13,6 +13,7 @@ use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
+pub(crate) use assistant::assistant_label;
 pub use assistant::{
     render_assistant_message, render_assistant_message_content, render_content_blocks,
 };

@@ -59,6 +59,13 @@ fn build_usage_tooltip(usage: Option<&UsageInfo>) -> String {
         .unwrap_or_default()
 }
 
+pub(crate) fn assistant_label(model: &str) -> String {
+    match shorten_model_name(model) {
+        Some(short_name) => format!("Claude - {short_name}"),
+        None => "Claude".to_string(),
+    }
+}
+
 /// Extract concatenated raw text from a list of content blocks.
 /// Used for the message header copy button: pulls out text and thinking
 /// blocks as markdown, ignoring tool_use/tool_result internals.
@@ -110,19 +117,13 @@ pub fn render_assistant_message(
 
     let model_tooltip = build_model_tooltip(model, usage);
     let usage_tooltip = build_usage_tooltip(usage);
+    let label = assistant_label(model);
     let copy_text = content_blocks_to_text(&blocks);
 
     html! {
         <div class="claude-message assistant-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge assistant">{ "Assistant" }</span>
-                {
-                    if let Some(short_name) = shorten_model_name(model) {
-                        html! { <span class="model-name" title={model_tooltip}>{ short_name }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
+                <span class="message-type-badge assistant" title={model_tooltip}>{ label }</span>
                 if !copy_text.is_empty() {
                     <CopyButton text={copy_text} title="Copy assistant text" />
                 }
