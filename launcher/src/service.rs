@@ -1,5 +1,34 @@
 use anyhow::Result;
 
+/// Build a PATH for the service that includes `$HOME/.local/bin` — the default
+/// location of the native `claude` installer. Prepends it to the supplied PATH
+/// unless already present, so a service installed from a shell that lacked it
+/// (or a unit file predating this logic) can still resolve the agent binary.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn path_with_local_bin(existing: &str, home: Option<&str>) -> String {
+    let local_bin = match home {
+        Some(h) if !h.is_empty() => format!("{h}/.local/bin"),
+        _ => return existing.to_string(),
+    };
+    if existing.split(':').any(|p| p == local_bin) {
+        existing.to_string()
+    } else if existing.is_empty() {
+        local_bin
+    } else {
+        format!("{local_bin}:{existing}")
+    }
+}
+
+/// The PATH the installed service should run with: the current environment's
+/// PATH, guaranteed to include `$HOME/.local/bin`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn service_path() -> String {
+    path_with_local_bin(
+        &std::env::var("PATH").unwrap_or_default(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
 // --- Linux (systemd) ---
 
 #[cfg(target_os = "linux")]
@@ -16,7 +45,7 @@ fn service_file_path() -> Result<std::path::PathBuf> {
 
 #[cfg(target_os = "linux")]
 fn generate_unit(binary_path: &str) -> String {
-    let path = std::env::var("PATH").unwrap_or_default();
+    let path = service_path();
     format!(
         r#"[Unit]
 Description=Agent Launcher
@@ -85,6 +114,34 @@ pub fn install() -> Result<()> {
     println!("Launcher is installed and running.");
     println!("  Logs: journalctl --user -u {} -f", SERVICE_NAME);
 
+    Ok(())
+}
+
+/// Regenerate the installed unit file from the current executable + PATH and
+/// reload systemd if it changed. Called after an auto-update so a stale unit
+/// (e.g. one predating `Environment=PATH`) self-heals. No-op if not installed.
+#[cfg(target_os = "linux")]
+pub fn sync() -> Result<()> {
+    use anyhow::Context;
+    let service_path = service_file_path()?;
+    if !service_path.exists() {
+        return Ok(());
+    }
+
+    let binary_path = std::env::current_exe()
+        .context("Failed to get current executable path")?
+        .to_string_lossy()
+        .to_string();
+    let unit = generate_unit(&binary_path);
+
+    if std::fs::read_to_string(&service_path).unwrap_or_default() == unit {
+        return Ok(());
+    }
+
+    std::fs::write(&service_path, unit)
+        .with_context(|| format!("Failed to write {}", service_path.display()))?;
+    systemctl(&["daemon-reload"])?;
+    tracing::info!("Regenerated service unit at {}", service_path.display());
     Ok(())
 }
 
@@ -212,7 +269,7 @@ fn log_dir() -> String {
 #[cfg(target_os = "macos")]
 fn generate_plist(binary_path: &str) -> String {
     let log_dir = log_dir();
-    let path = std::env::var("PATH").unwrap_or_default();
+    let path = service_path();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -294,6 +351,33 @@ pub fn install() -> Result<()> {
     println!("Launcher is installed and running.");
     println!("  Logs: tail -f {}/stdout.log", log_dir());
 
+    Ok(())
+}
+
+/// Regenerate the installed plist from the current executable + PATH if it
+/// changed. Called after an auto-update so a stale plist self-heals; the
+/// subsequent service restart reloads it. No-op if not installed.
+#[cfg(target_os = "macos")]
+pub fn sync() -> Result<()> {
+    use anyhow::Context;
+    let plist = plist_path()?;
+    if !plist.exists() {
+        return Ok(());
+    }
+
+    let binary_path = std::env::current_exe()
+        .context("Failed to get current executable path")?
+        .to_string_lossy()
+        .to_string();
+    let content = generate_plist(&binary_path);
+
+    if std::fs::read_to_string(&plist).unwrap_or_default() == content {
+        return Ok(());
+    }
+
+    std::fs::write(&plist, content)
+        .with_context(|| format!("Failed to write {}", plist.display()))?;
+    tracing::info!("Regenerated service plist at {}", plist.display());
     Ok(())
 }
 
@@ -430,6 +514,11 @@ pub fn install() -> Result<()> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn sync() -> Result<()> {
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn uninstall() -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
 }
@@ -457,6 +546,39 @@ pub fn restart() -> Result<()> {
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn logs(_lines: u32, _follow: bool) -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests {
+    use super::path_with_local_bin;
+
+    #[test]
+    fn prepends_local_bin_when_absent() {
+        assert_eq!(
+            path_with_local_bin("/usr/bin:/bin", Some("/home/u")),
+            "/home/u/.local/bin:/usr/bin:/bin"
+        );
+    }
+
+    #[test]
+    fn leaves_path_untouched_when_already_present() {
+        let existing = "/usr/bin:/home/u/.local/bin:/bin";
+        assert_eq!(path_with_local_bin(existing, Some("/home/u")), existing);
+    }
+
+    #[test]
+    fn handles_empty_path() {
+        assert_eq!(
+            path_with_local_bin("", Some("/home/u")),
+            "/home/u/.local/bin"
+        );
+    }
+
+    #[test]
+    fn no_home_returns_existing_unchanged() {
+        assert_eq!(path_with_local_bin("/usr/bin", None), "/usr/bin");
+        assert_eq!(path_with_local_bin("/usr/bin", Some("")), "/usr/bin");
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]

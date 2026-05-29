@@ -575,6 +575,9 @@ async fn handle_message(
                     }
                 }
                 if crate::service::is_installed() {
+                    if let Err(e) = crate::service::sync() {
+                        error!("Service unit sync failed: {}", e);
+                    }
                     if let Err(e) = crate::service::restart() {
                         error!("Service restart failed: {}", e);
                     }
