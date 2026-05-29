@@ -7,8 +7,8 @@
 //!
 //! On mount, fetches the default `bucket=day&window=30d` aggregation, then
 //! refetches when the user switches the time-window radio. A group-by
-//! dropdown filters to one `(model, service_tier)` pair, or "All" to render
-//! one line per pair.
+//! dropdown filters to one `(agent_type, model, service_tier)` group, or
+//! "All" to render one line per group.
 
 use std::collections::BTreeMap;
 
@@ -21,30 +21,44 @@ use yew::prelude::*;
 use crate::components::charts::{BucketKind, LinePlot, LineSeries, StackedArea, StackedSeries};
 use crate::utils;
 
-/// (model, service_tier) pair used as the group-by key. `(None, None)` is a
-/// legitimate Codex shape (no model, no tier reported); we render it as
-/// `"all (codex)"` in the dropdown.
-type GroupKey = (Option<String>, Option<String>);
+/// (agent_type, model, service_tier) tuple used as the group-by key. Codex
+/// currently reports no model or tier; keeping the agent in the key lets the
+/// UI label that shape explicitly without colliding with missing Claude
+/// metadata.
+type GroupKey = (String, Option<String>, Option<String>);
 
-/// Pure helper: list the distinct (model, tier) pairs present in the bucket
-/// list, sorted alphabetically with the empty pair last.
+/// Pure helper: list the distinct (agent, model, tier) groups present in the
+/// bucket list.
 fn distinct_pairs(buckets: &[MetricBucket]) -> Vec<GroupKey> {
     let mut seen: std::collections::BTreeSet<GroupKey> = std::collections::BTreeSet::new();
     for b in buckets {
-        seen.insert((b.model.clone(), b.service_tier.clone()));
+        seen.insert(bucket_group_key(b));
     }
     seen.into_iter().collect()
 }
 
-/// Format a (model, tier) pair as a human-readable label for the dropdown
-/// and legend.
+fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
+    (
+        bucket.agent_type.clone(),
+        bucket.model.clone(),
+        bucket.service_tier.clone(),
+    )
+}
+
+/// Format an (agent, model, tier) group as a human-readable label for the
+/// dropdown and legend.
 fn pair_label(pair: &GroupKey) -> String {
-    let m = pair.0.as_deref().unwrap_or("unknown");
-    match pair.1.as_deref() {
+    let base = match (pair.0.as_str(), pair.1.as_deref()) {
+        ("codex", None) => "Codex".to_string(),
+        (_, Some(model)) => model.to_string(),
+        (agent, None) if !agent.is_empty() => format!("{agent} unknown"),
+        _ => "unknown".to_string(),
+    };
+    match pair.2.as_deref() {
         Some(t) if !t.is_empty() && !t.eq_ignore_ascii_case("standard") => {
-            format!("{m} {t}")
+            format!("{base} {t}")
         }
-        _ => m.to_string(),
+        _ => base,
     }
 }
 
@@ -140,7 +154,7 @@ impl TimeWindow {
     }
 }
 
-/// Group-by selection: either a specific (model, tier) pair or "All".
+/// Group-by selection: either a specific (agent, model, tier) group or "All".
 #[derive(Debug, Clone, PartialEq)]
 enum GroupBy {
     All,
@@ -152,8 +166,9 @@ impl GroupBy {
     fn key(&self) -> String {
         match self {
             Self::All => "__ALL__".to_string(),
-            Self::Pair((m, t)) => format!(
-                "{}|{}",
+            Self::Pair((agent, m, t)) => format!(
+                "{}|{}|{}",
+                agent,
                 m.as_deref().unwrap_or(""),
                 t.as_deref().unwrap_or("")
             ),
@@ -302,7 +317,7 @@ pub fn performance_panel() -> Html {
                             value="__ALL__"
                             selected={matches!(*group_by, GroupBy::All)}
                         >
-                            { "All (model, tier) pairs" }
+                            { "All groups" }
                         </option>
                         { for pairs.iter().map(|pair| {
                             let gb = GroupBy::Pair(pair.clone());
@@ -344,10 +359,7 @@ fn render_charts(
     // Bucketed by (pair, ts) for O(1) lookup.
     let mut indexed: BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket> = BTreeMap::new();
     for b in buckets {
-        indexed.insert(
-            ((b.model.clone(), b.service_tier.clone()), b.bucket_start),
-            b,
-        );
+        indexed.insert((bucket_group_key(b), b.bucket_start), b);
     }
 
     // ------------ a) Throughput trend: p50 (solid) + p95 (dashed) ------------
@@ -481,7 +493,7 @@ fn build_stop_reason_series(
         by_reason.insert(key, vec![0.0; bucket_axis.len()]);
     }
     for b in buckets {
-        let pair = (b.model.clone(), b.service_tier.clone());
+        let pair = bucket_group_key(b);
         if !active_set.contains(&pair) {
             continue;
         }
@@ -675,6 +687,7 @@ mod tests {
     #[test]
     fn pair_label_appends_non_standard_tier() {
         let label = pair_label(&(
+            "claude".to_string(),
             Some("claude-opus-4-7".to_string()),
             Some("priority".to_string()),
         ));
@@ -684,6 +697,7 @@ mod tests {
     #[test]
     fn pair_label_drops_standard_tier() {
         let label = pair_label(&(
+            "claude".to_string(),
             Some("claude-opus-4-7".to_string()),
             Some("standard".to_string()),
         ));
@@ -691,9 +705,15 @@ mod tests {
     }
 
     #[test]
-    fn pair_label_unknown_when_no_model() {
-        let label = pair_label(&(None, None));
-        assert_eq!(label, "unknown");
+    fn pair_label_codex_when_no_model() {
+        let label = pair_label(&("codex".to_string(), None, None));
+        assert_eq!(label, "Codex");
+    }
+
+    #[test]
+    fn pair_label_unknown_when_no_claude_model() {
+        let label = pair_label(&("claude".to_string(), None, None));
+        assert_eq!(label, "claude unknown");
     }
 
     #[test]
@@ -705,6 +725,7 @@ mod tests {
     #[test]
     fn group_by_key_roundtrips_through_string() {
         let pairs = vec![(
+            "claude".to_string(),
             Some("claude-opus-4-7".to_string()),
             Some("standard".to_string()),
         )];
@@ -789,10 +810,7 @@ mod tests {
         let pairs = distinct_pairs(&buckets);
         let mut indexed: BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket> = BTreeMap::new();
         for bb in &buckets {
-            indexed.insert(
-                ((bb.model.clone(), bb.service_tier.clone()), bb.bucket_start),
-                bb,
-            );
+            indexed.insert((bucket_group_key(bb), bb.bucket_start), bb);
         }
         let series = build_cache_hit_series(&indexed, &axis, &pairs);
         // Only had a single bucket with denom=0 → no values → no series at all.
@@ -809,10 +827,7 @@ mod tests {
         let pairs = distinct_pairs(&buckets);
         let mut indexed: BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket> = BTreeMap::new();
         for bb in &buckets {
-            indexed.insert(
-                ((bb.model.clone(), bb.service_tier.clone()), bb.bucket_start),
-                bb,
-            );
+            indexed.insert((bucket_group_key(bb), bb.bucket_start), bb);
         }
         let series = build_cost_per_token_series(&indexed, &axis, &pairs);
         assert!(series.is_empty());
@@ -829,10 +844,7 @@ mod tests {
         let pairs = distinct_pairs(&buckets);
         let mut indexed: BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket> = BTreeMap::new();
         for bb in &buckets {
-            indexed.insert(
-                ((bb.model.clone(), bb.service_tier.clone()), bb.bucket_start),
-                bb,
-            );
+            indexed.insert((bucket_group_key(bb), bb.bucket_start), bb);
         }
         let series = build_cost_per_token_series(&indexed, &axis, &pairs);
         assert_eq!(series.len(), 1);

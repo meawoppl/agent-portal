@@ -168,9 +168,10 @@ pub(crate) async fn claude_io_task(
                         // again).
                         if let ClaudeOutput::Result(ref r) = output {
                             let usage = r.usage.as_ref();
+                            let model = current_model.clone();
                             let outcome = TurnOutcome {
                                 agent_type: shared::AgentType::Claude.as_str().to_string(),
-                                model: current_model.clone(),
+                                model,
                                 service_tier: current_service_tier.clone().or_else(|| {
                                     usage
                                         .map(|u| u.service_tier.clone())
@@ -198,8 +199,22 @@ pub(crate) async fn claude_io_task(
                                 chrono::Utc::now(),
                                 outcome,
                             ) {
-                                let _ = event_tx
-                                    .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
+                                if metrics
+                                    .model
+                                    .as_deref()
+                                    .is_some_and(|m| {
+                                        let m = m.trim();
+                                        !m.is_empty() && !m.eq_ignore_ascii_case("unknown")
+                                    })
+                                {
+                                    let _ = event_tx
+                                        .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
+                                } else {
+                                    tracing::warn!(
+                                        "Claude result completed without model metadata for session {}; dropping turn metrics",
+                                        session_id
+                                    );
+                                }
                             }
                         }
 

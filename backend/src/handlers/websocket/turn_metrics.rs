@@ -9,7 +9,7 @@
 
 use diesel::prelude::*;
 use shared::{ServerToClient, TurnMetrics};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::{SessionId, SessionManager};
@@ -35,6 +35,14 @@ pub fn handle_turn_metrics_report(
         return;
     };
     metrics.session_id = session_id;
+
+    if has_unknown_model(metrics.model.as_deref()) {
+        warn!(
+            "Dropping turn metrics for session {} with unknown model (agent={})",
+            session_id, metrics.agent_type
+        );
+        return;
+    }
 
     let mut conn = match db_pool.get() {
         Ok(c) => c,
@@ -150,6 +158,13 @@ pub fn handle_turn_metrics_report(
             ServerToClient::TurnMetrics(Box::new(payload.clone())),
         );
     }
+}
+
+fn has_unknown_model(model: Option<&str>) -> bool {
+    model.is_none_or(|value| {
+        let value = value.trim();
+        value.is_empty() || value.eq_ignore_ascii_case("unknown")
+    })
 }
 
 // No unit tests here — the persist/broadcast round-trip needs a real
