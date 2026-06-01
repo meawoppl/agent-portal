@@ -8,6 +8,8 @@
 //! PR — the v1 chrome is one chip, one trend.
 
 use shared::TurnMetrics;
+use wasm_bindgen::JsCast;
+use web_sys::Element;
 use yew::prelude::*;
 
 use super::sparkline::Sparkline;
@@ -175,6 +177,36 @@ pub struct TurnMetricsHeaderPillProps {
 pub fn turn_metrics_header_pill(props: &TurnMetricsHeaderPillProps) -> Html {
     let selected_metric = use_state(|| SparklineMetric::TokPerSec);
     let dropdown_open = use_state(|| false);
+    let pill_ref = use_node_ref();
+
+    {
+        let dropdown_open = dropdown_open.clone();
+        let pill_ref = pill_ref.clone();
+        let is_open = *dropdown_open;
+        use_effect_with(is_open, move |is_open| {
+            let listener = if *is_open {
+                let document = gloo::utils::document();
+                Some(gloo::events::EventListener::new(
+                    &document,
+                    "click",
+                    move |e| {
+                        if let Some(pill_el) = pill_ref.cast::<Element>() {
+                            if let Some(target) =
+                                e.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok())
+                            {
+                                if !pill_el.contains(Some(&target)) {
+                                    dropdown_open.set(false);
+                                }
+                            }
+                        }
+                    },
+                ))
+            } else {
+                None
+            };
+            move || drop(listener)
+        });
+    }
 
     // Pick the (model, tier) pair from the most recent turn. If nothing
     // qualifies (empty buffer, or no model/tier on the newest row), render
@@ -202,7 +234,7 @@ pub fn turn_metrics_header_pill(props: &TurnMetricsHeaderPillProps) -> Html {
     };
 
     html! {
-        <div class="turn-metrics-pill" onclick={on_toggle.clone()}>
+        <div ref={pill_ref} class="turn-metrics-pill" onclick={on_toggle.clone()}>
             <span class="turn-metrics-pill-label">{ label }</span>
             <Sparkline values={values} />
             <span class="turn-metrics-pill-value">
