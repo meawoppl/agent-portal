@@ -6,6 +6,7 @@
 //! backed session.
 
 pub mod agent;
+mod events;
 mod handler;
 mod helpers;
 mod io_task;

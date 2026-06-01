@@ -14,6 +14,9 @@ use session_lib::io::IoEvent;
 use shared::CodexPermissionInput;
 use tokio::sync::mpsc;
 
+use crate::events::{
+    to_raw_output, CodexUsageEvent, ErrorEvent, ItemEvent, PassthroughEvent, TurnCompletedEvent,
+};
 use crate::helpers::format_request_id;
 
 /// Convert a Codex app-server ServerMessage into exec-format JSONL events.
@@ -21,7 +24,7 @@ use crate::helpers::format_request_id;
 pub(crate) fn handle_codex_server_message(
     msg: ServerMessage,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
-    latest_token_usage: Option<&serde_json::Value>,
+    latest_token_usage: Option<&CodexUsageEvent>,
 ) -> (bool, bool) {
     match msg {
         ServerMessage::Notification(notif) => {
@@ -36,7 +39,7 @@ pub(crate) fn handle_codex_server_message(
 fn handle_notification(
     notif: Notification,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
-    latest_token_usage: Option<&serde_json::Value>,
+    latest_token_usage: Option<&CodexUsageEvent>,
 ) -> (bool, bool) {
     match notif {
         // Lifecycle — already handled elsewhere or intentionally silent.
@@ -46,37 +49,33 @@ fn handle_notification(
         | Notification::ThreadTokenUsageUpdated(_) => (true, false),
 
         Notification::TurnCompleted(p) => {
-            let status = serde_json::to_value(&p.turn.status)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string));
-            let event = serde_json::json!({
-                "type": "turn.completed",
-                "turn_id": p.turn.id,
-                "status": status,
-                "duration_ms": p.turn.duration_ms,
-                "usage": latest_token_usage.cloned(),
-            });
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
+            let event = TurnCompletedEvent::new(
+                p.turn.id,
+                turn_status_label(&p.turn.status).to_string(),
+                p.turn.duration_ms,
+                latest_token_usage.cloned(),
+            );
+            let ok = event_tx
+                .send(IoEvent::RawOutput(to_raw_output(&event)))
+                .is_ok();
             (ok, true)
         }
 
         Notification::ItemStarted(p) => {
             let item = serde_json::to_value(&p.item).unwrap_or(serde_json::Value::Null);
-            let event = serde_json::json!({
-                "type": "item.started",
-                "item": item,
-            });
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
+            let event = ItemEvent::started(item);
+            let ok = event_tx
+                .send(IoEvent::RawOutput(to_raw_output(&event)))
+                .is_ok();
             (ok, false)
         }
 
         Notification::ItemCompleted(p) => {
             let item = serde_json::to_value(&p.item).unwrap_or(serde_json::Value::Null);
-            let event = serde_json::json!({
-                "type": "item.completed",
-                "item": item,
-            });
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
+            let event = ItemEvent::completed(item);
+            let ok = event_tx
+                .send(IoEvent::RawOutput(to_raw_output(&event)))
+                .is_ok();
             (ok, false)
         }
 
@@ -88,11 +87,10 @@ fn handle_notification(
             } else {
                 p.error.message.clone()
             };
-            let event = serde_json::json!({
-                "type": "error",
-                "message": message,
-            });
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
+            let event = ErrorEvent::new(message);
+            let ok = event_tx
+                .send(IoEvent::RawOutput(to_raw_output(&event)))
+                .is_ok();
             (ok, false)
         }
 
@@ -220,12 +218,20 @@ fn emit_passthrough<P: serde::Serialize>(
     p: &P,
 ) -> (bool, bool) {
     let params = serde_json::to_value(p).unwrap_or(serde_json::Value::Null);
-    let event = serde_json::json!({
-        "type": method,
-        "params": params,
-    });
-    let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
+    let event = PassthroughEvent::new(method, params);
+    let ok = event_tx
+        .send(IoEvent::RawOutput(to_raw_output(&event)))
+        .is_ok();
     (ok, false)
+}
+
+fn turn_status_label(status: &codex_codes::TurnStatus) -> &'static str {
+    match status {
+        codex_codes::TurnStatus::Completed => "completed",
+        codex_codes::TurnStatus::Interrupted => "interrupted",
+        codex_codes::TurnStatus::Failed => "failed",
+        codex_codes::TurnStatus::InProgress => "in_progress",
+    }
 }
 
 fn handle_request(
@@ -394,7 +400,7 @@ mod tests {
 
     fn handle_with_usage(
         msg: ServerMessage,
-        latest_token_usage: Option<&serde_json::Value>,
+        latest_token_usage: Option<&CodexUsageEvent>,
     ) -> (Vec<IoEvent>, bool, bool) {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (sent, ended) = handle_codex_server_message(msg, &tx, latest_token_usage);
@@ -441,23 +447,23 @@ mod tests {
             }
         }))
         .unwrap();
-        let usage = json!({
-            "last": {
-                "inputTokens": 100,
-                "cachedInputTokens": 25,
-                "outputTokens": 40,
-                "reasoningOutputTokens": 7,
-                "totalTokens": 147
+        let usage = CodexUsageEvent {
+            last: codex_codes::TokenUsageBreakdown {
+                input_tokens: 100,
+                cached_input_tokens: 25,
+                output_tokens: 40,
+                reasoning_output_tokens: 7,
+                total_tokens: 147,
             },
-            "total": {
-                "inputTokens": 300,
-                "cachedInputTokens": 75,
-                "outputTokens": 90,
-                "reasoningOutputTokens": 17,
-                "totalTokens": 407
+            total: codex_codes::TokenUsageBreakdown {
+                input_tokens: 300,
+                cached_input_tokens: 75,
+                output_tokens: 90,
+                reasoning_output_tokens: 17,
+                total_tokens: 407,
             },
-            "model_context_window": 200000
-        });
+            model_context_window: Some(200000),
+        };
         let msg = ServerMessage::Notification(Notification::TurnCompleted(notif));
         let (events, sent, ended) = handle_with_usage(msg, Some(&usage));
 

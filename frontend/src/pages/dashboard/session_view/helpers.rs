@@ -303,12 +303,18 @@ pub(super) fn inject_message_metadata(
         return content.to_string();
     };
     if role_user && (user_id.is_some() || sender_name.is_some()) {
+        #[derive(serde::Serialize)]
+        struct SenderMeta<'a> {
+            user_id: &'a str,
+            name: &'a str,
+        }
         obj.insert(
             "_sender".to_string(),
-            serde_json::json!({
-                "user_id": user_id.unwrap_or_default(),
-                "name": sender_name.unwrap_or_default(),
-            }),
+            serde_json::to_value(SenderMeta {
+                user_id: user_id.unwrap_or_default(),
+                name: sender_name.unwrap_or_default(),
+            })
+            .unwrap_or(serde_json::Value::Null),
         );
     }
     obj.insert(

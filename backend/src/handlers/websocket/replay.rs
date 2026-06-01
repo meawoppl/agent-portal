@@ -129,12 +129,18 @@ pub(super) fn replay_history(
                 // Reconstruct _sender for user messages from DB user_id
                 if msg.role == "user" {
                     if let Some(name) = user_names.get(&msg.user_id) {
+                        #[derive(serde::Serialize)]
+                        struct SenderMeta<'a> {
+                            user_id: String,
+                            name: &'a str,
+                        }
                         obj.insert(
                             "_sender".to_string(),
-                            serde_json::json!({
-                                "user_id": msg.user_id.to_string(),
-                                "name": name,
-                            }),
+                            serde_json::to_value(SenderMeta {
+                                user_id: msg.user_id.to_string(),
+                                name,
+                            })
+                            .unwrap_or(serde_json::Value::Null),
                         );
                     }
                 }
