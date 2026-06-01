@@ -20,6 +20,9 @@ jobs:
       - name: Check migration naming convention
         run: ./scripts/check-migration-names.sh
 
+      - name: Check production Rust does not use json! macro
+        run: python3 ./scripts/check-no-json-macro.py
+
   lint-css:
     name: CSS Lint
     runs-on: ubuntu-latest
@@ -365,4 +368,3 @@ jobs:
         with:
           name: launcher-windows-x86_64
           path: target/release/agent-portal.exe
-

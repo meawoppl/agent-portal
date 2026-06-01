@@ -139,12 +139,18 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             if needs_sender || created_at.is_some() {
                 if let Some(obj) = content_val.as_object_mut() {
                     if needs_sender {
+                        #[derive(serde::Serialize)]
+                        struct SenderMeta<'a> {
+                            user_id: &'a str,
+                            name: &'a str,
+                        }
                         obj.insert(
                             "_sender".to_string(),
-                            serde_json::json!({
-                                "user_id": sender_user_id.unwrap_or_default(),
-                                "name": sender_name.unwrap_or_default(),
-                            }),
+                            serde_json::to_value(SenderMeta {
+                                user_id: sender_user_id.as_deref().unwrap_or_default(),
+                                name: sender_name.as_deref().unwrap_or_default(),
+                            })
+                            .unwrap_or(serde_json::Value::Null),
                         );
                     }
                     if let Some(ref ts) = created_at {

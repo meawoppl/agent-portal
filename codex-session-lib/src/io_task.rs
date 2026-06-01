@@ -18,6 +18,9 @@ use session_lib::snapshot::SessionConfig;
 use session_lib::{TurnOutcome, TurnTracker};
 use tokio::sync::mpsc;
 
+use crate::events::{
+    to_raw_output, CodexUsageEvent, ThreadStartedEvent, TurnFailedEvent, UserEchoEvent,
+};
 use crate::handler::handle_codex_server_message;
 use crate::helpers::{extract_prompt_text, parse_request_id};
 
@@ -96,8 +99,7 @@ pub(crate) async fn codex_io_task(
     // all skip_serializing_if Some); the SDK's idiom for an "empty"
     // params is round-tripping through `{}` JSON. See codex-codes
     // 0.129.3 src/lib.rs:18-30 example.
-    let thread_params: ThreadStartParams = serde_json::from_value(serde_json::json!({}))
-        .expect("empty JSON object is a valid ThreadStartParams");
+    let thread_params = empty_thread_start_params();
     let (thread_id, thread_model) = match client.thread_start(&thread_params).await {
         Ok(resp) => {
             let model = non_empty_string(resp.model).or_else(|| configured_model_fallback.clone());
@@ -120,10 +122,9 @@ pub(crate) async fn codex_io_task(
 
     tracing::info!("Codex thread started: {}", thread_id);
 
-    let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-        "type": "thread.started",
-        "thread_id": &thread_id
-    })));
+    let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&ThreadStartedEvent::new(
+        &thread_id,
+    ))));
 
     let mut turn_active = false;
     let mut queued_prompts: VecDeque<String> = VecDeque::new();
@@ -133,7 +134,7 @@ pub(crate) async fn codex_io_task(
     // Set when a `turn/started` notification arrives; cleared when
     // `turn/completed` arrives.
     let mut current_turn_id: Option<String> = None;
-    let mut latest_token_usage: Option<(String, serde_json::Value)> = None;
+    let mut latest_token_usage: Option<(String, CodexUsageEvent)> = None;
     // Per-turn metrics tracker. `start`ed inside `start_codex_turn`,
     // updated as `ItemStarted` / `ItemCompleted` notifications come in,
     // finalized on `TurnCompleted`.
@@ -178,11 +179,11 @@ pub(crate) async fn codex_io_task(
                                 {
                                     latest_token_usage = Some((
                                         p.turn_id.clone(),
-                                        serde_json::json!({
-                                            "last": &p.token_usage.last,
-                                            "total": &p.token_usage.total,
-                                            "model_context_window": p.token_usage.model_context_window,
-                                        }),
+                                        CodexUsageEvent {
+                                            last: p.token_usage.last.clone(),
+                                            total: p.token_usage.total.clone(),
+                                            model_context_window: p.token_usage.model_context_window,
+                                        },
                                     ));
                                     // Latch the per-turn breakdown so the
                                     // finalized `TurnMetrics` can carry
@@ -383,16 +384,12 @@ pub(crate) async fn codex_io_task(
                                 error_message,
                                 method
                             );
-                            let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-                                "type": "turn.failed",
-                                "error": {
-                                    "message": format!(
-                                        "Codex emitted a frame this client could not parse ({}). \
-                                         Interrupting the turn to recover — please retry.",
-                                        error_message
-                                    )
-                                }
-                            })));
+                            let event = TurnFailedEvent::new(format!(
+                                "Codex emitted a frame this client could not parse ({}). \
+                                 Interrupting the turn to recover \u{2014} please retry.",
+                                error_message
+                            ));
+                            let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&event)));
 
                             let rendered = raw_json
                                 .as_ref()
@@ -407,13 +404,9 @@ pub(crate) async fn codex_io_task(
                                 method.as_deref().map(|m| format!(" (`{}`)", m)).unwrap_or_default(),
                                 rendered
                             );
-                            let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-                                "type": "portal",
-                                "content": [{
-                                    "type": "text",
-                                    "text": portal_text
-                                }]
-                            })));
+                            let _ = event_tx.send(IoEvent::RawOutput(
+                                shared::PortalMessage::text(portal_text).to_json(),
+                            ));
 
                             let interrupt_params = TurnInterruptParams {
                                 thread_id: thread_id.clone(),
@@ -496,44 +489,75 @@ async fn start_codex_turn(
     // frontend's content-based pending-match. Skip <system-reminder> wrappers
     // (portal reminder injection) because those shouldn't appear in transcript.
     if !prompt.starts_with("<system-reminder>") {
-        let echo = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": [{"type": "text", "text": prompt}]
-            },
-            "content": prompt,
-        });
-        let _ = event_tx.send(IoEvent::RawOutput(echo));
+        let echo = UserEchoEvent::new(prompt);
+        let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&echo)));
+        return start_codex_turn_request(client, thread_id, echo.content, event_tx).await;
     }
 
+    start_codex_turn_request(client, thread_id, prompt, event_tx).await
+}
+
+async fn start_codex_turn_request(
+    client: &mut CodexAsyncClient,
+    thread_id: &str,
+    prompt: String,
+    event_tx: &mpsc::UnboundedSender<IoEvent>,
+) -> bool {
     tracing::info!("Starting Codex turn with {} chars", prompt.len());
 
     // codex-codes 0.129.3 generated TurnStartParams from its schema:
     // `reasoning_effort` is now `effort`, a new required `text_elements` field
     // landed on `UserInput::Text`, and the struct has many more Option fields
-    // with no Default impl. We construct the explicit fields and `..` from an
-    // empty JSON baseline to inherit Nones for the rest.
-    let turn_params_base: TurnStartParams =
-        serde_json::from_value(serde_json::json!({"threadId": thread_id, "input": []}))
-            .expect("threadId + empty input is a valid TurnStartParams base");
-    let turn_params = TurnStartParams {
-        thread_id: thread_id.to_string(),
+    // with no Default impl. Keep this construction explicit so SDK schema
+    // changes become compile errors.
+    let turn_params = turn_start_params(thread_id, prompt);
+    match client.turn_start(&turn_params).await {
+        Ok(_) => true,
+        Err(e) => {
+            let event = TurnFailedEvent::new(e.to_string());
+            let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&event)));
+            false
+        }
+    }
+}
+
+fn empty_thread_start_params() -> ThreadStartParams {
+    ThreadStartParams {
+        approval_policy: None,
+        approvals_reviewer: None,
+        base_instructions: None,
+        config: None,
+        cwd: None,
+        developer_instructions: None,
+        ephemeral: None,
+        model: None,
+        model_provider: None,
+        personality: None,
+        sandbox: None,
+        service_name: None,
+        service_tier: None,
+        session_start_source: None,
+        thread_source: None,
+    }
+}
+
+fn turn_start_params(thread_id: &str, prompt: String) -> TurnStartParams {
+    TurnStartParams {
+        approval_policy: None,
+        approvals_reviewer: None,
+        cwd: None,
+        effort: None,
         input: vec![UserInput::Text {
             text: prompt,
             text_elements: None,
         }],
-        ..turn_params_base
-    };
-    match client.turn_start(&turn_params).await {
-        Ok(_) => true,
-        Err(e) => {
-            let _ = event_tx.send(IoEvent::RawOutput(serde_json::json!({
-                "type": "turn.failed",
-                "error": { "message": e.to_string() }
-            })));
-            false
-        }
+        model: None,
+        output_schema: None,
+        personality: None,
+        sandbox_policy: None,
+        service_tier: None,
+        summary: None,
+        thread_id: thread_id.to_string(),
     }
 }
 
