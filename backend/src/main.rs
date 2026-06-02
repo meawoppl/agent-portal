@@ -479,6 +479,10 @@ async fn main() -> anyhow::Result<()> {
         )
         // Proxy token management endpoints
         .route(
+            "/api/proxy/resolve-session",
+            post(handlers::sessions::resolve_proxy_session),
+        )
+        .route(
             "/api/proxy-tokens",
             get(handlers::proxy_tokens::list_tokens_handler)
                 .post(handlers::proxy_tokens::create_token_handler),

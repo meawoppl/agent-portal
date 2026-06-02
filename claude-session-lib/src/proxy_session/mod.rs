@@ -24,8 +24,9 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use git_metadata::{
-    check_and_send_branch_update, codex_output_has_git_signal, get_git_branch, get_pr_url,
-    get_repo_url, GitMetadataState, GitRefreshTrigger,
+    check_and_send_branch_update, check_and_send_branch_update_if_branch_changed,
+    codex_output_has_git_signal, get_git_branch, get_pr_url, get_repo_url, GitMetadataState,
+    GitRefreshTrigger,
 };
 use output_forwarder::spawn_output_forwarder;
 use wiggum::{handle_session_event_with_wiggum, WiggumState};
@@ -392,16 +393,14 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
         .git_branch
         .as_deref()
         .and_then(|b| get_pr_url(&session.config.working_directory, b));
-    if pr_url.is_some() || repo_url.is_some() {
-        let update_msg = ProxyToServer::SessionUpdate {
-            session_id: config_with_branch.session_id,
-            git_branch: config_with_branch.git_branch.clone(),
-            pr_url,
-            repo_url,
-        };
-        if conn.send(update_msg).await.is_err() {
-            error!("Failed to send initial session update");
-        }
+    let update_msg = ProxyToServer::SessionUpdate {
+        session_id: config_with_branch.session_id,
+        git_branch: config_with_branch.git_branch.clone(),
+        pr_url,
+        repo_url,
+    };
+    if conn.send(update_msg).await.is_err() {
+        error!("Failed to send initial session update");
     }
 
     // Replay pending messages after successful registration.
@@ -810,6 +809,14 @@ async fn run_main_loop<A: Agent>(
             }
 
             Some(text) = input_rx.recv() => {
+                check_and_send_branch_update_if_branch_changed(
+                    &state.ws_write,
+                    state.session_id,
+                    &state.working_directory,
+                    &state.git_metadata,
+                )
+                .await;
+
                 debug!("sending to claude process: {}", truncate(&text, 100));
 
                 if let Err(e) = claude_session.send_input(serde_json::Value::String(text)).await {
@@ -821,6 +828,13 @@ async fn run_main_loop<A: Agent>(
             // Wiggum mode activation — set state and send prompt atomically
             Some(original_prompt) = state.wiggum_rx.recv() => {
                 info!("Wiggum mode activated with prompt: {}", truncate(&original_prompt, 60));
+                check_and_send_branch_update_if_branch_changed(
+                    &state.ws_write,
+                    state.session_id,
+                    &state.working_directory,
+                    &state.git_metadata,
+                )
+                .await;
                 let wiggum_prompt = format!(
                     "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
                     original_prompt

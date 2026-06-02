@@ -224,25 +224,30 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
 /// for thread/turn-started signals and streaming deltas (those don't render
 /// visible cards, so the sparkline stays clean) and for unparseable JSON.
 fn classify_codex_event(output: &str) -> Option<ActivityTag> {
-    use crate::components::codex_renderer::CodexEvent;
+    use crate::components::codex_renderer::{CodexEvent, CodexItem};
     use codex_codes::io::items::ThreadItem;
     let event: CodexEvent = serde_json::from_str(output).ok()?;
     match event {
         CodexEvent::ItemStarted { item: Some(item) }
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
-            ThreadItem::Error(_) => Some(ActivityTag::Error),
-            ThreadItem::CommandExecution(ref it) if command_execution_reads_file(&it.command) => {
+            CodexItem::ContextCompaction(_) => Some(ActivityTag::Assistant),
+            CodexItem::Thread(ThreadItem::Error(_)) => Some(ActivityTag::Error),
+            CodexItem::Thread(ThreadItem::CommandExecution(ref it))
+                if command_execution_reads_file(&it.command) =>
+            {
                 Some(ActivityTag::Read)
             }
-            ThreadItem::AgentMessage(_)
-            | ThreadItem::Reasoning(_)
-            | ThreadItem::CommandExecution(_)
-            | ThreadItem::FileChange(_)
-            | ThreadItem::McpToolCall(_)
-            | ThreadItem::WebSearch(_)
-            | ThreadItem::TodoList(_)
-            | ThreadItem::UserMessage(_) => Some(ActivityTag::Assistant),
+            CodexItem::Thread(
+                ThreadItem::AgentMessage(_)
+                | ThreadItem::Reasoning(_)
+                | ThreadItem::CommandExecution(_)
+                | ThreadItem::FileChange(_)
+                | ThreadItem::McpToolCall(_)
+                | ThreadItem::WebSearch(_)
+                | ThreadItem::TodoList(_)
+                | ThreadItem::UserMessage(_),
+            ) => Some(ActivityTag::Assistant),
         },
         CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => {
             Some(ActivityTag::Result)

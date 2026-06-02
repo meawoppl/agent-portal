@@ -230,6 +230,24 @@ pub(super) async fn check_and_send_branch_update(
     }
 }
 
+/// Cheap input-path refresh: only pay for PR/repo lookup when the branch changed.
+pub(super) async fn check_and_send_branch_update_if_branch_changed(
+    ws_write: &SharedWsWrite,
+    session_id: Uuid,
+    working_directory: &str,
+    state: &GitMetadataState,
+) {
+    let new_branch = get_git_branch(working_directory);
+    let branch_changed = {
+        let branch_guard = state.current_branch.lock().await;
+        *branch_guard != new_branch
+    };
+
+    if branch_changed {
+        check_and_send_branch_update(ws_write, session_id, working_directory, state).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
