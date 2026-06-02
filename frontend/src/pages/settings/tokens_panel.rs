@@ -26,7 +26,9 @@ pub fn count_expiring_tokens(tokens: &[ProxyTokenInfo]) -> usize {
         .iter()
         .filter(|t| !t.revoked)
         .filter(|t| {
-            days_until_expiration(&t.expires_at)
+            t.expires_at
+                .as_deref()
+                .and_then(days_until_expiration)
                 .map(|d| (0..=7).contains(&d))
                 .unwrap_or(false)
         })
@@ -71,7 +73,7 @@ fn token_row(props: &TokenRowProps) -> Html {
     let on_renew = props.on_renew.clone();
     let token_id = token.id;
 
-    let days_left = days_until_expiration(&token.expires_at);
+    let days_left = token.expires_at.as_deref().and_then(days_until_expiration);
     let is_expired = days_left.map(|d| d < 0).unwrap_or(false);
     let is_expiring_soon = days_left.map(|d| (0..=7).contains(&d)).unwrap_or(false);
 
@@ -121,7 +123,9 @@ fn token_row(props: &TokenRowProps) -> Html {
             <td class="token-last-used">
                 { token.last_used_at.as_ref().map(|t| utils::format_timestamp(t)).unwrap_or_else(|| "Never".to_string()) }
             </td>
-            <td class="token-expires">{ utils::format_timestamp(&token.expires_at) }</td>
+            <td class="token-expires">
+                { token.expires_at.as_ref().map(|t| utils::format_timestamp(t)).unwrap_or_else(|| "Never".to_string()) }
+            </td>
             <td class={status_class}>{ status_text }</td>
             <td class="token-actions">
                 if !token.revoked {

@@ -63,8 +63,9 @@ diesel::table! {
         token_hash -> Varchar,
         created_at -> Timestamp,
         last_used_at -> Nullable<Timestamp>,
-        expires_at -> Timestamp,
+        expires_at -> Nullable<Timestamp>,
         revoked -> Bool,
+        session_id -> Nullable<Uuid>,
     }
 }
 

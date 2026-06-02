@@ -302,12 +302,15 @@ pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<S
         .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     let token_id = Uuid::new_v4();
+    // Launch tokens never expire. The token is bound to its session at proxy
+    // registration and revoked when the session terminates, so its lifetime
+    // tracks the session rather than a fixed TTL. See #932.
     let token = crate::jwt::create_proxy_token(
         app_state.jwt_secret.as_bytes(),
         token_id,
         user_id,
         &user.email,
-        1, // 1 day expiration for launched sessions
+        None,
     )
     .map_err(|e| AppError::Internal(format!("Failed to create launch token: {}", e)))?;
 
@@ -315,9 +318,9 @@ pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<S
     let token_hash = crate::jwt::hash_token(&token);
     let new_token = crate::models::NewProxyAuthToken {
         user_id,
-        name: "launcher-spawned".to_string(),
+        name: crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME.to_string(),
         token_hash,
-        expires_at: (chrono::Utc::now() + chrono::Duration::days(1)).naive_utc(),
+        expires_at: None,
     };
 
     use crate::schema::proxy_auth_tokens;
@@ -327,40 +330,6 @@ pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<S
         .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
     Ok(token)
-}
-
-/// POST /api/launchers/:launcher_id/renew-token - Manually renew a launcher's auth token
-pub async fn renew_launcher_token(
-    State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Path(launcher_id): Path<Uuid>,
-) -> Result<EmptyResponse, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
-
-    // Verify the launcher belongs to this user and get its current token info
-    let (old_token_hash, sender) = {
-        let launcher = app_state
-            .session_manager
-            .launchers
-            .get(&launcher_id)
-            .ok_or(AppError::NotFound("Launcher not found"))?;
-        if launcher.user_id != user_id {
-            return Err(AppError::Forbidden);
-        }
-        (launcher.token_hash.clone(), launcher.sender.clone())
-    };
-
-    crate::handlers::websocket::launcher_socket::renew_launcher_token_for(
-        &app_state,
-        launcher_id,
-        user_id,
-        old_token_hash,
-        sender,
-    )
-    .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
-
-    info!("Manually renewed token for launcher {}", launcher_id);
-    Ok(EmptyResponse::OK)
 }
 
 /// POST /api/launchers/:launcher_id/update - Tell the launcher to fetch the
@@ -472,8 +441,6 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
-            token_hash: None,
-            token_expires_at: None,
         }
     }
 

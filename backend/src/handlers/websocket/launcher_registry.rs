@@ -16,10 +16,6 @@ pub struct LauncherConnection {
     pub running_sessions: Vec<Uuid>,
     pub working_directory: Option<String>,
     pub version: String,
-    /// SHA256 hash of the launcher's current auth token (for revocation on renewal)
-    pub token_hash: Option<String>,
-    /// When the launcher's auth token expires
-    pub token_expires_at: Option<chrono::NaiveDateTime>,
 }
 
 impl SessionManager {
@@ -90,10 +86,6 @@ impl SessionManager {
                 running_sessions: entry.value().running_sessions.len() as u32,
                 working_directory: entry.value().working_directory.clone(),
                 version: entry.value().version.clone(),
-                token_expires_at: entry
-                    .value()
-                    .token_expires_at
-                    .map(|dt| dt.and_utc().to_rfc3339()),
             })
             .collect()
     }
