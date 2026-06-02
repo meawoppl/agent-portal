@@ -40,15 +40,15 @@ pub enum CodexEvent {
     },
     #[serde(rename = "item.started")]
     ItemStarted {
-        item: Option<ThreadItem>,
+        item: Option<CodexItem>,
     },
     #[serde(rename = "item.updated")]
     ItemUpdated {
-        item: Option<ThreadItem>,
+        item: Option<CodexItem>,
     },
     #[serde(rename = "item.completed")]
     ItemCompleted {
-        item: Option<ThreadItem>,
+        item: Option<CodexItem>,
     },
     Error {
         message: Option<String>,
@@ -88,6 +88,28 @@ pub enum CodexEvent {
     },
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CodexItem {
+    // TODO(SDK #930): move this variant to codex-codes once the generated
+    // ThreadItem model includes `contextCompaction`.
+    ContextCompaction(ContextCompactionItem),
+    Thread(ThreadItem),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextCompactionItem {
+    pub id: String,
+    #[serde(rename = "type")]
+    item_type: ContextCompactionItemType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum ContextCompactionItemType {
+    #[serde(rename = "contextCompaction", alias = "context_compaction")]
+    ContextCompaction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -267,6 +289,13 @@ pub fn thread_item_id(item: &ThreadItem) -> &str {
     }
 }
 
+pub fn codex_item_id(item: &CodexItem) -> &str {
+    match item {
+        CodexItem::ContextCompaction(it) => &it.id,
+        CodexItem::Thread(it) => thread_item_id(it),
+    }
+}
+
 /// Extract the `item_id` from a Codex event JSON, if it carries one. Returns
 /// `None` for events without items (turn-level events, deltas, errors) or for
 /// unparseable JSON. The group renderer uses this to dedupe progressive
@@ -280,7 +309,7 @@ pub fn codex_event_item_id(json: &str) -> Option<String> {
         | CodexEvent::ItemCompleted { item } => item?,
         _ => return None,
     };
-    Some(thread_item_id(&item).to_string())
+    Some(codex_item_id(&item).to_string())
 }
 
 /// Check if a Codex message indicates "awaiting" (turn complete or turn failed)

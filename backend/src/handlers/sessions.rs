@@ -5,7 +5,10 @@ use axum::{
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::Serialize;
-use shared::api::{AddMemberRequest, UpdateMemberRoleRequest};
+use shared::api::{
+    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse,
+    UpdateMemberRoleRequest,
+};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -69,6 +72,79 @@ pub async fn list_sessions(
     Ok(Json(SessionListResponse {
         sessions: sessions_with_role,
     }))
+}
+
+pub async fn resolve_proxy_session(
+    State(app_state): State<Arc<AppState>>,
+    Json(req): Json<ResolveProxySessionRequest>,
+) -> Result<Json<ResolveProxySessionResponse>, AppError> {
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let current_user_id = proxy_request_user_id(&app_state, &mut conn, req.auth_token.as_deref())?;
+
+    use crate::schema::{session_members, sessions};
+
+    let mut query = sessions::table
+        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+        .filter(session_members::user_id.eq(current_user_id))
+        .filter(sessions::working_directory.eq(req.working_directory))
+        .filter(sessions::agent_type.eq(req.agent_type.as_str()))
+        .filter(sessions::scheduled_task_id.is_null())
+        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::paused.eq(false))
+        .select(Session::as_select())
+        .into_boxed();
+
+    if let Some(hostname) = req.hostname.as_deref().filter(|h| !h.is_empty()) {
+        query = query.filter(sessions::hostname.eq(hostname));
+    }
+
+    let session = query
+        .order((sessions::last_activity.desc(), sessions::created_at.desc()))
+        .first::<Session>(&mut conn)
+        .optional()
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    Ok(Json(match session {
+        Some(session) => ResolveProxySessionResponse {
+            session_id: Some(session.id),
+            session_name: Some(session.session_name),
+            created_at: Some(session.created_at.and_utc().to_rfc3339()),
+            last_activity: Some(session.last_activity.and_utc().to_rfc3339()),
+        },
+        None => ResolveProxySessionResponse {
+            session_id: None,
+            session_name: None,
+            created_at: None,
+            last_activity: None,
+        },
+    }))
+}
+
+fn proxy_request_user_id(
+    app_state: &AppState,
+    conn: &mut diesel::pg::PgConnection,
+    auth_token: Option<&str>,
+) -> Result<Uuid, AppError> {
+    use crate::schema::users;
+
+    if let Some(token) = auth_token {
+        return crate::handlers::proxy_tokens::verify_and_get_user(app_state, conn, token)
+            .map(|(user_id, _)| user_id)
+            .map_err(|status| match status {
+                axum::http::StatusCode::FORBIDDEN => AppError::Forbidden,
+                _ => AppError::Unauthorized,
+            });
+    }
+
+    if app_state.dev_mode {
+        return users::table
+            .filter(users::email.eq("testing@testing.local"))
+            .select(users::id)
+            .first::<Uuid>(conn)
+            .map_err(|e| AppError::DbQuery(e.to_string()));
+    }
+
+    Err(AppError::Unauthorized)
 }
 
 #[derive(Debug, Serialize)]
