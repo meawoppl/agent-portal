@@ -188,9 +188,6 @@ pub struct LauncherInfo {
     /// Launcher binary version
     #[serde(default)]
     pub version: String,
-    /// ISO 8601 timestamp when the launcher's auth token expires
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_expires_at: Option<String>,
 }
 
 /// API types for HTTP endpoints

@@ -634,8 +634,6 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
-            token_hash: None,
-            token_expires_at: None,
         }
     }
 
@@ -723,8 +721,6 @@ mod tests {
                         running_sessions: Vec::new(),
                         working_directory: None,
                         version: "test".to_string(),
-                        token_hash: None,
-                        token_expires_at: None,
                     }
                 };
                 mgr_clone

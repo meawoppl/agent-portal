@@ -129,8 +129,13 @@ pub struct ProxyAuthToken {
     pub token_hash: String,
     pub created_at: NaiveDateTime,
     pub last_used_at: Option<NaiveDateTime>,
-    pub expires_at: NaiveDateTime,
+    /// `None` means the token never expires (launch/launcher tokens). User
+    /// dashboard tokens still carry an explicit expiry. See #932.
+    pub expires_at: Option<NaiveDateTime>,
     pub revoked: bool,
+    /// Session whose proxy holds this token, if it is a launch token. Used to
+    /// revoke the token when that session terminates.
+    pub session_id: Option<Uuid>,
 }
 
 #[derive(Debug, Insertable)]
@@ -139,7 +144,8 @@ pub struct NewProxyAuthToken {
     pub user_id: Uuid,
     pub name: String,
     pub token_hash: String,
-    pub expires_at: NaiveDateTime,
+    /// `None` mints a non-expiring token.
+    pub expires_at: Option<NaiveDateTime>,
 }
 
 // ============================================================================

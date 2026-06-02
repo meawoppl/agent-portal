@@ -6,10 +6,10 @@ mod sounds_panel;
 mod tokens_panel;
 
 use appearance_panel::AppearancePanel;
-use launchers_panel::{count_expiring_launchers, LaunchersPanel};
+use launchers_panel::LaunchersPanel;
 use performance_panel::PerformancePanel;
 use sessions_panel::SessionsPanel;
-use shared::{LauncherInfo, ProxyTokenInfo, SessionInfo};
+use shared::{ProxyTokenInfo, SessionInfo};
 use sounds_panel::SoundsPanel;
 use tokens_panel::{count_expiring_tokens, TokensPanel};
 use yew::prelude::*;
@@ -36,7 +36,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     // Counts for tab badges (updated when panels load their data)
     let session_count = use_state(|| 0usize);
     let expiring_token_count = use_state(|| 0usize);
-    let expiring_launcher_count = use_state(|| 0usize);
 
     let on_sessions_loaded = {
         let session_count = session_count.clone();
@@ -49,13 +48,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         let expiring_token_count = expiring_token_count.clone();
         Callback::from(move |tokens: Vec<ProxyTokenInfo>| {
             expiring_token_count.set(count_expiring_tokens(&tokens));
-        })
-    };
-
-    let on_launchers_loaded = {
-        let expiring_launcher_count = expiring_launcher_count.clone();
-        Callback::from(move |launchers: Vec<LauncherInfo>| {
-            expiring_launcher_count.set(count_expiring_launchers(&launchers));
         })
     };
 
@@ -132,9 +124,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     onclick={on_launchers_tab}
                 >
                     { "Launchers" }
-                    if *expiring_launcher_count > 0 {
-                        <span class="expiring-badge">{ *expiring_launcher_count }</span>
-                    }
                 </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sounds).then_some("active"))}
@@ -161,7 +150,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
                 }
                 if *active_tab == SettingsTab::Launchers {
-                    <LaunchersPanel on_launchers_loaded={on_launchers_loaded} />
+                    <LaunchersPanel />
                 }
                 if *active_tab == SettingsTab::Sounds {
                     <SoundsPanel />

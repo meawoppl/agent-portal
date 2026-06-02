@@ -105,6 +105,10 @@ pub fn delete_session_with_data(
     )
     .execute(conn);
 
+    // Revoke any (non-expiring) launch tokens bound to this session so they
+    // don't outlive the session row. See #932.
+    crate::handlers::proxy_tokens::revoke_tokens_for_session(conn, session_id);
+
     // Delete the session
     diesel::delete(sessions::table.filter(sessions::id.eq(session_id)))
         .execute(conn)

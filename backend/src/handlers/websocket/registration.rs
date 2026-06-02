@@ -115,7 +115,7 @@ pub fn register_or_update_session(
         .optional()
         .unwrap_or(None);
 
-    if let Some(existing_session) = existing {
+    let result = if let Some(existing_session) = existing {
         // Authorization gate for reattach: the resolved user_id must be the
         // session's owner or a `session_members` row. Same error shape as
         // "session not found" so a probe can't distinguish the two cases.
@@ -176,7 +176,18 @@ pub fn register_or_update_session(
         }
 
         create_new_session(&mut conn, requesting_user_id, params)
+    };
+
+    // Bind the auth token to the session it just registered, and revoke any
+    // token previously bound to that session. Launch tokens never expire, so
+    // this binding is what ties a token's lifetime to its session. See #932.
+    if result.success {
+        if let (Some(session_id), Some(token)) = (result.session_id, params.auth_token) {
+            super::super::proxy_tokens::link_token_to_session(&mut conn, token, session_id);
+        }
     }
+
+    result
 }
 
 /// Returns true if `user_id` owns the session or has a `session_members` row for it.
