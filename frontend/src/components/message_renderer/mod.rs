@@ -140,11 +140,34 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             let ts = messages
                 .first()
                 .and_then(|json| extract_local_timestamp(json));
+
+            // A run of `thinking_tokens` markers collapses to a single compact
+            // chip: the `thinking` badge plus a `× N` odometer that rolls up to
+            // the number of pulses. No body — these markers carry none.
+            if *category == GroupCategory::Thinking {
+                let count = messages.len();
+                return html! {
+                    <div class="claude-message thinking-pulse-group" title={ts.unwrap_or_default()}>
+                        <div class="message-header">
+                            <span class="message-type-badge thinking">{ "thinking" }</span>
+                            if count > 1 {
+                                <span class="message-count" title={format!("{} thinking pulses", count)}>
+                                    { "\u{00d7} " }
+                                    <crate::components::CountUp target={count as i64} />
+                                </span>
+                            }
+                        </div>
+                    </div>
+                };
+            }
+
             let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
             let wrapper_class = match category {
                 GroupCategory::User => "user-message",
                 GroupCategory::Portal => "portal-message",
                 GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
+                // Handled above with an early return; arm kept for exhaustiveness.
+                GroupCategory::Thinking => "assistant-message",
             };
             let visible = visible_group_indices(*category, messages);
             let visible_count = visible.len();
@@ -309,6 +332,18 @@ mod tests {
 
     fn group_for_codex_tests(messages: &[String]) -> Vec<MessageGroup> {
         group_messages(messages, shared::AgentType::Codex, None)
+    }
+
+    /// A `system`/`thinking_tokens` marker — the bodyless per-reasoning-step
+    /// event the Claude CLI emits, which the portal collapses into one chip.
+    fn thinking_tokens_message() -> String {
+        serde_json::json!({
+            "type": "system",
+            "subtype": "thinking_tokens",
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
     }
 
     /// Realistic Claude wire shape for a user message containing a single
@@ -621,6 +656,32 @@ mod tests {
         assert_eq!(groups.len(), 3);
     }
 
+    /// A run of `thinking_tokens` markers must collapse into a single
+    /// `Thinking` group (one counted chip), not one empty badge per marker —
+    /// the regression target for the "wall of THINKING_TOKENS badges" symptom.
+    #[test]
+    fn serial_thinking_tokens_collapse_into_one_group() {
+        let messages = vec![
+            thinking_tokens_message(),
+            thinking_tokens_message(),
+            thinking_tokens_message(),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(groups.len(), 1);
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Thinking,
+                messages,
+                label,
+                ..
+            } => {
+                assert_eq!(messages.len(), 3);
+                assert_eq!(label, "thinking");
+            }
+            other => panic!("expected Thinking run, got {:?}", other),
+        }
+    }
+
     #[test]
     fn codex_event_classifies_into_codex_group() {
         let msg = codex_item_started_agent_message("hi");
@@ -722,6 +783,11 @@ mod tests {
                 })
                 .to_string(),
                 None,
+            ),
+            (
+                "system thinking_tokens marker collapses into the Thinking group",
+                thinking_tokens_message(),
+                Some(GroupCategory::Thinking),
             ),
             (
                 "result message",

@@ -2,6 +2,7 @@ pub mod charts;
 pub mod codex_renderer;
 pub mod copy_button;
 mod copy_command;
+mod count_up;
 mod cron_describe;
 mod diff;
 pub mod expandable;
@@ -18,6 +19,7 @@ mod turn_metrics_pill;
 mod voice_input;
 
 pub use copy_command::CopyCommand;
+pub use count_up::CountUp;
 pub use launch_dialog::LaunchDialog;
 pub use message_renderer::{group_is_turn_terminator, group_messages, MessageGroupRenderer};
 pub use proxy_token_setup::ProxyTokenSetup;
