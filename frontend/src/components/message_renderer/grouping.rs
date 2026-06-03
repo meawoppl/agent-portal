@@ -26,6 +26,10 @@ pub enum GroupCategory {
     User,
     /// Consecutive Codex protocol events (any non-Unknown `CodexEvent`).
     Codex,
+    /// Consecutive `system`/`thinking_tokens` markers emitted by the Claude CLI.
+    /// These carry no renderable body — the portal collapses a run of them into
+    /// a single compact `thinking × N` chip instead of one empty badge each.
+    Thinking,
 }
 
 impl GroupCategory {
@@ -39,6 +43,7 @@ impl GroupCategory {
             GroupCategory::Portal => "p",
             GroupCategory::User => "u",
             GroupCategory::Codex => "x",
+            GroupCategory::Thinking => "t",
         }
     }
 }
@@ -220,6 +225,16 @@ pub(super) fn classify(
                 category: GroupCategory::Portal,
                 label: "Portal".to_string(),
                 badge_class: "portal".to_string(),
+            });
+        }
+        // The Claude CLI emits a bodyless `system`/`thinking_tokens` marker per
+        // reasoning step; a long turn produces a wall of them. Fold a run into
+        // one `Thinking` group so the renderer can show a single counted chip.
+        Ok(ClaudeMessage::System(msg)) if msg.subtype.as_str() == "thinking_tokens" => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Thinking,
+                label: "thinking".to_string(),
+                badge_class: "thinking".to_string(),
             });
         }
         _ => {}

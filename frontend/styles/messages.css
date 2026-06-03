@@ -270,6 +270,31 @@
     margin-left: 0.25rem;
 }
 
+/* Condensed run of `thinking_tokens` markers — a single compact chip with a
+   `× N` pulse-count odometer, in place of one empty "THINKING_TOKENS" badge
+   per marker. Purple to read as "reasoning", distinct from the blue system
+   badge. */
+.message-type-badge.thinking {
+    background: rgba(187, 154, 247, 0.18);
+    color: #bb9af7;
+}
+
+.thinking-pulse-group {
+    padding: 0.2rem 0;
+    opacity: 0.85;
+}
+
+.thinking-pulse-group .message-count {
+    background: rgba(187, 154, 247, 0.22);
+    color: #bb9af7;
+}
+
+/* Odometer digits: tabular figures so the width doesn't jitter as it rolls. */
+.count-up {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
+
 .init-badge {
     font-size: 0.7rem;
     font-weight: 500;
