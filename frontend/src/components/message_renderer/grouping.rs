@@ -257,6 +257,29 @@ pub(super) fn classify(
     None
 }
 
+/// Peak `estimated_tokens` across a run of `thinking_tokens` markers — the
+/// burst's running thinking-token total. Each marker reports the *cumulative*
+/// estimate so far (`50` → `150` → `250` …), so the maximum (last) value is the
+/// total for the run; returns `0` when none parse.
+///
+/// `estimated_tokens` lives in the flattened `SystemMessage.data` because
+/// claude-codes 2.1.141 models `thinking_tokens` as `SystemSubtype::Unknown`
+/// (no typed fields). TODO(SDK): push a typed `thinking_tokens` system variant
+/// upstream to `rust-code-agent-sdks` so this reads a field instead of poking
+/// `data`.
+pub(super) fn thinking_tokens_estimate(messages: &[String]) -> i64 {
+    messages
+        .iter()
+        .filter_map(|json| match ClaudeMessage::parse(json) {
+            Ok(ClaudeMessage::System(msg)) => {
+                msg.data.get("estimated_tokens").and_then(|v| v.as_i64())
+            }
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 fn group_label(identity: &MessageIdentity, messages: &[String]) -> String {
     if identity.category != GroupCategory::Assistant || identity.label == "Codex" {
         return identity.label.clone();

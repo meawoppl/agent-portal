@@ -1,10 +1,14 @@
-//! A small "odometer" component that animates an integer rolling up from 0 to
-//! a target value once, on mount. Used for the per-turn reasoning-token chip in
-//! the turn-metrics footer and for the condensed `thinking` pulse-count chip.
+//! A small "odometer" component that animates an integer climbing toward a
+//! target value. Used for the per-turn reasoning-token chip in the turn-metrics
+//! footer and for the condensed `thinking` token-count chip.
 //!
-//! The animation is a one-shot reveal (not a live stream): it ticks from 0 to
-//! `target` over a fixed number of frames and then stops, dropping its timer so
-//! historical transcript cards don't leave intervals running forever.
+//! It climbs from its *current* displayed value to the target — not from 0 — so
+//! when the target keeps growing (e.g. live `thinking_tokens` estimates arriving
+//! one after another), the number keeps ticking upward smoothly instead of
+//! snapping back to 0 and re-racing on every update. On mount the current value
+//! is 0, so the first reveal still rolls 0→target. The timer is dropped once the
+//! target is reached and on unmount, so historical transcript cards never leave
+//! an interval running.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -12,11 +16,11 @@ use std::rc::Rc;
 use gloo::timers::callback::Interval;
 use yew::prelude::*;
 
-/// Number of animation frames and the per-frame delay. ~20 frames at 28ms is a
-/// ~560ms roll — long enough to read as "counting up", short enough not to feel
-/// laggy when several land on screen at once.
-const FRAMES: i64 = 20;
-const FRAME_MS: u32 = 28;
+/// Animation cadence. ~30 frames at 40ms is a ~1.2s climb per leg — slow enough
+/// to read as a deliberate count-up, and since each new target resumes from the
+/// current value the overall motion stays smooth as estimates stream in.
+const FRAMES: i64 = 30;
+const FRAME_MS: u32 = 40;
 
 #[derive(Properties, PartialEq)]
 pub struct CountUpProps {
@@ -43,16 +47,20 @@ pub fn count_up(props: &CountUpProps) -> Html {
         let value = value.clone();
         let interval = interval.clone();
         use_effect_with(target, move |&target| {
-            value.set(0);
-            if target > 0 {
-                let step = ((target as f64) / FRAMES as f64).ceil() as i64;
-                let tick = Rc::new(Cell::new(0i64));
+            // Resume the climb from wherever the display currently sits, not 0,
+            // so a growing target keeps ticking up smoothly instead of re-racing.
+            let start = *value;
+            // Cancel any in-flight leg before starting a new one.
+            interval.borrow_mut().take();
+            if target > start {
+                let step = (((target - start) as f64) / FRAMES as f64).ceil() as i64;
+                let cur = Rc::new(Cell::new(start));
                 let iv = Interval::new(FRAME_MS, {
                     let value = value.clone();
                     let interval = interval.clone();
                     move || {
-                        let next = (tick.get() + step).min(target);
-                        tick.set(next);
+                        let next = (cur.get() + step).min(target);
+                        cur.set(next);
                         value.set(next);
                         if next >= target {
                             // Reached the target: drop our handle to stop ticking.
@@ -61,6 +69,10 @@ pub fn count_up(props: &CountUpProps) -> Html {
                     }
                 });
                 *interval.borrow_mut() = Some(iv);
+            } else if target < start {
+                // Target moved backwards (e.g. a fresh card reusing the slot):
+                // snap down rather than animating in reverse.
+                value.set(target);
             }
             let interval = interval.clone();
             move || {
