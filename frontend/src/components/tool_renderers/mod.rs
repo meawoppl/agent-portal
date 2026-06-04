@@ -4,11 +4,9 @@ mod interactive;
 mod search;
 mod task;
 
+use serde::de::DeserializeOwned;
 use serde_json::Value;
-use shared::{
-    AskUserQuestionInput, BashInput, EditInput, ExitPlanModeInput, GlobInput, GrepInput, ReadInput,
-    TaskInput, TodoWriteInput, ToolInput, WebFetchInput, WebSearchInput, WriteInput,
-};
+use shared::ReadInput;
 use yew::prelude::*;
 
 use self::bash::render_bash_tool;
@@ -22,48 +20,25 @@ use self::search::{
 use self::task::render_task_tool;
 use super::expandable::ExpandableText;
 
-/// Project-local equivalent of `TryFrom<ToolInput>` for the upstream
-/// `claude_codes::tool_inputs::*Input` variant structs. Orphan rules forbid an
-/// `impl TryFrom<ToolInput> for BashInput` here (both sides are foreign), so
-/// each variant struct implements this local trait instead. The blanket impl
-/// in [`extract_tool_input`] keeps call sites to one line.
-pub trait FromToolInput: Sized {
-    fn from_tool_input(input: ToolInput) -> Option<Self>;
-}
-
-macro_rules! impl_from_tool_input {
-    ($variant:ident, $inner:ty) => {
-        impl FromToolInput for $inner {
-            fn from_tool_input(input: ToolInput) -> Option<Self> {
-                match input {
-                    ToolInput::$variant(v) => Some(v),
-                    _ => None,
-                }
-            }
-        }
-    };
-}
-
-impl_from_tool_input!(Bash, BashInput);
-impl_from_tool_input!(Read, ReadInput);
-impl_from_tool_input!(Edit, EditInput);
-impl_from_tool_input!(Write, WriteInput);
-impl_from_tool_input!(Glob, GlobInput);
-impl_from_tool_input!(Grep, GrepInput);
-impl_from_tool_input!(Task, TaskInput);
-impl_from_tool_input!(WebFetch, WebFetchInput);
-impl_from_tool_input!(WebSearch, WebSearchInput);
-impl_from_tool_input!(TodoWrite, TodoWriteInput);
-impl_from_tool_input!(AskUserQuestion, AskUserQuestionInput);
-impl_from_tool_input!(ExitPlanMode, ExitPlanModeInput);
-
-/// Decode a tool-use `input` JSON envelope into the typed variant struct `T`.
-/// Returns `None` when the JSON does not deserialize as the expected
-/// `ToolInput` variant — callers should fall back to a generic renderer.
-pub fn extract_tool_input<T: FromToolInput>(input: &Value) -> Option<T> {
-    serde_json::from_value::<ToolInput>(input.clone())
-        .ok()
-        .and_then(T::from_tool_input)
+/// Decode a tool-use `input` JSON object directly into the typed struct `T`.
+///
+/// The caller dispatches by tool *name* (see [`render_tool_use`]), so we trust
+/// that and deserialize straight into the named `*Input` struct. We deliberately
+/// do NOT route through the untagged `claude_codes::ToolInput` enum: its variants
+/// are matched by field shape in declaration order, so a tool whose input is a
+/// subset of an earlier variant gets misclassified. Concretely, a bare WebSearch
+/// `{"query": "…"}` matches `ToolSearch` (declared first; its only other field,
+/// `max_results`, is optional) and never reaches the `WebSearch` variant — which
+/// is why the WebSearch card was rendering its `"?"` fallback. Deserializing by
+/// name sidesteps the ordering hazard entirely.
+///
+/// Returns `None` when the JSON doesn't match `T`; callers fall back to a
+/// generic/default renderer.
+///
+/// TODO(SDK): the upstream ordering hazard (`ToolSearch` before `WebSearch` in
+/// the untagged enum) is worth fixing in `meawoppl/rust-code-agent-sdks` too.
+pub fn extract_tool_input<T: DeserializeOwned>(input: &Value) -> Option<T> {
+    serde_json::from_value::<T>(input.clone()).ok()
 }
 
 /// Render a tool use block with special handling for various tools
@@ -160,5 +135,48 @@ fn render_generic_args(input: &Value) -> Html {
         }
     } else {
         html! { "..." }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_tool_input;
+    use shared::{GlobInput, GrepInput, WebSearchInput};
+
+    /// Regression: a bare `{"query": …}` WebSearch input used to misclassify as
+    /// `ToolSearch` in the untagged `ToolInput` enum (declared first, sharing the
+    /// `query` field) and lose the query — the card rendered `"?"`. Deserializing
+    /// by name must recover it.
+    #[test]
+    fn websearch_bare_query_extracts() {
+        let input = serde_json::json!({ "query": "rust async traits" });
+        let ws: WebSearchInput = extract_tool_input(&input).expect("WebSearch should parse");
+        assert_eq!(ws.query, "rust async traits");
+    }
+
+    /// A WebSearch with domain filters parsed fine even before the fix (the
+    /// extra fields tripped `ToolSearch`'s `deny_unknown_fields`); pin it so the
+    /// by-name path keeps working too.
+    #[test]
+    fn websearch_with_domains_extracts() {
+        let input = serde_json::json!({ "query": "tokio", "allowed_domains": ["docs.rs"] });
+        let ws: WebSearchInput = extract_tool_input(&input).expect("WebSearch should parse");
+        assert_eq!(ws.query, "tokio");
+        assert_eq!(
+            ws.allowed_domains.as_deref(),
+            Some(&["docs.rs".to_string()][..])
+        );
+    }
+
+    /// Glob and Grep share the `pattern` field; by-name dispatch must still land
+    /// each in its own struct.
+    #[test]
+    fn glob_and_grep_still_extract_by_name() {
+        let glob: GlobInput = extract_tool_input(&serde_json::json!({ "pattern": "**/*.rs" }))
+            .expect("Glob should parse");
+        assert_eq!(glob.pattern, "**/*.rs");
+        let grep: GrepInput = extract_tool_input(&serde_json::json!({ "pattern": "TODO" }))
+            .expect("Grep should parse");
+        assert_eq!(grep.pattern, "TODO");
     }
 }
