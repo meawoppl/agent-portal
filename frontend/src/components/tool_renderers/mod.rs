@@ -35,8 +35,10 @@ use super::expandable::ExpandableText;
 /// Returns `None` when the JSON doesn't match `T`; callers fall back to a
 /// generic/default renderer.
 ///
-/// TODO(SDK): the upstream ordering hazard (`ToolSearch` before `WebSearch` in
-/// the untagged enum) is worth fixing in `meawoppl/rust-code-agent-sdks` too.
+/// TODO(SDK #146): the upstream ambiguity (`WebSearch` and `ToolSearch` are both
+/// `{query}` under the untagged enum) is tracked in
+/// meawoppl/rust-code-agent-sdks#146 — a name-aware `ToolInput::from_named_input`
+/// is proposed there. Once it lands, callers can route through it instead.
 pub fn extract_tool_input<T: DeserializeOwned>(input: &Value) -> Option<T> {
     serde_json::from_value::<T>(input.clone()).ok()
 }
