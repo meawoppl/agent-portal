@@ -64,7 +64,9 @@ fn verify_session_access(
 fn row_to_wire(row: TurnMetric) -> TurnMetrics {
     TurnMetrics {
         id: Some(row.id),
-        session_id: row.session_id,
+        // Nullable in the DB (orphaned-from-session rows); the wire shape keeps
+        // a non-null `Uuid`, so fall back to nil for rows whose session is gone.
+        session_id: row.session_id.unwrap_or_default(),
         user_message_id: row.user_message_id,
         agent_type: row.agent_type,
         model: row.model,
@@ -125,10 +127,11 @@ pub async fn list_turn_metrics(
 const RECENT_TURN_LIMIT: i64 = 50;
 
 /// `GET /api/metrics/recent` — returns the calling user's most recent
-/// `RECENT_TURN_LIMIT` turns across all sessions they own, ordered
-/// `started_at ASC` so the client can spark-plot left→right oldest→newest
-/// without a second sort. Joins `turn_metrics` to `sessions` on
-/// `session_id` and filters by `sessions.user_id = current_user_id`.
+/// `RECENT_TURN_LIMIT` turns, ordered `started_at ASC` so the client can
+/// spark-plot left→right oldest→newest without a second sort. Filters by
+/// `turn_metrics.user_id = current_user_id` directly — the row carries its own
+/// owner, so metrics survive (and still attribute correctly) after their
+/// session is deleted.
 ///
 /// We deliberately take the SQL's "newest N" (ORDER BY started_at DESC LIMIT
 /// N) and then reverse the result in Rust rather than ordering ASC in SQL:
@@ -142,10 +145,9 @@ pub async fn list_recent_user_turn_metrics(
     let current_user_id = extract_user_id(&app_state, &cookies)?;
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
-    use crate::schema::{sessions, turn_metrics};
+    use crate::schema::turn_metrics;
     let mut rows: Vec<TurnMetric> = turn_metrics::table
-        .inner_join(sessions::table.on(sessions::id.eq(turn_metrics::session_id)))
-        .filter(sessions::user_id.eq(current_user_id))
+        .filter(turn_metrics::user_id.eq(current_user_id))
         .order(turn_metrics::started_at.desc())
         .limit(RECENT_TURN_LIMIT)
         .select(TurnMetric::as_select())
@@ -364,8 +366,7 @@ pub async fn list_aggregated_turn_metrics(
             COALESCE(SUM(tm.cache_creation_tokens), 0)::bigint AS cache_creation_tokens_sum, \
             SUM(tm.total_cost_usd)::float8 AS total_cost_usd_sum \
         FROM turn_metrics tm \
-        INNER JOIN sessions s ON s.id = tm.session_id \
-        WHERE s.user_id = $2 \
+        WHERE tm.user_id = $2 \
           AND tm.started_at >= NOW() - $3::interval \
         GROUP BY bucket_start, tm.agent_type, tm.model, tm.service_tier \
         ORDER BY bucket_start ASC, tm.agent_type ASC, tm.model ASC, tm.service_tier ASC";
@@ -394,8 +395,7 @@ pub async fn list_aggregated_turn_metrics(
             END AS reason_key, \
             COUNT(*)::bigint AS count \
         FROM turn_metrics tm \
-        INNER JOIN sessions s ON s.id = tm.session_id \
-        WHERE s.user_id = $2 \
+        WHERE tm.user_id = $2 \
           AND tm.started_at >= NOW() - $3::interval \
         GROUP BY bucket_start, tm.agent_type, tm.model, tm.service_tier, reason_key";
 
