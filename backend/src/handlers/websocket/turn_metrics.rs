@@ -52,8 +52,31 @@ pub fn handle_turn_metrics_report(
         }
     };
 
+    // Resolve the session's owner so the metric carries its own ownership.
+    // `turn_metrics.user_id` is what the Performance queries filter on, which
+    // lets a row outlive its session (`session_id` is `ON DELETE SET NULL`)
+    // and still be attributed to the right user.
+    let owner_id: Uuid = {
+        use crate::schema::sessions;
+        match sessions::table
+            .find(session_id)
+            .select(sessions::user_id)
+            .first::<Uuid>(&mut conn)
+        {
+            Ok(uid) => uid,
+            Err(e) => {
+                error!(
+                    "Failed to resolve owner for session {} (turn metrics insert): {}",
+                    session_id, e
+                );
+                return;
+            }
+        }
+    };
+
     let new_row = NewTurnMetric {
         session_id,
+        user_id: owner_id,
         user_message_id: metrics.user_message_id,
         agent_type: metrics.agent_type.clone(),
         model: metrics.model.clone(),
@@ -99,7 +122,10 @@ pub fn handle_turn_metrics_report(
     // the `TurnMetrics` shape stays explicitly synchronized with the DB row.
     let payload = TurnMetrics {
         id: Some(inserted.id),
-        session_id: inserted.session_id,
+        // Always the just-inserted session id (the DB column is now nullable —
+        // for orphaned-from-session rows — but a freshly inserted row always
+        // has one). Use the resolved local rather than unwrapping the Option.
+        session_id,
         user_message_id: inserted.user_message_id,
         agent_type: inserted.agent_type,
         model: inserted.model,

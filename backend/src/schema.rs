@@ -148,7 +148,7 @@ diesel::table! {
 diesel::table! {
     turn_metrics (id) {
         id -> Uuid,
-        session_id -> Uuid,
+        session_id -> Nullable<Uuid>,
         user_message_id -> Nullable<Uuid>,
         agent_type -> Text,
         model -> Nullable<Text>,
@@ -171,6 +171,7 @@ diesel::table! {
         stream_restarts -> Int4,
         total_cost_usd -> Nullable<Float8>,
         created_at -> Timestamptz,
+        user_id -> Uuid,
     }
 }
 
@@ -205,6 +206,7 @@ diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
 diesel::joinable!(turn_metrics -> messages (user_message_id));
 diesel::joinable!(turn_metrics -> sessions (session_id));
+diesel::joinable!(turn_metrics -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     deleted_session_costs,

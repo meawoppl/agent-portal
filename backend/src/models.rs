@@ -283,15 +283,17 @@ pub struct NewScheduledTask {
 // ============================================================================
 
 /// One row in `turn_metrics`. Persisted per user-input → terminator. See the
-/// `2026-05-27-184255_add_turn_metrics` migration for column semantics and
-/// the explicit retention note (this table is intentionally outside the
-/// `MESSAGE_RETENTION_DAYS` cleanup sweep).
+/// `2026-05-27-184255_add_turn_metrics` migration for column semantics. The
+/// table is a durable per-user archive: it's outside the `MESSAGE_RETENTION_DAYS`
+/// sweep, and `2026-06-04-120000_decouple_turn_metrics_from_sessions` made
+/// `session_id` nullable with `ON DELETE SET NULL` (was `NOT NULL`/`CASCADE`) so
+/// a row survives its session's deletion. Ownership now lives on `user_id`.
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
 #[diesel(table_name = crate::schema::turn_metrics)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct TurnMetric {
     pub id: Uuid,
-    pub session_id: Uuid,
+    pub session_id: Option<Uuid>,
     pub user_message_id: Option<Uuid>,
     pub agent_type: String,
     pub model: Option<String>,
@@ -314,12 +316,14 @@ pub struct TurnMetric {
     pub stream_restarts: i32,
     pub total_cost_usd: Option<f64>,
     pub created_at: DateTime<Utc>,
+    pub user_id: Uuid,
 }
 
 #[derive(Debug, Insertable)]
 #[diesel(table_name = crate::schema::turn_metrics)]
 pub struct NewTurnMetric {
     pub session_id: Uuid,
+    pub user_id: Uuid,
     pub user_message_id: Option<Uuid>,
     pub agent_type: String,
     pub model: Option<String>,
