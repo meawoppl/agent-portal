@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.6
+
+- **Portal version surfaced in the agent's `<system-reminder>`.** The reminder injected at session start (and after each compaction) in `claude-session-lib/src/proxy_session/portal_reminder.rs::agent_facing` now leads with `Agent Portal version X.Y.Z`, captured at compile time via `env!("CARGO_PKG_VERSION")`. The agent now knows which portal release it's running on without having to ask, and operator overrides via `PORTAL_REMINDER_FILE` still get the version line auto-prepended.
+
 ## 2.8.5
 
 - **Slow the thinking/reasoning token odometer 2× (`CountUp`).** `frontend/src/components/count_up.rs` now climbs over ~60 frames instead of ~30 (40ms/frame unchanged), so each leg takes ~2.4s instead of ~1.2s — a more deliberate count-up. Smoothness (~25fps) is unchanged; only the duration doubles. Affects both the condensed `thinking` chip and the per-turn reasoning-token footer chip.
