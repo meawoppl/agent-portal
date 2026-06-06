@@ -3,6 +3,7 @@ pub mod auth;
 pub mod config;
 pub mod device_flow;
 pub mod downloads;
+pub mod files;
 pub mod helpers;
 pub mod images;
 pub mod launchers;

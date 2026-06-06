@@ -85,28 +85,6 @@ pub fn dashboard_page() -> Html {
     let initial_focus_set = use_state(|| false);
     let sessions_at_launch = use_state(|| None::<HashSet<Uuid>>);
 
-    // Map of launcher_id → token_expires_at (ISO string) for launchers with expiring tokens.
-    // Passed to SessionRail so it can show warning icons on sessions from those launchers.
-    let expiring_launchers = use_state(std::collections::HashMap::<Uuid, String>::new);
-    {
-        let expiring_launchers = expiring_launchers.clone();
-        use_effect_with((), move |_| {
-            spawn_local(async move {
-                let url = utils::api_url("/api/launchers");
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if let Ok(launchers) = resp.json::<Vec<shared::LauncherInfo>>().await {
-                        let map: std::collections::HashMap<Uuid, String> = launchers
-                            .into_iter()
-                            .filter_map(|l| l.token_expires_at.map(|exp| (l.launcher_id, exp)))
-                            .collect();
-                        expiring_launchers.set(map);
-                    }
-                }
-            });
-            || ()
-        });
-    }
-
     // Detect spend tier changes and trigger timed animation
     {
         let spend_animating = spend_animating.clone();
@@ -848,7 +826,6 @@ pub fn dashboard_page() -> Html {
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
                         server_version={(*server_version).clone()}
-                        launcher_token_expiry={(*expiring_launchers).clone()}
                         on_select={on_select_session.clone()}
                         on_leave={on_leave.clone()}
                         on_delete={on_delete.clone()}

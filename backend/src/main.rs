@@ -479,6 +479,10 @@ async fn main() -> anyhow::Result<()> {
         )
         // Proxy token management endpoints
         .route(
+            "/api/proxy/resolve-session",
+            post(handlers::sessions::resolve_proxy_session),
+        )
+        .route(
             "/api/proxy-tokens",
             get(handlers::proxy_tokens::list_tokens_handler)
                 .post(handlers::proxy_tokens::create_token_handler),
@@ -495,6 +499,10 @@ async fn main() -> anyhow::Result<()> {
         // lives in the handler via `extract_user_id`, matching the pattern
         // every other cookie-gated handler in this router uses.
         .route("/api/images/{id}", get(handlers::images::serve_image))
+        .route(
+            "/api/sessions/{id}/files/pull",
+            get(handlers::files::pull_session_file),
+        )
         // Scheduled task management endpoints
         .route(
             "/api/scheduled-tasks",
@@ -561,10 +569,6 @@ async fn main() -> anyhow::Result<()> {
             get(handlers::launchers::list_directories),
         )
         .route("/api/launch", post(handlers::launchers::launch_session))
-        .route(
-            "/api/launchers/{launcher_id}/renew-token",
-            post(handlers::launchers::renew_launcher_token),
-        )
         .route(
             "/api/launchers/{launcher_id}/update",
             post(handlers::launchers::update_launcher),

@@ -451,6 +451,40 @@ pub struct SessionsResponse {
 }
 
 // =============================================================================
+// Proxy Session Resolution Endpoint (POST /api/proxy/resolve-session)
+// =============================================================================
+
+/// Request from a proxy before it spawns the agent process. The backend uses
+/// this to choose the latest resumable session for the authenticated user and
+/// local machine/path, so clients don't need to persist directory -> session_id
+/// as the source of truth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolveProxySessionRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
+    pub working_directory: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    #[serde(default)]
+    pub agent_type: crate::AgentType,
+}
+
+/// Response from `POST /api/proxy/resolve-session`. `session_id == None`
+/// means the backend has no matching resumable session and the proxy should
+/// allocate a fresh UUID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolveProxySessionResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity: Option<String>,
+}
+
+// =============================================================================
 // Admin Users Endpoint (GET /api/admin/users)
 // =============================================================================
 

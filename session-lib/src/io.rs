@@ -7,6 +7,7 @@
 use claude_codes::io::{ControlResponse, PermissionSuggestion};
 use claude_codes::{ClaudeInput, ClaudeOutput};
 use shared::{CodexPermissionInput, TurnMetrics};
+use tokio::sync::oneshot;
 
 use crate::error::SessionError;
 
@@ -17,7 +18,10 @@ use crate::error::SessionError;
 /// - Codex io task ignores `PermissionResponse`.
 pub enum IoCommand {
     /// User input to forward to the agent.
-    Input(ClaudeInput),
+    Input {
+        input: ClaudeInput,
+        delivered: Option<oneshot::Sender<Result<(), String>>>,
+    },
     /// Permission response for Claude's `can_use_tool` control flow.
     PermissionResponse(ControlResponse),
     /// Approval response for Codex's app-server JSON-RPC approval flow.

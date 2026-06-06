@@ -16,13 +16,16 @@ use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
 use session_lib::snapshot::SessionConfig;
 use session_lib::{TurnOutcome, TurnTracker};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::events::{
     to_raw_output, CodexUsageEvent, ThreadStartedEvent, TurnFailedEvent, UserEchoEvent,
 };
 use crate::handler::handle_codex_server_message;
 use crate::helpers::{extract_prompt_text, parse_request_id};
+
+type DeliveryAck = oneshot::Sender<Result<(), String>>;
+type QueuedPrompt = (String, Option<DeliveryAck>);
 
 /// Background task for Codex sessions.
 pub(crate) async fn codex_io_task(
@@ -127,7 +130,7 @@ pub(crate) async fn codex_io_task(
     ))));
 
     let mut turn_active = false;
-    let mut queued_prompts: VecDeque<String> = VecDeque::new();
+    let mut queued_prompts: VecDeque<QueuedPrompt> = VecDeque::new();
     // Track the turn currently being driven so we can name it on
     // `turn/interrupt` requests (codex-codes 0.129.3 made both
     // `thread_id` and `turn_id` required on `TurnInterruptParams`).
@@ -328,12 +331,17 @@ pub(crate) async fn codex_io_task(
                                 );
                             if turn_ended {
                                 turn_active = false;
-                                if let Some(prompt) = queued_prompts.pop_front() {
+                                if let Some((prompt, delivered)) = queued_prompts.pop_front() {
                                     turn_tracker
                                         .start(Instant::now(), chrono::Utc::now());
-                                    turn_active =
-                                        start_codex_turn(&mut client, &thread_id, prompt, &event_tx)
-                                            .await;
+                                    turn_active = start_codex_turn(
+                                        &mut client,
+                                        &thread_id,
+                                        prompt,
+                                        delivered,
+                                        &event_tx,
+                                    )
+                                    .await;
                                 }
                             }
                             if !ok {
@@ -438,14 +446,16 @@ pub(crate) async fn codex_io_task(
                                 tracing::error!("Failed to send Codex approval: {}", e);
                             }
                         }
-                        IoCommand::Input(input) => {
+                        IoCommand::Input { input, delivered } => {
                             let prompt = extract_prompt_text(&input);
                             if !prompt.is_empty() {
                                 tracing::info!(
                                     "Queued Codex input received during active turn ({} pending)",
                                     queued_prompts.len() + 1
                                 );
-                                queued_prompts.push_back(prompt);
+                                queued_prompts.push_back((prompt, delivered));
+                            } else if let Some(delivered) = delivered {
+                                let _ = delivered.send(Ok(()));
                             }
                         }
                         IoCommand::PermissionResponse(_) => {}
@@ -455,14 +465,18 @@ pub(crate) async fn codex_io_task(
         } else {
             // No active turn: wait for user input.
             match command_rx.recv().await {
-                Some(IoCommand::Input(input)) => {
+                Some(IoCommand::Input { input, delivered }) => {
                     let prompt = extract_prompt_text(&input);
                     if prompt.is_empty() {
+                        if let Some(delivered) = delivered {
+                            let _ = delivered.send(Ok(()));
+                        }
                         continue;
                     }
                     turn_tracker.start(Instant::now(), chrono::Utc::now());
                     turn_active =
-                        start_codex_turn(&mut client, &thread_id, prompt, &event_tx).await;
+                        start_codex_turn(&mut client, &thread_id, prompt, delivered, &event_tx)
+                            .await;
                 }
                 Some(IoCommand::PermissionResponse(_)) => continue,
                 Some(IoCommand::CodexApproval { .. }) => {
@@ -481,6 +495,7 @@ async fn start_codex_turn(
     client: &mut CodexAsyncClient,
     thread_id: &str,
     prompt: String,
+    delivered: Option<DeliveryAck>,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) -> bool {
     // Codex's app-server protocol doesn't echo user input, so the frontend's
@@ -491,16 +506,18 @@ async fn start_codex_turn(
     if !prompt.starts_with("<system-reminder>") {
         let echo = UserEchoEvent::new(prompt);
         let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&echo)));
-        return start_codex_turn_request(client, thread_id, echo.content, event_tx).await;
+        return start_codex_turn_request(client, thread_id, echo.content, delivered, event_tx)
+            .await;
     }
 
-    start_codex_turn_request(client, thread_id, prompt, event_tx).await
+    start_codex_turn_request(client, thread_id, prompt, delivered, event_tx).await
 }
 
 async fn start_codex_turn_request(
     client: &mut CodexAsyncClient,
     thread_id: &str,
     prompt: String,
+    delivered: Option<DeliveryAck>,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) -> bool {
     tracing::info!("Starting Codex turn with {} chars", prompt.len());
@@ -512,10 +529,19 @@ async fn start_codex_turn_request(
     // changes become compile errors.
     let turn_params = turn_start_params(thread_id, prompt);
     match client.turn_start(&turn_params).await {
-        Ok(_) => true,
+        Ok(_) => {
+            if let Some(delivered) = delivered {
+                let _ = delivered.send(Ok(()));
+            }
+            true
+        }
         Err(e) => {
+            let message = e.to_string();
             let event = TurnFailedEvent::new(e.to_string());
             let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&event)));
+            if let Some(delivered) = delivered {
+                let _ = delivered.send(Err(message));
+            }
             false
         }
     }

@@ -139,6 +139,15 @@ impl SessionStatus {
     }
 }
 
+impl SendMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SendMode::Normal => "normal",
+            SendMode::Wiggum => "wiggum",
+        }
+    }
+}
+
 /// Send mode for user input
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -188,9 +197,6 @@ pub struct LauncherInfo {
     /// Launcher binary version
     #[serde(default)]
     pub version: String,
-    /// ISO 8601 timestamp when the launcher's auth token expires
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_expires_at: Option<String>,
 }
 
 /// API types for HTTP endpoints

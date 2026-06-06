@@ -18,8 +18,11 @@ pub struct ProxyTokenClaims {
     pub email: String,
     /// Issued at (Unix timestamp)
     pub iat: i64,
-    /// Expires at (Unix timestamp)
-    pub exp: i64,
+    /// Expires at (Unix timestamp). `None` means the token never expires; the
+    /// backend's live DB checks (revocation, user disabled) govern validity
+    /// instead of a fixed TTL. See #932.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exp: Option<i64>,
     /// Token type: "proxy" or "launcher"
     #[serde(default = "default_token_type")]
     pub token_type: String,
@@ -97,7 +100,8 @@ pub struct ProxyTokenInfo {
     pub name: String,
     pub created_at: String,
     pub last_used_at: Option<String>,
-    pub expires_at: String,
+    /// `None` for non-expiring tokens (launch/launcher tokens). See #932.
+    pub expires_at: Option<String>,
     pub revoked: bool,
 }
 

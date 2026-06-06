@@ -1,10 +1,14 @@
 use super::super::types::PortalMessage;
 use super::render_image_source;
 use crate::components::copy_button::CopyButton;
-use crate::components::markdown::render_markdown;
+use crate::components::markdown::render_markdown_for_session;
 use yew::prelude::*;
 
-pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Html {
+pub fn render_portal_message(
+    msg: &PortalMessage,
+    timestamp: Option<&str>,
+    session_id: Option<uuid::Uuid>,
+) -> Html {
     let copy_text: String = msg
         .content
         .iter()
@@ -22,18 +26,18 @@ pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Ht
                     <CopyButton text={copy_text} title="Copy portal text" />
                 }
             </div>
-            <div class="message-body">{ render_portal_message_content(msg) }</div>
+            <div class="message-body">{ render_portal_message_content(msg, session_id) }</div>
         </div>
     }
 }
 
-pub fn render_portal_message_content(msg: &PortalMessage) -> Html {
-    html! { <>{ for msg.content.iter().map(render_portal_content) }</> }
+pub fn render_portal_message_content(msg: &PortalMessage, session_id: Option<uuid::Uuid>) -> Html {
+    html! { <>{ for msg.content.iter().map(|content| render_portal_content(content, session_id)) }</> }
 }
 
-fn render_portal_content(content: &shared::PortalContent) -> Html {
+fn render_portal_content(content: &shared::PortalContent, session_id: Option<uuid::Uuid>) -> Html {
     match content {
-        shared::PortalContent::Text { text } => render_markdown(text),
+        shared::PortalContent::Text { text } => render_markdown_for_session(text, session_id),
         shared::PortalContent::Image {
             media_type,
             data,
@@ -94,7 +98,7 @@ fn portal_reminder(props: &PortalReminderProps) -> Html {
             </button>
             if *expanded {
                 <div class="portal-reminder-body">
-                    { render_markdown(&props.body) }
+                    { render_markdown_for_session(&props.body, None) }
                 </div>
             }
         </div>

@@ -10,7 +10,7 @@ mod events;
 mod tools;
 #[cfg(test)]
 use events::thread_item_id;
-pub use events::{codex_event_item_id, is_codex_terminal_event, CodexEvent};
+pub use events::{codex_event_item_id, is_codex_terminal_event, CodexEvent, CodexItem};
 use events::{CodexError, CodexUsage, ContextCompactedParams, TurnPlanStep};
 use tools::{
     render_command_execution, render_diff_card, render_file_change, render_mcp_tool_call,
@@ -88,37 +88,40 @@ fn item_card_classes(completed: bool) -> &'static str {
     }
 }
 
-fn render_item(item: Option<&ThreadItem>, completed: bool) -> Html {
+fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
     let Some(item) = item else {
         return html! {};
     };
     match item {
-        ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed),
-        ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
-        ThreadItem::CommandExecution(it) => render_command_execution(it, completed),
-        ThreadItem::FileChange(it) => render_file_change(it, completed),
-        ThreadItem::McpToolCall(it) => render_mcp_tool_call(it, completed),
-        ThreadItem::WebSearch(it) => render_web_search(&it.query, completed),
-        ThreadItem::TodoList(it) => render_todo_list(&it.items, completed),
-        ThreadItem::Error(it) => render_error_block(Some(&it.message)),
-        // UserMessage is the user's prompt for the turn — emitted by the
-        // app-server protocol as the first item; the portal renders the
-        // user-typed prompt out-of-band (Claude wire shape), so suppress
-        // here to avoid duplication.
-        ThreadItem::UserMessage(_) => html! {},
+        CodexItem::ContextCompaction(_) => render_context_compaction_item(completed),
+        CodexItem::Thread(item) => match item {
+            ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed),
+            ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
+            ThreadItem::CommandExecution(it) => render_command_execution(it, completed),
+            ThreadItem::FileChange(it) => render_file_change(it, completed),
+            ThreadItem::McpToolCall(it) => render_mcp_tool_call(it, completed),
+            ThreadItem::WebSearch(it) => render_web_search(&it.query, completed),
+            ThreadItem::TodoList(it) => render_todo_list(&it.items, completed),
+            ThreadItem::Error(it) => render_error_block(Some(&it.message)),
+            // UserMessage is the user's prompt for the turn — emitted by the
+            // app-server protocol as the first item; the portal renders the
+            // user-typed prompt out-of-band (Claude wire shape), so suppress
+            // here to avoid duplication.
+            ThreadItem::UserMessage(_) => html! {},
+        },
     }
 }
 
 pub fn render_codex_message_content(json: &str) -> Html {
     match serde_json::from_str::<CodexEvent>(json) {
         Ok(CodexEvent::ItemCompleted {
-            item: Some(ThreadItem::AgentMessage(it)),
+            item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
         })
         | Ok(CodexEvent::ItemStarted {
-            item: Some(ThreadItem::AgentMessage(it)),
+            item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
         })
         | Ok(CodexEvent::ItemUpdated {
-            item: Some(ThreadItem::AgentMessage(it)),
+            item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
         }) => render_agent_message_content(&it.text),
         Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
             render_item(item.as_ref(), false)
@@ -463,6 +466,30 @@ fn render_context_compacted(params: Option<&ContextCompactedParams>) -> Html {
     }
 }
 
+fn render_context_compaction_item(completed: bool) -> Html {
+    let title = if completed {
+        "Codex compacted the conversation context"
+    } else {
+        "Codex is compacting the conversation context"
+    };
+
+    html! {
+        <div class="claude-message compaction-message">
+            <div class="message-header">
+                <span class="message-type-badge compaction">{ "Context Compaction" }</span>
+            </div>
+            <div class="message-body">
+                <div class="compaction-content">
+                    <div class="compaction-icon">{ "\u{1f4e6}" }</div>
+                    <div class="compaction-text">
+                        <div class="compaction-description">{ title }</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
 fn render_raw_codex(json: &str) -> Html {
     let display = serde_json::from_str::<Value>(json)
         .ok()
@@ -609,7 +636,7 @@ mod tests {
         assert!(matches!(
             event,
             CodexEvent::ItemCompleted {
-                item: Some(ThreadItem::AgentMessage(_))
+                item: Some(CodexItem::Thread(ThreadItem::AgentMessage(_)))
             }
         ));
     }
@@ -621,7 +648,7 @@ mod tests {
         assert!(matches!(
             event,
             CodexEvent::ItemUpdated {
-                item: Some(ThreadItem::CommandExecution(ref c))
+                item: Some(CodexItem::Thread(ThreadItem::CommandExecution(ref c)))
             } if c.exit_code == Some(1)
         ));
     }
@@ -652,7 +679,7 @@ mod tests {
         }"#;
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         let CodexEvent::ItemStarted {
-            item: Some(ThreadItem::FileChange(fc)),
+            item: Some(CodexItem::Thread(ThreadItem::FileChange(fc))),
         } = event
         else {
             panic!("expected ItemStarted{{FileChange}}, got {:?}", event);
@@ -663,6 +690,35 @@ mod tests {
             "/home/meawoppl/repos/agent-portal-2/frontend/src/components/schedule_dialog.rs"
         );
         assert!(fc.changes[0].diff.contains("session_agent_type"));
+    }
+
+    /// #930 regression target — Codex emits compaction as an item lifecycle
+    /// event whose item type is not in codex-codes yet. It should parse as a
+    /// typed local item and render via the compaction card, not fall through
+    /// to the raw JSON renderer.
+    #[test]
+    fn event_item_started_context_compaction_no_longer_renders_raw() {
+        let json = r#"{
+            "_created_at": "2026-06-01T23:58:42.384Z",
+            "item": {
+                "id": "9edb35c0-6b6b-407f-84e3-d03a03050a2a",
+                "type": "contextCompaction"
+            },
+            "type": "item.started"
+        }"#;
+
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        let CodexEvent::ItemStarted {
+            item: Some(CodexItem::ContextCompaction(item)),
+        } = event
+        else {
+            panic!("expected ItemStarted{{ContextCompaction}}, got {:?}", event);
+        };
+        assert_eq!(item.id, "9edb35c0-6b6b-407f-84e3-d03a03050a2a");
+        assert_eq!(
+            codex_event_item_id(json).as_deref(),
+            Some("9edb35c0-6b6b-407f-84e3-d03a03050a2a")
+        );
     }
 
     #[test]

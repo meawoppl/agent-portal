@@ -1,7 +1,7 @@
 use super::{ProxySender, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
-use shared::{AgentType, ServerToClient, ServerToProxy};
+use shared::{AgentType, SendMode, ServerToClient, ServerToProxy};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -54,7 +54,7 @@ pub fn replay_pending_inputs_from_db(
             session_id,
             seq: input.seq_num,
             content,
-            send_mode: None,
+            send_mode: input.send_mode.as_deref().and_then(parse_send_mode),
         };
 
         if sender.send(msg).is_ok() {
@@ -73,6 +73,17 @@ pub fn replay_pending_inputs_from_db(
     }
 
     replayed
+}
+
+fn parse_send_mode(value: &str) -> Option<SendMode> {
+    match value {
+        "normal" => Some(SendMode::Normal),
+        "wiggum" => Some(SendMode::Wiggum),
+        other => {
+            warn!("Ignoring unknown pending input send_mode: {}", other);
+            None
+        }
+    }
 }
 
 /// Handle Claude output (both legacy ClaudeOutput and new SequencedOutput).
@@ -420,4 +431,16 @@ fn extract_portal_images(
     }
 
     content
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_send_mode_accepts_persisted_wire_values() {
+        assert_eq!(parse_send_mode("normal"), Some(SendMode::Normal));
+        assert_eq!(parse_send_mode("wiggum"), Some(SendMode::Wiggum));
+        assert_eq!(parse_send_mode("unknown"), None);
+    }
 }

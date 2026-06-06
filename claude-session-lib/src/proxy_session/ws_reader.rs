@@ -1,10 +1,10 @@
 //! WebSocket reader task: receives messages from backend and dispatches to channels.
 
-use shared::{ProxyToServer, SendMode, ServerToProxy};
+use shared::{SendMode, ServerToProxy};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
-use super::{truncate, GracefulShutdown, PermissionResponseData, SharedWsWrite, WsRead};
+use super::{truncate, GracefulShutdown, PermissionResponseData, WsRead};
 
 /// Events sent through the file upload channel from the WS reader to the main loop
 pub enum FileUploadEvent {
@@ -17,6 +17,10 @@ pub enum FileUploadEvent {
     },
     /// A chunk of file data (base64-encoded)
     Chunk { upload_id: String, data: String },
+}
+
+pub enum FileDownloadEvent {
+    Request(shared::FileDownloadRequestFields),
 }
 
 /// Tracks state for a file being received in chunks
@@ -47,16 +51,16 @@ pub(super) enum WsMessageResult {
 #[allow(clippy::too_many_arguments)] // TODO: refactor to event enum (issue #271)
 pub(super) fn spawn_ws_reader(
     mut ws_read: WsRead,
-    input_tx: mpsc::UnboundedSender<String>,
+    input_tx: mpsc::UnboundedSender<super::PortalInput>,
     perm_tx: mpsc::UnboundedSender<PermissionResponseData>,
     ack_tx: mpsc::UnboundedSender<u64>,
-    ws_write: SharedWsWrite,
     disconnect_tx: tokio::sync::oneshot::Sender<()>,
-    wiggum_tx: mpsc::UnboundedSender<String>,
+    wiggum_tx: mpsc::UnboundedSender<super::PortalInput>,
     graceful_shutdown_tx: mpsc::UnboundedSender<GracefulShutdown>,
     session_terminated_tx: tokio::sync::oneshot::Sender<()>,
     heartbeat: session_lib::heartbeat::HeartbeatTracker,
     file_upload_tx: mpsc::UnboundedSender<FileUploadEvent>,
+    file_download_tx: mpsc::UnboundedSender<FileDownloadEvent>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(result) = ws_read.recv().await {
@@ -67,10 +71,10 @@ pub(super) fn spawn_ws_reader(
                         &input_tx,
                         &perm_tx,
                         &ack_tx,
-                        &ws_write,
                         &wiggum_tx,
                         &heartbeat,
                         &file_upload_tx,
+                        &file_download_tx,
                     )
                     .await
                     {
@@ -103,13 +107,13 @@ pub(super) fn spawn_ws_reader(
 #[allow(clippy::too_many_arguments)]
 async fn handle_ws_message(
     proxy_msg: ServerToProxy,
-    input_tx: &mpsc::UnboundedSender<String>,
+    input_tx: &mpsc::UnboundedSender<super::PortalInput>,
     perm_tx: &mpsc::UnboundedSender<PermissionResponseData>,
     ack_tx: &mpsc::UnboundedSender<u64>,
-    ws_write: &SharedWsWrite,
-    wiggum_tx: &mpsc::UnboundedSender<String>,
+    wiggum_tx: &mpsc::UnboundedSender<super::PortalInput>,
     heartbeat: &session_lib::heartbeat::HeartbeatTracker,
     file_upload_tx: &mpsc::UnboundedSender<FileUploadEvent>,
+    file_download_tx: &mpsc::UnboundedSender<FileDownloadEvent>,
 ) -> WsMessageResult {
     if !matches!(
         proxy_msg,
@@ -128,13 +132,25 @@ async fn handle_ws_message(
             if send_mode == Some(SendMode::Wiggum) {
                 debug!("→ [input/wiggum] {}", truncate(&user_text, 80));
                 // Only send to wiggum_tx — the select loop sets state and sends prompt atomically
-                if wiggum_tx.send(user_text).is_err() {
+                if wiggum_tx
+                    .send(super::PortalInput {
+                        text: user_text,
+                        ack: None,
+                    })
+                    .is_err()
+                {
                     error!("Failed to send wiggum activation");
                     return WsMessageResult::Disconnect;
                 }
             } else {
                 debug!("→ [input] {}", truncate(&user_text, 80));
-                if input_tx.send(user_text).is_err() {
+                if input_tx
+                    .send(super::PortalInput {
+                        text: user_text,
+                        ack: None,
+                    })
+                    .is_err()
+                {
                     error!("Failed to send input to channel");
                     return WsMessageResult::Disconnect;
                 }
@@ -158,26 +174,28 @@ async fn handle_ws_message(
                     truncate(&user_text, 80)
                 );
                 // Only send to wiggum_tx — the select loop sets state and sends prompt atomically
-                if wiggum_tx.send(user_text).is_err() {
+                if wiggum_tx
+                    .send(super::PortalInput {
+                        text: user_text,
+                        ack: Some(super::PortalInputAck { session_id, seq }),
+                    })
+                    .is_err()
+                {
                     error!("Failed to send wiggum activation");
                     return WsMessageResult::Disconnect;
                 }
             } else {
                 debug!("→ [seq_input] seq={} {}", seq, truncate(&user_text, 80));
-                if input_tx.send(user_text).is_err() {
+                if input_tx
+                    .send(super::PortalInput {
+                        text: user_text,
+                        ack: Some(super::PortalInputAck { session_id, seq }),
+                    })
+                    .is_err()
+                {
                     error!("Failed to send input to channel");
                     return WsMessageResult::Disconnect;
                 }
-            }
-
-            // Send InputAck back to backend
-            let ack = ProxyToServer::InputAck {
-                session_id,
-                ack_seq: seq,
-            };
-            let mut ws = ws_write.lock().await;
-            if let Err(e) = ws.send(ack).await {
-                error!("Failed to send InputAck: {}", e);
             }
         }
         ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
@@ -273,6 +291,15 @@ async fn handle_ws_message(
                 .is_err()
             {
                 error!("Failed to send file upload chunk to main loop");
+                return WsMessageResult::Disconnect;
+            }
+        }
+        ServerToProxy::FileDownloadRequest(fields) => {
+            if file_download_tx
+                .send(FileDownloadEvent::Request(fields))
+                .is_err()
+            {
+                error!("Failed to send file download request to main loop");
                 return WsMessageResult::Disconnect;
             }
         }

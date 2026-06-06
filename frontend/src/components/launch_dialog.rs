@@ -67,12 +67,12 @@ struct AgentConfig {
 fn agent_config(agent_type: shared::AgentType) -> AgentConfig {
     match agent_type {
         shared::AgentType::Claude => AgentConfig {
-            args_placeholder: "--model sonnet --allowedTools \"Bash Edit\"",
+            args_placeholder: "ex: --model sonnet --allowedTools \"Bash Edit\"",
             skip_permissions_args: &["--dangerously-skip-permissions"],
             skip_permissions_label: Some("--dangerously-skip-permissions"),
         },
         shared::AgentType::Codex => AgentConfig {
-            args_placeholder: "-c model=o3 -c model_reasoning_effort=high",
+            args_placeholder: "ex: -c model=gpt-5.5 -c model_reasoning_effort=high",
             skip_permissions_args: &[
                 "-c",
                 "approval_policy=never",

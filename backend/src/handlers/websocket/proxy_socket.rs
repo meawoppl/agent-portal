@@ -279,6 +279,19 @@ fn handle_proxy_message(
                 *metrics,
             );
         }
+        ProxyToServer::FileDownloadResponse(response) => {
+            if let Some((_, tx)) = session_manager
+                .pending_file_downloads
+                .remove(&response.request_id)
+            {
+                let _ = tx.send(response);
+            } else {
+                warn!(
+                    "Received FileDownloadResponse for unknown request {}",
+                    response.request_id
+                );
+            }
+        }
         ProxyToServer::SessionStatus { .. } => {}
     }
     ControlFlow::Continue(())
