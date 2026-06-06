@@ -93,6 +93,29 @@ pub struct FileUploadChunkFields {
     pub data: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileDownloadRequestFields {
+    pub request_id: Uuid,
+    pub path: String,
+    pub max_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileDownloadResponseFields {
+    pub request_id: Uuid,
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_base64: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // =============================================================================
 // Session endpoint: proxy <-> backend (/ws/session)
 // =============================================================================
@@ -195,6 +218,9 @@ pub enum ProxyToServer {
     /// the enum's variants; keeps the discriminant small for the
     /// hot-path frames that fly orders of magnitude more often.
     TurnMetricsReport(Box<TurnMetrics>),
+
+    /// Response to a backend-requested local file download.
+    FileDownloadResponse(FileDownloadResponseFields),
 }
 
 /// Messages the backend sends to the proxy.
@@ -252,6 +278,9 @@ pub enum ServerToProxy {
 
     /// Interrupt the current Claude response
     Interrupt,
+
+    /// Request that the proxy read a file relative to the session working directory.
+    FileDownloadRequest(FileDownloadRequestFields),
 }
 
 // =============================================================================

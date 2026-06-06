@@ -205,9 +205,9 @@ pub fn get_repo_url(cwd: &str) -> Option<String> {
 /// Events produced by the WebSocket reader for the shim's select loop.
 pub enum WsEvent {
     /// Text input from the portal web UI
-    Input(String),
+    Input(ShimPortalInput),
     /// Wiggum mode activation with the original prompt
-    WiggumActivation(String),
+    WiggumActivation(ShimPortalInput),
     /// Permission response from the portal
     PermissionResponse(PermissionResponseData),
     /// Output acknowledgment from the backend
@@ -220,6 +220,18 @@ pub enum WsEvent {
     SessionTerminated,
     /// Interrupt the current Claude response
     Interrupt,
+    /// Backend requested a local file download.
+    FileDownloadRequest(shared::FileDownloadRequestFields),
+}
+
+pub struct ShimPortalInput {
+    pub text: String,
+    pub ack: Option<ShimPortalInputAck>,
+}
+
+pub struct ShimPortalInputAck {
+    pub session_id: uuid::Uuid,
+    pub seq: i64,
 }
 
 /// Spawn a WebSocket reader task (raw tokio-tungstenite).
@@ -276,10 +288,14 @@ async fn handle_ws_text_message(
                 other => other.to_string(),
             };
 
+            let input = ShimPortalInput {
+                text: user_text,
+                ack: None,
+            };
             let event = if send_mode == Some(SendMode::Wiggum) {
-                WsEvent::WiggumActivation(user_text)
+                WsEvent::WiggumActivation(input)
             } else {
-                WsEvent::Input(user_text)
+                WsEvent::Input(input)
             };
             event_tx.send(event).is_ok()
         }
@@ -294,27 +310,16 @@ async fn handle_ws_text_message(
                 other => other.to_string(),
             };
 
+            let input = ShimPortalInput {
+                text: user_text,
+                ack: Some(ShimPortalInputAck { session_id, seq }),
+            };
             let event = if send_mode == Some(SendMode::Wiggum) {
-                WsEvent::WiggumActivation(user_text)
+                WsEvent::WiggumActivation(input)
             } else {
-                WsEvent::Input(user_text)
+                WsEvent::Input(input)
             };
-            if event_tx.send(event).is_err() {
-                return false;
-            }
-
-            // Send InputAck back to backend
-            let ack = ProxyToServer::InputAck {
-                session_id,
-                ack_seq: seq,
-            };
-            let mut ws = ws_write.lock().await;
-            if let Ok(json) = serde_json::to_string(&ack) {
-                if let Err(e) = ws.send(Message::Text(json.into())).await {
-                    error!("Failed to send InputAck: {}", e);
-                }
-            }
-            true
+            event_tx.send(event).is_ok()
         }
         ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
             request_id,
@@ -361,6 +366,9 @@ async fn handle_ws_text_message(
         ServerToProxy::Interrupt => {
             info!("Interrupt received from server");
             event_tx.send(WsEvent::Interrupt).is_ok()
+        }
+        ServerToProxy::FileDownloadRequest(fields) => {
+            event_tx.send(WsEvent::FileDownloadRequest(fields)).is_ok()
         }
         _ => true,
     }

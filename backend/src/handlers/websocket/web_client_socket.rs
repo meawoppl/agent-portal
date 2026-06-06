@@ -398,6 +398,7 @@ fn handle_web_input(
                 session_id,
                 seq_num: next_seq,
                 content: serde_json::to_string(&content).unwrap_or_default(),
+                send_mode: send_mode.map(|mode| mode.as_str().to_string()),
             };
             if let Err(e) = diesel::insert_into(pending_inputs::table)
                 .values(&new_input)

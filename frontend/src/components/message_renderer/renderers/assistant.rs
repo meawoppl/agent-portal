@@ -7,7 +7,7 @@ use super::tools::{
 };
 use crate::components::copy_button::CopyButton;
 use crate::components::expandable::ExpandableText;
-use crate::components::markdown::render_markdown;
+use crate::components::markdown::render_markdown_for_session;
 use crate::components::time_ago::TimeAgo;
 use crate::components::tool_renderers::render_tool_use;
 use shared::{AssistantMessage, AssistantUsage as UsageInfo};
@@ -97,6 +97,7 @@ pub fn render_assistant_message(
     msg: &AssistantMessage,
     timestamp: Option<&str>,
     raw_iso: Option<&str>,
+    session_id: Option<uuid::Uuid>,
 ) -> Html {
     let blocks = msg.message.content.clone();
 
@@ -135,7 +136,7 @@ pub fn render_assistant_message(
                     }
                 }
             </div>
-            <div class="message-body">{ render_assistant_message_content(msg) }</div>
+            <div class="message-body">{ render_assistant_message_content(msg, session_id) }</div>
             if let Some(iso) = raw_iso {
                 <div class="message-footer">
                     <TimeAgo iso={iso.to_string()} />
@@ -145,12 +146,15 @@ pub fn render_assistant_message(
     }
 }
 
-pub fn render_assistant_message_content(msg: &AssistantMessage) -> Html {
+pub fn render_assistant_message_content(
+    msg: &AssistantMessage,
+    session_id: Option<uuid::Uuid>,
+) -> Html {
     let blocks = msg.message.content.clone();
-    render_content_blocks(&blocks)
+    render_content_blocks(&blocks, session_id)
 }
 
-pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
+pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Option<uuid::Uuid>) -> Html {
     html! {
         <>
             {
@@ -159,7 +163,7 @@ pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
                         ContentBlock::Text(t) => {
                             html! {
                                 <div class="assistant-text">
-                                    { render_markdown(&t.text) }
+                                    { render_markdown_for_session(&t.text, session_id) }
                                     { render_citations(&t.citations) }
                                 </div>
                             }

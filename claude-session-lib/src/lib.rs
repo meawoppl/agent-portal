@@ -16,7 +16,8 @@ pub use agent::ClaudeAgent;
 
 // Re-export the proxy session helpers used by the proxy binary.
 pub use proxy_session::{
-    run_connection_loop, ConnectionResult, LoopResult, ProxySessionConfig, SessionState,
+    run_connection_loop, ConnectionResult, LoopResult, PortalInput, ProxySessionConfig,
+    SessionState,
 };
 
 // Convenience re-exports so existing consumers don't all have to add

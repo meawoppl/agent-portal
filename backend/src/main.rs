@@ -499,6 +499,10 @@ async fn main() -> anyhow::Result<()> {
         // lives in the handler via `extract_user_id`, matching the pattern
         // every other cookie-gated handler in this router uses.
         .route("/api/images/{id}", get(handlers::images::serve_image))
+        .route(
+            "/api/sessions/{id}/files/pull",
+            get(handlers::files::pull_session_file),
+        )
         // Scheduled task management endpoints
         .route(
             "/api/scheduled-tasks",

@@ -703,7 +703,8 @@ async fn run_proxy_session(mut config: ProxySessionConfig) -> Result<()> {
         ui::print_started();
 
         // Create input channel (shared across reconnections)
-        let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (input_tx, mut input_rx) =
+            tokio::sync::mpsc::unbounded_channel::<session::PortalInput>();
 
         // Run the connection loop
         let result =

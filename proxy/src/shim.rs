@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use crate::session::{
     connect_ws, get_git_branch, register_with_backend, Backoff, PermissionResponseData,
-    ProxySessionConfig, SharedWsWrite, WsEvent,
+    ProxySessionConfig, SharedWsWrite, ShimPortalInputAck, WsEvent,
 };
 use anyhow::Result;
 use claude_codes::io::{
@@ -539,36 +539,44 @@ async fn run_shim_connection(
             // WebSocket events from portal (unified channel)
             event = event_rx.recv() => {
                 match event {
-                    Some(WsEvent::Input(text)) => {
-                        debug!("Portal input: {}", &text[..text.len().min(80)]);
-                        let _ = portal_text_tx.send(text.clone());
+                    Some(WsEvent::Input(input)) => {
+                        debug!("Portal input: {}", &input.text[..input.text.len().min(80)]);
+                        let _ = portal_text_tx.send(input.text.clone());
                         let mut stdin = claude_stdin.lock().await;
-                        let input = ClaudeInput::user_message(&text, config.session_id);
-                        if let Ok(json_line) = serde_json::to_string(&input) {
-                            if let Err(e) = stdin.write_all(json_line.as_bytes()).await {
+                        let claude_input =
+                            ClaudeInput::user_message(&input.text, config.session_id);
+                        if let Ok(json_line) = serde_json::to_string(&claude_input) {
+                            if let Err(e) =
+                                write_json_line_and_flush(&mut *stdin, &json_line).await
+                            {
                                 error!("Failed to write portal input to claude: {}", e);
                                 break ShimConnectionResult::ClaudeExited;
                             }
-                            let _ = stdin.write_all(b"\n").await;
-                            let _ = stdin.flush().await;
+                            ack_portal_input(&ws_write, input.ack).await;
                         }
                     }
-                    Some(WsEvent::WiggumActivation(prompt)) => {
-                        debug!("Portal wiggum input: {}", &prompt[..prompt.len().min(60)]);
+                    Some(WsEvent::WiggumActivation(input)) => {
+                        let prompt_text = input.text;
+                        let ack = input.ack;
+                        debug!(
+                            "Portal wiggum input: {}",
+                            &prompt_text[..prompt_text.len().min(60)]
+                        );
                         let wiggum_prompt = format!(
                             "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
-                            prompt
+                            prompt_text
                         );
                         let _ = portal_text_tx.send(wiggum_prompt.clone());
                         let mut stdin = claude_stdin.lock().await;
                         let input = ClaudeInput::user_message(&wiggum_prompt, config.session_id);
                         if let Ok(json_line) = serde_json::to_string(&input) {
-                            if let Err(e) = stdin.write_all(json_line.as_bytes()).await {
+                            if let Err(e) =
+                                write_json_line_and_flush(&mut *stdin, &json_line).await
+                            {
                                 error!("Failed to write wiggum input to claude: {}", e);
                                 break ShimConnectionResult::ClaudeExited;
                             }
-                            let _ = stdin.write_all(b"\n").await;
-                            let _ = stdin.flush().await;
+                            ack_portal_input(&ws_write, ack).await;
                         }
                     }
                     Some(WsEvent::PermissionResponse(perm_response)) => {
@@ -633,6 +641,17 @@ async fn run_shim_connection(
                             let _ = stdin.flush().await;
                         }
                     }
+                    Some(WsEvent::FileDownloadRequest(request)) => {
+                        let response = read_download_file(&config.working_directory, &request).await;
+                        let msg = ProxyToServer::FileDownloadResponse(response);
+                        let mut ws = ws_write.lock().await;
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            if let Err(e) = ws.send(Message::Text(json.into())).await {
+                                error!("Failed to send file download response: {}", e);
+                                break ShimConnectionResult::Disconnected;
+                            }
+                        }
+                    }
                     Some(WsEvent::Disconnect) | None => {
                         info!("Portal WebSocket disconnected");
                         break ShimConnectionResult::Disconnected;
@@ -674,6 +693,108 @@ async fn run_shim_connection(
 
     reader_task.abort();
     result
+}
+
+async fn write_json_line_and_flush<W>(writer: &mut W, json_line: &str) -> std::io::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    writer.write_all(json_line.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await
+}
+
+async fn ack_portal_input(ws_write: &SharedWsWrite, ack: Option<ShimPortalInputAck>) {
+    let Some(ack) = ack else {
+        return;
+    };
+    let msg = ProxyToServer::InputAck {
+        session_id: ack.session_id,
+        ack_seq: ack.seq,
+    };
+    let mut ws = ws_write.lock().await;
+    if let Ok(json) = serde_json::to_string(&msg) {
+        if let Err(e) = ws.send(Message::Text(json.into())).await {
+            error!("Failed to send InputAck: {}", e);
+        }
+    }
+}
+
+async fn read_download_file(
+    working_directory: &str,
+    request: &shared::FileDownloadRequestFields,
+) -> shared::FileDownloadResponseFields {
+    use base64::Engine;
+    use std::path::{Component, Path};
+
+    let fail = |error: &str| shared::FileDownloadResponseFields {
+        request_id: request.request_id,
+        success: false,
+        filename: None,
+        media_type: None,
+        size: None,
+        data_base64: None,
+        error: Some(error.to_string()),
+    };
+
+    let requested = Path::new(&request.path);
+    if requested.is_absolute()
+        || requested.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return fail("invalid relative path");
+    }
+
+    let root = match tokio::fs::canonicalize(working_directory).await {
+        Ok(path) => path,
+        Err(_) => return fail("working directory is unavailable"),
+    };
+    let canonical = match tokio::fs::canonicalize(root.join(requested)).await {
+        Ok(path) => path,
+        Err(_) => return fail("file not found"),
+    };
+    if !canonical.starts_with(&root) {
+        return fail("path escapes working directory");
+    }
+
+    let metadata = match tokio::fs::metadata(&canonical).await {
+        Ok(metadata) => metadata,
+        Err(_) => return fail("file not found"),
+    };
+    if !metadata.is_file() {
+        return fail("path is not a file");
+    }
+    if metadata.len() > request.max_bytes {
+        return fail("file exceeds size limit");
+    }
+
+    let bytes = match tokio::fs::read(&canonical).await {
+        Ok(bytes) => bytes,
+        Err(_) => return fail("failed to read file"),
+    };
+    if bytes.len() as u64 > request.max_bytes {
+        return fail("file exceeds size limit");
+    }
+
+    let filename = canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("download")
+        .to_string();
+
+    shared::FileDownloadResponseFields {
+        request_id: request.request_id,
+        success: true,
+        filename: Some(filename),
+        media_type: Some("application/octet-stream".to_string()),
+        size: Some(bytes.len() as u64),
+        data_base64: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+        error: None,
+    }
 }
 
 /// Extract the text content from a user message echo.
