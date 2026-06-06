@@ -14,14 +14,20 @@ use yew::prelude::*;
 /// Render markdown text as HTML, with a post-render hook that triggers KaTeX
 /// to render any LaTeX math expressions (`$...$`, `$$...$$`).
 pub fn render_markdown(text: &str) -> Html {
+    render_markdown_for_session(text, None)
+}
+
+pub fn render_markdown_for_session(text: &str, session_id: Option<uuid::Uuid>) -> Html {
     html! {
-        <MarkdownView text={text.to_string()} />
+        <MarkdownView text={text.to_string()} {session_id} />
     }
 }
 
 #[derive(Properties, PartialEq)]
 struct MarkdownViewProps {
     text: String,
+    #[prop_or_default]
+    session_id: Option<uuid::Uuid>,
 }
 
 #[function_component(MarkdownView)]
@@ -61,7 +67,7 @@ fn markdown_view(props: &MarkdownViewProps) -> Html {
     let events = restore_math_in_events(events, &math_blocks);
 
     html! {
-        <span ref={node_ref}>{ render_events(&events) }</span>
+        <span ref={node_ref}>{ render_events(&events, props.session_id) }</span>
     }
 }
 
@@ -222,12 +228,12 @@ fn restore_math(text: &str, math_blocks: &[String]) -> String {
 }
 
 /// Convert pulldown-cmark events to Yew Html
-fn render_events(events: &[Event]) -> Html {
+fn render_events(events: &[Event], session_id: Option<uuid::Uuid>) -> Html {
     let mut html_parts: Vec<Html> = Vec::new();
     let mut i = 0;
 
     while i < events.len() {
-        let (html, consumed) = render_event(&events[i..]);
+        let (html, consumed) = render_event(&events[i..], session_id);
         html_parts.push(html);
         i += consumed;
     }
@@ -237,13 +243,13 @@ fn render_events(events: &[Event]) -> Html {
 
 /// Render a single event or a group of related events
 /// Returns (Html, number of events consumed)
-fn render_event(events: &[Event]) -> (Html, usize) {
+fn render_event(events: &[Event], session_id: Option<uuid::Uuid>) -> (Html, usize) {
     if events.is_empty() {
         return (html! {}, 0);
     }
 
     match &events[0] {
-        Event::Start(tag) => render_tag(tag, events),
+        Event::Start(tag) => render_tag(tag, events, session_id),
         Event::Text(text) => (linkify_urls(text), 1),
         Event::Code(code) => (
             html! { <code class="md-inline-code">{ linkify_urls(code) }</code> },
@@ -258,10 +264,10 @@ fn render_event(events: &[Event]) -> (Html, usize) {
 }
 
 /// Render a tag and its contents
-fn render_tag(tag: &Tag, events: &[Event]) -> (Html, usize) {
+fn render_tag(tag: &Tag, events: &[Event], session_id: Option<uuid::Uuid>) -> (Html, usize) {
     let end_tag = get_end_tag(tag);
     let (inner_events, total_consumed) = collect_until_end(events, &end_tag);
-    let inner_html = render_events(&inner_events);
+    let inner_html = render_events(&inner_events, session_id);
 
     let html = match tag {
         Tag::Paragraph => html! { <p class="md-paragraph">{ inner_html }</p> },
@@ -279,9 +285,20 @@ fn render_tag(tag: &Tag, events: &[Event]) -> (Html, usize) {
             dest_url, title, ..
         } => {
             let href = dest_url.to_string();
-            // Guard against false autolinks from angle-bracket syntax like
-            // <crate::path::Type> which pulldown-cmark interprets as URLs.
-            if !is_valid_url(&href) && !href.starts_with('#') && !href.starts_with('/') {
+            if let Some(download_href) = portal_file_download_href(&href, session_id) {
+                let title_attr = if title.is_empty() {
+                    Some("Download file from session workspace".to_string())
+                } else {
+                    Some(title.to_string())
+                };
+                html! {
+                    <a href={download_href} title={title_attr} class="md-link portal-file-link">
+                        { inner_html }
+                    </a>
+                }
+            } else if !is_valid_url(&href) && !href.starts_with('#') && !href.starts_with('/') {
+                // Guard against false autolinks from angle-bracket syntax like
+                // <crate::path::Type> which pulldown-cmark interprets as URLs.
                 // Not a real URL — render as plain text with angle brackets
                 html! { <><>{"<"}</>{ inner_html }<>{">"}</></> }
             } else {
@@ -309,7 +326,7 @@ fn render_tag(tag: &Tag, events: &[Event]) -> (Html, usize) {
             };
             html! { <img src={src} alt={alt} title={title_attr} class="md-image" /> }
         }
-        Tag::Table(alignments) => render_table(&inner_events, alignments),
+        Tag::Table(alignments) => render_table(&inner_events, alignments, session_id),
         Tag::TableHead => html! { <thead class="md-table-head">{ inner_html }</thead> },
         Tag::TableRow => html! { <tr class="md-table-row">{ inner_html }</tr> },
         Tag::TableCell => html! { <td class="md-table-cell">{ inner_html }</td> },
@@ -317,6 +334,21 @@ fn render_tag(tag: &Tag, events: &[Event]) -> (Html, usize) {
     };
 
     (html, total_consumed)
+}
+
+fn portal_file_download_href(href: &str, session_id: Option<uuid::Uuid>) -> Option<String> {
+    let path = href.strip_prefix("portal://file/")?;
+    if path.is_empty() {
+        return None;
+    }
+    let session_id = session_id?;
+    let encoded = js_sys::encode_uri_component(path)
+        .as_string()
+        .unwrap_or_else(|| path.to_string());
+    Some(format!(
+        "/api/sessions/{}/files/pull?path={}",
+        session_id, encoded
+    ))
 }
 
 /// Get the corresponding end tag for a start tag
@@ -469,7 +501,11 @@ fn render_list(start: Option<u64>, inner: Html) -> Html {
 }
 
 /// Render a table with alignment support
-fn render_table(events: &[Event], alignments: &[pulldown_cmark::Alignment]) -> Html {
+fn render_table(
+    events: &[Event],
+    alignments: &[pulldown_cmark::Alignment],
+    session_id: Option<uuid::Uuid>,
+) -> Html {
     // Tables have: TableHead (with TableRow and TableCells), then TableRows with TableCells
     // We need to process the events to build proper thead/tbody structure
     let mut parts: Vec<Html> = Vec::new();
@@ -482,7 +518,7 @@ fn render_table(events: &[Event], alignments: &[pulldown_cmark::Alignment]) -> H
             Event::Start(Tag::TableHead) => {
                 // Find the end of TableHead and render it
                 let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableHead);
-                let head_html = render_table_head(&inner, &alignments);
+                let head_html = render_table_head(&inner, &alignments, session_id);
                 parts.push(head_html);
                 i += consumed;
                 head_processed = true;
@@ -490,7 +526,7 @@ fn render_table(events: &[Event], alignments: &[pulldown_cmark::Alignment]) -> H
             Event::Start(Tag::TableRow) if head_processed => {
                 // Body rows come after head is processed
                 let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableRow);
-                let row_html = render_table_row(&inner, &alignments);
+                let row_html = render_table_row(&inner, &alignments, session_id);
                 parts.push(row_html);
                 i += consumed;
             }
@@ -517,7 +553,11 @@ fn render_table(events: &[Event], alignments: &[pulldown_cmark::Alignment]) -> H
 
 /// Render table header row
 /// Note: pulldown-cmark puts TableCells directly inside TableHead (no TableRow wrapper)
-fn render_table_head(events: &[Event], alignments: &[pulldown_cmark::Alignment]) -> Html {
+fn render_table_head(
+    events: &[Event],
+    alignments: &[pulldown_cmark::Alignment],
+    session_id: Option<uuid::Uuid>,
+) -> Html {
     let mut cells: Vec<Html> = Vec::new();
     let mut i = 0;
     let mut col = 0;
@@ -526,7 +566,7 @@ fn render_table_head(events: &[Event], alignments: &[pulldown_cmark::Alignment])
         match &events[i] {
             Event::Start(Tag::TableCell) => {
                 let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableCell);
-                let inner_html = render_events(&inner);
+                let inner_html = render_events(&inner, session_id);
                 let align = alignments
                     .get(col)
                     .copied()
@@ -546,7 +586,11 @@ fn render_table_head(events: &[Event], alignments: &[pulldown_cmark::Alignment])
 }
 
 /// Render a table body row
-fn render_table_row(events: &[Event], alignments: &[pulldown_cmark::Alignment]) -> Html {
+fn render_table_row(
+    events: &[Event],
+    alignments: &[pulldown_cmark::Alignment],
+    session_id: Option<uuid::Uuid>,
+) -> Html {
     let mut cells: Vec<Html> = Vec::new();
     let mut i = 0;
     let mut col = 0;
@@ -555,7 +599,7 @@ fn render_table_row(events: &[Event], alignments: &[pulldown_cmark::Alignment]) 
         match &events[i] {
             Event::Start(Tag::TableCell) => {
                 let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableCell);
-                let inner_html = render_events(&inner);
+                let inner_html = render_events(&inner, session_id);
                 let align = alignments
                     .get(col)
                     .copied()

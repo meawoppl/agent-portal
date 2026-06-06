@@ -67,7 +67,12 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
             return renderers::render_system_message(&msg, ts.as_deref());
         }
         Ok(ClaudeMessage::Assistant(msg)) => {
-            return renderers::render_assistant_message(&msg, ts.as_deref(), raw_iso.as_deref());
+            return renderers::render_assistant_message(
+                &msg,
+                ts.as_deref(),
+                raw_iso.as_deref(),
+                props.session_id,
+            );
         }
         Ok(ClaudeMessage::Result(msg)) => {
             return renderers::render_result_message(&msg, props.turn_metrics.as_ref());
@@ -92,7 +97,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
             return renderers::render_error_message(&msg, ts.as_deref());
         }
         Ok(ClaudeMessage::Portal(msg)) => {
-            return renderers::render_portal_message(&msg, ts.as_deref());
+            return renderers::render_portal_message(&msg, ts.as_deref(), props.session_id);
         }
         Ok(ClaudeMessage::RateLimitEvent(msg)) => {
             return renderers::render_rate_limit_event(&msg, ts.as_deref());
@@ -208,8 +213,10 @@ fn render_identity_group_part(json: &str, agent_type: shared::AgentType) -> Html
         Ok(ClaudeMessage::OptimisticUser(msg)) => {
             renderers::render_optimistic_user_message_content(&msg)
         }
-        Ok(ClaudeMessage::Assistant(msg)) => renderers::render_assistant_message_content(&msg),
-        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg),
+        Ok(ClaudeMessage::Assistant(msg)) => {
+            renderers::render_assistant_message_content(&msg, None)
+        }
+        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg, None),
         _ if agent_type == shared::AgentType::Codex => {
             super::codex_renderer::render_codex_message_content(json)
         }

@@ -139,6 +139,15 @@ impl SessionStatus {
     }
 }
 
+impl SendMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SendMode::Normal => "normal",
+            SendMode::Wiggum => "wiggum",
+        }
+    }
+}
+
 /// Send mode for user input
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]

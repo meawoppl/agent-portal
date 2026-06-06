@@ -1,5 +1,7 @@
 use dashmap::{DashMap, DashSet};
-use shared::{LauncherToServer, ServerToClient, ServerToLauncher, ServerToProxy};
+use shared::{
+    FileDownloadResponseFields, LauncherToServer, ServerToClient, ServerToLauncher, ServerToProxy,
+};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -44,6 +46,7 @@ pub struct SessionManager {
     launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
     pub pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     pub pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    pub pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
     pub pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     pub last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
@@ -66,6 +69,7 @@ impl Default for SessionManager {
             launcher_dedup: Arc::new(DashMap::new()),
             pending_dir_requests: Arc::new(DashMap::new()),
             pending_probe_requests: Arc::new(DashMap::new()),
+            pending_file_downloads: Arc::new(DashMap::new()),
             pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
@@ -177,6 +181,12 @@ impl SessionManager {
         }
 
         self.queue_pending_message(session_key, msg)
+    }
+
+    pub fn send_to_connected_session(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {
+        self.sessions
+            .get(session_key)
+            .is_some_and(|sender| sender.send(msg).is_ok())
     }
 
     fn queue_pending_message(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {

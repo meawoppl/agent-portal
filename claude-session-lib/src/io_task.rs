@@ -71,7 +71,7 @@ pub(crate) async fn claude_io_task(
             // Handle incoming commands (input to send to Claude).
             Some(cmd) = command_rx.recv() => {
                 let result = match cmd {
-                    IoCommand::Input(input) => {
+                    IoCommand::Input { input, delivered } => {
                         // Each fresh user input gets its own retry budget.
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
@@ -81,6 +81,9 @@ pub(crate) async fn claude_io_task(
                         turn_tracker.start(Instant::now(), chrono::Utc::now());
                         let r = client.send(&input).await;
                         last_input = Some(input);
+                        if let Some(delivered) = delivered {
+                            let _ = delivered.send(r.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+                        }
                         r
                     }
                     IoCommand::PermissionResponse(response) => {
@@ -289,7 +292,10 @@ pub(crate) async fn claude_io_task(
                             }
                             Some(cmd) = command_rx.recv() => {
                                 match cmd {
-                                    IoCommand::Input(new_input) => {
+                                    IoCommand::Input {
+                                        input: new_input,
+                                        delivered,
+                                    } => {
                                         // User typed something while we were waiting
                                         // — honor that, abandon the retry, and reset
                                         // the budget for the new prompt.
@@ -297,6 +303,10 @@ pub(crate) async fn claude_io_task(
                                         turn_tracker.start(Instant::now(), chrono::Utc::now());
                                         let r = client.send(&new_input).await;
                                         last_input = Some(new_input);
+                                        if let Some(delivered) = delivered {
+                                            let _ = delivered
+                                                .send(r.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+                                        }
                                         if let Err(e) = r {
                                             let _ = event_tx.send(IoEvent::Error(
                                                 SessionError::Agent(e.to_string()),

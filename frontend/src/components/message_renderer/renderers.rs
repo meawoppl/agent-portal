@@ -116,7 +116,7 @@ pub fn render_user_message_content(msg: &shared::UserMessage) -> Html {
         .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
 
     if has_tool_results {
-        render_content_blocks(&blocks)
+        render_content_blocks(&blocks, None)
     } else {
         let text_content = blocks
             .iter()

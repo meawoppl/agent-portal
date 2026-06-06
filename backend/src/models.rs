@@ -227,6 +227,7 @@ pub struct PendingInput {
     pub seq_num: i64,
     pub content: String,
     pub created_at: NaiveDateTime,
+    pub send_mode: Option<String>,
 }
 
 #[derive(Debug, Insertable)]
@@ -235,6 +236,7 @@ pub struct NewPendingInput {
     pub session_id: Uuid,
     pub seq_num: i64,
     pub content: String,
+    pub send_mode: Option<String>,
 }
 
 // ============================================================================
