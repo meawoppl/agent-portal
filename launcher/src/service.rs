@@ -29,6 +29,24 @@ fn service_path() -> String {
     )
 }
 
+/// Path of the running executable, with any trailing ` (deleted)` stripped.
+///
+/// On Linux `std::env::current_exe()` is implemented via `readlink /proc/self/exe`.
+/// Per `proc(5)`, if the underlying inode has been unlinked (e.g. by an in-place
+/// `agent-portal update` that replaces the binary at the same path), the kernel
+/// returns the original path with the literal string ` (deleted)` appended. We
+/// strip that suffix so it cannot leak into a generated unit file / plist and
+/// produce an `ExecStart` that systemd parses as a bogus subcommand.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn current_exe_path() -> Result<String> {
+    use anyhow::Context;
+    Ok(std::env::current_exe()
+        .context("Failed to get current executable path")?
+        .to_string_lossy()
+        .trim_end_matches(" (deleted)")
+        .to_string())
+}
+
 // --- Linux (systemd) ---
 
 #[cfg(target_os = "linux")]
@@ -78,10 +96,7 @@ fn systemctl(args: &[&str]) -> Result<std::process::Output> {
 #[cfg(target_os = "linux")]
 pub fn install() -> Result<()> {
     use anyhow::Context;
-    let binary_path = std::env::current_exe()
-        .context("Failed to get current executable path")?
-        .to_string_lossy()
-        .to_string();
+    let binary_path = current_exe_path()?;
 
     let service_path = service_file_path()?;
 
@@ -128,10 +143,7 @@ pub fn sync() -> Result<()> {
         return Ok(());
     }
 
-    let binary_path = std::env::current_exe()
-        .context("Failed to get current executable path")?
-        .to_string_lossy()
-        .to_string();
+    let binary_path = current_exe_path()?;
     let unit = generate_unit(&binary_path);
 
     if std::fs::read_to_string(&service_path).unwrap_or_default() == unit {
@@ -310,10 +322,7 @@ fn generate_plist(binary_path: &str) -> String {
 #[cfg(target_os = "macos")]
 pub fn install() -> Result<()> {
     use anyhow::{bail, Context};
-    let binary_path = std::env::current_exe()
-        .context("Failed to get current executable path")?
-        .to_string_lossy()
-        .to_string();
+    let binary_path = current_exe_path()?;
 
     let plist = plist_path()?;
 
@@ -365,10 +374,7 @@ pub fn sync() -> Result<()> {
         return Ok(());
     }
 
-    let binary_path = std::env::current_exe()
-        .context("Failed to get current executable path")?
-        .to_string_lossy()
-        .to_string();
+    let binary_path = current_exe_path()?;
     let content = generate_plist(&binary_path);
 
     if std::fs::read_to_string(&plist).unwrap_or_default() == content {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.7
+
+- **Strip a trailing `` (deleted)`` from `current_exe()` before baking it into the service unit.** On Linux `current_exe()` reads `/proc/self/exe`; per `proc(5)`, once the running binary's inode is unlinked (which `agent-portal update` does by replacing it in place) the kernel appends a literal `` (deleted)``. `service::sync()` then wrote `ExecStart=.../agent-portal (deleted) --no-update`, so the next restart handed `(deleted)` to clap as a subcommand (`unrecognized subcommand`) — a fast restart loop and an offline launcher. `launcher/src/service.rs` now routes its four `current_exe()` consumers through one helper that strips the suffix.
+
 ## 2.8.6
 
 - **Portal version surfaced in the agent's `<system-reminder>`.** The reminder injected at session start (and after each compaction) in `claude-session-lib/src/proxy_session/portal_reminder.rs::agent_facing` now leads with `Agent Portal version X.Y.Z`, captured at compile time via `env!("CARGO_PKG_VERSION")`. The agent now knows which portal release it's running on without having to ask, and operator overrides via `PORTAL_REMINDER_FILE` still get the version line auto-prepended.
