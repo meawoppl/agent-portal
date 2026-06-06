@@ -171,20 +171,42 @@ pub fn build_chip_list(metrics: &TurnMetrics) -> Vec<String> {
 /// `<div class="turn-metrics-footer">` directly below the parent
 /// `result-message` card; chips are separated by the `·` character (a
 /// `<span class="turn-metric-sep">` so the CSS can dim it independently).
+///
+/// The text chips come from [`build_chip_list`]. The reasoning-token chip is
+/// rendered separately as an animated odometer (`CountUp`) — it rolls 0→total
+/// on mount — and is appended last. It only appears when `thinking_tokens > 0`,
+/// which is the Codex reasoning case; Claude turns record `0` here (the wire
+/// folds reasoning into `output_tokens`) so the chip naturally drops.
 pub fn render_turn_metrics_footer(metrics: &TurnMetrics) -> Html {
-    let chips = build_chip_list(metrics);
-    if chips.is_empty() {
+    use crate::components::CountUp;
+
+    let text_chips = build_chip_list(metrics);
+    let has_thinking = metrics.thinking_tokens > 0;
+    if text_chips.is_empty() && !has_thinking {
         return html! {};
     }
+
+    let mut chips: Vec<Html> = text_chips
+        .into_iter()
+        .map(|chip| html! { <span class="turn-metric-chip">{ chip }</span> })
+        .collect();
+    if has_thinking {
+        chips.push(html! {
+            <span class="turn-metric-chip thinking-chip">
+                <CountUp target={metrics.thinking_tokens} suffix={" thinking"} compact={true} />
+            </span>
+        });
+    }
+
     html! {
         <div class="turn-metrics-footer">
-            { for chips.iter().enumerate().map(|(i, chip)| {
+            { for chips.into_iter().enumerate().map(|(i, chip)| {
                 html! {
                     <>
                         if i > 0 {
                             <span class="turn-metric-sep">{ "\u{00b7}" }</span>
                         }
-                        <span class="turn-metric-chip">{ chip.clone() }</span>
+                        { chip }
                     </>
                 }
             }) }

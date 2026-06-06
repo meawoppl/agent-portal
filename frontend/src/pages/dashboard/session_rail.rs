@@ -213,9 +213,6 @@ pub struct SessionRailProps {
     /// Server version string for comparing against client versions
     #[prop_or_default]
     pub server_version: String,
-    /// Map of launcher_id → token_expires_at (ISO string) for all launchers
-    #[prop_or_default]
-    pub launcher_token_expiry: HashMap<Uuid, String>,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
     pub on_delete: Callback<Uuid>,
@@ -858,48 +855,6 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                         html! { <span class="pill-agent-badge cron">{ "Cron" }</span> }
                     } else if session.paused {
                         html! { <span class="pill-agent-badge paused">{ "Paused" }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    // Show warning icon when this session's launcher token is expiring
-                    if let Some(expires_at) = session.launcher_id
-                        .and_then(|lid| props.launcher_token_expiry.get(&lid))
-                    {
-                        let now = js_sys::Date::now();
-                        let exp = js_sys::Date::parse(expires_at);
-                        let days_left = if !exp.is_nan() {
-                            ((exp - now) / (1000.0 * 60.0 * 60.0 * 24.0)).floor() as i64
-                        } else {
-                            999
-                        };
-                        if days_left <= 7 {
-                            let tooltip = if days_left <= 0 {
-                                "Launcher token expired! Go to Settings > Launchers to renew.".to_string()
-                            } else if days_left == 1 {
-                                "Launcher token expires tomorrow. Go to Settings > Launchers to renew.".to_string()
-                            } else {
-                                format!(
-                                    "Launcher token expires in {} days. Go to Settings > Launchers to renew.",
-                                    days_left
-                                )
-                            };
-                            let badge_class = if days_left <= 0 {
-                                "pill-token-warning expired"
-                            } else if days_left <= 3 {
-                                "pill-token-warning critical"
-                            } else {
-                                "pill-token-warning"
-                            };
-                            html! {
-                                <span class={badge_class} title={tooltip}>
-                                    { "⚠" }
-                                </span>
-                            }
-                        } else {
-                            html! {}
-                        }
                     } else {
                         html! {}
                     }

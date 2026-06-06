@@ -17,16 +17,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     let (mut ws_sender, mut ws_receiver) = conn.split();
 
     // Wait for LauncherRegister message
-    let (
-        launcher_id,
-        launcher_name,
-        hostname,
-        user_id,
-        working_directory,
-        version,
-        reg_token_hash,
-        reg_token_expires_at,
-    ) = loop {
+    let (launcher_id, launcher_name, hostname, user_id, working_directory, version) = loop {
         match ws_receiver.recv().await {
             Some(Ok(LauncherToServer::LauncherRegister {
                 launcher_id,
@@ -36,10 +27,9 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 working_directory,
                 version,
             })) => {
-                // Authenticate and look up token metadata
-                let (user_id, reg_token_hash, reg_token_expires_at) = if let Some(ref token) =
-                    auth_token
-                {
+                // Authenticate. Launcher tokens never expire (see #932), so
+                // there is no expiry to track here.
+                let user_id = if let Some(ref token) = auth_token {
                     match app_state.db_pool.get() {
                         Ok(mut conn) => {
                             match crate::handlers::proxy_tokens::verify_and_get_user(
@@ -47,22 +37,11 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                             ) {
                                 Ok((uid, email)) => {
                                     info!("Launcher authenticated as {} ({})", email, uid);
-                                    // Look up token expiry from DB
-                                    let token_hash = crate::jwt::hash_token(token);
-                                    let expires_at = {
-                                        use crate::schema::proxy_auth_tokens;
-                                        use diesel::prelude::*;
-                                        proxy_auth_tokens::table
-                                            .filter(proxy_auth_tokens::token_hash.eq(&token_hash))
-                                            .select(proxy_auth_tokens::expires_at)
-                                            .first::<chrono::NaiveDateTime>(&mut conn)
-                                            .ok()
-                                    };
-                                    (uid, Some(token_hash), expires_at)
+                                    uid
                                 }
                                 Err(_) => {
                                     if app_state.dev_mode {
-                                        (get_dev_user_id(&app_state), None, None)
+                                        get_dev_user_id(&app_state)
                                     } else {
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
@@ -90,7 +69,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         }
                     }
                 } else if app_state.dev_mode {
-                    (get_dev_user_id(&app_state), None, None)
+                    get_dev_user_id(&app_state)
                 } else {
                     let _ = ws_sender
                         .send(ServerToLauncher::LauncherRegisterAck {
@@ -110,8 +89,6 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                     user_id,
                     working_directory,
                     version,
-                    reg_token_hash,
-                    reg_token_expires_at,
                 );
             }
             Some(Ok(_)) => continue,
@@ -171,8 +148,6 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             running_sessions: Vec::new(),
             working_directory,
             version: version.unwrap_or_default(),
-            token_hash: reg_token_hash,
-            token_expires_at: reg_token_expires_at,
         },
     );
 
@@ -399,24 +374,6 @@ fn handle_launcher_message(
         } => {
             if let Some(mut launcher) = app_state.session_manager.launchers.get_mut(&launcher_id) {
                 launcher.running_sessions = running_sessions;
-
-                // Check if token needs renewal (within 7 days of expiry)
-                if let Some(expires_at) = launcher.token_expires_at {
-                    let now = chrono::Utc::now().naive_utc();
-                    let days_until_expiry = (expires_at - now).num_days();
-                    if days_until_expiry <= 7 {
-                        let old_hash = launcher.token_hash.clone();
-                        let sender = launcher.sender.clone();
-                        drop(launcher); // release DashMap lock before DB work
-                        let _ = renew_launcher_token_for(
-                            app_state,
-                            launcher_id,
-                            user_id,
-                            old_hash,
-                            sender,
-                        );
-                    }
-                }
             }
             reconcile_desired_sessions(app_state, launcher_id, user_id);
         }
@@ -436,6 +393,11 @@ fn handle_launcher_message(
             exit_code,
         } => {
             info!("Proxy exited: session={}, code={:?}", session_id, exit_code);
+            // The proxy holding this session's token has exited; revoke the
+            // token so it can't be reused. A resume mints a fresh one. See #932.
+            if let Ok(mut conn) = app_state.db_pool.get() {
+                crate::handlers::proxy_tokens::revoke_tokens_for_session(&mut conn, session_id);
+            }
             app_state.session_manager.broadcast_to_user(
                 &user_id,
                 ServerToClient::SessionExited {
@@ -768,91 +730,6 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             );
         }
     }
-}
-
-/// Mint a new 30-day token for a launcher, revoke the old one, and push it over WS.
-/// Used by both the heartbeat auto-renewal and the manual renew API endpoint.
-pub fn renew_launcher_token_for(
-    app_state: &AppState,
-    launcher_id: Uuid,
-    user_id: Uuid,
-    old_token_hash: Option<String>,
-    sender: mpsc::UnboundedSender<ServerToLauncher>,
-) -> Result<(), ()> {
-    let mut conn = app_state.db_pool.get().map_err(|e| {
-        error!("Failed to get DB connection for token renewal: {}", e);
-    })?;
-
-    use crate::schema::{proxy_auth_tokens, users};
-    use diesel::prelude::*;
-
-    let user: crate::models::User = users::table.find(user_id).first(&mut conn).map_err(|e| {
-        error!("Failed to find user for token renewal: {}", e);
-    })?;
-
-    let token_id = Uuid::new_v4();
-    let expires_in_days: u32 = 30;
-    let token = crate::jwt::create_proxy_token(
-        app_state.jwt_secret.as_bytes(),
-        token_id,
-        user_id,
-        &user.email,
-        expires_in_days,
-    )
-    .map_err(|e| {
-        error!("Failed to create renewal token: {}", e);
-    })?;
-
-    let new_hash = crate::jwt::hash_token(&token);
-    let new_expires_at =
-        (chrono::Utc::now() + chrono::Duration::days(expires_in_days as i64)).naive_utc();
-
-    let new_token = crate::models::NewProxyAuthToken {
-        user_id,
-        name: format!(
-            "Launcher renewal {}",
-            chrono::Utc::now().format("%Y-%m-%d %H:%M")
-        ),
-        token_hash: new_hash.clone(),
-        expires_at: new_expires_at,
-    };
-
-    diesel::insert_into(proxy_auth_tokens::table)
-        .values(&new_token)
-        .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to store renewed token: {}", e);
-        })?;
-
-    // Revoke old token
-    if let Some(ref old_hash) = old_token_hash {
-        let _ = diesel::update(
-            proxy_auth_tokens::table.filter(proxy_auth_tokens::token_hash.eq(old_hash)),
-        )
-        .set(proxy_auth_tokens::revoked.eq(true))
-        .execute(&mut conn);
-    }
-
-    // Update launcher connection with new token info
-    if let Some(mut launcher) = app_state.session_manager.launchers.get_mut(&launcher_id) {
-        launcher.token_hash = Some(new_hash);
-        launcher.token_expires_at = Some(new_expires_at);
-    }
-
-    // Push the new token to the launcher
-    if sender
-        .send(ServerToLauncher::TokenRenewed { token })
-        .is_ok()
-    {
-        info!(
-            "Renewed launcher token for '{}' (user {}), new expiry: {}",
-            launcher_id, user.email, new_expires_at
-        );
-    } else {
-        warn!("Failed to send renewed token to launcher {}", launcher_id);
-    }
-
-    Ok(())
 }
 
 fn get_dev_user_id(app_state: &AppState) -> Uuid {

@@ -40,7 +40,6 @@ chrono-tz = "0.10"
 
 # Cron expression parsing
 croner = "3"
-toml = "1.0.1"
 dirs = "6.0.0"
 portal-auth = { path = "../portal-auth" }
 session-lib = { path = "../session-lib" }

@@ -35,68 +35,7 @@ fn config_path() -> PathBuf {
     config_dir().join("launcher.json")
 }
 
-fn legacy_config_path() -> PathBuf {
-    dirs::config_dir()
-        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("claude-portal")
-        .join("launcher.toml")
-}
-
-/// Migrate from the old ~/.config/claude-portal/launcher.toml to the new path.
-/// Reads the TOML, writes JSON to the new location, and removes the old file.
-fn migrate_legacy_config() {
-    let old_path = legacy_config_path();
-    let new_path = config_path();
-
-    if !old_path.exists() || new_path.exists() {
-        return;
-    }
-
-    tracing::warn!(
-        "Migrating config: {} -> {}",
-        old_path.display(),
-        new_path.display()
-    );
-
-    let Ok(contents) = std::fs::read_to_string(&old_path) else {
-        return;
-    };
-
-    // Parse as TOML (the old format)
-    let config: LauncherConfig = match toml::from_str(&contents) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to parse legacy config: {}", e);
-            return;
-        }
-    };
-
-    // Write as JSON to the new path
-    if let Some(parent) = new_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match serde_json::to_string_pretty(&config) {
-        Ok(json) => {
-            if std::fs::write(&new_path, &json).is_ok() {
-                tracing::info!("Migrated config to {}", new_path.display());
-                // Remove the old file
-                if let Err(e) = std::fs::remove_file(&old_path) {
-                    tracing::warn!("Failed to remove old config: {}", e);
-                }
-                // Try to remove the old directory if empty
-                if let Some(old_dir) = old_path.parent() {
-                    let _ = std::fs::remove_dir(old_dir);
-                }
-            }
-        }
-        Err(e) => tracing::warn!("Failed to serialize migrated config: {}", e),
-    }
-}
-
 pub fn load_config() -> LauncherConfig {
-    migrate_legacy_config();
-
     let path = config_path();
     match std::fs::read_to_string(&path) {
         Ok(contents) => match serde_json::from_str(&contents) {

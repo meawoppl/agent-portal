@@ -44,6 +44,14 @@ pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str
         return html! {};
     }
 
+    // `thinking_tokens` markers are collapsed into a single counted chip by the
+    // grouping layer (`GroupCategory::Thinking`), so they never reach here via a
+    // group. Suppress any that slip through as a standalone `Single` rather than
+    // rendering the bare-subtype fallback badge ("THINKING_TOKENS" × N noise).
+    if subtype == "thinking_tokens" {
+        return html! {};
+    }
+
     html! {
         <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
             <span class="message-type-badge system">{ subtype }</span>

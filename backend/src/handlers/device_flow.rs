@@ -396,19 +396,19 @@ pub async fn complete_device_flow(
         error!("Failed to find user: {}", e);
     })?;
 
-    // Generate token ID and create JWT
+    // Generate token ID and create JWT. Device-flow tokens (used by launchers
+    // and CLI proxies) never expire; revocation governs their lifetime. See
+    // #932.
     let token_id = Uuid::new_v4();
-    let expires_in_days: u32 = 30; // Device flow tokens valid for 30 days
     let jwt_secret = app_state.jwt_secret.as_bytes();
 
-    let token = create_proxy_token(jwt_secret, token_id, user_id, &user.email, expires_in_days)
-        .map_err(|e| {
+    let token =
+        create_proxy_token(jwt_secret, token_id, user_id, &user.email, None).map_err(|e| {
             error!("Failed to create JWT: {}", e);
         })?;
 
     // Store token hash in database
     let token_hash = hash_token(&token);
-    let expires_at = chrono::Utc::now() + chrono::Duration::days(expires_in_days as i64);
 
     let new_token = NewProxyAuthToken {
         user_id,
@@ -417,7 +417,7 @@ pub async fn complete_device_flow(
             chrono::Utc::now().format("%Y-%m-%d %H:%M")
         ),
         token_hash,
-        expires_at: expires_at.naive_utc(),
+        expires_at: None,
     };
 
     diesel::insert_into(proxy_auth_tokens::table)

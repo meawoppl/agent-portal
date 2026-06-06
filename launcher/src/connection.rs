@@ -543,14 +543,6 @@ async fn handle_message(
             info!("Received ScheduleSync with {} task(s)", tasks.len());
             scheduler.update_tasks(tasks);
         }
-        ServerToLauncher::TokenRenewed { token } => {
-            info!("Received renewed auth token from server");
-            if let Err(e) = config::save_auth_token(&token) {
-                error!("Failed to save renewed token: {}", e);
-            } else {
-                info!("Renewed token saved to config");
-            }
-        }
         ServerToLauncher::ServerShutdown { reason, .. } => {
             info!("Server shutting down: {}", reason);
         }

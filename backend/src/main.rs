@@ -570,10 +570,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/launch", post(handlers::launchers::launch_session))
         .route(
-            "/api/launchers/{launcher_id}/renew-token",
-            post(handlers::launchers::renew_launcher_token),
-        )
-        .route(
             "/api/launchers/{launcher_id}/update",
             post(handlers::launchers::update_launcher),
         )

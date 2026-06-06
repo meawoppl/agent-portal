@@ -129,8 +129,13 @@ pub struct ProxyAuthToken {
     pub token_hash: String,
     pub created_at: NaiveDateTime,
     pub last_used_at: Option<NaiveDateTime>,
-    pub expires_at: NaiveDateTime,
+    /// `None` means the token never expires (launch/launcher tokens). User
+    /// dashboard tokens still carry an explicit expiry. See #932.
+    pub expires_at: Option<NaiveDateTime>,
     pub revoked: bool,
+    /// Session whose proxy holds this token, if it is a launch token. Used to
+    /// revoke the token when that session terminates.
+    pub session_id: Option<Uuid>,
 }
 
 #[derive(Debug, Insertable)]
@@ -139,7 +144,8 @@ pub struct NewProxyAuthToken {
     pub user_id: Uuid,
     pub name: String,
     pub token_hash: String,
-    pub expires_at: NaiveDateTime,
+    /// `None` mints a non-expiring token.
+    pub expires_at: Option<NaiveDateTime>,
 }
 
 // ============================================================================
@@ -279,15 +285,17 @@ pub struct NewScheduledTask {
 // ============================================================================
 
 /// One row in `turn_metrics`. Persisted per user-input → terminator. See the
-/// `2026-05-27-184255_add_turn_metrics` migration for column semantics and
-/// the explicit retention note (this table is intentionally outside the
-/// `MESSAGE_RETENTION_DAYS` cleanup sweep).
+/// `2026-05-27-184255_add_turn_metrics` migration for column semantics. The
+/// table is a durable per-user archive: it's outside the `MESSAGE_RETENTION_DAYS`
+/// sweep, and `2026-06-04-120000_decouple_turn_metrics_from_sessions` made
+/// `session_id` nullable with `ON DELETE SET NULL` (was `NOT NULL`/`CASCADE`) so
+/// a row survives its session's deletion. Ownership now lives on `user_id`.
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
 #[diesel(table_name = crate::schema::turn_metrics)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct TurnMetric {
     pub id: Uuid,
-    pub session_id: Uuid,
+    pub session_id: Option<Uuid>,
     pub user_message_id: Option<Uuid>,
     pub agent_type: String,
     pub model: Option<String>,
@@ -310,12 +318,14 @@ pub struct TurnMetric {
     pub stream_restarts: i32,
     pub total_cost_usd: Option<f64>,
     pub created_at: DateTime<Utc>,
+    pub user_id: Uuid,
 }
 
 #[derive(Debug, Insertable)]
 #[diesel(table_name = crate::schema::turn_metrics)]
 pub struct NewTurnMetric {
     pub session_id: Uuid,
+    pub user_id: Uuid,
     pub user_message_id: Option<Uuid>,
     pub agent_type: String,
     pub model: Option<String>,

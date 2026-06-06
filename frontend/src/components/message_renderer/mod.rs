@@ -145,11 +145,35 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             let ts = messages
                 .first()
                 .and_then(|json| extract_local_timestamp(json));
+
+            // A run of `thinking_tokens` markers collapses to a single compact
+            // chip: the `thinking` badge plus an odometer climbing to the run's
+            // running thinking-token estimate. No body — these markers carry
+            // none. Each marker reports the cumulative estimate, so the chip
+            // ticks upward live as more markers stream in.
+            if *category == GroupCategory::Thinking {
+                let tokens = grouping::thinking_tokens_estimate(messages);
+                return html! {
+                    <div class="claude-message thinking-pulse-group" title={ts.unwrap_or_default()}>
+                        <div class="message-header">
+                            <span class="message-type-badge thinking">{ "thinking" }</span>
+                            if tokens > 0 {
+                                <span class="message-count" title={format!("~{} thinking tokens", tokens)}>
+                                    <crate::components::CountUp target={tokens} suffix={" tokens"} compact={true} />
+                                </span>
+                            }
+                        </div>
+                    </div>
+                };
+            }
+
             let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
             let wrapper_class = match category {
                 GroupCategory::User => "user-message",
                 GroupCategory::Portal => "portal-message",
                 GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
+                // Handled above with an early return; arm kept for exhaustiveness.
+                GroupCategory::Thinking => "assistant-message",
             };
             let visible = visible_group_indices(*category, messages);
             let visible_count = visible.len();
@@ -316,6 +340,21 @@ mod tests {
 
     fn group_for_codex_tests(messages: &[String]) -> Vec<MessageGroup> {
         group_messages(messages, shared::AgentType::Codex, None)
+    }
+
+    /// A `system`/`thinking_tokens` marker — the bodyless per-reasoning-step
+    /// event the Claude CLI emits, which the portal collapses into one chip.
+    /// `estimated_tokens` is the cumulative running thinking-token estimate.
+    fn thinking_tokens_message(estimated_tokens: i64) -> String {
+        serde_json::json!({
+            "type": "system",
+            "subtype": "thinking_tokens",
+            "estimated_tokens": estimated_tokens,
+            "estimated_tokens_delta": estimated_tokens,
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
     }
 
     /// Realistic Claude wire shape for a user message containing a single
@@ -628,6 +667,47 @@ mod tests {
         assert_eq!(groups.len(), 3);
     }
 
+    /// A run of `thinking_tokens` markers must collapse into a single
+    /// `Thinking` group (one counted chip), not one empty badge per marker —
+    /// the regression target for the "wall of THINKING_TOKENS badges" symptom.
+    #[test]
+    fn serial_thinking_tokens_collapse_into_one_group() {
+        let messages = vec![
+            thinking_tokens_message(50),
+            thinking_tokens_message(150),
+            thinking_tokens_message(250),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(groups.len(), 1);
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Thinking,
+                messages,
+                label,
+                ..
+            } => {
+                assert_eq!(messages.len(), 3);
+                assert_eq!(label, "thinking");
+            }
+            other => panic!("expected Thinking run, got {:?}", other),
+        }
+    }
+
+    /// The condensed chip shows a token estimate, not a pulse count: each
+    /// marker reports the cumulative `estimated_tokens`, so the run's peak
+    /// (last) value is the burst total.
+    #[test]
+    fn thinking_tokens_estimate_returns_peak() {
+        let messages = vec![
+            thinking_tokens_message(50),
+            thinking_tokens_message(150),
+            thinking_tokens_message(250),
+        ];
+        assert_eq!(grouping::thinking_tokens_estimate(&messages), 250);
+        // No markers / unparseable input yields 0 (chip hides).
+        assert_eq!(grouping::thinking_tokens_estimate(&[]), 0);
+    }
+
     #[test]
     fn codex_event_classifies_into_codex_group() {
         let msg = codex_item_started_agent_message("hi");
@@ -729,6 +809,11 @@ mod tests {
                 })
                 .to_string(),
                 None,
+            ),
+            (
+                "system thinking_tokens marker collapses into the Thinking group",
+                thinking_tokens_message(150),
+                Some(GroupCategory::Thinking),
             ),
             (
                 "result message",
