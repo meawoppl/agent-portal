@@ -20,7 +20,8 @@ pub mod protocol;
 pub mod api;
 pub use api::{
     ApiError, Citation, CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage,
-    ModelUsageEntry, SoundSettingsResponse, TaskNotificationExtra,
+    ModelUsageEntry, SoundSettingsResponse, TaskNotificationExtra, TurnMetrics,
+    TurnMetricsResponse,
 };
 
 /// Default backend URL based on build profile.
@@ -35,16 +36,15 @@ pub fn default_backend_url() -> &'static str {
 
 // Re-export claude-codes types for frontend message parsing
 pub use claude_codes::io::{
-    ContentBlock, ImageBlock, ImageSource, PermissionSuggestion, TextBlock, ThinkingBlock,
-    ToolResultBlock, ToolResultContent, ToolUseBlock,
+    ContentBlock, ImageBlock, ImageSource, ImageSourceType, MediaType, PermissionSuggestion,
+    TextBlock, ThinkingBlock, ToolResultBlock, ToolResultContent, ToolUseBlock,
 };
 
-// Re-export claude-codes output types for typed parsing (aliased to avoid conflicts with
-// frontend's local lenient types in message_renderer/types.rs)
+// Re-export claude-codes output types for typed parsing.
 pub use claude_codes::io::{
-    ResultMessage as CCResultMessage, SystemMessage as CCSystemMessage,
-    SystemSubtype as CCSystemSubtype, TaskNotificationMessage, TaskProgressMessage,
-    TaskStartedMessage, TaskStatus as CCTaskStatus, TaskType as CCTaskType, TaskUsage,
+    AnthropicError, AssistantMessage, AssistantUsage, MessageContent, RateLimitEvent,
+    ResultMessage, ServerToolUse, SystemMessage, SystemSubtype, TaskNotificationMessage,
+    TaskProgressMessage, TaskStartedMessage, TaskStatus, TaskType, TaskUsage, UserMessage,
 };
 pub use claude_codes::CacheCreationDetails;
 pub use claude_codes::ClaudeOutput;
@@ -63,7 +63,7 @@ pub use claude_codes::{AllowedPrompt, ExitPlanModeInput};
 /// The CLI uses several spellings depending on version and code path, so this
 /// helper centralizes the predicate. Callers should use this instead of
 /// inlining the disjunction.
-pub fn is_compaction_boundary(sys: &CCSystemMessage) -> bool {
+pub fn is_compaction_boundary(sys: &SystemMessage) -> bool {
     sys.is_compact_boundary()
         || matches!(
             sys.subtype.as_str(),
@@ -139,6 +139,15 @@ impl SessionStatus {
     }
 }
 
+impl SendMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SendMode::Normal => "normal",
+            SendMode::Wiggum => "wiggum",
+        }
+    }
+}
+
 /// Send mode for user input
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -188,9 +197,6 @@ pub struct LauncherInfo {
     /// Launcher binary version
     #[serde(default)]
     pub version: String,
-    /// ISO 8601 timestamp when the launcher's auth token expires
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_expires_at: Option<String>,
 }
 
 /// API types for HTTP endpoints
@@ -230,6 +236,13 @@ pub struct SessionInfo {
     /// Scheduled task ID if this session was spawned by a scheduled task
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_task_id: Option<Uuid>,
+    /// Server-side pause flag. Paused sessions are resumable on demand but
+    /// launchers must not auto-restart them during reconnect/startup.
+    #[serde(default)]
+    pub paused: bool,
+    /// Arguments used when launching the agent CLI.
+    #[serde(default)]
+    pub claude_args: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

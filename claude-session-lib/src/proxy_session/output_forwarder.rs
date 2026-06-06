@@ -1,20 +1,22 @@
 //! Output forwarder task: forwards Claude outputs to WebSocket with sequencing.
 //!
-//! Also handles git branch detection, PR URL lookup, and image extraction.
+//! Also handles metadata refresh triggering and image extraction.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use base64::Engine;
 use claude_codes::io::{ContentBlock, ControlRequestPayload, ToolUseBlock};
 use claude_codes::ClaudeOutput;
 use shared::{AgentType, ProxyToServer};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use session_lib::output_buffer::PendingOutputBuffer;
 
+use super::git_metadata::{
+    check_and_send_branch_update, claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
+};
 use super::image_uploader::upload_image;
 use super::{format_duration, truncate, SharedWsWrite};
 
@@ -35,45 +37,36 @@ pub fn spawn_output_forwarder(
     backend_url: String,
     auth_token: Option<String>,
     working_directory: String,
-    current_branch: Arc<Mutex<Option<String>>>,
-    current_pr_url: Arc<Mutex<Option<String>>>,
-    current_repo_url: Arc<Mutex<Option<String>>>,
-    output_buffer: Arc<Mutex<PendingOutputBuffer>>,
+    git_metadata: GitMetadataState,
+    output_buffer: std::sync::Arc<tokio::sync::Mutex<PendingOutputBuffer>>,
     max_image_mb: u32,
     agent_type: AgentType,
 ) -> tokio::task::JoinHandle<()> {
     let max_bytes = max_image_mb as usize * 1024 * 1024;
     tokio::spawn(async move {
-        let mut message_count: u64 = 0;
-        let mut pending_git_check = false;
+        let mut git_refresh = GitRefreshTrigger::default();
         // Track Read tool calls on image files: tool_use_id → file_path
         let mut image_read_map: HashMap<String, String> = HashMap::new();
 
         while let Some(output) = output_rx.recv().await {
-            message_count += 1;
-
             // Log detailed info about the message
             log_claude_output(&output);
 
             // Check for branch/PR update from PREVIOUS git command (deferred so
             // the command has finished executing before we query git/gh state)
-            let should_check_branch = pending_git_check || message_count.is_multiple_of(100);
-            if should_check_branch {
-                pending_git_check = false;
+            if git_refresh.should_check_before_message() {
                 check_and_send_branch_update(
                     &ws_write,
                     session_id,
                     &working_directory,
-                    &current_branch,
-                    &current_pr_url,
-                    &current_repo_url,
+                    &git_metadata,
                 )
                 .await;
             }
 
             // Check if THIS message is a git-related bash command (for next iteration)
-            if is_git_bash_command(&output) {
-                pending_git_check = true;
+            if claude_output_has_git_signal(&output) {
+                git_refresh.mark_git_signal();
             }
 
             // Track Read tool calls on image files from assistant messages
@@ -193,161 +186,6 @@ enum ImageWorkItem {
     },
     /// Image exceeded the hard cap; this is a textual rejection notice.
     TooLarge(shared::PortalMessage),
-}
-
-/// Get the current git branch name, if in a git repository
-pub(super) fn get_git_branch(cwd: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let branch = String::from_utf8(output.stdout)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())?;
-
-    // If we're in detached HEAD state, get the short commit hash instead
-    if branch == "HEAD" {
-        std::process::Command::new("git")
-            .args(["rev-parse", "--short", "HEAD"])
-            .current_dir(cwd)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| format!("detached:{}", s.trim()))
-    } else {
-        Some(branch)
-    }
-}
-
-/// Look up the GitHub repository URL using the `gh` CLI
-pub(super) fn get_repo_url(cwd: &str) -> Option<String> {
-    let output = std::process::Command::new("gh")
-        .args(["repo", "view", "--json", "url", "-q", ".url"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8(output.stdout)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// Look up the GitHub PR URL for a branch using the `gh` CLI
-pub(super) fn get_pr_url(cwd: &str, branch: &str) -> Option<String> {
-    if branch == "main" || branch == "master" || branch.starts_with("detached:") {
-        return None;
-    }
-    let output = std::process::Command::new("gh")
-        .args(["pr", "view", branch, "--json", "url", "-q", ".url"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8(output.stdout)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// Check if a tool use is a Bash command containing "git"
-fn is_git_bash_command(output: &ClaudeOutput) -> bool {
-    if let ClaudeOutput::User(user) = output {
-        for block in &user.message.content {
-            if let ContentBlock::ToolResult(tr) = block {
-                if let Some(ref content) = tr.content {
-                    let content_str = format!("{:?}", content);
-                    if content_str.contains("git ")
-                        || content_str.contains("gh ")
-                        || content_str.contains("branch")
-                        || content_str.contains("checkout")
-                        || content_str.contains("merge")
-                        || content_str.contains("rebase")
-                        || content_str.contains("commit")
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    // Also check if an assistant message contains a Bash tool_use with git
-    if let Some(bash) = output.as_tool_use("Bash") {
-        if let Some(claude_codes::tool_inputs::ToolInput::Bash(input)) = bash.typed_input() {
-            if input.command.contains("git ") || input.command.contains("gh ") {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Check and send git branch or PR URL update if changed
-async fn check_and_send_branch_update(
-    ws_write: &SharedWsWrite,
-    session_id: Uuid,
-    working_directory: &str,
-    current_branch: &Arc<Mutex<Option<String>>>,
-    current_pr_url: &Arc<Mutex<Option<String>>>,
-    current_repo_url: &Arc<Mutex<Option<String>>>,
-) {
-    let new_branch = get_git_branch(working_directory);
-    let new_pr_url = new_branch
-        .as_deref()
-        .and_then(|b| get_pr_url(working_directory, b));
-    let new_repo_url = get_repo_url(working_directory);
-
-    let mut branch_guard = current_branch.lock().await;
-    let mut pr_guard = current_pr_url.lock().await;
-    let mut repo_guard = current_repo_url.lock().await;
-
-    let branch_changed = *branch_guard != new_branch;
-    let pr_changed = *pr_guard != new_pr_url;
-    let repo_changed = *repo_guard != new_repo_url;
-
-    if branch_changed || pr_changed || repo_changed {
-        if branch_changed {
-            debug!(
-                "Git branch changed: {:?} -> {:?}",
-                *branch_guard, new_branch
-            );
-        }
-        if pr_changed {
-            debug!("PR URL changed: {:?} -> {:?}", *pr_guard, new_pr_url);
-        }
-        *branch_guard = new_branch.clone();
-        *pr_guard = new_pr_url.clone();
-        *repo_guard = new_repo_url.clone();
-
-        // Drop locks before acquiring ws lock
-        drop(branch_guard);
-        drop(pr_guard);
-        drop(repo_guard);
-
-        let update_msg = ProxyToServer::SessionUpdate {
-            session_id,
-            git_branch: new_branch,
-            pr_url: new_pr_url,
-            repo_url: new_repo_url,
-        };
-
-        let mut ws = ws_write.lock().await;
-        if let Err(e) = ws.send(update_msg).await {
-            error!("Failed to send branch update: {}", e);
-        }
-    }
 }
 
 /// Return the MIME type for a supported image extension, or None.

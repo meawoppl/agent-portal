@@ -5,7 +5,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use claude_session_lib::{run_connection_loop, ClaudeAgent, LoopResult, ProxySessionConfig};
+use claude_session_lib::{
+    run_connection_loop, ClaudeAgent, LoopResult, PortalInput, ProxySessionConfig,
+};
 use codex_session_lib::CodexAgent;
 use session_lib::{Session, SessionConfig};
 
@@ -63,14 +65,6 @@ impl ProcessManager {
 
     pub fn running_session_ids(&self) -> Vec<Uuid> {
         self.tasks.keys().copied().collect()
-    }
-
-    /// Returns the set of working directories that currently have running sessions.
-    pub fn running_directories(&self) -> Vec<String> {
-        self.tasks
-            .values()
-            .map(|t| t.working_directory.clone())
-            .collect()
     }
 
     /// Returns the working directory for a given session, if it exists.
@@ -241,7 +235,7 @@ async fn run_session_task(
             }
         };
 
-        let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<PortalInput>();
 
         // run_connection_loop is generic over A: Agent, so we dispatch
         // here on the AnySession variant. Everything else

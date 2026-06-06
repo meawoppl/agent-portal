@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use claude_session_lib::ClaudeAgent;
 use session_lib::{Session, SessionConfig};
+use shared::api::{ResolveProxySessionRequest, ResolveProxySessionResponse};
 
 /// Type alias — the proxy binary only ever drives Claude sessions; the
 /// launcher is where heterogeneous (Claude + Codex) dispatch lives.
@@ -339,9 +340,6 @@ async fn main() -> Result<()> {
         return commands::handle_init(&mut config, &cwd, init_value, args.backend_url.as_deref());
     }
 
-    // Resolve session (new or resume)
-    let (session_id, session_name, resuming) = resolve_session(&args, &cwd)?;
-
     // Resolve backend URL: CLI arg > per-directory config > global default > compile-time default
     let backend_url = args
         .backend_url
@@ -350,19 +348,9 @@ async fn main() -> Result<()> {
         .or_else(|| config.preferences.default_backend_url.clone())
         .unwrap_or_else(|| shared::default_backend_url().to_string());
 
-    // Print startup info (suppress in shim mode — stdout is reserved for claude I/O)
-    if !args.shim {
-        ui::print_startup_banner();
-        if args.session_id_tag.is_none() {
-            ui::print_deprecation_warning();
-        }
-        ui::print_session_info(
-            &session_name,
-            &session_id.to_string(),
-            &backend_url,
-            resuming,
-        );
-    }
+    // Parse agent type
+    let agent_type: shared::AgentType =
+        args.agent.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
     // Resolve auth token — in shim mode, auth failure is non-fatal so claude
     // still launches even if the portal backend is unreachable.
@@ -378,15 +366,34 @@ async fn main() -> Result<()> {
         resolve_auth_token(&args, &mut config, &cwd, &backend_url).await?
     };
 
+    // Resolve session (new or resume). Prefer the backend's DB-backed session
+    // identity; fall back to the local directory cache only when the backend
+    // cannot answer (offline, auth unavailable, older server).
+    let resolved_session =
+        resolve_session(&args, &cwd, &backend_url, auth_token.as_deref(), agent_type).await?;
+    let session_id = resolved_session.session_id;
+    let session_name = resolved_session.session_name;
+    let resuming = resolved_session.resuming;
+
+    // Print startup info (suppress in shim mode — stdout is reserved for claude I/O)
+    if !args.shim {
+        ui::print_startup_banner();
+        if args.session_id_tag.is_none() {
+            ui::print_deprecation_warning();
+        }
+        ui::print_session_info(
+            &session_name,
+            &session_id.to_string(),
+            &backend_url,
+            resuming,
+        );
+    }
+
     // Detect git branch
     let git_branch = get_git_branch(&cwd);
     if let Some(ref branch) = git_branch {
         info!("Detected git branch: {}", branch);
     }
-
-    // Parse agent type
-    let agent_type: shared::AgentType =
-        args.agent.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
     // Build session config
     let session_config = ProxySessionConfig {
@@ -415,48 +422,119 @@ async fn main() -> Result<()> {
     run_proxy_session(session_config).await
 }
 
-/// Resolve which session to use (new or resume existing)
-fn resolve_session(args: &Args, cwd: &str) -> Result<(Uuid, String, bool)> {
+struct ResolvedSession {
+    session_id: Uuid,
+    session_name: String,
+    resuming: bool,
+}
+
+/// Resolve which session to use (new or resume existing).
+async fn resolve_session(
+    args: &Args,
+    cwd: &str,
+    backend_url: &str,
+    auth_token: Option<&str>,
+    agent_type: shared::AgentType,
+) -> Result<ResolvedSession> {
+    if args.new_session {
+        return create_fresh_local_session(args, cwd, true);
+    }
+
+    if let Some(token) = auth_token {
+        match resolve_session_from_backend(args, cwd, backend_url, token, agent_type).await {
+            Ok(Some(resolved)) => return Ok(resolved),
+            Ok(None) => {
+                info!("Backend has no resumable session for {}; creating new", cwd);
+                return create_fresh_local_session(args, cwd, false);
+            }
+            Err(e) => {
+                warn!(
+                    "Backend session resolution failed (falling back to local cache): {}",
+                    e
+                );
+            }
+        }
+    } else {
+        info!("No auth token available; using local session cache");
+    }
+
+    resolve_session_from_local_cache(args, cwd)
+}
+
+async fn resolve_session_from_backend(
+    args: &Args,
+    cwd: &str,
+    backend_url: &str,
+    auth_token: &str,
+    agent_type: shared::AgentType,
+) -> Result<Option<ResolvedSession>> {
+    let http_url = http_api_url(backend_url, "/api/proxy/resolve-session")?;
+    let hostname = hostname::get().ok().and_then(|h| h.into_string().ok());
+    let req = ResolveProxySessionRequest {
+        auth_token: Some(auth_token.to_string()),
+        working_directory: cwd.to_string(),
+        hostname,
+        agent_type,
+    };
+
+    let response = reqwest::Client::new()
+        .post(http_url)
+        .json(&req)
+        .send()
+        .await
+        .context("request failed")?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        anyhow::bail!("server returned {}", response.status());
+    }
+
+    let resolved = response
+        .json::<ResolveProxySessionResponse>()
+        .await
+        .context("invalid resolve-session response")?;
+
+    let Some(session_id) = resolved.session_id else {
+        return Ok(None);
+    };
+    let session_name = args
+        .session_name
+        .clone()
+        .or(resolved.session_name.clone())
+        .unwrap_or_else(default_session_name);
+
+    cache_directory_session(
+        cwd,
+        session_id,
+        session_name.clone(),
+        resolved.created_at.clone(),
+        resolved.last_activity.clone(),
+    )?;
+
+    if !args.shim {
+        let created_at = resolved
+            .created_at
+            .as_deref()
+            .unwrap_or("unknown creation time");
+        ui::print_resuming_session(&session_id.to_string(), created_at);
+    }
+
+    Ok(Some(ResolvedSession {
+        session_id,
+        session_name,
+        resuming: true,
+    }))
+}
+
+fn resolve_session_from_local_cache(args: &Args, cwd: &str) -> Result<ResolvedSession> {
     let (mut config, lock) =
         ProxyConfig::load_locked().context("Failed to load config with lock")?;
 
     let existing_session = config.get_directory_session(cwd).cloned();
 
-    // Force new session or no existing session to resume
-    if args.new_session || existing_session.is_none() {
-        let had_existing = existing_session.is_some();
-
-        // Start a new session
-        let session_id = Uuid::new_v4();
-        let session_name = args
-            .session_name
-            .clone()
-            .unwrap_or_else(default_session_name);
-
-        let dir_session = ProxyConfig::create_directory_session(session_id, session_name.clone());
-        config.set_directory_session(cwd.to_string(), dir_session);
-        config.save_with_lock(&lock)?;
-
-        if args.new_session && had_existing {
-            warn!(
-                "Starting new session (--new-session flag) - previous session will not be resumed"
-            );
-            if !args.shim {
-                ui::print_new_session_forced();
-            }
-        } else if !had_existing {
-            info!(
-                "No existing session for directory {}, creating new session {}",
-                cwd, session_id
-            );
-            if !args.shim {
-                ui::print_no_previous_session();
-            }
-        }
-
-        info!("New session ID: {}", session_id);
-        Ok((session_id, session_name, false))
-    } else if let Some(existing) = existing_session {
+    if let Some(existing) = existing_session {
         // Resume existing session
         let session_name = args
             .session_name
@@ -474,11 +552,86 @@ fn resolve_session(args: &Args, cwd: &str) -> Result<(Uuid, String, bool)> {
             ui::print_resuming_session(&existing.session_id.to_string(), &existing.created_at);
         }
 
-        Ok((existing.session_id, session_name, true))
+        Ok(ResolvedSession {
+            session_id: existing.session_id,
+            session_name,
+            resuming: true,
+        })
     } else {
-        // This branch is unreachable: if first condition is false, existing_session must be Some
-        unreachable!("existing_session cannot be None here")
+        create_fresh_local_session(args, cwd, false)
     }
+}
+
+fn create_fresh_local_session(args: &Args, cwd: &str, forced: bool) -> Result<ResolvedSession> {
+    let (mut config, lock) =
+        ProxyConfig::load_locked().context("Failed to load config with lock")?;
+    let had_existing = config.get_directory_session(cwd).is_some();
+    let session_id = Uuid::new_v4();
+    let session_name = args
+        .session_name
+        .clone()
+        .unwrap_or_else(default_session_name);
+
+    let dir_session = ProxyConfig::create_directory_session(session_id, session_name.clone());
+    config.set_directory_session(cwd.to_string(), dir_session);
+    config.save_with_lock(&lock)?;
+
+    if forced && had_existing {
+        warn!("Starting new session (--new-session flag) - previous session will not be resumed");
+        if !args.shim {
+            ui::print_new_session_forced();
+        }
+    } else if !had_existing {
+        info!(
+            "No existing session for directory {}, creating new session {}",
+            cwd, session_id
+        );
+        if !args.shim {
+            ui::print_no_previous_session();
+        }
+    }
+
+    info!("New session ID: {}", session_id);
+    Ok(ResolvedSession {
+        session_id,
+        session_name,
+        resuming: false,
+    })
+}
+
+fn cache_directory_session(
+    cwd: &str,
+    session_id: Uuid,
+    session_name: String,
+    created_at: Option<String>,
+    last_used: Option<String>,
+) -> Result<()> {
+    let (mut config, lock) =
+        ProxyConfig::load_locked().context("Failed to load config with lock")?;
+    let mut dir_session = ProxyConfig::create_directory_session(session_id, session_name);
+    if let Some(created_at) = created_at {
+        dir_session.created_at = created_at;
+    }
+    if let Some(last_used) = last_used {
+        dir_session.last_used = last_used;
+    }
+    config.set_directory_session(cwd.to_string(), dir_session);
+    config.save_with_lock(&lock)
+}
+
+fn http_api_url(backend_url: &str, path: &str) -> Result<String> {
+    let mut url = url::Url::parse(backend_url).context("Invalid backend URL")?;
+    match url.scheme() {
+        "ws" => url.set_scheme("http").ok(),
+        "wss" => url.set_scheme("https").ok(),
+        "http" | "https" => Some(()),
+        other => anyhow::bail!("Unsupported backend URL scheme: {}", other),
+    }
+    .context("Failed to convert backend URL scheme")?;
+    url.set_path(path);
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.to_string())
 }
 
 /// Resolve the authentication token
@@ -550,7 +703,8 @@ async fn run_proxy_session(mut config: ProxySessionConfig) -> Result<()> {
         ui::print_started();
 
         // Create input channel (shared across reconnections)
-        let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (input_tx, mut input_rx) =
+            tokio::sync::mpsc::unbounded_channel::<session::PortalInput>();
 
         // Run the connection loop
         let result =
@@ -631,4 +785,33 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
     ClaudeSession::new(claude_config)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create Claude session: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::http_api_url;
+
+    #[test]
+    fn http_api_url_converts_ws_backend_url() {
+        assert_eq!(
+            http_api_url("ws://localhost:3000", "/api/proxy/resolve-session").unwrap(),
+            "http://localhost:3000/api/proxy/resolve-session"
+        );
+        assert_eq!(
+            http_api_url("wss://portal.example", "/api/proxy/resolve-session").unwrap(),
+            "https://portal.example/api/proxy/resolve-session"
+        );
+    }
+
+    #[test]
+    fn http_api_url_replaces_existing_path_query_and_fragment() {
+        assert_eq!(
+            http_api_url(
+                "wss://portal.example/base/path?x=1#frag",
+                "/api/proxy/resolve-session"
+            )
+            .unwrap(),
+            "https://portal.example/api/proxy/resolve-session"
+        );
+    }
 }

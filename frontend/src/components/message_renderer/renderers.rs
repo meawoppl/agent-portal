@@ -1,17 +1,24 @@
 //! Rendering functions for each message type.
 
-use super::types::*;
+mod assistant;
+mod portal;
+mod system;
+mod tools;
+
+use super::types::{OptimisticUserMessage, UserMessageMeta};
 use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
-use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown;
-use crate::components::time_ago::TimeAgo;
-use crate::components::tool_renderers::render_tool_use;
 use serde::Deserialize;
-use serde_json::Value;
-use shared::{Citation, ToolResultContent};
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
+
+pub(crate) use assistant::assistant_label;
+pub use assistant::{
+    render_assistant_message, render_assistant_message_content, render_content_blocks,
+};
+pub use portal::{render_portal_message, render_portal_message_content};
+pub use system::render_system_message;
 
 /// Convert single newlines to markdown hard breaks (trailing two spaces)
 /// so that user-typed line breaks are preserved when rendered as markdown.
@@ -19,82 +26,10 @@ fn preserve_user_newlines(text: &str) -> String {
     text.replace('\n', "  \n")
 }
 
-fn extract_ephemeral_cache(usage: &UsageInfo) -> (u64, u64) {
-    usage
-        .cache_creation
-        .as_ref()
-        .map(|cc| {
-            (
-                u64::from(cc.ephemeral_1h_input_tokens),
-                u64::from(cc.ephemeral_5m_input_tokens),
-            )
-        })
-        .unwrap_or((0, 0))
-}
-
-fn build_model_tooltip(model: &str, usage: Option<&UsageInfo>) -> String {
-    let mut parts = vec![model.to_string()];
-    if let Some(u) = usage {
-        if let Some(tier) = &u.service_tier {
-            parts.push(tier.clone());
-        }
-        if let Some(geo) = &u.inference_geo {
-            parts.push(geo.clone());
-        }
-    }
-    parts.join(" | ")
-}
-
-fn build_usage_tooltip(usage: Option<&UsageInfo>) -> String {
-    usage
-        .map(|u| {
-            let mut tooltip = format!(
-                "Input: {} | Output: {} | Cache read: {} | Cache created: {}",
-                u.input_tokens.unwrap_or(0),
-                u.output_tokens.unwrap_or(0),
-                u.cache_read_input_tokens.unwrap_or(0),
-                u.cache_creation_input_tokens.unwrap_or(0)
-            );
-            let (e1h, e5m) = extract_ephemeral_cache(u);
-            if e1h > 0 || e5m > 0 {
-                tooltip.push_str(&format!(" | Ephemeral 1h: {} | Ephemeral 5m: {}", e1h, e5m));
-            }
-            tooltip
-        })
-        .unwrap_or_default()
-}
-
-/// Extract concatenated raw text from a list of content blocks.
-/// Used for the message header copy button — pulls out text and thinking
-/// blocks as markdown, ignoring tool_use/tool_result internals.
-fn content_blocks_to_text(blocks: &[ContentBlock]) -> String {
-    let mut out = String::new();
-    for block in blocks {
-        match block {
-            ContentBlock::Text { text, .. } => {
-                if !out.is_empty() {
-                    out.push_str("\n\n");
-                }
-                out.push_str(text);
-            }
-            ContentBlock::Thinking { thinking } => {
-                if !out.is_empty() {
-                    out.push_str("\n\n");
-                }
-                out.push_str("<thinking>\n");
-                out.push_str(thinking);
-                out.push_str("\n</thinking>");
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
 // --- Message renderers ---
 
-pub fn render_user_message(
-    msg: &UserMessage,
+pub fn render_optimistic_user_message(
+    msg: &OptimisticUserMessage,
     current_user_id: Option<&str>,
     timestamp: Option<&str>,
 ) -> Html {
@@ -104,83 +39,89 @@ pub fn render_user_message(
     };
     let pending_class = if msg.pending { " pending" } else { "" };
 
-    if let Some(text) = &msg.content {
+    html! {
+        <div class={format!("claude-message user-message{}", pending_class)}>
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
+                <span class="message-type-badge user">{ &label }</span>
+                if msg.pending {
+                    <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
+                }
+                <CopyButton text={msg.content.clone()} title="Copy message" />
+            </div>
+            <div class="message-body">{ render_optimistic_user_message_content(msg) }</div>
+        </div>
+    }
+}
+
+pub fn render_user_message(
+    msg: &shared::UserMessage,
+    meta: &UserMessageMeta,
+    current_user_id: Option<&str>,
+    timestamp: Option<&str>,
+) -> Html {
+    let label = match &meta.sender {
+        Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
+        _ => "You".to_string(),
+    };
+    let pending_class = if meta.pending { " pending" } else { "" };
+    let blocks = msg.message.content.clone();
+
+    let text_content: String = blocks
+        .iter()
+        .filter_map(|block| match block {
+            shared::ContentBlock::Text(t) => Some(t.text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let has_tool_results = blocks
+        .iter()
+        .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
+
+    if has_tool_results {
+        html! {
+            <div class="claude-message user-message tool-result-message">
+                <div class="message-body">{ render_user_message_content(msg) }</div>
+            </div>
+        }
+    } else if !text_content.is_empty() {
         html! {
             <div class={format!("claude-message user-message{}", pending_class)}>
                 <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                     <span class="message-type-badge user">{ &label }</span>
-                    if msg.pending {
+                    if meta.pending {
                         <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
                     }
-                    <CopyButton text={text.clone()} title="Copy message" />
+                    <CopyButton text={text_content.clone()} title="Copy message" />
                 </div>
                 <div class="message-body">{ render_user_message_content(msg) }</div>
             </div>
-        }
-    } else if let Some(message) = &msg.message {
-        let blocks = message.content.as_ref().cloned().unwrap_or_default();
-
-        let text_content: String = blocks
-            .iter()
-            .filter_map(|block| match block {
-                ContentBlock::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let has_tool_results = blocks
-            .iter()
-            .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
-
-        if has_tool_results {
-            html! {
-                <div class="claude-message user-message tool-result-message">
-                    <div class="message-body">{ render_user_message_content(msg) }</div>
-                </div>
-            }
-        } else if !text_content.is_empty() {
-            html! {
-                <div class="claude-message user-message">
-                    <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                        <span class="message-type-badge user">{ &label }</span>
-                        <CopyButton text={text_content.clone()} title="Copy message" />
-                    </div>
-                    <div class="message-body">{ render_user_message_content(msg) }</div>
-                </div>
-            }
-        } else {
-            html! {}
         }
     } else {
         html! {}
     }
 }
 
-pub fn render_user_message_content(msg: &UserMessage) -> Html {
-    if let Some(text) = &msg.content {
-        return html! {
-            <div class="user-text">{ render_markdown(&preserve_user_newlines(text)) }</div>
-        };
+pub fn render_optimistic_user_message_content(msg: &OptimisticUserMessage) -> Html {
+    html! {
+        <div class="user-text">{ render_markdown(&preserve_user_newlines(&msg.content)) }</div>
     }
+}
 
-    let blocks = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .cloned()
-        .unwrap_or_default();
+pub fn render_user_message_content(msg: &shared::UserMessage) -> Html {
+    let blocks = msg.message.content.clone();
     let has_tool_results = blocks
         .iter()
-        .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
+        .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
 
     if has_tool_results {
-        render_content_blocks(&blocks)
+        render_content_blocks(&blocks, None)
     } else {
         let text_content = blocks
             .iter()
             .filter_map(|block| match block {
-                ContentBlock::Text { text, .. } => Some(text.clone()),
+                shared::ContentBlock::Text(t) => Some(t.text.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -196,24 +137,20 @@ pub fn render_user_message_content(msg: &UserMessage) -> Html {
     }
 }
 
-pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
-    if msg.is_overload() {
+pub fn render_error_message(msg: &shared::AnthropicError, timestamp: Option<&str>) -> Html {
+    if msg.is_overloaded() {
         return render_overload_error(msg, timestamp);
     }
 
-    let message = msg.display_message();
-    let error_type = msg.error_type();
+    let message = msg.error.message.as_str();
+    let error_type = msg.error.error_type.as_str();
 
     html! {
         <div class="claude-message error-message-display">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge result error">{ "Error" }</span>
                 {
-                    if let Some(err_type) = error_type {
-                        html! { <span class="error-type">{ err_type }</span> }
-                    } else {
-                        html! {}
-                    }
+                    html! { <span class="error-type">{ error_type }</span> }
                 }
             </div>
             <div class="message-body">
@@ -223,131 +160,7 @@ pub fn render_error_message(msg: &ErrorMessage, timestamp: Option<&str>) -> Html
     }
 }
 
-pub fn render_portal_message(msg: &PortalMessage, timestamp: Option<&str>) -> Html {
-    let copy_text: String = msg
-        .content
-        .iter()
-        .filter_map(|c| match c {
-            shared::PortalContent::Text { text } => Some(text.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    html! {
-        <div class="claude-message portal-message">
-            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge portal">{ "Portal" }</span>
-                if !copy_text.is_empty() {
-                    <CopyButton text={copy_text} title="Copy portal text" />
-                }
-            </div>
-            <div class="message-body">{ render_portal_message_content(msg) }</div>
-        </div>
-    }
-}
-
-pub fn render_portal_message_content(msg: &PortalMessage) -> Html {
-    html! { <>{ for msg.content.iter().map(render_portal_content) }</> }
-}
-
-fn render_portal_content(content: &shared::PortalContent) -> Html {
-    match content {
-        shared::PortalContent::Text { text } => render_markdown(text),
-        shared::PortalContent::Image {
-            media_type,
-            data,
-            file_path,
-            file_size,
-            source_type,
-        } => {
-            let source = ImageSource {
-                source_type: source_type.clone().unwrap_or_else(|| "base64".to_string()),
-                media_type: media_type.clone(),
-                data: data.clone(),
-            };
-            let filename = file_path
-                .as_deref()
-                .and_then(|p| p.rsplit('/').next())
-                .map(|s| s.to_string());
-            html! {
-                <>
-                    { render_portal_image_header(file_path.as_deref(), *file_size) }
-                    { render_image_source(&source, filename) }
-                </>
-            }
-        }
-        shared::PortalContent::Reminder { title, body } => {
-            html! { <PortalReminder title={title.clone()} body={body.clone()} /> }
-        }
-    }
-}
-
-#[derive(Properties, PartialEq)]
-struct PortalReminderProps {
-    title: AttrValue,
-    body: AttrValue,
-}
-
-/// Collapsed-by-default "Portal features reminder" block. Header is always
-/// visible; clicking it toggles the markdown body open/closed.
-#[function_component(PortalReminder)]
-fn portal_reminder(props: &PortalReminderProps) -> Html {
-    let expanded = use_state(|| false);
-    let on_toggle = {
-        let expanded = expanded.clone();
-        Callback::from(move |_: MouseEvent| expanded.set(!*expanded))
-    };
-    let header_class = if *expanded {
-        "portal-reminder-header expanded"
-    } else {
-        "portal-reminder-header"
-    };
-    html! {
-        <div class="portal-reminder">
-            <button type="button" class={header_class} onclick={on_toggle}>
-                <span class="portal-reminder-icon">{ "ⓘ" }</span>
-                <span class="portal-reminder-title">{ &*props.title }</span>
-                <span class="portal-reminder-toggle">{ if *expanded { "▾" } else { "▸" } }</span>
-            </button>
-            if *expanded {
-                <div class="portal-reminder-body">
-                    { render_markdown(&props.body) }
-                </div>
-            }
-        </div>
-    }
-}
-
-fn render_portal_image_header(file_path: Option<&str>, file_size: Option<u64>) -> Html {
-    let Some(path) = file_path else {
-        return html! {};
-    };
-    html! {
-        <div class="tool-use-header">
-            <span class="tool-icon">{ "\u{1f5bc}\u{fe0f}" }</span>
-            <span class="read-file-path">{ path }</span>
-            {
-                if let Some(size) = file_size {
-                    html! { <span class="tool-meta">{ format_file_size(size) }</span> }
-                } else {
-                    html! {}
-                }
-            }
-        </div>
-    }
-}
-
-fn format_file_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
-}
-
-fn render_overload_error(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
+fn render_overload_error(msg: &shared::AnthropicError, timestamp: Option<&str>) -> Html {
     let request_id = msg.request_id.as_deref().unwrap_or("unknown");
 
     html! {
@@ -373,15 +186,17 @@ fn render_overload_error(msg: &ErrorMessage, timestamp: Option<&str>) -> Html {
     }
 }
 
-pub fn render_rate_limit_event(msg: &RateLimitEventMessage, timestamp: Option<&str>) -> Html {
-    let info = msg.rate_limit_info.as_ref();
-    let status = info.and_then(|i| i.status.as_deref()).unwrap_or("unknown");
+pub fn render_rate_limit_event(msg: &shared::RateLimitEvent, timestamp: Option<&str>) -> Html {
+    let info = &msg.rate_limit_info;
+    let status = info.status.as_str();
     let rate_type = info
-        .and_then(|i| i.rate_limit_type.as_deref())
+        .rate_limit_type
+        .as_ref()
+        .map(|t| t.as_str())
         .unwrap_or("unknown");
-    let resets_at = info.and_then(|i| i.resets_at).unwrap_or(0);
-    let using_overage = info.and_then(|i| i.is_using_overage).unwrap_or(false);
-    let utilization = info.and_then(|i| i.utilization);
+    let resets_at = info.resets_at.unwrap_or(0);
+    let using_overage = info.is_using_overage;
+    let utilization = info.utilization;
 
     let reset_text = if resets_at > 0 {
         let now = (js_sys::Date::now() / 1000.0) as u64;
@@ -444,435 +259,6 @@ pub fn render_rate_limit_event(msg: &RateLimitEventMessage, timestamp: Option<&s
     }
 }
 
-pub fn render_system_message(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
-    let subtype = msg.subtype.as_deref().unwrap_or("system");
-
-    // Check if this is a compaction-related message via subtype or status field
-    let status_value = msg
-        .extra
-        .as_ref()
-        .and_then(|v| v.get("status"))
-        .and_then(|s| s.as_str())
-        .unwrap_or("");
-
-    if status_value == "compacting" {
-        return render_compaction_beginning();
-    }
-
-    if subtype == "compact_boundary" {
-        return render_compaction_completed(msg);
-    }
-
-    if subtype == "summary" || subtype == "compaction" || subtype == "context_compaction" {
-        return render_compaction_completed(msg);
-    }
-
-    if subtype == "task_started" {
-        return render_task_started(msg, timestamp);
-    }
-
-    if subtype == "task_progress" {
-        return html! {};
-    }
-
-    if subtype == "task_notification" {
-        return render_task_notification(msg, timestamp);
-    }
-
-    if subtype == "init" {
-        return render_init_bar(msg, timestamp);
-    }
-
-    if subtype == "status" {
-        return html! {};
-    }
-
-    html! {
-        <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
-            <span class="message-type-badge system">{ subtype }</span>
-        </div>
-    }
-}
-
-fn render_init_bar(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
-    let model_short = msg
-        .model
-        .as_deref()
-        .and_then(shorten_model_name)
-        .unwrap_or_default();
-    let version = msg.claude_code_version.as_deref().unwrap_or("");
-    let tool_count = msg.tools.as_ref().map(|t| t.len()).unwrap_or(0);
-    let mcp_count = msg.mcp_servers.as_ref().map(|s| s.len()).unwrap_or(0);
-    // Typed dispatch over `extra` (closes #752). `InitExtra::fast_mode_state`
-    // mirrors `claude_codes::InitMessage::fast_mode_state` (already typed
-    // upstream); we use a narrow local mirror because the SDK's full
-    // `InitMessage` has many required fields and a partial frame here would
-    // otherwise fail to deserialize.
-    let init_extra: shared::InitExtra = msg
-        .extra
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-    let fast_mode = init_extra.fast_mode_state.as_deref().unwrap_or("off");
-
-    html! {
-        <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
-            <span class="message-type-badge system">{ "Session" }</span>
-            if !model_short.is_empty() {
-                <span class="init-badge">{ &model_short }</span>
-            }
-            if !version.is_empty() {
-                <span class="init-badge">{ format!("v{}", version) }</span>
-            }
-            if fast_mode == "on" {
-                <span class="init-badge fast">{ "Fast" }</span>
-            }
-            if mcp_count > 0 {
-                <span class="init-badge">{ format!("{} MCP", mcp_count) }</span>
-            }
-            if tool_count > 0 {
-                <span class="init-badge">{ format!("{} tools", tool_count) }</span>
-            }
-        </div>
-    }
-}
-
-fn render_compaction_beginning() -> Html {
-    html! {
-        <div class="claude-message compaction-message compact">
-            <div class="message-header">
-                <span class="message-type-badge compaction">{ "Compaction Beginning" }</span>
-            </div>
-        </div>
-    }
-}
-
-fn render_compaction_completed(msg: &SystemMessage) -> Html {
-    // Typed dispatch over `extra` (closes #752). The SDK's
-    // `CompactBoundaryMessage` currently only exposes
-    // `compact_metadata { pre_tokens, trigger }` — not the `summary` /
-    // `leaf_message_count` / `duration_ms` fields the renderer needs.
-    // TODO(SDK rust-code-agent-sdks#141): drop the local `CompactionExtra`
-    // mirror once upstream adds these fields to `CompactBoundaryMessage`,
-    // and switch to `CCSystemMessage::as_compact_boundary()` here.
-    let compact_extra: shared::CompactionExtra = msg
-        .extra
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    let summary_text = msg
-        .summary
-        .as_deref()
-        .or_else(|| compact_extra.summary_text());
-    let leaf_count = msg
-        .leaf_message_count
-        .or_else(|| compact_extra.message_count());
-    let duration = msg.duration_ms.or(compact_extra.duration_ms);
-
-    html! {
-        <div class="claude-message compaction-message">
-            <div class="message-header">
-                <span class="message-type-badge compaction">{ "Compaction Completed" }</span>
-                {
-                    if let Some(count) = leaf_count {
-                        html! {
-                            <span class="compaction-stat" title="Messages summarized">
-                                { format!("{} messages", count) }
-                            </span>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    if let Some(ms) = duration {
-                        html! {
-                            <span class="compaction-stat" title="Compaction duration">
-                                { format_duration(ms) }
-                            </span>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
-            </div>
-            <div class="message-body">
-                <div class="compaction-content">
-                    <div class="compaction-icon">{ "📦" }</div>
-                    <div class="compaction-text">
-                        {
-                            if let Some(summary) = summary_text {
-                                html! {
-                                    <div class="compaction-summary">
-                                        <div class="summary-label">{ "Summary:" }</div>
-                                        <div class="summary-text">{ render_markdown(summary) }</div>
-                                    </div>
-                                }
-                            } else {
-                                html! {
-                                    <div class="compaction-description">
-                                        { "The conversation context has been summarized to free up space. Previous messages have been condensed while preserving important context." }
-                                    </div>
-                                }
-                            }
-                        }
-                    </div>
-                </div>
-            </div>
-        </div>
-    }
-}
-
-fn render_task_started(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
-    let extra = msg.extra.as_ref();
-    let description = extra
-        .and_then(|v| v.get("description").and_then(|d| d.as_str()))
-        .unwrap_or("Background task");
-    let task_id = extra
-        .and_then(|v| v.get("task_id").and_then(|t| t.as_str()))
-        .unwrap_or("");
-
-    let type_label = extra
-        .and_then(|v| v.get("task_type"))
-        .and_then(|v| serde_json::from_value::<shared::CCTaskType>(v.clone()).ok())
-        .map(|tt| match tt {
-            shared::CCTaskType::LocalAgent => "Sub-agent",
-            shared::CCTaskType::LocalBash => "Background Bash",
-        })
-        .unwrap_or("Task");
-
-    html! {
-        <div class="claude-message task-message compact" title={format!("Task ID: {}", task_id)}>
-            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge task">{ "Task Started" }</span>
-                <span class="task-type-badge">{ type_label }</span>
-                <span class="task-description-inline">{ description }</span>
-            </div>
-        </div>
-    }
-}
-
-fn render_task_notification(msg: &SystemMessage, timestamp: Option<&str>) -> Html {
-    // Typed dispatch over `extra` (closes #752). `TaskNotificationExtra`
-    // mirrors the renderable subset of `claude_codes::TaskNotificationMessage`
-    // (the SDK type's required `session_id` / `summary` are already consumed
-    // by the outer lenient `SystemMessage`'s typed top-level fields and would
-    // not appear in the flattened `extra` Value).
-    let notif: shared::TaskNotificationExtra = msg
-        .extra
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    let summary_text = msg.summary.as_deref();
-    let task_id = notif.task_id.as_deref().unwrap_or("");
-    let duration = notif.usage.as_ref().map(|u| u.duration_ms);
-    let tool_uses = notif.usage.as_ref().map(|u| u.tool_uses);
-    let total_tokens = notif.usage.as_ref().map(|u| u.total_tokens);
-
-    let is_failed = matches!(notif.status, Some(shared::CCTaskStatus::Failed));
-    let status_class = if is_failed { "failed" } else { "completed" };
-
-    html! {
-        <div class={classes!("claude-message", "task-message", status_class)}
-             title={format!("Task ID: {}", task_id)}>
-            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class={classes!("message-type-badge", "task", status_class)}>
-                    { if is_failed { "Task Failed" } else { "Task Completed" } }
-                </span>
-                {
-                    if let Some(ms) = duration {
-                        html! { <span class="task-stat">{ format_duration(ms) }</span> }
-                    } else { html! {} }
-                }
-                {
-                    if let Some(tools) = tool_uses {
-                        html! { <span class="task-stat" title="Tool calls">{ format!("{} tools", tools) }</span> }
-                    } else { html! {} }
-                }
-                {
-                    if let Some(tokens) = total_tokens {
-                        html! { <span class="task-stat" title="Total tokens">{ format!("{}k tokens", tokens / 1000) }</span> }
-                    } else { html! {} }
-                }
-            </div>
-            {
-                if let Some(summary) = summary_text {
-                    html! {
-                        <div class="message-body">
-                            <div class="task-summary">{ render_markdown(summary) }</div>
-                        </div>
-                    }
-                } else { html! {} }
-            }
-        </div>
-    }
-}
-
-pub fn render_assistant_message(
-    msg: &AssistantMessage,
-    timestamp: Option<&str>,
-    raw_iso: Option<&str>,
-) -> Html {
-    let blocks = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .cloned()
-        .unwrap_or_default();
-
-    let usage = msg.message.as_ref().and_then(|m| m.usage.as_ref());
-    let model = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.model.as_ref())
-        .map(|s| s.as_str())
-        .unwrap_or("");
-    let stop_reason = msg.message.as_ref().and_then(|m| m.stop_reason.as_deref());
-    let is_truncated = stop_reason == Some("max_tokens");
-
-    let model_tooltip = build_model_tooltip(model, usage);
-    let usage_tooltip = build_usage_tooltip(usage);
-    let copy_text = content_blocks_to_text(&blocks);
-
-    html! {
-        <div class="claude-message assistant-message">
-            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge assistant">{ "Assistant" }</span>
-                {
-                    if let Some(short_name) = shorten_model_name(model) {
-                        html! { <span class="model-name" title={model_tooltip}>{ short_name }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                if !copy_text.is_empty() {
-                    <CopyButton text={copy_text} title="Copy assistant text" />
-                }
-                {
-                    if is_truncated {
-                        html! { <span class="truncated-badge" title="Response was cut off (max_tokens)">{ "truncated" }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    if let Some(u) = usage {
-                        html! {
-                            <span class="usage-badge" title={usage_tooltip}>
-                                <span class="token-count">{ format!("{}↓ {}↑", u.input_tokens.unwrap_or(0), u.output_tokens.unwrap_or(0)) }</span>
-                            </span>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
-            </div>
-            <div class="message-body">{ render_assistant_message_content(msg) }</div>
-            if let Some(iso) = raw_iso {
-                <div class="message-footer">
-                    <TimeAgo iso={iso.to_string()} />
-                </div>
-            }
-        </div>
-    }
-}
-
-pub fn render_assistant_message_content(msg: &AssistantMessage) -> Html {
-    let blocks = msg
-        .message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .cloned()
-        .unwrap_or_default();
-    render_content_blocks(&blocks)
-}
-
-pub fn render_content_blocks(blocks: &[ContentBlock]) -> Html {
-    html! {
-        <>
-            {
-                blocks.iter().map(|block| {
-                    match block {
-                        ContentBlock::Text { text, citations } => {
-                            html! {
-                                <div class="assistant-text">
-                                    { render_markdown(text) }
-                                    { render_citations(citations) }
-                                </div>
-                            }
-                        }
-                        ContentBlock::ToolUse { id: _, name, input } => {
-                            render_tool_use(name, input)
-                        }
-                        ContentBlock::ToolResult { tool_use_id: _, content, is_error } => {
-                            let class = if *is_error { "tool-result error" } else { "tool-result" };
-                            match content {
-                                Some(ToolResultContent::Text(s)) => {
-                                    html! {
-                                        <div class={class}>
-                                            <ExpandableText full_text={s.clone()} max_len={500} class="tool-result-content" />
-                                        </div>
-                                    }
-                                }
-                                Some(ToolResultContent::Structured(blocks)) => {
-                                    html! {
-                                        <div class={class}>
-                                            { for blocks.iter().map(|v| {
-                                                match serde_json::from_value::<shared::ContentBlock>(v.clone()) {
-                                                    Ok(typed) => render_structured_block(&typed),
-                                                    Err(_) => {
-                                                        let json = serde_json::to_string_pretty(v).unwrap_or_default();
-                                                        html! { <pre class="tool-result-content">{ json }</pre> }
-                                                    }
-                                                }
-                                            }) }
-                                        </div>
-                                    }
-                                }
-                                None => html! { <div class={class}></div> },
-                            }
-                        }
-                        ContentBlock::Image { source } => {
-                            render_image_source(source, None)
-                        }
-                        ContentBlock::Thinking { thinking } => {
-                            html! {
-                                <div class="thinking-block">
-                                    <span class="thinking-label">{ "thinking" }</span>
-                                    <div class="thinking-content">{ crate::components::markdown::linkify_urls(thinking) }</div>
-                                </div>
-                            }
-                        }
-                        ContentBlock::ServerToolUse { id: _, name, input } => {
-                            render_server_tool_use(name, input)
-                        }
-                        ContentBlock::WebSearchToolResult { tool_use_id: _, content } => {
-                            render_web_search_result(content)
-                        }
-                        ContentBlock::CodeExecutionToolResult { tool_use_id: _, content } => {
-                            render_code_execution_result(content)
-                        }
-                        ContentBlock::McpToolUse { id: _, name, server_name, input } => {
-                            render_mcp_tool_use(name, server_name.as_deref(), input)
-                        }
-                        ContentBlock::McpToolResult { tool_use_id: _, content, is_error } => {
-                            render_mcp_tool_result(content, is_error.unwrap_or(false))
-                        }
-                        ContentBlock::ContainerUpload { data } => {
-                            render_container_upload(data)
-                        }
-                        ContentBlock::Unknown(value) => {
-                            render_unknown_block(value)
-                        }
-                    }
-                }).collect::<Html>()
-            }
-        </>
-    }
-}
-
 const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
     "image/png",
     "image/jpeg",
@@ -881,7 +267,7 @@ const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
     "image/svg+xml",
 ];
 
-fn render_image_source(source: &ImageSource, filename: Option<String>) -> Html {
+pub(super) fn render_image_source(source: &shared::ImageSource, filename: Option<String>) -> Html {
     if !ALLOWED_IMAGE_MEDIA_TYPES.contains(&source.media_type.as_str()) {
         return html! {
             <pre class="tool-result-content">
@@ -890,13 +276,13 @@ fn render_image_source(source: &ImageSource, filename: Option<String>) -> Html {
         };
     }
     // Support both URL sources (from backend image store) and base64 data URIs
-    let src = if source.source_type == "url" {
+    let src = if source.source_type.as_str() == "url" {
         source.data.clone()
     } else {
         format!("data:{};base64,{}", source.media_type, source.data)
     };
     html! {
-        <ImageViewer src={src} media_type={source.media_type.clone()} {filename} />
+        <ImageViewer src={src} media_type={source.media_type.as_str().to_string()} {filename} />
     }
 }
 
@@ -995,198 +381,31 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     }
 }
 
-fn render_citations(citations: &[Citation]) -> Html {
-    if citations.is_empty() {
-        return html! {};
-    }
-    html! {
-        <div class="citation-list">
-            { for citations.iter().enumerate().map(|(i, cite)| {
-                let url = cite.url.as_deref().unwrap_or("#");
-                let title = cite.title.as_deref()
-                    .or(cite.cited_text.as_deref())
-                    .unwrap_or("source");
-                html! {
-                    <a class="citation-link"
-                       href={url.to_string()}
-                       target="_blank"
-                       rel="noopener noreferrer"
-                       title={title.to_string()}>
-                        { format!("[{}]", i + 1) }
-                    </a>
-                }
-            })}
-        </div>
-    }
-}
-
-fn render_server_tool_use(name: &str, input: &Value) -> Html {
-    let badge_label = if name.contains("web_search") || name.contains("search") {
-        "Web Search"
-    } else {
-        "Server"
-    };
-    let args_summary = summarize_input(input);
-    html! {
-        <div class="tool-use server-tool-use">
-            <div class="tool-use-header">
-                <span class="tool-badge server">{ badge_label }</span>
-                <span class="tool-name">{ name }</span>
-                { if !args_summary.is_empty() {
-                    html! { <span class="tool-meta">{ args_summary }</span> }
-                } else {
-                    html! {}
-                }}
-            </div>
-        </div>
-    }
-}
-
-fn render_web_search_result(content: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
-    html! {
-        <div class="tool-result web-search-result">
-            <div class="tool-use-header">
-                <span class="tool-badge server">{ "Web Search Result" }</span>
-            </div>
-            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
-        </div>
-    }
-}
-
-fn render_code_execution_result(content: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
-    html! {
-        <div class="tool-result code-execution-result">
-            <div class="tool-use-header">
-                <span class="tool-badge code-exec">{ "Code Execution" }</span>
-            </div>
-            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" />
-        </div>
-    }
-}
-
-fn render_mcp_tool_use(name: &str, server_name: Option<&str>, input: &Value) -> Html {
-    let display_name = match server_name {
-        Some(server) => format!("{} > {}", server, name),
-        None => name.to_string(),
-    };
-    let args_summary = summarize_input(input);
-    html! {
-        <div class="tool-use mcp-tool-use">
-            <div class="tool-use-header">
-                <span class="tool-badge mcp">{ "MCP" }</span>
-                <span class="tool-name">{ display_name }</span>
-                { if !args_summary.is_empty() {
-                    html! { <span class="tool-meta">{ args_summary }</span> }
-                } else {
-                    html! {}
-                }}
-            </div>
-        </div>
-    }
-}
-
-fn render_mcp_tool_result(content: &Value, is_error: bool) -> Html {
-    let class = if is_error {
-        "tool-result mcp-tool-result error"
-    } else {
-        "tool-result mcp-tool-result"
-    };
-    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
-    html! {
-        <div class={class}>
-            <div class="tool-use-header">
-                <span class={if is_error { "tool-badge mcp error" } else { "tool-badge mcp" }}>
-                    { if is_error { "MCP Error" } else { "MCP Result" } }
-                </span>
-            </div>
-            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" />
-        </div>
-    }
-}
-
-fn render_container_upload(data: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(data).unwrap_or_else(|_| data.to_string());
-    html! {
-        <div class="tool-use container-upload">
-            <div class="tool-use-header">
-                <span class="tool-badge container">{ "Container Upload" }</span>
-            </div>
-            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
-        </div>
-    }
-}
-
-fn render_unknown_block(value: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
-    html! {
-        <div class="tool-use unknown-block">
-            <div class="tool-use-header">
-                <span class="tool-badge unknown">{ "Unknown Block" }</span>
-            </div>
-            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
-        </div>
-    }
-}
-
-fn summarize_input(input: &Value) -> String {
-    if let Some(obj) = input.as_object() {
-        let entries: Vec<String> = obj
-            .iter()
-            .filter(|(_, v)| v.is_string() || v.is_number() || v.is_boolean())
-            .take(3)
-            .map(|(k, v)| match v {
-                Value::String(s) => {
-                    let truncated = if s.len() > 40 {
-                        format!("{}...", super::truncate_str(s, 40))
-                    } else {
-                        s.clone()
-                    };
-                    format!("{}={}", k, truncated)
-                }
-                other => format!("{}={}", k, other),
-            })
-            .collect();
-        entries.join(", ")
-    } else {
-        String::new()
-    }
-}
-
-fn render_structured_block(block: &shared::ContentBlock) -> Html {
-    match block {
-        shared::ContentBlock::Image(_) => {
-            html! { <span class="tool-result-image-tag">{ "[image]" }</span> }
-        }
-        shared::ContentBlock::Text(t) => {
-            html! { <ExpandableText full_text={t.text.clone()} max_len={500} class="tool-result-content" /> }
-        }
-        other => {
-            let json = serde_json::to_string_pretty(other).unwrap_or_default();
-            html! { <pre class="tool-result-content">{ json }</pre> }
-        }
-    }
-}
-
-pub fn render_result_message(msg: &ResultMessage) -> Html {
-    let is_error = msg.is_error.unwrap_or(false);
+pub fn render_result_message(
+    msg: &shared::ResultMessage,
+    turn_metrics: Option<&shared::TurnMetrics>,
+) -> Html {
+    let is_error = msg.is_error;
     let status_class = if is_error { "error" } else { "success" };
 
-    let duration_ms = msg.duration_ms.unwrap_or(0);
-    let api_ms = msg.duration_api_ms.unwrap_or(0);
-    let turns = msg.num_turns.unwrap_or(0);
+    let duration_ms = msg.duration_ms;
+    let api_ms = msg.duration_api_ms;
+    let turns = msg.num_turns;
 
     let mut timing_tooltip = format!(
         "Total: {}ms | API: {}ms | Turns: {}",
         duration_ms, api_ms, turns
     );
 
-    if let Some(model_usage) = &msg.model_usage {
+    if let Some(model_usage) = msg
+        .model_usage
+        .as_ref()
+        .and_then(|v| serde_json::from_value::<shared::ModelUsage>(v.clone()).ok())
+    {
         for (model, entry) in model_usage {
             timing_tooltip.push_str(&format!(
                 " | {}: ${:.4}",
-                shorten_model_name(model).unwrap_or_else(|| model.clone()),
+                shorten_model_name(&model).unwrap_or_else(|| model.clone()),
                 entry.cost_usd
             ));
         }
@@ -1201,12 +420,7 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
     let denials_tooltip = if !msg.permission_denials.is_empty() {
         msg.permission_denials
             .iter()
-            .filter_map(|v| {
-                v.get("tool_name")
-                    .and_then(|t| t.as_str())
-                    .or_else(|| v.as_str())
-                    .map(|s| s.to_string())
-            })
+            .map(|v| v.tool_name.clone())
             .collect::<Vec<_>>()
             .join(", ")
     } else {
@@ -1216,10 +430,10 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
     let extra_badges = html! {
         <>
             {
-                if let Some(cost) = msg.total_cost_usd {
+                    if msg.total_cost_usd > 0.0 {
                     html! {
                         <span class="stat-item cost" title="Total cost">
-                            { format!("${:.2}", cost) }
+                            { format!("${:.2}", msg.total_cost_usd) }
                         </span>
                     }
                 } else {
@@ -1273,6 +487,18 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
         </>
     };
 
+    // Per-turn metrics footer (PR 2 of N) — sits directly below the result
+    // stats bar. `None` for sessions on the live path before the first
+    // metrics frame arrives, for pre-PR-1 historical rows, and during the
+    // brief window between a turn's terminator landing and the metrics
+    // broadcast for that turn (the wire order is "Result frame first,
+    // metrics broadcast second"). Renders nothing in those cases — the
+    // chip strip lights up retroactively on the next render.
+    let metrics_footer = match turn_metrics {
+        Some(m) => super::turn_metrics_footer::render_turn_metrics_footer(m),
+        None => html! {},
+    };
+
     if is_error {
         if let Some(error_html) = try_render_api_error(msg.result.as_deref()) {
             return html! {
@@ -1286,6 +512,7 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
                             </span>
                             { extra_badges.clone() }
                         </div>
+                        { metrics_footer.clone() }
                     </div>
                 </>
             };
@@ -1306,10 +533,10 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
                         html! {
                             <>
                                 <span class="stat-item tokens" title="Input tokens">
-                                    { format!("{}↓", usage.input_tokens.unwrap_or(0)) }
+                                    { format!("{}↓", usage.input_tokens) }
                                 </span>
                                 <span class="stat-item tokens" title="Output tokens">
-                                    { format!("{}↑", usage.output_tokens.unwrap_or(0)) }
+                                    { format!("{}↑", usage.output_tokens) }
                                 </span>
                             </>
                         }
@@ -1330,6 +557,7 @@ pub fn render_result_message(msg: &ResultMessage) -> Html {
                 }
                 { extra_badges }
             </div>
+            { metrics_footer }
         </div>
     }
 }

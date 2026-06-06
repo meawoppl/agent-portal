@@ -1,8 +1,13 @@
 //! Hook for managing the client WebSocket connection with spend updates.
 
+#[path = "client_websocket_events.rs"]
+mod client_websocket_events;
+
 use crate::utils;
+use client_websocket_events::handle_server_message;
 use gloo_net::http::Request;
-use shared::{AppConfig, ClientEndpoint, ServerToClient, WsEndpoint};
+use shared::api::TurnMetricsResponse;
+use shared::{AppConfig, ClientEndpoint, TurnMetrics, WsEndpoint};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
@@ -18,6 +23,21 @@ pub struct UseClientWebSocket {
     /// with the backend they just reconnected to. Once set, stays set
     /// until the user reloads.
     pub update_available: Option<String>,
+    /// The user's most recent N turn-metrics rows across all of their
+    /// sessions, ordered `started_at` ASC (oldest → newest). Seeded once on
+    /// hook mount from `GET /api/metrics/recent` and then kept fresh by
+    /// `ServerToClient::TurnMetrics` WS frames — the backend fans the
+    /// per-session broadcast out to each session member's user channel so
+    /// this buffer ticks live without the dashboard having to subscribe to
+    /// individual session WS streams. Capped by the websocket event helper.
+    pub recent_turn_metrics: Vec<TurnMetrics>,
+    /// Monotonic counter that ticks every time the backend broadcasts a
+    /// `ServerToClient::LaunchSessionResult` frame (proxy registered, or
+    /// the launch failed). Consumers can hang a `use_effect_with` on this
+    /// value to fire a single `/api/sessions` refresh at the exact moment
+    /// the new session becomes findable — no polling burst needed. The
+    /// value itself is opaque; only its *change* is meaningful.
+    pub launch_event_counter: u32,
 }
 
 /// Calculate exponential backoff delay for reconnection attempts.
@@ -64,16 +84,42 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     let total_spend = use_state(|| 0.0f64);
     let shutdown_reason = use_state(|| None::<String>);
     let update_available = use_state(|| None::<String>);
+    let recent_turn_metrics = use_state(Vec::<TurnMetrics>::new);
+    let launch_event_counter = use_state(|| 0u32);
+
+    // One-shot REST hydration on hook mount. Fires alongside (not gated on)
+    // the WS connect — the dashboard pill shows immediately if the user
+    // has any prior turns, and the WS path keeps it fresh once it lands.
+    {
+        let recent_turn_metrics = recent_turn_metrics.clone();
+        use_effect_with((), move |_| {
+            spawn_local(async move {
+                let url = utils::api_url("/api/metrics/recent");
+                if let Ok(resp) = Request::get(&url).send().await {
+                    if resp.ok() {
+                        if let Ok(parsed) = resp.json::<TurnMetricsResponse>().await {
+                            recent_turn_metrics.set(parsed.metrics);
+                        }
+                    }
+                }
+            });
+            || ()
+        });
+    }
 
     {
         let total_spend = total_spend.clone();
         let shutdown_reason = shutdown_reason.clone();
         let update_available = update_available.clone();
+        let recent_turn_metrics = recent_turn_metrics.clone();
+        let launch_event_counter = launch_event_counter.clone();
 
         use_effect_with((), move |_| {
             let total_spend = total_spend.clone();
             let shutdown_reason = shutdown_reason.clone();
             let update_available = update_available.clone();
+            let recent_turn_metrics = recent_turn_metrics.clone();
+            let launch_event_counter = launch_event_counter.clone();
 
             spawn_local(async move {
                 let mut attempt: u32 = 0;
@@ -113,26 +159,13 @@ pub fn use_client_websocket() -> UseClientWebSocket {
 
                             while let Some(result) = receiver.recv().await {
                                 match result {
-                                    Ok(msg) => match msg {
-                                        ServerToClient::UserSpendUpdate {
-                                            total_spend_usd,
-                                            session_costs: _,
-                                        } => {
-                                            total_spend.set(total_spend_usd);
-                                        }
-                                        ServerToClient::ServerShutdown {
-                                            reason,
-                                            reconnect_delay_ms,
-                                        } => {
-                                            log::info!(
-                                                "Server shutdown: {} (reconnect in {}ms)",
-                                                reason,
-                                                reconnect_delay_ms
-                                            );
-                                            shutdown_reason.set(Some(reason));
-                                        }
-                                        _ => {}
-                                    },
+                                    Ok(msg) => handle_server_message(
+                                        msg,
+                                        &total_spend,
+                                        &shutdown_reason,
+                                        &recent_turn_metrics,
+                                        &launch_event_counter,
+                                    ),
                                     Err(e) => {
                                         log::error!("Client WebSocket error: {:?}", e);
                                         break;
@@ -168,6 +201,8 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         total_spend: *total_spend,
         shutdown_reason: (*shutdown_reason).clone(),
         update_available: (*update_available).clone(),
+        recent_turn_metrics: (*recent_turn_metrics).clone(),
+        launch_event_counter: *launch_event_counter,
     }
 }
 

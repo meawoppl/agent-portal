@@ -23,6 +23,7 @@ impl Agent for ClaudeAgent {
         // claude CLI + creating the AsyncClient). Failures during setup are
         // surfaced via the event channel — see the `Err(e) =>` branch below.
         let handle = tokio::spawn(async move {
+            let session_id = config.session_id;
             let client = match spawn_claude(&config).await {
                 Ok(c) => c,
                 Err(e) => {
@@ -31,7 +32,7 @@ impl Agent for ClaudeAgent {
                     return;
                 }
             };
-            claude_io_task(client, command_rx, event_tx).await;
+            claude_io_task(session_id, client, command_rx, event_tx).await;
         });
         Ok(handle)
     }

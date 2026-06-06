@@ -5,7 +5,10 @@ use axum::{
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::Serialize;
-use shared::api::{AddMemberRequest, UpdateMemberRoleRequest};
+use shared::api::{
+    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse,
+    UpdateMemberRoleRequest,
+};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -13,6 +16,7 @@ use uuid::Uuid;
 use crate::{
     auth::extract_user_id,
     errors::AppError,
+    handlers::responses::EmptyResponse,
     models::{Message, NewSessionMember, Session, SessionMember},
     AppState,
 };
@@ -70,6 +74,79 @@ pub async fn list_sessions(
     }))
 }
 
+pub async fn resolve_proxy_session(
+    State(app_state): State<Arc<AppState>>,
+    Json(req): Json<ResolveProxySessionRequest>,
+) -> Result<Json<ResolveProxySessionResponse>, AppError> {
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let current_user_id = proxy_request_user_id(&app_state, &mut conn, req.auth_token.as_deref())?;
+
+    use crate::schema::{session_members, sessions};
+
+    let mut query = sessions::table
+        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+        .filter(session_members::user_id.eq(current_user_id))
+        .filter(sessions::working_directory.eq(req.working_directory))
+        .filter(sessions::agent_type.eq(req.agent_type.as_str()))
+        .filter(sessions::scheduled_task_id.is_null())
+        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::paused.eq(false))
+        .select(Session::as_select())
+        .into_boxed();
+
+    if let Some(hostname) = req.hostname.as_deref().filter(|h| !h.is_empty()) {
+        query = query.filter(sessions::hostname.eq(hostname));
+    }
+
+    let session = query
+        .order((sessions::last_activity.desc(), sessions::created_at.desc()))
+        .first::<Session>(&mut conn)
+        .optional()
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    Ok(Json(match session {
+        Some(session) => ResolveProxySessionResponse {
+            session_id: Some(session.id),
+            session_name: Some(session.session_name),
+            created_at: Some(session.created_at.and_utc().to_rfc3339()),
+            last_activity: Some(session.last_activity.and_utc().to_rfc3339()),
+        },
+        None => ResolveProxySessionResponse {
+            session_id: None,
+            session_name: None,
+            created_at: None,
+            last_activity: None,
+        },
+    }))
+}
+
+fn proxy_request_user_id(
+    app_state: &AppState,
+    conn: &mut diesel::pg::PgConnection,
+    auth_token: Option<&str>,
+) -> Result<Uuid, AppError> {
+    use crate::schema::users;
+
+    if let Some(token) = auth_token {
+        return crate::handlers::proxy_tokens::verify_and_get_user(app_state, conn, token)
+            .map(|(user_id, _)| user_id)
+            .map_err(|status| match status {
+                axum::http::StatusCode::FORBIDDEN => AppError::Forbidden,
+                _ => AppError::Unauthorized,
+            });
+    }
+
+    if app_state.dev_mode {
+        return users::table
+            .filter(users::email.eq("testing@testing.local"))
+            .select(users::id)
+            .first::<Uuid>(conn)
+            .map_err(|e| AppError::DbQuery(e.to_string()));
+    }
+
+    Err(AppError::Unauthorized)
+}
+
 #[derive(Debug, Serialize)]
 pub struct SessionDetailResponse {
     pub session: Session,
@@ -114,7 +191,7 @@ pub async fn delete_session(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -147,17 +224,24 @@ pub async fn delete_session(
             .ok_or(AppError::NotFound("Session not found"))?,
     };
 
+    app_state.session_manager.disconnect_session(session_id);
+    app_state.session_manager.stop_session_on_launcher(
+        session_id,
+        session.launcher_id,
+        Some(session.working_directory.clone()),
+    );
+
     super::helpers::delete_session_with_data(&mut conn, &session, true)
         .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
 
-    Ok(axum::http::StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 pub async fn stop_session(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -166,22 +250,151 @@ pub async fn stop_session(
     // able to terminate sessions they only have read access to. The helper
     // also accepts the session's `sessions.user_id` owner row, so owners
     // without a `session_members` row still work.
-    crate::handlers::session_access::verify_session_mutator(
+    let session = crate::handlers::session_access::verify_session_mutator(
         &mut conn,
         session_id,
         current_user_id,
     )?;
 
     let stopped = app_state.session_manager.disconnect_session(session_id);
-    app_state
-        .session_manager
-        .stop_session_on_launcher(session_id);
+    let launcher_stopped = app_state.session_manager.stop_session_on_launcher(
+        session_id,
+        session.launcher_id,
+        Some(session.working_directory.clone()),
+    );
 
-    if stopped {
-        Ok(axum::http::StatusCode::ACCEPTED)
+    if stopped || launcher_stopped {
+        use crate::schema::sessions;
+        diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::paused.eq(false),
+                sessions::status.eq("disconnected"),
+                sessions::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(&mut conn)
+            .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        Ok(EmptyResponse::ACCEPTED)
+    } else if session.paused {
+        Err(AppError::NotFound("Launcher not connected"))
     } else {
         Err(AppError::NotFound("Session not connected"))
     }
+}
+
+pub async fn pause_session(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(session_id): Path<Uuid>,
+) -> Result<EmptyResponse, AppError> {
+    let current_user_id = extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    crate::handlers::session_access::verify_session_mutator(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
+
+    use crate::schema::sessions;
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::paused.eq(true),
+            sessions::status.eq("disconnected"),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    app_state.session_manager.disconnect_session(session_id);
+    app_state
+        .session_manager
+        .pause_session_on_launcher(session_id);
+
+    Ok(EmptyResponse::ACCEPTED)
+}
+
+pub async fn resume_session(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(session_id): Path<Uuid>,
+) -> Result<EmptyResponse, AppError> {
+    let current_user_id = extract_user_id(&app_state, &cookies)?;
+
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let session = crate::handlers::session_access::verify_session_mutator(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
+
+    let launcher_id = resolve_resume_launcher(&app_state, &session)
+        .ok_or(AppError::NotFound("Launcher not connected"))?;
+
+    let auth_token = crate::handlers::launchers::mint_launch_token(&app_state, session.user_id)?;
+    let request_id = Uuid::new_v4();
+    let claude_args =
+        serde_json::from_value::<Vec<String>>(session.claude_args.clone()).unwrap_or_default();
+    let agent_type = session
+        .agent_type
+        .parse()
+        .unwrap_or(shared::AgentType::Claude);
+
+    use crate::schema::sessions;
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::paused.eq(false),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)
+        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+
+    let launch_msg = shared::ServerToLauncher::LaunchSession {
+        request_id,
+        user_id: session.user_id,
+        auth_token,
+        working_directory: session.working_directory.clone(),
+        session_name: Some(session.session_name.clone()),
+        claude_args,
+        agent_type,
+        scheduled_task_id: session.scheduled_task_id,
+        resume_session_id: Some(session.id),
+    };
+
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, launch_msg)
+    {
+        let _ = diesel::update(sessions::table.find(session_id))
+            .set(sessions::paused.eq(true))
+            .execute(&mut conn);
+        return Err(AppError::Internal(
+            "Failed to send resume request to launcher".to_string(),
+        ));
+    }
+
+    Ok(EmptyResponse::ACCEPTED)
+}
+
+fn resolve_resume_launcher(app_state: &AppState, session: &Session) -> Option<Uuid> {
+    if let Some(launcher_id) = session.launcher_id {
+        if app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .is_some_and(|l| l.user_id == session.user_id)
+        {
+            return Some(launcher_id);
+        }
+    }
+
+    app_state
+        .session_manager
+        .launchers
+        .iter()
+        .find(|entry| {
+            entry.value().user_id == session.user_id && entry.value().hostname == session.hostname
+        })
+        .map(|entry| *entry.key())
 }
 
 // ============================================================================
@@ -262,7 +475,7 @@ pub async fn add_session_member(
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
     Json(req): Json<AddMemberRequest>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     if req.role != "editor" && req.role != "viewer" {
@@ -312,7 +525,7 @@ pub async fn add_session_member(
         .execute(&mut conn)
         .map_err(|e| AppError::DbQuery(e.to_string()))?;
 
-    Ok(axum::http::StatusCode::CREATED)
+    Ok(EmptyResponse::CREATED)
 }
 
 /// Remove a member from a session
@@ -321,7 +534,7 @@ pub async fn remove_session_member(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -360,7 +573,7 @@ pub async fn remove_session_member(
         return Err(AppError::NotFound("Member not found"));
     }
 
-    Ok(axum::http::StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 /// Update a member's role (owner only)
@@ -369,7 +582,7 @@ pub async fn update_session_member_role(
     cookies: Cookies,
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMemberRoleRequest>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     if req.role != "editor" && req.role != "viewer" {
@@ -406,5 +619,5 @@ pub async fn update_session_member_role(
         return Err(AppError::NotFound("Member not found"));
     }
 
-    Ok(axum::http::StatusCode::OK)
+    Ok(EmptyResponse::OK)
 }

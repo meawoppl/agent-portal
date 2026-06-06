@@ -11,6 +11,11 @@ crate-type = ["cdylib", "rlib"]
 # Shared types
 shared = { path = "../shared" }
 
+# Typed Codex protocol types (no tokio/log/which — WASM-compat).
+# Replaces the locally-mirrored CodexItem / FileChange / FileUpdateChange /
+# PatchChangeKind types that drifted from the wire shape (#827).
+codex-codes = { workspace = true }
+
 # Yew framework
 yew = { workspace = true }
 yew-router = { workspace = true }
@@ -71,6 +76,7 @@ log = "0.4"
 futures-util = "0.3"
 futures-channel = "0.3"
 uuid = { workspace = true, features = ["v4", "serde", "js"] }
+chrono = { workspace = true, features = ["wasmbind"] }
 js-sys = "0.3.83"
 pulldown-cmark = { version = "0.13.0", default-features = false }
 ws-bridge = { workspace = true, features = ["yew-client"] }

@@ -18,8 +18,10 @@ claude-codes = { workspace = true }
 # Async runtime
 tokio = { workspace = true, features = ["full"] }
 
-# WebSocket client
-tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
+# WebSocket client. Use rustls instead of native-tls so the released binary
+# doesn't link against system libssl — Ubuntu 20.04 ships OpenSSL 1.1 only,
+# and our release binaries are built against OpenSSL 3, which crashes there.
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 futures-util = "0.3"
 
 # Serialization
@@ -48,6 +50,9 @@ hostname = "0.4"
 # URL parsing
 url = "2.5"
 
+# HTTP client for pre-spawn backend session resolution
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+
 # Config file management
 directories = "5.0"
 
@@ -67,4 +72,3 @@ base64 = "0.22"
 # Unix system calls (for lock file process checking)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-

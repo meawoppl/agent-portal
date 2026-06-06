@@ -4,6 +4,7 @@
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
 use crate::components::{ScheduleDialog, ShareDialog};
+use crate::pages::dashboard::session_view::ActivityTag;
 use crate::utils;
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
@@ -53,7 +54,7 @@ impl SparklineView {
     }
 }
 
-type EventStore = HashMap<Uuid, Vec<(f64, String)>>;
+type EventStore = HashMap<Uuid, Vec<(f64, ActivityTag)>>;
 
 /// Shared activity event buffer.
 ///
@@ -66,12 +67,12 @@ pub struct ActivityRef(Rc<RefCell<EventStore>>);
 impl ActivityRef {
     /// Record a new event, evicting any entries that have fallen outside the
     /// rolling window relative to `timestamp`.
-    pub fn push(&self, session_id: Uuid, msg_type: String, timestamp: f64) {
+    pub fn push(&self, session_id: Uuid, tag: ActivityTag, timestamp: f64) {
         let cutoff = timestamp - SPARKLINE_WINDOW_MS;
         let mut map = self.0.borrow_mut();
         let events = map.entry(session_id).or_default();
         events.retain(|(t, _)| *t > cutoff);
-        events.push((timestamp, msg_type));
+        events.push((timestamp, tag));
     }
 
     /// Compute the sparkline view for one session at the given wall-clock time.
@@ -88,30 +89,29 @@ impl ActivityRef {
 
         let ticks = events
             .iter()
-            .filter(|(t, kind)| {
-                *t > cutoff
-                    && !matches!(
-                        kind.as_str(),
-                        "compaction_start" | "compaction_end" | "task_start" | "task_end"
-                    )
-            })
-            .map(|(t, kind)| SparklineTick {
-                pct: (t - cutoff) / SPARKLINE_WINDOW_MS * 100.0,
-                css_type: match kind.as_str() {
-                    "assistant" => "assistant",
-                    "user" => "user",
-                    "result" => "result",
-                    "portal" => "portal",
-                    "error" => "error",
-                    _ => "other",
-                },
+            .filter(|(t, tag)| *t > cutoff && !tag.is_range_marker())
+            .filter_map(|(t, tag)| {
+                tag.tick_css().map(|css_type| SparklineTick {
+                    pct: (t - cutoff) / SPARKLINE_WINDOW_MS * 100.0,
+                    css_type,
+                })
             })
             .collect();
 
         SparklineView {
             ticks,
-            compaction_ranges: extract_ranges(events, cutoff, "compaction_start", "compaction_end"),
-            task_ranges: extract_ranges(events, cutoff, "task_start", "task_end"),
+            compaction_ranges: extract_ranges(
+                events,
+                cutoff,
+                ActivityTag::is_compaction_start,
+                ActivityTag::is_compaction_end,
+            ),
+            task_ranges: extract_ranges(
+                events,
+                cutoff,
+                ActivityTag::is_task_start,
+                ActivityTag::is_task_end,
+            ),
         }
     }
 }
@@ -128,21 +128,21 @@ impl Default for ActivityRef {
     }
 }
 
-/// Pair up `start_tag`/`end_tag` events into percentage ranges.
-/// An in-progress range (start with no matching end) extends to 100 %.
+/// Pair up start/end tag events (selected by the given predicates) into
+/// percentage ranges. An in-progress range (start with no matching end)
+/// extends to 100 %.
 fn extract_ranges(
-    events: &[(f64, String)],
+    events: &[(f64, ActivityTag)],
     cutoff: f64,
-    start_tag: &str,
-    end_tag: &str,
+    is_start: fn(ActivityTag) -> bool,
+    is_end: fn(ActivityTag) -> bool,
 ) -> Vec<SparklineRange> {
     let mut ranges = Vec::new();
     let mut pending_start: Option<f64> = None;
-    for (t, kind) in events.iter().filter(|(t, _)| *t > cutoff) {
-        let kind = kind.as_str();
-        if kind == start_tag {
+    for (t, tag) in events.iter().filter(|(t, _)| *t > cutoff) {
+        if is_start(*tag) {
             pending_start = Some((t - cutoff) / SPARKLINE_WINDOW_MS * 100.0);
-        } else if kind == end_tag {
+        } else if is_end(*tag) {
             let end_pct = (t - cutoff) / SPARKLINE_WINDOW_MS * 100.0;
             ranges.push(SparklineRange {
                 start_pct: pending_start.take().unwrap_or(0.0),
@@ -213,14 +213,13 @@ pub struct SessionRailProps {
     /// Server version string for comparing against client versions
     #[prop_or_default]
     pub server_version: String,
-    /// Map of launcher_id → token_expires_at (ISO string) for all launchers
-    #[prop_or_default]
-    pub launcher_token_expiry: HashMap<Uuid, String>,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
+    pub on_delete: Callback<Uuid>,
     pub on_toggle_hidden: Callback<Uuid>,
     pub on_toggle_inactive_hidden: Callback<MouseEvent>,
     pub on_stop: Callback<Uuid>,
+    pub on_toggle_pause: Callback<(Uuid, bool)>,
 }
 
 /// SessionRail - Horizontal carousel of session pills
@@ -379,6 +378,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let dropdown_content = if let Some(session) = open_session {
         let is_hidden = props.hidden_sessions.contains(&session.id);
         let is_connected = props.connected_sessions.contains(&session.id);
+        let is_paused = session.paused;
 
         let on_stop = {
             let on_stop = props.on_stop.clone();
@@ -407,12 +407,32 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             })
         };
 
+        let on_toggle_pause = {
+            let on_toggle_pause = props.on_toggle_pause.clone();
+            let session_id = session.id;
+            let menu_session = menu_session.clone();
+            Callback::from(move |_: MouseEvent| {
+                on_toggle_pause.emit((session_id, !is_paused));
+                menu_session.set(None);
+            })
+        };
+
         let on_leave = {
             let on_leave = props.on_leave.clone();
             let session_id = session.id;
             let menu_session = menu_session.clone();
             Callback::from(move |_: MouseEvent| {
                 on_leave.emit(session_id);
+                menu_session.set(None);
+            })
+        };
+
+        let on_delete = {
+            let on_delete = props.on_delete.clone();
+            let session_id = session.id;
+            let menu_session = menu_session.clone();
+            Callback::from(move |_: MouseEvent| {
+                on_delete.emit(session_id);
                 menu_session.set(None);
             })
         };
@@ -428,7 +448,48 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             "Hide from rotation"
         };
 
-        let stop_option = if is_connected && session.status == shared::SessionStatus::Active {
+        let hide_option = if is_paused {
+            html! {
+                <span class="pill-menu-option disabled">
+                    { "Hidden While Paused" }
+                    <span class="option-hint">{ "Resume to show in rotation" }</span>
+                </span>
+            }
+        } else {
+            html! {
+                <button
+                    type="button"
+                    class={classes!("pill-menu-option", "hide", is_hidden.then_some("active"))}
+                    onclick={on_hide}
+                >
+                    { hide_label }
+                    <span class="option-hint">{ hide_hint }</span>
+                </button>
+            }
+        };
+
+        let pause_option = if session.my_role != "viewer" {
+            let (pause_label, pause_hint) = if is_paused {
+                ("Resume Session", "Restart from saved session")
+            } else {
+                ("Pause Session", "Stop and suppress auto-resume")
+            };
+            html! {
+                <button type="button"
+                    class={classes!("pill-menu-option", "pause", is_paused.then_some("active"))}
+                    onclick={on_toggle_pause}
+                >
+                    { pause_label }
+                    <span class="option-hint">{ pause_hint }</span>
+                </button>
+            }
+        } else {
+            html! {}
+        };
+
+        let stop_option = if is_paused
+            || (is_connected && session.status == shared::SessionStatus::Active)
+        {
             if *stop_has_tasks {
                 // Block stop — open schedule dialog so user can delete tasks first
                 let schedule_session = schedule_session.clone();
@@ -446,7 +507,14 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 }
             } else {
                 let (stop_label, stop_hint) = if confirming_stop {
-                    ("Click again to confirm", "This will terminate the process")
+                    let hint = if is_paused {
+                        "This will remove the saved launcher entry"
+                    } else {
+                        "This will terminate the process"
+                    };
+                    ("Click again to confirm", hint)
+                } else if is_paused {
+                    ("Stop Session", "Remove saved launcher entry")
                 } else {
                     ("Stop Session", "Terminate process")
                 };
@@ -548,6 +616,17 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             html! {}
         };
 
+        let delete_option = if session.my_role == "owner" {
+            html! {
+                <button type="button" class="pill-menu-option stop" onclick={on_delete}>
+                    { "Delete Session" }
+                    <span class="option-hint">{ "Remove history and metadata" }</span>
+                </button>
+            }
+        } else {
+            html! {}
+        };
+
         let schedule_option = if session.my_role == "owner" {
             let schedule_session = schedule_session.clone();
             let session_clone = session.clone();
@@ -579,16 +658,11 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 { share_option }
                 { schedule_option }
                 { repo_option }
-                <button
-                    type="button"
-                    class={classes!("pill-menu-option", "hide", is_hidden.then_some("active"))}
-                    onclick={on_hide}
-                >
-                    { hide_label }
-                    <span class="option-hint">{ hide_hint }</span>
-                </button>
+                { pause_option }
+                { hide_option }
                 { leave_option }
                 { stop_option }
+                { delete_option }
             </>
         }
     } else {
@@ -779,48 +853,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 {
                     if session.scheduled_task_id.is_some() {
                         html! { <span class="pill-agent-badge cron">{ "Cron" }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    // Show warning icon when this session's launcher token is expiring
-                    if let Some(expires_at) = session.launcher_id
-                        .and_then(|lid| props.launcher_token_expiry.get(&lid))
-                    {
-                        let now = js_sys::Date::now();
-                        let exp = js_sys::Date::parse(expires_at);
-                        let days_left = if !exp.is_nan() {
-                            ((exp - now) / (1000.0 * 60.0 * 60.0 * 24.0)).floor() as i64
-                        } else {
-                            999
-                        };
-                        if days_left <= 7 {
-                            let tooltip = if days_left <= 0 {
-                                "Launcher token expired! Go to Settings > Launchers to renew.".to_string()
-                            } else if days_left == 1 {
-                                "Launcher token expires tomorrow. Go to Settings > Launchers to renew.".to_string()
-                            } else {
-                                format!(
-                                    "Launcher token expires in {} days. Go to Settings > Launchers to renew.",
-                                    days_left
-                                )
-                            };
-                            let badge_class = if days_left <= 0 {
-                                "pill-token-warning expired"
-                            } else if days_left <= 3 {
-                                "pill-token-warning critical"
-                            } else {
-                                "pill-token-warning"
-                            };
-                            html! {
-                                <span class={badge_class} title={tooltip}>
-                                    { "⚠" }
-                                </span>
-                            }
-                        } else {
-                            html! {}
-                        }
+                    } else if session.paused {
+                        html! { <span class="pill-agent-badge paused">{ "Paused" }</span> }
                     } else {
                         html! {}
                     }

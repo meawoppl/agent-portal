@@ -6,7 +6,7 @@ use super::types::{
     load_hidden_sessions, load_inactive_hidden, load_rail_position, load_show_cost,
     save_hidden_sessions, save_inactive_hidden, save_show_cost,
 };
-use crate::components::LaunchDialog;
+use crate::components::{LaunchDialog, TurnMetricsHeaderPill};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
@@ -37,6 +37,25 @@ pub fn dashboard_page() -> Html {
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
     let update_available = ws_hook.update_available.clone();
 
+    // Push-driven session refresh: the backend broadcasts
+    // `ServerToClient::LaunchSessionResult` the moment the launcher's
+    // proxy registers (or fails). The WS hook ticks
+    // `launch_event_counter` on each such frame; we hang a
+    // `use_effect_with` on it so the freshly-launched session shows up in
+    // the rail at the exact moment it becomes findable, instead of
+    // waiting up to the 5 s steady-poll tick. Initial value 0 is skipped
+    // so the mount doesn't fire a redundant refresh on top of the hook's
+    // own initial fetch.
+    {
+        let refresh = sessions_hook.refresh.clone();
+        use_effect_with(ws_hook.launch_event_counter, move |&c| {
+            if c > 0 {
+                refresh.emit(());
+            }
+            || ()
+        });
+    }
+
     // Track spend tier for timed animations
     let prev_spend_tier = use_state(|| 0u8);
     let spend_animating = use_state(|| false);
@@ -54,6 +73,7 @@ pub fn dashboard_page() -> Html {
     let rail_position = use_state(load_rail_position);
     let connected_sessions = use_state(HashSet::<Uuid>::new);
     let pending_leave = use_state(|| None::<Uuid>);
+    let pending_delete = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
     let current_user_id = use_state(|| None::<String>);
     let app_title = use_state(|| "Agent Portal".to_string());
@@ -64,28 +84,6 @@ pub fn dashboard_page() -> Html {
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
     let initial_focus_set = use_state(|| false);
     let sessions_at_launch = use_state(|| None::<HashSet<Uuid>>);
-
-    // Map of launcher_id → token_expires_at (ISO string) for launchers with expiring tokens.
-    // Passed to SessionRail so it can show warning icons on sessions from those launchers.
-    let expiring_launchers = use_state(std::collections::HashMap::<Uuid, String>::new);
-    {
-        let expiring_launchers = expiring_launchers.clone();
-        use_effect_with((), move |_| {
-            spawn_local(async move {
-                let url = utils::api_url("/api/launchers");
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if let Ok(launchers) = resp.json::<Vec<shared::LauncherInfo>>().await {
-                        let map: std::collections::HashMap<Uuid, String> = launchers
-                            .into_iter()
-                            .filter_map(|l| l.token_expires_at.map(|exp| (l.launcher_id, exp)))
-                            .collect();
-                        expiring_launchers.set(map);
-                    }
-                }
-            });
-            || ()
-        });
-    }
 
     // Detect spend tier changes and trigger timed animation
     {
@@ -169,14 +167,11 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Get active sessions sorted by repo name, then hostname
-    // Disconnected sessions are completely hidden from the UI
+    // Get DB-authoritative sessions sorted by repo name, then hostname. A
+    // disconnected, unpaused session is desired-running and should stay visible
+    // while the launcher reconciles it.
     let active_sessions: Vec<SessionInfo> = {
-        let mut sorted: Vec<SessionInfo> = sessions
-            .iter()
-            .filter(|s| s.status.as_str() == "active")
-            .cloned()
-            .collect();
+        let mut sorted: Vec<SessionInfo> = sessions.to_vec();
         sorted.sort_by(|a, b| {
             let folder_a = utils::extract_folder(&a.working_directory);
             let folder_b = utils::extract_folder(&b.working_directory);
@@ -192,10 +187,19 @@ pub fn dashboard_page() -> Html {
         sorted
     };
 
+    // Paused sessions follow the same frontend convention as manually hidden
+    // sessions: they remain available in the hidden rail section but do not
+    // participate in focus, activation, waiting counts, or keyboard rotation.
+    let effective_hidden_sessions: HashSet<Uuid> = {
+        let mut hidden = (*hidden_sessions).clone();
+        hidden.extend(active_sessions.iter().filter(|s| s.paused).map(|s| s.id));
+        hidden
+    };
+
     // On initial load, focus first non-hidden session and activate all non-hidden sessions
     {
         let active_sessions = active_sessions.clone();
-        let hidden_sessions = hidden_sessions.clone();
+        let effective_hidden_sessions = effective_hidden_sessions.clone();
         let focused_index = focused_index.clone();
         let initial_focus_set = initial_focus_set.clone();
         let activated_sessions = activated_sessions.clone();
@@ -206,7 +210,7 @@ pub fn dashboard_page() -> Html {
                 if !*initial_focus_set && !*is_loading && *session_count > 0 {
                     let first_non_hidden_idx = active_sessions
                         .iter()
-                        .position(|s| !hidden_sessions.contains(&s.id))
+                        .position(|s| !effective_hidden_sessions.contains(&s.id))
                         .unwrap_or(0);
 
                     focused_index.set(first_non_hidden_idx);
@@ -214,7 +218,7 @@ pub fn dashboard_page() -> Html {
                     // Activate all non-hidden sessions so they load in background
                     let mut activated = (*activated_sessions).clone();
                     for s in &active_sessions {
-                        if !hidden_sessions.contains(&s.id) {
+                        if !effective_hidden_sessions.contains(&s.id) {
                             activated.insert(s.id);
                         }
                     }
@@ -293,7 +297,7 @@ pub fn dashboard_page() -> Html {
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
         focused_index: *focused_index,
-        hidden_sessions: (*hidden_sessions).clone(),
+        hidden_sessions: effective_hidden_sessions.clone(),
         connected_sessions: (*connected_sessions).clone(),
         inactive_hidden: *inactive_hidden,
         on_select: on_select_session.clone(),
@@ -396,6 +400,46 @@ pub fn dashboard_page() -> Html {
         })
     };
 
+    let on_delete = {
+        let pending_delete = pending_delete.clone();
+        Callback::from(move |session_id: Uuid| {
+            pending_delete.set(Some(session_id));
+        })
+    };
+
+    let on_cancel_delete = {
+        let pending_delete = pending_delete.clone();
+        Callback::from(move |_| {
+            pending_delete.set(None);
+        })
+    };
+
+    let on_confirm_delete = {
+        let pending_delete = pending_delete.clone();
+        let refresh = sessions_hook.refresh.clone();
+        Callback::from(move |_| {
+            if let Some(session_id) = *pending_delete {
+                let refresh = refresh.clone();
+                let pending_delete = pending_delete.clone();
+                spawn_local(async move {
+                    let api_endpoint = utils::api_url(&format!("/api/sessions/{}", session_id));
+                    match Request::delete(&api_endpoint).send().await {
+                        Ok(response) if response.status() == 204 => {
+                            refresh.emit(());
+                        }
+                        Ok(response) => {
+                            log::error!("Failed to delete session: status {}", response.status());
+                        }
+                        Err(e) => {
+                            log::error!("Failed to delete session: {:?}", e);
+                        }
+                    }
+                    pending_delete.set(None);
+                });
+            }
+        })
+    };
+
     let toggle_launch_dialog = {
         let show_launch_dialog = show_launch_dialog.clone();
         Callback::from(move |_: MouseEvent| {
@@ -477,6 +521,43 @@ pub fn dashboard_page() -> Html {
         })
     };
 
+    let on_toggle_pause = {
+        let refresh = sessions_hook.refresh.clone();
+        let hidden_sessions = hidden_sessions.clone();
+        Callback::from(move |(session_id, pause): (Uuid, bool)| {
+            let refresh = refresh.clone();
+            let hidden_sessions = hidden_sessions.clone();
+            spawn_local(async move {
+                let action = if pause { "pause" } else { "resume" };
+                let url = utils::api_url(&format!("/api/sessions/{}/{}", session_id, action));
+                match Request::post(&url).send().await {
+                    Ok(resp) if resp.status() == 202 => {
+                        let mut set = (*hidden_sessions).clone();
+                        if pause {
+                            set.insert(session_id);
+                        } else {
+                            set.remove(&session_id);
+                        }
+                        save_hidden_sessions(&set);
+                        hidden_sessions.set(set);
+                        refresh.emit(());
+                    }
+                    Ok(resp) => {
+                        log::error!(
+                            "Failed to {} session {}: status {}",
+                            action,
+                            session_id,
+                            resp.status()
+                        );
+                    }
+                    Err(e) => {
+                        log::error!("Failed to {} session {}: {:?}", action, session_id, e);
+                    }
+                }
+            });
+        })
+    };
+
     let on_toggle_hidden = {
         let hidden_sessions = hidden_sessions.clone();
         Callback::from(move |session_id: Uuid| {
@@ -521,8 +602,12 @@ pub fn dashboard_page() -> Html {
     let on_activity = {
         let activity_timestamps = (*activity_timestamps).clone();
         Callback::from(
-            move |(session_id, msg_type, timestamp): (Uuid, String, f64)| {
-                activity_timestamps.push(session_id, msg_type, timestamp);
+            move |(session_id, tag, timestamp): (
+                Uuid,
+                crate::pages::dashboard::session_view::ActivityTag,
+                f64,
+            )| {
+                activity_timestamps.push(session_id, tag, timestamp);
             },
         )
     };
@@ -551,7 +636,7 @@ pub fn dashboard_page() -> Html {
     // Computed values
     let waiting_count = awaiting_sessions
         .iter()
-        .filter(|id| !hidden_sessions.contains(id))
+        .filter(|id| !effective_hidden_sessions.contains(id))
         .count();
 
     // Update browser tab title
@@ -618,6 +703,7 @@ pub fn dashboard_page() -> Html {
             <header class="focus-flow-header">
                 <h1>{ (*app_title).clone() }</h1>
                 <div class="header-actions">
+                    <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
                     {
                         if total_user_spend > 0.0 {
                             let tier_class = if total_user_spend >= 10000.0 {
@@ -734,18 +820,19 @@ pub fn dashboard_page() -> Html {
                         sessions={active_sessions.clone()}
                         focused_index={*focused_index}
                         awaiting_sessions={(*awaiting_sessions).clone()}
-                        hidden_sessions={(*hidden_sessions).clone()}
+                        hidden_sessions={effective_hidden_sessions.clone()}
                         inactive_hidden={*inactive_hidden}
                         connected_sessions={(*connected_sessions).clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
                         server_version={(*server_version).clone()}
-                        launcher_token_expiry={(*expiring_launchers).clone()}
                         on_select={on_select_session.clone()}
                         on_leave={on_leave.clone()}
+                        on_delete={on_delete.clone()}
                         on_toggle_hidden={on_toggle_hidden.clone()}
                         on_toggle_inactive_hidden={on_toggle_inactive_hidden.clone()}
                         on_stop={on_stop.clone()}
+                        on_toggle_pause={on_toggle_pause.clone()}
                     />
 
                     // Session views
@@ -828,6 +915,32 @@ pub fn dashboard_page() -> Html {
                         </div>
                     </div>
                 </>
+            }
+
+            // Delete confirmation modal
+            {
+                if let Some(session_id) = *pending_delete {
+                    let session_name = sessions.iter()
+                        .find(|s| s.id == session_id)
+                        .map(|s| utils::extract_folder(&s.working_directory))
+                        .unwrap_or("this session");
+
+                    html! {
+                        <div class="modal-overlay" onclick={on_cancel_delete.clone()}>
+                            <div class="modal-content delete-confirm" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                <h2>{ "Delete Session?" }</h2>
+                                <p>{ format!("Are you sure you want to delete \"{}\"?", session_name) }</p>
+                                <p class="modal-warning">{ "All message history and session metadata will be permanently removed." }</p>
+                                <div class="modal-actions">
+                                    <button class="modal-cancel" onclick={on_cancel_delete.clone()}>{ "Cancel" }</button>
+                                    <button class="modal-confirm" onclick={on_confirm_delete.clone()}>{ "Delete" }</button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
             }
 
             // Admin modal — full-page overlay preserves dashboard state

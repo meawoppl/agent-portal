@@ -1,161 +1,39 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
     response::{IntoResponse, Redirect},
     Json,
 };
 use diesel::prelude::*;
-use rand::{distributions::Alphanumeric, Rng};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use shared::api::{DeviceCodeRequest, DeviceFlowActionResponse, DeviceFlowPollRequest};
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower_cookies::Cookies;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
+    auth,
     jwt::{create_proxy_token, hash_token},
     models::NewProxyAuthToken,
+    routes,
     schema::proxy_auth_tokens,
     AppState,
 };
 
 use shared::protocol::{DEVICE_CODE_EXPIRES_SECS, SESSION_COOKIE_NAME};
 
-/// Error response for device flow endpoints
-#[derive(Debug, Serialize)]
-pub struct DeviceFlowError {
-    pub error: String,
-    pub message: String,
-}
+mod api_error;
+mod render;
+mod state;
 
-/// Device flow API error that returns JSON
-pub struct DeviceFlowApiError {
-    status: StatusCode,
-    error: String,
-    message: String,
-}
-
-impl DeviceFlowApiError {
-    fn service_unavailable() -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            error: "service_unavailable".to_string(),
-            message: "Device flow authentication is not available. Server may be in dev mode or OAuth is not configured.".to_string(),
-        }
-    }
-
-    fn not_found(msg: &str) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            error: "not_found".to_string(),
-            message: msg.to_string(),
-        }
-    }
-
-    fn internal_error(msg: &str) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            error: "internal_error".to_string(),
-            message: msg.to_string(),
-        }
-    }
-}
-
-impl IntoResponse for DeviceFlowApiError {
-    fn into_response(self) -> axum::response::Response {
-        (
-            self.status,
-            Json(DeviceFlowError {
-                error: self.error,
-                message: self.message,
-            }),
-        )
-            .into_response()
-    }
-}
-
-// In-memory store for device flow state
-// In production, use Redis or database
-pub type DeviceFlowStore = Arc<RwLock<HashMap<String, DeviceFlowState>>>;
-
-#[derive(Debug, Clone)]
-pub struct DeviceFlowState {
-    pub device_code: String,
-    pub user_code: String,
-    pub user_id: Option<Uuid>,
-    pub access_token: Option<String>,
-    pub expires_at: std::time::SystemTime,
-    pub status: DeviceFlowStatus,
-    /// Hostname of the machine requesting authorization
-    pub hostname: Option<String>,
-    /// Working directory / repository path
-    pub working_directory: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeviceFlowStatus {
-    Pending,
-    Complete,
-    Expired,
-    Denied,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeviceCodeResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub expires_in: u64,
-    pub interval: u64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "status")]
-pub enum PollResponse {
-    #[serde(rename = "pending")]
-    Pending,
-
-    #[serde(rename = "complete")]
-    Complete {
-        access_token: String,
-        user_id: String,
-        user_email: String,
-    },
-
-    #[serde(rename = "expired")]
-    Expired,
-
-    #[serde(rename = "denied")]
-    Denied,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VerifyQuery {
-    pub user_code: Option<String>,
-}
-
-fn generate_user_code() -> String {
-    let chars: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(6)
-        .map(|c| c as char)
-        .collect::<String>()
-        .to_uppercase();
-
-    // Format as XXX-XXX for readability
-    format!("{}-{}", &chars[0..3], &chars[3..6])
-}
-
-fn generate_device_code() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(|c| c as char)
-        .collect()
-}
+#[cfg(test)]
+use api_error::DeviceFlowError;
+use api_error::{auth_error_to_device_flow, DeviceFlowApiError};
+use render::render_approval_page;
+use state::{
+    generate_device_code, generate_user_code, DeviceCodeResponse, PollResponse, VerifyQuery,
+};
+pub use state::{DeviceFlowState, DeviceFlowStatus, DeviceFlowStore};
 
 // POST /auth/device/code
 pub async fn device_code(
@@ -270,7 +148,7 @@ pub async fn device_verify_page(
     // Check if user code exists and get device info
     let store = match &app_state.device_flow_store {
         Some(s) => s,
-        None => return Redirect::temporary("/").into_response(),
+        None => return Redirect::temporary(routes::ROOT).into_response(),
     };
     let store_lock = store.read().await;
     let device_info = store_lock
@@ -281,8 +159,11 @@ pub async fn device_verify_page(
         Some(state) => (state.hostname.clone(), state.working_directory.clone()),
         None => {
             drop(store_lock);
-            return Redirect::temporary("/api/auth/device/error?message=Invalid+or+expired+code")
-                .into_response();
+            return Redirect::temporary(&format!(
+                "{}?message=Invalid+or+expired+code",
+                routes::AUTH_DEVICE_ERROR
+            ))
+            .into_response();
         }
     };
     drop(store_lock);
@@ -306,7 +187,8 @@ pub async fn device_verify_page(
     // User not logged in - redirect to device-specific login endpoint
     // This endpoint will handle OAuth and redirect back to the approval page
     Redirect::temporary(&format!(
-        "/api/auth/device-login?device_user_code={}",
+        "{}?device_user_code={}",
+        routes::AUTH_DEVICE_LOGIN,
         user_code
     ))
     .into_response()
@@ -323,21 +205,8 @@ pub async fn device_approve(
     cookies: Cookies,
     Json(req): Json<ApproveRequest>,
 ) -> Result<Json<DeviceFlowActionResponse>, DeviceFlowApiError> {
-    // Verify user is logged in
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or_else(|| DeviceFlowApiError {
-            status: StatusCode::UNAUTHORIZED,
-            error: "unauthorized".to_string(),
-            message: "You must be logged in to approve device authorization".to_string(),
-        })?;
-
-    let user_id: Uuid = cookie.value().parse().map_err(|_| DeviceFlowApiError {
-        status: StatusCode::UNAUTHORIZED,
-        error: "unauthorized".to_string(),
-        message: "Invalid session".to_string(),
-    })?;
+    let user_id = auth::extract_user_id(&app_state, &cookies)
+        .map_err(|e| auth_error_to_device_flow(e, "approve"))?;
 
     let store = app_state
         .device_flow_store
@@ -366,21 +235,8 @@ pub async fn device_deny(
     cookies: Cookies,
     Json(req): Json<ApproveRequest>,
 ) -> Result<Json<DeviceFlowActionResponse>, DeviceFlowApiError> {
-    // Verify user is logged in
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or_else(|| DeviceFlowApiError {
-            status: StatusCode::UNAUTHORIZED,
-            error: "unauthorized".to_string(),
-            message: "You must be logged in to deny device authorization".to_string(),
-        })?;
-
-    let _user_id: Uuid = cookie.value().parse().map_err(|_| DeviceFlowApiError {
-        status: StatusCode::UNAUTHORIZED,
-        error: "unauthorized".to_string(),
-        message: "Invalid session".to_string(),
-    })?;
+    auth::extract_user_id(&app_state, &cookies)
+        .map_err(|e| auth_error_to_device_flow(e, "deny"))?;
 
     let store = app_state
         .device_flow_store
@@ -401,238 +257,6 @@ pub async fn device_deny(
         success: true,
         message: "Device authorization denied".to_string(),
     }))
-}
-
-fn render_approval_page(
-    user_code: &str,
-    hostname: Option<&str>,
-    working_directory: Option<&str>,
-) -> String {
-    let hostname_display = hostname.unwrap_or("Unknown device");
-    let working_dir_display = working_directory
-        .map(|wd| {
-            // Extract just the last component (likely repo name)
-            std::path::Path::new(wd)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(wd)
-        })
-        .unwrap_or("Unknown directory");
-
-    format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Approve Device - Agent Portal</title>
-    <style>
-        :root {{
-            --bg-dark: #1a1b26;
-            --bg-darker: #16161e;
-            --text-primary: #c0caf5;
-            --text-secondary: #7f849c;
-            --accent: #7aa2f7;
-            --accent-hover: #9eb3ff;
-            --border: #292e42;
-            --success: #9ece6a;
-            --error: #f7768e;
-            --warning: #e0af68;
-        }}
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
-        .container {{
-            background: var(--bg-darker);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 2rem;
-            max-width: 450px;
-            width: 90%;
-            text-align: center;
-        }}
-        h1 {{
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            color: var(--warning);
-        }}
-        .subtitle {{
-            color: var(--text-secondary);
-            margin-bottom: 1.5rem;
-            font-size: 0.9rem;
-        }}
-        .device-info {{
-            background: var(--bg-dark);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1.5rem;
-            text-align: left;
-        }}
-        .device-info .label {{
-            color: var(--text-secondary);
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 0.25rem;
-        }}
-        .device-info .value {{
-            color: var(--text-primary);
-            font-family: 'Courier New', monospace;
-            font-size: 0.95rem;
-            margin-bottom: 0.75rem;
-            word-break: break-all;
-        }}
-        .device-info .value:last-child {{
-            margin-bottom: 0;
-        }}
-        .code-display {{
-            background: var(--bg-dark);
-            border: 2px solid var(--accent);
-            border-radius: 8px;
-            padding: 0.75rem;
-            font-family: 'Courier New', monospace;
-            font-size: 1.25rem;
-            letter-spacing: 0.2rem;
-            color: var(--accent);
-            margin-bottom: 1.5rem;
-        }}
-        .buttons {{
-            display: flex;
-            gap: 1rem;
-        }}
-        button {{
-            flex: 1;
-            padding: 0.75rem 1.5rem;
-            font-size: 1rem;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.2s;
-        }}
-        .approve {{
-            background: var(--success);
-            color: var(--bg-dark);
-        }}
-        .approve:hover {{
-            filter: brightness(1.1);
-        }}
-        .deny {{
-            background: transparent;
-            border: 1px solid var(--error);
-            color: var(--error);
-        }}
-        .deny:hover {{
-            background: var(--error);
-            color: var(--bg-dark);
-        }}
-        .warning {{
-            color: var(--text-secondary);
-            font-size: 0.8rem;
-            margin-top: 1rem;
-        }}
-        .result {{
-            display: none;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-top: 1rem;
-        }}
-        .result.success {{
-            background: rgba(158, 206, 106, 0.1);
-            border: 1px solid var(--success);
-            color: var(--success);
-        }}
-        .result.error {{
-            background: rgba(247, 118, 142, 0.1);
-            border: 1px solid var(--error);
-            color: var(--error);
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>⚠️ Authorize Device?</h1>
-        <p class="subtitle">A device is requesting access to your Claude Code sessions</p>
-
-        <div class="device-info">
-            <div class="label">Machine</div>
-            <div class="value">{hostname_display}</div>
-            <div class="label">Directory</div>
-            <div class="value">{working_dir_display}</div>
-        </div>
-
-        <div class="code-display">{user_code}</div>
-
-        <div class="buttons">
-            <button class="deny" onclick="denyDevice()">Deny</button>
-            <button class="approve" onclick="approveDevice()">Approve</button>
-        </div>
-
-        <div id="result" class="result"></div>
-
-        <p class="warning">Only approve if you initiated this request from your terminal.</p>
-    </div>
-
-    <script>
-        const userCode = "{user_code}";
-
-        async function approveDevice() {{
-            try {{
-                const response = await fetch('/api/auth/device/approve', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ user_code: userCode }})
-                }});
-                const data = await response.json();
-                if (response.ok) {{
-                    showResult('success', 'Device authorized! You can close this page or return to the dashboard.');
-                    setTimeout(() => window.location.href = '/dashboard', 2000);
-                }} else {{
-                    showResult('error', data.message || 'Failed to authorize device');
-                }}
-            }} catch (e) {{
-                showResult('error', 'Network error: ' + e.message);
-            }}
-        }}
-
-        async function denyDevice() {{
-            try {{
-                const response = await fetch('/api/auth/device/deny', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ user_code: userCode }})
-                }});
-                const data = await response.json();
-                if (response.ok) {{
-                    showResult('error', 'Device authorization denied.');
-                    setTimeout(() => window.location.href = '/', 1500);
-                }} else {{
-                    showResult('error', data.message || 'Failed to deny device');
-                }}
-            }} catch (e) {{
-                showResult('error', 'Network error: ' + e.message);
-            }}
-        }}
-
-        function showResult(type, message) {{
-            const result = document.getElementById('result');
-            result.className = 'result ' + type;
-            result.textContent = message;
-            result.style.display = 'block';
-            document.querySelector('.buttons').style.display = 'none';
-        }}
-    </script>
-</body>
-</html>"#
-    )
 }
 
 const DEVICE_CODE_FORM_HTML: &str = r#"<!DOCTYPE html>
@@ -772,19 +396,19 @@ pub async fn complete_device_flow(
         error!("Failed to find user: {}", e);
     })?;
 
-    // Generate token ID and create JWT
+    // Generate token ID and create JWT. Device-flow tokens (used by launchers
+    // and CLI proxies) never expire; revocation governs their lifetime. See
+    // #932.
     let token_id = Uuid::new_v4();
-    let expires_in_days: u32 = 30; // Device flow tokens valid for 30 days
     let jwt_secret = app_state.jwt_secret.as_bytes();
 
-    let token = create_proxy_token(jwt_secret, token_id, user_id, &user.email, expires_in_days)
-        .map_err(|e| {
+    let token =
+        create_proxy_token(jwt_secret, token_id, user_id, &user.email, None).map_err(|e| {
             error!("Failed to create JWT: {}", e);
         })?;
 
     // Store token hash in database
     let token_hash = hash_token(&token);
-    let expires_at = chrono::Utc::now() + chrono::Duration::days(expires_in_days as i64);
 
     let new_token = NewProxyAuthToken {
         user_id,
@@ -793,7 +417,7 @@ pub async fn complete_device_flow(
             chrono::Utc::now().format("%Y-%m-%d %H:%M")
         ),
         token_hash,
-        expires_at: expires_at.naive_utc(),
+        expires_at: None,
     };
 
     diesel::insert_into(proxy_auth_tokens::table)
@@ -1183,6 +807,36 @@ mod tests {
         assert!(
             DEVICE_CODE_FORM_HTML.contains("pattern="),
             "Should have input validation pattern"
+        );
+    }
+
+    #[test]
+    fn approval_page_escapes_device_metadata() {
+        let html = render_approval_page(
+            "ABC-123",
+            Some(r#"<img src=x onerror="alert(1)">"#),
+            Some(r#"repo<script>alert('x')"#),
+        );
+
+        assert!(!html.contains("<img src=x"));
+        assert!(!html.contains("<script>alert"));
+        assert!(html.contains("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"));
+        assert!(html.contains("repo&lt;script&gt;alert(&#39;x&#39;)"));
+    }
+
+    #[test]
+    fn approval_page_serializes_user_code_as_javascript_string() {
+        let html = render_approval_page(r#"ABC-123";alert(1)//"#, None, None);
+
+        assert!(html.contains(r#"const userCode = "ABC-123\";alert(1)//";"#));
+        assert!(!html.contains(r#"const userCode = "ABC-123";alert(1)//";"#));
+    }
+
+    #[test]
+    fn escape_html_text_escapes_text_node_metacharacters() {
+        assert_eq!(
+            render::escape_html_text(r#"<>&"'"#),
+            "&lt;&gt;&amp;&quot;&#39;"
         );
     }
 }

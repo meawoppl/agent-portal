@@ -4,6 +4,7 @@ mod errors;
 mod handlers;
 mod jwt;
 mod models;
+mod routes;
 mod schema;
 
 use crate::db::DbPool;
@@ -13,7 +14,10 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
+use oauth2::{
+    basic::BasicClient, AuthUrl, ClientId, ClientSecret, EndpointNotSet, EndpointSet, RedirectUrl,
+    TokenUrl,
+};
 use shared::WsEndpoint;
 use std::{env, net::SocketAddr, sync::Arc};
 use tower_cookies::{CookieManagerLayer, Key};
@@ -34,12 +38,15 @@ struct Args {
     dev_mode: bool,
 }
 
+type GoogleOAuthClient =
+    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub session_manager: SessionManager,
-    pub oauth_basic_client: Option<BasicClient>,
+    pub oauth_basic_client: Option<GoogleOAuthClient>,
     pub device_flow_store: Option<DeviceFlowStore>,
     pub public_url: String,
     pub cookie_key: Key,
@@ -122,7 +129,10 @@ async fn main() -> anyhow::Result<()> {
         )?;
 
         Some(
-            BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url))
+            BasicClient::new(client_id)
+                .set_client_secret(client_secret)
+                .set_auth_uri(auth_url)
+                .set_token_uri(token_url)
                 .set_redirect_uri(redirect_uri),
         )
     } else {
@@ -392,11 +402,11 @@ async fn main() -> anyhow::Result<()> {
     // Rate-limited device flow auth routes
     let auth_device_routes = Router::new()
         .route(
-            "/api/auth/device/code",
+            routes::AUTH_DEVICE_CODE,
             post(handlers::device_flow::device_code),
         )
         .route(
-            "/api/auth/device/poll",
+            routes::AUTH_DEVICE_POLL,
             post(handlers::device_flow::device_poll),
         )
         .layer(GovernorLayer::new(auth_rate_limit))
@@ -432,6 +442,14 @@ async fn main() -> anyhow::Result<()> {
             "/api/sessions/{id}/stop",
             post(handlers::sessions::stop_session),
         )
+        .route(
+            "/api/sessions/{id}/pause",
+            post(handlers::sessions::pause_session),
+        )
+        .route(
+            "/api/sessions/{id}/resume",
+            post(handlers::sessions::resume_session),
+        )
         // Session member management routes
         .route(
             "/api/sessions/{id}/members",
@@ -447,7 +465,23 @@ async fn main() -> anyhow::Result<()> {
             "/api/sessions/{id}/messages",
             get(handlers::messages::list_messages).post(handlers::messages::create_message),
         )
+        .route(
+            "/api/sessions/{id}/turn-metrics",
+            get(handlers::turn_metrics::list_turn_metrics),
+        )
+        .route(
+            "/api/metrics/recent",
+            get(handlers::turn_metrics::list_recent_user_turn_metrics),
+        )
+        .route(
+            "/api/metrics/turns",
+            get(handlers::turn_metrics::list_aggregated_turn_metrics),
+        )
         // Proxy token management endpoints
+        .route(
+            "/api/proxy/resolve-session",
+            post(handlers::sessions::resolve_proxy_session),
+        )
         .route(
             "/api/proxy-tokens",
             get(handlers::proxy_tokens::list_tokens_handler)
@@ -465,6 +499,10 @@ async fn main() -> anyhow::Result<()> {
         // lives in the handler via `extract_user_id`, matching the pattern
         // every other cookie-gated handler in this router uses.
         .route("/api/images/{id}", get(handlers::images::serve_image))
+        .route(
+            "/api/sessions/{id}/files/pull",
+            get(handlers::files::pull_session_file),
+        )
         // Scheduled task management endpoints
         .route(
             "/api/scheduled-tasks",
@@ -487,24 +525,24 @@ async fn main() -> anyhow::Result<()> {
                 .put(handlers::sound_settings::save_sound_settings),
         )
         // Auth routes (under /api/auth)
-        .route("/api/auth/google", get(handlers::auth::login))
-        .route("/api/auth/google/callback", get(handlers::auth::callback))
-        .route("/api/auth/me", get(handlers::auth::me))
-        .route("/api/auth/logout", get(handlers::auth::logout))
-        .route("/api/auth/dev-login", get(handlers::auth::dev_login))
+        .route(routes::AUTH_GOOGLE, get(handlers::auth::login))
+        .route(routes::AUTH_GOOGLE_CALLBACK, get(handlers::auth::callback))
+        .route(routes::AUTH_ME, get(handlers::auth::me))
+        .route(routes::AUTH_LOGOUT, get(handlers::auth::logout))
+        .route(routes::AUTH_DEV_LOGIN, get(handlers::auth::dev_login))
         // Device-specific login endpoint (separate from regular web login)
-        .route("/api/auth/device-login", get(handlers::auth::device_login))
+        .route(routes::AUTH_DEVICE_LOGIN, get(handlers::auth::device_login))
         // Non-rate-limited device flow endpoints (verify page, approve, deny are user-facing)
         .route(
-            "/api/auth/device",
+            routes::AUTH_DEVICE,
             get(handlers::device_flow::device_verify_page),
         )
         .route(
-            "/api/auth/device/approve",
+            routes::AUTH_DEVICE_APPROVE,
             post(handlers::device_flow::device_approve),
         )
         .route(
-            "/api/auth/device/deny",
+            routes::AUTH_DEVICE_DENY,
             post(handlers::device_flow::device_deny),
         )
         // WebSocket routes (paths from ws-bridge endpoint definitions)
@@ -531,10 +569,6 @@ async fn main() -> anyhow::Result<()> {
             get(handlers::launchers::list_directories),
         )
         .route("/api/launch", post(handlers::launchers::launch_session))
-        .route(
-            "/api/launchers/{launcher_id}/renew-token",
-            post(handlers::launchers::renew_launcher_token),
-        )
         .route(
             "/api/launchers/{launcher_id}/update",
             post(handlers::launchers::update_launcher),
@@ -637,6 +671,19 @@ async fn main() -> anyhow::Result<()> {
             "Started session age cleanup task (every hour, max age {} days)",
             max_age_days
         );
+    }
+
+    // Spawn background task for expired proxy token cleanup (runs every hour)
+    {
+        let app_state = app_state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                run_expired_token_cleanup(&app_state).await;
+            }
+        });
+        tracing::info!("Started expired proxy token cleanup task (every hour)");
     }
 
     // Run the server with graceful shutdown
@@ -867,8 +914,24 @@ async fn run_session_age_cleanup(app_state: &Arc<AppState>) {
         deleted,
         max_days
     );
+}
 
-    // Also clean up tokens expired more than 7 days ago
+/// Delete proxy auth tokens whose expiration is more than 7 days in the past.
+async fn run_expired_token_cleanup(app_state: &Arc<AppState>) {
+    use diesel::prelude::*;
+
+    let Ok(mut conn) = app_state.db_pool.get() else {
+        tracing::error!("Failed to get DB connection for expired token cleanup");
+        return;
+    };
+
+    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
+        tracing::warn!(
+            "Failed to set statement_timeout for expired token cleanup: {}",
+            e
+        );
+    }
+
     let token_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(7);
     match diesel::delete(
         schema::proxy_auth_tokens::table

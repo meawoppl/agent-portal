@@ -1,11 +1,17 @@
+mod grouping;
 mod renderers;
+pub mod turn_metrics_footer;
 pub mod types;
 
 use serde_json::Value;
 use uuid::Uuid;
 use yew::prelude::*;
 
-use types::{ClaudeMessage, ContentBlock};
+#[cfg(test)]
+use grouping::classify;
+use grouping::{extract_raw_iso, visible_group_indices, GroupCategory};
+pub use grouping::{group_is_turn_terminator, group_messages, MessageGroup};
+use types::{user_meta_from_json, ClaudeMessage};
 
 /// Extract `_created_at` from a raw JSON message string and format it as local time.
 fn extract_local_timestamp(json: &str) -> Option<String> {
@@ -20,317 +26,6 @@ fn extract_local_timestamp(json: &str) -> Option<String> {
         .as_string()
 }
 
-/// Extract the raw `_created_at` ISO string from a message JSON, for use with
-/// the live-updating TimeAgo component (which parses it itself).
-pub(super) fn extract_raw_iso(json: &str) -> Option<String> {
-    let val: Value = serde_json::from_str(json).ok()?;
-    val.get("_created_at")?.as_str().map(|s| s.to_string())
-}
-
-/// Category for a run of consecutive related messages — drives both the
-/// grouping decision (`classify`) and the wrapper style on the rendered
-/// group (`MessageGroupRenderer`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GroupCategory {
-    /// Assistant messages and the user-shaped envelopes that carry only
-    /// tool results back to the agent.
-    Assistant,
-    /// Consecutive portal messages (connect/disconnect notices, retry
-    /// announcements, codex raw-frame attachments, etc.).
-    Portal,
-    /// Consecutive plain-text user messages typed by the human. Excludes
-    /// the tool-result user envelopes which group with Assistant.
-    User,
-    /// Consecutive Codex protocol events (any non-Unknown `CodexEvent`).
-    Codex,
-}
-
-impl GroupCategory {
-    /// Short stable prefix for `MessageGroup::key`. Don't change without
-    /// understanding the Yew diff implications — these strings end up in
-    /// virtual-dom keys and switching them mid-flight would re-mount every
-    /// group component on the page.
-    fn key_prefix(self) -> &'static str {
-        match self {
-            GroupCategory::Assistant => "g",
-            GroupCategory::Portal => "p",
-            GroupCategory::User => "u",
-            GroupCategory::Codex => "x",
-        }
-    }
-}
-
-/// A group of messages to render together.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MessageGroup {
-    /// A single message that doesn't classify into any group category.
-    /// Kept as a distinct variant (rather than a one-element `Grouped`) so
-    /// the most common case avoids the group-wrapper render path and keeps
-    /// its Yew key stable independent of category.
-    Single(String),
-    /// One or more consecutive messages with the same display identity.
-    IdentityGroup {
-        category: GroupCategory,
-        label: String,
-        badge_class: String,
-        messages: Vec<String>,
-    },
-}
-
-impl MessageGroup {
-    /// Stable key for this group derived from the first message's identity.
-    ///
-    /// A positional index would change whenever an earlier group gets added
-    /// or removed, causing Yew to throw away the group component and reset
-    /// internal state of every expandable/collapsible inside it (bash
-    /// command toggle, `ExpandableText`, image viewer, etc.). Using the
-    /// first message's `_created_at` keeps the key stable across reorderings.
-    /// `index` is used only as a fallback when no timestamp is present.
-    pub fn key(&self, index: usize) -> yew::virtual_dom::Key {
-        let (prefix, first) = match self {
-            MessageGroup::Single(json) => ("s", json.as_str()),
-            MessageGroup::IdentityGroup {
-                category, messages, ..
-            } => match messages.first() {
-                Some(j) => (category.key_prefix(), j.as_str()),
-                None => {
-                    return yew::virtual_dom::Key::from(format!(
-                        "{}{}",
-                        category.key_prefix(),
-                        index
-                    ));
-                }
-            },
-        };
-        match extract_raw_iso(first) {
-            Some(iso) => yew::virtual_dom::Key::from(format!("{}-{}", prefix, iso)),
-            None => yew::virtual_dom::Key::from(format!("{}{}", prefix, index)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MessageIdentity {
-    category: GroupCategory,
-    label: String,
-    badge_class: String,
-}
-
-/// True iff the parsed `UserMessage` carries only tool-result content blocks
-/// — the user-shaped envelope Claude uses to deliver tool output back to the
-/// assistant turn. The decision is made on the **nested** `message.content`
-/// blocks alone — we deliberately do NOT short-circuit on the top-level
-/// `content` field, because that field is the optimistic-send envelope shape
-/// and can leak onto real echoes through the cross-process wire wrapping.
-/// Gating on it broke serial Read tool-use grouping in the wild (#758).
-fn user_is_tool_result_envelope(msg: &types::UserMessage) -> bool {
-    let Some(message) = &msg.message else {
-        return false;
-    };
-    let Some(blocks) = &message.content else {
-        return false;
-    };
-    !blocks.is_empty()
-        && blocks.iter().all(|b| {
-            matches!(
-                b,
-                ContentBlock::ToolResult { .. }
-                    | ContentBlock::WebSearchToolResult { .. }
-                    | ContentBlock::McpToolResult { .. }
-                    | ContentBlock::CodeExecutionToolResult { .. }
-            )
-        })
-}
-
-/// True iff the parsed `UserMessage` is a plain-text human prompt — the kind
-/// we want to roll into the User group. Two wire shapes carry this content:
-/// the optimistic-send envelope (`UserMessage.content: Some(String)`) and the
-/// Claude echo shape (`UserMessage.message.content: Some([Text { .. }, …])`).
-/// We deliberately require *all* nested blocks to be `Text` so we don't
-/// silently roll a tool-result envelope into User — those belong with
-/// Assistant and are caught by `user_is_tool_result_envelope`.
-fn user_is_plain_text(msg: &types::UserMessage) -> bool {
-    if msg.content.is_some() {
-        return true;
-    }
-    let Some(message) = &msg.message else {
-        return false;
-    };
-    let Some(blocks) = &message.content else {
-        return false;
-    };
-    !blocks.is_empty()
-        && blocks
-            .iter()
-            .all(|b| matches!(b, ContentBlock::Text { .. }))
-}
-
-/// Classify a single wire message into the display identity it belongs to,
-/// or `None` if it shouldn't roll into any group (renders as `Single`).
-///
-/// Sole entry point for "which identity group does this message belong to"
-/// across the codebase — add new categories here, not at the `group_messages`
-/// loop level. The wire JSON is parsed at most twice: once as a
-/// `ClaudeMessage`, and if (and only if) that parse yields no recognized
-/// variant on a Codex session, once as a `CodexEvent`.
-///
-/// **Variant ordering matters**:
-///   1. **User-as-tool-result** runs first because user-tool-result envelopes
-///      are user-shaped but belong with the surrounding assistant turn. If
-///      the plain-text branch ran first, every Read tool-result would
-///      silently land in a User group instead of continuing the assistant
-///      run (the regression target of PR 1 of #758).
-///   2. **Assistant** is the other half of the assistant group — covered by
-///      the same `Assistant` category that user-tool-result envelopes map to.
-///   3. **Portal** has its own wire shape so it can't collide with the User
-///      arms, but matching it explicitly keeps the dispatch documented.
-///   4. **User plain-text** runs after the tool-result branch so prose lands
-///      in the User group while tool-result envelopes are already claimed.
-///      The sender label is part of the group key, so proxy users don't
-///      collapse under the current user's "You" header.
-///   5. **Codex** runs last — Codex events parse via a different enum and
-///      only the messages that don't match any Claude shape get here.
-fn classify(
-    json: &str,
-    agent_type: shared::AgentType,
-    current_user_id: Option<&str>,
-) -> Option<MessageIdentity> {
-    let assistant_label = if agent_type == shared::AgentType::Codex {
-        "Codex"
-    } else {
-        "Assistant"
-    };
-
-    match serde_json::from_str::<ClaudeMessage>(json) {
-        Ok(ClaudeMessage::Assistant(_)) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Assistant,
-                label: assistant_label.to_string(),
-                badge_class: "assistant".to_string(),
-            });
-        }
-        Ok(ClaudeMessage::User(msg)) => {
-            if user_is_tool_result_envelope(&msg) {
-                return Some(MessageIdentity {
-                    category: GroupCategory::Assistant,
-                    label: assistant_label.to_string(),
-                    badge_class: "assistant".to_string(),
-                });
-            }
-            if user_is_plain_text(&msg) {
-                let label = match &msg.sender {
-                    Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
-                        sender.name.clone()
-                    }
-                    _ => "You".to_string(),
-                };
-                return Some(MessageIdentity {
-                    category: GroupCategory::User,
-                    label,
-                    badge_class: "user".to_string(),
-                });
-            }
-        }
-        Ok(ClaudeMessage::Portal(_)) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Portal,
-                label: "Portal".to_string(),
-                badge_class: "portal".to_string(),
-            });
-        }
-        _ => {}
-    }
-
-    if agent_type == shared::AgentType::Codex {
-        use crate::components::codex_renderer::CodexEvent;
-        if !matches!(
-            serde_json::from_str::<CodexEvent>(json),
-            Err(_) | Ok(CodexEvent::Unknown)
-        ) {
-            return Some(MessageIdentity {
-                category: GroupCategory::Codex,
-                label: "Codex".to_string(),
-                badge_class: "assistant".to_string(),
-            });
-        }
-    }
-
-    None
-}
-
-/// Walk `messages` and collapse consecutive same-category runs into
-/// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
-/// `MessageGroup::Single`.
-pub fn group_messages(
-    messages: &[String],
-    agent_type: shared::AgentType,
-    current_user_id: Option<&str>,
-) -> Vec<MessageGroup> {
-    let mut groups = Vec::new();
-    let mut current: Option<(MessageIdentity, Vec<String>)> = None;
-
-    fn flush(out: &mut Vec<MessageGroup>, slot: &mut Option<(MessageIdentity, Vec<String>)>) {
-        if let Some((identity, messages)) = slot.take() {
-            out.push(MessageGroup::IdentityGroup {
-                category: identity.category,
-                label: identity.label,
-                badge_class: identity.badge_class,
-                messages,
-            });
-        }
-    }
-
-    for json in messages {
-        match classify(json, agent_type, current_user_id) {
-            Some(identity) => match current.as_mut() {
-                Some((cur_identity, msgs)) if *cur_identity == identity => msgs.push(json.clone()),
-                _ => {
-                    flush(&mut groups, &mut current);
-                    current = Some((identity, vec![json.clone()]));
-                }
-            },
-            None => {
-                flush(&mut groups, &mut current);
-                groups.push(MessageGroup::Single(json.clone()));
-            }
-        }
-    }
-
-    flush(&mut groups, &mut current);
-    groups
-}
-
-/// For Codex groups, suppress earlier events that share an `item_id` with a
-/// later event in the same group — they represent the same logical card being
-/// progressively filled in (`item.started` → `item.updated` → `item.completed`),
-/// and rendering all of them creates duplicate near-identical cards (#776 — a
-/// bash command would show up as a "running" card immediately followed by a
-/// near-identical "completed" card). Non-Codex categories pass through
-/// unchanged because their wire shapes don't carry the same lifecycle.
-///
-/// Events that don't carry an `item_id` (turn-level events, deltas, errors)
-/// always pass through — they're standalone signals, not lifecycle stages of
-/// a per-item card.
-fn visible_group_indices(category: GroupCategory, messages: &[String]) -> Vec<usize> {
-    if !matches!(category, GroupCategory::Codex) {
-        return (0..messages.len()).collect();
-    }
-    use crate::components::codex_renderer::codex_event_item_id;
-    use std::collections::HashMap;
-    let mut last_idx: HashMap<String, usize> = HashMap::new();
-    for (i, json) in messages.iter().enumerate() {
-        if let Some(id) = codex_event_item_id(json) {
-            last_idx.insert(id, i);
-        }
-    }
-    (0..messages.len())
-        .filter(|i| match codex_event_item_id(&messages[*i]) {
-            Some(id) => last_idx.get(&id) == Some(i),
-            None => true,
-        })
-        .collect()
-}
-
 // --- Components ---
 
 #[derive(Properties, PartialEq)]
@@ -342,13 +37,23 @@ pub struct MessageRendererProps {
     pub agent_type: shared::AgentType,
     #[prop_or_default]
     pub current_user_id: Option<String>,
+    /// Per-turn metrics for the terminator card this `MessageRenderer` is
+    /// rendering, if any. Populated by `SessionView::view()` when the
+    /// message is the Nth `Result` / `turn.completed` / `turn.failed` and
+    /// `SessionView.turn_metrics` has an Nth entry. The renderer ignores it
+    /// for non-terminator shapes; terminator renderers (`render_result_message`
+    /// for Claude, the dispatch arm for `CodexEvent::TurnCompleted` /
+    /// `TurnFailed` for Codex) append a `<div class="turn-metrics-footer">`
+    /// chip strip below the existing stats bar when present.
+    #[prop_or_default]
+    pub turn_metrics: Option<shared::TurnMetrics>,
 }
 
 #[function_component(MessageRenderer)]
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
     let ts = extract_local_timestamp(&props.json);
     let raw_iso = extract_raw_iso(&props.json);
-    let parsed: Result<ClaudeMessage, _> = serde_json::from_str(&props.json);
+    let parsed = ClaudeMessage::parse(&props.json);
 
     // Dispatch on the message shape, not the agent. `User` (the proxy's
     // synthetic echo) and `Portal` (the backend's portal-content envelope)
@@ -362,11 +67,27 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
             return renderers::render_system_message(&msg, ts.as_deref());
         }
         Ok(ClaudeMessage::Assistant(msg)) => {
-            return renderers::render_assistant_message(&msg, ts.as_deref(), raw_iso.as_deref());
+            return renderers::render_assistant_message(
+                &msg,
+                ts.as_deref(),
+                raw_iso.as_deref(),
+                props.session_id,
+            );
         }
-        Ok(ClaudeMessage::Result(msg)) => return renderers::render_result_message(&msg),
+        Ok(ClaudeMessage::Result(msg)) => {
+            return renderers::render_result_message(&msg, props.turn_metrics.as_ref());
+        }
         Ok(ClaudeMessage::User(msg)) => {
+            let meta = user_meta_from_json(&props.json);
             return renderers::render_user_message(
+                &msg,
+                &meta,
+                props.current_user_id.as_deref(),
+                ts.as_deref(),
+            );
+        }
+        Ok(ClaudeMessage::OptimisticUser(msg)) => {
+            return renderers::render_optimistic_user_message(
                 &msg,
                 props.current_user_id.as_deref(),
                 ts.as_deref(),
@@ -376,7 +97,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
             return renderers::render_error_message(&msg, ts.as_deref());
         }
         Ok(ClaudeMessage::Portal(msg)) => {
-            return renderers::render_portal_message(&msg, ts.as_deref());
+            return renderers::render_portal_message(&msg, ts.as_deref(), props.session_id);
         }
         Ok(ClaudeMessage::RateLimitEvent(msg)) => {
             return renderers::render_rate_limit_event(&msg, ts.as_deref());
@@ -385,7 +106,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
     }
 
     if props.agent_type == shared::AgentType::Codex {
-        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} /> }
+        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} turn_metrics={props.turn_metrics.clone()} /> }
     } else {
         render_raw_json(&props.json)
     }
@@ -400,13 +121,20 @@ pub struct MessageGroupRendererProps {
     pub agent_type: shared::AgentType,
     #[prop_or_default]
     pub current_user_id: Option<String>,
+    /// Per-turn metrics for the terminator card in this group, if the group
+    /// is a `Single` carrying a terminator and the SessionView has a matching
+    /// metrics entry. Forwarded to the inner `MessageRenderer` for the
+    /// `Single` variant only — `IdentityGroup`s never contain terminator
+    /// shapes (`Result` / `turn.completed` always render as `Single`).
+    #[prop_or_default]
+    pub turn_metrics: Option<shared::TurnMetrics>,
 }
 
 #[function_component(MessageGroupRenderer)]
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     match &props.group {
         MessageGroup::Single(json) => {
-            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} /> }
+            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} /> }
         }
         MessageGroup::IdentityGroup {
             category,
@@ -417,11 +145,35 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             let ts = messages
                 .first()
                 .and_then(|json| extract_local_timestamp(json));
+
+            // A run of `thinking_tokens` markers collapses to a single compact
+            // chip: the `thinking` badge plus an odometer climbing to the run's
+            // running thinking-token estimate. No body — these markers carry
+            // none. Each marker reports the cumulative estimate, so the chip
+            // ticks upward live as more markers stream in.
+            if *category == GroupCategory::Thinking {
+                let tokens = grouping::thinking_tokens_estimate(messages);
+                return html! {
+                    <div class="claude-message thinking-pulse-group" title={ts.unwrap_or_default()}>
+                        <div class="message-header">
+                            <span class="message-type-badge thinking">{ "thinking" }</span>
+                            if tokens > 0 {
+                                <span class="message-count" title={format!("~{} thinking tokens", tokens)}>
+                                    <crate::components::CountUp target={tokens} suffix={" tokens"} compact={true} />
+                                </span>
+                            }
+                        </div>
+                    </div>
+                };
+            }
+
             let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
             let wrapper_class = match category {
                 GroupCategory::User => "user-message",
                 GroupCategory::Portal => "portal-message",
                 GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
+                // Handled above with an early return; arm kept for exhaustiveness.
+                GroupCategory::Thinking => "assistant-message",
             };
             let visible = visible_group_indices(*category, messages);
             let visible_count = visible.len();
@@ -456,10 +208,15 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
 }
 
 fn render_identity_group_part(json: &str, agent_type: shared::AgentType) -> Html {
-    match serde_json::from_str::<ClaudeMessage>(json) {
+    match ClaudeMessage::parse(json) {
         Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg),
-        Ok(ClaudeMessage::Assistant(msg)) => renderers::render_assistant_message_content(&msg),
-        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg),
+        Ok(ClaudeMessage::OptimisticUser(msg)) => {
+            renderers::render_optimistic_user_message_content(&msg)
+        }
+        Ok(ClaudeMessage::Assistant(msg)) => {
+            renderers::render_assistant_message_content(&msg, None)
+        }
+        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg, None),
         _ if agent_type == shared::AgentType::Codex => {
             super::codex_renderer::render_codex_message_content(json)
         }
@@ -514,7 +271,14 @@ pub(crate) fn shorten_model_name(model: &str) -> Option<String> {
     let extract_version = |model: &str| -> Option<String> {
         let parts: Vec<&str> = model.split('-').collect();
         for i in 0..parts.len().saturating_sub(1) {
-            if let (Ok(major), Ok(minor)) = (parts[i].parse::<u32>(), parts[i + 1].parse::<u32>()) {
+            let minor_digits: String = parts[i + 1]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if minor_digits.len() >= 8 {
+                continue;
+            }
+            if let (Ok(major), Ok(minor)) = (parts[i].parse::<u32>(), minor_digits.parse::<u32>()) {
                 if parts[i + 1].len() >= 8 {
                     continue;
                 }
@@ -578,6 +342,21 @@ mod tests {
         group_messages(messages, shared::AgentType::Codex, None)
     }
 
+    /// A `system`/`thinking_tokens` marker — the bodyless per-reasoning-step
+    /// event the Claude CLI emits, which the portal collapses into one chip.
+    /// `estimated_tokens` is the cumulative running thinking-token estimate.
+    fn thinking_tokens_message(estimated_tokens: i64) -> String {
+        serde_json::json!({
+            "type": "system",
+            "subtype": "thinking_tokens",
+            "estimated_tokens": estimated_tokens,
+            "estimated_tokens_delta": estimated_tokens,
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
+    }
+
     /// Realistic Claude wire shape for a user message containing a single
     /// `tool_result` content block (the kind Read / Bash / Edit etc. produce).
     /// Matches `claude-codes` 2.1.x `ClaudeOutput::User(UserMessage)`
@@ -605,7 +384,9 @@ mod tests {
         serde_json::json!({
             "type": "assistant",
             "message": {
+                "id": format!("msg_{tool_use_id}"),
                 "role": "assistant",
+                "model": "claude-sonnet-4-5-20250929",
                 "content": [{
                     "type": "tool_use",
                     "id": tool_use_id,
@@ -822,6 +603,10 @@ mod tests {
     /// `stage` is one of `"item.started"` / `"item.updated"` / `"item.completed"`.
     /// All three carry the same `item_id`, mirroring the Codex wire flow that
     /// produced the duplicate-card regression of #776.
+    ///
+    /// `status` must be a real `CommandExecutionStatus` value (`in_progress`,
+    /// `completed`, `failed`, `declined`) — upstream `codex-codes` types
+    /// are strict here, the pre-#827 local mirror was looser (any string).
     fn codex_command_event(stage: &str, item_id: &str, status: &str) -> String {
         serde_json::json!({
             "type": stage,
@@ -880,6 +665,47 @@ mod tests {
         ];
         let groups = group_for_tests(&messages);
         assert_eq!(groups.len(), 3);
+    }
+
+    /// A run of `thinking_tokens` markers must collapse into a single
+    /// `Thinking` group (one counted chip), not one empty badge per marker —
+    /// the regression target for the "wall of THINKING_TOKENS badges" symptom.
+    #[test]
+    fn serial_thinking_tokens_collapse_into_one_group() {
+        let messages = vec![
+            thinking_tokens_message(50),
+            thinking_tokens_message(150),
+            thinking_tokens_message(250),
+        ];
+        let groups = group_for_tests(&messages);
+        assert_eq!(groups.len(), 1);
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Thinking,
+                messages,
+                label,
+                ..
+            } => {
+                assert_eq!(messages.len(), 3);
+                assert_eq!(label, "thinking");
+            }
+            other => panic!("expected Thinking run, got {:?}", other),
+        }
+    }
+
+    /// The condensed chip shows a token estimate, not a pulse count: each
+    /// marker reports the cumulative `estimated_tokens`, so the run's peak
+    /// (last) value is the burst total.
+    #[test]
+    fn thinking_tokens_estimate_returns_peak() {
+        let messages = vec![
+            thinking_tokens_message(50),
+            thinking_tokens_message(150),
+            thinking_tokens_message(250),
+        ];
+        assert_eq!(grouping::thinking_tokens_estimate(&messages), 250);
+        // No markers / unparseable input yields 0 (chip hides).
+        assert_eq!(grouping::thinking_tokens_estimate(&[]), 0);
     }
 
     #[test]
@@ -985,11 +811,21 @@ mod tests {
                 None,
             ),
             (
+                "system thinking_tokens marker collapses into the Thinking group",
+                thinking_tokens_message(150),
+                Some(GroupCategory::Thinking),
+            ),
+            (
                 "result message",
                 serde_json::json!({
                     "type": "result",
                     "subtype": "success",
+                    "is_error": false,
+                    "duration_ms": 100,
+                    "duration_api_ms": 80,
+                    "num_turns": 1,
                     "session_id": "01890000-0000-7000-8000-000000000001",
+                    "total_cost_usd": 0.0,
                     "_created_at": "2026-05-17T10:00:00.000Z",
                 })
                 .to_string(),
@@ -1027,7 +863,7 @@ mod tests {
     #[test]
     fn codex_command_lifecycle_dedupes_to_completed() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
         let visible = visible_group_indices(GroupCategory::Codex, &messages);
@@ -1045,8 +881,8 @@ mod tests {
     #[test]
     fn codex_command_started_updated_completed_dedupes_to_completed() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
-            codex_command_event("item.updated", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
+            codex_command_event("item.updated", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
         let visible = visible_group_indices(GroupCategory::Codex, &messages);
@@ -1058,9 +894,9 @@ mod tests {
     #[test]
     fn codex_two_distinct_items_each_keep_one_card() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_a", "running"),
+            codex_command_event("item.started", "cmd_a", "in_progress"),
             codex_command_event("item.completed", "cmd_a", "completed"),
-            codex_command_event("item.started", "cmd_b", "running"),
+            codex_command_event("item.started", "cmd_b", "in_progress"),
             codex_command_event("item.completed", "cmd_b", "completed"),
         ];
         let visible = visible_group_indices(GroupCategory::Codex, &messages);
@@ -1080,7 +916,7 @@ mod tests {
         })
         .to_string();
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
             turn_completed.clone(),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
@@ -1097,7 +933,7 @@ mod tests {
     #[test]
     fn visible_group_indices_is_codex_only() {
         let messages = vec![
-            codex_command_event("item.started", "cmd_1", "running"),
+            codex_command_event("item.started", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
         for cat in [
@@ -1138,6 +974,30 @@ mod tests {
     }
 
     #[test]
+    fn assistant_group_label_uses_claude_model() {
+        let messages = vec![serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "role": "assistant",
+                "model": "claude-opus-4-7-20260501",
+                "content": [{"type": "text", "text": "hello"}],
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()];
+
+        let groups = group_for_tests(&messages);
+        match &groups[0] {
+            MessageGroup::IdentityGroup { label, .. } => {
+                assert_eq!(label, "Claude - Opus 4.7");
+            }
+            other => panic!("expected assistant identity group, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_shorten_model_name() {
         assert_eq!(
             shorten_model_name("claude-opus-4-5-20251101"),
@@ -1158,6 +1018,10 @@ mod tests {
         assert_eq!(
             shorten_model_name("claude-opus-4-6"),
             Some("Opus 4.6".to_string())
+        );
+        assert_eq!(
+            shorten_model_name("claude-opus-4-7[1m]"),
+            Some("Opus 4.7".to_string())
         );
         assert_eq!(
             shorten_model_name("claude-sonnet-4-5"),

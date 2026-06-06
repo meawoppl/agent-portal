@@ -1,5 +1,6 @@
 //! Proxy session management and WebSocket connection handling.
 
+mod git_metadata;
 mod image_uploader;
 mod output_forwarder;
 mod portal_reminder;
@@ -22,9 +23,14 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use output_forwarder::{get_git_branch, get_pr_url, get_repo_url, spawn_output_forwarder};
+use git_metadata::{
+    check_and_send_branch_update, check_and_send_branch_update_if_branch_changed,
+    codex_output_has_git_signal, get_git_branch, get_pr_url, get_repo_url, GitMetadataState,
+    GitRefreshTrigger,
+};
+use output_forwarder::spawn_output_forwarder;
 use wiggum::{handle_session_event_with_wiggum, WiggumState};
-use ws_reader::{spawn_ws_reader, FileReceiveState, FileUploadEvent};
+use ws_reader::{spawn_ws_reader, FileDownloadEvent, FileReceiveState, FileUploadEvent};
 
 /// Type alias for the native WebSocket connection
 type NativeConnection = ws_bridge::native_client::Connection<SessionEndpoint>;
@@ -147,6 +153,17 @@ pub struct PermissionResponseData {
     pub reason: Option<String>,
 }
 
+/// Portal-originated user input plus optional backend ack metadata.
+pub struct PortalInput {
+    pub text: String,
+    pub ack: Option<PortalInputAck>,
+}
+
+pub struct PortalInputAck {
+    pub session_id: Uuid,
+    pub seq: i64,
+}
+
 /// Signal for graceful server shutdown with recommended reconnect delay
 pub struct GracefulShutdown {
     pub reconnect_delay_ms: u64,
@@ -160,9 +177,9 @@ pub struct SessionState<'a, A: Agent> {
     /// The agent-backed session (Claude or Codex).
     pub claude_session: &'a mut Session<A>,
     /// Sender for input messages (cloned per connection)
-    pub input_tx: mpsc::UnboundedSender<String>,
+    pub input_tx: mpsc::UnboundedSender<PortalInput>,
     /// Receiver for input messages (persists across connections)
-    pub input_rx: &'a mut mpsc::UnboundedReceiver<String>,
+    pub input_rx: &'a mut mpsc::UnboundedReceiver<PortalInput>,
     /// Output buffer with persistence
     pub output_buffer: Arc<Mutex<PendingOutputBuffer>>,
     /// Backoff state for reconnection
@@ -184,8 +201,8 @@ impl<'a, A: Agent> SessionState<'a, A> {
     pub fn new(
         config: &'a ProxySessionConfig,
         claude_session: &'a mut Session<A>,
-        input_tx: mpsc::UnboundedSender<String>,
-        input_rx: &'a mut mpsc::UnboundedReceiver<String>,
+        input_tx: mpsc::UnboundedSender<PortalInput>,
+        input_rx: &'a mut mpsc::UnboundedReceiver<PortalInput>,
     ) -> Result<Self> {
         let output_buffer = match PendingOutputBuffer::new(config.session_id) {
             Ok(buf) => buf,
@@ -243,6 +260,8 @@ impl<'a, A: Agent> SessionState<'a, A> {
 /// Contains channels and state that are specific to a single connection attempt.
 /// Note: input_rx is passed separately as it persists across reconnections.
 struct ConnectionState {
+    /// Session id for metadata updates.
+    session_id: Uuid,
     /// Receiver for permission responses from frontend
     perm_rx: mpsc::UnboundedReceiver<PermissionResponseData>,
     /// Receiver for output acknowledgments from backend
@@ -262,27 +281,33 @@ struct ConnectionState {
     /// Buffer for pending outputs
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
     /// Receiver for wiggum mode activation
-    wiggum_rx: mpsc::UnboundedReceiver<String>,
+    wiggum_rx: mpsc::UnboundedReceiver<PortalInput>,
     /// Current wiggum state (if active)
     wiggum_state: Option<WiggumState>,
     /// Heartbeat tracker for dead connection detection
     heartbeat: session_lib::heartbeat::HeartbeatTracker,
     /// Receiver for file upload events from backend
     file_upload_rx: mpsc::UnboundedReceiver<FileUploadEvent>,
+    /// Receiver for file download requests from backend
+    file_download_rx: mpsc::UnboundedReceiver<FileDownloadEvent>,
     /// Working directory for file uploads
     working_directory: String,
     /// Active file uploads being received in chunks
     active_uploads: std::collections::HashMap<String, FileReceiveState>,
     /// Agent type for tagging per-message wire output (proxy emission side)
     agent_type: shared::AgentType,
+    /// Shared git metadata state for branch / PR / repo refreshes.
+    git_metadata: GitMetadataState,
+    /// Refresh cadence for Codex raw-output messages.
+    git_refresh: GitRefreshTrigger,
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
 pub async fn run_connection_loop<A: Agent>(
     config: &ProxySessionConfig,
     claude_session: &mut Session<A>,
-    input_tx: mpsc::UnboundedSender<String>,
-    input_rx: &mut mpsc::UnboundedReceiver<String>,
+    input_tx: mpsc::UnboundedSender<PortalInput>,
+    input_rx: &mut mpsc::UnboundedReceiver<PortalInput>,
 ) -> Result<LoopResult> {
     let mut session = SessionState::new(config, claude_session, input_tx, input_rx)?;
     session.log_pending_messages().await;
@@ -381,16 +406,14 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
         .git_branch
         .as_deref()
         .and_then(|b| get_pr_url(&session.config.working_directory, b));
-    if pr_url.is_some() || repo_url.is_some() {
-        let update_msg = ProxyToServer::SessionUpdate {
-            session_id: config_with_branch.session_id,
-            git_branch: config_with_branch.git_branch.clone(),
-            pr_url,
-            repo_url,
-        };
-        if conn.send(update_msg).await.is_err() {
-            error!("Failed to send initial session update");
-        }
+    let update_msg = ProxyToServer::SessionUpdate {
+        session_id: config_with_branch.session_id,
+        git_branch: config_with_branch.git_branch.clone(),
+        pr_url,
+        repo_url,
+    };
+    if conn.send(update_msg).await.is_err() {
+        error!("Failed to send initial session update");
     }
 
     // Replay pending messages after successful registration.
@@ -572,6 +595,7 @@ async fn register_session(
         agent_type: config.agent_type,
         repo_url: get_repo_url(&config.working_directory),
         scheduled_task_id: config.scheduled_task_id,
+        claude_args: config.claude_args.clone(),
     });
 
     if conn.send(register_msg).await.is_err() {
@@ -646,7 +670,7 @@ async fn run_message_loop<A: Agent>(
     let (ack_tx, ack_rx) = mpsc::unbounded_channel::<u64>();
 
     // Channel for wiggum mode activation
-    let (wiggum_tx, wiggum_rx) = mpsc::unbounded_channel::<String>();
+    let (wiggum_tx, wiggum_rx) = mpsc::unbounded_channel::<PortalInput>();
 
     // Channel for graceful server shutdown signals
     let (graceful_shutdown_tx, graceful_shutdown_rx) =
@@ -654,6 +678,9 @@ async fn run_message_loop<A: Agent>(
 
     // Channel for file upload events from backend
     let (file_upload_tx, file_upload_rx) = mpsc::unbounded_channel::<FileUploadEvent>();
+
+    // Channel for file download requests from backend
+    let (file_download_tx, file_download_rx) = mpsc::unbounded_channel::<FileDownloadEvent>();
 
     // Channel for session terminated signal (do not reconnect)
     let (session_terminated_tx, session_terminated_rx) = tokio::sync::oneshot::channel::<()>();
@@ -668,9 +695,7 @@ async fn run_message_loop<A: Agent>(
     let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
 
     // Shared state for tracking git branch, PR URL, and repo URL updates
-    let current_branch = Arc::new(Mutex::new(config.git_branch.clone()));
-    let current_pr_url = Arc::new(Mutex::new(None::<String>));
-    let current_repo_url = Arc::new(Mutex::new(None::<String>));
+    let git_metadata = GitMetadataState::new(config.git_branch.clone());
 
     // Spawn output forwarder task with buffer
     let output_task = spawn_output_forwarder(
@@ -680,9 +705,7 @@ async fn run_message_loop<A: Agent>(
         config.backend_url.clone(),
         config.auth_token.clone(),
         config.working_directory.clone(),
-        current_branch,
-        current_pr_url,
-        current_repo_url,
+        git_metadata.clone(),
         session.output_buffer.clone(),
         max_image_mb,
         config.agent_type,
@@ -694,17 +717,18 @@ async fn run_message_loop<A: Agent>(
         session.input_tx.clone(),
         perm_tx,
         ack_tx,
-        ws_write.clone(),
         disconnect_tx,
         wiggum_tx,
         graceful_shutdown_tx,
         session_terminated_tx,
         heartbeat.clone(),
         file_upload_tx,
+        file_download_tx,
     );
 
     // Create connection state (per-connection channels and timing)
     let mut conn_state = ConnectionState {
+        session_id,
         perm_rx,
         ack_rx,
         output_tx,
@@ -718,9 +742,12 @@ async fn run_message_loop<A: Agent>(
         wiggum_state: None,
         heartbeat,
         file_upload_rx,
+        file_download_rx,
         working_directory: config.working_directory.clone(),
         active_uploads: std::collections::HashMap::new(),
         agent_type: config.agent_type,
+        git_metadata,
+        git_refresh: GitRefreshTrigger::default(),
     };
 
     // On the very first connection of this session, inject the portal
@@ -749,6 +776,20 @@ async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> 
     rx.await.ok()
 }
 
+async fn ack_portal_input(ws_write: &SharedWsWrite, ack: Option<PortalInputAck>) {
+    let Some(ack) = ack else {
+        return;
+    };
+    let msg = ProxyToServer::InputAck {
+        session_id: ack.session_id,
+        ack_seq: ack.seq,
+    };
+    let mut ws = ws_write.lock().await;
+    if let Err(e) = ws.send(msg).await {
+        error!("Failed to send InputAck: {}", e);
+    }
+}
+
 /// Run the main select loop
 ///
 /// The Claude session internally uses a dedicated drain task to continuously
@@ -756,7 +797,7 @@ async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> 
 /// See: https://github.com/meawoppl/agent-portal/issues/278
 async fn run_main_loop<A: Agent>(
     claude_session: &mut Session<A>,
-    input_rx: &mut mpsc::UnboundedReceiver<String>,
+    input_rx: &mut mpsc::UnboundedReceiver<PortalInput>,
     state: &mut ConnectionState,
 ) -> ConnectionResult {
     use crate::Permission;
@@ -798,24 +839,46 @@ async fn run_main_loop<A: Agent>(
                 return ConnectionResult::ServerShutdown(Duration::from_millis(shutdown.reconnect_delay_ms));
             }
 
-            Some(text) = input_rx.recv() => {
-                debug!("sending to claude process: {}", truncate(&text, 100));
+            Some(input) = input_rx.recv() => {
+                check_and_send_branch_update_if_branch_changed(
+                    &state.ws_write,
+                    state.session_id,
+                    &state.working_directory,
+                    &state.git_metadata,
+                )
+                .await;
 
-                if let Err(e) = claude_session.send_input(serde_json::Value::String(text)).await {
+                debug!("sending to claude process: {}", truncate(&input.text, 100));
+
+                if let Err(e) = claude_session
+                    .send_input(serde_json::Value::String(input.text))
+                    .await
+                {
                     error!("Failed to send to Claude: {}", e);
                     return ConnectionResult::ClaudeExited;
                 }
+                ack_portal_input(&state.ws_write, input.ack).await;
             }
 
             // Wiggum mode activation — set state and send prompt atomically
-            Some(original_prompt) = state.wiggum_rx.recv() => {
-                info!("Wiggum mode activated with prompt: {}", truncate(&original_prompt, 60));
+            Some(wiggum_input) = state.wiggum_rx.recv() => {
+                info!(
+                    "Wiggum mode activated with prompt: {}",
+                    truncate(&wiggum_input.text, 60)
+                );
+                check_and_send_branch_update_if_branch_changed(
+                    &state.ws_write,
+                    state.session_id,
+                    &state.working_directory,
+                    &state.git_metadata,
+                )
+                .await;
                 let wiggum_prompt = format!(
                     "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
-                    original_prompt
+                    wiggum_input.text
                 );
                 state.wiggum_state = Some(WiggumState {
-                    original_prompt,
+                    original_prompt: wiggum_input.text,
                     iteration: 1,
                     loop_start: Instant::now(),
                     loop_durations: Vec::new(),
@@ -824,10 +887,15 @@ async fn run_main_loop<A: Agent>(
                     error!("Failed to send wiggum prompt to Claude: {}", e);
                     return ConnectionResult::ClaudeExited;
                 }
+                ack_portal_input(&state.ws_write, wiggum_input.ack).await;
             }
 
             Some(upload_event) = state.file_upload_rx.recv() => {
                 handle_file_upload(upload_event, state).await;
+            }
+
+            Some(download_event) = state.file_download_rx.recv() => {
+                handle_file_download(download_event, state).await;
             }
 
             Some(perm_response) = state.perm_rx.recv() => {
@@ -871,6 +939,19 @@ async fn run_main_loop<A: Agent>(
                 // Handle raw output directly (Codex JSONL) — bypasses the
                 // ClaudeOutput-typed output forwarder
                 if let Some(SessionEvent::RawOutput(ref value)) = event {
+                    if state.git_refresh.should_check_before_message() {
+                        check_and_send_branch_update(
+                            &state.ws_write,
+                            state.session_id,
+                            &state.working_directory,
+                            &state.git_metadata,
+                        )
+                        .await;
+                    }
+                    if codex_output_has_git_signal(value) {
+                        state.git_refresh.mark_git_signal();
+                    }
+
                     let is_codex_compaction = is_codex_compaction_event(value);
                     let seq = {
                         let mut buf = state.output_buffer.lock().await;
@@ -888,6 +969,21 @@ async fn run_main_loop<A: Agent>(
                     }
                     if is_codex_compaction {
                         inject_portal_reminder(claude_session).await;
+                    }
+                    continue;
+                }
+
+                // Per-turn metrics: forward as a typed `TurnMetricsReport`
+                // envelope. Doesn't go through the output buffer because
+                // it's not part of the message-replay path — a missed
+                // metrics row is acceptable (next turn replaces it on the
+                // dashboard) but we still want low-latency delivery.
+                if let Some(SessionEvent::TurnMetricsReady(metrics)) = event {
+                    let msg = ProxyToServer::TurnMetricsReport(metrics);
+                    let mut ws = state.ws_write.lock().await;
+                    if ws.send(msg).await.is_err() {
+                        error!("Failed to send turn metrics report");
+                        return ConnectionResult::Disconnected(state.connection_start.elapsed());
                     }
                     continue;
                 }
@@ -1041,6 +1137,93 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                 state.active_uploads.remove(&upload_id);
             }
         }
+    }
+}
+
+async fn handle_file_download(download_event: FileDownloadEvent, state: &mut ConnectionState) {
+    let FileDownloadEvent::Request(request) = download_event;
+    let response = read_download_file(&state.working_directory, &request).await;
+    let mut ws = state.ws_write.lock().await;
+    if let Err(e) = ws.send(ProxyToServer::FileDownloadResponse(response)).await {
+        error!("Failed to send file download response: {}", e);
+    }
+}
+
+async fn read_download_file(
+    working_directory: &str,
+    request: &shared::FileDownloadRequestFields,
+) -> shared::FileDownloadResponseFields {
+    use base64::Engine;
+    use std::path::{Component, Path};
+
+    let fail = |error: &str| shared::FileDownloadResponseFields {
+        request_id: request.request_id,
+        success: false,
+        filename: None,
+        media_type: None,
+        size: None,
+        data_base64: None,
+        error: Some(error.to_string()),
+    };
+
+    let requested = Path::new(&request.path);
+    if requested.is_absolute()
+        || requested.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return fail("invalid relative path");
+    }
+
+    let root = match tokio::fs::canonicalize(working_directory).await {
+        Ok(path) => path,
+        Err(_) => return fail("working directory is unavailable"),
+    };
+    let target = root.join(requested);
+    let canonical = match tokio::fs::canonicalize(&target).await {
+        Ok(path) => path,
+        Err(_) => return fail("file not found"),
+    };
+    if !canonical.starts_with(&root) {
+        return fail("path escapes working directory");
+    }
+
+    let metadata = match tokio::fs::metadata(&canonical).await {
+        Ok(metadata) => metadata,
+        Err(_) => return fail("file not found"),
+    };
+    if !metadata.is_file() {
+        return fail("path is not a file");
+    }
+    if metadata.len() > request.max_bytes {
+        return fail("file exceeds size limit");
+    }
+
+    let bytes = match tokio::fs::read(&canonical).await {
+        Ok(bytes) => bytes,
+        Err(_) => return fail("failed to read file"),
+    };
+    if bytes.len() as u64 > request.max_bytes {
+        return fail("file exceeds size limit");
+    }
+
+    let filename = canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("download")
+        .to_string();
+
+    shared::FileDownloadResponseFields {
+        request_id: request.request_id,
+        success: true,
+        filename: Some(filename),
+        media_type: Some("application/octet-stream".to_string()),
+        size: Some(bytes.len() as u64),
+        data_base64: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+        error: None,
     }
 }
 

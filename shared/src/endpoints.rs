@@ -4,7 +4,7 @@ pub use ws_bridge::WsEndpoint;
 
 use crate::{
     AgentInstall, AgentType, DirectoryEntry, PermissionSuggestion, SendMode, SessionCost,
-    SessionStatus,
+    SessionStatus, TurnMetrics,
 };
 
 // =============================================================================
@@ -38,6 +38,8 @@ pub struct RegisterFields {
     pub repo_url: Option<String>,
     #[serde(default)]
     pub scheduled_task_id: Option<Uuid>,
+    #[serde(default)]
+    pub claude_args: Vec<String>,
 }
 
 /// Configuration for a scheduled task, sent from backend to launcher via ScheduleSync.
@@ -89,6 +91,29 @@ pub struct FileUploadChunkFields {
     pub upload_id: String,
     pub chunk_index: u32,
     pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileDownloadRequestFields {
+    pub request_id: Uuid,
+    pub path: String,
+    pub max_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileDownloadResponseFields {
+    pub request_id: Uuid,
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_base64: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // =============================================================================
@@ -181,6 +206,21 @@ pub enum ProxyToServer {
 
     /// Session status update
     SessionStatus { status: SessionStatus },
+
+    /// Per-turn performance metrics report (PR 1 of N).
+    ///
+    /// Emitted once per completed turn by the proxy. The backend persists
+    /// the row in `turn_metrics` and broadcasts it to web clients as
+    /// `ServerToClient::TurnMetrics`. See `shared::TurnMetrics` for field
+    /// semantics.
+    ///
+    /// Boxed because `TurnMetrics` is materially larger than the rest of
+    /// the enum's variants; keeps the discriminant small for the
+    /// hot-path frames that fly orders of magnitude more often.
+    TurnMetricsReport(Box<TurnMetrics>),
+
+    /// Response to a backend-requested local file download.
+    FileDownloadResponse(FileDownloadResponseFields),
 }
 
 /// Messages the backend sends to the proxy.
@@ -238,6 +278,9 @@ pub enum ServerToProxy {
 
     /// Interrupt the current Claude response
     Interrupt,
+
+    /// Request that the proxy read a file relative to the session working directory.
+    FileDownloadRequest(FileDownloadRequestFields),
 }
 
 // =============================================================================
@@ -386,6 +429,17 @@ pub enum ServerToClient {
         session_id: Uuid,
         exit_code: Option<i32>,
     },
+
+    /// Per-turn performance metrics row saved by the backend (PR 1 of N).
+    ///
+    /// Broadcast to all web clients on the matching session immediately
+    /// after the row is inserted, so live dashboards can update without a
+    /// page refresh. Frontend rendering ships in a follow-up PR; current
+    /// frontends silently ignore the frame.
+    ///
+    /// Boxed to keep the rest of the enum compact — see
+    /// `ProxyToServer::TurnMetricsReport` for the same rationale.
+    TurnMetrics(Box<TurnMetrics>),
 }
 
 // =============================================================================
@@ -480,6 +534,11 @@ pub enum LauncherToServer {
         agent_type: AgentType,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scheduled_task_id: Option<Uuid>,
+        /// Existing session this launch would resume, if this is a restart of
+        /// a launcher-persisted session. The backend uses this to suppress
+        /// auto-resume when the session is paused server-side.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_session_id: Option<Uuid>,
     },
 
     /// Inject input into a session on behalf of the scheduler
@@ -526,10 +585,23 @@ pub enum ServerToLauncher {
         agent_type: AgentType,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scheduled_task_id: Option<Uuid>,
+        /// Specific existing session to resume. When omitted, the launcher may
+        /// use its local expected-session mapping for backwards compatibility.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_session_id: Option<Uuid>,
     },
 
-    /// Request to stop a running session
-    StopSession { session_id: Uuid },
+    /// Request to stop a session and remove the launcher's persisted
+    /// expected-session metadata.
+    StopSession {
+        session_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        working_directory: Option<String>,
+    },
+
+    /// Pause a running session without deleting the launcher's persisted
+    /// expected-session metadata.
+    PauseSession { session_id: Uuid },
 
     /// Request directory listing
     ListDirectories { request_id: Uuid, path: String },
@@ -546,9 +618,6 @@ pub enum ServerToLauncher {
 
     /// Sync scheduled task definitions to the launcher
     ScheduleSync { tasks: Vec<ScheduledTaskConfig> },
-
-    /// Push a renewed auth token to the launcher (auto-renewal or manual)
-    TokenRenewed { token: String },
 
     /// Tell the launcher to pull the latest release, install it, and restart
     /// the agent-portal service. Triggered from the dashboard Launchers panel.
@@ -591,6 +660,7 @@ mod tests {
             agent_type: AgentType::Claude,
             repo_url: None,
             scheduled_task_id: None,
+            claude_args: Vec::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"Register""#));
@@ -788,6 +858,7 @@ mod tests {
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
             scheduled_task_id: None,
+            resume_session_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LaunchSession""#));
@@ -830,6 +901,7 @@ mod tests {
             claude_args: vec!["--verbose".into()],
             agent_type: AgentType::Claude,
             scheduled_task_id: None,
+            last_session_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"RequestLaunch""#));

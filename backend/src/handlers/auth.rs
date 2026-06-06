@@ -1,52 +1,34 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
     response::{IntoResponse, Redirect},
     Json,
 };
 use diesel::prelude::*;
-use oauth2::{AuthorizationCode, CsrfToken, Scope, TokenResponse};
+use oauth2::{AuthorizationCode, TokenResponse};
 use serde::Deserialize;
 use shared::api::MeResponse;
 use std::sync::Arc;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
-use tracing::{error, info};
-use uuid::Uuid;
+use tracing::info;
 
 use crate::{
+    errors::AppError,
     models::{NewUser, User},
-    AppState,
+    routes, AppState,
 };
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
-const OAUTH_CSRF_COOKIE: &str = "oauth_csrf";
+mod oauth;
 
 /// Regular web login - redirects to Google OAuth
 pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
     let client = match &app_state.oauth_basic_client {
         Some(c) => c,
-        None => return Redirect::temporary("/api/auth/dev-login").into_response(),
+        None => return Redirect::temporary(routes::AUTH_DEV_LOGIN).into_response(),
     };
 
-    let auth_request = client
-        .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("openid".to_string()))
-        .add_scope(Scope::new("email".to_string()))
-        .add_scope(Scope::new("profile".to_string()));
-
-    let (auth_url, csrf_token) = auth_request.url();
-
-    // Store the CSRF token in a short-lived signed cookie so we can verify it on callback.
-    let mut csrf_cookie = Cookie::new(OAUTH_CSRF_COOKIE, csrf_token.secret().clone());
-    csrf_cookie.set_path("/api/auth/google/callback");
-    csrf_cookie.set_http_only(true);
-    csrf_cookie.set_secure(!app_state.dev_mode);
-    csrf_cookie.set_same_site(SameSite::Lax);
-    csrf_cookie.set_max_age(tower_cookies::cookie::time::Duration::minutes(10));
-    cookies.signed(&app_state.cookie_key).add(csrf_cookie);
-
-    Redirect::temporary(auth_url.as_str()).into_response()
+    oauth::regular_authorization_redirect(client, &cookies, &app_state).into_response()
 }
 
 /// Device flow login - separate endpoint that stores device_user_code in state
@@ -60,56 +42,36 @@ pub async fn device_login(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Query(query): Query<DeviceLoginQuery>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     // In dev mode, auto-login and redirect to device approval page
     if app_state.oauth_basic_client.is_none() {
         use crate::schema::users::dsl::*;
 
-        let mut conn = app_state
-            .db_pool
-            .get()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
         let user = users
             .filter(email.eq("testing@testing.local"))
             .first::<User>(&mut conn)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(dev_user_lookup_error)?;
 
         if user.disabled {
             info!("Banned user {} attempted dev device login", user.email);
-            return Ok(Redirect::temporary("/banned").into_response());
+            return Ok(Redirect::temporary(routes::BANNED).into_response());
         }
 
         info!("Dev mode: auto-logged in for device flow");
 
-        let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
-        cookie.set_path("/");
-        cookie.set_http_only(true);
-        cookie.set_secure(false);
-        cookie.set_same_site(SameSite::Lax);
-        cookies.signed(&app_state.cookie_key).add(cookie);
+        add_session_cookie(&cookies, &app_state, &user);
 
-        return Ok(Redirect::temporary(&format!(
-            "/api/auth/device?user_code={}",
-            query.device_user_code
-        ))
-        .into_response());
+        return Ok(device_approval_redirect(&query.device_user_code).into_response());
     }
 
     let client = app_state.oauth_basic_client.as_ref().unwrap();
 
-    // Use a prefixed state to identify this as a device flow callback
-    let state_value = format!("device:{}", query.device_user_code);
-
-    let auth_request = client
-        .authorize_url(|| CsrfToken::new(state_value))
-        .add_scope(Scope::new("openid".to_string()))
-        .add_scope(Scope::new("email".to_string()))
-        .add_scope(Scope::new("profile".to_string()));
-
-    let (auth_url, _csrf_token) = auth_request.url();
-
-    Ok(Redirect::temporary(auth_url.as_str()).into_response())
+    Ok(
+        oauth::device_authorization_redirect(client, &cookies, &app_state, &query.device_user_code)
+            .into_response(),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,40 +92,18 @@ pub async fn callback(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Query(query): Query<AuthCallbackQuery>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     let client = app_state
         .oauth_basic_client
         .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+        .ok_or(AppError::ServiceUnavailable("OAuth client not configured"))?;
+    let http_client = oauth2::reqwest::ClientBuilder::new()
+        .redirect(oauth2::reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| AppError::Internal(format!("Failed to build OAuth HTTP client: {e}")))?;
 
-    // Verify CSRF state token for regular web logins.
-    // Device flow uses a deterministic "device:{code}" state so we skip it there.
-    let is_device_flow = query
-        .state
-        .as_deref()
-        .is_some_and(|s| s.starts_with("device:"));
-
-    if !is_device_flow {
-        let csrf_cookie = cookies
-            .signed(&app_state.cookie_key)
-            .get(OAUTH_CSRF_COOKIE)
-            .ok_or_else(|| {
-                error!("OAuth callback: missing CSRF cookie");
-                StatusCode::FORBIDDEN
-            })?;
-
-        let state_value = query.state.as_deref().unwrap_or("");
-        if csrf_cookie.value() != state_value {
-            error!("OAuth callback: CSRF token mismatch");
-            return Err(StatusCode::FORBIDDEN);
-        }
-
-        // Consume the CSRF cookie
-        let mut remove_csrf = Cookie::new(OAUTH_CSRF_COOKIE, "");
-        remove_csrf.set_path("/api/auth/google/callback");
-        remove_csrf.set_max_age(tower_cookies::cookie::time::Duration::ZERO);
-        cookies.signed(&app_state.cookie_key).add(remove_csrf);
-    }
+    let device_state =
+        oauth::validate_callback_state(&cookies, &app_state, query.state.as_deref())?;
 
     // Exchange code for token
     let token: oauth2::StandardTokenResponse<
@@ -171,12 +111,9 @@ pub async fn callback(
         oauth2::basic::BasicTokenType,
     > = client
         .exchange_code(AuthorizationCode::new(query.code))
-        .request_async(oauth2::reqwest::async_http_client)
+        .request_async(&http_client)
         .await
-        .map_err(|e| {
-            error!("Failed to exchange code: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::Internal(format!("Failed to exchange OAuth code: {e}")))?;
 
     // Fetch user info from Google
     let client = reqwest::Client::new();
@@ -185,16 +122,10 @@ pub async fn callback(
         .bearer_auth(token.access_token().secret())
         .send()
         .await
-        .map_err(|e| {
-            error!("Failed to fetch user info: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(|e| AppError::Internal(format!("Failed to fetch Google user info: {e}")))?
         .json()
         .await
-        .map_err(|e| {
-            error!("Failed to parse user info: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::Internal(format!("Failed to parse Google user info: {e}")))?;
 
     info!("User authenticated: {}", user_info.email);
 
@@ -204,10 +135,7 @@ pub async fn callback(
     }
 
     // Save or update user in database
-    let mut conn = app_state.db_pool.get().map_err(|e| {
-        error!("Failed to get db connection: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     use crate::schema::users::dsl::*;
 
@@ -215,10 +143,7 @@ pub async fn callback(
         .filter(google_id.eq(&user_info.sub))
         .first::<User>(&mut conn)
         .optional()
-        .map_err(|e| {
-            error!("Failed to look up user by google_id: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| AppError::DbQuery(format!("Failed to look up user by google_id: {e}")))?;
 
     let user = match user {
         Some(user) => user,
@@ -233,96 +158,38 @@ pub async fn callback(
             diesel::insert_into(users)
                 .values(&new_user)
                 .get_result::<User>(&mut conn)
-                .map_err(|e| {
-                    error!("Failed to create user: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?
+                .map_err(|e| AppError::DbQuery(format!("Failed to create user: {e}")))?
         }
     };
 
     // Check if user is banned
     if user.disabled {
         let reason = user.ban_reason.as_deref().unwrap_or("No reason provided");
-        // URL encode the reason for the query parameter
-        let encoded_reason: String = reason
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
-                    c.to_string()
-                } else if c == ' ' {
-                    "+".to_string()
-                } else {
-                    format!("%{:02X}", c as u8)
-                }
-            })
-            .collect();
         info!("Banned user {} attempted login", user.email);
-        return Ok(Redirect::temporary(&format!(
-            "/banned?reason={}",
-            encoded_reason
-        )));
+        return Ok(banned_redirect(reason));
     }
 
-    // Check if this is part of a device flow (state starts with "device:")
-    if let Some(ref state) = query.state {
-        if let Some(device_user_code) = state.strip_prefix("device:") {
-            // Set session cookie first so user is logged in
-            let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
-            cookie.set_path("/");
-            cookie.set_http_only(true);
-            cookie.set_secure(!app_state.dev_mode);
-            cookie.set_same_site(SameSite::Lax);
-            cookies.signed(&app_state.cookie_key).add(cookie);
+    if let Some(device_state) = device_state {
+        add_session_cookie(&cookies, &app_state, &user);
 
-            // Redirect back to device verify page to show approval UI
-            info!(
-                "OAuth complete for device flow, redirecting to approval page for user: {}",
-                user.email
-            );
-            return Ok(Redirect::temporary(&format!(
-                "/api/auth/device?user_code={}",
-                device_user_code
-            )));
-        }
+        // Redirect back to device verify page to show approval UI
+        info!(
+            "OAuth complete for device flow, redirecting to approval page for user: {}",
+            user.email
+        );
+        return Ok(device_approval_redirect(&device_state.user_code));
     }
 
-    // Set session cookie with user ID
-    let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
-    cookie.set_path("/");
-    cookie.set_http_only(true);
-    cookie.set_secure(!app_state.dev_mode); // Don't require HTTPS in dev mode
-    cookie.set_same_site(SameSite::Lax);
-    cookies.signed(&app_state.cookie_key).add(cookie);
+    add_session_cookie(&cookies, &app_state, &user);
 
-    Ok(Redirect::temporary("/dashboard"))
+    Ok(Redirect::temporary(routes::DASHBOARD))
 }
 
 pub async fn me(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<Json<MeResponse>, StatusCode> {
-    // Extract user ID from signed session cookie
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let user_id: Uuid = cookie
-        .value()
-        .parse()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    // Fetch user from database
-    use crate::schema::users::dsl::*;
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let user = users
-        .find(user_id)
-        .first::<User>(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+) -> Result<Json<MeResponse>, AppError> {
+    let user = crate::auth::extract_user(&app_state, &cookies).map_err(auth_user_error)?;
 
     Ok(Json(MeResponse {
         id: user.id,
@@ -334,70 +201,53 @@ pub async fn me(
 }
 
 pub async fn logout(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
-    // Remove session cookie by setting it with empty value and immediate expiry
-    let mut cookie = Cookie::new(SESSION_COOKIE_NAME, "");
-    cookie.set_path("/");
-    cookie.set_http_only(true);
-    cookie.set_secure(true);
-    cookie.set_same_site(SameSite::Lax);
-    cookie.set_max_age(tower_cookies::cookie::time::Duration::ZERO);
-    cookies.signed(&app_state.cookie_key).add(cookie);
+    cookies
+        .signed(&app_state.cookie_key)
+        .add(remove_session_cookie());
 
     info!("User logged out");
-    Redirect::temporary("/")
+    Redirect::temporary(routes::ROOT)
 }
 
 // Development mode handlers (bypass OAuth)
 pub async fn dev_login(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     use crate::schema::users::dsl::*;
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     let user = users
         .filter(email.eq("testing@testing.local"))
         .first::<User>(&mut conn)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(dev_user_lookup_error)?;
 
     // Check if user is banned
     if user.disabled {
         let reason = user.ban_reason.as_deref().unwrap_or("No reason provided");
-        let encoded_reason: String = reason
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
-                    c.to_string()
-                } else if c == ' ' {
-                    "+".to_string()
-                } else {
-                    format!("%{:02X}", c as u8)
-                }
-            })
-            .collect();
         info!("Banned user {} attempted dev login", user.email);
-        return Ok(Redirect::temporary(&format!(
-            "/banned?reason={}",
-            encoded_reason
-        )));
+        return Ok(banned_redirect(reason));
     }
 
     info!("Dev mode: auto-logged in as testing@testing.local");
 
-    // Set session cookie with user ID
-    let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
-    cookie.set_path("/");
-    cookie.set_http_only(true);
-    cookie.set_secure(!app_state.dev_mode); // Don't require HTTPS in dev mode
-    cookie.set_same_site(SameSite::Lax);
-    cookies.signed(&app_state.cookie_key).add(cookie);
+    add_session_cookie(&cookies, &app_state, &user);
 
     // Redirect to dashboard
-    Ok(Redirect::temporary("/dashboard"))
+    Ok(Redirect::temporary(routes::DASHBOARD))
+}
+
+fn dev_user_lookup_error(error: diesel::result::Error) -> AppError {
+    AppError::Internal(format!("Failed to look up dev user: {error}"))
+}
+
+fn auth_user_error(error: AppError) -> AppError {
+    match error {
+        AppError::Forbidden => AppError::Forbidden,
+        AppError::DbPool | AppError::DbQuery(_) => error,
+        _ => AppError::Unauthorized,
+    }
 }
 
 /// Check if an email is allowed based on ALLOWED_EMAIL_DOMAIN and ALLOWED_EMAILS
@@ -428,5 +278,110 @@ fn check_email_allowed(app_state: &AppState, email: &str) -> Result<(), Redirect
 
     // Access denied
     info!("Access denied for email: {} (not in allowlist)", email);
-    Err(Redirect::temporary("/access-denied"))
+    Err(Redirect::temporary(routes::ACCESS_DENIED))
+}
+
+fn add_session_cookie(cookies: &Cookies, app_state: &AppState, user: &User) {
+    cookies
+        .signed(&app_state.cookie_key)
+        .add(session_cookie(user, !app_state.dev_mode));
+}
+
+fn session_cookie(user: &User, secure: bool) -> Cookie<'static> {
+    let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
+    cookie.set_path(routes::ROOT);
+    cookie.set_http_only(true);
+    cookie.set_secure(secure);
+    cookie.set_same_site(SameSite::Lax);
+    cookie
+}
+
+fn remove_session_cookie() -> Cookie<'static> {
+    let mut cookie = Cookie::new(SESSION_COOKIE_NAME, "");
+    cookie.set_path(routes::ROOT);
+    cookie.set_http_only(true);
+    cookie.set_secure(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_max_age(tower_cookies::cookie::time::Duration::ZERO);
+    cookie
+}
+
+fn banned_redirect(reason: &str) -> Redirect {
+    Redirect::temporary(&format!(
+        "{}?reason={}",
+        routes::BANNED,
+        encode_query_value(reason)
+    ))
+}
+
+fn device_approval_redirect(user_code: &str) -> Redirect {
+    Redirect::temporary(&format!(
+        "{}?user_code={}",
+        routes::AUTH_DEVICE,
+        encode_query_value(user_code)
+    ))
+}
+
+fn encode_query_value(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
+                c.to_string()
+            } else if c == ' ' {
+                "+".to_string()
+            } else {
+                format!("%{:02X}", c as u8)
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_user_error_preserves_forbidden_and_database_errors() {
+        assert!(matches!(
+            auth_user_error(AppError::Forbidden),
+            AppError::Forbidden
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::DbPool),
+            AppError::DbPool
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::DbQuery("session lookup failed".to_string())),
+            AppError::DbQuery(message) if message == "session lookup failed"
+        ));
+    }
+
+    #[test]
+    fn auth_user_error_collapses_other_failures_to_unauthorized() {
+        assert!(matches!(
+            auth_user_error(AppError::BadRequest("bad cookie")),
+            AppError::Unauthorized
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::NotFound("user")),
+            AppError::Unauthorized
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::Internal("decode failed".to_string())),
+            AppError::Unauthorized
+        ));
+        assert!(matches!(
+            auth_user_error(AppError::ServiceUnavailable("auth unavailable")),
+            AppError::Unauthorized
+        ));
+    }
+
+    #[test]
+    fn encode_query_value_keeps_unreserved_and_encodes_reserved_chars() {
+        assert_eq!(
+            encode_query_value("ABC-123 reason?/"),
+            "ABC-123+reason%3F%2F"
+        );
+    }
 }

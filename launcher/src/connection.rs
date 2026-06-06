@@ -23,6 +23,16 @@ pub async fn run_launcher_loop(
     mut expected_sessions: Vec<ExpectedSession>,
 ) -> anyhow::Result<()> {
     process_manager.set_launcher_id(launcher_id);
+    if !expected_sessions.is_empty() {
+        info!(
+            "Discarding {} launcher-local expected session(s); backend DB is authoritative",
+            expected_sessions.len()
+        );
+        expected_sessions.clear();
+        if let Err(e) = config::clear_sessions() {
+            warn!("Failed to clear launcher-local expected sessions: {}", e);
+        }
+    }
     let mut backoff = Duration::from_secs(1);
     let mut scheduler = Scheduler::new();
 
@@ -102,33 +112,8 @@ pub async fn run_launcher_loop(
                     Some(true) => {} // fall through to main loop
                 }
 
-                // Reconcile expected sessions: launch any that aren't running
+                // Expected sessions are reconciled by the backend from the DB.
                 let mut restart_counts: HashMap<String, u32> = HashMap::new();
-                if !expected_sessions.is_empty() {
-                    let running_dirs = process_manager.running_directories();
-                    for expected in &expected_sessions {
-                        if running_dirs.contains(&expected.working_directory) {
-                            info!(
-                                "Expected session already running: {}",
-                                expected.working_directory
-                            );
-                            continue;
-                        }
-                        info!("Launching expected session: {}", expected.working_directory);
-                        let request = LauncherToServer::RequestLaunch {
-                            request_id: Uuid::new_v4(),
-                            working_directory: expected.working_directory.clone(),
-                            session_name: expected.session_name.clone(),
-                            claude_args: expected.claude_args.clone(),
-                            agent_type: expected.agent_type,
-                            scheduled_task_id: None,
-                        };
-                        if ws_sender.send(request).await.is_err() {
-                            warn!("Failed to send expected session launch request");
-                            break;
-                        }
-                    }
-                }
 
                 // Channel for delayed restart requests
                 let (restart_tx, mut restart_rx) = mpsc::unbounded_channel::<ExpectedSession>();
@@ -266,6 +251,7 @@ pub async fn run_launcher_loop(
                                 claude_args: session.claude_args,
                                 agent_type: session.agent_type,
                                 scheduled_task_id: None,
+                                last_session_id: session.session_id,
                             };
                             if ws_sender.send(request).await.is_err() {
                                 warn!("Failed to send session restart request");
@@ -287,6 +273,7 @@ pub async fn run_launcher_loop(
                                     claude_args: task_to_fire.config.claude_args.clone(),
                                     agent_type: task_to_fire.config.agent_type,
                                     scheduled_task_id: Some(task_to_fire.config.id),
+                                    last_session_id: task_to_fire.config.last_session_id,
                                 };
                                 if ws_sender.send(msg).await.is_err() {
                                     warn!("Failed to send RequestLaunch for scheduled task");
@@ -445,6 +432,7 @@ async fn handle_message(
             session_name,
             claude_args,
             agent_type,
+            resume_session_id,
             ..
         } => {
             // Check if this is a scheduled launch or a relaunch of an expected session
@@ -456,10 +444,12 @@ async fn handle_message(
             {
                 (resume_id, Some(task_id), true)
             } else {
-                let resume_id = expected_sessions
-                    .iter()
-                    .find(|s| s.working_directory == working_directory)
-                    .and_then(|s| s.session_id);
+                let resume_id = resume_session_id.or_else(|| {
+                    expected_sessions
+                        .iter()
+                        .find(|s| s.working_directory == working_directory)
+                        .and_then(|s| s.session_id)
+                });
                 (resume_id, None, false)
             };
 
@@ -484,28 +474,6 @@ async fn handle_message(
                 Ok(session_id) => {
                     if is_scheduled {
                         scheduler.on_session_spawned(request_id, session_id);
-                    } else if let Some(existing) = expected_sessions
-                        .iter_mut()
-                        .find(|s| s.working_directory == working_directory)
-                    {
-                        // Update stored session_id so future restarts resume this session
-                        existing.session_id = Some(session_id);
-                        if let Err(e) = config::update_session_id(&working_directory, session_id) {
-                            warn!("Failed to update session_id in config: {}", e);
-                        }
-                    } else {
-                        // New session — persist so it survives launcher restarts
-                        let expected = ExpectedSession {
-                            working_directory: working_directory.clone(),
-                            session_name: session_name.clone(),
-                            agent_type,
-                            claude_args: claude_args.clone(),
-                            session_id: Some(session_id),
-                        };
-                        if let Err(e) = config::add_session(&expected) {
-                            warn!("Failed to persist session to config: {}", e);
-                        }
-                        expected_sessions.push(expected);
                     }
                     LauncherToServer::LaunchSessionResult {
                         request_id,
@@ -534,9 +502,14 @@ async fn handle_message(
                 warn!("Failed to send launch session result");
             }
         }
-        ServerToLauncher::StopSession { session_id } => {
+        ServerToLauncher::StopSession {
+            session_id,
+            working_directory,
+        } => {
             info!("Stop request for session {}", session_id);
-            let working_dir = process_manager.session_working_directory(&session_id);
+            let working_dir = process_manager
+                .session_working_directory(&session_id)
+                .or(working_directory);
             process_manager.stop(&session_id).await;
             if let Some(dir) = working_dir {
                 expected_sessions.retain(|s| s.working_directory != dir);
@@ -544,6 +517,10 @@ async fn handle_message(
                     warn!("Failed to remove session from config: {}", e);
                 }
             }
+        }
+        ServerToLauncher::PauseSession { session_id } => {
+            info!("Pause request for session {}", session_id);
+            process_manager.stop(&session_id).await;
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);
@@ -565,14 +542,6 @@ async fn handle_message(
         ServerToLauncher::ScheduleSync { tasks } => {
             info!("Received ScheduleSync with {} task(s)", tasks.len());
             scheduler.update_tasks(tasks);
-        }
-        ServerToLauncher::TokenRenewed { token } => {
-            info!("Received renewed auth token from server");
-            if let Err(e) = config::save_auth_token(&token) {
-                error!("Failed to save renewed token: {}", e);
-            } else {
-                info!("Renewed token saved to config");
-            }
         }
         ServerToLauncher::ServerShutdown { reason, .. } => {
             info!("Server shutting down: {}", reason);
@@ -598,6 +567,9 @@ async fn handle_message(
                     }
                 }
                 if crate::service::is_installed() {
+                    if let Err(e) = crate::service::sync() {
+                        error!("Service unit sync failed: {}", e);
+                    }
                     if let Err(e) = crate::service::restart() {
                         error!("Service restart failed: {}", e);
                     }

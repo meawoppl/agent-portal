@@ -22,23 +22,27 @@ pub enum JwtError {
     Expired,
 }
 
-/// Create a new JWT token for proxy authentication
+/// Create a new JWT token for proxy authentication.
+///
+/// `expires_in_days` is `Some(n)` for tokens with a fixed TTL (user dashboard
+/// tokens) or `None` for non-expiring tokens (launch/launcher tokens), whose
+/// validity is governed by the live DB checks instead. See #932.
 pub fn create_proxy_token(
     secret: &[u8],
     token_id: Uuid,
     user_id: Uuid,
     email: &str,
-    expires_in_days: u32,
+    expires_in_days: Option<u32>,
 ) -> Result<String, JwtError> {
     let now = Utc::now();
-    let exp = now + Duration::days(expires_in_days as i64);
+    let exp = expires_in_days.map(|days| (now + Duration::days(days as i64)).timestamp());
 
     let claims = ProxyTokenClaims {
         jti: token_id,
         sub: user_id,
         email: email.to_string(),
         iat: now.timestamp(),
-        exp: exp.timestamp(),
+        exp,
         token_type: "proxy".to_string(),
     };
 
@@ -54,7 +58,12 @@ pub fn create_proxy_token(
 /// Verify and decode a JWT token
 pub fn verify_proxy_token(secret: &[u8], token: &str) -> Result<ProxyTokenClaims, JwtError> {
     let mut validation = Validation::default();
+    // `exp` is optional: non-expiring tokens omit it. When present it is still
+    // validated; when absent the token simply never expires. Clearing the
+    // required-claims set lets a token without `exp` decode rather than being
+    // rejected for a missing claim.
     validation.validate_exp = true;
+    validation.required_spec_claims.clear();
 
     let token_data =
         decode::<ProxyTokenClaims>(token, &DecodingKey::from_secret(secret), &validation).map_err(
@@ -85,7 +94,7 @@ mod tests {
         let user_id = Uuid::new_v4();
         let email = "test@example.com";
 
-        let token = create_proxy_token(secret, token_id, user_id, email, 30).unwrap();
+        let token = create_proxy_token(secret, token_id, user_id, email, Some(30)).unwrap();
         let claims = verify_proxy_token(secret, &token).unwrap();
 
         assert_eq!(claims.jti, token_id);
@@ -107,7 +116,8 @@ mod tests {
         let token_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
 
-        let token = create_proxy_token(secret1, token_id, user_id, "test@example.com", 30).unwrap();
+        let token =
+            create_proxy_token(secret1, token_id, user_id, "test@example.com", Some(30)).unwrap();
         let result = verify_proxy_token(secret2, &token);
         assert!(result.is_err());
     }
@@ -147,7 +157,7 @@ mod tests {
         let email = "test@example.com";
 
         // Create token with 30 day expiration
-        let token = create_proxy_token(secret, token_id, user_id, email, 30).unwrap();
+        let token = create_proxy_token(secret, token_id, user_id, email, Some(30)).unwrap();
         let claims = verify_proxy_token(secret, &token).unwrap();
 
         // Verify expiration is roughly 30 days from now
@@ -155,8 +165,9 @@ mod tests {
         let expected_exp = now + (30 * 24 * 60 * 60); // 30 days in seconds
 
         // Allow 60 seconds tolerance for test execution time
+        let exp = claims.exp.expect("token created with a TTL must carry exp");
         assert!(
-            (claims.exp - expected_exp).abs() < 60,
+            (exp - expected_exp).abs() < 60,
             "Expiration should be approximately 30 days from now"
         );
 
@@ -165,6 +176,17 @@ mod tests {
             (claims.iat - now).abs() < 60,
             "Issued-at should be close to now"
         );
+    }
+
+    #[test]
+    fn test_non_expiring_token_verifies() {
+        // Launch/launcher tokens are minted with `None` (no expiry). They must
+        // omit `exp` and still verify successfully. See #932.
+        let secret = b"test-secret-key-at-least-32-bytes";
+        let token = create_proxy_token(secret, Uuid::new_v4(), Uuid::new_v4(), "x@y.z", None)
+            .expect("non-expiring token should be creatable");
+        let claims = verify_proxy_token(secret, &token).expect("should verify without exp");
+        assert!(claims.exp.is_none(), "non-expiring token must omit exp");
     }
 
     #[test]
@@ -182,8 +204,9 @@ mod tests {
         let expires_in_days = 30u32; // Device tokens valid for 30 days
 
         // Step 1: Create the JWT token
-        let token = create_proxy_token(secret, token_id, user_id, user_email, expires_in_days)
-            .expect("Token creation should succeed");
+        let token =
+            create_proxy_token(secret, token_id, user_id, user_email, Some(expires_in_days))
+                .expect("Token creation should succeed");
 
         // Step 2: Hash for database storage
         let token_hash = hash_token(&token);
@@ -218,7 +241,8 @@ mod tests {
         // Test wrong secret (also Invalid)
         let token_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
-        let token = create_proxy_token(secret, token_id, user_id, "test@test.com", 30).unwrap();
+        let token =
+            create_proxy_token(secret, token_id, user_id, "test@test.com", Some(30)).unwrap();
         let wrong_secret = b"wrong-secret-key-at-least-32-bytes";
         let result = verify_proxy_token(wrong_secret, &token);
         assert!(matches!(result, Err(JwtError::Invalid(_))));
@@ -237,7 +261,7 @@ mod tests {
 
         for _ in 0..5 {
             let token_id = Uuid::new_v4();
-            let token = create_proxy_token(secret, token_id, user_id, email, 30).unwrap();
+            let token = create_proxy_token(secret, token_id, user_id, email, Some(30)).unwrap();
             let hash = hash_token(&token);
 
             // Verify token

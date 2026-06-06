@@ -36,6 +36,8 @@ diesel::table! {
         seq_num -> Int8,
         content -> Text,
         created_at -> Timestamp,
+        #[max_length = 32]
+        send_mode -> Nullable<Varchar>,
     }
 }
 
@@ -63,19 +65,9 @@ diesel::table! {
         token_hash -> Varchar,
         created_at -> Timestamp,
         last_used_at -> Nullable<Timestamp>,
-        expires_at -> Timestamp,
+        expires_at -> Nullable<Timestamp>,
         revoked -> Bool,
-    }
-}
-
-diesel::table! {
-    session_members (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        user_id -> Uuid,
-        #[max_length = 20]
-        role -> Varchar,
-        created_at -> Timestamp,
+        session_id -> Nullable<Uuid>,
     }
 }
 
@@ -102,6 +94,17 @@ diesel::table! {
         last_run_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    session_members (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 20]
+        role -> Varchar,
+        created_at -> Timestamp,
     }
 }
 
@@ -139,6 +142,38 @@ diesel::table! {
         #[max_length = 512]
         repo_url -> Nullable<Varchar>,
         scheduled_task_id -> Nullable<Uuid>,
+        paused -> Bool,
+        claude_args -> Jsonb,
+    }
+}
+
+diesel::table! {
+    turn_metrics (id) {
+        id -> Uuid,
+        session_id -> Nullable<Uuid>,
+        user_message_id -> Nullable<Uuid>,
+        agent_type -> Text,
+        model -> Nullable<Text>,
+        service_tier -> Nullable<Text>,
+        started_at -> Timestamptz,
+        first_token_at -> Nullable<Timestamptz>,
+        completed_at -> Nullable<Timestamptz>,
+        ttft_ms -> Nullable<Int8>,
+        total_duration_ms -> Nullable<Int8>,
+        generation_duration_ms -> Nullable<Int8>,
+        max_inter_token_gap_ms -> Nullable<Int8>,
+        input_tokens -> Int8,
+        output_tokens -> Int8,
+        cache_creation_tokens -> Int8,
+        cache_read_tokens -> Int8,
+        thinking_tokens -> Int8,
+        stop_reason -> Nullable<Text>,
+        is_error -> Bool,
+        tool_call_count -> Int4,
+        stream_restarts -> Int4,
+        total_cost_usd -> Nullable<Float8>,
+        created_at -> Timestamptz,
+        user_id -> Uuid,
     }
 }
 
@@ -171,6 +206,9 @@ diesel::joinable!(scheduled_tasks -> users (user_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
+diesel::joinable!(turn_metrics -> messages (user_message_id));
+diesel::joinable!(turn_metrics -> sessions (session_id));
+diesel::joinable!(turn_metrics -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     deleted_session_costs,
@@ -181,5 +219,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     scheduled_tasks,
     session_members,
     sessions,
+    turn_metrics,
     users,
 );

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::{
     errors::AppError,
+    handlers::responses::EmptyResponse,
     jwt::{create_proxy_token, hash_token},
     models::{NewProxyAuthToken, ProxyAuthToken, User},
     schema::proxy_auth_tokens,
@@ -56,7 +57,7 @@ pub async fn create_token_handler(
         token_id,
         user_id,
         &user.email,
-        req.expires_in_days,
+        Some(req.expires_in_days),
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -68,7 +69,7 @@ pub async fn create_token_handler(
         user_id,
         name: req.name.clone(),
         token_hash,
-        expires_at: expires_at.naive_utc(),
+        expires_at: Some(expires_at.naive_utc()),
     };
 
     let saved_token: ProxyAuthToken = diesel::insert_into(proxy_auth_tokens::table)
@@ -118,7 +119,7 @@ pub async fn list_tokens_handler(
             name: t.name,
             created_at: t.created_at.and_utc().to_rfc3339(),
             last_used_at: t.last_used_at.map(|dt| dt.and_utc().to_rfc3339()),
-            expires_at: t.expires_at.and_utc().to_rfc3339(),
+            expires_at: t.expires_at.map(|dt| dt.and_utc().to_rfc3339()),
             revoked: t.revoked,
         })
         .collect();
@@ -133,7 +134,7 @@ pub async fn revoke_token_handler(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(token_id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
+) -> Result<EmptyResponse, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
@@ -153,7 +154,7 @@ pub async fn revoke_token_handler(
     }
 
     info!("Revoked proxy token {}", token_id);
-    Ok(StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 /// POST /api/proxy-tokens/:id/renew - Renew a token with a new expiration
@@ -192,7 +193,7 @@ pub async fn renew_token_handler(
         new_token_id,
         user_id,
         &user.email,
-        req.expires_in_days,
+        Some(req.expires_in_days),
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -205,7 +206,7 @@ pub async fn renew_token_handler(
     )
     .set((
         proxy_auth_tokens::token_hash.eq(&token_hash),
-        proxy_auth_tokens::expires_at.eq(expires_at.naive_utc()),
+        proxy_auth_tokens::expires_at.eq(Some(expires_at.naive_utc())),
     ))
     .execute(&mut conn)
     .map_err(|e| AppError::DbQuery(e.to_string()))?;
@@ -262,11 +263,15 @@ pub fn verify_and_get_user(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Check if expired (belt and suspenders - JWT already checked this)
-    let now = chrono::Utc::now().naive_utc();
-    if db_token.expires_at < now {
-        error!("Token has expired");
-        return Err(StatusCode::UNAUTHORIZED);
+    // Check if expired (belt and suspenders - JWT already checked this).
+    // A NULL `expires_at` means the token never expires (launch/launcher
+    // tokens); its lifetime is governed by revocation instead. See #932.
+    if let Some(expires_at) = db_token.expires_at {
+        let now = chrono::Utc::now().naive_utc();
+        if expires_at < now {
+            error!("Token has expired");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
     }
 
     // Check if user is banned
@@ -287,4 +292,71 @@ pub fn verify_and_get_user(
         .execute(conn);
 
     Ok((claims.sub, claims.email))
+}
+
+/// Name stamped on tokens minted per launched session (`mint_launch_token`).
+///
+/// Only tokens with this name are bound to a session and revoked when the
+/// session ends. Durable credentials — user dashboard tokens and device-flow
+/// tokens (which a direct `claude-portal` CLI may reuse across sessions) — must
+/// never be revoked just because one session they registered terminated.
+pub const LAUNCH_TOKEN_NAME: &str = "launcher-spawned";
+
+/// Bind a launch token to the session whose proxy registered with it, and
+/// revoke any older tokens previously bound to the same session.
+///
+/// Launch tokens never expire (see #932); instead their lifetime tracks the
+/// session. The proxy currently attached to a session is whichever one
+/// registered most recently, so binding the active token and revoking the
+/// rest keeps exactly one live token per session. A reconnect re-binds the
+/// *same* token (no-op); a relaunch binds a fresh token and revokes the dead
+/// proxy's old one.
+///
+/// Only `LAUNCH_TOKEN_NAME` tokens are bound — the filter makes binding a no-op
+/// for durable credentials, so they are never revoked on session termination.
+pub fn link_token_to_session(conn: &mut diesel::pg::PgConnection, token: &str, session: Uuid) {
+    let token_hash = hash_token(token);
+
+    let bound = match diesel::update(
+        proxy_auth_tokens::table
+            .filter(proxy_auth_tokens::token_hash.eq(&token_hash))
+            .filter(proxy_auth_tokens::name.eq(LAUNCH_TOKEN_NAME)),
+    )
+    .set(proxy_auth_tokens::session_id.eq(Some(session)))
+    .execute(conn)
+    {
+        Ok(n) => n,
+        Err(e) => {
+            error!("Failed to bind token to session {}: {}", session, e);
+            return;
+        }
+    };
+
+    // Not a launch token (durable credential): leave it and every other token
+    // for this session alone.
+    if bound == 0 {
+        return;
+    }
+
+    // Revoke superseded tokens for this session (any token bound to it that
+    // isn't the one that just registered).
+    let _ = diesel::update(
+        proxy_auth_tokens::table
+            .filter(proxy_auth_tokens::session_id.eq(session))
+            .filter(proxy_auth_tokens::token_hash.ne(&token_hash)),
+    )
+    .set(proxy_auth_tokens::revoked.eq(true))
+    .execute(conn);
+}
+
+/// Revoke every token bound to a session. Called when the session terminates
+/// (proxy exit) or is deleted, so a session's tokens never outlive it.
+pub fn revoke_tokens_for_session(conn: &mut diesel::pg::PgConnection, session: Uuid) {
+    if let Err(e) =
+        diesel::update(proxy_auth_tokens::table.filter(proxy_auth_tokens::session_id.eq(session)))
+            .set(proxy_auth_tokens::revoked.eq(true))
+            .execute(conn)
+    {
+        error!("Failed to revoke tokens for session {}: {}", session, e);
+    }
 }

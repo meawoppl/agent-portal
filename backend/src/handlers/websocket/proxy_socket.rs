@@ -1,6 +1,7 @@
 use super::message_handlers::{handle_claude_output, replay_pending_inputs_from_db};
 use super::permissions::handle_permission_request;
 use super::registration::{register_or_update_session, RegistrationParams};
+use super::turn_metrics::handle_turn_metrics_report;
 use super::{ProxySender, SessionId, SessionManager};
 use crate::AppState;
 use axum::extract::ws::WebSocket;
@@ -126,6 +127,7 @@ fn handle_proxy_message(
             agent_type,
             repo_url,
             scheduled_task_id,
+            claude_args,
         }) => {
             let key = claude_session_id.to_string();
 
@@ -153,6 +155,7 @@ fn handle_proxy_message(
                 agent_type,
                 repo_url: &repo_url,
                 scheduled_task_id,
+                claude_args: &claude_args,
             };
             let result = register_or_update_session(app_state, &params);
 
@@ -266,6 +269,28 @@ fn handle_proxy_message(
             ack_seq,
         } => {
             handle_input_ack(*db_session_id, db_pool, ack_session_id, ack_seq);
+        }
+        ProxyToServer::TurnMetricsReport(metrics) => {
+            handle_turn_metrics_report(
+                session_manager,
+                session_key,
+                *db_session_id,
+                db_pool,
+                *metrics,
+            );
+        }
+        ProxyToServer::FileDownloadResponse(response) => {
+            if let Some((_, tx)) = session_manager
+                .pending_file_downloads
+                .remove(&response.request_id)
+            {
+                let _ = tx.send(response);
+            } else {
+                warn!(
+                    "Received FileDownloadResponse for unknown request {}",
+                    response.request_id
+                );
+            }
         }
         ProxyToServer::SessionStatus { .. } => {}
     }

@@ -9,12 +9,12 @@
 //! `tasks_panel.rs`.
 
 use crate::components::message_renderer::MessageRenderer;
-use crate::components::{group_messages, MessageGroupRenderer};
+use crate::components::{group_is_turn_terminator, group_messages, MessageGroupRenderer};
 use crate::utils;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
-use shared::api::ErrorMessage;
-use shared::{ClientToServer, SendMode, SessionInfo};
+use shared::api::{ErrorMessage, TurnMetricsResponse};
+use shared::{ClientToServer, SendMode, SessionInfo, TurnMetrics};
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -24,7 +24,7 @@ use yew::prelude::*;
 
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, inject_message_metadata, is_claude_awaiting,
-    reconcile_pending_sends,
+    reconcile_pending_sends, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
@@ -47,7 +47,7 @@ pub struct SessionViewProps {
     #[allow(clippy::type_complexity)]
     pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>, Option<String>)>,
     #[prop_or_default]
-    pub on_activity: Callback<(Uuid, String, f64)>,
+    pub on_activity: Callback<(Uuid, ActivityTag, f64)>,
     #[prop_or_default]
     pub current_user_id: Option<String>,
     #[prop_or(0)]
@@ -106,6 +106,14 @@ pub enum SessionViewMsg {
     AutoscrollChanged(bool),
     /// User clicked the "Jump to live" pill: resume tailing and scroll to bottom.
     JumpToLive,
+    /// REST hydration of historical per-turn metrics finished (PR 2 of N).
+    /// Replaces any current buffer with the freshly-fetched list — fired
+    /// once per session load alongside the existing `LoadHistory` path.
+    LoadTurnMetrics(Vec<TurnMetrics>),
+    /// Live per-turn metrics frame arrived over the WS (PR 2 of N). Inserted
+    /// into `turn_metrics` in `started_at`-sorted order, deduping by `id`
+    /// so a backfill-then-broadcast pair (or a duplicate replay) collapses.
+    TurnMetricsReceived(Box<TurnMetrics>),
 }
 
 /// SessionView - Main terminal view for a single session
@@ -149,6 +157,16 @@ pub struct SessionView {
     input_bar_dispatcher: Option<Callback<InputBarInbound>>,
     /// Messages sent but not yet confirmed by the server echo
     pending_sends: Vec<String>,
+    /// Per-turn performance metrics, sorted by `started_at ASC` (PR 2 of N).
+    /// Hydrated by `LoadTurnMetrics` on initial REST load and topped up by
+    /// `TurnMetricsReceived` on every live WS frame. Joined to terminator
+    /// messages in `view()` by ordering: the Nth terminator card pairs
+    /// with the Nth entry. See the PR 2 changelog entry for the rationale
+    /// (the proxy-emit shape doesn't populate `user_message_id` yet, so a
+    /// key-based join would fail on every row). Vec rather than HashMap
+    /// because the join walk is sequential — a HashMap with a positional
+    /// counter would buy nothing.
+    turn_metrics: Vec<TurnMetrics>,
 }
 
 impl Component for SessionView {
@@ -179,6 +197,19 @@ impl Component for SessionView {
                 }
             }
 
+            // Hydrate the per-turn metrics buffer in parallel (PR 2 of N).
+            // Failure here is non-fatal: the chip-strip footer simply stays
+            // empty for past turns; live broadcasts still populate the
+            // buffer for new turns. Same `MeResponse`-style typed deserialize
+            // pattern the existing `MessagesResponse` path uses.
+            let metrics_endpoint =
+                utils::api_url(&format!("/api/sessions/{}/turn-metrics", session_id));
+            if let Ok(response) = Request::get(&metrics_endpoint).send().await {
+                if let Ok(data) = response.json::<TurnMetricsResponse>().await {
+                    link.send_message(SessionViewMsg::LoadTurnMetrics(data.metrics));
+                }
+            }
+
             // Connect WebSocket with event callback
             let ws_link = link.clone();
             let on_event = Callback::from(move |event: WsEvent| {
@@ -205,6 +236,7 @@ impl Component for SessionView {
             tasks_dispatcher: None,
             input_bar_dispatcher: None,
             pending_sends: Vec::new(),
+            turn_metrics: Vec::new(),
         }
     }
 
@@ -379,6 +411,19 @@ impl Component for SessionView {
                 // next paint.
                 true
             }
+            SessionViewMsg::LoadTurnMetrics(mut metrics) => {
+                // REST hydration arrives once per session load. Sort by
+                // started_at ASC defensively even though the backend
+                // already orders that way — the join walk depends on
+                // strict order.
+                metrics.sort_by(|a, b| a.started_at.cmp(&b.started_at));
+                self.turn_metrics = metrics;
+                true
+            }
+            SessionViewMsg::TurnMetricsReceived(metrics) => {
+                self.insert_turn_metrics(*metrics);
+                true
+            }
         }
     }
 
@@ -390,18 +435,37 @@ impl Component for SessionView {
             SessionViewMsg::JumpToLive
         });
 
+        // Per-turn metrics join (PR 2 of N): walk grouped messages in order
+        // and pair the Nth terminator card with `turn_metrics[N]`. The
+        // pairs computed here are passed down to `MessageGroupRenderer` so
+        // the renderer doesn't have to know its own position in the
+        // transcript. See the PR 2 changelog entry for the rationale.
+        let groups = group_messages(
+            &self.messages,
+            ctx.props().session.agent_type,
+            ctx.props().current_user_id.as_deref(),
+        );
+        let mut metrics_iter = self.turn_metrics.iter();
+        let group_metrics: Vec<Option<TurnMetrics>> = groups
+            .iter()
+            .map(|g| {
+                if group_is_turn_terminator(g) {
+                    metrics_iter.next().cloned()
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         html! {
             <div class="session-view">
                 <div class="session-view-scroll-area">
                     <div class="session-view-messages" ref={self.messages_ref.clone()}>
                         {
-                            group_messages(
-                                &self.messages,
-                                ctx.props().session.agent_type,
-                                ctx.props().current_user_id.as_deref(),
-                            ).into_iter().enumerate().map(|(i, group)| {
+                            groups.into_iter().enumerate().map(|(i, group)| {
                                 let key = group.key(i);
-                                html! { <MessageGroupRenderer {key} group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
+                                let metrics = group_metrics.get(i).cloned().flatten();
+                                html! { <MessageGroupRenderer {key} group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} /> }
                             }).collect::<Html>()
                         }
                         { for self.pending_sends.iter().enumerate().map(|(i, json)| {
@@ -487,7 +551,37 @@ impl SessionView {
                     .send_message(SessionViewMsg::BranchChanged(branch, pr_url, repo_url));
                 false
             }
+            WsEvent::TurnMetrics(metrics) => {
+                ctx.link()
+                    .send_message(SessionViewMsg::TurnMetricsReceived(metrics));
+                false
+            }
         }
+    }
+
+    /// Insert a single live `TurnMetrics` into the buffer, preserving
+    /// `started_at ASC` order and deduping by `id`.
+    ///
+    /// Dedup matters because two paths can deliver the same row: the REST
+    /// hydration loads the canonical DB-ordered list, and the broadcast
+    /// pipeline replays whatever the backend pushed. If the user reconnects
+    /// shortly after a turn completed, the broadcast for that row may
+    /// arrive after the REST hydration that already contains it — without
+    /// dedup the chip strip would be paired against the wrong turn from
+    /// that point on. Match on `Some(id)` so two backfilled `None` rows
+    /// (impossible today but a defensive guard) don't collapse together.
+    fn insert_turn_metrics(&mut self, metrics: TurnMetrics) {
+        if let Some(new_id) = metrics.id {
+            if let Some(slot) = self.turn_metrics.iter_mut().find(|m| m.id == Some(new_id)) {
+                *slot = metrics;
+                return;
+            }
+        }
+        let pos = self
+            .turn_metrics
+            .binary_search_by(|m| m.started_at.cmp(&metrics.started_at))
+            .unwrap_or_else(|p| p);
+        self.turn_metrics.insert(pos, metrics);
     }
 
     /// Hydrate the message buffer + task panel from a REST history batch.
@@ -508,7 +602,7 @@ impl SessionView {
         let session_id = ctx.props().session.id;
         self.dispatch_tasks(TasksInbound::ClearForReplay);
         for msg in &messages {
-            let msg_type = classify_output_msg_type(&msg.content);
+            let tag = classify_output_msg_type(&msg.content);
             if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&msg.content) {
                 for ev in derive_task_events(&claude_msg, &msg.created_at, false) {
                     self.dispatch_tasks(TasksInbound::Replay(ev));
@@ -516,7 +610,7 @@ impl SessionView {
             }
             let ts_ms = js_sys::Date::parse(&msg.created_at);
             if ts_ms.is_finite() {
-                ctx.props().on_activity.emit((session_id, msg_type, ts_ms));
+                ctx.props().on_activity.emit((session_id, tag, ts_ms));
             }
         }
         self.messages = messages
@@ -584,7 +678,7 @@ impl SessionView {
     }
 
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: String) -> bool {
-        let msg_type = classify_output_msg_type(&output);
+        let tag = classify_output_msg_type(&output);
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output) {
             if let shared::ClaudeOutput::Result(res) = &claude_msg {
                 let cost = res.total_cost_usd;
@@ -610,11 +704,9 @@ impl SessionView {
             }
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
-        ctx.props().on_activity.emit((
-            ctx.props().session.id,
-            msg_type.clone(),
-            js_sys::Date::now(),
-        ));
+        ctx.props()
+            .on_activity
+            .emit((ctx.props().session.id, tag, js_sys::Date::now()));
         // Inject _created_at for tooltip display. Live path has no server
         // timestamp on the wire — use browser `now()` for the tooltip only;
         // the reconnect-replay watermark is set separately from the
@@ -625,7 +717,7 @@ impl SessionView {
             .unwrap_or_default();
         let output = inject_message_metadata(&output, &now_iso, false, None, None);
 
-        reconcile_pending_sends(&mut self.pending_sends, &msg_type, &output);
+        reconcile_pending_sends(&mut self.pending_sends, tag, &output);
 
         self.messages.push(output);
         if self.messages.len() > MAX_MESSAGES_PER_SESSION {

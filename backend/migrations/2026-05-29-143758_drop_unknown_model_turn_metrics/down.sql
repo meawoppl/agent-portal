@@ -1,0 +1,2 @@
+-- Irreversible data cleanup: unknown-model turn metrics are intentionally
+-- discarded because they cannot be grouped or interpreted correctly.

@@ -40,7 +40,6 @@ chrono-tz = "0.10"
 
 # Cron expression parsing
 croner = "3"
-toml = "1.0.1"
 dirs = "6.0.0"
 portal-auth = { path = "../portal-auth" }
 session-lib = { path = "../session-lib" }
@@ -48,7 +47,9 @@ claude-session-lib = { path = "../claude-session-lib" }
 codex-session-lib = { path = "../codex-session-lib" }
 ws-bridge = { workspace = true, features = ["native-client"] }
 portal-update = { path = "../portal-update" }
-reqwest = { version = "0.12", features = ["json"] }
+# rustls (not native-tls) so the released agent-portal binary doesn't link
+# against system libssl — see proxy/Cargo.toml.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 tokio-util.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 directories = "5.0"

@@ -4,7 +4,6 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use diesel::prelude::*;
@@ -13,10 +12,13 @@ use serde::Serialize;
 use shared::api::{AdminUserEntry, AdminUsersResponse, UpdateUserRequest};
 use std::sync::Arc;
 use tower_cookies::Cookies;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{db::get_user_usage, models::User, schema, AppState};
+use crate::{
+    db::get_user_usage, errors::AppError, handlers::responses::EmptyResponse, models::User, schema,
+    AppState,
+};
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
@@ -25,43 +27,34 @@ use shared::protocol::SESSION_COOKIE_NAME;
 // ============================================================================
 
 /// Extract the current user from cookies and verify they are an admin.
-/// Returns the User if they are an admin, or an appropriate error status code.
-pub async fn require_admin(
-    app_state: &Arc<AppState>,
-    cookies: &Cookies,
-) -> Result<User, StatusCode> {
+/// Returns the User if they are an admin, or an appropriate application error.
+pub async fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Result<User, AppError> {
     // Extract user ID from signed session cookie
     let cookie = cookies
         .signed(&app_state.cookie_key)
         .get(SESSION_COOKIE_NAME)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+        .ok_or(AppError::Unauthorized)?;
 
-    let user_id: Uuid = cookie
-        .value()
-        .parse()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let user_id: Uuid = cookie.value().parse().map_err(|_| AppError::Unauthorized)?;
 
     // Fetch user from database
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     let user = schema::users::table
         .find(user_id)
         .first::<User>(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound("admin user"))?;
 
     // Check if user is disabled
     if user.disabled {
         warn!("Disabled user {} attempted admin access", user.email);
-        return Err(StatusCode::FORBIDDEN);
+        return Err(AppError::Forbidden);
     }
 
     // Check if user is admin
     if !user.is_admin {
         warn!("Non-admin user {} attempted admin access", user.email);
-        return Err(StatusCode::FORBIDDEN);
+        return Err(AppError::Forbidden);
     }
 
     Ok(user)
@@ -147,14 +140,11 @@ struct DeletedCostStats {
 pub async fn get_stats(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<Json<AdminStats>, StatusCode> {
+) -> Result<Json<AdminStats>, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested system stats", admin.email);
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Query 1: All user counts in one pass
     let user_stats: UserStats = diesel::sql_query(
@@ -164,10 +154,7 @@ pub async fn get_stats(
          FROM users",
     )
     .get_result(&mut conn)
-    .map_err(|e| {
-        error!("Failed to query user stats: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| admin_db_query("Failed to query user stats", e))?;
 
     // Query 2: All session counts + cost/token sums in one pass
     let session_stats: SessionStats = diesel::sql_query(
@@ -181,10 +168,7 @@ pub async fn get_stats(
          FROM sessions",
     )
     .get_result(&mut conn)
-    .map_err(|e| {
-        error!("Failed to query session stats: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| admin_db_query("Failed to query session stats", e))?;
 
     // Query 3: Deleted session cost/token sums in one pass
     let deleted_stats: DeletedCostStats = diesel::sql_query(
@@ -197,10 +181,7 @@ pub async fn get_stats(
          FROM deleted_session_costs",
     )
     .get_result(&mut conn)
-    .map_err(|e| {
-        error!("Failed to query deleted session stats: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| admin_db_query("Failed to query deleted session stats", e))?;
 
     // Get connected client counts from session manager (no DB query needed)
     let connected_proxy_clients = app_state.session_manager.sessions.len();
@@ -236,23 +217,17 @@ pub async fn get_stats(
 pub async fn list_users(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<Json<AdminUsersResponse>, StatusCode> {
+) -> Result<Json<AdminUsersResponse>, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested user list", admin.email);
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Get all users
     let users: Vec<User> = schema::users::table
         .order(schema::users::created_at.desc())
         .load(&mut conn)
-        .map_err(|e| {
-            error!("Failed to load users: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| admin_db_query("Failed to load users", e))?;
 
     // Get session counts and usage per user
     let mut user_infos = Vec::with_capacity(users.len());
@@ -292,7 +267,7 @@ pub async fn update_user(
     cookies: Cookies,
     Path(user_id): Path<Uuid>,
     Json(update): Json<UpdateUserRequest>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<EmptyResponse, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
 
     // Prevent admin from demoting themselves
@@ -301,7 +276,9 @@ pub async fn update_user(
             "Admin {} attempted to remove their own admin status",
             admin.email
         );
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(AppError::BadRequest(
+            "admin cannot remove their own admin status",
+        ));
     }
 
     // Prevent admin from disabling themselves
@@ -310,29 +287,25 @@ pub async fn update_user(
             "Admin {} attempted to disable their own account",
             admin.email
         );
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(AppError::BadRequest(
+            "admin cannot disable their own account",
+        ));
     }
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Get target user for logging
     let target_user: User = schema::users::table
         .find(user_id)
         .first(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound("user"))?;
 
     // Build update query
     if let Some(is_admin_val) = update.is_admin {
         diesel::update(schema::users::table.find(user_id))
             .set(schema::users::is_admin.eq(is_admin_val))
             .execute(&mut conn)
-            .map_err(|e| {
-                error!("Failed to update user admin status: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            .map_err(|e| admin_db_query("Failed to update user admin status", e))?;
         info!(
             "Admin {} set is_admin={} for user {}",
             admin.email, is_admin_val, target_user.email
@@ -343,10 +316,7 @@ pub async fn update_user(
         diesel::update(schema::users::table.find(user_id))
             .set(schema::users::disabled.eq(disabled_val))
             .execute(&mut conn)
-            .map_err(|e| {
-                error!("Failed to update user disabled status: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            .map_err(|e| admin_db_query("Failed to update user disabled status", e))?;
         info!(
             "Admin {} set disabled={} for user {}",
             admin.email, disabled_val, target_user.email
@@ -362,10 +332,7 @@ pub async fn update_user(
             )
             .set(proxy_auth_tokens::revoked.eq(true))
             .execute(&mut conn)
-            .map_err(|e| {
-                error!("Failed to revoke user tokens: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            .map_err(|e| admin_db_query("Failed to revoke user tokens", e))?;
             if revoked_count > 0 {
                 info!(
                     "Revoked {} proxy tokens for banned user {}",
@@ -376,8 +343,7 @@ pub async fn update_user(
             // Delete all user's sessions and associated data
             let (deleted_sessions, deleted_messages, deleted_members) =
                 super::helpers::delete_user_sessions(&mut conn, user_id).map_err(|e| {
-                    error!("Failed to delete user sessions: {:?}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                    AppError::Internal(format!("Failed to delete user sessions: {e:?}"))
                 })?;
 
             if deleted_sessions > 0 {
@@ -394,17 +360,14 @@ pub async fn update_user(
         diesel::update(schema::users::table.find(user_id))
             .set(schema::users::ban_reason.eq(reason.as_ref()))
             .execute(&mut conn)
-            .map_err(|e| {
-                error!("Failed to update ban reason: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            .map_err(|e| admin_db_query("Failed to update ban reason", e))?;
         info!(
             "Admin {} set ban_reason for user {}",
             admin.email, target_user.email
         );
     }
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 // ============================================================================
@@ -435,14 +398,11 @@ pub struct AdminSessionsResponse {
 pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
-) -> Result<Json<AdminSessionsResponse>, StatusCode> {
+) -> Result<Json<AdminSessionsResponse>, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested sessions list", admin.email);
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Get all sessions with user email
     let results: Vec<(crate::models::Session, String)> = schema::sessions::table
@@ -450,10 +410,7 @@ pub async fn list_sessions(
         .select((schema::sessions::all_columns, schema::users::email))
         .order(schema::sessions::last_activity.desc())
         .load(&mut conn)
-        .map_err(|e| {
-            error!("Failed to load sessions: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| admin_db_query("Failed to load sessions", e))?;
 
     let session_infos: Vec<AdminSessionInfo> = results
         .into_iter()
@@ -489,19 +446,16 @@ pub async fn delete_session(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<EmptyResponse, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
 
-    let mut conn = app_state
-        .db_pool
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
 
     // Get session info for logging and cost tracking
     let session: crate::models::Session = schema::sessions::table
         .find(session_id)
         .first(&mut conn)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound("session"))?;
 
     // Remove from session manager (disconnect if connected)
     let session_key = session_id.to_string();
@@ -511,12 +465,16 @@ pub async fn delete_session(
 
     // Delete session and all associated data, recording costs
     super::helpers::delete_session_with_data(&mut conn, &session, true)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| AppError::Internal(format!("Failed to delete session data: {e:?}")))?;
 
     info!(
         "Admin {} deleted session {} ({}) - cost ${:.4} recorded",
         admin.email, session_id, session.session_name, session.total_cost_usd
     );
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(EmptyResponse::NO_CONTENT)
+}
+
+fn admin_db_query(context: &str, error: diesel::result::Error) -> AppError {
+    AppError::DbQuery(format!("{context}: {error}"))
 }

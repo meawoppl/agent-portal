@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use chrono::Utc;
 use claude_codes::io::{ControlResponse, PermissionResult};
 use claude_codes::{ClaudeInput, ClaudeOutput};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::agent::Agent;
@@ -233,6 +233,9 @@ impl<A: Agent> Session<A> {
                         permission_suggestions: vec![],
                     });
                 }
+                Some(IoEvent::TurnMetricsReady(metrics)) => {
+                    return Some(SessionEvent::TurnMetricsReady(metrics));
+                }
                 Some(IoEvent::Exited { code }) => {
                     self.state = SessionState::Exited { code };
                     self.command_tx = None;
@@ -267,9 +270,21 @@ impl<A: Agent> Session<A> {
                 other => other.to_string(),
             };
             let input = ClaudeInput::user_message(text, self.id);
+            let (delivered_tx, delivered_rx) = oneshot::channel();
             command_tx
-                .send(IoCommand::Input(input))
+                .send(IoCommand::Input {
+                    input,
+                    delivered: Some(delivered_tx),
+                })
                 .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
+            delivered_rx
+                .await
+                .map_err(|_| {
+                    SessionError::CommunicationError(
+                        "I/O task closed before accepting input".to_string(),
+                    )
+                })?
+                .map_err(SessionError::Agent)?;
         }
 
         Ok(())
