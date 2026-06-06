@@ -16,10 +16,11 @@ use std::rc::Rc;
 use gloo::timers::callback::Interval;
 use yew::prelude::*;
 
-/// Animation cadence. ~30 frames at 40ms is a ~1.2s climb per leg — slow enough
-/// to read as a deliberate count-up, and since each new target resumes from the
-/// current value the overall motion stays smooth as estimates stream in.
-const FRAMES: i64 = 30;
+/// Animation cadence. ~60 frames at 40ms is a ~2.4s climb per leg — a deliberate,
+/// slow count-up (keeps the ~25fps smoothness but takes twice as long as the
+/// original ~1.2s). Since each new target resumes from the current value, the
+/// overall motion stays smooth as estimates stream in.
+const FRAMES: i64 = 60;
 const FRAME_MS: u32 = 40;
 
 #[derive(Properties, PartialEq)]
