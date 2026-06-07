@@ -46,6 +46,10 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
         });
 
     let answers = parsed.answers.as_ref();
+    if !has_askuserquestion_answers(&parsed) {
+        return html! {};
+    }
+
     let questions = &parsed.questions;
 
     html! {
@@ -65,6 +69,7 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
 
                         let answer = answers
                             .and_then(|a| a.get(question))
+                            .or_else(|| answers.and_then(|a| a.get(header)))
                             .map(|s| s.as_str());
 
                         html! {
@@ -142,6 +147,23 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
             </div>
         </div>
     }
+}
+
+pub fn render_askuserquestion_result(input: &AskUserQuestionInput) -> Html {
+    if !has_askuserquestion_answers(input) {
+        return html! {};
+    }
+
+    let value = serde_json::to_value(input).unwrap_or(Value::Null);
+    render_askuserquestion_tool(&value)
+}
+
+pub fn has_askuserquestion_answers(input: &AskUserQuestionInput) -> bool {
+    input
+        .answers
+        .as_ref()
+        .map(|answers| !answers.is_empty())
+        .unwrap_or(false)
 }
 
 pub fn render_exitplanmode_tool(input: &Value) -> Html {

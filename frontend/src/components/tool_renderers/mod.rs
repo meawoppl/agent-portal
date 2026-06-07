@@ -11,6 +11,7 @@ use yew::prelude::*;
 
 use self::bash::render_bash_tool;
 use self::edit::{render_edit_tool, render_write_tool};
+pub(crate) use self::interactive::{has_askuserquestion_answers, render_askuserquestion_result};
 use self::interactive::{
     render_askuserquestion_tool, render_exitplanmode_tool, render_todowrite_tool,
 };
