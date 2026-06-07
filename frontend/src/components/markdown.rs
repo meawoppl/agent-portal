@@ -259,6 +259,9 @@ fn render_event(events: &[Event], session_id: Option<uuid::Uuid>) -> (Html, usiz
         Event::HardBreak => (html! { <br /> }, 1),
         Event::Rule => (html! { <hr class="md-rule" /> }, 1),
         Event::End(_) => (html! {}, 1),
+        Event::Html(html_text) | Event::InlineHtml(html_text) => {
+            (html! { <>{ html_text.to_string() }</> }, 1)
+        }
         _ => (html! {}, 1),
     }
 }
@@ -1003,7 +1006,7 @@ mod tests {
     /// fenced ```latex``` code block (no `$` inside), then real `$$…$$`
     /// display math, then inline `$…$` math in a list. We verify the math
     /// placeholders survive the pulldown-cmark round-trip and end up as
-    /// plain `Event::Text` (not `Event::Html`, which we drop). My initial
+    /// plain `Event::Text` (not `Event::Html`). My initial
     /// hypothesis for #684 was that the `<thinking>` block was swallowing
     /// the math into raw HTML events — this test disproves that.
     #[test]
@@ -1038,7 +1041,7 @@ Where:\n\
 
         // The math content (`\rho`) must land in plain Text events so KaTeX
         // auto-render can find the delimiters. If it ends up in `Event::Html`
-        // or `Event::InlineHtml`, our catch-all renderer drops it silently.
+        // or `Event::InlineHtml`, KaTeX cannot find the math reliably.
         let math_in_text = restored.iter().any(|e| match e {
             Event::Text(t) => t.contains("\\rho"),
             _ => false,
@@ -1049,5 +1052,24 @@ Where:\n\
         });
         assert!(math_in_text, "math should reach Event::Text");
         assert!(!math_in_html, "math should not leak into Event::Html");
+    }
+
+    #[test]
+    fn angle_bracket_text_is_html_not_plain_text() {
+        let input = "<Download sensor-report.csv>";
+
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        let parser = Parser::new_ext(input, options);
+        let events: Vec<Event> = parser.collect();
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Html(t) | Event::InlineHtml(t) if t.as_ref() == input
+            )),
+            "pulldown-cmark classifies angle-bracket labels as raw HTML: {events:?}"
+        );
     }
 }

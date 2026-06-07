@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.10
+
+- **Render literal angle-bracket text in markdown instead of dropping it as raw HTML.** `pulldown-cmark` classifies text like `<Download sensor-report.csv>` as inline HTML; the frontend markdown renderer now emits those events as escaped text, preserving portal messages without allowing raw HTML injection.
+
 ## 2.8.9
 
 - **Codex session resume re-attaches to the prior app-server thread.** Codex launches now persist the app-server `thread_id` and pass it back through `thread/resume` when a session is resumed. Standalone proxy sessions store the id in their directory-session config, launcher sessions store it in a sidecar `codex_threads.json`, and resume falls back to a fresh `thread_start` if the prior thread cannot be reopened.
