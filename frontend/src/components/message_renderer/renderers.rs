@@ -9,6 +9,9 @@ use super::types::{OptimisticUserMessage, UserMessageMeta};
 use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown;
+use crate::components::tool_renderers::{
+    has_askuserquestion_answers, render_askuserquestion_result,
+};
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
@@ -110,6 +113,12 @@ pub fn render_optimistic_user_message_content(msg: &OptimisticUserMessage) -> Ht
 }
 
 pub fn render_user_message_content(msg: &shared::UserMessage) -> Html {
+    if let Some(Ok(input)) = msg.tool_use_result_as::<shared::AskUserQuestionInput>() {
+        if has_askuserquestion_answers(&input) {
+            return render_askuserquestion_result(&input);
+        }
+    }
+
     let blocks = msg.message.content.clone();
     let has_tool_results = blocks
         .iter()
