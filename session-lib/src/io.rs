@@ -59,6 +59,13 @@ pub enum IoEvent {
     /// ship to the backend as `ProxyToServer::TurnMetricsReport`. Emitted
     /// once per finalize by the agent-specific I/O task.
     TurnMetricsReady(Box<TurnMetrics>),
+    /// The codex io-task learned (or re-confirmed) the app-server thread
+    /// id for this session — emitted exactly once per spawn after
+    /// `thread_start` / `thread/resume` returns. The proxy persists the
+    /// value into `ProxyConfig.directory_sessions[wd].codex_thread_id` so
+    /// the next launch of the same session can pass it back through
+    /// `SessionConfig.codex_thread_id` to drive `thread/resume`.
+    CodexThreadId(String),
     Error(SessionError),
     Exited {
         code: i32,
@@ -100,6 +107,10 @@ pub enum SessionEvent {
     /// to the backend as `ProxyToServer::TurnMetricsReport`. See PR-1
     /// design doc / `shared::TurnMetrics` for field semantics.
     TurnMetricsReady(Box<TurnMetrics>),
+
+    /// Codex app-server thread id, surfaced by the codex io-task so the
+    /// proxy can persist it. See `IoEvent::CodexThreadId`.
+    CodexThreadId(String),
 }
 
 /// Response to a permission request.

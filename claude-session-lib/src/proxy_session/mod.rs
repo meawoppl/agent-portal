@@ -41,6 +41,14 @@ type SharedWsWrite = Arc<tokio::sync::Mutex<ws_bridge::WsSender<ProxyToServer>>>
 /// Type alias for the WebSocket read half
 type WsRead = ws_bridge::WsReceiver<ServerToProxy>;
 
+/// Sink for codex thread-id persistence. The proxy crate owns the
+/// `ProxyConfig` JSON file; this callback lets the session loop hand the
+/// learned thread id back without claude-session-lib having to depend on
+/// proxy internals. Called at most once per spawn, from the
+/// `SessionEvent::CodexThreadId` arm. `None` is a no-op (the codex
+/// io-task still emits the event, the loop just doesn't persist it).
+pub type CodexThreadIdSink = Arc<dyn Fn(String) + Send + Sync>;
+
 /// Configuration for a proxy session
 #[derive(Clone)]
 pub struct ProxySessionConfig {
@@ -61,6 +69,9 @@ pub struct ProxySessionConfig {
     pub agent_type: shared::AgentType,
     /// If this session was started by a scheduled task
     pub scheduled_task_id: Option<Uuid>,
+    /// Persist-back closure for the codex app-server thread id; see
+    /// [`CodexThreadIdSink`] doc.
+    pub codex_thread_id_sink: Option<CodexThreadIdSink>,
 }
 
 /// Exponential backoff helper
@@ -300,6 +311,10 @@ struct ConnectionState {
     git_metadata: GitMetadataState,
     /// Refresh cadence for Codex raw-output messages.
     git_refresh: GitRefreshTrigger,
+    /// Persist-back closure for the codex app-server thread id; see
+    /// [`CodexThreadIdSink`] doc. Cloned out of `ProxySessionConfig` so
+    /// the per-connection state doesn't need to carry a config reference.
+    codex_thread_id_sink: Option<CodexThreadIdSink>,
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
@@ -748,6 +763,7 @@ async fn run_message_loop<A: Agent>(
         agent_type: config.agent_type,
         git_metadata,
         git_refresh: GitRefreshTrigger::default(),
+        codex_thread_id_sink: config.codex_thread_id_sink.clone(),
     };
 
     // On the very first connection of this session, inject the portal
@@ -984,6 +1000,18 @@ async fn run_main_loop<A: Agent>(
                     if ws.send(msg).await.is_err() {
                         error!("Failed to send turn metrics report");
                         return ConnectionResult::Disconnected(state.connection_start.elapsed());
+                    }
+                    continue;
+                }
+
+                // Codex app-server thread id: hand it to the persistence
+                // sink (the proxy's ProxyConfig writer) so the next resume
+                // of this session can call `thread/resume` with it.
+                // Emitted once per spawn by codex-session-lib. No-op for
+                // claude sessions (claude doesn't emit it).
+                if let Some(SessionEvent::CodexThreadId(thread_id)) = event {
+                    if let Some(sink) = state.codex_thread_id_sink.as_ref() {
+                        sink(thread_id);
                     }
                     continue;
                 }

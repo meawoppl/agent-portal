@@ -30,3 +30,9 @@ frontend/dist/
 *.db
 *.db-shm
 *.db-wal
+
+# Per-session worktrees created by the agent harness
+.claude/worktrees/
+
+# Stray files
+First Article*.zip

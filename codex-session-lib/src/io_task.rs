@@ -9,8 +9,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use codex_codes::{
-    AppServerBuilder, AsyncClient as CodexAsyncClient, ThreadStartParams, TurnInterruptParams,
-    TurnStartParams, UserInput,
+    methods, AppServerBuilder, AsyncClient as CodexAsyncClient, ThreadResumeParams,
+    ThreadResumeResponse, ThreadStartParams, TurnInterruptParams, TurnStartParams, UserInput,
 };
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
@@ -97,33 +97,102 @@ pub(crate) async fn codex_io_task(
         }
     };
 
-    // Start a thread (conversation session). codex-codes 0.129.3 removed
-    // the `Default` impl on `ThreadStartParams` (15 Option<...> fields,
-    // all skip_serializing_if Some); the SDK's idiom for an "empty"
-    // params is round-tripping through `{}` JSON. See codex-codes
-    // 0.129.3 src/lib.rs:18-30 example.
-    let thread_params = empty_thread_start_params();
-    let (thread_id, thread_model) = match client.thread_start(&thread_params).await {
-        Ok(resp) => {
-            let model = non_empty_string(resp.model).or_else(|| configured_model_fallback.clone());
-            if model.is_none() {
-                tracing::warn!(
-                    "Codex thread {} started without a detectable model; turn metrics will warn until model metadata is available",
-                    resp.thread.id
-                );
+    // Re-attach to a prior codex thread when this is a resume launch
+    // (`config.resume == true`) and the proxy persisted a thread id from
+    // the previous incarnation. codex-codes 0.129.3 doesn't expose a
+    // typed `thread_resume` helper on AsyncClient yet — only
+    // `thread_start` / `turn_*` / `thread_archive` — so we drive the
+    // JSON-RPC call directly via the low-level `request<P, R>` primitive
+    // using `methods::THREAD_RESUME`. Upstream issue filed against
+    // meawoppl/rust-code-agent-sdks for the missing helper.
+    let mut resumed_thread: Option<(String, Option<String>)> = None;
+    if config.resume {
+        if let Some(prior) = config.codex_thread_id.as_ref() {
+            let resume_params = ThreadResumeParams {
+                thread_id: prior.clone(),
+                approval_policy: None,
+                approvals_reviewer: None,
+                base_instructions: None,
+                config: None,
+                // Leave cwd as None on resume — the app-server stored the
+                // thread's working directory at first launch and we don't
+                // want to override it from the launcher's POV.
+                cwd: None,
+                developer_instructions: None,
+                model: None,
+                model_provider: None,
+                personality: None,
+                sandbox: None,
+                service_tier: None,
+            };
+            match client
+                .request::<_, ThreadResumeResponse>(methods::THREAD_RESUME, &resume_params)
+                .await
+            {
+                Ok(resp) => {
+                    tracing::info!("Codex thread resumed: {}", prior);
+                    let model =
+                        non_empty_string(resp.model).or_else(|| configured_model_fallback.clone());
+                    resumed_thread = Some((prior.clone(), model));
+                }
+                Err(e) => {
+                    // Fall through to `thread_start`. Common failure
+                    // modes: the codex binary upgraded across a thread
+                    // storage breaking change, or the thread was archived
+                    // out of band. Don't lose the session — just strip
+                    // server-side context. The transcript is rehydrated
+                    // by the backend's message-replay path independently.
+                    tracing::warn!(
+                        "Codex thread/resume of {} failed: {} — falling back to fresh thread_start",
+                        prior,
+                        e
+                    );
+                }
             }
-            (resp.thread.id.clone(), model)
+        } else {
+            tracing::info!(
+                "Codex resume requested but no prior thread_id is known — starting fresh thread"
+            );
         }
-        Err(e) => {
-            let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(format!(
-                "Failed to start Codex thread: {}",
-                e
-            ))));
-            return;
+    }
+
+    let (thread_id, thread_model) = match resumed_thread {
+        Some(thread) => thread,
+        None => {
+            // codex-codes 0.129.3 removed the `Default` impl on
+            // `ThreadStartParams` (15 Option<...> fields, all
+            // skip_serializing_if Some); the SDK's idiom for an "empty"
+            // params is round-tripping through `{}` JSON. See codex-codes
+            // 0.129.3 src/lib.rs:18-30 example.
+            let thread_params = empty_thread_start_params();
+            match client.thread_start(&thread_params).await {
+                Ok(resp) => {
+                    let model =
+                        non_empty_string(resp.model).or_else(|| configured_model_fallback.clone());
+                    if model.is_none() {
+                        tracing::warn!(
+                            "Codex thread {} started without a detectable model; turn metrics will warn until model metadata is available",
+                            resp.thread.id
+                        );
+                    }
+                    (resp.thread.id.clone(), model)
+                }
+                Err(e) => {
+                    let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(
+                        format!("Failed to start Codex thread: {}", e),
+                    )));
+                    return;
+                }
+            }
         }
     };
 
-    tracing::info!("Codex thread started: {}", thread_id);
+    tracing::info!("Codex thread ready: {}", thread_id);
+
+    // Surface the thread id to the proxy so it can persist it for the
+    // next resume of this session. Emitted once per spawn after either
+    // thread_start or thread/resume returns.
+    let _ = event_tx.send(IoEvent::CodexThreadId(thread_id.clone()));
 
     let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&ThreadStartedEvent::new(
         &thread_id,

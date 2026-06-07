@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.9
+
+- **Codex session resume re-attaches to the prior app-server thread.** Codex launches now persist the app-server `thread_id` and pass it back through `thread/resume` when a session is resumed. Standalone proxy sessions store the id in their directory-session config, launcher sessions store it in a sidecar `codex_threads.json`, and resume falls back to a fresh `thread_start` if the prior thread cannot be reopened.
+
 ## 2.8.7
 
 - **Strip a trailing `` (deleted)`` from `current_exe()` before baking it into the service unit.** On Linux `current_exe()` reads `/proc/self/exe`; per `proc(5)`, once the running binary's inode is unlinked (which `agent-portal update` does by replacing it in place) the kernel appends a literal `` (deleted)``. `service::sync()` then wrote `ExecStart=.../agent-portal (deleted) --no-update`, so the next restart handed `(deleted)` to clap as a subcommand (`unrecognized subcommand`) — a fast restart loop and an offline launcher. `launcher/src/service.rs` now routes its four `current_exe()` consumers through one helper that strips the suffix.
