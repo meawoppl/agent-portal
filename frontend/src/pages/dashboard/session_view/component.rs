@@ -465,11 +465,11 @@ impl Component for SessionView {
                             groups.into_iter().enumerate().map(|(i, group)| {
                                 let key = group.key(i);
                                 let metrics = group_metrics.get(i).cloned().flatten();
-                                html! { <MessageGroupRenderer {key} group={group} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} /> }
+                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} /> }
                             }).collect::<Html>()
                         }
                         { for self.pending_sends.iter().enumerate().map(|(i, json)| {
-                            html! { <MessageRenderer key={format!("p{}", i)} json={json.clone()} session_id={Some(ctx.props().session.id)} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
+                            html! { <MessageRenderer key={format!("p{}", i)} json={json.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
                         })}
                     </div>
                     if !is_tailing {

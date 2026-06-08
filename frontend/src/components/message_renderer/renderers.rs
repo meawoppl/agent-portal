@@ -8,11 +8,12 @@ mod tools;
 use super::types::{OptimisticUserMessage, UserMessageMeta};
 use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
-use crate::components::markdown::render_markdown;
+use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
     has_askuserquestion_answers, render_askuserquestion_result,
 };
 use serde::Deserialize;
+use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
@@ -35,6 +36,7 @@ pub fn render_optimistic_user_message(
     msg: &OptimisticUserMessage,
     current_user_id: Option<&str>,
     timestamp: Option<&str>,
+    session_id: Uuid,
 ) -> Html {
     let label = match &msg.sender {
         Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
@@ -51,7 +53,7 @@ pub fn render_optimistic_user_message(
                 }
                 <CopyButton text={msg.content.clone()} title="Copy message" />
             </div>
-            <div class="message-body">{ render_optimistic_user_message_content(msg) }</div>
+            <div class="message-body">{ render_optimistic_user_message_content(msg, session_id) }</div>
         </div>
     }
 }
@@ -61,6 +63,7 @@ pub fn render_user_message(
     meta: &UserMessageMeta,
     current_user_id: Option<&str>,
     timestamp: Option<&str>,
+    session_id: Uuid,
 ) -> Html {
     let label = match &meta.sender {
         Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
@@ -85,7 +88,7 @@ pub fn render_user_message(
     if has_tool_results {
         html! {
             <div class="claude-message user-message tool-result-message">
-                <div class="message-body">{ render_user_message_content(msg) }</div>
+                <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
             </div>
         }
     } else if !text_content.is_empty() {
@@ -98,7 +101,7 @@ pub fn render_user_message(
                     }
                     <CopyButton text={text_content.clone()} title="Copy message" />
                 </div>
-                <div class="message-body">{ render_user_message_content(msg) }</div>
+                <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
             </div>
         }
     } else {
@@ -106,13 +109,16 @@ pub fn render_user_message(
     }
 }
 
-pub fn render_optimistic_user_message_content(msg: &OptimisticUserMessage) -> Html {
+pub fn render_optimistic_user_message_content(
+    msg: &OptimisticUserMessage,
+    session_id: Uuid,
+) -> Html {
     html! {
-        <div class="user-text">{ render_markdown(&preserve_user_newlines(&msg.content)) }</div>
+        <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&msg.content), session_id) }</div>
     }
 }
 
-pub fn render_user_message_content(msg: &shared::UserMessage) -> Html {
+pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) -> Html {
     if let Some(Ok(input)) = msg.tool_use_result_as::<shared::AskUserQuestionInput>() {
         if has_askuserquestion_answers(&input) {
             return render_askuserquestion_result(&input);
@@ -125,7 +131,7 @@ pub fn render_user_message_content(msg: &shared::UserMessage) -> Html {
         .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
 
     if has_tool_results {
-        render_content_blocks(&blocks, None)
+        render_content_blocks(&blocks, session_id)
     } else {
         let text_content = blocks
             .iter()
@@ -140,7 +146,7 @@ pub fn render_user_message_content(msg: &shared::UserMessage) -> Html {
             html! {}
         } else {
             html! {
-                <div class="user-text">{ render_markdown(&preserve_user_newlines(&text_content)) }</div>
+                <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
             }
         }
     }

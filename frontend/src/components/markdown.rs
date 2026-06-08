@@ -6,6 +6,7 @@
 
 use gloo::timers::callback::Timeout;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
@@ -14,12 +15,14 @@ use yew::prelude::*;
 /// Render markdown text as HTML, with a post-render hook that triggers KaTeX
 /// to render any LaTeX math expressions (`$...$`, `$$...$$`).
 pub fn render_markdown(text: &str) -> Html {
-    render_markdown_for_session(text, None)
+    html! {
+        <MarkdownView text={text.to_string()} />
+    }
 }
 
-pub fn render_markdown_for_session(text: &str, session_id: Option<uuid::Uuid>) -> Html {
+pub fn render_markdown_for_session(text: &str, session_id: Uuid) -> Html {
     html! {
-        <MarkdownView text={text.to_string()} {session_id} />
+        <MarkdownView text={text.to_string()} session_id={Some(session_id)} />
     }
 }
 
@@ -27,7 +30,7 @@ pub fn render_markdown_for_session(text: &str, session_id: Option<uuid::Uuid>) -
 struct MarkdownViewProps {
     text: String,
     #[prop_or_default]
-    session_id: Option<uuid::Uuid>,
+    session_id: Option<Uuid>,
 }
 
 #[function_component(MarkdownView)]
@@ -228,7 +231,7 @@ fn restore_math(text: &str, math_blocks: &[String]) -> String {
 }
 
 /// Convert pulldown-cmark events to Yew Html
-fn render_events(events: &[Event], session_id: Option<uuid::Uuid>) -> Html {
+fn render_events(events: &[Event], session_id: Option<Uuid>) -> Html {
     let mut html_parts: Vec<Html> = Vec::new();
     let mut i = 0;
 
@@ -243,7 +246,7 @@ fn render_events(events: &[Event], session_id: Option<uuid::Uuid>) -> Html {
 
 /// Render a single event or a group of related events
 /// Returns (Html, number of events consumed)
-fn render_event(events: &[Event], session_id: Option<uuid::Uuid>) -> (Html, usize) {
+fn render_event(events: &[Event], session_id: Option<Uuid>) -> (Html, usize) {
     if events.is_empty() {
         return (html! {}, 0);
     }
@@ -267,7 +270,7 @@ fn render_event(events: &[Event], session_id: Option<uuid::Uuid>) -> (Html, usiz
 }
 
 /// Render a tag and its contents
-fn render_tag(tag: &Tag, events: &[Event], session_id: Option<uuid::Uuid>) -> (Html, usize) {
+fn render_tag(tag: &Tag, events: &[Event], session_id: Option<Uuid>) -> (Html, usize) {
     let end_tag = get_end_tag(tag);
     let (inner_events, total_consumed) = collect_until_end(events, &end_tag);
     let inner_html = render_events(&inner_events, session_id);
@@ -288,32 +291,36 @@ fn render_tag(tag: &Tag, events: &[Event], session_id: Option<uuid::Uuid>) -> (H
             dest_url, title, ..
         } => {
             let href = dest_url.to_string();
-            if let Some(download_href) = portal_file_download_href(&href, session_id) {
-                let title_attr = if title.is_empty() {
-                    Some("Download file from session workspace".to_string())
-                } else {
-                    Some(title.to_string())
-                };
-                html! {
-                    <a href={download_href} title={title_attr} class="md-link portal-file-link">
-                        { inner_html }
-                    </a>
+            match classify_link_destination(&href, session_id) {
+                LinkDestination::PortalDownload(download_href) => {
+                    let title_attr = if title.is_empty() {
+                        Some("Download file from session workspace".to_string())
+                    } else {
+                        Some(title.to_string())
+                    };
+                    html! {
+                        <a href={download_href} title={title_attr} class="md-link portal-file-link">
+                            { inner_html }
+                        </a>
+                    }
                 }
-            } else if !is_valid_url(&href) && !href.starts_with('#') && !href.starts_with('/') {
-                // Guard against false autolinks from angle-bracket syntax like
-                // <crate::path::Type> which pulldown-cmark interprets as URLs.
-                // Not a real URL — render as plain text with angle brackets
-                html! { <><>{"<"}</>{ inner_html }<>{">"}</></> }
-            } else {
-                let title_attr = if title.is_empty() {
-                    None
-                } else {
-                    Some(title.to_string())
-                };
-                html! {
-                    <a href={href} title={title_attr} target="_blank" rel="noopener noreferrer" class="md-link">
-                        { inner_html }
-                    </a>
+                LinkDestination::LiteralAngleText => {
+                    // Guard against false autolinks from angle-bracket syntax like
+                    // <crate::path::Type> which pulldown-cmark interprets as URLs.
+                    // Not a real URL — render as plain text with angle brackets.
+                    html! { <><>{"<"}</>{ inner_html }<>{">"}</></> }
+                }
+                LinkDestination::ExternalOrRelative(href) => {
+                    let title_attr = if title.is_empty() {
+                        None
+                    } else {
+                        Some(title.to_string())
+                    };
+                    html! {
+                        <a href={href} title={title_attr} target="_blank" rel="noopener noreferrer" class="md-link">
+                            { inner_html }
+                        </a>
+                    }
                 }
             }
         }
@@ -339,19 +346,64 @@ fn render_tag(tag: &Tag, events: &[Event], session_id: Option<uuid::Uuid>) -> (H
     (html, total_consumed)
 }
 
-fn portal_file_download_href(href: &str, session_id: Option<uuid::Uuid>) -> Option<String> {
+#[derive(Debug, PartialEq, Eq)]
+enum LinkDestination {
+    PortalDownload(String),
+    LiteralAngleText,
+    ExternalOrRelative(String),
+}
+
+fn classify_link_destination(href: &str, session_id: Option<Uuid>) -> LinkDestination {
+    if href.starts_with("portal://file/") {
+        let session_id =
+            session_id.expect("portal://file markdown links require a session_id to render");
+        if let Some(download_href) = portal_file_download_href(href, session_id) {
+            LinkDestination::PortalDownload(download_href)
+        } else {
+            LinkDestination::LiteralAngleText
+        }
+    } else if !is_valid_url(href) && !href.starts_with('#') && !href.starts_with('/') {
+        LinkDestination::LiteralAngleText
+    } else {
+        LinkDestination::ExternalOrRelative(href.to_string())
+    }
+}
+
+fn portal_file_download_href(href: &str, session_id: Uuid) -> Option<String> {
     let path = href.strip_prefix("portal://file/")?;
     if path.is_empty() {
         return None;
     }
-    let session_id = session_id?;
-    let encoded = js_sys::encode_uri_component(path)
-        .as_string()
-        .unwrap_or_else(|| path.to_string());
+    let encoded = encode_uri_component(path);
     Some(format!(
         "/api/sessions/{}/files/pull?path={}",
         session_id, encoded
     ))
+}
+
+fn encode_uri_component(input: &str) -> String {
+    let mut encoded = String::with_capacity(input.len());
+    for &byte in input.as_bytes() {
+        match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => encoded.push(byte as char),
+            _ => {
+                encoded.push('%');
+                encoded.push_str(&format!("{:02X}", byte));
+            }
+        }
+    }
+    encoded
 }
 
 /// Get the corresponding end tag for a start tag
@@ -507,7 +559,7 @@ fn render_list(start: Option<u64>, inner: Html) -> Html {
 fn render_table(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
-    session_id: Option<uuid::Uuid>,
+    session_id: Option<Uuid>,
 ) -> Html {
     // Tables have: TableHead (with TableRow and TableCells), then TableRows with TableCells
     // We need to process the events to build proper thead/tbody structure
@@ -559,7 +611,7 @@ fn render_table(
 fn render_table_head(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
-    session_id: Option<uuid::Uuid>,
+    session_id: Option<Uuid>,
 ) -> Html {
     let mut cells: Vec<Html> = Vec::new();
     let mut i = 0;
@@ -592,7 +644,7 @@ fn render_table_head(
 fn render_table_row(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
-    session_id: Option<uuid::Uuid>,
+    session_id: Option<Uuid>,
 ) -> Html {
     let mut cells: Vec<Html> = Vec::new();
     let mut i = 0;
@@ -1071,5 +1123,44 @@ Where:\n\
             )),
             "pulldown-cmark classifies angle-bracket labels as raw HTML: {events:?}"
         );
+    }
+
+    #[test]
+    fn bare_angle_bracket_description_is_html_not_a_link() {
+        let input = "<description>";
+
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        let parser = Parser::new_ext(input, options);
+        let events: Vec<Event> = parser.collect();
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Html(t) | Event::InlineHtml(t) if t.as_ref() == input
+            )),
+            "pulldown-cmark classifies bare <description> as raw HTML text, not a markdown link: {events:?}"
+        );
+    }
+
+    #[test]
+    fn portal_file_markdown_link_rewrites_description_to_download_href() {
+        let session_id = Uuid::parse_str("11111111-2222-3333-4444-555555555555")
+            .expect("static uuid should parse");
+
+        assert_eq!(
+            classify_link_destination("portal://file/docs/portal link.svg", Some(session_id)),
+            LinkDestination::PortalDownload(
+                "/api/sessions/11111111-2222-3333-4444-555555555555/files/pull?path=docs%2Fportal%20link.svg"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "portal://file markdown links require a session_id to render")]
+    fn portal_file_markdown_link_without_session_panics() {
+        let _ = classify_link_destination("portal://file/docs/portal_link_rendering.svg", None);
     }
 }

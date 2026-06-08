@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.13
+
+- **Add a direct regression test for portal file link rewriting.** Markdown link destinations are now classified through a small testable helper, and `[description](portal://file/path)` is pinned to render as an authenticated portal download target. `portal://file/...` now requires a session id and panics in tests/dev if called without one, because session file downloads cannot work outside a session context. Codex assistant markdown now receives the active session id too.
+
 ## 2.8.12
 
 - **Keep portal file downloads active in grouped assistant messages.** Consecutive assistant messages render through the identity-group path, which previously passed `None` for `session_id` into assistant markdown. That made `[label](portal://file/path)` hit the generic invalid-link fallback and display as literal angle-bracket text. Grouped assistant markdown now receives the active session id, matching standalone assistant and portal-message rendering.

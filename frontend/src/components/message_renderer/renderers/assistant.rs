@@ -12,6 +12,7 @@ use crate::components::time_ago::TimeAgo;
 use crate::components::tool_renderers::render_tool_use;
 use shared::{AssistantMessage, AssistantUsage as UsageInfo};
 use shared::{Citation, ContentBlock, ToolResultContent};
+use uuid::Uuid;
 use yew::prelude::*;
 
 fn extract_ephemeral_cache(usage: &UsageInfo) -> (u64, u64) {
@@ -97,7 +98,7 @@ pub fn render_assistant_message(
     msg: &AssistantMessage,
     timestamp: Option<&str>,
     raw_iso: Option<&str>,
-    session_id: Option<uuid::Uuid>,
+    session_id: Uuid,
 ) -> Html {
     let blocks = msg.message.content.clone();
 
@@ -146,15 +147,12 @@ pub fn render_assistant_message(
     }
 }
 
-pub fn render_assistant_message_content(
-    msg: &AssistantMessage,
-    session_id: Option<uuid::Uuid>,
-) -> Html {
+pub fn render_assistant_message_content(msg: &AssistantMessage, session_id: Uuid) -> Html {
     let blocks = msg.message.content.clone();
     render_content_blocks(&blocks, session_id)
 }
 
-pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Option<uuid::Uuid>) -> Html {
+pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Html {
     html! {
         <>
             {
