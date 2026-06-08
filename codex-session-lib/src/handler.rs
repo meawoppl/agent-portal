@@ -162,6 +162,8 @@ fn handle_notification(
         | Notification::FileChangeOutputDelta(_)
         | Notification::ReasoningDelta(_)
         | Notification::Warning(_)
+        | Notification::ThreadSettingsUpdated(_)
+        | Notification::TurnModerationMetadata(_)
         | Notification::ThreadArchived(_)
         | Notification::ThreadClosed(_)
         | Notification::ThreadUnarchived(_)

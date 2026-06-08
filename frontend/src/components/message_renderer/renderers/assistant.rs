@@ -242,17 +242,17 @@ pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Html 
     }
 }
 
-fn render_citations(citations: &[serde_json::Value]) -> Html {
+fn render_citations(citations: &[Citation]) -> Html {
     if citations.is_empty() {
         return html! {};
     }
     html! {
         <div class="citation-list">
             { for citations.iter().enumerate().map(|(i, cite)| {
-                let cite = serde_json::from_value::<Citation>(cite.clone()).ok();
-                let url = cite.as_ref().and_then(|c| c.url.as_deref()).unwrap_or("#");
-                let title = cite.as_ref().and_then(|c| c.title.as_deref()
-                    .or(c.cited_text.as_deref()))
+                let url = cite.url.as_deref().unwrap_or("#");
+                let title = cite.title.as_deref()
+                    .or(cite.cited_text.as_deref())
+                    .or(cite.document_title.as_deref())
                     .unwrap_or("source");
                 html! {
                     <a class="citation-link"

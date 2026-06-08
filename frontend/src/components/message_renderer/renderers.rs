@@ -218,57 +218,37 @@ pub fn render_rate_limit_event(msg: &shared::RateLimitEvent, timestamp: Option<&
         if resets_at > now {
             let mins = (resets_at - now) / 60;
             if mins > 60 {
-                format!("Resets in {}h {}m", mins / 60, mins % 60)
+                Some(format!("resets in {}h {}m", mins / 60, mins % 60))
             } else {
-                format!("Resets in {}m", mins)
+                Some(format!("resets in {}m", mins))
             }
         } else {
-            "Reset".to_string()
+            Some("reset".to_string())
         }
     } else {
-        String::new()
+        None
     };
 
     let format_type = rate_type.replace('_', " ");
+    let utilization_text = utilization.map(|pct| format!("{}%", (pct * 100.0).round() as u32));
 
     html! {
         <div class="claude-message rate-limit-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge rate-limit">{ "Rate Limit" }</span>
-            </div>
-            <div class="message-body">
-                <div class="overload-content">
-                    <div class="overload-icon">{ "\u{23f1}\u{fe0f}" }</div>
-                    <div class="overload-text">
-                        <div class="overload-title">{ format!("Rate limit: {} ({})", status, format_type) }</div>
-                        <div class="overload-description">
-                            { &reset_text }
-                            { if using_overage { " \u{b7} Using overage" } else { "" } }
-                        </div>
-                        {
-                            if let Some(pct) = utilization {
-                                let pct_int = (pct * 100.0).round() as u32;
-                                let bar_class = if pct >= 0.9 {
-                                    "utilization-bar critical"
-                                } else if pct >= 0.7 {
-                                    "utilization-bar warning"
-                                } else {
-                                    "utilization-bar"
-                                };
-                                html! {
-                                    <div class="utilization-row">
-                                        <div class={bar_class}>
-                                            <div class="utilization-fill" style={format!("width: {}%", pct_int)}></div>
-                                        </div>
-                                        <span class="utilization-label">{ format!("{}%", pct_int) }</span>
-                                    </div>
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
-                    </div>
-                </div>
+                <span class="rate-limit-inline">
+                    <span class="rate-limit-status">{ status }</span>
+                    <span class="rate-limit-detail">{ format_type }</span>
+                    if let Some(text) = reset_text {
+                        <span class="rate-limit-detail">{ text }</span>
+                    }
+                    if using_overage {
+                        <span class="rate-limit-detail">{ "using overage" }</span>
+                    }
+                    if let Some(text) = utilization_text {
+                        <span class="rate-limit-detail">{ text }</span>
+                    }
+                </span>
             </div>
         </div>
     }
@@ -412,15 +392,11 @@ pub fn render_result_message(
         duration_ms, api_ms, turns
     );
 
-    if let Some(model_usage) = msg
-        .model_usage
-        .as_ref()
-        .and_then(|v| serde_json::from_value::<shared::ModelUsage>(v.clone()).ok())
-    {
+    if let Some(model_usage) = msg.model_usage.as_ref() {
         for (model, entry) in model_usage {
             timing_tooltip.push_str(&format!(
                 " | {}: ${:.4}",
-                shorten_model_name(&model).unwrap_or_else(|| model.clone()),
+                shorten_model_name(model).unwrap_or_else(|| model.clone()),
                 entry.cost_usd
             ));
         }

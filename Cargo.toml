@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.8.13"
+version = "2.8.14"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -50,10 +50,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Claude Code integration
-claude-codes = { version = "2.1.141", default-features = false, features = ["types"] }
+claude-codes = { version = "2.1.155", default-features = false, features = ["types"] }
 
 # Codex CLI integration
-codex-codes = { version = "0.129.3", default-features = false, features = ["types"] }
+codex-codes = { version = "0.137.3", default-features = false, features = ["types"] }
 
 # Frontend (Yew)
 yew = { version = "0.21", features = ["csr"] }
