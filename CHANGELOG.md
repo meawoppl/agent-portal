@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.11
+
+- **Keep portal file downloads active in portal reminders and grouped portal messages.** The markdown renderer already rewrites `[label](portal://file/path)` into an authenticated session download URL, but two portal-message paths discarded `session_id` before rendering markdown. Reminder bodies and collapsed portal groups now pass the active session id through, so documented download links are formatted consistently.
+
 ## 2.8.10
 
 - **Render literal angle-bracket text in markdown instead of dropping it as raw HTML.** `pulldown-cmark` classifies text like `<Download sensor-report.csv>` as inline HTML; the frontend markdown renderer now emits those events as escaped text, preserving portal messages without allowing raw HTML injection.
