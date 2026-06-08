@@ -1,9 +1,10 @@
 use super::copy_button::CopyButton;
 use super::expandable::ExpandableText;
-use super::markdown::render_markdown;
+use super::markdown::render_markdown_for_session;
 use super::message_renderer::format_duration;
 use codex_codes::io::items::{FileUpdateChange, ThreadItem};
 use serde_json::Value;
+use uuid::Uuid;
 use yew::prelude::*;
 
 mod events;
@@ -22,6 +23,7 @@ use tools::{
 #[derive(Properties, PartialEq)]
 pub struct CodexMessageRendererProps {
     pub json: String,
+    pub session_id: Uuid,
     /// Per-turn metrics for the terminator card, if any. Forwarded down
     /// into `render_turn_completed` / `render_turn_failed` so the chip-strip
     /// footer renders beneath the existing result card. PR 2 of N.
@@ -52,9 +54,11 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
             render_turn_failed(error.as_ref(), props.turn_metrics.as_ref())
         }
         Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
-            render_item(item.as_ref(), false)
+            render_item(item.as_ref(), false, props.session_id)
         }
-        Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
+        Ok(CodexEvent::ItemCompleted { item }) => {
+            render_item(item.as_ref(), true, props.session_id)
+        }
         Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
         Ok(CodexEvent::TurnDiffUpdated { params }) => {
             render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
@@ -88,14 +92,14 @@ fn item_card_classes(completed: bool) -> &'static str {
     }
 }
 
-fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
+fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> Html {
     let Some(item) = item else {
         return html! {};
     };
     match item {
         CodexItem::ContextCompaction(_) => render_context_compaction_item(completed),
         CodexItem::Thread(item) => match item {
-            ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed),
+            ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed, session_id),
             ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
             ThreadItem::CommandExecution(it) => render_command_execution(it, completed),
             ThreadItem::FileChange(it) => render_file_change(it, completed),
@@ -112,7 +116,7 @@ fn render_item(item: Option<&CodexItem>, completed: bool) -> Html {
     }
 }
 
-pub fn render_codex_message_content(json: &str) -> Html {
+pub fn render_codex_message_content(json: &str, session_id: Uuid) -> Html {
     match serde_json::from_str::<CodexEvent>(json) {
         Ok(CodexEvent::ItemCompleted {
             item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
@@ -122,11 +126,11 @@ pub fn render_codex_message_content(json: &str) -> Html {
         })
         | Ok(CodexEvent::ItemUpdated {
             item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
-        }) => render_agent_message_content(&it.text),
+        }) => render_agent_message_content(&it.text, session_id),
         Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
-            render_item(item.as_ref(), false)
+            render_item(item.as_ref(), false, session_id)
         }
-        Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true),
+        Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true, session_id),
         Ok(CodexEvent::TurnCompleted {
             usage,
             duration_ms,
@@ -160,7 +164,7 @@ pub fn render_codex_message_content(json: &str) -> Html {
     }
 }
 
-fn render_agent_message(text: &str, completed: bool) -> Html {
+fn render_agent_message(text: &str, completed: bool, session_id: Uuid) -> Html {
     if text.is_empty() {
         return html! {};
     }
@@ -170,16 +174,16 @@ fn render_agent_message(text: &str, completed: bool) -> Html {
             <div class="message-header">
                 <span class="message-type-badge assistant">{ "Codex" }</span>
             </div>
-            <div class="message-body">{ render_agent_message_content(text) }</div>
+            <div class="message-body">{ render_agent_message_content(text, session_id) }</div>
         </div>
     }
 }
 
-fn render_agent_message_content(text: &str) -> Html {
+fn render_agent_message_content(text: &str, session_id: Uuid) -> Html {
     if text.is_empty() {
         html! {}
     } else {
-        html! { <div class="assistant-text">{ render_markdown(text) }</div> }
+        html! { <div class="assistant-text">{ render_markdown_for_session(text, session_id) }</div> }
     }
 }
 

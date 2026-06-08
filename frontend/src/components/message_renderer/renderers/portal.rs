@@ -2,12 +2,13 @@ use super::super::types::PortalMessage;
 use super::render_image_source;
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
+use uuid::Uuid;
 use yew::prelude::*;
 
 pub fn render_portal_message(
     msg: &PortalMessage,
     timestamp: Option<&str>,
-    session_id: Option<uuid::Uuid>,
+    session_id: Uuid,
 ) -> Html {
     let copy_text: String = msg
         .content
@@ -31,11 +32,11 @@ pub fn render_portal_message(
     }
 }
 
-pub fn render_portal_message_content(msg: &PortalMessage, session_id: Option<uuid::Uuid>) -> Html {
+pub fn render_portal_message_content(msg: &PortalMessage, session_id: Uuid) -> Html {
     html! { <>{ for msg.content.iter().map(|content| render_portal_content(content, session_id)) }</> }
 }
 
-fn render_portal_content(content: &shared::PortalContent, session_id: Option<uuid::Uuid>) -> Html {
+fn render_portal_content(content: &shared::PortalContent, session_id: Uuid) -> Html {
     match content {
         shared::PortalContent::Text { text } => render_markdown_for_session(text, session_id),
         shared::PortalContent::Image {
@@ -73,8 +74,7 @@ fn render_portal_content(content: &shared::PortalContent, session_id: Option<uui
 struct PortalReminderProps {
     title: AttrValue,
     body: AttrValue,
-    #[prop_or_default]
-    session_id: Option<uuid::Uuid>,
+    session_id: Uuid,
 }
 
 /// Collapsed-by-default "Portal features reminder" block. Header is always

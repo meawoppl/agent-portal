@@ -31,8 +31,7 @@ fn extract_local_timestamp(json: &str) -> Option<String> {
 #[derive(Properties, PartialEq)]
 pub struct MessageRendererProps {
     pub json: String,
-    #[prop_or_default]
-    pub session_id: Option<Uuid>,
+    pub session_id: Uuid,
     #[prop_or_default]
     pub agent_type: shared::AgentType,
     #[prop_or_default]
@@ -84,6 +83,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
                 &meta,
                 props.current_user_id.as_deref(),
                 ts.as_deref(),
+                props.session_id,
             );
         }
         Ok(ClaudeMessage::OptimisticUser(msg)) => {
@@ -91,6 +91,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
                 &msg,
                 props.current_user_id.as_deref(),
                 ts.as_deref(),
+                props.session_id,
             );
         }
         Ok(ClaudeMessage::Error(msg)) => {
@@ -106,7 +107,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
     }
 
     if props.agent_type == shared::AgentType::Codex {
-        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} turn_metrics={props.turn_metrics.clone()} /> }
+        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} session_id={props.session_id} turn_metrics={props.turn_metrics.clone()} /> }
     } else {
         render_raw_json(&props.json)
     }
@@ -115,8 +116,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
 #[derive(Properties, PartialEq)]
 pub struct MessageGroupRendererProps {
     pub group: MessageGroup,
-    #[prop_or_default]
-    pub session_id: Option<Uuid>,
+    pub session_id: Uuid,
     #[prop_or_default]
     pub agent_type: shared::AgentType,
     #[prop_or_default]
@@ -207,15 +207,11 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     }
 }
 
-fn render_identity_group_part(
-    json: &str,
-    agent_type: shared::AgentType,
-    session_id: Option<Uuid>,
-) -> Html {
+fn render_identity_group_part(json: &str, agent_type: shared::AgentType, session_id: Uuid) -> Html {
     match ClaudeMessage::parse(json) {
-        Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg),
+        Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg, session_id),
         Ok(ClaudeMessage::OptimisticUser(msg)) => {
-            renderers::render_optimistic_user_message_content(&msg)
+            renderers::render_optimistic_user_message_content(&msg, session_id)
         }
         Ok(ClaudeMessage::Assistant(msg)) => {
             renderers::render_assistant_message_content(&msg, session_id)
@@ -224,7 +220,7 @@ fn render_identity_group_part(
             renderers::render_portal_message_content(&msg, session_id)
         }
         _ if agent_type == shared::AgentType::Codex => {
-            super::codex_renderer::render_codex_message_content(json)
+            super::codex_renderer::render_codex_message_content(json, session_id)
         }
         _ => html! {},
     }
