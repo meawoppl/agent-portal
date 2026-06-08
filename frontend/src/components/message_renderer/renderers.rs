@@ -396,7 +396,7 @@ pub fn render_result_message(
         for (model, entry) in model_usage {
             timing_tooltip.push_str(&format!(
                 " | {}: ${:.4}",
-                shorten_model_name(&model).unwrap_or_else(|| model.clone()),
+                shorten_model_name(model).unwrap_or_else(|| model.clone()),
                 entry.cost_usd
             ));
         }
