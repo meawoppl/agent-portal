@@ -19,9 +19,8 @@ pub mod protocol;
 // API client types and trait
 pub mod api;
 pub use api::{
-    ApiError, Citation, CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage,
-    ModelUsageEntry, SoundSettingsResponse, TaskNotificationExtra, TurnMetrics,
-    TurnMetricsResponse,
+    ApiError, CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage, ModelUsageEntry,
+    SoundSettingsResponse, TaskNotificationExtra, TurnMetrics, TurnMetricsResponse,
 };
 
 /// Default backend URL based on build profile.
@@ -36,8 +35,9 @@ pub fn default_backend_url() -> &'static str {
 
 // Re-export claude-codes types for frontend message parsing
 pub use claude_codes::io::{
-    ContentBlock, ImageBlock, ImageSource, ImageSourceType, MediaType, PermissionSuggestion,
-    TextBlock, ThinkingBlock, ToolResultBlock, ToolResultContent, ToolUseBlock,
+    Citation, ContentBlock, ImageBlock, ImageSource, ImageSourceType, MediaType,
+    PermissionSuggestion, TextBlock, ThinkingBlock, ToolResultBlock, ToolResultContent,
+    ToolUseBlock,
 };
 
 // Re-export claude-codes output types for typed parsing.

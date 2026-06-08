@@ -941,9 +941,35 @@
     background: rgba(224, 175, 104, 0.05);
 }
 
+.rate-limit-message .message-header {
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .message-type-badge.rate-limit {
     background: rgba(224, 175, 104, 0.2);
     color: #e0af68;
+}
+
+.rate-limit-inline {
+    align-items: center;
+    color: var(--text-secondary);
+    display: inline-flex;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.rate-limit-status {
+    color: #e0af68;
+    font-weight: 600;
+}
+
+.rate-limit-detail::before {
+    color: var(--text-muted);
+    content: "·";
+    margin-right: 0.35rem;
 }
 
 .utilization-row {

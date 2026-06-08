@@ -640,6 +640,7 @@ fn turn_start_params(thread_id: &str, prompt: String) -> TurnStartParams {
     TurnStartParams {
         approval_policy: None,
         approvals_reviewer: None,
+        client_user_message_id: None,
         cwd: None,
         effort: None,
         input: vec![UserInput::Text {

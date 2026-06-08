@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "anyhow",
  "axum",
@@ -485,9 +485,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.141"
+version = "2.1.155"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc4430abb2bef291e8e1084287aa85d53ebe441ffc6567ad7a6a72e21410f744"
+checksum = "fae0d0f45f19147bab483423223888c21cd6a7da92c6e395b4f7af6dbcdd54ff"
 dependencies = [
  "anyhow",
  "chrono",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "anyhow",
  "base64",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "anyhow",
  "base64",
@@ -556,9 +556,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.129.3"
+version = "0.137.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07e315ac25585083cfb1c1035a6c6e1b3e9e3457686d9a46b9f99668615873a1"
+checksum = "ee0e7507510e88735234d2ce3fdbb63e7655cb15c63415396b479404dda9e3a4"
 dependencies = [
  "log",
  "serde",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -973,7 +973,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1041,7 +1041,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1129,7 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "base64",
  "chrono",
@@ -2455,7 +2455,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2691,7 +2691,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "anyhow",
  "colored",
@@ -2706,7 +2706,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "anyhow",
  "hex",
@@ -3142,7 +3142,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3369,7 +3369,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3431,7 +3431,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.8.13"
+version = "2.8.14"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -3644,7 +3644,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4454,7 +4454,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

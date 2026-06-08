@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.8.14
+
+- **Update code-agent protocol crates.** `claude-codes` is now `2.1.155` and `codex-codes` is now `0.137.3`, with frontend and Codex bridge call sites updated for the newer typed citation, model-usage, turn-start, and notification shapes.
+- **Render Claude rate-limit events as a compact single-line message.** The previous card used the same large visual treatment as API overload messages despite carrying only status, rate-limit window, reset timing, overage, and optional utilization. The renderer now keeps those fields inline in the header row and removes the progress bar/icon block.
+
 ## 2.8.13
 
 - **Add a direct regression test for portal file link rewriting.** Markdown link destinations are now classified through a small testable helper, and `[description](portal://file/path)` is pinned to render as an authenticated portal download target. `portal://file/...` now requires a session id and panics in tests/dev if called without one, because session file downloads cannot work outside a session context. Codex assistant markdown now receives the active session id too.
