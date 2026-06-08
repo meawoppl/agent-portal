@@ -218,7 +218,7 @@ fn render_identity_group_part(
             renderers::render_optimistic_user_message_content(&msg)
         }
         Ok(ClaudeMessage::Assistant(msg)) => {
-            renderers::render_assistant_message_content(&msg, None)
+            renderers::render_assistant_message_content(&msg, session_id)
         }
         Ok(ClaudeMessage::Portal(msg)) => {
             renderers::render_portal_message_content(&msg, session_id)

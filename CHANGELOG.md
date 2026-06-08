@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.12
+
+- **Keep portal file downloads active in grouped assistant messages.** Consecutive assistant messages render through the identity-group path, which previously passed `None` for `session_id` into assistant markdown. That made `[label](portal://file/path)` hit the generic invalid-link fallback and display as literal angle-bracket text. Grouped assistant markdown now receives the active session id, matching standalone assistant and portal-message rendering.
+
 ## 2.8.11
 
 - **Keep portal file downloads active in portal reminders and grouped portal messages.** The markdown renderer already rewrites `[label](portal://file/path)` into an authenticated session download URL, but two portal-message paths discarded `session_id` before rendering markdown. Reminder bodies and collapsed portal groups now pass the active session id through, so documented download links are formatted consistently.
