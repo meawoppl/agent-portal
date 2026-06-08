@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="720" viewBox="0 0 1120 720" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Portal link rendering pipeline</title>
+  <desc id="desc">Diagram showing how portal messages, markdown parsing, portal file links, bare URLs, and raw angle bracket text are rendered in the Agent Portal frontend.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7aa2f7"/>
+    </marker>
+    <style>
+      .title { fill: #c0caf5; font: 700 28px system-ui, -apple-system, Segoe UI, sans-serif; }
+      .subtitle { fill: #a9b1d6; font: 15px system-ui, -apple-system, Segoe UI, sans-serif; }
+      .label { fill: #c0caf5; font: 700 15px system-ui, -apple-system, Segoe UI, sans-serif; }
+      .text { fill: #a9b1d6; font: 13px system-ui, -apple-system, Segoe UI, sans-serif; }
+      .code { fill: #c0caf5; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .small { fill: #9aa5ce; font: 12px system-ui, -apple-system, Segoe UI, sans-serif; }
+      .box { fill: #24283b; stroke: #565f89; stroke-width: 1.4; rx: 8; }
+      .good { fill: #1f2f2b; stroke: #9ece6a; stroke-width: 1.4; rx: 8; }
+      .warn { fill: #332b20; stroke: #e0af68; stroke-width: 1.4; rx: 8; }
+      .bad { fill: #322432; stroke: #f7768e; stroke-width: 1.4; rx: 8; }
+      .blue { fill: #202a44; stroke: #7aa2f7; stroke-width: 1.4; rx: 8; }
+      .line { stroke: #7aa2f7; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .muted-line { stroke: #565f89; stroke-width: 1.4; fill: none; stroke-dasharray: 5 5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <text x="42" y="48" class="title">Portal link rendering</text>
+  <text x="42" y="73" class="subtitle">The browser never opens portal:// directly; the frontend rewrites recognized markdown links into authenticated backend downloads.</text>
+
+  <rect x="42" y="112" width="220" height="92" class="blue"/>
+  <text x="62" y="140" class="label">Portal message content</text>
+  <text x="62" y="166" class="code">{"type":"portal"}</text>
+  <text x="62" y="186" class="text">Text and reminders render as markdown.</text>
+
+  <rect x="332" y="112" width="230" height="92" class="box"/>
+  <text x="352" y="140" class="label">Markdown parser</text>
+  <text x="352" y="166" class="text">pulldown-cmark emits events:</text>
+  <text x="352" y="186" class="code">Text, Link, Html, Code, ...</text>
+
+  <rect x="632" y="112" width="246" height="92" class="box"/>
+  <text x="652" y="140" class="label">Yew event renderer</text>
+  <text x="652" y="166" class="text">Dispatches per event type.</text>
+  <text x="652" y="186" class="text">Raw HTML events are escaped text.</text>
+
+  <path d="M 262 158 L 324 158" class="line"/>
+  <path d="M 562 158 L 624 158" class="line"/>
+
+  <rect x="42" y="278" width="300" height="110" class="good"/>
+  <text x="62" y="306" class="label">Correct file download format</text>
+  <text x="62" y="332" class="code">[Download report]</text>
+  <text x="62" y="350" class="code">(portal://file/reports/final.pdf)</text>
+  <text x="62" y="374" class="text">Must be a markdown link with a label.</text>
+
+  <rect x="392" y="278" width="296" height="110" class="good"/>
+  <text x="412" y="306" class="label">Link event with portal scheme</text>
+  <text x="412" y="332" class="code">Tag::Link dest_url</text>
+  <text x="412" y="350" class="code">starts_with("portal://file/")</text>
+  <text x="412" y="374" class="text">Requires active session_id.</text>
+
+  <rect x="738" y="278" width="320" height="110" class="good"/>
+  <text x="758" y="306" class="label">Rendered download anchor</text>
+  <text x="758" y="332" class="code">/api/sessions/{id}/files/pull</text>
+  <text x="758" y="350" class="code">?path=reports%2Ffinal.pdf</text>
+  <text x="758" y="374" class="text">Backend asks the live proxy for bytes.</text>
+
+  <path d="M 192 204 C 192 238 192 248 192 270" class="line"/>
+  <path d="M 342 333 L 384 333" class="line"/>
+  <path d="M 688 333 L 730 333" class="line"/>
+
+  <rect x="42" y="456" width="300" height="96" class="warn"/>
+  <text x="62" y="484" class="label">Bare angle-bracket text</text>
+  <text x="62" y="510" class="code">&lt;Download sensor-report.csv&gt;</text>
+  <text x="62" y="534" class="text">Parsed as raw HTML-looking text.</text>
+
+  <rect x="392" y="456" width="296" height="96" class="warn"/>
+  <text x="412" y="484" class="label">Html or InlineHtml event</text>
+  <text x="412" y="510" class="text">Frontend renders escaped text.</text>
+  <text x="412" y="534" class="text">It is not a link and not executable HTML.</text>
+
+  <rect x="738" y="456" width="320" height="96" class="warn"/>
+  <text x="758" y="484" class="label">Visible literal output</text>
+  <text x="758" y="510" class="code">&lt;Download sensor-report.csv&gt;</text>
+  <text x="758" y="534" class="text">Expected behavior: text only.</text>
+
+  <path d="M 192 388 C 192 420 192 430 192 448" class="muted-line"/>
+  <path d="M 342 504 L 384 504" class="line"/>
+  <path d="M 688 504 L 730 504" class="line"/>
+
+  <rect x="42" y="598" width="300" height="74" class="box"/>
+  <text x="62" y="626" class="label">Bare web URLs</text>
+  <text x="62" y="650" class="code">https://example.com/report.csv</text>
+
+  <rect x="392" y="598" width="296" height="74" class="box"/>
+  <text x="412" y="626" class="label">Text event linkifier</text>
+  <text x="412" y="650" class="text">Only http:// and https:// become links.</text>
+
+  <rect x="738" y="598" width="320" height="74" class="box"/>
+  <text x="758" y="626" class="label">External anchor</text>
+  <text x="758" y="650" class="text">target=_blank rel=noopener noreferrer</text>
+
+  <path d="M 342 635 L 384 635" class="line"/>
+  <path d="M 688 635 L 730 635" class="line"/>
+
+  <text x="42" y="704" class="small">Rule of thumb: use markdown link syntax for downloads; use bare http(s) for web links; angle brackets are just escaped text.</text>
+</svg>

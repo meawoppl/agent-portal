@@ -193,7 +193,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                             let key = extract_raw_iso(json)
                                 .map(|iso| format!("m-{}", iso))
                                 .unwrap_or_else(|| format!("m{}", i));
-                            html! { <div {key} class="grouped-message-part">{ render_identity_group_part(json, props.agent_type) }</div> }
+                            html! { <div {key} class="grouped-message-part">{ render_identity_group_part(json, props.agent_type, props.session_id) }</div> }
                         })}
                     </div>
                     if let Some(iso) = last_iso {
@@ -207,7 +207,11 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     }
 }
 
-fn render_identity_group_part(json: &str, agent_type: shared::AgentType) -> Html {
+fn render_identity_group_part(
+    json: &str,
+    agent_type: shared::AgentType,
+    session_id: Option<Uuid>,
+) -> Html {
     match ClaudeMessage::parse(json) {
         Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg),
         Ok(ClaudeMessage::OptimisticUser(msg)) => {
@@ -216,7 +220,9 @@ fn render_identity_group_part(json: &str, agent_type: shared::AgentType) -> Html
         Ok(ClaudeMessage::Assistant(msg)) => {
             renderers::render_assistant_message_content(&msg, None)
         }
-        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(&msg, None),
+        Ok(ClaudeMessage::Portal(msg)) => {
+            renderers::render_portal_message_content(&msg, session_id)
+        }
         _ if agent_type == shared::AgentType::Codex => {
             super::codex_renderer::render_codex_message_content(json)
         }

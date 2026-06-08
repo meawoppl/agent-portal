@@ -64,7 +64,7 @@ fn render_portal_content(content: &shared::PortalContent, session_id: Option<uui
             }
         }
         shared::PortalContent::Reminder { title, body } => {
-            html! { <PortalReminder title={title.clone()} body={body.clone()} /> }
+            html! { <PortalReminder title={title.clone()} body={body.clone()} session_id={session_id} /> }
         }
     }
 }
@@ -73,6 +73,8 @@ fn render_portal_content(content: &shared::PortalContent, session_id: Option<uui
 struct PortalReminderProps {
     title: AttrValue,
     body: AttrValue,
+    #[prop_or_default]
+    session_id: Option<uuid::Uuid>,
 }
 
 /// Collapsed-by-default "Portal features reminder" block. Header is always
@@ -98,7 +100,7 @@ fn portal_reminder(props: &PortalReminderProps) -> Html {
             </button>
             if *expanded {
                 <div class="portal-reminder-body">
-                    { render_markdown_for_session(&props.body, None) }
+                    { render_markdown_for_session(&props.body, props.session_id) }
                 </div>
             }
         </div>
