@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.15
+
+- **Keep the launch-session modal inside the viewport.** The launcher dialog now has bounded height, backdrop padding, and internal scrolling so tall directory listings or install instructions do not extend off the bottom of the screen.
+
 ## 2.8.14
 
 - **Update code-agent protocol crates.** `claude-codes` is now `2.1.155` and `codex-codes` is now `0.137.3`, with frontend and Codex bridge call sites updated for the newer typed citation, model-usage, turn-start, and notification shapes.

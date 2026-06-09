@@ -334,12 +334,14 @@
     left: 0;
     right: 0;
     bottom: 0;
+    box-sizing: border-box;
     background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
     display: flex;
     justify-content: center;
     align-items: center;
+    padding: 2rem;
     z-index: 1000;
     animation: fadeIn 0.2s ease-out;
 }
@@ -348,8 +350,13 @@
     background: var(--bg-darker);
     border: 1px solid var(--border);
     border-radius: 8px;
+    box-sizing: border-box;
     padding: 2rem;
     max-width: 540px;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
     width: 90%;
     animation: scaleIn 0.2s ease-out;
 }
@@ -554,6 +561,16 @@
     overflow-y: auto;
 }
 
+@supports (height: 100dvh) {
+    .launch-dialog {
+        max-height: calc(100dvh - 4rem);
+    }
+
+    .dir-browser {
+        max-height: min(240px, 32dvh);
+    }
+}
+
 .dir-entry {
     display: flex;
     align-items: center;
@@ -628,5 +645,3 @@
     border-color: var(--text-muted);
     color: var(--text-primary);
 }
-
-
