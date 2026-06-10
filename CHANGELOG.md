@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.17
+
+- **Add log-scale support to Performance plots.** The Performance page now has a `Y scale` control with `Linear` as the default and `Log` as an alternate view across all plots. Log scaling maps positive values by base-10 decades while keeping zero/non-positive buckets on a baseline, and the chart headers show the active scale.
+
 ## 2.8.16
 
 - **Increase Performance chart x-axis resolution.** Performance tabs now request minute buckets for 6-hour windows, 5-minute buckets for 1-day windows, and hourly buckets for week-plus windows instead of collapsing long windows to daily data. Multi-day minute/hour tick labels include the date so the denser charts stay readable.

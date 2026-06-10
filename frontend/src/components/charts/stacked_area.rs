@@ -8,7 +8,10 @@
 use chrono::{DateTime, Utc};
 use yew::prelude::*;
 
-use super::scale::{nice_y_axis, time_axis_ticks, y_axis_ticks, BucketKind, TickLabel};
+use super::scale::{
+    format_axis_value, time_axis_ticks, value_to_y as scaled_value_to_y, y_axis_for_values,
+    y_axis_tick_labels, AxisScale, BucketKind, TickLabel,
+};
 
 /// One band in the stacked area. Order matters — bands are stacked in vector
 /// order from the bottom upward.
@@ -28,6 +31,7 @@ pub struct StackedAreaProps {
     pub buckets: Vec<DateTime<Utc>>,
     pub bucket_kind: BucketKind,
     pub series: Vec<StackedSeries>,
+    pub axis_scale: AxisScale,
 }
 
 const VIEW_W: f32 = 800.0;
@@ -65,14 +69,14 @@ pub fn stacked_area(props: &StackedAreaProps) -> Html {
             </div>
         };
     }
-    let (y_min, y_max, y_step) = nice_y_axis(0.0, max_total);
+    let y_axis = y_axis_for_values(&totals, props.axis_scale);
 
     let plot_w = VIEW_W - PAD_L - PAD_R;
     let plot_h = VIEW_H - PAD_T - PAD_B;
     let viewbox = format!("0 0 {VIEW_W} {VIEW_H}");
 
     let x_ticks = time_axis_ticks(&props.buckets, props.bucket_kind, 6);
-    let y_ticks = y_axis_ticks(y_min, y_max, y_step);
+    let y_ticks = y_axis_tick_labels(&y_axis);
 
     // Build cumulative bottoms per series. `bottoms[i][b]` is the y-stack
     // floor for series i at bucket b — the previous series' top.
@@ -105,14 +109,14 @@ pub fn stacked_area(props: &StackedAreaProps) -> Html {
                     points.push(' ');
                 }
                 let x = PAD_L + (i as f32 / last_idx) * plot_w;
-                let y = value_to_y(t, y_min, y_max, plot_h);
+                let y = value_to_y(t, &y_axis, plot_h);
                 points.push_str(&format!("{:.2},{:.2}", x, y));
             }
             // bottom, right → left
             for (i, &b) in bottom.iter().enumerate().rev().take(n_buckets) {
                 points.push(' ');
                 let x = PAD_L + (i as f32 / last_idx) * plot_w;
-                let y = value_to_y(b, y_min, y_max, plot_h);
+                let y = value_to_y(b, &y_axis, plot_h);
                 points.push_str(&format!("{:.2},{:.2}", x, y));
             }
             html! {
@@ -145,7 +149,7 @@ pub fn stacked_area(props: &StackedAreaProps) -> Html {
                         class="chart-y-label"
                         text-anchor="end"
                     >
-                        { format_count(*v) }
+                        { format_axis_value(*v) }
                     </text>
                 </>
             }
@@ -187,7 +191,10 @@ pub fn stacked_area(props: &StackedAreaProps) -> Html {
 
     html! {
         <div class="performance-chart">
-            <h3 class="chart-title">{ &props.title }</h3>
+            <div class="chart-header">
+                <h3 class="chart-title">{ &props.title }</h3>
+                <span class="chart-scale-badge">{ props.axis_scale.label() }</span>
+            </div>
             <div class="chart-legend">{ legend }</div>
             <svg
                 class="performance-chart-svg"
@@ -211,24 +218,8 @@ pub fn stacked_area(props: &StackedAreaProps) -> Html {
     }
 }
 
-fn value_to_y(v: f64, y_min: f64, y_max: f64, plot_h: f32) -> f32 {
-    let span = y_max - y_min;
-    if span.abs() < f64::EPSILON {
-        return PAD_T + plot_h;
-    }
-    let clamped = v.clamp(y_min, y_max);
-    let frac = ((clamped - y_min) / span) as f32;
-    PAD_T + plot_h - frac * plot_h
-}
-
-fn format_count(v: f64) -> String {
-    if v.abs() >= 1000.0 {
-        format!("{:.1}k", v / 1000.0)
-    } else if v.fract().abs() < 1e-9 {
-        format!("{}", v as i64)
-    } else {
-        format!("{:.1}", v)
-    }
+fn value_to_y(v: f64, axis: &super::scale::YAxis, plot_h: f32) -> f32 {
+    PAD_T + scaled_value_to_y(v, axis, plot_h)
 }
 
 #[cfg(test)]
@@ -237,9 +228,9 @@ mod tests {
 
     #[test]
     fn format_count_for_axis() {
-        assert_eq!(format_count(0.0), "0");
-        assert_eq!(format_count(5.0), "5");
-        assert_eq!(format_count(2_500.0), "2.5k");
-        assert_eq!(format_count(7.5), "7.5");
+        assert_eq!(format_axis_value(0.0), "0");
+        assert_eq!(format_axis_value(5.0), "5");
+        assert_eq!(format_axis_value(2_500.0), "2.5k");
+        assert_eq!(format_axis_value(7.5), "7.5");
     }
 }
