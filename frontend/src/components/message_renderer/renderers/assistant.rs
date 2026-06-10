@@ -62,8 +62,12 @@ fn build_usage_tooltip(usage: Option<&UsageInfo>) -> String {
 
 pub(crate) fn assistant_label(model: &str) -> String {
     match shorten_model_name(model) {
-        Some(short_name) => format!("Claude - {short_name}"),
-        None => "Claude".to_string(),
+        // Guard against unknown `claude-*` families shortening to a bare
+        // vendor prefix, which would render as "Claude - claude".
+        Some(short_name) if !short_name.eq_ignore_ascii_case("claude") => {
+            format!("Claude - {short_name}")
+        }
+        _ => "Claude".to_string(),
     }
 }
 

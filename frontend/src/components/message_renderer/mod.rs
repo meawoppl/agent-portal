@@ -290,25 +290,35 @@ pub(crate) fn shorten_model_name(model: &str) -> Option<String> {
         None
     };
 
-    let version = extract_version(model);
+    // Single-part versions (e.g. `claude-fable-5`): a lone short numeric
+    // segment, skipping 8-digit date stamps.
+    let extract_major = |model: &str| -> Option<String> {
+        model
+            .split('-')
+            .filter(|p| !p.is_empty() && p.len() < 8)
+            .find(|p| p.chars().all(|c| c.is_ascii_digit()))
+            .map(|p| p.to_string())
+    };
 
-    Some(if model.contains("opus") {
-        match version {
-            Some(v) => format!("Opus {}", v),
-            None => "Opus".to_string(),
-        }
-    } else if model.contains("sonnet") {
-        match version {
-            Some(v) => format!("Sonnet {}", v),
-            None => "Sonnet".to_string(),
-        }
-    } else if model.contains("haiku") {
-        match version {
-            Some(v) => format!("Haiku {}", v),
-            None => "Haiku".to_string(),
-        }
-    } else {
-        model.split('-').next().unwrap_or(model).to_string()
+    const FAMILIES: [(&str, &str); 5] = [
+        ("opus", "Opus"),
+        ("sonnet", "Sonnet"),
+        ("haiku", "Haiku"),
+        ("fable", "Fable"),
+        ("mythos", "Mythos"),
+    ];
+
+    let family = FAMILIES
+        .iter()
+        .find(|(needle, _)| model.contains(needle))
+        .map(|(_, name)| *name);
+
+    Some(match family {
+        Some(name) => match extract_version(model).or_else(|| extract_major(model)) {
+            Some(v) => format!("{} {}", name, v),
+            None => name.to_string(),
+        },
+        None => model.split('-').next().unwrap_or(model).to_string(),
     })
 }
 
@@ -1028,6 +1038,18 @@ mod tests {
         assert_eq!(
             shorten_model_name("claude-sonnet-4-5"),
             Some("Sonnet 4.5".to_string())
+        );
+        assert_eq!(
+            shorten_model_name("claude-fable-5"),
+            Some("Fable 5".to_string())
+        );
+        assert_eq!(
+            shorten_model_name("claude-mythos-5"),
+            Some("Mythos 5".to_string())
+        );
+        assert_eq!(
+            shorten_model_name("claude-fable-5-20260601"),
+            Some("Fable 5".to_string())
         );
         assert_eq!(shorten_model_name("claude-opus"), Some("Opus".to_string()));
         assert_eq!(shorten_model_name(""), None);
