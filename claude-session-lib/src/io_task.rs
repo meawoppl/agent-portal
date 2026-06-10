@@ -202,14 +202,7 @@ pub(crate) async fn claude_io_task(
                                 chrono::Utc::now(),
                                 outcome,
                             ) {
-                                if metrics
-                                    .model
-                                    .as_deref()
-                                    .is_some_and(|m| {
-                                        let m = m.trim();
-                                        !m.is_empty() && !m.eq_ignore_ascii_case("unknown")
-                                    })
-                                {
+                                if metrics.has_known_model() {
                                     let _ = event_tx
                                         .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
                                 } else {

@@ -367,7 +367,7 @@ pub(crate) async fn codex_io_task(
                                     chrono::Utc::now(),
                                     outcome,
                                 ) {
-                                    if metrics.model.is_some() {
+                                    if metrics.has_known_model() {
                                         let _ = event_tx
                                             .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
                                     } else {
