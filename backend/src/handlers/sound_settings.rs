@@ -15,14 +15,13 @@ pub async fn get_sound_settings(
 ) -> Result<Json<SoundSettingsResponse>, AppError> {
     let user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::users;
     let sound_config: Option<serde_json::Value> = users::table
         .find(user_id)
         .select(users::sound_config)
-        .first(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .first(&mut conn)?;
 
     Ok(Json(SoundSettingsResponse { sound_config }))
 }
@@ -34,13 +33,12 @@ pub async fn save_sound_settings(
 ) -> Result<EmptyResponse, AppError> {
     let user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::users;
     diesel::update(users::table.find(user_id))
         .set(users::sound_config.eq(Some(config)))
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     Ok(EmptyResponse::OK)
 }

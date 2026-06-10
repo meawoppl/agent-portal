@@ -109,13 +109,12 @@ pub async fn list_tasks_handler(
 ) -> Result<Json<ScheduledTaskListResponse>, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     let tasks: Vec<ScheduledTask> = scheduled_tasks::table
         .filter(scheduled_tasks::user_id.eq(user_id))
         .order(scheduled_tasks::created_at.desc())
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     let infos: Vec<ScheduledTaskInfo> = tasks.into_iter().map(task_to_info).collect();
     Ok(Json(ScheduledTaskListResponse { tasks: infos }))
@@ -136,7 +135,7 @@ pub async fn create_task_handler(
         return Err(AppError::Internal("Invalid cron expression".to_string()));
     }
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     let new_task = NewScheduledTask {
         user_id,
@@ -153,8 +152,7 @@ pub async fn create_task_handler(
 
     let saved: ScheduledTask = diesel::insert_into(scheduled_tasks::table)
         .values(&new_task)
-        .get_result(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .get_result(&mut conn)?;
 
     info!("Created scheduled task '{}' ({})", saved.name, saved.id);
 
@@ -173,7 +171,7 @@ pub async fn update_task_handler(
 ) -> Result<Json<ScheduledTaskInfo>, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     // Verify ownership
     let existing: ScheduledTask = scheduled_tasks::table
@@ -232,8 +230,7 @@ pub async fn update_task_handler(
         scheduled_tasks::max_runtime_minutes.eq(max_runtime_minutes),
         scheduled_tasks::updated_at.eq(diesel::dsl::now),
     ))
-    .get_result(&mut conn)
-    .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    .get_result(&mut conn)?;
 
     info!("Updated scheduled task '{}' ({})", updated.name, updated.id);
 
@@ -251,7 +248,7 @@ pub async fn delete_task_handler(
 ) -> Result<EmptyResponse, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     // Verify ownership
     let task: ScheduledTask = scheduled_tasks::table
@@ -267,8 +264,7 @@ pub async fn delete_task_handler(
         .execute(&mut conn);
 
     diesel::delete(scheduled_tasks::table.filter(scheduled_tasks::id.eq(task_id)))
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     info!("Deleted scheduled task '{}' ({})", task.name, task_id);
 
@@ -286,7 +282,7 @@ pub async fn list_runs_handler(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     // Verify task ownership
     let _task: ScheduledTask = scheduled_tasks::table
@@ -300,8 +296,7 @@ pub async fn list_runs_handler(
         .filter(sessions::scheduled_task_id.eq(task_id))
         .order(sessions::created_at.desc())
         .limit(50)
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     Ok(Json(serde_json::to_value(runs).unwrap_or_default()))
 }

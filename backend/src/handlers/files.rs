@@ -118,7 +118,7 @@ fn verify_session_read_access(
     session_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
     use crate::schema::{session_members, sessions};
 
     let is_owner = sessions::table
@@ -126,8 +126,7 @@ fn verify_session_read_access(
         .filter(sessions::user_id.eq(user_id))
         .select(sessions::id)
         .first::<Uuid>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .is_some();
     if is_owner {
         return Ok(());
@@ -138,8 +137,7 @@ fn verify_session_read_access(
         .filter(session_members::user_id.eq(user_id))
         .select(session_members::id)
         .first::<Uuid>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .map(|_| ())
         .ok_or(AppError::NotFound("Session not found"))
 }

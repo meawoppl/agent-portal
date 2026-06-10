@@ -49,8 +49,7 @@ fn verify_session_access(
         .filter(session_members::user_id.eq(user_id))
         .select(sessions::id)
         .first::<uuid::Uuid>(conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .optional()?;
     if exists.is_none() {
         return Err(AppError::NotFound("Session not found"));
     }
@@ -104,7 +103,7 @@ pub async fn list_turn_metrics(
     Path(session_id): Path<uuid::Uuid>,
 ) -> Result<Json<TurnMetricsResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     verify_session_access(&mut conn, session_id, current_user_id)?;
 
@@ -113,8 +112,7 @@ pub async fn list_turn_metrics(
         .filter(turn_metrics::session_id.eq(session_id))
         .order(turn_metrics::started_at.asc())
         .select(TurnMetric::as_select())
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     let metrics = rows.into_iter().map(row_to_wire).collect();
     Ok(Json(TurnMetricsResponse { metrics }))
@@ -143,7 +141,7 @@ pub async fn list_recent_user_turn_metrics(
     cookies: Cookies,
 ) -> Result<Json<TurnMetricsResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::turn_metrics;
     let mut rows: Vec<TurnMetric> = turn_metrics::table
@@ -151,8 +149,7 @@ pub async fn list_recent_user_turn_metrics(
         .order(turn_metrics::started_at.desc())
         .limit(RECENT_TURN_LIMIT)
         .select(TurnMetric::as_select())
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     // SQL gave us newest-first; flip to oldest-first so the sparkline reads
     // left→right oldest→newest without a second pass on the frontend.
@@ -326,7 +323,7 @@ pub async fn list_aggregated_turn_metrics(
     Query(query): Query<TurnMetricsAggregateQuery>,
 ) -> Result<Json<MetricBucketsResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     let bucket = parse_bucket(query.bucket.as_deref())?;
     let interval = parse_window_to_interval(query.window.as_deref())?;
@@ -375,8 +372,7 @@ pub async fn list_aggregated_turn_metrics(
         .bind::<Text, _>(bucket.as_interval())
         .bind::<diesel::sql_types::Uuid, _>(current_user_id)
         .bind::<Text, _>(&interval)
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     // Stop-reason mix runs as a separate `GROUP BY` so the main query stays
     // one-row-per-(bucket, group). Folds error rows under the `"error"` key
@@ -403,8 +399,7 @@ pub async fn list_aggregated_turn_metrics(
         .bind::<Text, _>(bucket.as_interval())
         .bind::<diesel::sql_types::Uuid, _>(current_user_id)
         .bind::<Text, _>(&interval)
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     // Fold the stop-reason rows by `(bucket_start, agent_type, model, tier)`
     // into a histogram keyed by `reason_key`.

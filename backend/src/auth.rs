@@ -26,15 +26,14 @@ fn reject_disabled_user(user: User) -> Result<User, AppError> {
 /// Disabled users are rejected in both modes so a ban takes effect for existing
 /// browser sessions immediately.
 pub fn extract_user(app_state: &AppState, cookies: &Cookies) -> Result<User, AppError> {
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::users;
 
     if app_state.dev_mode {
         let user = users::table
             .filter(users::email.eq("testing@testing.local"))
-            .first::<User>(&mut conn)
-            .map_err(|e| AppError::DbQuery(e.to_string()))?;
+            .first::<User>(&mut conn)?;
         return reject_disabled_user(user);
     }
 
