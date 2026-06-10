@@ -26,7 +26,8 @@
     margin-right: 0.5rem;
 }
 
-.performance-window-group {
+.performance-window-group,
+.performance-scale-group {
     display: flex;
     align-items: center;
     gap: 0.25rem;
@@ -90,6 +91,23 @@
     color: var(--text-primary);
     font-size: 1rem;
     font-weight: 600;
+}
+
+.chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.chart-scale-badge {
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.7rem;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 .chart-legend {

@@ -13,7 +13,8 @@ use chrono::{DateTime, Utc};
 use yew::prelude::*;
 
 use super::scale::{
-    nice_y_axis, series_points, time_axis_ticks, y_axis_ticks, BucketKind, TickLabel,
+    format_axis_value, series_points_with_axis, time_axis_ticks, y_axis_for_values,
+    y_axis_tick_labels, AxisScale, BucketKind, TickLabel,
 };
 
 /// One labelled line in the chart. `dashed = true` is used for p95 traces
@@ -45,6 +46,8 @@ pub struct LinePlotProps {
     pub bucket_kind: BucketKind,
     /// Lines to draw. Empty list → renders the "no data" placeholder.
     pub series: Vec<LineSeries>,
+    /// Y-axis projection mode. Defaults are owned by the parent page.
+    pub axis_scale: AxisScale,
 }
 
 /// Internal SVG canvas size. We render at 800×260 in the viewBox and let CSS
@@ -85,19 +88,14 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
             </div>
         };
     }
-    let (min_v, max_v) = all_y
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |a, &b| {
-            (a.0.min(b), a.1.max(b))
-        });
-    let (y_min, y_max, y_step) = nice_y_axis(min_v, max_v);
+    let y_axis = y_axis_for_values(&all_y, props.axis_scale);
 
     let plot_w = VIEW_W - PAD_L - PAD_R;
     let plot_h = VIEW_H - PAD_T - PAD_B;
     let viewbox = format!("0 0 {VIEW_W} {VIEW_H}");
 
     let x_ticks = time_axis_ticks(&props.buckets, props.bucket_kind, 6);
-    let y_ticks = y_axis_ticks(y_min, y_max, y_step);
+    let y_ticks = y_axis_tick_labels(&y_axis);
 
     // For each series, split into contiguous runs (skipping `None` gaps), then
     // turn each run into its own polyline via `series_points` against the same
@@ -110,7 +108,7 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
                 * (plot_w / (props.buckets.len() as f32 - 1.0).max(1.0));
             let offset_x =
                 (start_idx as f32) * (plot_w / (props.buckets.len() as f32 - 1.0).max(1.0));
-            let points = series_points(&run, scaled_w.max(0.0), plot_h, y_min, y_max);
+            let points = series_points_with_axis(&run, scaled_w.max(0.0), plot_h, &y_axis);
             if points.is_empty() {
                 continue;
             }
@@ -193,7 +191,10 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
 
     html! {
         <div class="performance-chart">
-            <h3 class="chart-title">{ &props.title }</h3>
+            <div class="chart-header">
+                <h3 class="chart-title">{ &props.title }</h3>
+                <span class="chart-scale-badge">{ props.axis_scale.label() }</span>
+            </div>
             <div class="chart-legend">{ legend }</div>
             <svg
                 class="performance-chart-svg"
@@ -243,20 +244,6 @@ fn contiguous_runs(values: &[Option<f64>]) -> Vec<(usize, Vec<f64>)> {
         runs.push((current_start, current));
     }
     runs
-}
-
-/// Format a y-axis tick value as compactly as possible. Whole numbers drop the
-/// decimal; small fractions keep 2 decimals; big values use a `k` suffix.
-fn format_axis_value(v: f64) -> String {
-    if v.abs() >= 1000.0 {
-        format!("{:.1}k", v / 1000.0)
-    } else if v.fract().abs() < 1e-9 {
-        format!("{}", v as i64)
-    } else if v.abs() < 1.0 {
-        format!("{:.2}", v)
-    } else {
-        format!("{:.1}", v)
-    }
 }
 
 #[cfg(test)]

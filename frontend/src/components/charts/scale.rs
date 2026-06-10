@@ -35,6 +35,35 @@ impl BucketKind {
     }
 }
 
+/// Y-axis projection mode for Performance charts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisScale {
+    Linear,
+    Log,
+}
+
+impl AxisScale {
+    pub const fn all() -> [Self; 2] {
+        [Self::Linear, Self::Log]
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "Linear",
+            Self::Log => "Log",
+        }
+    }
+}
+
+/// Complete y-axis mapping, including displayed tick positions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum YAxis {
+    Linear { min: f64, max: f64, step: f64 },
+    Log { min_log: f64, max_log: f64 },
+}
+
+const LOG_ZERO_BAND_FRAC: f32 = 0.08;
+
 /// One axis tick — a normalized x position in `[0.0, 1.0]` plus the label
 /// string to render. Consumers multiply by the chart width to get the SVG
 /// `x` coordinate.
@@ -74,6 +103,52 @@ pub fn nice_y_axis(min: f64, max: f64) -> (f64, f64, f64) {
     let nice_min = nice_min.max(0.0); // never below zero for our metrics
     let nice_max = (max / step).ceil() * step;
     (nice_min, nice_max, step)
+}
+
+/// Build a linear or logarithmic y-axis from the finite chart values.
+///
+/// Log scale reserves a small baseline band for zero/non-positive values, then
+/// maps positive values by base-10 decades. That keeps sparse zero buckets
+/// visible without pretending that `log(0)` exists.
+pub fn y_axis_for_values(values: &[f64], scale: AxisScale) -> YAxis {
+    match scale {
+        AxisScale::Linear => {
+            let (min_v, max_v) = finite_min_max(values).unwrap_or((0.0, 1.0));
+            let (min, max, step) = nice_y_axis(min_v, max_v);
+            YAxis::Linear { min, max, step }
+        }
+        AxisScale::Log => {
+            let positives: Vec<f64> = values
+                .iter()
+                .copied()
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .collect();
+            let Some((min_positive, max_positive)) = finite_min_max(&positives) else {
+                let (min, max, step) = nice_y_axis(0.0, 1.0);
+                return YAxis::Linear { min, max, step };
+            };
+            let mut min_log = min_positive.log10().floor();
+            let mut max_log = max_positive.log10().ceil();
+            if (max_log - min_log).abs() < f64::EPSILON {
+                min_log -= 1.0;
+                max_log += 1.0;
+            }
+            YAxis::Log { min_log, max_log }
+        }
+    }
+}
+
+fn finite_min_max(values: &[f64]) -> Option<(f64, f64)> {
+    values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .fold(None, |acc, v| {
+            Some(match acc {
+                Some((min, max)) => (min.min(v), max.max(v)),
+                None => (v, v),
+            })
+        })
 }
 
 /// Round `raw` up to the nearest "nice" value (1, 2, or 5 times a power of ten).
@@ -212,21 +287,38 @@ pub fn y_axis_ticks(min: f64, max: f64, step: f64) -> Vec<(f64, f32)> {
     out
 }
 
-/// Project a series of `(x_index, value)` data points onto an SVG-friendly
-/// "x,y x,y …" string for a `<polyline>`. `width` and `height` are the SVG
-/// viewBox dimensions; `(y_min, y_max)` are the *displayed* y-axis bounds
-/// (typically from [`nice_y_axis`]). Values outside the bounds are clamped.
+/// Build y-axis ticks for an already resolved axis mapping.
+pub fn y_axis_tick_labels(axis: &YAxis) -> Vec<(f64, f32)> {
+    match *axis {
+        YAxis::Linear { min, max, step } => y_axis_ticks(min, max, step),
+        YAxis::Log { min_log, max_log } => {
+            if !min_log.is_finite() || !max_log.is_finite() || max_log <= min_log {
+                return Vec::new();
+            }
+            let mut ticks = vec![(0.0, 0.0)];
+            let min_power = min_log as i32;
+            let max_power = max_log as i32;
+            for power in min_power..=max_power {
+                let value = 10f64.powi(power);
+                ticks.push((value, value_frac(value, axis)));
+            }
+            ticks
+        }
+    }
+}
+
+/// Project a series using a resolved [`YAxis`] mapping.
 ///
 /// Returns an empty string for an empty series; a single-point series renders
 /// as one `x,y` pair at `x = width` (right edge), mirroring the Sparkline
 /// convention so a one-point chart looks consistent across the page.
-pub fn series_points(values: &[f64], width: f32, height: f32, y_min: f64, y_max: f64) -> String {
+pub fn series_points_with_axis(values: &[f64], width: f32, height: f32, axis: &YAxis) -> String {
     if values.is_empty() {
         return String::new();
     }
     if values.len() == 1 {
         let v = values[0];
-        let y = value_to_y(v, y_min, y_max, height);
+        let y = value_to_y(v, axis, height);
         return format!("{:.2},{:.2}", width, y);
     }
     let n = values.len();
@@ -237,21 +329,61 @@ pub fn series_points(values: &[f64], width: f32, height: f32, y_min: f64, y_max:
             out.push(' ');
         }
         let x = step * i as f32;
-        let y = value_to_y(v, y_min, y_max, height);
+        let y = value_to_y(v, axis, height);
         out.push_str(&format!("{:.2},{:.2}", x, y));
     }
     out
 }
 
-fn value_to_y(v: f64, y_min: f64, y_max: f64, height: f32) -> f32 {
-    let span = y_max - y_min;
-    if span.abs() < f64::EPSILON {
-        return height / 2.0;
-    }
-    let clamped = v.clamp(y_min, y_max);
-    let frac = ((clamped - y_min) / span) as f32;
-    // y grows down in SVG, so high values → small y.
+/// Convert a raw value to an SVG y coordinate for `height`.
+pub fn value_to_y(v: f64, axis: &YAxis, height: f32) -> f32 {
+    let frac = value_frac(v, axis);
     height - frac * height
+}
+
+/// Convert a raw value to a normalized y fraction in `[0.0, 1.0]`.
+pub fn value_frac(v: f64, axis: &YAxis) -> f32 {
+    match *axis {
+        YAxis::Linear { min, max, .. } => {
+            let span = max - min;
+            if span.abs() < f64::EPSILON {
+                return 0.5;
+            }
+            let clamped = v.clamp(min, max);
+            ((clamped - min) / span) as f32
+        }
+        YAxis::Log { min_log, max_log } => {
+            if !v.is_finite() || v <= 0.0 {
+                return 0.0;
+            }
+            let span = max_log - min_log;
+            if span.abs() < f64::EPSILON {
+                return 1.0;
+            }
+            let log_frac = ((v.log10() - min_log) / span).clamp(0.0, 1.0) as f32;
+            LOG_ZERO_BAND_FRAC + log_frac * (1.0 - LOG_ZERO_BAND_FRAC)
+        }
+    }
+}
+
+/// Format a y-axis tick value as compactly as possible. Whole numbers drop the
+/// decimal; small fractions keep enough precision to avoid rendering as `0`.
+pub fn format_axis_value(v: f64) -> String {
+    if v == 0.0 {
+        "0".to_string()
+    } else if v.abs() >= 1000.0 {
+        format!("{:.1}k", v / 1000.0)
+    } else if v.fract().abs() < 1e-9 {
+        format!("{}", v as i64)
+    } else if v.abs() >= 1.0 {
+        format!("{:.1}", v)
+    } else if v.abs() >= 0.01 {
+        format!("{:.2}", v)
+    } else if v.abs() >= 0.001 {
+        format!("{:.3}", v)
+    } else {
+        format!("{:.1e}", v)
+    }
 }
 
 #[cfg(test)]
@@ -419,20 +551,51 @@ mod tests {
     }
 
     #[test]
+    fn log_y_axis_reserves_zero_baseline() {
+        let axis = y_axis_for_values(&[0.0, 1.0, 10.0, 100.0], AxisScale::Log);
+        let ticks = y_axis_tick_labels(&axis);
+        assert_eq!(ticks[0], (0.0, 0.0));
+        assert_eq!(value_frac(0.0, &axis), 0.0);
+        assert!(value_frac(1.0, &axis) > 0.0);
+        assert!(value_frac(100.0, &axis) > value_frac(10.0, &axis));
+    }
+
+    #[test]
+    fn log_y_axis_without_positive_values_falls_back_to_linear() {
+        let axis = y_axis_for_values(&[0.0, 0.0], AxisScale::Log);
+        assert!(matches!(axis, YAxis::Linear { .. }));
+    }
+
+    #[test]
     fn series_points_empty_yields_empty_string() {
-        assert_eq!(series_points(&[], 100.0, 50.0, 0.0, 10.0), "");
+        let axis = YAxis::Linear {
+            min: 0.0,
+            max: 10.0,
+            step: 1.0,
+        };
+        assert_eq!(series_points_with_axis(&[], 100.0, 50.0, &axis), "");
     }
 
     #[test]
     fn series_points_single_value_pins_right_edge() {
-        let out = series_points(&[5.0], 100.0, 50.0, 0.0, 10.0);
+        let axis = YAxis::Linear {
+            min: 0.0,
+            max: 10.0,
+            step: 1.0,
+        };
+        let out = series_points_with_axis(&[5.0], 100.0, 50.0, &axis);
         // single point parks at the right edge (mirrors Sparkline)
         assert!(out.starts_with("100.00,"), "got: {out}");
     }
 
     #[test]
     fn series_points_endpoints_anchored() {
-        let out = series_points(&[0.0, 10.0], 100.0, 50.0, 0.0, 10.0);
+        let axis = YAxis::Linear {
+            min: 0.0,
+            max: 10.0,
+            step: 1.0,
+        };
+        let out = series_points_with_axis(&[0.0, 10.0], 100.0, 50.0, &axis);
         let parts: Vec<&str> = out.split_whitespace().collect();
         assert_eq!(parts.len(), 2);
         // First x is 0, last x is 100.
@@ -448,7 +611,12 @@ mod tests {
     #[test]
     fn series_points_clamps_out_of_range() {
         // y_max=10 but value=20 → should clamp to top of chart, not flow off.
-        let out = series_points(&[20.0], 100.0, 50.0, 0.0, 10.0);
+        let axis = YAxis::Linear {
+            min: 0.0,
+            max: 10.0,
+            step: 1.0,
+        };
+        let out = series_points_with_axis(&[20.0], 100.0, 50.0, &axis);
         let parts: Vec<&str> = out.split_whitespace().collect();
         let y: f32 = parts[0].split(',').nth(1).unwrap().parse().unwrap();
         assert!((y - 0.0).abs() < 0.01);

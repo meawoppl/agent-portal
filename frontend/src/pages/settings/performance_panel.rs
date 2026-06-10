@@ -18,7 +18,9 @@ use shared::api::{MetricBucket, MetricBucketsResponse};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-use crate::components::charts::{BucketKind, LinePlot, LineSeries, StackedArea, StackedSeries};
+use crate::components::charts::{
+    AxisScale, BucketKind, LinePlot, LineSeries, StackedArea, StackedSeries,
+};
 use crate::utils;
 
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
@@ -192,6 +194,7 @@ impl GroupBy {
 pub fn performance_panel() -> Html {
     let window = use_state(|| TimeWindow::Days30);
     let group_by = use_state(|| GroupBy::All);
+    let axis_scale = use_state(|| AxisScale::Linear);
     let buckets = use_state(Vec::<MetricBucket>::new);
     let loading = use_state(|| true);
     let error_msg = use_state(|| None::<String>);
@@ -255,6 +258,13 @@ pub fn performance_panel() -> Html {
         })
     };
 
+    let on_axis_scale_change = {
+        let axis_scale = axis_scale.clone();
+        Callback::from(move |scale: AxisScale| {
+            axis_scale.set(scale);
+        })
+    };
+
     let body = if *loading {
         html! {
             <div class="chart-empty">{ "Loading…" }</div>
@@ -270,7 +280,7 @@ pub fn performance_panel() -> Html {
             </div>
         }
     } else {
-        render_charts(&buckets, &group_by, &pairs, *window)
+        render_charts(&buckets, &group_by, &pairs, *window, *axis_scale)
     };
 
     html! {
@@ -330,6 +340,27 @@ pub fn performance_panel() -> Html {
                         }) }
                     </select>
                 </div>
+
+                <div class="performance-scale-group" role="radiogroup">
+                    <span class="performance-control-label">{ "Y scale:" }</span>
+                    { for AxisScale::all().iter().copied().map(|scale| {
+                        let is_active = *axis_scale == scale;
+                        let on_axis_scale_change = on_axis_scale_change.clone();
+                        let on_click = Callback::from(move |_| on_axis_scale_change.emit(scale));
+                        html! {
+                            <button
+                                type="button"
+                                class={classes!(
+                                    "performance-window-button",
+                                    is_active.then_some("active"),
+                                )}
+                                onclick={on_click}
+                            >
+                                { scale.label() }
+                            </button>
+                        }
+                    }) }
+                </div>
             </div>
 
             { body }
@@ -343,6 +374,7 @@ fn render_charts(
     group_by: &GroupBy,
     pairs: &[GroupKey],
     window: TimeWindow,
+    axis_scale: AxisScale,
 ) -> Html {
     let bucket_axis = distinct_bucket_starts(buckets);
     // Resolve the bucket-kind from the same wire param we sent on the request,
@@ -439,6 +471,7 @@ fn render_charts(
                 buckets={bucket_axis.clone()}
                 bucket_kind={bucket_kind}
                 series={throughput_series}
+                axis_scale={axis_scale}
             />
             <LinePlot
                 title="Time to first token"
@@ -446,6 +479,7 @@ fn render_charts(
                 buckets={bucket_axis.clone()}
                 bucket_kind={bucket_kind}
                 series={ttft_series}
+                axis_scale={axis_scale}
             />
             <StackedArea
                 title="Stop-reason mix"
@@ -453,6 +487,7 @@ fn render_charts(
                 buckets={bucket_axis.clone()}
                 bucket_kind={bucket_kind}
                 series={stop_reason_series}
+                axis_scale={axis_scale}
             />
             <LinePlot
                 title="Cache hit rate"
@@ -460,6 +495,7 @@ fn render_charts(
                 buckets={bucket_axis.clone()}
                 bucket_kind={bucket_kind}
                 series={cache_hit_series}
+                axis_scale={axis_scale}
             />
             <LinePlot
                 title="Cost per 1k output tokens"
@@ -467,6 +503,7 @@ fn render_charts(
                 buckets={bucket_axis.clone()}
                 bucket_kind={bucket_kind}
                 series={cost_series}
+                axis_scale={axis_scale}
             />
         </div>
     }

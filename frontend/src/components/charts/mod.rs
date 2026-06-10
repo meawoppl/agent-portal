@@ -18,5 +18,5 @@ pub mod scale;
 pub mod stacked_area;
 
 pub use line_plot::{LinePlot, LineSeries};
-pub use scale::BucketKind;
+pub use scale::{AxisScale, BucketKind};
 pub use stacked_area::{StackedArea, StackedSeries};
