@@ -133,7 +133,7 @@ pub async fn create_message(
 ) -> Result<Json<MessageResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     // Creating a message is a mutation — require editor/owner role (or the
     // session-row owner). See `session_access` for the layered rules.
@@ -149,8 +149,7 @@ pub async fn create_message(
 
     let message: Message = diesel::insert_into(messages::table)
         .values(&new_message)
-        .get_result(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .get_result(&mut conn)?;
 
     app_state.session_manager.queue_truncation(session_id);
 
@@ -179,7 +178,7 @@ pub async fn list_messages(
 ) -> Result<Json<MessagesListResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     let _session = verify_session_access(&mut conn, session_id, current_user_id)?;
 
@@ -230,8 +229,7 @@ pub async fn list_messages(
             .filter(messages::created_at.gt(after))
             .order(messages::created_at.asc())
             .limit(limit)
-            .load(&mut conn)
-            .map_err(|e| AppError::DbQuery(e.to_string()))?
+            .load(&mut conn)?
     } else {
         let mut query = messages::table
             .filter(messages::session_id.eq(session_id))
@@ -242,8 +240,7 @@ pub async fn list_messages(
         let mut newest_first: Vec<Message> = query
             .order(messages::created_at.desc())
             .limit(limit)
-            .load(&mut conn)
-            .map_err(|e| AppError::DbQuery(e.to_string()))?;
+            .load(&mut conn)?;
         newest_first.reverse();
         newest_first
     };

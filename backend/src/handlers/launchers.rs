@@ -94,7 +94,7 @@ pub async fn launch_session(
             .session_manager
             .pending_launch_sessions
             .remove(&request_id);
-        let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+        let mut conn = app_state.db_pool.get()?;
         use crate::schema::sessions;
         let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
         error!("Failed to send launch request to launcher {}", launcher_id);
@@ -135,7 +135,7 @@ pub(crate) fn create_desired_session(
     app_state: &AppState,
     draft: DesiredSessionDraft,
 ) -> Result<(), AppError> {
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::{session_members, sessions};
     use diesel::prelude::*;
@@ -162,8 +162,7 @@ pub(crate) fn create_desired_session(
 
     diesel::insert_into(sessions::table)
         .values(&new_session)
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     diesel::insert_into(session_members::table)
         .values(NewSessionMember {
@@ -171,8 +170,7 @@ pub(crate) fn create_desired_session(
             user_id: draft.user_id,
             role: "owner".to_string(),
         })
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     Ok(())
 }
@@ -291,15 +289,12 @@ pub async fn list_directories(
 }
 
 pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<String, AppError> {
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::users;
     use diesel::prelude::*;
 
-    let user: crate::models::User = users::table
-        .find(user_id)
-        .first(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    let user: crate::models::User = users::table.find(user_id).first(&mut conn)?;
 
     let token_id = Uuid::new_v4();
     // Launch tokens never expire. The token is bound to its session at proxy
@@ -326,8 +321,7 @@ pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<S
     use crate::schema::proxy_auth_tokens;
     diesel::insert_into(proxy_auth_tokens::table)
         .values(&new_token)
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     Ok(token)
 }

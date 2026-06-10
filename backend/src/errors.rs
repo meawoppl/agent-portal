@@ -17,6 +17,23 @@ pub enum AppError {
     Internal(String),
 }
 
+/// Blanket Diesel-error conversion so handlers can use `?` directly on
+/// query results. Matches the historical blanket `map_err(|e|
+/// AppError::DbQuery(e.to_string()))` mapping — handlers that want a
+/// different status for `diesel::result::Error::NotFound` keep an explicit
+/// `map_err`/`optional()` at the call site.
+impl From<diesel::result::Error> for AppError {
+    fn from(e: diesel::result::Error) -> Self {
+        AppError::DbQuery(e.to_string())
+    }
+}
+
+impl From<diesel::r2d2::PoolError> for AppError {
+    fn from(_: diesel::r2d2::PoolError) -> Self {
+        AppError::DbPool
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, msg) = match &self {
@@ -47,6 +64,16 @@ impl IntoResponse for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diesel_errors_convert_to_db_query() {
+        let err: AppError = diesel::result::Error::NotFound.into();
+        assert!(matches!(err, AppError::DbQuery(_)));
+        assert_eq!(
+            err.into_response().status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
 
     #[test]
     fn service_unavailable_maps_to_503() {

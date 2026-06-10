@@ -5,7 +5,6 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use diesel::prelude::*;
@@ -35,14 +34,11 @@ pub async fn create_token_handler(
 ) -> Result<Json<CreateProxyTokenResponse>, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     // Get user email for JWT claims
     use crate::schema::users;
-    let user: User = users::table
-        .find(user_id)
-        .first(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    let user: User = users::table.find(user_id).first(&mut conn)?;
 
     // Generate token ID
     let token_id = Uuid::new_v4();
@@ -74,8 +70,7 @@ pub async fn create_token_handler(
 
     let saved_token: ProxyAuthToken = diesel::insert_into(proxy_auth_tokens::table)
         .values(&new_token)
-        .get_result(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .get_result(&mut conn)?;
 
     // Build init URL
     let config = ProxyInitConfig {
@@ -104,13 +99,12 @@ pub async fn list_tokens_handler(
 ) -> Result<Json<ProxyTokenListResponse>, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     let tokens: Vec<ProxyAuthToken> = proxy_auth_tokens::table
         .filter(proxy_auth_tokens::user_id.eq(user_id))
         .order(proxy_auth_tokens::created_at.desc())
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     let token_infos: Vec<ProxyTokenInfo> = tokens
         .into_iter()
@@ -137,7 +131,7 @@ pub async fn revoke_token_handler(
 ) -> Result<EmptyResponse, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     // Update token to revoked (only if owned by user)
     let updated = diesel::update(
@@ -146,8 +140,7 @@ pub async fn revoke_token_handler(
             .filter(proxy_auth_tokens::user_id.eq(user_id)),
     )
     .set(proxy_auth_tokens::revoked.eq(true))
-    .execute(&mut conn)
-    .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    .execute(&mut conn)?;
 
     if updated == 0 {
         return Err(AppError::NotFound("proxy token"));
@@ -166,7 +159,7 @@ pub async fn renew_token_handler(
 ) -> Result<Json<CreateProxyTokenResponse>, AppError> {
     let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     let existing: ProxyAuthToken = proxy_auth_tokens::table
         .filter(proxy_auth_tokens::id.eq(token_id))
@@ -179,10 +172,7 @@ pub async fn renew_token_handler(
     }
 
     use crate::schema::users;
-    let user: User = users::table
-        .find(user_id)
-        .first(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    let user: User = users::table.find(user_id).first(&mut conn)?;
 
     let new_token_id = Uuid::new_v4();
     let expires_at = chrono::Utc::now() + chrono::Duration::days(req.expires_in_days as i64);
@@ -208,8 +198,7 @@ pub async fn renew_token_handler(
         proxy_auth_tokens::token_hash.eq(&token_hash),
         proxy_auth_tokens::expires_at.eq(Some(expires_at.naive_utc())),
     ))
-    .execute(&mut conn)
-    .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    .execute(&mut conn)?;
 
     let config = ProxyInitConfig {
         token: token.clone(),
@@ -239,12 +228,12 @@ pub fn verify_and_get_user(
     app_state: &AppState,
     conn: &mut diesel::pg::PgConnection,
     token: &str,
-) -> Result<(Uuid, String), StatusCode> {
+) -> Result<(Uuid, String), AppError> {
     // First verify JWT signature and expiration
     let claims =
         crate::jwt::verify_proxy_token(app_state.jwt_secret.as_bytes(), token).map_err(|e| {
             error!("JWT verification failed: {}", e);
-            StatusCode::UNAUTHORIZED
+            AppError::Unauthorized
         })?;
 
     // Then check database for revocation
@@ -254,13 +243,13 @@ pub fn verify_and_get_user(
         .first(conn)
         .map_err(|_| {
             error!("Token not found in database");
-            StatusCode::UNAUTHORIZED
+            AppError::Unauthorized
         })?;
 
     // Check if revoked
     if db_token.revoked {
         error!("Token has been revoked");
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(AppError::Unauthorized);
     }
 
     // Check if expired (belt and suspenders - JWT already checked this).
@@ -270,7 +259,7 @@ pub fn verify_and_get_user(
         let now = chrono::Utc::now().naive_utc();
         if expires_at < now {
             error!("Token has expired");
-            return Err(StatusCode::UNAUTHORIZED);
+            return Err(AppError::Unauthorized);
         }
     }
 
@@ -278,12 +267,12 @@ pub fn verify_and_get_user(
     use crate::schema::users;
     let user: crate::models::User = users::table.find(claims.sub).first(conn).map_err(|_| {
         error!("User not found for token");
-        StatusCode::UNAUTHORIZED
+        AppError::Unauthorized
     })?;
 
     if user.disabled {
         error!("Token belongs to banned user: {}", user.email);
-        return Err(StatusCode::FORBIDDEN);
+        return Err(AppError::Forbidden);
     }
 
     // Update last_used_at

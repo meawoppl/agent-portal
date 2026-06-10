@@ -48,7 +48,7 @@ pub async fn list_sessions(
 ) -> Result<Json<SessionListResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::{session_members, sessions};
 
@@ -58,8 +58,7 @@ pub async fn list_sessions(
         .filter(sessions::status.ne("replaced"))
         .select((Session::as_select(), session_members::role))
         .order(sessions::last_activity.desc())
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     let sessions_with_role = results
         .into_iter()
@@ -78,7 +77,7 @@ pub async fn resolve_proxy_session(
     State(app_state): State<Arc<AppState>>,
     Json(req): Json<ResolveProxySessionRequest>,
 ) -> Result<Json<ResolveProxySessionResponse>, AppError> {
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
     let current_user_id = proxy_request_user_id(&app_state, &mut conn, req.auth_token.as_deref())?;
 
     use crate::schema::{session_members, sessions};
@@ -101,8 +100,7 @@ pub async fn resolve_proxy_session(
     let session = query
         .order((sessions::last_activity.desc(), sessions::created_at.desc()))
         .first::<Session>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .optional()?;
 
     Ok(Json(match session {
         Some(session) => ResolveProxySessionResponse {
@@ -129,19 +127,14 @@ fn proxy_request_user_id(
 
     if let Some(token) = auth_token {
         return crate::handlers::proxy_tokens::verify_and_get_user(app_state, conn, token)
-            .map(|(user_id, _)| user_id)
-            .map_err(|status| match status {
-                axum::http::StatusCode::FORBIDDEN => AppError::Forbidden,
-                _ => AppError::Unauthorized,
-            });
+            .map(|(user_id, _)| user_id);
     }
 
     if app_state.dev_mode {
-        return users::table
+        return Ok(users::table
             .filter(users::email.eq("testing@testing.local"))
             .select(users::id)
-            .first::<Uuid>(conn)
-            .map_err(|e| AppError::DbQuery(e.to_string()));
+            .first::<Uuid>(conn)?);
     }
 
     Err(AppError::Unauthorized)
@@ -160,7 +153,7 @@ pub async fn get_session(
 ) -> Result<Json<SessionDetailResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::{messages, session_members, sessions};
 
@@ -170,16 +163,14 @@ pub async fn get_session(
         .filter(session_members::user_id.eq(current_user_id))
         .select(Session::as_select())
         .first::<Session>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .ok_or(AppError::NotFound("Session not found"))?;
 
     let recent_messages = messages::table
         .filter(messages::session_id.eq(session_id))
         .order(messages::created_at.desc())
         .limit(50)
-        .load::<Message>(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load::<Message>(&mut conn)?;
 
     Ok(Json(SessionDetailResponse {
         session,
@@ -194,7 +185,7 @@ pub async fn delete_session(
 ) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::{session_members, sessions};
 
@@ -207,8 +198,7 @@ pub async fn delete_session(
         .filter(sessions::user_id.eq(current_user_id))
         .select(Session::as_select())
         .first::<Session>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .optional()?;
 
     let session = match owned_by_user {
         Some(s) => s,
@@ -219,8 +209,7 @@ pub async fn delete_session(
             .filter(session_members::role.eq("owner"))
             .select(Session::as_select())
             .first::<Session>(&mut conn)
-            .optional()
-            .map_err(|e| AppError::DbQuery(e.to_string()))?
+            .optional()?
             .ok_or(AppError::NotFound("Session not found"))?,
     };
 
@@ -244,7 +233,7 @@ pub async fn stop_session(
 ) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     // Stopping a session is a mutation — viewer-role members must not be
     // able to terminate sessions they only have read access to. The helper
@@ -271,8 +260,7 @@ pub async fn stop_session(
                 sessions::status.eq("disconnected"),
                 sessions::updated_at.eq(diesel::dsl::now),
             ))
-            .execute(&mut conn)
-            .map_err(|e| AppError::DbQuery(e.to_string()))?;
+            .execute(&mut conn)?;
         Ok(EmptyResponse::ACCEPTED)
     } else if session.paused {
         Err(AppError::NotFound("Launcher not connected"))
@@ -288,7 +276,7 @@ pub async fn pause_session(
 ) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
     crate::handlers::session_access::verify_session_mutator(
         &mut conn,
         session_id,
@@ -302,8 +290,7 @@ pub async fn pause_session(
             sessions::status.eq("disconnected"),
             sessions::updated_at.eq(diesel::dsl::now),
         ))
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     app_state.session_manager.disconnect_session(session_id);
     app_state
@@ -320,7 +307,7 @@ pub async fn resume_session(
 ) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
     let session = crate::handlers::session_access::verify_session_mutator(
         &mut conn,
         session_id,
@@ -345,8 +332,7 @@ pub async fn resume_session(
             sessions::paused.eq(false),
             sessions::updated_at.eq(diesel::dsl::now),
         ))
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     let launch_msg = shared::ServerToLauncher::LaunchSession {
         request_id,
@@ -431,7 +417,7 @@ pub async fn list_session_members(
 ) -> Result<Json<SessionMembersResponse>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::{session_members, users};
 
@@ -439,8 +425,7 @@ pub async fn list_session_members(
         .filter(session_members::session_id.eq(session_id))
         .filter(session_members::user_id.eq(current_user_id))
         .first::<SessionMember>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .ok_or(AppError::NotFound("Session not found"))?;
 
     let members: Vec<(SessionMember, UserBasicInfo)> = session_members::table
@@ -450,8 +435,7 @@ pub async fn list_session_members(
             SessionMember::as_select(),
             (users::id, users::email, users::name),
         ))
-        .load(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .load(&mut conn)?;
 
     let member_infos = members
         .into_iter()
@@ -482,7 +466,7 @@ pub async fn add_session_member(
         return Err(AppError::Internal("Invalid role".to_string()));
     }
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::{session_members, users};
 
@@ -491,24 +475,21 @@ pub async fn add_session_member(
         .filter(session_members::user_id.eq(current_user_id))
         .filter(session_members::role.eq("owner"))
         .first::<SessionMember>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .ok_or(AppError::Forbidden)?;
 
     let target_user_id: Uuid = users::table
         .filter(users::email.eq(&req.email))
         .select(users::id)
         .first(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .ok_or(AppError::NotFound("User not found"))?;
 
     let existing = session_members::table
         .filter(session_members::session_id.eq(session_id))
         .filter(session_members::user_id.eq(target_user_id))
         .first::<SessionMember>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .optional()?;
 
     if existing.is_some() {
         return Err(AppError::Internal("User is already a member".to_string()));
@@ -522,8 +503,7 @@ pub async fn add_session_member(
 
     diesel::insert_into(session_members::table)
         .values(&new_member)
-        .execute(&mut conn)
-        .map_err(|e| AppError::DbQuery(e.to_string()))?;
+        .execute(&mut conn)?;
 
     Ok(EmptyResponse::CREATED)
 }
@@ -537,7 +517,7 @@ pub async fn remove_session_member(
 ) -> Result<EmptyResponse, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::session_members;
 
@@ -545,8 +525,7 @@ pub async fn remove_session_member(
         .filter(session_members::session_id.eq(session_id))
         .filter(session_members::user_id.eq(current_user_id))
         .first::<SessionMember>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .ok_or(AppError::NotFound("Session not found"))?;
 
     let is_owner = current_membership.role == "owner";
@@ -566,8 +545,7 @@ pub async fn remove_session_member(
             .filter(session_members::session_id.eq(session_id))
             .filter(session_members::user_id.eq(target_user_id)),
     )
-    .execute(&mut conn)
-    .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    .execute(&mut conn)?;
 
     if deleted == 0 {
         return Err(AppError::NotFound("Member not found"));
@@ -589,7 +567,7 @@ pub async fn update_session_member_role(
         return Err(AppError::Internal("Invalid role".to_string()));
     }
 
-    let mut conn = app_state.db_pool.get().map_err(|_| AppError::DbPool)?;
+    let mut conn = app_state.db_pool.get()?;
 
     use crate::schema::session_members;
 
@@ -598,8 +576,7 @@ pub async fn update_session_member_role(
         .filter(session_members::user_id.eq(current_user_id))
         .filter(session_members::role.eq("owner"))
         .first::<SessionMember>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .ok_or(AppError::Forbidden)?;
 
     if current_user_id == target_user_id {
@@ -612,8 +589,7 @@ pub async fn update_session_member_role(
             .filter(session_members::user_id.eq(target_user_id)),
     )
     .set(session_members::role.eq(&req.role))
-    .execute(&mut conn)
-    .map_err(|e| AppError::DbQuery(e.to_string()))?;
+    .execute(&mut conn)?;
 
     if updated == 0 {
         return Err(AppError::NotFound("Member not found"));

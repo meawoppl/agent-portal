@@ -47,8 +47,7 @@ pub fn verify_session_mutator(
         .filter(sessions::user_id.eq(user_id))
         .select(crate::models::Session::as_select())
         .first::<crate::models::Session>(conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
     {
         return Ok(session);
     }
@@ -65,8 +64,7 @@ pub fn verify_session_mutator(
         )
         .select(crate::models::Session::as_select())
         .first::<crate::models::Session>(conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(e.to_string()))?
+        .optional()?
         .ok_or(AppError::NotFound("Session not found"))
 }
 
