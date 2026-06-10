@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.16
+
+- **Increase Performance chart x-axis resolution.** Performance tabs now request minute buckets for 6-hour windows, 5-minute buckets for 1-day windows, and hourly buckets for week-plus windows instead of collapsing long windows to daily data. Multi-day minute/hour tick labels include the date so the denser charts stay readable.
+
 ## 2.8.15
 
 - **Keep the launch-session modal inside the viewport.** The launcher dialog now has bounded height, backdrop padding, and internal scrolling so tall directory listings or install instructions do not extend off the bottom of the screen.

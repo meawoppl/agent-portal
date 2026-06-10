@@ -107,7 +107,8 @@ fn nice_step(raw: f64) -> f64 {
 ///
 /// Labels:
 /// - `BucketKind::Day` → `"May 5"` (month abbreviation + day-of-month)
-/// - `BucketKind::Minute` / `Hour` → `"14:05"` / `"14:00"` (24-hour HH:MM)
+/// - single-day `BucketKind::Minute` / `Hour` → `"14:05"` / `"14:00"`
+/// - multi-day `BucketKind::Minute` / `Hour` → `"May 5 14:05"` / `"May 5 14:00"`
 pub fn time_axis_ticks(
     buckets: &[DateTime<Utc>],
     bucket: BucketKind,
@@ -119,10 +120,15 @@ pub fn time_axis_ticks(
     if buckets.len() == 1 {
         return vec![TickLabel {
             frac: 0.5,
-            label: format_tick_label(buckets[0], bucket),
+            label: format_tick_label(buckets[0], bucket, false),
         }];
     }
     let n = buckets.len();
+    let include_date = matches!(bucket, BucketKind::Minute | BucketKind::Hour)
+        && buckets
+            .first()
+            .zip(buckets.last())
+            .is_some_and(|(first, last)| first.date_naive() != last.date_naive());
     let target = max_ticks.clamp(2, n);
     // Step so we land on `target - 1` intervals across the [0..n-1] range.
     let last = (n - 1) as f64;
@@ -138,35 +144,51 @@ pub fn time_axis_ticks(
         };
         out.push(TickLabel {
             frac,
-            label: format_tick_label(buckets[idx], bucket),
+            label: format_tick_label(buckets[idx], bucket, include_date),
         });
     }
     out
 }
 
-fn format_tick_label(ts: DateTime<Utc>, bucket: BucketKind) -> String {
+fn format_tick_label(ts: DateTime<Utc>, bucket: BucketKind, include_date: bool) -> String {
     match bucket {
-        BucketKind::Minute => format!("{:02}:{:02}", ts.hour(), ts.minute()),
-        BucketKind::Hour => format!("{:02}:00", ts.hour()),
-        BucketKind::Day => {
-            let month = match ts.month() {
-                1 => "Jan",
-                2 => "Feb",
-                3 => "Mar",
-                4 => "Apr",
-                5 => "May",
-                6 => "Jun",
-                7 => "Jul",
-                8 => "Aug",
-                9 => "Sep",
-                10 => "Oct",
-                11 => "Nov",
-                12 => "Dec",
-                _ => "?",
-            };
-            format!("{} {}", month, ts.day())
+        BucketKind::Minute => {
+            let time = format!("{:02}:{:02}", ts.hour(), ts.minute());
+            if include_date {
+                format!("{} {time}", format_month_day(ts))
+            } else {
+                time
+            }
         }
+        BucketKind::Hour => {
+            let time = format!("{:02}:00", ts.hour());
+            if include_date {
+                format!("{} {time}", format_month_day(ts))
+            } else {
+                time
+            }
+        }
+        BucketKind::Day => format_month_day(ts),
     }
+}
+
+fn format_month_day(ts: DateTime<Utc>) -> String {
+    let month = match ts.month() {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => "?",
+    };
+    format!("{} {}", month, ts.day())
 }
 
 /// Build the y-axis ticks as `(value, normalized_frac)` pairs. `frac == 0.0`
@@ -334,6 +356,20 @@ mod tests {
     }
 
     #[test]
+    fn time_axis_ticks_hourly_labels_include_dates_across_days() {
+        let mut buckets = Vec::new();
+        for day in 5..=7 {
+            for hour in 0..24 {
+                buckets.push(Utc.with_ymd_and_hms(2026, 5, day, hour, 0, 0).unwrap());
+            }
+        }
+        let ticks = time_axis_ticks(&buckets, BucketKind::Hour, 4);
+        assert_eq!(ticks.len(), 4);
+        assert_eq!(ticks[0].label, "May 5 00:00");
+        assert_eq!(ticks[3].label, "May 7 23:00");
+    }
+
+    #[test]
     fn time_axis_ticks_minute_labels_include_minutes() {
         let mut buckets = Vec::new();
         for minute in 0..60 {
@@ -343,6 +379,18 @@ mod tests {
         assert_eq!(ticks.len(), 5);
         assert_eq!(ticks[0].label, "14:00");
         assert_eq!(ticks[4].label, "14:59");
+    }
+
+    #[test]
+    fn time_axis_ticks_minute_labels_include_dates_across_days() {
+        let buckets = vec![
+            Utc.with_ymd_and_hms(2026, 5, 5, 23, 55, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 5, 6, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 5, 6, 0, 5, 0).unwrap(),
+        ];
+        let ticks = time_axis_ticks(&buckets, BucketKind::Minute, 3);
+        assert_eq!(ticks[0].label, "May 5 23:55");
+        assert_eq!(ticks[2].label, "May 6 00:05");
     }
 
     #[test]

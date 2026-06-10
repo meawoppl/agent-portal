@@ -5,10 +5,10 @@
 //! the existing settings nav (alongside Launchers / Tokens / Sounds / Sessions
 //! / Appearance) — same chrome, same back-button pattern.
 //!
-//! On mount, fetches the default `bucket=day&window=30d` aggregation, then
-//! refetches when the user switches the time-window radio. A group-by
-//! dropdown filters to one `(agent_type, model, service_tier)` group, or
-//! "All" to render one line per group.
+//! On mount, fetches the default high-resolution `bucket=hour&window=30d`
+//! aggregation, then refetches when the user switches the time-window radio.
+//! A group-by dropdown filters to one `(agent_type, model, service_tier)`
+//! group, or "All" to render one line per group.
 
 use std::collections::BTreeMap;
 
@@ -108,15 +108,15 @@ fn window_param(window: TimeWindow) -> &'static str {
 }
 
 /// Build the bucket-granularity query string for the selected window.
-/// Pick enough buckets to show shape without turning sparse per-turn metrics
-/// into comb noise: roughly 60 buckets for 1h, 72 for 6h, 96 for 1d, and
-/// daily for week-plus windows.
+/// Pick high-fidelity buckets for the selected window. The charts only render
+/// a handful of x-axis labels, so dense buckets preserve real per-turn shape
+/// without cluttering the axis.
 fn bucket_param(window: TimeWindow) -> &'static str {
     match window {
         TimeWindow::Hours1 => "1m",
-        TimeWindow::Hours6 => "5m",
-        TimeWindow::Days1 => "15m",
-        TimeWindow::Days7 | TimeWindow::Days30 | TimeWindow::Days90 => "day",
+        TimeWindow::Hours6 => "1m",
+        TimeWindow::Days1 => "5m",
+        TimeWindow::Days7 | TimeWindow::Days30 | TimeWindow::Days90 => "hour",
     }
 }
 
@@ -863,16 +863,16 @@ mod tests {
         assert_eq!(window_param(TimeWindow::Days90), "90d");
     }
 
-    /// Short windows should stay granular enough to show shape; week-plus
-    /// windows stay daily so the query and x-axis remain readable.
+    /// Windows should stay granular enough to show shape; the chart axis
+    /// itself is already subsampled to a few readable labels.
     #[test]
     fn bucket_param_dispatches_on_window_length() {
         assert_eq!(bucket_param(TimeWindow::Hours1), "1m");
-        assert_eq!(bucket_param(TimeWindow::Hours6), "5m");
-        assert_eq!(bucket_param(TimeWindow::Days1), "15m");
-        assert_eq!(bucket_param(TimeWindow::Days7), "day");
-        assert_eq!(bucket_param(TimeWindow::Days30), "day");
-        assert_eq!(bucket_param(TimeWindow::Days90), "day");
+        assert_eq!(bucket_param(TimeWindow::Hours6), "1m");
+        assert_eq!(bucket_param(TimeWindow::Days1), "5m");
+        assert_eq!(bucket_param(TimeWindow::Days7), "hour");
+        assert_eq!(bucket_param(TimeWindow::Days30), "hour");
+        assert_eq!(bucket_param(TimeWindow::Days90), "hour");
     }
 
     #[test]
