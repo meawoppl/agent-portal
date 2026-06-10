@@ -36,7 +36,7 @@ pub fn handle_turn_metrics_report(
     };
     metrics.session_id = session_id;
 
-    if has_unknown_model(metrics.model.as_deref()) {
+    if !metrics.has_known_model() {
         warn!(
             "Dropping turn metrics for session {} with unknown model (agent={})",
             session_id, metrics.agent_type
@@ -184,13 +184,6 @@ pub fn handle_turn_metrics_report(
             ServerToClient::TurnMetrics(Box::new(payload.clone())),
         );
     }
-}
-
-fn has_unknown_model(model: Option<&str>) -> bool {
-    model.is_none_or(|value| {
-        let value = value.trim();
-        value.is_empty() || value.eq_ignore_ascii_case("unknown")
-    })
 }
 
 // No unit tests here — the persist/broadcast round-trip needs a real

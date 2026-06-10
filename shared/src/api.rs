@@ -712,6 +712,19 @@ pub struct TurnMetrics {
     pub total_cost_usd: Option<f64>,
 }
 
+impl TurnMetrics {
+    /// True when `model` is usable telemetry: present, non-blank, and not the
+    /// literal placeholder `"unknown"`. All three ingest points (Claude
+    /// proxy, Codex proxy, backend persist) warn-and-drop turn metrics that
+    /// fail this check, so the rule must stay identical everywhere.
+    pub fn has_known_model(&self) -> bool {
+        self.model.as_deref().is_some_and(|value| {
+            let value = value.trim();
+            !value.is_empty() && !value.eq_ignore_ascii_case("unknown")
+        })
+    }
+}
+
 // =============================================================================
 // Turn-metrics list endpoint (`GET /api/sessions/{id}/turn-metrics`)
 //
@@ -1030,6 +1043,50 @@ mod tests {
         assert_eq!(json["total_cost_usd"], 0.0145);
         let parsed: TurnMetrics = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, metrics);
+    }
+
+    /// The shared known-model gate: missing, blank, whitespace, and the
+    /// literal `unknown` placeholder (any case) are all rejected; real model
+    /// ids pass.
+    #[test]
+    fn turn_metrics_has_known_model() {
+        let mut metrics = TurnMetrics {
+            id: None,
+            session_id: Uuid::nil(),
+            user_message_id: None,
+            agent_type: "claude".to_string(),
+            model: Some("claude-opus-4-7".to_string()),
+            service_tier: None,
+            started_at: Utc::now(),
+            first_token_at: None,
+            completed_at: None,
+            ttft_ms: None,
+            total_duration_ms: None,
+            generation_duration_ms: None,
+            max_inter_token_gap_ms: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            thinking_tokens: 0,
+            stop_reason: None,
+            is_error: false,
+            tool_call_count: 0,
+            stream_restarts: 0,
+            total_cost_usd: None,
+        };
+        assert!(metrics.has_known_model());
+
+        for bad in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("unknown"),
+            Some("UNKNOWN"),
+        ] {
+            metrics.model = bad.map(str::to_string);
+            assert!(!metrics.has_known_model(), "expected {:?} rejected", bad);
+        }
     }
 
     /// `MetricBucket` round-trip. Claude row with all fields populated; the
