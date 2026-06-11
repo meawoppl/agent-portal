@@ -421,7 +421,7 @@ impl Component for SessionView {
                 // started_at ASC defensively even though the backend
                 // already orders that way — the join walk depends on
                 // strict order.
-                metrics.sort_by(|a, b| a.started_at.cmp(&b.started_at));
+                metrics.sort_by_key(|m| m.started_at);
                 self.turn_metrics = metrics;
                 true
             }
