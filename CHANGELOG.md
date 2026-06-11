@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.32
+
+- **`CurrentUserId` extractor + `AppState::conn()` replace the auth/DB preamble pasted into 33 REST handlers.** The extractor implements `FromRequestParts<Arc<AppState>>` over the existing `extract_user_id` (dev-mode bypass and disabled-user rejection reused, not reimplemented; rejection built from the same `AppError::into_response()`, so status/body are identical), which means a new handler can no longer forget the auth check. `AppState::conn()` centralizes pool checkout + `AppError::DbPool` mapping. Deliberately untouched: device-flow approve/deny (custom `DeviceFlowApiError` shape), `/api/me` (custom error mapping), Diesel `NotFound → 404` sites, and WebSocket paths with no request context. One inherent edge: requests that are both unauthenticated and malformed now get 401 before 400 (extractors run first) — auth-first is the point.
+
 ## 2.8.26
 
 - **Proxy shim now uses claude-session-lib's ws_bridge stack instead of a hand-rolled tokio-tungstenite wrapper.** `proxy/src/session.rs` (376 → 156 lines) loses `WebSocketConnection`, `connect_ws`, `register_with_backend`, raw text-frame parsing, and a byte-for-byte copy of the ClaudeInput/SequencedInput/PermissionResponse/OutputAck/Heartbeat/ServerShutdown/SessionTerminated dispatch — the shim now shares the exact connect/register/ack code path as the main proxy loop. The lib's duplicated wiggum-vs-input dispatch was extracted into `classify_portal_input`, which the shim reuses (deleting `ShimPortalInput`/`ShimPortalInputAck`). Behavior parity preserved deliberately: decode-tolerant reads (skip undecodable frames, warn), shim-style heartbeat replies, and the proxy keeps its direct tokio-tungstenite dep solely for the `rustls-tls-native-roots` feature union so cert validation is unchanged. Net −228 lines.
