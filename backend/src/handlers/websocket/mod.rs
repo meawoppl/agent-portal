@@ -1,4 +1,5 @@
 mod auth;
+mod continuations;
 mod image_upload_socket;
 pub mod launcher_socket;
 mod message_handlers;

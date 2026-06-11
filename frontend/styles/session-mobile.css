@@ -272,6 +272,15 @@
         padding: 0.75rem;
     }
 
+    .continuation-card {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .continuation-button {
+        width: 100%;
+    }
+
     .message-type-badge {
         font-size: 0.65rem;
         padding: 0.2rem 0.5rem;

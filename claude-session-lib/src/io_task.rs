@@ -8,6 +8,8 @@
 
 use std::time::{Duration, Instant};
 
+use chrono::{NaiveTime, TimeZone, Utc};
+use chrono_tz::Tz;
 use claude_codes::io::ContentBlock;
 use claude_codes::{AsyncClient as ClaudeAsyncClient, ClaudeInput, ClaudeOutput};
 use rand::Rng;
@@ -17,6 +19,10 @@ use session_lib::{TurnOutcome, TurnTracker};
 use shared::PortalMessage;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+const SESSION_LIMIT_TEXT: &str = "You've hit your session limit";
+const SESSION_LIMIT_CONTINUE_PROMPT: &str =
+    "Continue from where you stopped before the Claude session limit was reached.";
 
 /// Background task that owns the Claude process and handles all I/O.
 ///
@@ -54,6 +60,7 @@ pub(crate) async fn claude_io_task(
     // rate-limit text prefix. Latched until the turn's Result frame so we
     // can classify the whole turn on its terminator.
     let mut current_turn_was_rate_limited = false;
+    let mut pending_session_limit: Option<(String, String)> = None;
 
     // Per-turn performance metrics tracker. `start`ed on each user input,
     // `record_content_frame`d on assistant/text frames, finalized on
@@ -75,6 +82,7 @@ pub(crate) async fn claude_io_task(
                         // Each fresh user input gets its own retry budget.
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
+                        pending_session_limit = None;
                         // Begin per-turn metrics capture. Wall-clock UTC is
                         // chrono::Utc::now(); the monotonic instant is the
                         // anchor for TTFT / total / gap durations.
@@ -154,12 +162,17 @@ pub(crate) async fn claude_io_task(
                                     if text.starts_with(RATE_LIMIT_TEXT_PREFIX) {
                                         current_turn_was_rate_limited = true;
                                     }
+                                    if let Some(reset_at) = parse_session_limit_reset(text) {
+                                        pending_session_limit =
+                                            Some((reset_at, text.to_string()));
+                                    }
                                 }
                             }
                             ClaudeOutput::Result(r) if !r.is_error => {
                                 // Successful turn — clear consecutive-failure state.
                                 rate_limit_attempts = 0;
                                 current_turn_was_rate_limited = false;
+                                pending_session_limit = None;
                             }
                             _ => {}
                         }
@@ -218,10 +231,25 @@ pub(crate) async fn claude_io_task(
                             &output,
                             ClaudeOutput::Result(r) if r.is_error
                         ) && current_turn_was_rate_limited;
+                        let is_session_limit_terminator = matches!(
+                            &output,
+                            ClaudeOutput::Result(r) if r.is_error
+                        ) && pending_session_limit.is_some();
 
                         if event_tx.send(IoEvent::Output(Box::new(output))).is_err() {
                             // Receiver dropped, session ended.
                             break;
+                        }
+
+                        if is_session_limit_terminator {
+                            if let Some((reset_at, source_message)) = pending_session_limit.take() {
+                                let _ = event_tx.send(IoEvent::SessionLimitReached {
+                                    session_id,
+                                    reset_at,
+                                    source_message,
+                                    prompt: SESSION_LIMIT_CONTINUE_PROMPT.to_string(),
+                                });
+                            }
                         }
 
                         if !is_rate_limit_terminator {
@@ -293,6 +321,7 @@ pub(crate) async fn claude_io_task(
                                         // — honor that, abandon the retry, and reset
                                         // the budget for the new prompt.
                                         rate_limit_attempts = 0;
+                                        pending_session_limit = None;
                                         turn_tracker.start(Instant::now(), chrono::Utc::now());
                                         let r = client.send(&new_input).await;
                                         last_input = Some(new_input);
@@ -377,6 +406,60 @@ pub(crate) async fn claude_io_task(
             }
         }
     }
+}
+
+fn parse_session_limit_reset(text: &str) -> Option<String> {
+    if !text.contains(SESSION_LIMIT_TEXT) {
+        return None;
+    }
+
+    let after_resets = text.split("resets ").nth(1)?;
+    let open = after_resets.find('(')?;
+    let close = after_resets[open + 1..].find(')')? + open + 1;
+    let time_text = after_resets[..open].trim();
+    let tz_text = after_resets[open + 1..close].trim();
+
+    let tz: Tz = tz_text.parse().ok()?;
+    let reset_time = parse_limit_time(time_text)?;
+    let now_utc = Utc::now();
+    let now_local = now_utc.with_timezone(&tz);
+    let mut date = now_local.date_naive();
+
+    let local_dt = match tz.from_local_datetime(&date.and_time(reset_time)) {
+        chrono::LocalResult::Single(dt) => dt,
+        chrono::LocalResult::Ambiguous(earlier, _) => earlier,
+        chrono::LocalResult::None => {
+            date = date.succ_opt()?;
+            match tz.from_local_datetime(&date.and_time(reset_time)) {
+                chrono::LocalResult::Single(dt) => dt,
+                chrono::LocalResult::Ambiguous(earlier, _) => earlier,
+                chrono::LocalResult::None => return None,
+            }
+        }
+    };
+
+    let reset_utc = if local_dt.with_timezone(&Utc) <= now_utc {
+        let next_date = date.succ_opt()?;
+        match tz.from_local_datetime(&next_date.and_time(reset_time)) {
+            chrono::LocalResult::Single(dt) => dt,
+            chrono::LocalResult::Ambiguous(earlier, _) => earlier,
+            chrono::LocalResult::None => return None,
+        }
+    } else {
+        local_dt
+    };
+
+    Some(reset_utc.with_timezone(&Utc).to_rfc3339())
+}
+
+fn parse_limit_time(input: &str) -> Option<NaiveTime> {
+    let lower = input.trim().to_ascii_lowercase();
+    for fmt in ["%-I:%M%P", "%-I:%M %P", "%-I%P", "%-I %P"] {
+        if let Ok(time) = NaiveTime::parse_from_str(&lower, fmt) {
+            return Some(time);
+        }
+    }
+    None
 }
 
 /// Read available stderr output from the Claude process.

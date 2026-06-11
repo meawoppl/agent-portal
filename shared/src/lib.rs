@@ -354,6 +354,23 @@ impl PortalMessage {
         }
     }
 
+    pub fn continuation_prompt(
+        continuation_id: Uuid,
+        reset_at: String,
+        status: String,
+        source_message: String,
+    ) -> Self {
+        Self {
+            message_type: "portal".to_string(),
+            content: vec![PortalContent::ContinuationPrompt {
+                continuation_id,
+                reset_at,
+                status,
+                source_message,
+            }],
+        }
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_default()
     }
@@ -385,6 +402,15 @@ pub enum PortalContent {
         title: String,
         body: String,
     },
+    /// Action card shown when Claude reports a hard session limit. The
+    /// frontend may schedule a one-shot continuation for `reset_at`; the
+    /// launcher only injects it if the original local process is still alive.
+    ContinuationPrompt {
+        continuation_id: Uuid,
+        reset_at: String,
+        status: String,
+        source_message: String,
+    },
 }
 
 impl std::fmt::Debug for PortalContent {
@@ -409,6 +435,18 @@ impl std::fmt::Debug for PortalContent {
                 .debug_struct("Reminder")
                 .field("title", title)
                 .field("body", &format_args!("<{} bytes>", body.len()))
+                .finish(),
+            Self::ContinuationPrompt {
+                continuation_id,
+                reset_at,
+                status,
+                source_message,
+            } => f
+                .debug_struct("ContinuationPrompt")
+                .field("continuation_id", continuation_id)
+                .field("reset_at", reset_at)
+                .field("status", status)
+                .field("source_message", source_message)
                 .finish(),
         }
     }

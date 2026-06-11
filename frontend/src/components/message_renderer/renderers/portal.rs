@@ -2,6 +2,7 @@ use super::super::types::PortalMessage;
 use super::render_image_source;
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
+use std::collections::HashMap;
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -9,6 +10,8 @@ pub fn render_portal_message(
     msg: &PortalMessage,
     timestamp: Option<&str>,
     session_id: Uuid,
+    continuation_statuses: &HashMap<Uuid, String>,
+    on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
     let copy_text: String = msg
         .content
@@ -27,16 +30,26 @@ pub fn render_portal_message(
                     <CopyButton text={copy_text} title="Copy portal text" />
                 }
             </div>
-            <div class="message-body">{ render_portal_message_content(msg, session_id) }</div>
+            <div class="message-body">{ render_portal_message_content(msg, session_id, continuation_statuses, on_schedule_continuation) }</div>
         </div>
     }
 }
 
-pub fn render_portal_message_content(msg: &PortalMessage, session_id: Uuid) -> Html {
-    html! { <>{ for msg.content.iter().map(|content| render_portal_content(content, session_id)) }</> }
+pub fn render_portal_message_content(
+    msg: &PortalMessage,
+    session_id: Uuid,
+    continuation_statuses: &HashMap<Uuid, String>,
+    on_schedule_continuation: Callback<Uuid>,
+) -> Html {
+    html! { <>{ for msg.content.iter().map(|content| render_portal_content(content, session_id, continuation_statuses, on_schedule_continuation.clone())) }</> }
 }
 
-fn render_portal_content(content: &shared::PortalContent, session_id: Uuid) -> Html {
+fn render_portal_content(
+    content: &shared::PortalContent,
+    session_id: Uuid,
+    continuation_statuses: &HashMap<Uuid, String>,
+    on_schedule_continuation: Callback<Uuid>,
+) -> Html {
     match content {
         shared::PortalContent::Text { text } => render_markdown_for_session(text, session_id),
         shared::PortalContent::Image {
@@ -67,7 +80,84 @@ fn render_portal_content(content: &shared::PortalContent, session_id: Uuid) -> H
         shared::PortalContent::Reminder { title, body } => {
             html! { <PortalReminder title={title.clone()} body={body.clone()} session_id={session_id} /> }
         }
+        shared::PortalContent::ContinuationPrompt {
+            continuation_id,
+            reset_at,
+            status,
+            source_message,
+        } => render_continuation_prompt(
+            *continuation_id,
+            reset_at,
+            continuation_statuses
+                .get(continuation_id)
+                .map(String::as_str)
+                .unwrap_or(status),
+            source_message,
+            on_schedule_continuation,
+        ),
     }
+}
+
+fn render_continuation_prompt(
+    continuation_id: Uuid,
+    reset_at: &str,
+    status: &str,
+    source_message: &str,
+    on_schedule_continuation: Callback<Uuid>,
+) -> Html {
+    let reset_label = format_reset_label(reset_at);
+    let terminal = matches!(
+        status,
+        "scheduled" | "scheduling" | "fired" | "dropped" | "failed"
+    );
+    let status_class = status.to_string();
+    let button_label = match status {
+        "scheduled" => "Scheduled",
+        "scheduling" => "Scheduling...",
+        "fired" => "Continued",
+        "dropped" => "Dropped",
+        "failed" => "Failed",
+        _ => "Continue when limit lifted",
+    };
+    let onclick = {
+        let on_schedule_continuation = on_schedule_continuation.clone();
+        Callback::from(move |_: MouseEvent| {
+            on_schedule_continuation.emit(continuation_id);
+        })
+    };
+
+    html! {
+        <div class="continuation-card">
+            <div class="continuation-copy">
+                <div class="continuation-title">{ "Claude session limit reached" }</div>
+                <div class="continuation-detail">{ reset_label }</div>
+                if !source_message.is_empty() {
+                    <div class="continuation-source">{ source_message }</div>
+                }
+            </div>
+            <button
+                type="button"
+                class={classes!("continuation-button", status_class)}
+                disabled={terminal}
+                {onclick}
+            >
+                { button_label }
+            </button>
+        </div>
+    }
+}
+
+fn format_reset_label(reset_at: &str) -> String {
+    let ms = js_sys::Date::parse(reset_at);
+    if ms.is_nan() {
+        return format!("Resets at {}", reset_at);
+    }
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
+    let local = date
+        .to_locale_string("default", &js_sys::Object::new())
+        .as_string()
+        .unwrap_or_else(|| reset_at.to_string());
+    format!("Resets at {}", local)
 }
 
 #[derive(Properties, PartialEq)]

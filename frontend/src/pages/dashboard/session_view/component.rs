@@ -15,6 +15,7 @@ use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{ErrorMessage, TurnMetricsResponse};
 use shared::{ClientToServer, SendMode, SessionInfo, TurnMetrics};
+use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -114,6 +115,8 @@ pub enum SessionViewMsg {
     /// into `turn_metrics` in `started_at`-sorted order, deduping by `id`
     /// so a backfill-then-broadcast pair (or a duplicate replay) collapses.
     TurnMetricsReceived(Box<TurnMetrics>),
+    ScheduleLimitContinuation(Uuid),
+    ContinuationStatus(Uuid, String),
 }
 
 /// SessionView - Main terminal view for a single session
@@ -167,6 +170,7 @@ pub struct SessionView {
     /// because the join walk is sequential — a HashMap with a positional
     /// counter would buy nothing.
     turn_metrics: Vec<TurnMetrics>,
+    continuation_statuses: HashMap<Uuid, String>,
 }
 
 impl Component for SessionView {
@@ -237,6 +241,7 @@ impl Component for SessionView {
             input_bar_dispatcher: None,
             pending_sends: Vec::new(),
             turn_metrics: Vec::new(),
+            continuation_statuses: HashMap::new(),
         }
     }
 
@@ -424,6 +429,21 @@ impl Component for SessionView {
                 self.insert_turn_metrics(*metrics);
                 true
             }
+            SessionViewMsg::ScheduleLimitContinuation(continuation_id) => {
+                self.continuation_statuses
+                    .insert(continuation_id, "scheduling".to_string());
+                if let Some(ref sender) = self.ws_sender {
+                    send_message(
+                        sender,
+                        ClientToServer::ScheduleLimitContinuation { continuation_id },
+                    );
+                }
+                true
+            }
+            SessionViewMsg::ContinuationStatus(continuation_id, status) => {
+                self.continuation_statuses.insert(continuation_id, status);
+                true
+            }
         }
     }
 
@@ -434,6 +454,7 @@ impl Component for SessionView {
             e.stop_propagation();
             SessionViewMsg::JumpToLive
         });
+        let on_schedule_continuation = link.callback(SessionViewMsg::ScheduleLimitContinuation);
 
         // Per-turn metrics join (PR 2 of N): walk grouped messages in order
         // and pair the Nth terminator card with `turn_metrics[N]`. The
@@ -465,11 +486,11 @@ impl Component for SessionView {
                             groups.into_iter().enumerate().map(|(i, group)| {
                                 let key = group.key(i);
                                 let metrics = group_metrics.get(i).cloned().flatten();
-                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} /> }
+                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                             }).collect::<Html>()
                         }
                         { for self.pending_sends.iter().enumerate().map(|(i, json)| {
-                            html! { <MessageRenderer key={format!("p{}", i)} json={json.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} /> }
+                            html! { <MessageRenderer key={format!("p{}", i)} json={json.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                         })}
                     </div>
                     if !is_tailing {
@@ -554,6 +575,14 @@ impl SessionView {
             WsEvent::TurnMetrics(metrics) => {
                 ctx.link()
                     .send_message(SessionViewMsg::TurnMetricsReceived(metrics));
+                false
+            }
+            WsEvent::ContinuationStatus {
+                continuation_id,
+                status,
+            } => {
+                ctx.link()
+                    .send_message(SessionViewMsg::ContinuationStatus(continuation_id, status));
                 false
             }
         }

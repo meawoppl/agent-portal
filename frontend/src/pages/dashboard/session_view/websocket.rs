@@ -27,6 +27,10 @@ pub enum WsEvent {
     HistoryBatch(Vec<String>, Option<String>),
     Permission(PendingPermission),
     BranchChanged(Option<String>, Option<String>, Option<String>),
+    ContinuationStatus {
+        continuation_id: Uuid,
+        status: String,
+    },
     /// Live per-turn metrics broadcast for this session (PR 2 of N).
     /// Boxed to keep `WsEvent` compact — `TurnMetrics` is the largest variant
     /// payload by a wide margin (~22 fields).
@@ -205,6 +209,17 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         // an explicit branch or land in `unhandled` below.
         ServerToClient::TurnMetrics(metrics) => {
             on_event.emit(WsEvent::TurnMetrics(metrics));
+        }
+        ServerToClient::ContinuationStatus {
+            continuation_id,
+            status,
+            message,
+        } => {
+            let _ = message;
+            on_event.emit(WsEvent::ContinuationStatus {
+                continuation_id,
+                status,
+            });
         }
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
@@ -509,6 +524,7 @@ mod tests {
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",
             WsEvent::BranchChanged(_, _, _) => "BranchChanged",
+            WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",
         }
     }

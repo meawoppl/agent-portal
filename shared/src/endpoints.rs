@@ -61,6 +61,22 @@ pub struct ScheduledTaskConfig {
     pub last_session_id: Option<Uuid>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContinuationConfig {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub reset_at: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionLimitContinuationFields {
+    pub session_id: Uuid,
+    pub reset_at: String,
+    pub source_message: String,
+    pub prompt: String,
+}
+
 /// Fields for a permission response (shared by server-to-proxy and client-to-server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionResponseFields {
@@ -219,6 +235,11 @@ pub enum ProxyToServer {
     /// hot-path frames that fly orders of magnitude more often.
     TurnMetricsReport(Box<TurnMetrics>),
 
+    /// Claude reported a hard session limit with a reset time. The backend
+    /// persists a one-shot continuation candidate and asks the user whether
+    /// to schedule it.
+    SessionLimitReached(SessionLimitContinuationFields),
+
     /// Response to a backend-requested local file download.
     FileDownloadResponse(FileDownloadResponseFields),
 }
@@ -320,6 +341,10 @@ pub enum ClientToServer {
 
     /// Interrupt the current Claude response
     Interrupt,
+
+    /// Schedule a one-shot continuation that was detected by the proxy after
+    /// Claude reported a hard session limit.
+    ScheduleLimitContinuation { continuation_id: Uuid },
 }
 
 /// Messages the backend sends to the frontend.
@@ -411,6 +436,14 @@ pub enum ServerToClient {
 
     /// Session status changed
     SessionStatus { status: SessionStatus },
+
+    /// Status update for a one-shot hard-limit continuation action card.
+    ContinuationStatus {
+        continuation_id: Uuid,
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
 
     /// Launch session result (forwarded from launcher)
     LaunchSessionResult {
@@ -544,6 +577,21 @@ pub enum LauncherToServer {
     /// Inject input into a session on behalf of the scheduler
     InjectInput { session_id: Uuid, content: String },
 
+    /// A one-shot hard-limit continuation was injected into the still-running
+    /// local session.
+    ContinuationFired {
+        continuation_id: Uuid,
+        session_id: Uuid,
+    },
+
+    /// A one-shot hard-limit continuation reached its reset time, but the
+    /// original local session process was no longer running.
+    ContinuationDropped {
+        continuation_id: Uuid,
+        session_id: Uuid,
+        reason: String,
+    },
+
     /// Report that a scheduled task run has started
     ScheduledRunStarted { task_id: Uuid, session_id: Uuid },
 
@@ -618,6 +666,11 @@ pub enum ServerToLauncher {
 
     /// Sync scheduled task definitions to the launcher
     ScheduleSync { tasks: Vec<ScheduledTaskConfig> },
+
+    /// Sync one-shot hard-limit continuations to the launcher.
+    ContinuationSync {
+        continuations: Vec<ContinuationConfig>,
+    },
 
     /// Tell the launcher to pull the latest release, install it, and restart
     /// the agent-portal service. Triggered from the dashboard Launchers panel.

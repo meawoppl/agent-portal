@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use shared::ScheduledTaskConfig;
+use shared::{ContinuationConfig, ScheduledTaskConfig};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -9,6 +9,7 @@ use uuid::Uuid;
 /// Delay before sending the prompt after session spawn.
 /// Gives the proxy time to connect and register the session row.
 const PROMPT_DELAY: Duration = Duration::from_secs(5);
+const CONTINUATION_RESET_SKEW_SECS: i64 = 60;
 
 struct ActiveTask {
     config: ScheduledTaskConfig,
@@ -28,6 +29,13 @@ struct PendingPrompt {
     send_at: Instant,
 }
 
+#[derive(Clone)]
+pub struct ReadyContinuation {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub prompt: String,
+}
+
 pub struct RunningInfo {
     pub task_id: Uuid,
     pub started_at: Instant,
@@ -44,6 +52,7 @@ pub struct Scheduler {
     pending_launches: HashMap<Uuid, PendingLaunch>,
     running: HashMap<Uuid, RunningInfo>,
     pending_prompts: Vec<PendingPrompt>,
+    continuations: Vec<ContinuationConfig>,
 }
 
 impl Scheduler {
@@ -53,6 +62,7 @@ impl Scheduler {
             pending_launches: HashMap::new(),
             running: HashMap::new(),
             pending_prompts: Vec::new(),
+            continuations: Vec::new(),
         }
     }
 
@@ -101,6 +111,58 @@ impl Scheduler {
             .iter()
             .map(|p| p.send_at.saturating_duration_since(now))
             .min()
+    }
+
+    pub fn update_continuations(&mut self, continuations: Vec<ContinuationConfig>) {
+        info!(
+            "Continuation schedule updated: {} one-shot continuation(s)",
+            continuations.len()
+        );
+        self.continuations = continuations;
+    }
+
+    pub fn next_continuation_duration(&self) -> Option<Duration> {
+        let now = Utc::now();
+        self.continuations
+            .iter()
+            .filter_map(|c| {
+                DateTime::parse_from_rfc3339(&c.reset_at).ok().map(|dt| {
+                    dt.with_timezone(&Utc) + chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS)
+                })
+            })
+            .map(|next| {
+                if next <= now {
+                    Duration::ZERO
+                } else {
+                    (next - now).to_std().unwrap_or(Duration::ZERO)
+                }
+            })
+            .min()
+    }
+
+    pub fn ready_continuations(&mut self) -> Vec<ReadyContinuation> {
+        let now = Utc::now();
+        let mut ready = Vec::new();
+        self.continuations.retain(|c| {
+            let due = DateTime::parse_from_rfc3339(&c.reset_at)
+                .ok()
+                .map(|dt| {
+                    dt.with_timezone(&Utc) + chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS)
+                        <= now
+                })
+                .unwrap_or(false);
+            if due {
+                ready.push(ReadyContinuation {
+                    id: c.id,
+                    session_id: c.session_id,
+                    prompt: c.prompt.clone(),
+                });
+                false
+            } else {
+                true
+            }
+        });
+        ready
     }
 
     /// Find and return tasks that are due to fire. Advances next_fire times.

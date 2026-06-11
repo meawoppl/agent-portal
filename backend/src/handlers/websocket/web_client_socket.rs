@@ -231,6 +231,27 @@ fn handle_web_client_message(
             }
             false
         }
+        ClientToServer::ScheduleLimitContinuation { continuation_id } => {
+            if let Some(session_id) = *verified_session_id {
+                if !is_session_mutator(app_state, session_id, user_id) {
+                    warn!(
+                        "Viewer-role user {} attempted ScheduleLimitContinuation on session {}",
+                        user_id, session_id
+                    );
+                    return false;
+                }
+                super::continuations::schedule_limit_continuation(
+                    app_state,
+                    session_manager,
+                    user_id,
+                    session_id,
+                    continuation_id,
+                );
+            } else {
+                warn!("Web client tried to schedule continuation without verified session");
+            }
+            false
+        }
     }
 }
 
