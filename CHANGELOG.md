@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.26
+
+- **Proxy shim now uses claude-session-lib's ws_bridge stack instead of a hand-rolled tokio-tungstenite wrapper.** `proxy/src/session.rs` (376 → 156 lines) loses `WebSocketConnection`, `connect_ws`, `register_with_backend`, raw text-frame parsing, and a byte-for-byte copy of the ClaudeInput/SequencedInput/PermissionResponse/OutputAck/Heartbeat/ServerShutdown/SessionTerminated dispatch — the shim now shares the exact connect/register/ack code path as the main proxy loop. The lib's duplicated wiggum-vs-input dispatch was extracted into `classify_portal_input`, which the shim reuses (deleting `ShimPortalInput`/`ShimPortalInputAck`). Behavior parity preserved deliberately: decode-tolerant reads (skip undecodable frames, warn), shim-style heartbeat replies, and the proxy keeps its direct tokio-tungstenite dep solely for the `rustls-tls-native-roots` feature union so cert validation is unchanged. Net −228 lines.
+
 ## 2.8.24
 
 - **Remove the launcher's dead expected-session restart machinery.** `expected_sessions` is wiped unconditionally at startup (the backend DB has been authoritative since #908) and nothing repopulates it, so the crash-restart path could never fire. Deleted: `RESTART_DELAY`/`MAX_RESTART_ATTEMPTS`, the `restart_counts` map, the restart channel and its select arm, the post-exit clean/non-clean expected-session block, the resume-id fallback in `LaunchSession`, `config::remove_session`, and the now-orphaned `session_working_directory()` helper + `ManagedTask.working_directory` field. The one-time legacy-config wipe (`clear_sessions`) moved to `main.rs` where the config is loaded; behavior is identical. Net −132 lines and a simpler launcher select loop.
