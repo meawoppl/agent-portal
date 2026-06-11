@@ -48,7 +48,7 @@ impl GitRefreshTrigger {
 }
 
 /// Get the current git branch name, if in a git repository.
-pub(super) fn get_git_branch(cwd: &str) -> Option<String> {
+pub fn get_git_branch(cwd: &str) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(cwd)
