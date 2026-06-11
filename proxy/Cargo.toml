@@ -18,11 +18,16 @@ claude-codes = { workspace = true }
 # Async runtime
 tokio = { workspace = true, features = ["full"] }
 
-# WebSocket client. Use rustls instead of native-tls so the released binary
-# doesn't link against system libssl — Ubuntu 20.04 ships OpenSSL 1.1 only,
-# and our release binaries are built against OpenSSL 3, which crashes there.
+# Typed WebSocket client (connection comes from claude-session-lib's ws_bridge
+# usage; this direct dep is for the error types in the shim reader).
+ws-bridge = { workspace = true }
+
+# Not used directly: enables the system native root store for the WebSocket
+# client via feature union (ws-bridge only enables rustls-tls-webpki-roots).
+# Use rustls instead of native-tls so the released binary doesn't link against
+# system libssl — Ubuntu 20.04 ships OpenSSL 1.1 only, and our release
+# binaries are built against OpenSSL 3, which crashes there.
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
-futures-util = "0.3"
 
 # Serialization
 serde = { workspace = true }
