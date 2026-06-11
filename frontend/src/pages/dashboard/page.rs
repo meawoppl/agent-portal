@@ -10,7 +10,7 @@ use crate::components::{LaunchDialog, TurnMetricsHeaderPill};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::api::MeResponse;
 use shared::{AppConfig, SessionInfo};
@@ -137,12 +137,10 @@ pub fn dashboard_page() -> Html {
         let current_user_id = current_user_id.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/auth/me");
-                if let Ok(response) = Request::get(&api_endpoint).send().await {
-                    if let Ok(me) = response.json::<MeResponse>().await {
-                        is_admin.set(me.is_admin);
-                        current_user_id.set(Some(me.id.to_string()));
-                    }
+                if let Ok(me) = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await
+                {
+                    is_admin.set(me.is_admin);
+                    current_user_id.set(Some(me.id.to_string()));
                 }
             });
             || ()
@@ -155,12 +153,11 @@ pub fn dashboard_page() -> Html {
         let server_version = server_version.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/config");
-                if let Ok(response) = Request::get(&api_endpoint).send().await {
-                    if let Ok(config) = response.json::<AppConfig>().await {
-                        app_title.set(config.app_title);
-                        server_version.set(config.server_version);
-                    }
+                if let Ok(config) =
+                    utils::fetch_json::<AppConfig>("/api/config", On401::Ignore).await
+                {
+                    app_title.set(config.app_title);
+                    server_version.set(config.server_version);
                 }
             });
             || ()
@@ -333,11 +330,7 @@ pub fn dashboard_page() -> Html {
         })
     };
 
-    let do_logout = Callback::from(move |_| {
-        if let Some(window) = web_sys::window() {
-            let _ = window.location().set_href("/api/auth/logout");
-        }
-    });
+    let do_logout = Callback::from(move |_| utils::logout());
 
     // Leave session callbacks
     let on_leave = {
@@ -362,15 +355,10 @@ pub fn dashboard_page() -> Html {
                 let refresh = refresh.clone();
                 let pending_leave = pending_leave.clone();
                 spawn_local(async move {
-                    let me_endpoint = utils::api_url("/api/auth/me");
-                    let user_id = match Request::get(&me_endpoint).send().await {
-                        Ok(response) => response
-                            .json::<MeResponse>()
-                            .await
-                            .ok()
-                            .map(|me| me.id.to_string()),
-                        Err(_) => None,
-                    };
+                    let user_id = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore)
+                        .await
+                        .ok()
+                        .map(|me| me.id.to_string());
 
                     if let Some(user_id) = user_id {
                         let api_endpoint = utils::api_url(&format!(

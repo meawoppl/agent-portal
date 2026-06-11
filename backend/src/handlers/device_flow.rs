@@ -5,7 +5,10 @@ use axum::{
 };
 use diesel::prelude::*;
 use serde::Deserialize;
-use shared::api::{DeviceCodeRequest, DeviceFlowActionResponse, DeviceFlowPollRequest};
+use shared::api::{
+    DeviceCodeRequest, DeviceCodeResponse, DeviceFlowActionResponse, DeviceFlowPollRequest,
+};
+use shared::DevicePollResponse;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::{error, info};
@@ -13,11 +16,8 @@ use uuid::Uuid;
 
 use crate::{
     auth,
-    jwt::{create_proxy_token, hash_token},
-    models::NewProxyAuthToken,
-    routes,
-    schema::proxy_auth_tokens,
-    AppState,
+    handlers::proxy_tokens::{issue_proxy_token, TokenPersist},
+    routes, AppState,
 };
 
 use shared::protocol::{DEVICE_CODE_EXPIRES_SECS, SESSION_COOKIE_NAME};
@@ -30,9 +30,7 @@ mod state;
 use api_error::DeviceFlowError;
 use api_error::{auth_error_to_device_flow, DeviceFlowApiError};
 use render::render_approval_page;
-use state::{
-    generate_device_code, generate_user_code, DeviceCodeResponse, PollResponse, VerifyQuery,
-};
+use state::{generate_device_code, generate_user_code, VerifyQuery};
 pub use state::{DeviceFlowState, DeviceFlowStatus, DeviceFlowStore};
 
 // POST /auth/device/code
@@ -81,7 +79,7 @@ pub async fn device_code(
 pub async fn device_poll(
     State(app_state): State<Arc<AppState>>,
     Json(req): Json<DeviceFlowPollRequest>,
-) -> Result<Json<PollResponse>, DeviceFlowApiError> {
+) -> Result<Json<DevicePollResponse>, DeviceFlowApiError> {
     let store = app_state
         .device_flow_store
         .as_ref()
@@ -98,7 +96,7 @@ pub async fn device_poll(
     }
 
     match &state.status {
-        DeviceFlowStatus::Pending => Ok(Json(PollResponse::Pending)),
+        DeviceFlowStatus::Pending => Ok(Json(DevicePollResponse::Pending)),
         DeviceFlowStatus::Complete => {
             let user_id = state
                 .user_id
@@ -120,14 +118,14 @@ pub async fn device_poll(
                 .first::<crate::models::User>(&mut conn)
                 .map_err(|_| DeviceFlowApiError::internal_error("User not found"))?;
 
-            Ok(Json(PollResponse::Complete {
+            Ok(Json(DevicePollResponse::Complete {
                 access_token,
                 user_id: user_id.to_string(),
                 user_email: user.email,
             }))
         }
-        DeviceFlowStatus::Expired => Ok(Json(PollResponse::Expired)),
-        DeviceFlowStatus::Denied => Ok(Json(PollResponse::Denied)),
+        DeviceFlowStatus::Expired => Ok(Json(DevicePollResponse::Expired)),
+        DeviceFlowStatus::Denied => Ok(Json(DevicePollResponse::Denied)),
     }
 }
 
@@ -386,46 +384,26 @@ pub async fn complete_device_flow(
     user_code: &str,
     user_id: Uuid,
 ) -> Result<(), ()> {
-    // First, get user email from database (needed for JWT claims)
     let mut conn = app_state.db_pool.get().map_err(|e| {
         error!("Failed to get database connection: {}", e);
     })?;
 
-    use crate::schema::users;
-    let user: crate::models::User = users::table.find(user_id).first(&mut conn).map_err(|e| {
-        error!("Failed to find user: {}", e);
-    })?;
-
-    // Generate token ID and create JWT. Device-flow tokens (used by launchers
-    // and CLI proxies) never expire; revocation governs their lifetime. See
-    // #932.
-    let token_id = Uuid::new_v4();
-    let jwt_secret = app_state.jwt_secret.as_bytes();
-
-    let token =
-        create_proxy_token(jwt_secret, token_id, user_id, &user.email, None).map_err(|e| {
-            error!("Failed to create JWT: {}", e);
-        })?;
-
-    // Store token hash in database
-    let token_hash = hash_token(&token);
-
-    let new_token = NewProxyAuthToken {
+    // Device-flow tokens (used by launchers and CLI proxies) never expire;
+    // revocation governs their lifetime. See #932.
+    let name = format!(
+        "Device auth {}",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M")
+    );
+    let issued = issue_proxy_token(
+        &mut conn,
+        app_state.jwt_secret.as_bytes(),
         user_id,
-        name: format!(
-            "Device auth {}",
-            chrono::Utc::now().format("%Y-%m-%d %H:%M")
-        ),
-        token_hash,
-        expires_at: None,
-    };
-
-    diesel::insert_into(proxy_auth_tokens::table)
-        .values(&new_token)
-        .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to save token to database: {}", e);
-        })?;
+        TokenPersist::Create { name: &name },
+        None,
+    )
+    .map_err(|e| {
+        error!("Failed to issue device token: {:?}", e);
+    })?;
 
     // Now update the in-memory store with the JWT token
     let mut store_lock = store.write().await;
@@ -436,11 +414,11 @@ pub async fn complete_device_flow(
         .find(|s| s.user_code == user_code && s.status == DeviceFlowStatus::Pending)
     {
         state.user_id = Some(user_id);
-        state.access_token = Some(token);
+        state.access_token = Some(issued.token);
         state.status = DeviceFlowStatus::Complete;
         info!(
             "Device flow completed for user_code: {}, user: {}",
-            user_code, user.email
+            user_code, issued.user_email
         );
         Ok(())
     } else {
@@ -662,12 +640,12 @@ mod tests {
     #[test]
     fn test_poll_response_serialization() {
         // Test Pending
-        let pending = PollResponse::Pending;
+        let pending = DevicePollResponse::Pending;
         let json = serde_json::to_string(&pending).unwrap();
         assert!(json.contains("\"status\":\"pending\""));
 
         // Test Complete
-        let complete = PollResponse::Complete {
+        let complete = DevicePollResponse::Complete {
             access_token: "test-token".to_string(),
             user_id: "test-user-id".to_string(),
             user_email: "test@example.com".to_string(),
@@ -679,12 +657,12 @@ mod tests {
         assert!(json.contains("\"user_email\":\"test@example.com\""));
 
         // Test Expired
-        let expired = PollResponse::Expired;
+        let expired = DevicePollResponse::Expired;
         let json = serde_json::to_string(&expired).unwrap();
         assert!(json.contains("\"status\":\"expired\""));
 
         // Test Denied
-        let denied = PollResponse::Denied;
+        let denied = DevicePollResponse::Denied;
         let json = serde_json::to_string(&denied).unwrap();
         assert!(json.contains("\"status\":\"denied\""));
     }

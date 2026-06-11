@@ -11,6 +11,7 @@ use axum::{
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
+use shared::api::MessagesListResponse;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -95,18 +96,6 @@ pub struct MessageWithSender {
     pub sender_name: Option<String>,
 }
 
-/// Response for listing messages.
-///
-/// `total` is the page length (post-#788 it reflects what was actually
-/// returned, not the session-wide row count). Renamed semantics; the wire
-/// field stays `total` for backward compatibility with older clients that
-/// might key off it (the current frontend ignores this field).
-#[derive(Debug, Serialize)]
-pub struct MessagesListResponse {
-    pub messages: Vec<MessageWithSender>,
-    pub total: i64,
-}
-
 /// Verify that a user has access to a session (is a member with any role)
 fn verify_session_access(
     conn: &mut diesel::pg::PgConnection,
@@ -172,7 +161,7 @@ pub async fn list_messages(
     CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<uuid::Uuid>,
     Query(params): Query<ListMessagesQuery>,
-) -> Result<Json<MessagesListResponse>, AppError> {
+) -> Result<Json<MessagesListResponse<MessageWithSender>>, AppError> {
     let mut conn = app_state.conn()?;
 
     let _session = verify_session_access(&mut conn, session_id, current_user_id)?;
@@ -416,7 +405,7 @@ mod db_tests {
             session_name: format!("test-msg-session-{}", session_id),
             session_key: session_id.to_string(),
             working_directory: "/tmp".to_string(),
-            status: "active".to_string(),
+            status: shared::SessionStatus::Active.as_str().to_string(),
             git_branch: None,
             client_version: None,
             hostname: "test-host".to_string(),

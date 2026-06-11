@@ -1,5 +1,5 @@
 use crate::audio::{self, EventSound, SoundConfig, SoundEvent, Waveform, STORAGE_KEY};
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -25,22 +25,24 @@ pub fn sounds_panel() -> Html {
         let loading = loading.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                let url = utils::api_url("/api/settings/sound");
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if let Ok(data) = resp.json::<shared::SoundSettingsResponse>().await {
-                        if let Some(json) = data.sound_config {
-                            if let Ok(cfg) = serde_json::from_value::<SoundConfig>(json) {
-                                // Sync to localStorage for play_sound() runtime
-                                if let Ok(s) = serde_json::to_string(&cfg) {
-                                    if let Some(storage) = web_sys::window()
-                                        .and_then(|w| w.local_storage().ok())
-                                        .flatten()
-                                    {
-                                        let _ = storage.set_item(STORAGE_KEY, &s);
-                                    }
+                if let Ok(data) = utils::fetch_json::<shared::SoundSettingsResponse>(
+                    "/api/settings/sound",
+                    On401::Ignore,
+                )
+                .await
+                {
+                    if let Some(json) = data.sound_config {
+                        if let Ok(cfg) = serde_json::from_value::<SoundConfig>(json) {
+                            // Sync to localStorage for play_sound() runtime
+                            if let Ok(s) = serde_json::to_string(&cfg) {
+                                if let Some(storage) = web_sys::window()
+                                    .and_then(|w| w.local_storage().ok())
+                                    .flatten()
+                                {
+                                    let _ = storage.set_item(STORAGE_KEY, &s);
                                 }
-                                config.set(cfg);
                             }
+                            config.set(cfg);
                         }
                     }
                 }

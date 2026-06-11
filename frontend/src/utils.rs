@@ -1,4 +1,64 @@
+use serde::de::DeserializeOwned;
 use web_sys::window;
+
+/// How [`fetch_json`] should respond to an HTTP 401 (expired/invalid session).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum On401 {
+    /// Redirect the browser to the logout endpoint.
+    Logout,
+    /// Surface the 401 to the caller as `FetchError::Status(401)`.
+    Ignore,
+}
+
+/// Error from [`fetch_json`], split so callers can branch on HTTP status.
+#[derive(Debug)]
+pub enum FetchError {
+    /// The request could not be sent (network failure, etc.).
+    Network(String),
+    /// The server responded with a non-success HTTP status.
+    Status(u16),
+    /// The response body could not be decoded as the expected type.
+    Decode(String),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchError::Network(e) => write!(f, "request failed: {}", e),
+            FetchError::Status(code) => write!(f, "HTTP {}", code),
+            FetchError::Decode(e) => write!(f, "failed to parse response: {}", e),
+        }
+    }
+}
+
+/// Redirect the browser to the logout endpoint, clearing the session.
+pub fn logout() {
+    if let Some(window) = window() {
+        let _ = window.location().set_href("/api/auth/logout");
+    }
+}
+
+/// GET an API path (e.g. "/api/sessions") and decode the JSON response.
+///
+/// `on_401` selects whether an HTTP 401 logs the user out or is returned
+/// to the caller like any other error status.
+pub async fn fetch_json<T: DeserializeOwned>(path: &str, on_401: On401) -> Result<T, FetchError> {
+    let response = gloo_net::http::Request::get(&api_url(path))
+        .send()
+        .await
+        .map_err(|e| FetchError::Network(e.to_string()))?;
+    if response.status() == 401 && on_401 == On401::Logout {
+        logout();
+        return Err(FetchError::Status(401));
+    }
+    if !response.ok() {
+        return Err(FetchError::Status(response.status()));
+    }
+    response
+        .json::<T>()
+        .await
+        .map_err(|e| FetchError::Decode(e.to_string()))
+}
 
 /// Get the base HTTP URL (e.g., "http://localhost:3000" or "https://myapp.com")
 pub fn get_base_url() -> String {

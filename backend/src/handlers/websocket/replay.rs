@@ -208,7 +208,7 @@ mod replay_tests {
             session_name: format!("test-replay-{}", session_id),
             session_key: session_id.to_string(),
             working_directory: "/tmp".to_string(),
-            status: "active".to_string(),
+            status: shared::SessionStatus::Active.as_str().to_string(),
             git_branch: None,
             client_version: None,
             hostname: "test-host".to_string(),
