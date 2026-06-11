@@ -1,30 +1,10 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use serde::{Deserialize, Serialize};
 use shared::api::{DeviceCodeRequest, DeviceCodeResponse, DeviceFlowPollRequest};
+use shared::DevicePollResponse;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::info;
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "status")]
-enum PollResponse {
-    #[serde(rename = "pending")]
-    Pending,
-
-    #[serde(rename = "complete")]
-    Complete {
-        access_token: String,
-        user_id: String,
-        user_email: String,
-    },
-
-    #[serde(rename = "expired")]
-    Expired,
-
-    #[serde(rename = "denied")]
-    Denied,
-}
 
 /// Result of a successful device flow login.
 pub struct DeviceFlowResult {
@@ -156,14 +136,14 @@ pub async fn device_flow_login(
             anyhow::bail!("Poll request failed with status {}: {}", status, body);
         }
 
-        let poll_response: PollResponse = poll_http_response
+        let poll_response: DevicePollResponse = poll_http_response
             .json()
             .await
             .context("Failed to parse poll response")?;
 
         match poll_response {
-            PollResponse::Pending => continue,
-            PollResponse::Complete {
+            DevicePollResponse::Pending => continue,
+            DevicePollResponse::Complete {
                 access_token,
                 user_id,
                 user_email,
@@ -178,10 +158,10 @@ pub async fn device_flow_login(
                     user_email,
                 });
             }
-            PollResponse::Expired => {
+            DevicePollResponse::Expired => {
                 anyhow::bail!("Authentication code expired");
             }
-            PollResponse::Denied => {
+            DevicePollResponse::Denied => {
                 anyhow::bail!("Authentication was denied");
             }
         }

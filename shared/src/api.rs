@@ -1,6 +1,6 @@
 //! Shared API request/response types for HTTP endpoints.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -493,6 +493,175 @@ pub struct AdminUserEntry {
 pub struct AdminUsersResponse {
     #[serde(default)]
     pub users: Vec<AdminUserEntry>,
+}
+
+// =============================================================================
+// Admin Stats Endpoint (GET /api/admin/stats)
+// =============================================================================
+
+/// Response from GET /api/admin/stats — system overview statistics.
+///
+/// Wire shape matches the legacy `AdminStats` that lived in
+/// `backend/src/handlers/admin.rs`. All fields default so older or partial
+/// responses still parse.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AdminStats {
+    /// Total number of registered users
+    #[serde(default)]
+    pub total_users: i64,
+    /// Number of users with is_admin=true
+    #[serde(default)]
+    pub admin_users: i64,
+    /// Number of disabled users
+    #[serde(default)]
+    pub disabled_users: i64,
+    /// Total number of sessions (all time)
+    #[serde(default)]
+    pub total_sessions: i64,
+    /// Number of active sessions
+    #[serde(default)]
+    pub active_sessions: i64,
+    /// Number of currently connected proxy clients
+    #[serde(default)]
+    pub connected_proxy_clients: usize,
+    /// Number of currently connected web clients
+    #[serde(default)]
+    pub connected_web_clients: usize,
+    /// Total API spend across all sessions
+    #[serde(default)]
+    pub total_spend_usd: f64,
+    /// Total input tokens across all sessions
+    #[serde(default)]
+    pub total_input_tokens: i64,
+    /// Total output tokens across all sessions
+    #[serde(default)]
+    pub total_output_tokens: i64,
+    /// Total cache creation tokens across all sessions
+    #[serde(default)]
+    pub total_cache_creation_tokens: i64,
+    /// Total cache read tokens across all sessions
+    #[serde(default)]
+    pub total_cache_read_tokens: i64,
+}
+
+// =============================================================================
+// Admin Sessions Endpoint (GET /api/admin/sessions)
+// =============================================================================
+
+/// One row in the admin sessions table.
+///
+/// Wire shape matches the legacy `AdminSessionInfo` that was duplicated
+/// between `backend/src/handlers/admin.rs` and
+/// `frontend/src/pages/admin/mod.rs`. `id` is required because the frontend
+/// keys off it; everything else defaults so partial responses still parse.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdminSessionInfo {
+    pub id: Uuid,
+    #[serde(default)]
+    pub user_id: Uuid,
+    #[serde(default)]
+    pub user_email: String,
+    #[serde(default)]
+    pub session_name: String,
+    #[serde(default)]
+    pub working_directory: String,
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub total_cost_usd: f64,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub last_activity: String,
+    #[serde(default)]
+    pub is_connected: bool,
+    #[serde(default)]
+    pub hostname: String,
+}
+
+/// Response from GET /api/admin/sessions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AdminSessionsResponse {
+    #[serde(default)]
+    pub sessions: Vec<AdminSessionInfo>,
+}
+
+// =============================================================================
+// Launcher Endpoints (GET /api/launchers/:id/directories, /probe-agents)
+// =============================================================================
+
+/// Response from GET /api/launchers/:launcher_id/directories?path=…
+///
+/// Envelope around the already-shared `DirectoryEntry` payload type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DirectoryListingResponse {
+    #[serde(default)]
+    pub entries: Vec<crate::DirectoryEntry>,
+    #[serde(default)]
+    pub resolved_path: Option<String>,
+}
+
+/// Response from GET /api/launchers/:launcher_id/probe-agents.
+///
+/// Envelope around the already-shared `AgentInstall` payload type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProbeAgentsResponse {
+    #[serde(default)]
+    pub agents: Vec<crate::AgentInstall>,
+}
+
+// =============================================================================
+// Session Members Endpoint (GET /api/sessions/:id/members)
+// =============================================================================
+
+/// One member of a shared session.
+///
+/// Wire shape matches the legacy `SessionMemberInfo` in
+/// `backend/src/handlers/sessions.rs` — `created_at` serializes as the naive
+/// ISO timestamp chrono emits for `NaiveDateTime` (the frontend's old
+/// `MemberInfo` copy silently dropped this field).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMemberInfo {
+    pub user_id: Uuid,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub role: String,
+    pub created_at: NaiveDateTime,
+}
+
+/// Response from GET /api/sessions/:id/members.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionMembersResponse {
+    #[serde(default)]
+    pub members: Vec<SessionMemberInfo>,
+}
+
+// =============================================================================
+// Messages List Endpoint (GET /api/sessions/:id/messages)
+// =============================================================================
+
+/// Response envelope for listing messages.
+///
+/// Generic over the message element type because the two sides project the
+/// row differently: the backend serializes a flattened Diesel `Message` model
+/// (+ optional `sender_name`), while the frontend deserializes its lenient
+/// `MessageData` view. The envelope shape (`messages` + `total`) is the
+/// shared wire contract.
+///
+/// `total` is the page length (post-#788 it reflects what was actually
+/// returned, not the session-wide row count). The wire field stays `total`
+/// for backward compatibility with older clients that might key off it (the
+/// current frontend ignores this field).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MessagesListResponse<T> {
+    pub messages: Vec<T>,
+    #[serde(default)]
+    pub total: i64,
 }
 
 // =============================================================================

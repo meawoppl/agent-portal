@@ -1,5 +1,5 @@
 use rand::{distributions::Alphanumeric, Rng};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -28,35 +28,6 @@ pub enum DeviceFlowStatus {
     Pending,
     Complete,
     Expired,
-    Denied,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeviceCodeResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub expires_in: u64,
-    pub interval: u64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "status")]
-pub enum PollResponse {
-    #[serde(rename = "pending")]
-    Pending,
-
-    #[serde(rename = "complete")]
-    Complete {
-        access_token: String,
-        user_id: String,
-        user_email: String,
-    },
-
-    #[serde(rename = "expired")]
-    Expired,
-
-    #[serde(rename = "denied")]
     Denied,
 }
 

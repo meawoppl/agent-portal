@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::session::{
-    connect_ws, get_git_branch, register_with_backend, Backoff, PermissionResponseData,
-    ProxySessionConfig, SharedWsWrite, ShimPortalInputAck, WsEvent,
+    ack_portal_input, connect_to_backend, get_git_branch, register_session, Backoff,
+    PermissionResponseData, ProxySessionConfig, SharedWsWrite, WsEvent,
 };
 use anyhow::Result;
 use claude_codes::io::{
@@ -23,13 +23,11 @@ use claude_codes::io::{
     ControlResponsePayload, PermissionResult, UserMessage,
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
-use futures_util::SinkExt;
 use session_lib::output_buffer::PendingOutputBuffer;
 use shared::ProxyToServer;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
 /// Permission tracking for deduplication between VS Code and portal responses.
@@ -384,7 +382,7 @@ async fn run_shim_loop(
     // WebSocket connection loop with reconnection
     loop {
         // Connect to portal backend
-        let conn = match connect_ws(&config.backend_url).await {
+        let conn = match connect_to_backend(&config.backend_url, first_connection).await {
             Ok(conn) => {
                 if !first_connection {
                     info!("Reconnected to portal backend");
@@ -415,10 +413,12 @@ async fn run_shim_loop(
             ..config.clone()
         };
 
-        if let Err((_, err)) = register_with_backend(&mut conn, &config_with_branch).await {
+        if register_session(&mut conn, &config_with_branch)
+            .await
+            .is_err()
+        {
             warn!(
-                "Registration failed: {}, retrying in {}s",
-                err.as_deref().unwrap_or("unknown"),
+                "Registration failed, retrying in {}s",
                 backoff.current_secs()
             );
             tokio::time::sleep(backoff.sleep_duration()).await;
@@ -441,7 +441,7 @@ async fn run_shim_loop(
                         content: p.content.clone(),
                         agent_type: config.agent_type,
                     };
-                    if let Err(e) = conn.send(&msg).await {
+                    if let Err(e) = conn.send(msg).await {
                         error!("Failed to replay: {}", e);
                         break;
                     }
@@ -516,7 +516,7 @@ enum ShimConnectionResult {
 #[allow(clippy::too_many_arguments)]
 async fn run_shim_connection(
     config: &ProxySessionConfig,
-    conn: crate::session::WebSocketConnection,
+    conn: crate::session::NativeConnection,
     output_line_rx: &mut mpsc::UnboundedReceiver<(u64, serde_json::Value)>,
     perm_request_rx: &mut mpsc::UnboundedReceiver<ProxyToServer>,
     stdin_line_rx: &mut mpsc::UnboundedReceiver<String>,
@@ -645,11 +645,9 @@ async fn run_shim_connection(
                         let response = read_download_file(&config.working_directory, &request).await;
                         let msg = ProxyToServer::FileDownloadResponse(response);
                         let mut ws = ws_write.lock().await;
-                        if let Ok(json) = serde_json::to_string(&msg) {
-                            if let Err(e) = ws.send(Message::Text(json.into())).await {
-                                error!("Failed to send file download response: {}", e);
-                                break ShimConnectionResult::Disconnected;
-                            }
+                        if let Err(e) = ws.send(msg).await {
+                            error!("Failed to send file download response: {}", e);
+                            break ShimConnectionResult::Disconnected;
                         }
                     }
                     Some(WsEvent::Disconnect) | None => {
@@ -667,22 +665,18 @@ async fn run_shim_connection(
                     agent_type: config.agent_type,
                 };
                 let mut ws = ws_write.lock().await;
-                if let Ok(json) = serde_json::to_string(&msg) {
-                    if let Err(e) = ws.send(Message::Text(json.into())).await {
-                        error!("Failed to send output to portal: {}", e);
-                        break ShimConnectionResult::Disconnected;
-                    }
+                if let Err(e) = ws.send(msg).await {
+                    error!("Failed to send output to portal: {}", e);
+                    break ShimConnectionResult::Disconnected;
                 }
             }
 
             // Permission request from claude → send as typed PermissionRequest
             Some(perm_msg) = perm_request_rx.recv() => {
                 let mut ws = ws_write.lock().await;
-                if let Ok(json) = serde_json::to_string(&perm_msg) {
-                    if let Err(e) = ws.send(Message::Text(json.into())).await {
-                        error!("Failed to send permission request to portal: {}", e);
-                        break ShimConnectionResult::Disconnected;
-                    }
+                if let Err(e) = ws.send(perm_msg).await {
+                    error!("Failed to send permission request to portal: {}", e);
+                    break ShimConnectionResult::Disconnected;
                 }
             }
 
@@ -702,22 +696,6 @@ where
     writer.write_all(json_line.as_bytes()).await?;
     writer.write_all(b"\n").await?;
     writer.flush().await
-}
-
-async fn ack_portal_input(ws_write: &SharedWsWrite, ack: Option<ShimPortalInputAck>) {
-    let Some(ack) = ack else {
-        return;
-    };
-    let msg = ProxyToServer::InputAck {
-        session_id: ack.session_id,
-        ack_seq: ack.seq,
-    };
-    let mut ws = ws_write.lock().await;
-    if let Ok(json) = serde_json::to_string(&msg) {
-        if let Err(e) = ws.send(Message::Text(json.into())).await {
-            error!("Failed to send InputAck: {}", e);
-        }
-    }
 }
 
 async fn read_download_file(
