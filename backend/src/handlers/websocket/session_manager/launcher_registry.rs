@@ -138,3 +138,140 @@ impl SessionManager {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_launcher_connection(user_id: Uuid, hostname: &str) -> LauncherConnection {
+        let (sender, _rx) = mpsc::unbounded_channel();
+        LauncherConnection {
+            sender,
+            launcher_name: format!("launcher-{}", hostname),
+            hostname: hostname.to_string(),
+            user_id,
+            running_sessions: Vec::new(),
+            working_directory: None,
+            version: "test".to_string(),
+        }
+    }
+
+    #[test]
+    fn try_register_launcher_rejects_serial_duplicate() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let id_a = Uuid::new_v4();
+        let id_b = Uuid::new_v4();
+
+        assert!(mgr
+            .try_register_launcher(id_a, make_launcher_connection(user_id, "host1"))
+            .is_ok());
+
+        let err = mgr
+            .try_register_launcher(id_b, make_launcher_connection(user_id, "host1"))
+            .expect_err("second registration for same (user, host) must be rejected");
+        assert_eq!(err, format!("launcher-host1"));
+
+        assert_eq!(mgr.launchers.len(), 1);
+        assert!(mgr.launchers.contains_key(&id_a));
+        assert!(!mgr.launchers.contains_key(&id_b));
+    }
+
+    #[test]
+    fn try_register_launcher_allows_different_user_same_host() {
+        let mgr = SessionManager::new();
+        let user_a = Uuid::new_v4();
+        let user_b = Uuid::new_v4();
+
+        assert!(mgr
+            .try_register_launcher(Uuid::new_v4(), make_launcher_connection(user_a, "host1"))
+            .is_ok());
+        assert!(mgr
+            .try_register_launcher(Uuid::new_v4(), make_launcher_connection(user_b, "host1"))
+            .is_ok());
+        assert_eq!(mgr.launchers.len(), 2);
+    }
+
+    #[test]
+    fn unregister_launcher_releases_dedup_slot() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let id_a = Uuid::new_v4();
+        let id_b = Uuid::new_v4();
+
+        assert!(mgr
+            .try_register_launcher(id_a, make_launcher_connection(user_id, "host1"))
+            .is_ok());
+        mgr.unregister_launcher(&id_a);
+
+        // After unregister the same (user, host) should be claimable again.
+        assert!(mgr
+            .try_register_launcher(id_b, make_launcher_connection(user_id, "host1"))
+            .is_ok());
+        assert_eq!(mgr.launchers.len(), 1);
+        assert!(mgr.launchers.contains_key(&id_b));
+    }
+
+    /// Regression test for #790: concurrent registrations from the same
+    /// `(user_id, hostname)` must result in exactly one launcher being
+    /// registered. Previously `find_duplicate_launcher` + `register_launcher`
+    /// were separate steps, so two simultaneous connections could both pass
+    /// the duplicate check and both insert.
+    #[tokio::test]
+    async fn concurrent_launcher_registrations_dedupe_to_single_entry() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let hostname = "race-host";
+
+        // Spawn 10 concurrent registration attempts for the same (user, host).
+        let mut handles = Vec::with_capacity(10);
+        for _ in 0..10 {
+            let mgr_clone = mgr.clone();
+            let host = hostname.to_string();
+            handles.push(tokio::spawn(async move {
+                let launcher_id = Uuid::new_v4();
+                let conn = {
+                    let (sender, _rx) = mpsc::unbounded_channel();
+                    LauncherConnection {
+                        sender,
+                        launcher_name: format!("launcher-{}", launcher_id),
+                        hostname: host,
+                        user_id,
+                        running_sessions: Vec::new(),
+                        working_directory: None,
+                        version: "test".to_string(),
+                    }
+                };
+                mgr_clone
+                    .try_register_launcher(launcher_id, conn)
+                    .map(|_| launcher_id)
+            }));
+        }
+
+        let mut successes = 0usize;
+        let mut failures = 0usize;
+        for h in handles {
+            match h.await.expect("task panicked") {
+                Ok(_) => successes += 1,
+                Err(_) => failures += 1,
+            }
+        }
+
+        // Exactly one registration must succeed; the other nine must be
+        // rejected as duplicates. And the launchers map must hold exactly
+        // one entry for this (user, host).
+        assert_eq!(successes, 1, "exactly one registration should succeed");
+        assert_eq!(failures, 9, "nine registrations should be rejected");
+        assert_eq!(
+            mgr.launchers.len(),
+            1,
+            "launchers map must contain exactly one entry after the race"
+        );
+        let user_count = mgr
+            .launchers
+            .iter()
+            .filter(|e| e.value().user_id == user_id && e.value().hostname == hostname)
+            .count();
+        assert_eq!(user_count, 1);
+    }
+}
