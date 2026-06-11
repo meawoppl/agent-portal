@@ -33,7 +33,36 @@ pub struct CodexMessageRendererProps {
 
 #[function_component(CodexMessageRenderer)]
 pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
-    let parsed: Result<CodexEvent, _> = serde_json::from_str(&props.json);
+    render_codex_event(
+        &props.json,
+        props.session_id,
+        false,
+        props.turn_metrics.as_ref(),
+    )
+}
+
+/// Render the content-only body for a codex message inside an
+/// `IdentityGroup` — agent messages drop their card wrapper (the group
+/// header already carries the badge), everything else renders as it would
+/// standalone, and unrecognized events emit nothing instead of the raw-JSON
+/// card (the group classifier never admits them, so there is nothing to
+/// debug there).
+pub fn render_codex_message_content(json: &str, session_id: Uuid) -> Html {
+    render_codex_event(json, session_id, true, None)
+}
+
+/// Single dispatcher over `CodexEvent` for both the standalone card path
+/// (`CodexMessageRenderer`) and the grouped content path
+/// (`render_codex_message_content`). `bare_agent_message` selects the
+/// grouped behavior: agent messages render content-only (no card chrome)
+/// and unparseable/unknown events render nothing rather than the raw card.
+fn render_codex_event(
+    json: &str,
+    session_id: Uuid,
+    bare_agent_message: bool,
+    turn_metrics: Option<&shared::TurnMetrics>,
+) -> Html {
+    let parsed: Result<CodexEvent, _> = serde_json::from_str(json);
 
     match parsed {
         Ok(CodexEvent::ThreadStarted { .. }) => html! {},
@@ -48,17 +77,23 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
             duration_ms,
             turn_id.as_deref(),
             status.as_deref(),
-            props.turn_metrics.as_ref(),
+            turn_metrics,
         ),
-        Ok(CodexEvent::TurnFailed { error }) => {
-            render_turn_failed(error.as_ref(), props.turn_metrics.as_ref())
-        }
+        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref(), turn_metrics),
         Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
-            render_item(item.as_ref(), false, props.session_id)
+            match item.as_ref() {
+                Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
+                    render_agent_message_content(&it.text, session_id)
+                }
+                item => render_item(item, false, session_id),
+            }
         }
-        Ok(CodexEvent::ItemCompleted { item }) => {
-            render_item(item.as_ref(), true, props.session_id)
-        }
+        Ok(CodexEvent::ItemCompleted { item }) => match item.as_ref() {
+            Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
+                render_agent_message_content(&it.text, session_id)
+            }
+            item => render_item(item, true, session_id),
+        },
         Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
         Ok(CodexEvent::TurnDiffUpdated { params }) => {
             render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
@@ -77,7 +112,13 @@ pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
         Ok(CodexEvent::PlanDelta { .. })
         | Ok(CodexEvent::ReasoningSummaryPartAdded { .. })
         | Ok(CodexEvent::ReasoningTextDelta { .. }) => html! {},
-        Ok(CodexEvent::Unknown) | Err(_) => render_raw_codex(&props.json),
+        Ok(CodexEvent::Unknown) | Err(_) => {
+            if bare_agent_message {
+                html! {}
+            } else {
+                render_raw_codex(json)
+            }
+        }
     }
 }
 
@@ -113,54 +154,6 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
             // here to avoid duplication.
             ThreadItem::UserMessage(_) => html! {},
         },
-    }
-}
-
-pub fn render_codex_message_content(json: &str, session_id: Uuid) -> Html {
-    match serde_json::from_str::<CodexEvent>(json) {
-        Ok(CodexEvent::ItemCompleted {
-            item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
-        })
-        | Ok(CodexEvent::ItemStarted {
-            item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
-        })
-        | Ok(CodexEvent::ItemUpdated {
-            item: Some(CodexItem::Thread(ThreadItem::AgentMessage(it))),
-        }) => render_agent_message_content(&it.text, session_id),
-        Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
-            render_item(item.as_ref(), false, session_id)
-        }
-        Ok(CodexEvent::ItemCompleted { item }) => render_item(item.as_ref(), true, session_id),
-        Ok(CodexEvent::TurnCompleted {
-            usage,
-            duration_ms,
-            turn_id,
-            status,
-        }) => render_turn_completed(
-            usage.as_ref(),
-            duration_ms,
-            turn_id.as_deref(),
-            status.as_deref(),
-            // `render_codex_message_content` is the non-card content path
-            // used by `IdentityGroup` bodies; terminator events never end
-            // up grouped (they render as `Single` everywhere), so this
-            // branch is dead in practice but stays wired for shape symmetry.
-            None,
-        ),
-        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref(), None),
-        Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
-        Ok(CodexEvent::TurnDiffUpdated { params }) => {
-            render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
-        }
-        Ok(CodexEvent::FileChangePatchUpdated { params }) => {
-            render_file_change_patch(params.as_ref().and_then(|p| p.changes.as_deref()))
-        }
-        Ok(CodexEvent::TurnPlanUpdated { params }) => render_turn_plan(
-            params.as_ref().and_then(|p| p.plan.as_deref()),
-            params.as_ref().and_then(|p| p.explanation.as_deref()),
-        ),
-        Ok(CodexEvent::ThreadCompacted { params }) => render_context_compacted(params.as_ref()),
-        _ => html! {},
     }
 }
 

@@ -394,16 +394,22 @@ pub(super) fn visible_group_indices(category: GroupCategory, messages: &[String]
     }
     use crate::components::codex_renderer::codex_event_item_id;
     use std::collections::HashMap;
-    let mut last_idx: HashMap<String, usize> = HashMap::new();
-    for (i, json) in messages.iter().enumerate() {
-        if let Some(id) = codex_event_item_id(json) {
-            last_idx.insert(id, i);
+    // Parse each message's item_id once, then resolve the last index per id
+    // from the cached vector — parsing twice per message doubled the JSON
+    // work on the hot render path (#967).
+    let ids: Vec<Option<String>> = messages.iter().map(|j| codex_event_item_id(j)).collect();
+    let mut last_idx: HashMap<&str, usize> = HashMap::new();
+    for (i, id) in ids.iter().enumerate() {
+        if let Some(id) = id {
+            last_idx.insert(id.as_str(), i);
         }
     }
-    (0..messages.len())
-        .filter(|i| match codex_event_item_id(&messages[*i]) {
-            Some(id) => last_idx.get(&id) == Some(i),
+    ids.iter()
+        .enumerate()
+        .filter(|(i, id)| match id {
+            Some(id) => last_idx.get(id.as_str()) == Some(i),
             None => true,
         })
+        .map(|(i, _)| i)
         .collect()
 }

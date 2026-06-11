@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.28
+
+- **Message renderer: one JSON parse per message instead of 3-4 on the hot transcript path.** The dedicated `extract_local_timestamp` full-`Value` parse is gone — the timestamp tooltip is now derived from the already-extracted `_created_at` ISO string via `js_sys::Date::parse` (`local_timestamp` helper). Group dedup in `grouping.rs` now parses each message's codex `item_id` once into a cached `Vec<Option<String>>` instead of twice (last-index map + visibility filter both read the cache). Separately, the two near-identical 12-arm `CodexEvent` dispatchers in `codex_renderer.rs` (`CodexMessageRenderer` and `render_codex_message_content`, the latter carrying self-documented dead arms) collapsed into a single `render_codex_event(..., bare_agent_message, turn_metrics)` — the flag carries the only real difference (AgentMessage content-only rendering, no raw-JSON card on the grouped path). Rendering output verified arm-by-arm identical; 310 frontend tests pass.
+
 ## 2.8.27
 
 - **Frontend: one `fetch_json` helper replaces 25 hand-rolled GET call sites across 16 files.** New `utils::fetch_json<T>(path, On401)` (gloo_net GET via `api_url` → status check → JSON decode) with a typed `FetchError { Network, Status, Decode }` so pages that branch on status keep their exact behavior: admin's 401→Home / 403→"Access denied", launch dialog's distinct 400/504 messages. 401→logout applies only where it existed before (`/api/sessions`, `/api/proxy-tokens`); the splash page explicitly ignores 401 (pre-login). The logout redirect itself, previously copy-pasted in five files, is now `utils::logout()`. One genuine bug fixed in passing: share-dialog member-list decode failures used to hang the loading spinner silently, now they show an error. Net −22 lines and uniform error logging.
