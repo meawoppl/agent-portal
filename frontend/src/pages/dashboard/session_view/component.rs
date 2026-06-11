@@ -10,9 +10,8 @@
 
 use crate::components::message_renderer::MessageRenderer;
 use crate::components::{group_is_turn_terminator, group_messages, MessageGroupRenderer};
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
-use gloo_net::http::Request;
 use shared::api::{ErrorMessage, TurnMetricsResponse};
 use shared::{ClientToServer, SendMode, SessionInfo, TurnMetrics};
 use std::collections::HashMap;
@@ -185,20 +184,22 @@ impl Component for SessionView {
         // Fetch existing messages via REST, then connect WebSocket
         spawn_local(async move {
             let mut last_message_time: Option<String> = None;
-            let api_endpoint = utils::api_url(&format!("/api/sessions/{}/messages", session_id));
 
-            if let Ok(response) = Request::get(&api_endpoint).send().await {
-                if let Ok(data) = response.json::<MessagesResponse>().await {
-                    let is_awaiting = is_claude_awaiting(data.messages.iter().map(|m| &m.content));
-                    on_awaiting_change.emit((session_id, is_awaiting));
+            if let Ok(data) = utils::fetch_json::<MessagesResponse>(
+                &format!("/api/sessions/{}/messages", session_id),
+                On401::Ignore,
+            )
+            .await
+            {
+                let is_awaiting = is_claude_awaiting(data.messages.iter().map(|m| &m.content));
+                on_awaiting_change.emit((session_id, is_awaiting));
 
-                    last_message_time = data.messages.last().map(|m| m.created_at.clone());
+                last_message_time = data.messages.last().map(|m| m.created_at.clone());
 
-                    link.send_message(SessionViewMsg::LoadHistory(
-                        data.messages,
-                        last_message_time.clone(),
-                    ));
-                }
+                link.send_message(SessionViewMsg::LoadHistory(
+                    data.messages,
+                    last_message_time.clone(),
+                ));
             }
 
             // Hydrate the per-turn metrics buffer in parallel (PR 2 of N).
@@ -206,12 +207,13 @@ impl Component for SessionView {
             // empty for past turns; live broadcasts still populate the
             // buffer for new turns. Same `MeResponse`-style typed deserialize
             // pattern the existing `MessagesResponse` path uses.
-            let metrics_endpoint =
-                utils::api_url(&format!("/api/sessions/{}/turn-metrics", session_id));
-            if let Ok(response) = Request::get(&metrics_endpoint).send().await {
-                if let Ok(data) = response.json::<TurnMetricsResponse>().await {
-                    link.send_message(SessionViewMsg::LoadTurnMetrics(data.metrics));
-                }
+            if let Ok(data) = utils::fetch_json::<TurnMetricsResponse>(
+                &format!("/api/sessions/{}/turn-metrics", session_id),
+                On401::Ignore,
+            )
+            .await
+            {
+                link.send_message(SessionViewMsg::LoadTurnMetrics(data.metrics));
             }
 
             // Connect WebSocket with event callback

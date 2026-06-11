@@ -1,4 +1,4 @@
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::{
     CreateProxyTokenRequest, CreateProxyTokenResponse, ProxyTokenInfo, ProxyTokenListResponse,
@@ -37,23 +37,10 @@ pub fn count_expiring_tokens(tokens: &[ProxyTokenInfo]) -> usize {
 
 /// Fetch tokens from API, returning the list
 pub async fn fetch_tokens_from_api() -> Option<Vec<ProxyTokenInfo>> {
-    let api_endpoint = utils::api_url("/api/proxy-tokens");
-    match Request::get(&api_endpoint).send().await {
-        Ok(response) => {
-            if response.status() == 401 {
-                if let Some(window) = web_sys::window() {
-                    let _ = window.location().set_href("/api/auth/logout");
-                }
-                return None;
-            }
-            if let Ok(data) = response.json::<ProxyTokenListResponse>().await {
-                Some(data.tokens)
-            } else {
-                None
-            }
-        }
+    match utils::fetch_json::<ProxyTokenListResponse>("/api/proxy-tokens", On401::Logout).await {
+        Ok(data) => Some(data.tokens),
         Err(e) => {
-            log::error!("Failed to fetch tokens: {:?}", e);
+            log::error!("Failed to fetch tokens: {}", e);
             None
         }
     }

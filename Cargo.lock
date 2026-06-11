@@ -513,7 +513,6 @@ dependencies = [
  "colored",
  "directories",
  "dotenvy",
- "futures-util",
  "hostname",
  "libc",
  "portal-auth",
@@ -529,6 +528,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "ws-bridge",
 ]
 
 [[package]]

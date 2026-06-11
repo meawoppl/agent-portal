@@ -1,4 +1,4 @@
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::LauncherInfo;
 use uuid::Uuid;
@@ -78,11 +78,10 @@ pub fn launchers_panel() -> Html {
             let loading = loading.clone();
 
             spawn_local(async move {
-                let url = utils::api_url("/api/launchers");
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if let Ok(data) = resp.json::<Vec<LauncherInfo>>().await {
-                        launchers.set(data);
-                    }
+                if let Ok(data) =
+                    utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
+                {
+                    launchers.set(data);
                 }
                 loading.set(false);
             });
