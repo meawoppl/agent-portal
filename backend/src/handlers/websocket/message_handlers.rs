@@ -1,6 +1,7 @@
 use super::{ProxySender, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
+use serde::Deserialize;
 use shared::{AgentType, SendMode, ServerToClient, ServerToProxy};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -139,7 +140,7 @@ pub fn handle_claude_output(
     };
 
     // Validate that content roundtrips through ClaudeOutput parsing (frontend depends on this)
-    match serde_json::from_value::<shared::ClaudeOutput>(content.clone()) {
+    match shared::ClaudeOutput::deserialize(&content) {
         Ok(parsed) => {
             if let shared::ClaudeOutput::System(ref sys) = parsed {
                 if sys.is_task_started() && sys.as_task_started().is_none() {
@@ -291,7 +292,7 @@ pub fn handle_claude_output(
         session_manager.broadcast_to_web_clients(
             key,
             ServerToClient::ClaudeOutput {
-                content: content.clone(),
+                content,
                 sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
                 sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
                 agent_type,
@@ -312,7 +313,7 @@ fn store_result_metadata(
     use crate::schema::sessions;
 
     // Try typed deserialization first
-    if let Ok(result) = serde_json::from_value::<claude_codes::io::ResultMessage>(content.clone()) {
+    if let Ok(result) = claude_codes::io::ResultMessage::deserialize(content) {
         if let Err(e) = diesel::update(sessions::table.find(session_id))
             .set(sessions::total_cost_usd.eq(result.total_cost_usd))
             .execute(conn)
