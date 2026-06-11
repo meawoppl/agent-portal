@@ -38,7 +38,7 @@ pub async fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Resu
     let user_id: Uuid = cookie.value().parse().map_err(|_| AppError::Unauthorized)?;
 
     // Fetch user from database
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let user = schema::users::table
         .find(user_id)
@@ -144,7 +144,7 @@ pub async fn get_stats(
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested system stats", admin.email);
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Query 1: All user counts in one pass
     let user_stats: UserStats = diesel::sql_query(
@@ -221,7 +221,7 @@ pub async fn list_users(
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested user list", admin.email);
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get all users
     let users: Vec<User> = schema::users::table
@@ -292,7 +292,7 @@ pub async fn update_user(
         ));
     }
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get target user for logging
     let target_user: User = schema::users::table
@@ -402,7 +402,7 @@ pub async fn list_sessions(
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested sessions list", admin.email);
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get all sessions with user email
     let results: Vec<(crate::models::Session, String)> = schema::sessions::table
@@ -449,7 +449,7 @@ pub async fn delete_session(
 ) -> Result<EmptyResponse, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get session info for logging and cost tracking
     let session: crate::models::Session = schema::sessions::table

@@ -2,20 +2,17 @@ use axum::{extract::State, Json};
 use diesel::prelude::*;
 use shared::api::SoundSettingsResponse;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
-use crate::auth::extract_user_id;
+use crate::auth::CurrentUserId;
 use crate::errors::AppError;
 use crate::handlers::responses::EmptyResponse;
 use crate::AppState;
 
 pub async fn get_sound_settings(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
 ) -> Result<Json<SoundSettingsResponse>, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::users;
     let sound_config: Option<serde_json::Value> = users::table
@@ -28,12 +25,10 @@ pub async fn get_sound_settings(
 
 pub async fn save_sound_settings(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Json(config): Json<serde_json::Value>,
 ) -> Result<EmptyResponse, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::users;
     diesel::update(users::table.find(user_id))

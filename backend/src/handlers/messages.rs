@@ -1,4 +1,4 @@
-use crate::auth::extract_user_id;
+use crate::auth::CurrentUserId;
 use crate::errors::AppError;
 use crate::handlers::session_access::verify_session_mutator;
 use crate::models::{Message, NewMessage};
@@ -13,7 +13,6 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
 /// Hard upper bound on `limit` for `GET /api/sessions/{id}/messages`.
 ///
@@ -127,13 +126,11 @@ fn verify_session_access(
 /// Create a new message for a session
 pub async fn create_message(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<uuid::Uuid>,
     Json(req): Json<CreateMessageRequest>,
 ) -> Result<Json<MessageResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Creating a message is a mutation — require editor/owner role (or the
     // session-row owner). See `session_access` for the layered rules.
@@ -172,13 +169,11 @@ pub async fn create_message(
 /// all but the trailing N. SQL now does the trim.
 pub async fn list_messages(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<uuid::Uuid>,
     Query(params): Query<ListMessagesQuery>,
 ) -> Result<Json<MessagesListResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let _session = verify_session_access(&mut conn, session_id, current_user_id)?;
 

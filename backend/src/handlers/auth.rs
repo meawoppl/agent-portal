@@ -47,7 +47,7 @@ pub async fn device_login(
     if app_state.oauth_basic_client.is_none() {
         use crate::schema::users::dsl::*;
 
-        let mut conn = app_state.db_pool.get()?;
+        let mut conn = app_state.conn()?;
 
         let user = users
             .filter(email.eq("testing@testing.local"))
@@ -135,7 +135,7 @@ pub async fn callback(
     }
 
     // Save or update user in database
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::users::dsl::*;
 
@@ -216,7 +216,7 @@ pub async fn dev_login(
 ) -> Result<impl IntoResponse, AppError> {
     use crate::schema::users::dsl::*;
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let user = users
         .filter(email.eq("testing@testing.local"))

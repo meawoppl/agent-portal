@@ -13,11 +13,11 @@ use shared::api::{
 };
 use shared::{AgentType, ScheduledTaskConfig, ServerToLauncher};
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{
+    auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
     models::{NewScheduledTask, ScheduledTask},
@@ -105,11 +105,9 @@ fn send_schedule_sync(app_state: &AppState, user_id: Uuid) {
 /// GET /api/scheduled-tasks
 pub async fn list_tasks_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
 ) -> Result<Json<ScheduledTaskListResponse>, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let tasks: Vec<ScheduledTask> = scheduled_tasks::table
         .filter(scheduled_tasks::user_id.eq(user_id))
@@ -123,11 +121,9 @@ pub async fn list_tasks_handler(
 /// POST /api/scheduled-tasks
 pub async fn create_task_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Json(req): Json<CreateScheduledTaskRequest>,
 ) -> Result<Json<ScheduledTaskInfo>, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
     // Basic cron validation: must have 5 space-separated fields
     let fields: Vec<&str> = req.cron_expression.split_whitespace().collect();
     if fields.len() != 5 {
@@ -135,7 +131,7 @@ pub async fn create_task_handler(
         return Err(AppError::Internal("Invalid cron expression".to_string()));
     }
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let new_task = NewScheduledTask {
         user_id,
@@ -165,13 +161,11 @@ pub async fn create_task_handler(
 /// PATCH /api/scheduled-tasks/:id
 pub async fn update_task_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(task_id): Path<Uuid>,
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Result<Json<ScheduledTaskInfo>, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Verify ownership
     let existing: ScheduledTask = scheduled_tasks::table
@@ -243,12 +237,10 @@ pub async fn update_task_handler(
 /// DELETE /api/scheduled-tasks/:id
 pub async fn delete_task_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(task_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Verify ownership
     let task: ScheduledTask = scheduled_tasks::table
@@ -277,12 +269,10 @@ pub async fn delete_task_handler(
 /// GET /api/scheduled-tasks/:id/runs
 pub async fn list_runs_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(task_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Verify task ownership
     let _task: ScheduledTask = scheduled_tasks::table

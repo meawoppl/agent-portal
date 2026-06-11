@@ -69,6 +69,14 @@ pub struct AppState {
     pub image_store: handlers::images::ImageStore,
 }
 
+impl AppState {
+    /// Check out a database connection from the pool, mapping pool errors to
+    /// [`AppError::DbPool`](crate::errors::AppError::DbPool).
+    pub fn conn(&self) -> Result<db::DbConnection, crate::errors::AppError> {
+        Ok(self.db_pool.get()?)
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Parse CLI arguments

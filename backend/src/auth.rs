@@ -1,4 +1,8 @@
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use axum::response::{IntoResponse, Response};
 use diesel::prelude::*;
+use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
@@ -26,7 +30,7 @@ fn reject_disabled_user(user: User) -> Result<User, AppError> {
 /// Disabled users are rejected in both modes so a ban takes effect for existing
 /// browser sessions immediately.
 pub fn extract_user(app_state: &AppState, cookies: &Cookies) -> Result<User, AppError> {
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::users;
 
@@ -58,6 +62,30 @@ pub fn extract_user(app_state: &AppState, cookies: &Cookies) -> Result<User, App
 /// Disabled users are rejected in both modes.
 pub fn extract_user_id(app_state: &AppState, cookies: &Cookies) -> Result<Uuid, AppError> {
     extract_user(app_state, cookies).map(|user| user.id)
+}
+
+/// Axum extractor for the authenticated user's ID.
+///
+/// Runs [`extract_user_id`] before the handler body, so handlers that take
+/// this parameter can't forget the auth check. The rejection renders exactly
+/// what the manual `extract_user_id(&app_state, &cookies)?` call produced
+/// (`AppError` via `IntoResponse`).
+pub struct CurrentUserId(pub Uuid);
+
+impl FromRequestParts<Arc<AppState>> for CurrentUserId {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let cookies = Cookies::from_request_parts(parts, state)
+            .await
+            .map_err(|rejection| rejection.into_response())?;
+        extract_user_id(state, &cookies)
+            .map(CurrentUserId)
+            .map_err(|e| e.into_response())
+    }
 }
 
 #[cfg(test)]

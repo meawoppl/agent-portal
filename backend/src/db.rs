@@ -2,7 +2,7 @@ use anyhow::Result;
 use bigdecimal::ToPrimitive;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
-use diesel::r2d2::{self, ConnectionManager, Pool};
+use diesel::r2d2::{self, ConnectionManager, Pool, PooledConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::env;
 use uuid::Uuid;
@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::schema;
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
+pub type DbConnection = PooledConnection<ConnectionManager<PgConnection>>;
 
 /// Embedded database migrations - compiled into the binary
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");

@@ -16,7 +16,7 @@
 //!   latency + throughput computed via `percentile_cont` server-side. Same
 //!   owner-only gate as `/api/metrics/recent`.
 
-use crate::auth::extract_user_id;
+use crate::auth::CurrentUserId;
 use crate::errors::AppError;
 use crate::models::TurnMetric;
 use crate::AppState;
@@ -31,7 +31,6 @@ use shared::api::{MetricBucket, MetricBucketsResponse, TurnMetricsResponse};
 use shared::TurnMetrics;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
 /// Verify that the caller is a member of the session. Reuses the same
 /// `session_members` join the messages handler uses — read access is
@@ -99,11 +98,10 @@ fn row_to_wire(row: TurnMetric) -> TurnMetrics {
 /// handler.
 pub async fn list_turn_metrics(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<uuid::Uuid>,
 ) -> Result<Json<TurnMetricsResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     verify_session_access(&mut conn, session_id, current_user_id)?;
 
@@ -138,10 +136,9 @@ const RECENT_TURN_LIMIT: i64 = 50;
 /// migration directly. The reverse is O(50) and a non-event.
 pub async fn list_recent_user_turn_metrics(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
 ) -> Result<Json<TurnMetricsResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::turn_metrics;
     let mut rows: Vec<TurnMetric> = turn_metrics::table
@@ -319,11 +316,10 @@ struct StopReasonRow {
 /// reach the query.
 pub async fn list_aggregated_turn_metrics(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Query(query): Query<TurnMetricsAggregateQuery>,
 ) -> Result<Json<MetricBucketsResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let bucket = parse_bucket(query.bucket.as_deref())?;
     let interval = parse_window_to_interval(query.window.as_deref())?;
