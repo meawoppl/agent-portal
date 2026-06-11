@@ -1,7 +1,7 @@
 use crate::models::{NewSessionMember, NewSessionWithId};
 use crate::AppState;
 use diesel::prelude::*;
-use shared::AgentType;
+use shared::{AgentType, SessionStatus};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -87,7 +87,7 @@ pub fn register_or_update_session(
     if let Some(old_id) = params.replaces_session_id {
         if user_is_authorized_for_session(&mut conn, old_id, requesting_user_id) {
             match diesel::update(sessions::table.find(old_id))
-                .set(sessions::status.eq("replaced"))
+                .set(sessions::status.eq(SessionStatus::Replaced.as_str()))
                 .execute(&mut conn)
             {
                 Ok(n) if n > 0 => {
@@ -133,7 +133,7 @@ pub fn register_or_update_session(
 
         match diesel::update(sessions::table.find(existing_session.id))
             .set((
-                sessions::status.eq("active"),
+                sessions::status.eq(SessionStatus::Active.as_str()),
                 sessions::paused.eq(false),
                 sessions::last_activity.eq(diesel::dsl::now),
                 sessions::working_directory.eq(params.working_directory),
@@ -237,7 +237,7 @@ fn create_new_session(
         session_name: params.session_name.to_string(),
         session_key: params.session_key.to_string(),
         working_directory: params.working_directory.to_string(),
-        status: "active".to_string(),
+        status: SessionStatus::Active.as_str().to_string(),
         git_branch: params.git_branch.clone(),
         client_version: params.client_version.clone(),
         hostname: params.hostname.to_string(),

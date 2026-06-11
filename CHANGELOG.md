@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.31
+
+- **Session statuses now come from `shared::SessionStatus` everywhere, and the enum gained the missing `Replaced` variant.** The DB has contained `"replaced"` rows that the shared enum could not represent — any `SessionInfo` serialized with that status failed frontend deserialization, and every query had to remember `.ne("replaced")` by hand against a bare string. Sixteen raw `"active"`/`"inactive"`/`"disconnected"`/`"replaced"` literals across ten backend files (sessions, registration, launcher/proxy sockets, launchers, admin's raw-SQL `FILTER` — now a `$1` bind — plus `main.rs` cleanup loops and test fixtures) are replaced with `SessionStatus::X.as_str()`. Columns stay text (no Diesel custom type); query semantics identical. Frontend: the sessions panel styles `Replaced` like Inactive; everything else already matched non-exhaustively.
+
 ## 2.8.30
 
 - **One `issue_proxy_token` helper replaces four duplicated token-mint sites.** `mint_launch_token` (launchers), `create_token_handler` + `renew_token_handler` (proxy tokens — whose `ProxyInitConfig`/init-URL construction was also duplicated verbatim and is now a shared `token_response` helper), and `complete_device_flow` (device auth) all did the same load-user → `create_proxy_token` JWT → `hash_token` → `proxy_auth_tokens` row dance. The helper parameterizes persistence (`TokenPersist::Create { name }` vs `Renew { token_id }`, preserving renew's update-in-place semantics) and TTL. The issue's fifth site (`renew_launcher_token_for`) had already been deleted by #933. JWT claims, hashing, row contents, and log messages are unchanged — token semantics now change in one place.

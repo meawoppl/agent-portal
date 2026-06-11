@@ -200,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
             use schema::sessions;
 
             let active_sessions: Vec<(uuid::Uuid,)> = match sessions::table
-                .filter(sessions::status.eq("active"))
+                .filter(sessions::status.eq(shared::SessionStatus::Active.as_str()))
                 .select((sessions::id,))
                 .load(&mut conn)
             {
@@ -223,7 +223,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             match diesel::update(sessions::table.filter(sessions::id.eq_any(&stale_ids)))
-                .set(sessions::status.eq("disconnected"))
+                .set(sessions::status.eq(shared::SessionStatus::Disconnected.as_str()))
                 .execute(&mut conn)
             {
                 Ok(updated) => {

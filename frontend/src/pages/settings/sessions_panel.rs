@@ -25,6 +25,7 @@ fn session_row(props: &SessionRowProps) -> Html {
         shared::SessionStatus::Active => "session-status active",
         shared::SessionStatus::Inactive => "session-status inactive",
         shared::SessionStatus::Disconnected => "session-status disconnected",
+        shared::SessionStatus::Replaced => "session-status inactive",
     };
 
     let on_delete_click = Callback::from(move |_| {
