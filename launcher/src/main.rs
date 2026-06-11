@@ -196,9 +196,12 @@ async fn main() -> anyhow::Result<()> {
     tracing::debug!("Max sessions: {}", args.max_sessions);
 
     if !config.sessions.is_empty() {
-        tracing::info!("Expected sessions configured: {}", config.sessions.len());
-        for s in &config.sessions {
-            tracing::info!("  - {} ({})", s.working_directory, s.agent_type);
+        tracing::info!(
+            "Discarding {} launcher-local expected session(s); backend DB is authoritative",
+            config.sessions.len()
+        );
+        if let Err(e) = config::clear_sessions() {
+            tracing::warn!("Failed to clear launcher-local expected sessions: {}", e);
         }
     }
 
@@ -212,7 +215,6 @@ async fn main() -> anyhow::Result<()> {
         auth_token.as_deref(),
         process_manager,
         exit_rx,
-        config.sessions,
     )
     .await
 }

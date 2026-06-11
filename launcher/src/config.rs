@@ -71,19 +71,6 @@ pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn remove_session(working_directory: &str) -> anyhow::Result<()> {
-    let mut config = load_config();
-    let before = config.sessions.len();
-    config
-        .sessions
-        .retain(|s| s.working_directory != working_directory);
-    if config.sessions.len() < before {
-        save_config(&config)?;
-        tracing::debug!("Removed session from config: {}", working_directory);
-    }
-    Ok(())
-}
-
 pub fn clear_sessions() -> anyhow::Result<()> {
     let mut config = load_config();
     if !config.sessions.is_empty() {
