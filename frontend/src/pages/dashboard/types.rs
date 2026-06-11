@@ -53,11 +53,10 @@ pub struct MessageData {
     pub agent_type: String,
 }
 
-/// Response from messages API endpoint
-#[derive(Clone, PartialEq, Deserialize)]
-pub struct MessagesResponse {
-    pub messages: Vec<MessageData>,
-}
+/// Response from the messages API endpoint — the shared envelope
+/// (`messages` + `total`, the latter unused here) over this module's
+/// lenient `MessageData` projection.
+pub type MessagesResponse = shared::api::MessagesListResponse<MessageData>;
 
 /// Pending permission request
 #[derive(Clone, Debug, PartialEq)]

@@ -8,8 +8,10 @@ use axum::{
 };
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Double};
-use serde::Serialize;
-use shared::api::{AdminUserEntry, AdminUsersResponse, UpdateUserRequest};
+use shared::api::{
+    AdminSessionInfo, AdminSessionsResponse, AdminStats, AdminUserEntry, AdminUsersResponse,
+    UpdateUserRequest,
+};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::{info, warn};
@@ -63,34 +65,6 @@ pub async fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Resu
 // ============================================================================
 // Stats Endpoint - System overview statistics
 // ============================================================================
-
-#[derive(Debug, Serialize)]
-pub struct AdminStats {
-    /// Total number of registered users
-    pub total_users: i64,
-    /// Number of users with is_admin=true
-    pub admin_users: i64,
-    /// Number of disabled users
-    pub disabled_users: i64,
-    /// Total number of sessions (all time)
-    pub total_sessions: i64,
-    /// Number of active sessions
-    pub active_sessions: i64,
-    /// Number of currently connected proxy clients
-    pub connected_proxy_clients: usize,
-    /// Number of currently connected web clients
-    pub connected_web_clients: usize,
-    /// Total API spend across all sessions
-    pub total_spend_usd: f64,
-    /// Total input tokens across all sessions
-    pub total_input_tokens: i64,
-    /// Total output tokens across all sessions
-    pub total_output_tokens: i64,
-    /// Total cache creation tokens across all sessions
-    pub total_cache_creation_tokens: i64,
-    /// Total cache read tokens across all sessions
-    pub total_cache_read_tokens: i64,
-}
 
 /// Aggregated user counts from a single query.
 #[derive(QueryableByName)]
@@ -374,27 +348,6 @@ pub async fn update_user(
 // ============================================================================
 // Sessions Endpoint - List and manage all sessions
 // ============================================================================
-
-#[derive(Debug, Serialize)]
-pub struct AdminSessionInfo {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub user_email: String,
-    pub session_name: String,
-    pub working_directory: String,
-    pub git_branch: Option<String>,
-    pub status: String,
-    pub total_cost_usd: f64,
-    pub created_at: String,
-    pub last_activity: String,
-    pub is_connected: bool,
-    pub hostname: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AdminSessionsResponse {
-    pub sessions: Vec<AdminSessionInfo>,
-}
 
 pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,

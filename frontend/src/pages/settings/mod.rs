@@ -5,6 +5,7 @@ mod sessions_panel;
 mod sounds_panel;
 mod tokens_panel;
 
+use crate::utils;
 use appearance_panel::AppearancePanel;
 use launchers_panel::LaunchersPanel;
 use performance_panel::PerformancePanel;
@@ -93,11 +94,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     { "< Back" }
                 </button>
                 <h1>{ "Settings" }</h1>
-                <button class="header-button logout" onclick={Callback::from(|_| {
-                    if let Some(window) = web_sys::window() {
-                        let _ = window.location().set_href("/api/auth/logout");
-                    }
-                })}>
+                <button class="header-button logout" onclick={Callback::from(|_| utils::logout())}>
                     { "Logout" }
                 </button>
             </header>

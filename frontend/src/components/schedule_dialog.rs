@@ -1,4 +1,4 @@
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::api::{
     CreateScheduledTaskRequest, ScheduledTaskInfo, ScheduledTaskListResponse,
@@ -199,12 +199,11 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let hostname = hostname.clone();
         use_effect_with(hostname.clone(), move |_| {
             spawn_local(async move {
-                let url = utils::api_url("/api/launchers");
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if let Ok(launchers) = resp.json::<Vec<LauncherInfo>>().await {
-                        if let Some(l) = launchers.iter().find(|l| l.hostname == hostname) {
-                            launcher_version.set(l.version.clone());
-                        }
+                if let Ok(launchers) =
+                    utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
+                {
+                    if let Some(l) = launchers.iter().find(|l| l.hostname == hostname) {
+                        launcher_version.set(l.version.clone());
                     }
                 }
             });
@@ -223,17 +222,19 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             let loading = loading.clone();
             let wd = wd.clone();
             spawn_local(async move {
-                let url = utils::api_url("/api/scheduled-tasks");
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if let Ok(data) = resp.json::<ScheduledTaskListResponse>().await {
-                        // Filter to tasks matching this working directory
-                        let filtered: Vec<_> = data
-                            .tasks
-                            .into_iter()
-                            .filter(|t| t.working_directory == wd)
-                            .collect();
-                        tasks.set(filtered);
-                    }
+                if let Ok(data) = utils::fetch_json::<ScheduledTaskListResponse>(
+                    "/api/scheduled-tasks",
+                    On401::Ignore,
+                )
+                .await
+                {
+                    // Filter to tasks matching this working directory
+                    let filtered: Vec<_> = data
+                        .tasks
+                        .into_iter()
+                        .filter(|t| t.working_directory == wd)
+                        .collect();
+                    tasks.set(filtered);
                 }
                 loading.set(false);
             });

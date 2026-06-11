@@ -14,10 +14,10 @@ use grouping::{extract_raw_iso, visible_group_indices, GroupCategory};
 pub use grouping::{group_is_turn_terminator, group_messages, MessageGroup};
 use types::{user_meta_from_json, ClaudeMessage};
 
-/// Extract `_created_at` from a raw JSON message string and format it as local time.
-fn extract_local_timestamp(json: &str) -> Option<String> {
-    let val: Value = serde_json::from_str(json).ok()?;
-    let iso = val.get("_created_at")?.as_str()?;
+/// Format an already-extracted `_created_at` ISO string as local time.
+/// Takes the `extract_raw_iso` result rather than the raw JSON so the
+/// message string is parsed once per render, not once per consumer.
+fn local_timestamp(iso: &str) -> Option<String> {
     let ms = js_sys::Date::parse(iso);
     if ms.is_nan() {
         return None;
@@ -55,8 +55,8 @@ pub struct MessageRendererProps {
 
 #[function_component(MessageRenderer)]
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
-    let ts = extract_local_timestamp(&props.json);
     let raw_iso = extract_raw_iso(&props.json);
+    let ts = raw_iso.as_deref().and_then(local_timestamp);
     let parsed = ClaudeMessage::parse(&props.json);
 
     // Dispatch on the message shape, not the agent. `User` (the proxy's
@@ -159,7 +159,8 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         } => {
             let ts = messages
                 .first()
-                .and_then(|json| extract_local_timestamp(json));
+                .and_then(|json| extract_raw_iso(json))
+                .and_then(|iso| local_timestamp(&iso));
 
             // A run of `thinking_tokens` markers collapses to a single compact
             // chip: the `thinking` badge plus an odometer climbing to the run's

@@ -1,5 +1,5 @@
 use crate::components::ShareDialog;
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::api::SessionsResponse;
 use shared::SessionInfo;
@@ -95,22 +95,13 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
             let on_sessions_loaded = on_sessions_loaded.clone();
 
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/sessions");
-                match Request::get(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 401 {
-                            if let Some(window) = web_sys::window() {
-                                let _ = window.location().set_href("/api/auth/logout");
-                            }
-                            return;
-                        }
-                        if let Ok(data) = response.json::<SessionsResponse>().await {
-                            on_sessions_loaded.emit(data.sessions.clone());
-                            sessions.set(data.sessions);
-                        }
+                match utils::fetch_json::<SessionsResponse>("/api/sessions", On401::Logout).await {
+                    Ok(data) => {
+                        on_sessions_loaded.emit(data.sessions.clone());
+                        sessions.set(data.sessions);
                     }
                     Err(e) => {
-                        log::error!("Failed to fetch sessions: {:?}", e);
+                        log::error!("Failed to fetch sessions: {}", e);
                     }
                 }
                 sessions_loading.set(false);

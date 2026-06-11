@@ -1,6 +1,6 @@
-use crate::{utils, VERSION};
+use crate::utils::{self, On401};
+use crate::VERSION;
 use gloo::console;
-use gloo_net::http::Request;
 use shared::AppConfig;
 use yew::prelude::*;
 
@@ -12,11 +12,11 @@ pub fn splash_page() -> Html {
         let splash_text = splash_text.clone();
         use_effect_with((), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/config");
-                if let Ok(response) = Request::get(&api_endpoint).send().await {
-                    if let Ok(config) = response.json::<AppConfig>().await {
-                        splash_text.set(config.splash_text);
-                    }
+                // Pre-login page: a 401 here must not bounce through logout.
+                if let Ok(config) =
+                    utils::fetch_json::<AppConfig>("/api/config", On401::Ignore).await
+                {
+                    splash_text.set(config.splash_text);
                 }
             });
             || ()

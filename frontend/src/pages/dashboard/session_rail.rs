@@ -5,10 +5,9 @@
 
 use crate::components::{ScheduleDialog, ShareDialog};
 use crate::pages::dashboard::session_view::ActivityTag;
-use crate::utils;
+use crate::utils::{self, On401};
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
-use gloo_net::http::Request;
 use shared::api::ScheduledTaskListResponse;
 use shared::SessionInfo;
 use std::cell::RefCell;
@@ -245,15 +244,17 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     let wd = session.working_directory.clone();
                     let stop_has_tasks = stop_has_tasks.clone();
                     spawn_local(async move {
-                        let url = utils::api_url("/api/scheduled-tasks");
-                        if let Ok(resp) = Request::get(&url).send().await {
-                            if let Ok(data) = resp.json::<ScheduledTaskListResponse>().await {
-                                let has = data
-                                    .tasks
-                                    .iter()
-                                    .any(|t| t.working_directory == wd && t.enabled);
-                                stop_has_tasks.set(has);
-                            }
+                        if let Ok(data) = utils::fetch_json::<ScheduledTaskListResponse>(
+                            "/api/scheduled-tasks",
+                            On401::Ignore,
+                        )
+                        .await
+                        {
+                            let has = data
+                                .tasks
+                                .iter()
+                                .any(|t| t.working_directory == wd && t.enabled);
+                            stop_has_tasks.set(has);
                         }
                     });
                 }
