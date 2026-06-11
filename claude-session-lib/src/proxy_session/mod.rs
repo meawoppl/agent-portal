@@ -9,6 +9,8 @@ mod ws_reader;
 
 pub(crate) use portal_reminder::inject_portal_reminder;
 
+pub use ws_reader::{classify_portal_input, RoutedPortalInput};
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,13 +36,13 @@ use wiggum::{handle_session_event_with_wiggum, WiggumState};
 use ws_reader::{spawn_ws_reader, FileDownloadEvent, FileReceiveState, FileUploadEvent};
 
 /// Type alias for the native WebSocket connection
-type NativeConnection = ws_bridge::native_client::Connection<SessionEndpoint>;
+pub type NativeConnection = ws_bridge::native_client::Connection<SessionEndpoint>;
 
 /// Type alias for the shared WebSocket write half
-type SharedWsWrite = Arc<tokio::sync::Mutex<ws_bridge::WsSender<ProxyToServer>>>;
+pub type SharedWsWrite = Arc<tokio::sync::Mutex<ws_bridge::WsSender<ProxyToServer>>>;
 
 /// Type alias for the WebSocket read half
-type WsRead = ws_bridge::WsReceiver<ServerToProxy>;
+pub type WsRead = ws_bridge::WsReceiver<ServerToProxy>;
 
 /// Sink for codex thread-id persistence. The proxy crate owns the
 /// `ProxyConfig` JSON file; this callback lets the session loop hand the
@@ -561,7 +563,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
 }
 
 /// Connect to the backend WebSocket
-async fn connect_to_backend(
+pub async fn connect_to_backend(
     backend_url: &str,
     first_connection: bool,
 ) -> Result<NativeConnection, Duration> {
@@ -585,7 +587,7 @@ async fn connect_to_backend(
 
 /// Register session with the backend and wait for acknowledgment.
 /// On success, returns the backend-provided max_image_mb.
-async fn register_session(
+pub async fn register_session(
     conn: &mut NativeConnection,
     config: &ProxySessionConfig,
 ) -> Result<u32, Duration> {
@@ -793,7 +795,8 @@ async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> 
     rx.await.ok()
 }
 
-async fn ack_portal_input(ws_write: &SharedWsWrite, ack: Option<PortalInputAck>) {
+/// Send an `InputAck` for a portal input, if it carried ack metadata.
+pub async fn ack_portal_input(ws_write: &SharedWsWrite, ack: Option<PortalInputAck>) {
     let Some(ack) = ack else {
         return;
     };

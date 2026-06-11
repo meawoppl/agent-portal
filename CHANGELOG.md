@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.26
+
+- **Proxy shim now uses claude-session-lib's ws_bridge stack instead of a hand-rolled tokio-tungstenite wrapper.** `proxy/src/session.rs` (376 → 156 lines) loses `WebSocketConnection`, `connect_ws`, `register_with_backend`, raw text-frame parsing, and a byte-for-byte copy of the ClaudeInput/SequencedInput/PermissionResponse/OutputAck/Heartbeat/ServerShutdown/SessionTerminated dispatch — the shim now shares the exact connect/register/ack code path as the main proxy loop. The lib's duplicated wiggum-vs-input dispatch was extracted into `classify_portal_input`, which the shim reuses (deleting `ShimPortalInput`/`ShimPortalInputAck`). Behavior parity preserved deliberately: decode-tolerant reads (skip undecodable frames, warn), shim-style heartbeat replies, and the proxy keeps its direct tokio-tungstenite dep solely for the `rustls-tls-native-roots` feature union so cert validation is unchanged. Net −228 lines.
+
 ## 2.8.25
 
 - **Dedupe `get_git_branch` (4 copies) and `get_repo_url` (2 copies) into `claude-session-lib`.** The canonical implementations in `proxy_session/git_metadata.rs` are now `pub` and re-exported from `claude_session_lib::proxy_session`; the verbatim copies in `proxy/src/main.rs`, `proxy/src/session.rs`, and `launcher/src/process_manager.rs` are deleted and their call sites pointed at the shared versions. All copies were byte-identical modulo comments — no behavior change. Net −109 lines.
