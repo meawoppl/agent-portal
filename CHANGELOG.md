@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.33
+
+- **CI dedup: one composite `setup-rust` action, one frontend build, matrix release.** `ci.yml` previously built the frontend in four jobs and pasted Install Rust/cache/trunk/protoc steps across eight; now `build-frontend` builds once and uploads `frontend/dist` as an artifact consumed by clippy/build-backend/test, the eight per-platform proxy/launcher jobs are one `build-binaries` matrix, and setup lives in `.github/actions/setup-rust` (which also carries the macOS clean-rustup workaround once instead of twice). `release.yml`'s five copy-pasted platform jobs are one matrix — uploaded artifact and release-asset filenames verified byte-identical against what `portal-update` expects. `container.yml` keeps its independent build (cross-workflow artifact handoff would couple it to CI's run lifecycle) but uses the composite action. Job display names, cache keys, runners, and codesign steps unchanged. actionlint-clean.
+
 ## 2.8.26
 
 - **Proxy shim now uses claude-session-lib's ws_bridge stack instead of a hand-rolled tokio-tungstenite wrapper.** `proxy/src/session.rs` (376 → 156 lines) loses `WebSocketConnection`, `connect_ws`, `register_with_backend`, raw text-frame parsing, and a byte-for-byte copy of the ClaudeInput/SequencedInput/PermissionResponse/OutputAck/Heartbeat/ServerShutdown/SessionTerminated dispatch — the shim now shares the exact connect/register/ack code path as the main proxy loop. The lib's duplicated wiggum-vs-input dispatch was extracted into `classify_portal_input`, which the shim reuses (deleting `ShimPortalInput`/`ShimPortalInputAck`). Behavior parity preserved deliberately: decode-tolerant reads (skip undecodable frames, warn), shim-style heartbeat replies, and the proxy keeps its direct tokio-tungstenite dep solely for the `rustls-tls-native-roots` feature union so cert validation is unchanged. Net −228 lines.
