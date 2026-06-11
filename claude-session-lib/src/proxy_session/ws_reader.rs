@@ -35,6 +35,70 @@ pub(crate) struct FileReceiveState {
     pub(crate) last_log_percent: u32,
 }
 
+/// A portal input classified by send mode: a plain user input or a
+/// wiggum-mode activation carrying the original prompt.
+pub enum RoutedPortalInput {
+    Input(super::PortalInput),
+    Wiggum(super::PortalInput),
+}
+
+/// Convert a `ClaudeInput`/`SequencedInput` payload into a routed portal
+/// input, applying the shared wiggum-vs-input dispatch.
+pub fn classify_portal_input(
+    content: serde_json::Value,
+    send_mode: Option<SendMode>,
+    ack: Option<super::PortalInputAck>,
+) -> RoutedPortalInput {
+    let text = match content {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    };
+    let input = super::PortalInput { text, ack };
+    if send_mode == Some(SendMode::Wiggum) {
+        RoutedPortalInput::Wiggum(input)
+    } else {
+        RoutedPortalInput::Input(input)
+    }
+}
+
+/// Route a portal input payload to the wiggum or input channel.
+fn route_portal_input(
+    content: serde_json::Value,
+    send_mode: Option<SendMode>,
+    ack: Option<super::PortalInputAck>,
+    input_tx: &mpsc::UnboundedSender<super::PortalInput>,
+    wiggum_tx: &mpsc::UnboundedSender<super::PortalInput>,
+) -> WsMessageResult {
+    let label = if ack.is_some() { "seq_input" } else { "input" };
+    let seq_part = ack
+        .as_ref()
+        .map(|a| format!(" seq={}", a.seq))
+        .unwrap_or_default();
+    match classify_portal_input(content, send_mode, ack) {
+        RoutedPortalInput::Wiggum(input) => {
+            debug!(
+                "→ [{}/wiggum]{} {}",
+                label,
+                seq_part,
+                truncate(&input.text, 80)
+            );
+            // Only send to wiggum_tx — the select loop sets state and sends prompt atomically
+            if wiggum_tx.send(input).is_err() {
+                error!("Failed to send wiggum activation");
+                return WsMessageResult::Disconnect;
+            }
+        }
+        RoutedPortalInput::Input(input) => {
+            debug!("→ [{}]{} {}", label, seq_part, truncate(&input.text, 80));
+            if input_tx.send(input).is_err() {
+                error!("Failed to send input to channel");
+                return WsMessageResult::Disconnect;
+            }
+        }
+    }
+    WsMessageResult::Continue
+}
+
 /// Result from handling a WebSocket text message
 pub(super) enum WsMessageResult {
     /// Continue processing messages
@@ -124,37 +188,7 @@ async fn handle_ws_message(
 
     match proxy_msg {
         ServerToProxy::ClaudeInput { content, send_mode } => {
-            let user_text = match &content {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-
-            if send_mode == Some(SendMode::Wiggum) {
-                debug!("→ [input/wiggum] {}", truncate(&user_text, 80));
-                // Only send to wiggum_tx — the select loop sets state and sends prompt atomically
-                if wiggum_tx
-                    .send(super::PortalInput {
-                        text: user_text,
-                        ack: None,
-                    })
-                    .is_err()
-                {
-                    error!("Failed to send wiggum activation");
-                    return WsMessageResult::Disconnect;
-                }
-            } else {
-                debug!("→ [input] {}", truncate(&user_text, 80));
-                if input_tx
-                    .send(super::PortalInput {
-                        text: user_text,
-                        ack: None,
-                    })
-                    .is_err()
-                {
-                    error!("Failed to send input to channel");
-                    return WsMessageResult::Disconnect;
-                }
-            }
+            return route_portal_input(content, send_mode, None, input_tx, wiggum_tx);
         }
         ServerToProxy::SequencedInput {
             session_id,
@@ -162,41 +196,13 @@ async fn handle_ws_message(
             content,
             send_mode,
         } => {
-            let user_text = match &content {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-
-            if send_mode == Some(SendMode::Wiggum) {
-                debug!(
-                    "→ [seq_input/wiggum] seq={} {}",
-                    seq,
-                    truncate(&user_text, 80)
-                );
-                // Only send to wiggum_tx — the select loop sets state and sends prompt atomically
-                if wiggum_tx
-                    .send(super::PortalInput {
-                        text: user_text,
-                        ack: Some(super::PortalInputAck { session_id, seq }),
-                    })
-                    .is_err()
-                {
-                    error!("Failed to send wiggum activation");
-                    return WsMessageResult::Disconnect;
-                }
-            } else {
-                debug!("→ [seq_input] seq={} {}", seq, truncate(&user_text, 80));
-                if input_tx
-                    .send(super::PortalInput {
-                        text: user_text,
-                        ack: Some(super::PortalInputAck { session_id, seq }),
-                    })
-                    .is_err()
-                {
-                    error!("Failed to send input to channel");
-                    return WsMessageResult::Disconnect;
-                }
-            }
+            return route_portal_input(
+                content,
+                send_mode,
+                Some(super::PortalInputAck { session_id, seq }),
+                input_tx,
+                wiggum_tx,
+            );
         }
         ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
             request_id,
