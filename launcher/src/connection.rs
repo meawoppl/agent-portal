@@ -129,10 +129,15 @@ pub async fn run_launcher_loop(
                     let prompt_dur = scheduler
                         .next_prompt_duration()
                         .unwrap_or(Duration::from_secs(3600));
+                    let continuation_dur = scheduler
+                        .next_continuation_duration()
+                        .unwrap_or(Duration::from_secs(3600));
                     let sched_sleep = tokio::time::sleep(sched_dur);
                     let prompt_sleep = tokio::time::sleep(prompt_dur);
+                    let continuation_sleep = tokio::time::sleep(continuation_dur);
                     tokio::pin!(sched_sleep);
                     tokio::pin!(prompt_sleep);
+                    tokio::pin!(continuation_sleep);
 
                     tokio::select! {
                         result = ws_receiver.recv() => {
@@ -306,6 +311,49 @@ pub async fn run_launcher_loop(
                                 if ws_sender.send(inject).await.is_err() {
                                     warn!("Failed to send InjectInput");
                                     break;
+                                }
+                            }
+                        }
+
+                        _ = &mut continuation_sleep => {
+                            let running = process_manager.running_session_ids();
+                            for continuation in scheduler.ready_continuations() {
+                                if running.contains(&continuation.session_id) {
+                                    info!(
+                                        "Injecting continuation {} into still-running session {}",
+                                        continuation.id, continuation.session_id
+                                    );
+                                    let inject = LauncherToServer::InjectInput {
+                                        session_id: continuation.session_id,
+                                        content: continuation.prompt.clone(),
+                                    };
+                                    if ws_sender.send(inject).await.is_err() {
+                                        warn!("Failed to send continuation InjectInput");
+                                        break;
+                                    }
+                                    let fired = LauncherToServer::ContinuationFired {
+                                        continuation_id: continuation.id,
+                                        session_id: continuation.session_id,
+                                    };
+                                    if ws_sender.send(fired).await.is_err() {
+                                        warn!("Failed to send ContinuationFired");
+                                        break;
+                                    }
+                                } else {
+                                    let reason = "local Claude process was no longer running at reset time".to_string();
+                                    warn!(
+                                        "Dropping continuation {} for session {}: {}",
+                                        continuation.id, continuation.session_id, reason
+                                    );
+                                    let dropped = LauncherToServer::ContinuationDropped {
+                                        continuation_id: continuation.id,
+                                        session_id: continuation.session_id,
+                                        reason,
+                                    };
+                                    if ws_sender.send(dropped).await.is_err() {
+                                        warn!("Failed to send ContinuationDropped");
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -521,6 +569,9 @@ async fn handle_message(
         ServerToLauncher::PauseSession { session_id } => {
             info!("Pause request for session {}", session_id);
             process_manager.stop(&session_id).await;
+        }
+        ServerToLauncher::ContinuationSync { continuations } => {
+            scheduler.update_continuations(continuations);
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);

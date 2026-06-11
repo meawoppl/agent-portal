@@ -59,6 +59,14 @@ pub enum IoEvent {
     /// ship to the backend as `ProxyToServer::TurnMetricsReport`. Emitted
     /// once per finalize by the agent-specific I/O task.
     TurnMetricsReady(Box<TurnMetrics>),
+    /// Claude reported a hard session limit with a reset time. The proxy
+    /// persists a one-shot continuation candidate via the backend.
+    SessionLimitReached {
+        session_id: uuid::Uuid,
+        reset_at: String,
+        source_message: String,
+        prompt: String,
+    },
     /// The codex io-task learned (or re-confirmed) the app-server thread
     /// id for this session — emitted exactly once per spawn after
     /// `thread_start` / `thread/resume` returns. The proxy persists the
@@ -111,6 +119,14 @@ pub enum SessionEvent {
     /// Codex app-server thread id, surfaced by the codex io-task so the
     /// proxy can persist it. See `IoEvent::CodexThreadId`.
     CodexThreadId(String),
+
+    /// Claude reported a hard session limit with a reset time.
+    SessionLimitReached {
+        session_id: uuid::Uuid,
+        reset_at: String,
+        source_message: String,
+        prompt: String,
+    },
 }
 
 /// Response to a permission request.

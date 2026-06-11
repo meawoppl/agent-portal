@@ -239,6 +239,19 @@ impl<A: Agent> Session<A> {
                 Some(IoEvent::CodexThreadId(thread_id)) => {
                     return Some(SessionEvent::CodexThreadId(thread_id));
                 }
+                Some(IoEvent::SessionLimitReached {
+                    session_id,
+                    reset_at,
+                    source_message,
+                    prompt,
+                }) => {
+                    return Some(SessionEvent::SessionLimitReached {
+                        session_id,
+                        reset_at,
+                        source_message,
+                        prompt,
+                    });
+                }
                 Some(IoEvent::Exited { code }) => {
                     self.state = SessionState::Exited { code };
                     self.command_tx = None;

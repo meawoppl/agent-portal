@@ -1016,6 +1016,28 @@ async fn run_main_loop<A: Agent>(
                     continue;
                 }
 
+                if let Some(SessionEvent::SessionLimitReached {
+                    session_id,
+                    reset_at,
+                    source_message,
+                    prompt,
+                }) = event
+                {
+                    let msg =
+                        ProxyToServer::SessionLimitReached(shared::SessionLimitContinuationFields {
+                            session_id,
+                            reset_at,
+                            source_message,
+                            prompt,
+                        });
+                    let mut ws = state.ws_write.lock().await;
+                    if ws.send(msg).await.is_err() {
+                        error!("Failed to send session-limit continuation candidate");
+                        return ConnectionResult::Disconnected(state.connection_start.elapsed());
+                    }
+                    continue;
+                }
+
                 match handle_session_event_with_wiggum(
                     event,
                     &state.output_tx,

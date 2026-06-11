@@ -232,6 +232,12 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         }
     }
 
+    let continuation_configs =
+        super::continuations::load_scheduled_continuations(&app_state, launcher_id, user_id);
+    let _ = tx_for_sync.send(ServerToLauncher::ContinuationSync {
+        continuations: continuation_configs,
+    });
+
     // Main message loop
     loop {
         tokio::select! {
@@ -546,6 +552,36 @@ fn handle_launcher_message(
                     },
                 );
             }
+        }
+        LauncherToServer::ContinuationFired {
+            continuation_id,
+            session_id,
+        } => {
+            super::continuations::mark_continuation_fired(
+                app_state,
+                launcher_id,
+                user_id,
+                continuation_id,
+                session_id,
+            );
+        }
+        LauncherToServer::ContinuationDropped {
+            continuation_id,
+            session_id,
+            reason,
+        } => {
+            warn!(
+                "Continuation {} for session {} dropped by launcher {}: {}",
+                continuation_id, session_id, launcher_id, reason
+            );
+            super::continuations::mark_continuation_dropped(
+                app_state,
+                launcher_id,
+                user_id,
+                continuation_id,
+                session_id,
+                reason,
+            );
         }
         LauncherToServer::ScheduledRunStarted {
             task_id,

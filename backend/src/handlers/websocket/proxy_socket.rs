@@ -1,3 +1,4 @@
+use super::continuations::handle_session_limit_reached;
 use super::message_handlers::{handle_claude_output, replay_pending_inputs_from_db};
 use super::permissions::handle_permission_request;
 use super::registration::{register_or_update_session, RegistrationParams};
@@ -277,6 +278,16 @@ fn handle_proxy_message(
                 *db_session_id,
                 db_pool,
                 *metrics,
+            );
+        }
+        ProxyToServer::SessionLimitReached(fields) => {
+            handle_session_limit_reached(
+                app_state,
+                session_manager,
+                session_key,
+                *db_session_id,
+                db_pool,
+                fields,
             );
         }
         ProxyToServer::FileDownloadResponse(response) => {

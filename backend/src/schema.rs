@@ -98,6 +98,27 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_continuations (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        user_id -> Uuid,
+        launcher_id -> Uuid,
+        reset_at -> Timestamptz,
+        prompt -> Text,
+        #[max_length = 32]
+        status -> Varchar,
+        source_message -> Nullable<Text>,
+        last_error -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+        scheduled_at -> Nullable<Timestamp>,
+        fired_at -> Nullable<Timestamp>,
+        dropped_at -> Nullable<Timestamp>,
+        cancelled_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
     session_members (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -203,6 +224,8 @@ diesel::joinable!(pending_inputs -> sessions (session_id));
 diesel::joinable!(pending_permission_requests -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
+diesel::joinable!(session_continuations -> sessions (session_id));
+diesel::joinable!(session_continuations -> users (user_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
@@ -217,6 +240,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     pending_permission_requests,
     proxy_auth_tokens,
     scheduled_tasks,
+    session_continuations,
     session_members,
     sessions,
     turn_metrics,

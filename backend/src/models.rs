@@ -281,6 +281,43 @@ pub struct NewScheduledTask {
 }
 
 // ============================================================================
+// Session Continuation Models
+// ============================================================================
+
+#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[diesel(table_name = crate::schema::session_continuations)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct SessionContinuation {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub launcher_id: Uuid,
+    pub reset_at: DateTime<Utc>,
+    pub prompt: String,
+    pub status: String,
+    pub source_message: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub scheduled_at: Option<NaiveDateTime>,
+    pub fired_at: Option<NaiveDateTime>,
+    pub dropped_at: Option<NaiveDateTime>,
+    pub cancelled_at: Option<NaiveDateTime>,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::session_continuations)]
+pub struct NewSessionContinuation {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub launcher_id: Uuid,
+    pub reset_at: DateTime<Utc>,
+    pub prompt: String,
+    pub status: String,
+    pub source_message: Option<String>,
+}
+
+// ============================================================================
 // Turn Metrics Models (per-turn performance metrics; PR 1 of N)
 // ============================================================================
 

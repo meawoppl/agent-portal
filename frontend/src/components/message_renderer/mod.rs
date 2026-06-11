@@ -4,6 +4,7 @@ pub mod turn_metrics_footer;
 pub mod types;
 
 use serde_json::Value;
+use std::collections::HashMap;
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -46,6 +47,10 @@ pub struct MessageRendererProps {
     /// chip strip below the existing stats bar when present.
     #[prop_or_default]
     pub turn_metrics: Option<shared::TurnMetrics>,
+    #[prop_or_default]
+    pub continuation_statuses: HashMap<Uuid, String>,
+    #[prop_or_default]
+    pub on_schedule_continuation: Callback<Uuid>,
 }
 
 #[function_component(MessageRenderer)]
@@ -98,7 +103,13 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
             return renderers::render_error_message(&msg, ts.as_deref());
         }
         Ok(ClaudeMessage::Portal(msg)) => {
-            return renderers::render_portal_message(&msg, ts.as_deref(), props.session_id);
+            return renderers::render_portal_message(
+                &msg,
+                ts.as_deref(),
+                props.session_id,
+                &props.continuation_statuses,
+                props.on_schedule_continuation.clone(),
+            );
         }
         Ok(ClaudeMessage::RateLimitEvent(msg)) => {
             return renderers::render_rate_limit_event(&msg, ts.as_deref());
@@ -128,13 +139,17 @@ pub struct MessageGroupRendererProps {
     /// shapes (`Result` / `turn.completed` always render as `Single`).
     #[prop_or_default]
     pub turn_metrics: Option<shared::TurnMetrics>,
+    #[prop_or_default]
+    pub continuation_statuses: HashMap<Uuid, String>,
+    #[prop_or_default]
+    pub on_schedule_continuation: Callback<Uuid>,
 }
 
 #[function_component(MessageGroupRenderer)]
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     match &props.group {
         MessageGroup::Single(json) => {
-            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} /> }
+            html! { <MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} continuation_statuses={props.continuation_statuses.clone()} on_schedule_continuation={props.on_schedule_continuation.clone()} /> }
         }
         MessageGroup::IdentityGroup {
             category,
@@ -193,7 +208,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                             let key = extract_raw_iso(json)
                                 .map(|iso| format!("m-{}", iso))
                                 .unwrap_or_else(|| format!("m{}", i));
-                            html! { <div {key} class="grouped-message-part">{ render_identity_group_part(json, props.agent_type, props.session_id) }</div> }
+                            html! { <div {key} class="grouped-message-part">{ render_identity_group_part(json, props.agent_type, props.session_id, &props.continuation_statuses, props.on_schedule_continuation.clone()) }</div> }
                         })}
                     </div>
                     if let Some(iso) = last_iso {
@@ -207,7 +222,13 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     }
 }
 
-fn render_identity_group_part(json: &str, agent_type: shared::AgentType, session_id: Uuid) -> Html {
+fn render_identity_group_part(
+    json: &str,
+    agent_type: shared::AgentType,
+    session_id: Uuid,
+    continuation_statuses: &HashMap<Uuid, String>,
+    on_schedule_continuation: Callback<Uuid>,
+) -> Html {
     match ClaudeMessage::parse(json) {
         Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg, session_id),
         Ok(ClaudeMessage::OptimisticUser(msg)) => {
@@ -216,9 +237,12 @@ fn render_identity_group_part(json: &str, agent_type: shared::AgentType, session
         Ok(ClaudeMessage::Assistant(msg)) => {
             renderers::render_assistant_message_content(&msg, session_id)
         }
-        Ok(ClaudeMessage::Portal(msg)) => {
-            renderers::render_portal_message_content(&msg, session_id)
-        }
+        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(
+            &msg,
+            session_id,
+            continuation_statuses,
+            on_schedule_continuation,
+        ),
         _ if agent_type == shared::AgentType::Codex => {
             super::codex_renderer::render_codex_message_content(json, session_id)
         }
