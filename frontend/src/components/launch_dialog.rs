@@ -90,6 +90,7 @@ fn agent_config(agent_type: shared::AgentType) -> AgentConfig {
 #[derive(Clone)]
 struct DirBrowser {
     path: UseStateHandle<String>,
+    home_root: UseStateHandle<Option<String>>,
     entries: UseStateHandle<Vec<DirectoryEntry>>,
     loading: UseStateHandle<bool>,
     error: UseStateHandle<Option<String>>,
@@ -122,6 +123,9 @@ impl DirBrowser {
             match Request::get(&url).send().await {
                 Ok(resp) if resp.ok() => {
                     if let Ok(listing) = resp.json::<DirectoryListingResponse>().await {
+                        if update_path && (path == "~" || path == "~/") {
+                            browser.home_root.set(listing.resolved_path.clone());
+                        }
                         browser.entries.set(listing.entries);
                         if update_path {
                             if let Some(resolved) = listing.resolved_path {
@@ -139,9 +143,9 @@ impl DirBrowser {
                 Ok(resp) => {
                     let status = resp.status();
                     if status == 400 {
-                        browser
-                            .error
-                            .set(Some("Path not found or not readable".to_string()));
+                        browser.error.set(Some(
+                            "Path not found, not readable, or outside home".to_string(),
+                        ));
                     } else if status == 504 {
                         browser
                             .error
@@ -167,6 +171,37 @@ fn parent_path(path: &str) -> String {
     }
 }
 
+fn clamp_to_home(path: String, home_root: Option<&str>) -> String {
+    let Some(home_root) = home_root else {
+        return path;
+    };
+    let root = ensure_trailing_slash(home_root);
+    if path == "/" || !path.starts_with(&root) {
+        root
+    } else {
+        path
+    }
+}
+
+fn ensure_trailing_slash(path: &str) -> String {
+    if path.ends_with('/') {
+        path.to_string()
+    } else {
+        format!("{}/", path)
+    }
+}
+
+fn is_path_home_scoped(path: &str, home_root: Option<&str>) -> bool {
+    if path == "~" || path.starts_with("~/") {
+        return true;
+    }
+
+    let Some(home_root) = home_root else {
+        return !path.starts_with('/');
+    };
+    path.starts_with(&ensure_trailing_slash(home_root)) || path == home_root.trim_end_matches('/')
+}
+
 #[derive(Properties, PartialEq)]
 pub struct LaunchDialogProps {
     pub on_close: Callback<()>,
@@ -182,6 +217,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let show_install = use_state(|| false);
     let dir = DirBrowser {
         path: use_state(|| "~".to_string()),
+        home_root: use_state(|| None::<String>),
         entries: use_state(Vec::<DirectoryEntry>::new),
         loading: use_state(|| false),
         error: use_state(|| None::<String>),
@@ -282,6 +318,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let selected_launcher = selected_launcher.clone();
         let dir = dir.clone();
         Callback::from(move |path: String| {
+            let path = clamp_to_home(path, (*dir.home_root).as_deref());
             dir.navigate(*selected_launcher, path);
         })
     };
@@ -330,6 +367,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     let on_launch = {
         let dir_path = dir.path.clone();
+        let home_root = dir.home_root.clone();
         let extra_args = extra_args.clone();
         let agent_type = agent_type.clone();
         let skip_permissions = skip_permissions.clone();
@@ -342,6 +380,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             let working_dir = (*dir_path).clone();
             if working_dir.is_empty() {
                 error_msg.set(Some("Working directory is required".to_string()));
+                return;
+            }
+            if !is_path_home_scoped(&working_dir, (*home_root).as_deref()) {
+                error_msg.set(Some(
+                    "Choose a directory under the launcher's home folder".to_string(),
+                ));
                 return;
             }
 
@@ -423,11 +467,15 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     // Build breadcrumb segments from current path
     let path_str = (*dir.path).clone();
-    let breadcrumbs: Vec<(String, String)> = {
-        let mut segs = vec![("/".to_string(), "/".to_string())];
-        let trimmed = path_str.trim_start_matches('/');
+    let breadcrumbs: Vec<(String, String)> = if let Some(home_root) = (*dir.home_root).as_deref() {
+        let root = ensure_trailing_slash(home_root);
+        let mut segs = vec![(root.clone(), "~".to_string())];
+        let trimmed = path_str
+            .strip_prefix(&root)
+            .unwrap_or("")
+            .trim_start_matches('/');
         if !trimmed.is_empty() {
-            let mut built = String::from("/");
+            let mut built = root;
             for part in trimmed.split('/') {
                 if part.is_empty() {
                     continue;
@@ -438,6 +486,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             }
         }
         segs
+    } else {
+        vec![("~".to_string(), "~".to_string())]
     };
 
     // Find selected launcher info for subtitle
@@ -470,7 +520,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     } else if dir.entries.is_empty() {
         html! { <div class="dir-empty">{ "Empty directory" }</div> }
     } else {
-        let parent = parent_path(&dir.path);
+        let parent = clamp_to_home(parent_path(&dir.path), (*dir.home_root).as_deref());
         let on_up = {
             let navigate_to = navigate_to.clone();
             Callback::from(move |_: MouseEvent| navigate_to.emit(parent.clone()))
@@ -603,10 +653,11 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
                     // Directory browser
                     <div class="launch-field">
-                        <label>{ "Directory" }</label>
+                        <label>{ "Directory (home folder only)" }</label>
                         <input
                             type="text"
                             class="dir-path-input"
+                            placeholder="~/project"
                             value={(*dir.path).clone()}
                             oninput={on_path_input}
                             onkeydown={on_path_keydown.clone()}
@@ -624,7 +675,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                                 };
                                 html! {
                                     <>
-                                        if i > 1 {
+                                        if i > 0 {
                                             <span class="dir-breadcrumb-sep">{ "/" }</span>
                                         }
                                         <a

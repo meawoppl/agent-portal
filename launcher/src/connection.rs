@@ -1,4 +1,5 @@
 use crate::config::{self, ExpectedSession};
+use crate::path_policy;
 use crate::process_manager::{ProcessManager, SessionExited, SpawnParams};
 use crate::scheduler::Scheduler;
 use shared::{LauncherEndpoint, LauncherToServer, ServerToLauncher};
@@ -391,22 +392,23 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
 fn list_directory(path: &str, request_id: Uuid) -> LauncherToServer {
     // Resolve ~ to home directory (trailing slash ensures the dir itself is listed,
     // not treated as a filter prefix against its parent)
-    let resolved = if path == "~" || path == "~/" {
-        dirs::home_dir()
-            .map(|p| format!("{}/", p.to_string_lossy()))
-            .unwrap_or_else(|| "/".to_string())
-    } else if let Some(rest) = path.strip_prefix("~/") {
-        dirs::home_dir()
-            .map(|p| format!("{}/{}", p.to_string_lossy(), rest))
-            .unwrap_or_else(|| format!("/{}", rest))
-    } else {
-        path.to_string()
+    let resolved_path = match path_policy::expand_home_path(path) {
+        Ok(path) => path,
+        Err(e) => {
+            return LauncherToServer::ListDirectoriesResult {
+                request_id,
+                entries: vec![],
+                error: Some(e.to_string()),
+                resolved_path: None,
+            };
+        }
     };
+    let resolved = resolved_path.to_string_lossy().to_string();
 
     // Split into (dir_to_list, filter_prefix)
     // If the path ends with '/', list the directory with no filter
     // Otherwise, treat the last component as a prefix filter
-    let (dir_path, filter) = if resolved.ends_with('/') || resolved == "/" {
+    let (dir_path, filter) = if path.ends_with('/') || path == "~" || path == "~/" {
         (resolved.as_str(), "")
     } else {
         let p = std::path::Path::new(&resolved);
@@ -419,9 +421,29 @@ fn list_directory(path: &str, request_id: Uuid) -> LauncherToServer {
     };
 
     let dir = std::path::Path::new(dir_path);
+    let canonical_dir = match dir.canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            return LauncherToServer::ListDirectoriesResult {
+                request_id,
+                entries: vec![],
+                error: Some(e.to_string()),
+                resolved_path: None,
+            };
+        }
+    };
+    if let Err(e) = path_policy::ensure_canonical_path_under_home(&canonical_dir) {
+        return LauncherToServer::ListDirectoriesResult {
+            request_id,
+            entries: vec![],
+            error: Some(e.to_string()),
+            resolved_path: None,
+        };
+    }
+
     // Uses synchronous std::fs::read_dir (blocking I/O). This is acceptable because
     // list_directory is only called for small local directories (UI path completion).
-    let read_dir = match std::fs::read_dir(dir) {
+    let read_dir = match std::fs::read_dir(&canonical_dir) {
         Ok(rd) => rd,
         Err(e) => {
             return LauncherToServer::ListDirectoriesResult {
@@ -444,6 +466,17 @@ fn list_directory(path: &str, request_id: Uuid) -> LauncherToServer {
             continue;
         }
         let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        if is_dir {
+            let under_home = entry
+                .path()
+                .canonicalize()
+                .ok()
+                .and_then(|path| path_policy::ensure_canonical_path_under_home(&path).ok())
+                .is_some();
+            if !under_home {
+                continue;
+            }
+        }
         entries.push(shared::DirectoryEntry { name, is_dir });
     }
 
@@ -640,6 +673,12 @@ async fn handle_message(
 mod tests {
     use super::*;
 
+    fn home_test_dir(name: &str) -> std::path::PathBuf {
+        path_policy::home_dir()
+            .unwrap()
+            .join(format!(".agent-portal-{}", name))
+    }
+
     fn extract_result(
         msg: LauncherToServer,
     ) -> (Vec<shared::DirectoryEntry>, Option<String>, Option<String>) {
@@ -656,7 +695,7 @@ mod tests {
 
     #[test]
     fn list_directory_returns_sorted_entries() {
-        let tmp = std::env::temp_dir().join("launcher_test_sorted");
+        let tmp = home_test_dir("launcher-test-sorted");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::create_dir(tmp.join("beta_dir")).unwrap();
@@ -681,7 +720,7 @@ mod tests {
 
     #[test]
     fn list_directory_filters_hidden_files() {
-        let tmp = std::env::temp_dir().join("launcher_test_hidden");
+        let tmp = home_test_dir("launcher-test-hidden");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(tmp.join(".hidden"), "").unwrap();
@@ -699,7 +738,7 @@ mod tests {
 
     #[test]
     fn list_directory_prefix_filter() {
-        let tmp = std::env::temp_dir().join("launcher_test_prefix");
+        let tmp = home_test_dir("launcher-test-prefix");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(tmp.join("foo.txt"), "").unwrap();
@@ -728,8 +767,25 @@ mod tests {
     }
 
     #[test]
+    fn list_directory_rejects_existing_paths_outside_home() {
+        let temp = std::env::temp_dir().canonicalize().unwrap();
+        let home = path_policy::home_dir().unwrap().canonicalize().unwrap();
+
+        if temp.starts_with(home) {
+            return;
+        }
+
+        let result = list_directory(&format!("{}/", temp.display()), Uuid::nil());
+        let (entries, error, resolved) = extract_result(result);
+
+        assert!(entries.is_empty());
+        assert!(error.unwrap().contains("home directory"));
+        assert!(resolved.is_none());
+    }
+
+    #[test]
     fn list_directory_resolved_path_has_trailing_slash() {
-        let tmp = std::env::temp_dir();
+        let tmp = path_policy::home_dir().unwrap();
         let path = tmp.to_string_lossy().to_string();
         // Even without trailing slash, if it's a valid dir the resolved_path should end with /
         let result = list_directory(&format!("{}/", path), Uuid::nil());

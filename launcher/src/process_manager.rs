@@ -12,6 +12,8 @@ use claude_session_lib::{
 use codex_session_lib::CodexAgent;
 use session_lib::{Session, SessionConfig};
 
+use crate::path_policy;
+
 /// Path to the launcher's sidecar codex-thread map: `session_id -> thread_id`.
 /// Lives next to `launcher.json` in `ProjectDirs` so it ships with the same
 /// install/uninstall surface and survives across restarts.
@@ -132,13 +134,10 @@ impl ProcessManager {
             );
         }
 
-        let wd = std::path::Path::new(&params.working_directory);
-        if !wd.is_dir() {
-            anyhow::bail!(
-                "Working directory does not exist: {}",
-                params.working_directory
-            );
-        }
+        let working_directory =
+            path_policy::ensure_existing_dir_under_home(&params.working_directory)?
+                .to_string_lossy()
+                .to_string();
 
         let (session_id, resume) = match params.resume_session_id {
             Some(id) => (id, true),
@@ -158,14 +157,14 @@ impl ProcessManager {
             .unwrap_or(&default_name)
             .to_string();
 
-        let git_branch = get_git_branch(&params.working_directory);
+        let git_branch = get_git_branch(&working_directory);
 
         let proxy_config = ProxySessionConfig {
             backend_url: self.backend_url.clone(),
             session_id,
             session_name: name.clone(),
             auth_token: Some(params.auth_token),
-            working_directory: params.working_directory.clone(),
+            working_directory: working_directory.clone(),
             resume,
             git_branch,
             claude_args: params.claude_args,
@@ -194,7 +193,7 @@ impl ProcessManager {
 
         info!(
             "Spawned session task: session_id={}, session_name={}, dir={}",
-            session_id, name, params.working_directory
+            session_id, name, working_directory
         );
 
         self.tasks.insert(
@@ -202,7 +201,7 @@ impl ProcessManager {
             ManagedTask {
                 handle,
                 cancel,
-                working_directory: params.working_directory,
+                working_directory,
             },
         );
 

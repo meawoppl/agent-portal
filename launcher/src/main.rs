@@ -1,6 +1,7 @@
 mod config;
 mod connection;
 mod pastebin;
+mod path_policy;
 mod process_manager;
 mod scheduler;
 mod service;
