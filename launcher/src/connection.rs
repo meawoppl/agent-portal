@@ -1,9 +1,7 @@
-use crate::config::{self, ExpectedSession};
 use crate::path_policy;
 use crate::process_manager::{ProcessManager, SessionExited, SpawnParams};
 use crate::scheduler::Scheduler;
 use shared::{LauncherEndpoint, LauncherToServer, ServerToLauncher};
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -11,8 +9,6 @@ use uuid::Uuid;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
-const RESTART_DELAY: Duration = Duration::from_secs(5);
-const MAX_RESTART_ATTEMPTS: u32 = 3;
 
 pub async fn run_launcher_loop(
     backend_url: &str,
@@ -21,19 +17,8 @@ pub async fn run_launcher_loop(
     auth_token: Option<&str>,
     mut process_manager: ProcessManager,
     mut exit_rx: mpsc::UnboundedReceiver<SessionExited>,
-    mut expected_sessions: Vec<ExpectedSession>,
 ) -> anyhow::Result<()> {
     process_manager.set_launcher_id(launcher_id);
-    if !expected_sessions.is_empty() {
-        info!(
-            "Discarding {} launcher-local expected session(s); backend DB is authoritative",
-            expected_sessions.len()
-        );
-        expected_sessions.clear();
-        if let Err(e) = config::clear_sessions() {
-            warn!("Failed to clear launcher-local expected sessions: {}", e);
-        }
-    }
     let mut backoff = Duration::from_secs(1);
     let mut scheduler = Scheduler::new();
 
@@ -113,12 +98,6 @@ pub async fn run_launcher_loop(
                     Some(true) => {} // fall through to main loop
                 }
 
-                // Expected sessions are reconciled by the backend from the DB.
-                let mut restart_counts: HashMap<String, u32> = HashMap::new();
-
-                // Channel for delayed restart requests
-                let (restart_tx, mut restart_rx) = mpsc::unbounded_channel::<ExpectedSession>();
-
                 // Main loop
                 let mut heartbeat_timer = tokio::time::interval(HEARTBEAT_INTERVAL);
                 let start = Instant::now();
@@ -148,7 +127,6 @@ pub async fn run_launcher_loop(
                                         msg,
                                         &mut ws_sender,
                                         &mut process_manager,
-                                        &mut expected_sessions,
                                         &mut scheduler,
                                     ).await;
                                 }
@@ -181,7 +159,6 @@ pub async fn run_launcher_loop(
                         }
 
                         Some(exited) = exit_rx.recv() => {
-                            let exited_dir = process_manager.session_working_directory(&exited.session_id);
                             info!(
                                 "Session {} exited with code {:?}",
                                 exited.session_id, exited.exit_code
@@ -208,60 +185,6 @@ pub async fn run_launcher_loop(
                                     warn!("Failed to send ScheduledRunCompleted");
                                     break;
                                 }
-                            }
-
-                            if let Some(dir) = exited_dir {
-                                let is_clean_exit = exited.exit_code == Some(0);
-                                if is_clean_exit {
-                                    // Clean exit: remove from expected sessions
-                                    expected_sessions.retain(|s| s.working_directory != dir);
-                                    if let Err(e) = config::remove_session(&dir) {
-                                        warn!("Failed to remove session from config: {}", e);
-                                    }
-                                    info!("Session exited cleanly, removed from expected: {}", dir);
-                                } else if let Some(expected) = expected_sessions.iter().find(|s| s.working_directory == dir) {
-                                    // Non-clean exit: try to restart
-                                    let count = restart_counts.entry(dir.clone()).or_insert(0);
-                                    *count += 1;
-                                    if *count <= MAX_RESTART_ATTEMPTS {
-                                        info!(
-                                            "Expected session exited, scheduling restart ({}/{}): {}",
-                                            count, MAX_RESTART_ATTEMPTS, dir
-                                        );
-                                        let tx = restart_tx.clone();
-                                        let session = expected.clone();
-                                        tokio::spawn(async move {
-                                            tokio::time::sleep(RESTART_DELAY).await;
-                                            let _ = tx.send(session);
-                                        });
-                                    } else {
-                                        warn!(
-                                            "Expected session exceeded max restarts ({}): {}",
-                                            MAX_RESTART_ATTEMPTS, dir
-                                        );
-                                        expected_sessions.retain(|s| s.working_directory != dir);
-                                        if let Err(e) = config::remove_session(&dir) {
-                                            warn!("Failed to remove session from config: {}", e);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Some(session) = restart_rx.recv() => {
-                            info!("Restarting expected session: {}", session.working_directory);
-                            let request = LauncherToServer::RequestLaunch {
-                                request_id: Uuid::new_v4(),
-                                working_directory: session.working_directory,
-                                session_name: session.session_name,
-                                claude_args: session.claude_args,
-                                agent_type: session.agent_type,
-                                scheduled_task_id: None,
-                                last_session_id: session.session_id,
-                            };
-                            if ws_sender.send(request).await.is_err() {
-                                warn!("Failed to send session restart request");
-                                break;
                             }
                         }
 
@@ -502,7 +425,6 @@ async fn handle_message(
     msg: ServerToLauncher,
     ws_sender: &mut ws_bridge::WsSender<LauncherToServer>,
     process_manager: &mut ProcessManager,
-    expected_sessions: &mut Vec<ExpectedSession>,
     scheduler: &mut Scheduler,
 ) {
     match msg {
@@ -516,7 +438,7 @@ async fn handle_message(
             resume_session_id,
             ..
         } => {
-            // Check if this is a scheduled launch or a relaunch of an expected session
+            // Check if this is a scheduled launch
             let (resume_session_id, scheduled_task_id, is_scheduled) = if let Some((
                 resume_id,
                 task_id,
@@ -525,13 +447,7 @@ async fn handle_message(
             {
                 (resume_id, Some(task_id), true)
             } else {
-                let resume_id = resume_session_id.or_else(|| {
-                    expected_sessions
-                        .iter()
-                        .find(|s| s.working_directory == working_directory)
-                        .and_then(|s| s.session_id)
-                });
-                (resume_id, None, false)
+                (resume_session_id, None, false)
             };
 
             info!(
@@ -583,21 +499,9 @@ async fn handle_message(
                 warn!("Failed to send launch session result");
             }
         }
-        ServerToLauncher::StopSession {
-            session_id,
-            working_directory,
-        } => {
+        ServerToLauncher::StopSession { session_id, .. } => {
             info!("Stop request for session {}", session_id);
-            let working_dir = process_manager
-                .session_working_directory(&session_id)
-                .or(working_directory);
             process_manager.stop(&session_id).await;
-            if let Some(dir) = working_dir {
-                expected_sessions.retain(|s| s.working_directory != dir);
-                if let Err(e) = config::remove_session(&dir) {
-                    warn!("Failed to remove session from config: {}", e);
-                }
-            }
         }
         ServerToLauncher::PauseSession { session_id } => {
             info!("Pause request for session {}", session_id);
