@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.25
+
+- **Dedupe `get_git_branch` (4 copies) and `get_repo_url` (2 copies) into `claude-session-lib`.** The canonical implementations in `proxy_session/git_metadata.rs` are now `pub` and re-exported from `claude_session_lib::proxy_session`; the verbatim copies in `proxy/src/main.rs`, `proxy/src/session.rs`, and `launcher/src/process_manager.rs` are deleted and their call sites pointed at the shared versions. All copies were byte-identical modulo comments — no behavior change. Net −109 lines.
+
 ## 2.8.24
 
 - **Remove the launcher's dead expected-session restart machinery.** `expected_sessions` is wiped unconditionally at startup (the backend DB has been authoritative since #908) and nothing repopulates it, so the crash-restart path could never fire. Deleted: `RESTART_DELAY`/`MAX_RESTART_ATTEMPTS`, the `restart_counts` map, the restart channel and its select arm, the post-exit clean/non-clean expected-session block, the resume-id fallback in `LaunchSession`, `config::remove_session`, and the now-orphaned `session_working_directory()` helper + `ManagedTask.working_directory` field. The one-time legacy-config wipe (`clear_sessions`) moved to `main.rs` where the config is loaded; behavior is identical. Net −132 lines and a simpler launcher select loop.

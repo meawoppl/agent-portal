@@ -155,53 +155,6 @@ pub async fn register_with_backend(
     }
 }
 
-/// Get the current git branch name, if in a git repository.
-pub fn get_git_branch(cwd: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let branch = String::from_utf8(output.stdout)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())?;
-
-    if branch == "HEAD" {
-        std::process::Command::new("git")
-            .args(["rev-parse", "--short", "HEAD"])
-            .current_dir(cwd)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| format!("detached:{}", s.trim()))
-    } else {
-        Some(branch)
-    }
-}
-
-/// Get the GitHub repository URL using the `gh` CLI.
-pub fn get_repo_url(cwd: &str) -> Option<String> {
-    let output = std::process::Command::new("gh")
-        .args(["repo", "view", "--json", "url", "-q", ".url"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8(output.stdout)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 /// Events produced by the WebSocket reader for the shim's select loop.
 pub enum WsEvent {
     /// Text input from the portal web UI
