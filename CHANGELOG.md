@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.31
+
+- **Session statuses now come from `shared::SessionStatus` everywhere, and the enum gained the missing `Replaced` variant.** The DB has contained `"replaced"` rows that the shared enum could not represent — any `SessionInfo` serialized with that status failed frontend deserialization, and every query had to remember `.ne("replaced")` by hand against a bare string. Sixteen raw `"active"`/`"inactive"`/`"disconnected"`/`"replaced"` literals across ten backend files (sessions, registration, launcher/proxy sockets, launchers, admin's raw-SQL `FILTER` — now a `$1` bind — plus `main.rs` cleanup loops and test fixtures) are replaced with `SessionStatus::X.as_str()`. Columns stay text (no Diesel custom type); query semantics identical. Frontend: the sessions panel styles `Replaced` like Inactive; everything else already matched non-exhaustively.
+
 ## 2.8.25
 
 - **Dedupe `get_git_branch` (4 copies) and `get_repo_url` (2 copies) into `claude-session-lib`.** The canonical implementations in `proxy_session/git_metadata.rs` are now `pub` and re-exported from `claude_session_lib::proxy_session`; the verbatim copies in `proxy/src/main.rs`, `proxy/src/session.rs`, and `launcher/src/process_manager.rs` are deleted and their call sites pointed at the shared versions. All copies were byte-identical modulo comments — no behavior change. Net −109 lines.
