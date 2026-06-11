@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.25
+
+- **Dedupe `get_git_branch` (4 copies) and `get_repo_url` (2 copies) into `claude-session-lib`.** The canonical implementations in `proxy_session/git_metadata.rs` are now `pub` and re-exported from `claude_session_lib::proxy_session`; the verbatim copies in `proxy/src/main.rs`, `proxy/src/session.rs`, and `launcher/src/process_manager.rs` are deleted and their call sites pointed at the shared versions. All copies were byte-identical modulo comments — no behavior change. Net −109 lines.
+
 ## 2.8.17
 
 - **Add log-scale support to Performance plots.** The Performance page now has a `Y scale` control with `Linear` as the default and `Log` as an alternate view across all plots. Log scaling maps positive values by base-10 decades while keeping zero/non-positive buckets on a baseline, and the chart headers show the active scale.
