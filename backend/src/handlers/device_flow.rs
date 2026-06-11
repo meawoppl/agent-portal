@@ -13,11 +13,8 @@ use uuid::Uuid;
 
 use crate::{
     auth,
-    jwt::{create_proxy_token, hash_token},
-    models::NewProxyAuthToken,
-    routes,
-    schema::proxy_auth_tokens,
-    AppState,
+    handlers::proxy_tokens::{issue_proxy_token, TokenPersist},
+    routes, AppState,
 };
 
 use shared::protocol::{DEVICE_CODE_EXPIRES_SECS, SESSION_COOKIE_NAME};
@@ -386,46 +383,26 @@ pub async fn complete_device_flow(
     user_code: &str,
     user_id: Uuid,
 ) -> Result<(), ()> {
-    // First, get user email from database (needed for JWT claims)
     let mut conn = app_state.db_pool.get().map_err(|e| {
         error!("Failed to get database connection: {}", e);
     })?;
 
-    use crate::schema::users;
-    let user: crate::models::User = users::table.find(user_id).first(&mut conn).map_err(|e| {
-        error!("Failed to find user: {}", e);
-    })?;
-
-    // Generate token ID and create JWT. Device-flow tokens (used by launchers
-    // and CLI proxies) never expire; revocation governs their lifetime. See
-    // #932.
-    let token_id = Uuid::new_v4();
-    let jwt_secret = app_state.jwt_secret.as_bytes();
-
-    let token =
-        create_proxy_token(jwt_secret, token_id, user_id, &user.email, None).map_err(|e| {
-            error!("Failed to create JWT: {}", e);
-        })?;
-
-    // Store token hash in database
-    let token_hash = hash_token(&token);
-
-    let new_token = NewProxyAuthToken {
+    // Device-flow tokens (used by launchers and CLI proxies) never expire;
+    // revocation governs their lifetime. See #932.
+    let name = format!(
+        "Device auth {}",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M")
+    );
+    let issued = issue_proxy_token(
+        &mut conn,
+        app_state.jwt_secret.as_bytes(),
         user_id,
-        name: format!(
-            "Device auth {}",
-            chrono::Utc::now().format("%Y-%m-%d %H:%M")
-        ),
-        token_hash,
-        expires_at: None,
-    };
-
-    diesel::insert_into(proxy_auth_tokens::table)
-        .values(&new_token)
-        .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to save token to database: {}", e);
-        })?;
+        TokenPersist::Create { name: &name },
+        None,
+    )
+    .map_err(|e| {
+        error!("Failed to issue device token: {:?}", e);
+    })?;
 
     // Now update the in-memory store with the JWT token
     let mut store_lock = store.write().await;
@@ -436,11 +413,11 @@ pub async fn complete_device_flow(
         .find(|s| s.user_code == user_code && s.status == DeviceFlowStatus::Pending)
     {
         state.user_id = Some(user_id);
-        state.access_token = Some(token);
+        state.access_token = Some(issued.token);
         state.status = DeviceFlowStatus::Complete;
         info!(
             "Device flow completed for user_code: {}, user: {}",
-            user_code, user.email
+            user_code, issued.user_email
         );
         Ok(())
     } else {
