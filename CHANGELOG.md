@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.24
+
+- **Remove the launcher's dead expected-session restart machinery.** `expected_sessions` is wiped unconditionally at startup (the backend DB has been authoritative since #908) and nothing repopulates it, so the crash-restart path could never fire. Deleted: `RESTART_DELAY`/`MAX_RESTART_ATTEMPTS`, the `restart_counts` map, the restart channel and its select arm, the post-exit clean/non-clean expected-session block, the resume-id fallback in `LaunchSession`, `config::remove_session`, and the now-orphaned `session_working_directory()` helper + `ManagedTask.working_directory` field. The one-time legacy-config wipe (`clear_sessions`) moved to `main.rs` where the config is loaded; behavior is identical. Net −132 lines and a simpler launcher select loop.
+
 ## 2.8.17
 
 - **Add log-scale support to Performance plots.** The Performance page now has a `Y scale` control with `Linear` as the default and `Log` as an alternate view across all plots. Log scaling maps positive values by base-10 decades while keeping zero/non-positive buckets on a baseline, and the chart headers show the active scale.
