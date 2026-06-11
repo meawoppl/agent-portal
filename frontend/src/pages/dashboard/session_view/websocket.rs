@@ -524,6 +524,7 @@ mod tests {
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",
             WsEvent::BranchChanged(_, _, _) => "BranchChanged",
+            WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",
         }
     }
