@@ -2,8 +2,7 @@ use crate::components::ProxyTokenSetup;
 use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
-use serde::Deserialize;
-use shared::api::LaunchRequest;
+use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
 use shared::{AgentInstall, AgentType, DirectoryEntry, LauncherInfo};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
@@ -13,17 +12,6 @@ use yew::prelude::*;
 
 /// Sentinel value used in the launcher <select> to represent the "connect new host" option.
 const CONNECT_NEW: &str = "__install__";
-
-#[derive(Deserialize)]
-struct DirectoryListingResponse {
-    entries: Vec<DirectoryEntry>,
-    resolved_path: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ProbeAgentsResponse {
-    agents: Vec<AgentInstall>,
-}
 
 /// Fetch the current install state for both agent CLIs from the given launcher.
 /// Stores the result in `agents` and clears `probing` when done.

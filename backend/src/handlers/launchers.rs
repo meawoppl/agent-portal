@@ -4,8 +4,8 @@ use axum::{
 };
 use diesel::prelude::*;
 use serde::Deserialize;
-use shared::api::LaunchRequest;
-use shared::{DirectoryEntry, LauncherInfo, LauncherToServer, ServerToLauncher};
+use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
+use shared::{LauncherInfo, LauncherToServer, ServerToLauncher};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::{error, info, warn};
@@ -207,12 +207,6 @@ pub struct DirectoryQuery {
     pub path: String,
 }
 
-#[derive(serde::Serialize)]
-pub struct DirectoryListingResponse {
-    pub entries: Vec<DirectoryEntry>,
-    pub resolved_path: Option<String>,
-}
-
 /// GET /api/launchers/:launcher_id/directories?path=/some/path
 pub async fn list_directories(
     State(app_state): State<Arc<AppState>>,
@@ -354,11 +348,6 @@ pub async fn update_launcher(
 
     info!("Sent UpdateAndRestart to launcher {}", launcher_id);
     Ok(EmptyResponse::OK)
-}
-
-#[derive(serde::Serialize)]
-pub struct ProbeAgentsResponse {
-    pub agents: Vec<shared::AgentInstall>,
 }
 
 /// GET /api/launchers/:launcher_id/probe-agents - Ask the launcher to (re-)scan

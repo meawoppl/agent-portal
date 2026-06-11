@@ -2,12 +2,11 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::Serialize;
 use shared::api::{
-    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse,
-    UpdateMemberRoleRequest,
+    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse, SessionMemberInfo,
+    SessionMembersResponse, UpdateMemberRoleRequest,
 };
 use std::sync::Arc;
 use tower_cookies::Cookies;
@@ -386,20 +385,6 @@ fn resolve_resume_launcher(app_state: &AppState, session: &Session) -> Option<Uu
 // ============================================================================
 // Session Member Management
 // ============================================================================
-
-#[derive(Debug, Serialize)]
-pub struct SessionMemberInfo {
-    pub user_id: Uuid,
-    pub email: String,
-    pub name: Option<String>,
-    pub role: String,
-    pub created_at: NaiveDateTime,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SessionMembersResponse {
-    pub members: Vec<SessionMemberInfo>,
-}
 
 /// User info selected from joined query
 #[derive(Debug, Queryable)]
