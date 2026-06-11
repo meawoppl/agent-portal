@@ -1,6 +1,8 @@
 use gloo::events::EventListener;
 use gloo_net::http::Request;
-use shared::api::{AddMemberRequest, UpdateMemberRoleRequest};
+use shared::api::{
+    AddMemberRequest, SessionMemberInfo, SessionMembersResponse, UpdateMemberRoleRequest,
+};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -8,20 +10,6 @@ use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
 use crate::utils;
-
-/// Member info returned from API
-#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
-pub struct MemberInfo {
-    pub user_id: Uuid,
-    pub email: String,
-    pub name: Option<String>,
-    pub role: String,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
-struct MembersResponse {
-    members: Vec<MemberInfo>,
-}
 
 #[derive(Properties, PartialEq)]
 pub struct ShareDialogProps {
@@ -31,7 +19,7 @@ pub struct ShareDialogProps {
 
 pub enum ShareDialogMsg {
     LoadMembers,
-    MembersLoaded(Vec<MemberInfo>),
+    MembersLoaded(Vec<SessionMemberInfo>),
     UpdateEmail(String),
     UpdateRole(String),
     AddMember,
@@ -44,7 +32,7 @@ pub enum ShareDialogMsg {
 }
 
 pub struct ShareDialog {
-    members: Vec<MemberInfo>,
+    members: Vec<SessionMemberInfo>,
     loading: bool,
     email_input: String,
     new_role: String,
@@ -86,7 +74,7 @@ impl Component for ShareDialog {
                     let url = utils::api_url(&format!("/api/sessions/{}/members", session_id));
                     match Request::get(&url).send().await {
                         Ok(response) if response.ok() => {
-                            if let Ok(data) = response.json::<MembersResponse>().await {
+                            if let Ok(data) = response.json::<SessionMembersResponse>().await {
                                 link.send_message(ShareDialogMsg::MembersLoaded(data.members));
                             }
                         }
@@ -334,7 +322,7 @@ impl Component for ShareDialog {
 }
 
 impl ShareDialog {
-    fn view_member(&self, ctx: &Context<Self>, member: &MemberInfo) -> Html {
+    fn view_member(&self, ctx: &Context<Self>, member: &SessionMemberInfo) -> Html {
         let is_owner = member.role == "owner";
         let user_id = member.user_id;
         let display_name = member

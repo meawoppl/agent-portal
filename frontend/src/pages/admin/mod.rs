@@ -14,8 +14,7 @@ use users_tab::AdminUsersTab;
 use crate::utils;
 use crate::Route;
 use gloo_net::http::Request;
-use serde::Deserialize;
-use shared::api::{AdminUsersResponse, MeResponse, UpdateUserRequest};
+use shared::api::{AdminSessionsResponse, AdminUsersResponse, MeResponse, UpdateUserRequest};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
@@ -25,6 +24,9 @@ use yew_router::prelude::*;
 /// Re-export the shared admin user entry under the legacy frontend name
 /// so this module's sub-tabs can keep importing `super::AdminUserInfo`.
 pub use shared::api::AdminUserEntry as AdminUserInfo;
+/// Re-export so this module's sub-tabs can keep importing
+/// `super::AdminSessionInfo` / `super::AdminStats`.
+pub use shared::api::{AdminSessionInfo, AdminStats};
 
 /// Admin page tabs
 #[derive(Clone, Copy, PartialEq)]
@@ -32,44 +34,6 @@ enum AdminTab {
     Overview,
     Users,
     Sessions,
-}
-
-// ============================================================================
-// API Response Types (shared across tabs)
-// ============================================================================
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct AdminStats {
-    pub total_users: i64,
-    pub admin_users: i64,
-    pub disabled_users: i64,
-    pub total_sessions: i64,
-    pub active_sessions: i64,
-    pub connected_proxy_clients: usize,
-    pub connected_web_clients: usize,
-    pub total_spend_usd: f64,
-    pub total_input_tokens: i64,
-    pub total_output_tokens: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct AdminSessionInfo {
-    pub id: Uuid,
-    pub user_email: String,
-    pub session_name: String,
-    pub working_directory: String,
-    pub git_branch: Option<String>,
-    pub status: String,
-    pub total_cost_usd: f64,
-    pub last_activity: String,
-    pub is_connected: bool,
-    #[serde(default)]
-    pub hostname: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct AdminSessionsResponse {
-    sessions: Vec<AdminSessionInfo>,
 }
 
 // ============================================================================

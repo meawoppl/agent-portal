@@ -11,6 +11,7 @@ use axum::{
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
+use shared::api::MessagesListResponse;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower_cookies::Cookies;
@@ -96,18 +97,6 @@ pub struct MessageWithSender {
     pub sender_name: Option<String>,
 }
 
-/// Response for listing messages.
-///
-/// `total` is the page length (post-#788 it reflects what was actually
-/// returned, not the session-wide row count). Renamed semantics; the wire
-/// field stays `total` for backward compatibility with older clients that
-/// might key off it (the current frontend ignores this field).
-#[derive(Debug, Serialize)]
-pub struct MessagesListResponse {
-    pub messages: Vec<MessageWithSender>,
-    pub total: i64,
-}
-
 /// Verify that a user has access to a session (is a member with any role)
 fn verify_session_access(
     conn: &mut diesel::pg::PgConnection,
@@ -175,7 +164,7 @@ pub async fn list_messages(
     cookies: Cookies,
     Path(session_id): Path<uuid::Uuid>,
     Query(params): Query<ListMessagesQuery>,
-) -> Result<Json<MessagesListResponse>, AppError> {
+) -> Result<Json<MessagesListResponse<MessageWithSender>>, AppError> {
     let current_user_id = extract_user_id(&app_state, &cookies)?;
 
     let mut conn = app_state.db_pool.get()?;
