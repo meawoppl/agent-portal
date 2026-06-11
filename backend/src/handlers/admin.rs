@@ -159,7 +159,7 @@ pub async fn get_stats(
     // Query 2: All session counts + cost/token sums in one pass
     let session_stats: SessionStats = diesel::sql_query(
         "SELECT COUNT(*) as total, \
-         COUNT(*) FILTER (WHERE status = 'active') as active_count, \
+         COUNT(*) FILTER (WHERE status = $1) as active_count, \
          COALESCE(SUM(total_cost_usd), 0.0)::float8 as spend_usd, \
          COALESCE(SUM(input_tokens), 0)::bigint as sum_input_tokens, \
          COALESCE(SUM(output_tokens), 0)::bigint as sum_output_tokens, \
@@ -167,6 +167,7 @@ pub async fn get_stats(
          COALESCE(SUM(cache_read_tokens), 0)::bigint as sum_cache_read_tokens \
          FROM sessions",
     )
+    .bind::<diesel::sql_types::Text, _>(shared::SessionStatus::Active.as_str())
     .get_result(&mut conn)
     .map_err(|e| admin_db_query("Failed to query session stats", e))?;
 

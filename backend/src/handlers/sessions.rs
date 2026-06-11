@@ -9,6 +9,7 @@ use shared::api::{
     AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse,
     UpdateMemberRoleRequest,
 };
+use shared::SessionStatus;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -55,7 +56,7 @@ pub async fn list_sessions(
     let results: Vec<(Session, String)> = sessions::table
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(session_members::user_id.eq(current_user_id))
-        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
         .select((Session::as_select(), session_members::role))
         .order(sessions::last_activity.desc())
         .load(&mut conn)?;
@@ -88,7 +89,7 @@ pub async fn resolve_proxy_session(
         .filter(sessions::working_directory.eq(req.working_directory))
         .filter(sessions::agent_type.eq(req.agent_type.as_str()))
         .filter(sessions::scheduled_task_id.is_null())
-        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
         .filter(sessions::paused.eq(false))
         .select(Session::as_select())
         .into_boxed();
@@ -257,7 +258,7 @@ pub async fn stop_session(
         diesel::update(sessions::table.find(session_id))
             .set((
                 sessions::paused.eq(false),
-                sessions::status.eq("disconnected"),
+                sessions::status.eq(SessionStatus::Disconnected.as_str()),
                 sessions::updated_at.eq(diesel::dsl::now),
             ))
             .execute(&mut conn)?;
@@ -287,7 +288,7 @@ pub async fn pause_session(
     diesel::update(sessions::table.find(session_id))
         .set((
             sessions::paused.eq(true),
-            sessions::status.eq("disconnected"),
+            sessions::status.eq(SessionStatus::Disconnected.as_str()),
             sessions::updated_at.eq(diesel::dsl::now),
         ))
         .execute(&mut conn)?;

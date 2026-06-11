@@ -127,6 +127,7 @@ pub enum SessionStatus {
     Active,
     Inactive,
     Disconnected,
+    Replaced,
 }
 
 impl SessionStatus {
@@ -135,6 +136,7 @@ impl SessionStatus {
             SessionStatus::Active => "active",
             SessionStatus::Inactive => "inactive",
             SessionStatus::Disconnected => "disconnected",
+            SessionStatus::Replaced => "replaced",
         }
     }
 }
@@ -507,8 +509,12 @@ mod tests {
         assert_eq!(SessionStatus::Active.as_str(), "active");
         assert_eq!(SessionStatus::Inactive.as_str(), "inactive");
         assert_eq!(SessionStatus::Disconnected.as_str(), "disconnected");
+        assert_eq!(SessionStatus::Replaced.as_str(), "replaced");
 
         let json = serde_json::to_string(&SessionStatus::Active).unwrap();
         assert_eq!(json, "\"active\"");
+
+        let replaced: SessionStatus = serde_json::from_str("\"replaced\"").unwrap();
+        assert_eq!(replaced, SessionStatus::Replaced);
     }
 }

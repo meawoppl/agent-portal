@@ -5,7 +5,7 @@ use axum::{
 use diesel::prelude::*;
 use serde::Deserialize;
 use shared::api::LaunchRequest;
-use shared::{DirectoryEntry, LauncherInfo, LauncherToServer, ServerToLauncher};
+use shared::{DirectoryEntry, LauncherInfo, LauncherToServer, ServerToLauncher, SessionStatus};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::{error, info, warn};
@@ -147,7 +147,7 @@ pub(crate) fn create_desired_session(
         session_name,
         session_key: draft.session_id.to_string(),
         working_directory: draft.working_directory,
-        status: "disconnected".to_string(),
+        status: SessionStatus::Disconnected.as_str().to_string(),
         git_branch: None,
         client_version: draft.client_version,
         hostname: draft.hostname,
