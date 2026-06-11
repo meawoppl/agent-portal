@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.32
+
+- **`CurrentUserId` extractor + `AppState::conn()` replace the auth/DB preamble pasted into 33 REST handlers.** The extractor implements `FromRequestParts<Arc<AppState>>` over the existing `extract_user_id` (dev-mode bypass and disabled-user rejection reused, not reimplemented; rejection built from the same `AppError::into_response()`, so status/body are identical), which means a new handler can no longer forget the auth check. `AppState::conn()` centralizes pool checkout + `AppError::DbPool` mapping. Deliberately untouched: device-flow approve/deny (custom `DeviceFlowApiError` shape), `/api/me` (custom error mapping), Diesel `NotFound → 404` sites, and WebSocket paths with no request context. One inherent edge: requests that are both unauthenticated and malformed now get 401 before 400 (extractors run first) — auth-first is the point.
+
 ## 2.8.31
 
 - **Session statuses now come from `shared::SessionStatus` everywhere, and the enum gained the missing `Replaced` variant.** The DB has contained `"replaced"` rows that the shared enum could not represent — any `SessionInfo` serialized with that status failed frontend deserialization, and every query had to remember `.ne("replaced")` by hand against a bare string. Sixteen raw `"active"`/`"inactive"`/`"disconnected"`/`"replaced"` literals across ten backend files (sessions, registration, launcher/proxy sockets, launchers, admin's raw-SQL `FILTER` — now a `$1` bind — plus `main.rs` cleanup loops and test fixtures) are replaced with `SessionStatus::X.as_str()`. Columns stay text (no Diesel custom type); query semantics identical. Frontend: the sessions panel styles `Replaced` like Inactive; everything else already matched non-exhaustively.

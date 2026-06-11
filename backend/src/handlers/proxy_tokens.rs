@@ -13,11 +13,11 @@ use shared::{
     ProxyTokenListResponse, RenewProxyTokenRequest,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
+    auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
     jwt::{create_proxy_token, hash_token},
@@ -143,12 +143,10 @@ fn token_response(
 /// POST /api/proxy-tokens - Create a new proxy token
 pub async fn create_token_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Json(req): Json<CreateProxyTokenRequest>,
 ) -> Result<Json<CreateProxyTokenResponse>, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let issued = issue_proxy_token(
         &mut conn,
@@ -169,11 +167,9 @@ pub async fn create_token_handler(
 /// GET /api/proxy-tokens - List all tokens for the current user
 pub async fn list_tokens_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
 ) -> Result<Json<ProxyTokenListResponse>, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let tokens: Vec<ProxyAuthToken> = proxy_auth_tokens::table
         .filter(proxy_auth_tokens::user_id.eq(user_id))
@@ -200,12 +196,10 @@ pub async fn list_tokens_handler(
 /// DELETE /api/proxy-tokens/:id - Revoke a token
 pub async fn revoke_token_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(token_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Update token to revoked (only if owned by user)
     let updated = diesel::update(
@@ -227,13 +221,11 @@ pub async fn revoke_token_handler(
 /// POST /api/proxy-tokens/:id/renew - Renew a token with a new expiration
 pub async fn renew_token_handler(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(token_id): Path<Uuid>,
     Json(req): Json<RenewProxyTokenRequest>,
 ) -> Result<Json<CreateProxyTokenResponse>, AppError> {
-    let user_id = crate::auth::extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let existing: ProxyAuthToken = proxy_auth_tokens::table
         .filter(proxy_auth_tokens::id.eq(token_id))

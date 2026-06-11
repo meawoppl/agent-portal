@@ -20,11 +20,10 @@ use diesel::prelude::*;
 use mini_moka::sync::Cache;
 use std::sync::Arc;
 use std::time::Duration;
-use tower_cookies::Cookies;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::auth::extract_user_id;
+use crate::auth::CurrentUserId;
 use crate::errors::AppError;
 
 /// Default total-byte cap for the served image cache (256 MiB).
@@ -297,13 +296,9 @@ impl ImageStore {
 /// fine when every image was world-readable, wrong now that auth gates it).
 pub async fn serve_image(
     State(app_state): State<Arc<crate::AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Auth first — if the caller has no session cookie we don't even tell
-    // them whether the image exists.
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
     let image = app_state
         .image_store
         .get(&id)
