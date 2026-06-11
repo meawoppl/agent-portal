@@ -1,7 +1,6 @@
 //! Hook for managing session list with automatic polling.
 
-use crate::utils;
-use gloo_net::http::Request;
+use crate::utils::{self, On401};
 use shared::api::SessionsResponse;
 use shared::SessionInfo;
 use wasm_bindgen_futures::spawn_local;
@@ -43,22 +42,13 @@ pub fn use_sessions() -> UseSessions {
             let loading = loading.clone();
 
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/sessions");
-                match Request::get(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 401 {
-                            // Session invalid - redirect to logout
-                            if let Some(window) = web_sys::window() {
-                                let _ = window.location().set_href("/api/auth/logout");
-                            }
-                            return;
-                        }
-                        if let Ok(data) = response.json::<SessionsResponse>().await {
-                            sessions.set(data.sessions);
-                        }
+                // 401 means the session is invalid; the helper redirects to logout.
+                match utils::fetch_json::<SessionsResponse>("/api/sessions", On401::Logout).await {
+                    Ok(data) => {
+                        sessions.set(data.sessions);
                     }
                     Err(e) => {
-                        log::error!("Failed to fetch sessions: {:?}", e);
+                        log::error!("Failed to fetch sessions: {}", e);
                     }
                 }
                 if set_loading {

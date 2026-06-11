@@ -13,7 +13,6 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use gloo_net::http::Request;
 use shared::api::{MetricBucket, MetricBucketsResponse};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -21,7 +20,7 @@ use yew::prelude::*;
 use crate::components::charts::{
     AxisScale, BucketKind, LinePlot, LineSeries, StackedArea, StackedSeries,
 };
-use crate::utils;
+use crate::utils::{self, FetchError, On401};
 
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
 /// currently reports no model or tier; keeping the agent in the key lets the
@@ -212,24 +211,22 @@ pub fn performance_panel() -> Html {
             let loading = loading.clone();
             let error_msg = error_msg.clone();
             spawn_local(async move {
-                let url = utils::api_url(&format!(
+                let path = format!(
                     "/api/metrics/turns?bucket={}&window={}",
                     bucket_param(window_val),
                     window_param(window_val)
-                ));
-                match Request::get(&url).send().await {
-                    Ok(resp) if resp.ok() => match resp.json::<MetricBucketsResponse>().await {
-                        Ok(data) => {
-                            buckets.set(data.buckets);
-                        }
-                        Err(e) => {
-                            error_msg.set(Some(format!("Failed to parse response: {e}")));
-                        }
-                    },
-                    Ok(resp) => {
-                        error_msg.set(Some(format!("Request failed: HTTP {}", resp.status())));
+                );
+                match utils::fetch_json::<MetricBucketsResponse>(&path, On401::Ignore).await {
+                    Ok(data) => {
+                        buckets.set(data.buckets);
                     }
-                    Err(e) => {
+                    Err(FetchError::Decode(e)) => {
+                        error_msg.set(Some(format!("Failed to parse response: {e}")));
+                    }
+                    Err(FetchError::Status(code)) => {
+                        error_msg.set(Some(format!("Request failed: HTTP {code}")));
+                    }
+                    Err(FetchError::Network(e)) => {
                         error_msg.set(Some(format!("Network error: {e}")));
                     }
                 }
