@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.27
+
+- **Frontend: one `fetch_json` helper replaces 25 hand-rolled GET call sites across 16 files.** New `utils::fetch_json<T>(path, On401)` (gloo_net GET via `api_url` → status check → JSON decode) with a typed `FetchError { Network, Status, Decode }` so pages that branch on status keep their exact behavior: admin's 401→Home / 403→"Access denied", launch dialog's distinct 400/504 messages. 401→logout applies only where it existed before (`/api/sessions`, `/api/proxy-tokens`); the splash page explicitly ignores 401 (pre-login). The logout redirect itself, previously copy-pasted in five files, is now `utils::logout()`. One genuine bug fixed in passing: share-dialog member-list decode failures used to hang the loading spinner silently, now they show an error. Net −22 lines and uniform error logging.
+
 ## 2.8.24
 
 - **Remove the launcher's dead expected-session restart machinery.** `expected_sessions` is wiped unconditionally at startup (the backend DB has been authoritative since #908) and nothing repopulates it, so the crash-restart path could never fire. Deleted: `RESTART_DELAY`/`MAX_RESTART_ATTEMPTS`, the `restart_counts` map, the restart channel and its select arm, the post-exit clean/non-clean expected-session block, the resume-id fallback in `LaunchSession`, `config::remove_session`, and the now-orphaned `session_working_directory()` helper + `ManagedTask.working_directory` field. The one-time legacy-config wipe (`clear_sessions`) moved to `main.rs` where the config is loaded; behavior is identical. Net −132 lines and a simpler launcher select loop.
