@@ -7,7 +7,7 @@ use super::{ProxySender, SessionId, SessionManager};
 use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
-use shared::{ProxyToServer, ServerToProxy, SessionEndpoint};
+use shared::{ProxyToServer, ServerToProxy, SessionEndpoint, SessionStatus};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -76,7 +76,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                 Ok(mut conn) => {
                     use crate::schema::sessions;
                     let _ = diesel::update(sessions::table.find(session_id))
-                        .set(sessions::status.eq("disconnected"))
+                        .set(sessions::status.eq(SessionStatus::Disconnected.as_str()))
                         .execute(&mut conn);
                 }
                 Err(e) => {

@@ -4,14 +4,13 @@ use axum::{
 };
 use diesel::prelude::*;
 use serde::Deserialize;
-use shared::api::LaunchRequest;
-use shared::{DirectoryEntry, LauncherInfo, LauncherToServer, ServerToLauncher};
+use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
+use shared::{LauncherInfo, LauncherToServer, ServerToLauncher, SessionStatus};
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::auth::extract_user_id;
+use crate::auth::CurrentUserId;
 use crate::errors::AppError;
 use crate::handlers::responses::EmptyResponse;
 use crate::handlers::websocket::SessionManager;
@@ -21,9 +20,8 @@ use crate::AppState;
 /// GET /api/launchers - List connected launchers for the current user
 pub async fn list_launchers(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
 ) -> Result<Json<Vec<LauncherInfo>>, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
     let launchers = app_state.session_manager.get_launchers_for_user(&user_id);
     Ok(Json(launchers))
 }
@@ -36,11 +34,9 @@ pub struct LaunchResponse {
 /// POST /api/launch - Request launching a new session
 pub async fn launch_session(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Json(req): Json<LaunchRequest>,
 ) -> Result<Json<LaunchResponse>, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
-
     let launcher_id = resolve_launch_target(&app_state.session_manager, req.launcher_id, user_id)?;
     let (hostname, version) = {
         let launcher = app_state
@@ -94,7 +90,7 @@ pub async fn launch_session(
             .session_manager
             .pending_launch_sessions
             .remove(&request_id);
-        let mut conn = app_state.db_pool.get()?;
+        let mut conn = app_state.conn()?;
         use crate::schema::sessions;
         let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
         error!("Failed to send launch request to launcher {}", launcher_id);
@@ -135,7 +131,7 @@ pub(crate) fn create_desired_session(
     app_state: &AppState,
     draft: DesiredSessionDraft,
 ) -> Result<(), AppError> {
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::{session_members, sessions};
     use diesel::prelude::*;
@@ -147,7 +143,7 @@ pub(crate) fn create_desired_session(
         session_name,
         session_key: draft.session_id.to_string(),
         working_directory: draft.working_directory,
-        status: "disconnected".to_string(),
+        status: SessionStatus::Disconnected.as_str().to_string(),
         git_branch: None,
         client_version: draft.client_version,
         hostname: draft.hostname,
@@ -207,21 +203,13 @@ pub struct DirectoryQuery {
     pub path: String,
 }
 
-#[derive(serde::Serialize)]
-pub struct DirectoryListingResponse {
-    pub entries: Vec<DirectoryEntry>,
-    pub resolved_path: Option<String>,
-}
-
 /// GET /api/launchers/:launcher_id/directories?path=/some/path
 pub async fn list_directories(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
     Query(query): Query<DirectoryQuery>,
 ) -> Result<Json<DirectoryListingResponse>, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
-
     // Verify the launcher belongs to this user
     let launcher = app_state
         .session_manager
@@ -289,52 +277,33 @@ pub async fn list_directories(
 }
 
 pub(crate) fn mint_launch_token(app_state: &AppState, user_id: Uuid) -> Result<String, AppError> {
-    let mut conn = app_state.db_pool.get()?;
+    use crate::handlers::proxy_tokens::{issue_proxy_token, TokenPersist, LAUNCH_TOKEN_NAME};
 
-    use crate::schema::users;
-    use diesel::prelude::*;
+    let mut conn = app_state.conn()?;
 
-    let user: crate::models::User = users::table.find(user_id).first(&mut conn)?;
-
-    let token_id = Uuid::new_v4();
     // Launch tokens never expire. The token is bound to its session at proxy
     // registration and revoked when the session terminates, so its lifetime
     // tracks the session rather than a fixed TTL. See #932.
-    let token = crate::jwt::create_proxy_token(
+    let issued = issue_proxy_token(
+        &mut conn,
         app_state.jwt_secret.as_bytes(),
-        token_id,
         user_id,
-        &user.email,
+        TokenPersist::Create {
+            name: LAUNCH_TOKEN_NAME,
+        },
         None,
-    )
-    .map_err(|e| AppError::Internal(format!("Failed to create launch token: {}", e)))?;
+    )?;
 
-    // Store token hash in DB
-    let token_hash = crate::jwt::hash_token(&token);
-    let new_token = crate::models::NewProxyAuthToken {
-        user_id,
-        name: crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME.to_string(),
-        token_hash,
-        expires_at: None,
-    };
-
-    use crate::schema::proxy_auth_tokens;
-    diesel::insert_into(proxy_auth_tokens::table)
-        .values(&new_token)
-        .execute(&mut conn)?;
-
-    Ok(token)
+    Ok(issued.token)
 }
 
 /// POST /api/launchers/:launcher_id/update - Tell the launcher to fetch the
 /// latest release, install it, and restart itself.
 pub async fn update_launcher(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
-
     let sender = {
         let launcher = app_state
             .session_manager
@@ -356,21 +325,14 @@ pub async fn update_launcher(
     Ok(EmptyResponse::OK)
 }
 
-#[derive(serde::Serialize)]
-pub struct ProbeAgentsResponse {
-    pub agents: Vec<shared::AgentInstall>,
-}
-
 /// GET /api/launchers/:launcher_id/probe-agents - Ask the launcher to (re-)scan
 /// its agent CLIs (`claude`, `codex`) and return install state. The frontend
 /// calls this when the launch dialog opens.
 pub async fn probe_agents(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<Json<ProbeAgentsResponse>, AppError> {
-    let user_id = extract_user_id(&app_state, &cookies)?;
-
     let sender = {
         let launcher = app_state
             .session_manager

@@ -69,6 +69,14 @@ pub struct AppState {
     pub image_store: handlers::images::ImageStore,
 }
 
+impl AppState {
+    /// Check out a database connection from the pool, mapping pool errors to
+    /// [`AppError::DbPool`](crate::errors::AppError::DbPool).
+    pub fn conn(&self) -> Result<db::DbConnection, crate::errors::AppError> {
+        Ok(self.db_pool.get()?)
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Parse CLI arguments
@@ -200,7 +208,7 @@ async fn main() -> anyhow::Result<()> {
             use schema::sessions;
 
             let active_sessions: Vec<(uuid::Uuid,)> = match sessions::table
-                .filter(sessions::status.eq("active"))
+                .filter(sessions::status.eq(shared::SessionStatus::Active.as_str()))
                 .select((sessions::id,))
                 .load(&mut conn)
             {
@@ -223,7 +231,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             match diesel::update(sessions::table.filter(sessions::id.eq_any(&stale_ids)))
-                .set(sessions::status.eq("disconnected"))
+                .set(sessions::status.eq(shared::SessionStatus::Disconnected.as_str()))
                 .execute(&mut conn)
             {
                 Ok(updated) => {

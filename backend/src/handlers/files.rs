@@ -1,4 +1,4 @@
-use crate::auth::extract_user_id;
+use crate::auth::CurrentUserId;
 use crate::errors::AppError;
 use crate::AppState;
 use axum::{
@@ -25,7 +25,7 @@ pub struct PullFileQuery {
 
 pub async fn pull_session_file(
     State(app_state): State<Arc<AppState>>,
-    cookies: tower_cookies::Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
     Query(query): Query<PullFileQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -33,7 +33,6 @@ pub async fn pull_session_file(
         return Err(AppError::BadRequest("path is required"));
     }
 
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
     verify_session_read_access(&app_state, session_id, current_user_id)?;
 
     let request_id = Uuid::new_v4();
@@ -118,7 +117,7 @@ fn verify_session_read_access(
     session_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
     use crate::schema::{session_members, sessions};
 
     let is_owner = sessions::table

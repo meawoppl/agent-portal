@@ -2,7 +2,7 @@ use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
 use shared::{
     AgentType, LauncherEndpoint, LauncherToServer, ScheduledTaskConfig, ServerToClient,
-    ServerToLauncher, ServerToProxy,
+    ServerToLauncher, ServerToProxy, SessionStatus,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -353,7 +353,7 @@ fn handle_launcher_message(
                         if let Err(e) = diesel::update(sessions::table.find(session_id))
                             .set((
                                 sessions::paused.eq(true),
-                                sessions::status.eq("disconnected"),
+                                sessions::status.eq(SessionStatus::Disconnected.as_str()),
                                 sessions::updated_at.eq(diesel::dsl::now),
                             ))
                             .execute(&mut conn)
@@ -696,7 +696,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         .filter(sessions::launcher_id.eq(launcher_id))
         .filter(sessions::paused.eq(false))
         .filter(sessions::scheduled_task_id.is_null())
-        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
         .select(Session::as_select())
         .load(&mut conn)
     {

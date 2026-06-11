@@ -2,19 +2,18 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::Serialize;
 use shared::api::{
-    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse,
-    UpdateMemberRoleRequest,
+    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse, SessionMemberInfo,
+    SessionMembersResponse, UpdateMemberRoleRequest,
 };
+use shared::SessionStatus;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 use crate::{
-    auth::extract_user_id,
+    auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
     models::{Message, NewSessionMember, Session, SessionMember},
@@ -44,18 +43,16 @@ pub struct SessionListResponse {
 
 pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
 ) -> Result<Json<SessionListResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::{session_members, sessions};
 
     let results: Vec<(Session, String)> = sessions::table
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(session_members::user_id.eq(current_user_id))
-        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
         .select((Session::as_select(), session_members::role))
         .order(sessions::last_activity.desc())
         .load(&mut conn)?;
@@ -77,7 +74,7 @@ pub async fn resolve_proxy_session(
     State(app_state): State<Arc<AppState>>,
     Json(req): Json<ResolveProxySessionRequest>,
 ) -> Result<Json<ResolveProxySessionResponse>, AppError> {
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
     let current_user_id = proxy_request_user_id(&app_state, &mut conn, req.auth_token.as_deref())?;
 
     use crate::schema::{session_members, sessions};
@@ -88,7 +85,7 @@ pub async fn resolve_proxy_session(
         .filter(sessions::working_directory.eq(req.working_directory))
         .filter(sessions::agent_type.eq(req.agent_type.as_str()))
         .filter(sessions::scheduled_task_id.is_null())
-        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
         .filter(sessions::paused.eq(false))
         .select(Session::as_select())
         .into_boxed();
@@ -148,12 +145,10 @@ pub struct SessionDetailResponse {
 
 pub async fn get_session(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<SessionDetailResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::{messages, session_members, sessions};
 
@@ -180,12 +175,10 @@ pub async fn get_session(
 
 pub async fn delete_session(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::{session_members, sessions};
 
@@ -228,12 +221,10 @@ pub async fn delete_session(
 
 pub async fn stop_session(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Stopping a session is a mutation — viewer-role members must not be
     // able to terminate sessions they only have read access to. The helper
@@ -257,7 +248,7 @@ pub async fn stop_session(
         diesel::update(sessions::table.find(session_id))
             .set((
                 sessions::paused.eq(false),
-                sessions::status.eq("disconnected"),
+                sessions::status.eq(SessionStatus::Disconnected.as_str()),
                 sessions::updated_at.eq(diesel::dsl::now),
             ))
             .execute(&mut conn)?;
@@ -271,12 +262,10 @@ pub async fn stop_session(
 
 pub async fn pause_session(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
     crate::handlers::session_access::verify_session_mutator(
         &mut conn,
         session_id,
@@ -287,7 +276,7 @@ pub async fn pause_session(
     diesel::update(sessions::table.find(session_id))
         .set((
             sessions::paused.eq(true),
-            sessions::status.eq("disconnected"),
+            sessions::status.eq(SessionStatus::Disconnected.as_str()),
             sessions::updated_at.eq(diesel::dsl::now),
         ))
         .execute(&mut conn)?;
@@ -302,12 +291,10 @@ pub async fn pause_session(
 
 pub async fn resume_session(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
     let session = crate::handlers::session_access::verify_session_mutator(
         &mut conn,
         session_id,
@@ -387,20 +374,6 @@ fn resolve_resume_launcher(app_state: &AppState, session: &Session) -> Option<Uu
 // Session Member Management
 // ============================================================================
 
-#[derive(Debug, Serialize)]
-pub struct SessionMemberInfo {
-    pub user_id: Uuid,
-    pub email: String,
-    pub name: Option<String>,
-    pub role: String,
-    pub created_at: NaiveDateTime,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SessionMembersResponse {
-    pub members: Vec<SessionMemberInfo>,
-}
-
 /// User info selected from joined query
 #[derive(Debug, Queryable)]
 struct UserBasicInfo {
@@ -412,12 +385,10 @@ struct UserBasicInfo {
 /// List all members of a session
 pub async fn list_session_members(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<SessionMembersResponse>, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::{session_members, users};
 
@@ -456,17 +427,15 @@ pub async fn list_session_members(
 /// Add a member to a session (owner only)
 pub async fn add_session_member(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
     Json(req): Json<AddMemberRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
     if req.role != "editor" && req.role != "viewer" {
         return Err(AppError::Internal("Invalid role".to_string()));
     }
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::{session_members, users};
 
@@ -512,12 +481,10 @@ pub async fn add_session_member(
 /// Owner can remove anyone; non-owner can only remove themselves (leave)
 pub async fn remove_session_member(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<EmptyResponse, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::session_members;
 
@@ -557,17 +524,15 @@ pub async fn remove_session_member(
 /// Update a member's role (owner only)
 pub async fn update_session_member_role(
     State(app_state): State<Arc<AppState>>,
-    cookies: Cookies,
+    CurrentUserId(current_user_id): CurrentUserId,
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMemberRoleRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    let current_user_id = extract_user_id(&app_state, &cookies)?;
-
     if req.role != "editor" && req.role != "viewer" {
         return Err(AppError::Internal("Invalid role".to_string()));
     }
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     use crate::schema::session_members;
 

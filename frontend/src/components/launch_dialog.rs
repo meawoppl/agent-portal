@@ -1,8 +1,8 @@
 use crate::components::ProxyTokenSetup;
+use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
-use serde::Deserialize;
-use shared::api::LaunchRequest;
+use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
 use shared::{AgentInstall, AgentType, DirectoryEntry, LauncherInfo};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
@@ -13,17 +13,6 @@ use yew::prelude::*;
 /// Sentinel value used in the launcher <select> to represent the "connect new host" option.
 const CONNECT_NEW: &str = "__install__";
 
-#[derive(Deserialize)]
-struct DirectoryListingResponse {
-    entries: Vec<DirectoryEntry>,
-    resolved_path: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ProbeAgentsResponse {
-    agents: Vec<AgentInstall>,
-}
-
 /// Fetch the current install state for both agent CLIs from the given launcher.
 /// Stores the result in `agents` and clears `probing` when done.
 fn probe_agents_for(
@@ -33,14 +22,12 @@ fn probe_agents_for(
 ) {
     probing.set(true);
     spawn_local(async move {
-        let url = format!("/api/launchers/{}/probe-agents", launcher_id);
-        match Request::get(&url).send().await {
-            Ok(resp) if resp.ok() => {
-                if let Ok(body) = resp.json::<ProbeAgentsResponse>().await {
-                    agents.set(body.agents);
-                }
+        let path = format!("/api/launchers/{}/probe-agents", launcher_id);
+        match utils::fetch_json::<ProbeAgentsResponse>(&path, On401::Ignore).await {
+            Ok(body) => {
+                agents.set(body.agents);
             }
-            _ => {
+            Err(_) => {
                 // Probe failures: leave the install list empty. The UI will
                 // treat unknown as "not blocking" — better to let the user
                 // try and see the spawn-time error than to over-block.
@@ -115,46 +102,44 @@ impl DirBrowser {
         browser.loading.set(true);
         browser.error.set(None);
         spawn_local(async move {
-            let url = format!(
+            let api_path = format!(
                 "/api/launchers/{}/directories?path={}",
                 launcher_id,
                 js_sys::encode_uri_component(&path)
             );
-            match Request::get(&url).send().await {
-                Ok(resp) if resp.ok() => {
-                    if let Ok(listing) = resp.json::<DirectoryListingResponse>().await {
-                        if update_path && (path == "~" || path == "~/") {
-                            browser.home_root.set(listing.resolved_path.clone());
+            match utils::fetch_json::<DirectoryListingResponse>(&api_path, On401::Ignore).await {
+                Ok(listing) => {
+                    if update_path && (path == "~" || path == "~/") {
+                        browser.home_root.set(listing.resolved_path.clone());
+                    }
+                    browser.entries.set(listing.entries);
+                    if update_path {
+                        if let Some(resolved) = listing.resolved_path {
+                            browser.path.set(resolved);
+                        } else {
+                            browser.path.set(path);
                         }
-                        browser.entries.set(listing.entries);
-                        if update_path {
-                            if let Some(resolved) = listing.resolved_path {
-                                browser.path.set(resolved);
-                            } else {
-                                browser.path.set(path);
-                            }
-                        }
-                    } else {
-                        browser
-                            .error
-                            .set(Some("Failed to parse response".to_string()));
                     }
                 }
-                Ok(resp) => {
-                    let status = resp.status();
-                    if status == 400 {
-                        browser.error.set(Some(
-                            "Path not found, not readable, or outside home".to_string(),
-                        ));
-                    } else if status == 504 {
-                        browser
-                            .error
-                            .set(Some("Launcher not responding".to_string()));
-                    } else {
-                        browser.error.set(Some(format!("Error {}", status)));
-                    }
+                Err(FetchError::Decode(_)) => {
+                    browser
+                        .error
+                        .set(Some("Failed to parse response".to_string()));
                 }
-                Err(e) => {
+                Err(FetchError::Status(400)) => {
+                    browser.error.set(Some(
+                        "Path not found, not readable, or outside home".to_string(),
+                    ));
+                }
+                Err(FetchError::Status(504)) => {
+                    browser
+                        .error
+                        .set(Some("Launcher not responding".to_string()));
+                }
+                Err(FetchError::Status(status)) => {
+                    browser.error.set(Some(format!("Error {}", status)));
+                }
+                Err(FetchError::Network(e)) => {
                     browser.error.set(Some(format!("Request failed: {}", e)));
                 }
             }
@@ -241,18 +226,18 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let probing_agents = probing_agents.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                if let Ok(resp) = Request::get("/api/launchers").send().await {
-                    if let Ok(data) = resp.json::<Vec<LauncherInfo>>().await {
-                        if let Some(first) = data.first() {
-                            let lid = first.launcher_id;
-                            selected_launcher.set(Some(lid));
-                            dir.fetch(lid, "~".to_string(), true);
-                            probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
-                        } else {
-                            show_install.set(true);
-                        }
-                        launchers.set(data);
+                if let Ok(data) =
+                    utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
+                {
+                    if let Some(first) = data.first() {
+                        let lid = first.launcher_id;
+                        selected_launcher.set(Some(lid));
+                        dir.fetch(lid, "~".to_string(), true);
+                        probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
+                    } else {
+                        show_install.set(true);
                     }
+                    launchers.set(data);
                 }
             });
             || ()

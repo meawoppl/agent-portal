@@ -8,8 +8,10 @@ use axum::{
 };
 use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Double};
-use serde::Serialize;
-use shared::api::{AdminUserEntry, AdminUsersResponse, UpdateUserRequest};
+use shared::api::{
+    AdminSessionInfo, AdminSessionsResponse, AdminStats, AdminUserEntry, AdminUsersResponse,
+    UpdateUserRequest,
+};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use tracing::{info, warn};
@@ -38,7 +40,7 @@ pub async fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Resu
     let user_id: Uuid = cookie.value().parse().map_err(|_| AppError::Unauthorized)?;
 
     // Fetch user from database
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     let user = schema::users::table
         .find(user_id)
@@ -63,34 +65,6 @@ pub async fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Resu
 // ============================================================================
 // Stats Endpoint - System overview statistics
 // ============================================================================
-
-#[derive(Debug, Serialize)]
-pub struct AdminStats {
-    /// Total number of registered users
-    pub total_users: i64,
-    /// Number of users with is_admin=true
-    pub admin_users: i64,
-    /// Number of disabled users
-    pub disabled_users: i64,
-    /// Total number of sessions (all time)
-    pub total_sessions: i64,
-    /// Number of active sessions
-    pub active_sessions: i64,
-    /// Number of currently connected proxy clients
-    pub connected_proxy_clients: usize,
-    /// Number of currently connected web clients
-    pub connected_web_clients: usize,
-    /// Total API spend across all sessions
-    pub total_spend_usd: f64,
-    /// Total input tokens across all sessions
-    pub total_input_tokens: i64,
-    /// Total output tokens across all sessions
-    pub total_output_tokens: i64,
-    /// Total cache creation tokens across all sessions
-    pub total_cache_creation_tokens: i64,
-    /// Total cache read tokens across all sessions
-    pub total_cache_read_tokens: i64,
-}
 
 /// Aggregated user counts from a single query.
 #[derive(QueryableByName)]
@@ -144,7 +118,7 @@ pub async fn get_stats(
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested system stats", admin.email);
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Query 1: All user counts in one pass
     let user_stats: UserStats = diesel::sql_query(
@@ -159,7 +133,7 @@ pub async fn get_stats(
     // Query 2: All session counts + cost/token sums in one pass
     let session_stats: SessionStats = diesel::sql_query(
         "SELECT COUNT(*) as total, \
-         COUNT(*) FILTER (WHERE status = 'active') as active_count, \
+         COUNT(*) FILTER (WHERE status = $1) as active_count, \
          COALESCE(SUM(total_cost_usd), 0.0)::float8 as spend_usd, \
          COALESCE(SUM(input_tokens), 0)::bigint as sum_input_tokens, \
          COALESCE(SUM(output_tokens), 0)::bigint as sum_output_tokens, \
@@ -167,6 +141,7 @@ pub async fn get_stats(
          COALESCE(SUM(cache_read_tokens), 0)::bigint as sum_cache_read_tokens \
          FROM sessions",
     )
+    .bind::<diesel::sql_types::Text, _>(shared::SessionStatus::Active.as_str())
     .get_result(&mut conn)
     .map_err(|e| admin_db_query("Failed to query session stats", e))?;
 
@@ -221,7 +196,7 @@ pub async fn list_users(
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested user list", admin.email);
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get all users
     let users: Vec<User> = schema::users::table
@@ -292,7 +267,7 @@ pub async fn update_user(
         ));
     }
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get target user for logging
     let target_user: User = schema::users::table
@@ -374,27 +349,6 @@ pub async fn update_user(
 // Sessions Endpoint - List and manage all sessions
 // ============================================================================
 
-#[derive(Debug, Serialize)]
-pub struct AdminSessionInfo {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub user_email: String,
-    pub session_name: String,
-    pub working_directory: String,
-    pub git_branch: Option<String>,
-    pub status: String,
-    pub total_cost_usd: f64,
-    pub created_at: String,
-    pub last_activity: String,
-    pub is_connected: bool,
-    pub hostname: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AdminSessionsResponse {
-    pub sessions: Vec<AdminSessionInfo>,
-}
-
 pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
@@ -402,7 +356,7 @@ pub async fn list_sessions(
     let admin = require_admin(&app_state, &cookies).await?;
     info!("Admin {} requested sessions list", admin.email);
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get all sessions with user email
     let results: Vec<(crate::models::Session, String)> = schema::sessions::table
@@ -449,7 +403,7 @@ pub async fn delete_session(
 ) -> Result<EmptyResponse, AppError> {
     let admin = require_admin(&app_state, &cookies).await?;
 
-    let mut conn = app_state.db_pool.get()?;
+    let mut conn = app_state.conn()?;
 
     // Get session info for logging and cost tracking
     let session: crate::models::Session = schema::sessions::table
