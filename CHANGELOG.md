@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.30
+
+- **One `issue_proxy_token` helper replaces four duplicated token-mint sites.** `mint_launch_token` (launchers), `create_token_handler` + `renew_token_handler` (proxy tokens — whose `ProxyInitConfig`/init-URL construction was also duplicated verbatim and is now a shared `token_response` helper), and `complete_device_flow` (device auth) all did the same load-user → `create_proxy_token` JWT → `hash_token` → `proxy_auth_tokens` row dance. The helper parameterizes persistence (`TokenPersist::Create { name }` vs `Renew { token_id }`, preserving renew's update-in-place semantics) and TTL. The issue's fifth site (`renew_launcher_token_for`) had already been deleted by #933. JWT claims, hashing, row contents, and log messages are unchanged — token semantics now change in one place.
+
 ## 2.8.29
 
 - **Wire types defined once in `shared/src/api.rs` instead of hand-copied on both sides of the API.** Migrated the stragglers that never followed `AdminUsersResponse`'s move: `AdminStats`/`AdminSessionInfo`/`AdminSessionsResponse` (admin page), `DirectoryListingResponse`/`ProbeAgentsResponse` (launch dialog envelopes around already-shared payloads), `SessionMemberInfo`/`SessionMembersResponse` (share dialog — frontend copy had silently dropped `created_at`), a generic `MessagesListResponse<T>` (frontend now sees `total` instead of silently ignoring it), and the device-flow pair: `shared::DevicePollResponse` is now canonical (deleting identical private copies in the backend and portal-auth) and the backend uses the existing `shared::api::DeviceCodeResponse`. Serialize-side field names/attrs byte-identical; `#[serde(default)]` added only on deserialize-lenient non-key fields per the established pattern. Compile-time wire-shape checking restored on the admin, launch, membership, and device-auth paths.
