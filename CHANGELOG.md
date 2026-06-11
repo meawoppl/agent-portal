@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.27
+
+- **Frontend: one `fetch_json` helper replaces 25 hand-rolled GET call sites across 16 files.** New `utils::fetch_json<T>(path, On401)` (gloo_net GET via `api_url` → status check → JSON decode) with a typed `FetchError { Network, Status, Decode }` so pages that branch on status keep their exact behavior: admin's 401→Home / 403→"Access denied", launch dialog's distinct 400/504 messages. 401→logout applies only where it existed before (`/api/sessions`, `/api/proxy-tokens`); the splash page explicitly ignores 401 (pre-login). The logout redirect itself, previously copy-pasted in five files, is now `utils::logout()`. One genuine bug fixed in passing: share-dialog member-list decode failures used to hang the loading spinner silently, now they show an error. Net −22 lines and uniform error logging.
+
 ## 2.8.26
 
 - **Proxy shim now uses claude-session-lib's ws_bridge stack instead of a hand-rolled tokio-tungstenite wrapper.** `proxy/src/session.rs` (376 → 156 lines) loses `WebSocketConnection`, `connect_ws`, `register_with_backend`, raw text-frame parsing, and a byte-for-byte copy of the ClaudeInput/SequencedInput/PermissionResponse/OutputAck/Heartbeat/ServerShutdown/SessionTerminated dispatch — the shim now shares the exact connect/register/ack code path as the main proxy loop. The lib's duplicated wiggum-vs-input dispatch was extracted into `classify_portal_input`, which the shim reuses (deleting `ShimPortalInput`/`ShimPortalInputAck`). Behavior parity preserved deliberately: decode-tolerant reads (skip undecodable frames, warn), shim-style heartbeat replies, and the proxy keeps its direct tokio-tungstenite dep solely for the `rustls-tls-native-roots` feature union so cert validation is unchanged. Net −228 lines.
