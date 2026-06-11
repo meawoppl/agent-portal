@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.29
+
+- **Wire types defined once in `shared/src/api.rs` instead of hand-copied on both sides of the API.** Migrated the stragglers that never followed `AdminUsersResponse`'s move: `AdminStats`/`AdminSessionInfo`/`AdminSessionsResponse` (admin page), `DirectoryListingResponse`/`ProbeAgentsResponse` (launch dialog envelopes around already-shared payloads), `SessionMemberInfo`/`SessionMembersResponse` (share dialog — frontend copy had silently dropped `created_at`), a generic `MessagesListResponse<T>` (frontend now sees `total` instead of silently ignoring it), and the device-flow pair: `shared::DevicePollResponse` is now canonical (deleting identical private copies in the backend and portal-auth) and the backend uses the existing `shared::api::DeviceCodeResponse`. Serialize-side field names/attrs byte-identical; `#[serde(default)]` added only on deserialize-lenient non-key fields per the established pattern. Compile-time wire-shape checking restored on the admin, launch, membership, and device-auth paths.
+
 ## 2.8.25
 
 - **Dedupe `get_git_branch` (4 copies) and `get_repo_url` (2 copies) into `claude-session-lib`.** The canonical implementations in `proxy_session/git_metadata.rs` are now `pub` and re-exported from `claude_session_lib::proxy_session`; the verbatim copies in `proxy/src/main.rs`, `proxy/src/session.rs`, and `launcher/src/process_manager.rs` are deleted and their call sites pointed at the shared versions. All copies were byte-identical modulo comments — no behavior change. Net −109 lines.
