@@ -3,9 +3,8 @@
 #[path = "client_websocket_events.rs"]
 mod client_websocket_events;
 
-use crate::utils;
+use crate::utils::{self, On401};
 use client_websocket_events::handle_server_message;
-use gloo_net::http::Request;
 use shared::api::TurnMetricsResponse;
 use shared::{AppConfig, ClientEndpoint, TurnMetrics, WsEndpoint};
 use wasm_bindgen_futures::spawn_local;
@@ -94,13 +93,11 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         let recent_turn_metrics = recent_turn_metrics.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                let url = utils::api_url("/api/metrics/recent");
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if resp.ok() {
-                        if let Ok(parsed) = resp.json::<TurnMetricsResponse>().await {
-                            recent_turn_metrics.set(parsed.metrics);
-                        }
-                    }
+                if let Ok(parsed) =
+                    utils::fetch_json::<TurnMetricsResponse>("/api/metrics/recent", On401::Ignore)
+                        .await
+                {
+                    recent_turn_metrics.set(parsed.metrics);
                 }
             });
             || ()
@@ -137,20 +134,19 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                             // Compare the server's reported version against what we last saw.
                             // If it advanced, surface a reload prompt; the user's JS/WASM
                             // bundle was built against the earlier backend and may be drifted.
-                            let cfg_url = utils::api_url("/api/config");
-                            if let Ok(resp) = Request::get(&cfg_url).send().await {
-                                if let Ok(cfg) = resp.json::<AppConfig>().await {
-                                    let next = cfg.server_version;
-                                    match &known_version {
-                                        None => {
-                                            known_version = Some(next);
+                            if let Ok(cfg) =
+                                utils::fetch_json::<AppConfig>("/api/config", On401::Ignore).await
+                            {
+                                let next = cfg.server_version;
+                                match &known_version {
+                                    None => {
+                                        known_version = Some(next);
+                                    }
+                                    Some(prev) => {
+                                        if is_newer_version(prev, &next) {
+                                            update_available.set(Some(next.clone()));
                                         }
-                                        Some(prev) => {
-                                            if is_newer_version(prev, &next) {
-                                                update_available.set(Some(next.clone()));
-                                            }
-                                            known_version = Some(next);
-                                        }
+                                        known_version = Some(next);
                                     }
                                 }
                             }

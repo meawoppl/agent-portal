@@ -11,7 +11,7 @@ use overview_tab::AdminOverviewTab;
 use sessions_tab::AdminSessionsTab;
 use users_tab::AdminUsersTab;
 
-use crate::utils;
+use crate::utils::{self, FetchError, On401};
 use crate::Route;
 use gloo_net::http::Request;
 use shared::api::{AdminSessionsResponse, AdminUsersResponse, MeResponse, UpdateUserRequest};
@@ -68,26 +68,22 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
         let navigator = navigator.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/auth/me");
-                match Request::get(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 401 {
-                            navigator.push(&Route::Home);
-                            return;
-                        }
-                        if response.status() == 403 {
-                            error.set(Some(
-                                "Access denied. Admin privileges required.".to_string(),
-                            ));
-                            return;
-                        }
-                        if let Ok(me) = response.json::<MeResponse>().await {
-                            current_user_id.set(Some(me.id));
-                        }
+                match utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await {
+                    Ok(me) => {
+                        current_user_id.set(Some(me.id));
                     }
-                    Err(e) => {
-                        error.set(Some(format!("Failed to fetch user: {:?}", e)));
+                    Err(FetchError::Status(401)) => {
+                        navigator.push(&Route::Home);
                     }
+                    Err(FetchError::Status(403)) => {
+                        error.set(Some(
+                            "Access denied. Admin privileges required.".to_string(),
+                        ));
+                    }
+                    Err(FetchError::Network(e)) => {
+                        error.set(Some(format!("Failed to fetch user: {}", e)));
+                    }
+                    Err(_) => {}
                 }
             });
             || ()
@@ -106,37 +102,28 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             let loading = loading.clone();
             let navigator = navigator.clone();
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/admin/stats");
-                match Request::get(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 401 {
-                            navigator.push(&Route::Home);
-                            return;
-                        }
-                        if response.status() == 403 {
-                            error.set(Some(
-                                "Access denied. Admin privileges required.".to_string(),
-                            ));
-                            loading.set(false);
-                            return;
-                        }
-                        if !response.ok() {
-                            error.set(Some(format!("Server error (HTTP {})", response.status())));
-                            loading.set(false);
-                            return;
-                        }
-                        match response.json::<AdminStats>().await {
-                            Ok(data) => {
-                                stats.set(Some(data));
-                                error.set(None);
-                            }
-                            Err(e) => {
-                                error.set(Some(format!("Failed to parse stats: {:?}", e)));
-                            }
-                        }
+                match utils::fetch_json::<AdminStats>("/api/admin/stats", On401::Ignore).await {
+                    Ok(data) => {
+                        stats.set(Some(data));
+                        error.set(None);
                     }
-                    Err(e) => {
-                        error.set(Some(format!("Failed to fetch stats: {:?}", e)));
+                    Err(FetchError::Status(401)) => {
+                        navigator.push(&Route::Home);
+                        return;
+                    }
+                    Err(FetchError::Status(403)) => {
+                        error.set(Some(
+                            "Access denied. Admin privileges required.".to_string(),
+                        ));
+                    }
+                    Err(FetchError::Status(code)) => {
+                        error.set(Some(format!("Server error (HTTP {})", code)));
+                    }
+                    Err(FetchError::Decode(e)) => {
+                        error.set(Some(format!("Failed to parse stats: {}", e)));
+                    }
+                    Err(FetchError::Network(e)) => {
+                        error.set(Some(format!("Failed to fetch stats: {}", e)));
                     }
                 }
                 loading.set(false);
@@ -152,23 +139,15 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             let users = users.clone();
             let error = error.clone();
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/admin/users");
-                match Request::get(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 403 {
-                            return;
-                        }
-                        match response.json::<AdminUsersResponse>().await {
-                            Ok(data) => {
-                                users.set(data.users);
-                            }
-                            Err(e) => {
-                                error.set(Some(format!("Failed to parse users: {:?}", e)));
-                            }
-                        }
+                match utils::fetch_json::<AdminUsersResponse>("/api/admin/users", On401::Ignore)
+                    .await
+                {
+                    Ok(data) => {
+                        users.set(data.users);
                     }
+                    Err(FetchError::Status(403)) => {}
                     Err(e) => {
-                        error.set(Some(format!("Failed to fetch users: {:?}", e)));
+                        error.set(Some(format!("Failed to fetch users: {}", e)));
                     }
                 }
             });
@@ -183,23 +162,18 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             let sessions = sessions.clone();
             let error = error.clone();
             spawn_local(async move {
-                let api_endpoint = utils::api_url("/api/admin/sessions");
-                match Request::get(&api_endpoint).send().await {
-                    Ok(response) => {
-                        if response.status() == 403 {
-                            return;
-                        }
-                        match response.json::<AdminSessionsResponse>().await {
-                            Ok(data) => {
-                                sessions.set(data.sessions);
-                            }
-                            Err(e) => {
-                                error.set(Some(format!("Failed to parse sessions: {:?}", e)));
-                            }
-                        }
+                match utils::fetch_json::<AdminSessionsResponse>(
+                    "/api/admin/sessions",
+                    On401::Ignore,
+                )
+                .await
+                {
+                    Ok(data) => {
+                        sessions.set(data.sessions);
                     }
+                    Err(FetchError::Status(403)) => {}
                     Err(e) => {
-                        error.set(Some(format!("Failed to fetch sessions: {:?}", e)));
+                        error.set(Some(format!("Failed to fetch sessions: {}", e)));
                     }
                 }
             });

@@ -2,165 +2,25 @@
 pub use claude_session_lib::proxy_session::*;
 
 // ---------------------------------------------------------------------------
-// Raw tokio-tungstenite helpers for shim mode.
+// Shim-mode WebSocket reader.
 //
-// The shim manages its own WebSocket connection independently of the library's
-// ws_bridge-based connection loop. These types and functions provide low-level
-// WS primitives that the shim needs.
+// The shim manages its own connection loop independently of the library's
+// `run_connection_loop`, but shares the same ws_bridge typed connection
+// (`connect_to_backend` / `register_session`). This reader dispatches
+// `ServerToProxy` messages onto a single event channel for the shim's
+// select loop.
 // ---------------------------------------------------------------------------
 
-use std::sync::Arc;
-use std::time::Duration;
-
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
-use shared::{ProxyToServer, SendMode, ServerToProxy};
+use shared::{ProxyToServer, ServerToProxy};
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, warn};
-
-/// Raw tokio-tungstenite WebSocket stream type.
-pub type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
-
-/// Shared write half for concurrent WebSocket sends (raw).
-pub type SharedWsWrite = Arc<tokio::sync::Mutex<SplitSink<WsStream, Message>>>;
-
-/// WebSocket connection wrapper (raw tokio-tungstenite).
-pub struct WebSocketConnection {
-    write: SplitSink<WsStream, Message>,
-    read: SplitStream<WsStream>,
-}
-
-impl WebSocketConnection {
-    pub fn new(stream: WsStream) -> Self {
-        let (write, read) = stream.split();
-        Self { write, read }
-    }
-
-    /// Send a serializable message as JSON text.
-    pub async fn send<T: serde::Serialize>(&mut self, msg: &T) -> Result<(), String> {
-        let json = serde_json::to_string(msg).map_err(|e| e.to_string())?;
-        self.write
-            .send(Message::Text(json.into()))
-            .await
-            .map_err(|e| e.to_string())
-    }
-
-    /// Receive the next raw WebSocket message.
-    pub async fn recv(&mut self) -> Option<Result<Message, tokio_tungstenite::tungstenite::Error>> {
-        self.read.next().await
-    }
-
-    /// Split into write and read halves for concurrent use.
-    pub fn split(self) -> (SplitSink<WsStream, Message>, SplitStream<WsStream>) {
-        (self.write, self.read)
-    }
-}
-
-/// Connect to the backend WebSocket (raw, no TUI output).
-pub async fn connect_ws(backend_url: &str) -> Result<WebSocketConnection, Duration> {
-    let ws_url = format!("{}/ws/session", backend_url);
-
-    match connect_async(&ws_url).await {
-        Ok((stream, _)) => {
-            info!("Connected to backend");
-            Ok(WebSocketConnection::new(stream))
-        }
-        Err(e) => {
-            error!("Failed to connect to backend: {}", e);
-            Err(Duration::ZERO)
-        }
-    }
-}
-
-/// Register session with the backend and wait for acknowledgment (raw WS).
-///
-/// Returns `Ok(())` on success, `Err((Duration, Option<String>))` on failure.
-pub async fn register_with_backend(
-    conn: &mut WebSocketConnection,
-    config: &ProxySessionConfig,
-) -> Result<(), (Duration, Option<String>)> {
-    let hostname = hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let register_msg = ProxyToServer::Register(shared::RegisterFields {
-        session_id: config.session_id,
-        session_name: config.session_name.clone(),
-        auth_token: config.auth_token.clone(),
-        working_directory: config.working_directory.clone(),
-        resuming: config.resume,
-        git_branch: config.git_branch.clone(),
-        replay_after: None,
-        client_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-        replaces_session_id: config.replaces_session_id,
-        hostname: Some(hostname),
-        launcher_id: config.launcher_id,
-        agent_type: config.agent_type,
-        repo_url: get_repo_url(&config.working_directory),
-        scheduled_task_id: config.scheduled_task_id,
-        claude_args: config.claude_args.clone(),
-    });
-
-    if let Err(e) = conn.send(&register_msg).await {
-        error!("Failed to send registration message: {}", e);
-        return Err((Duration::ZERO, Some(e)));
-    }
-
-    // Wait for RegisterAck with timeout
-    let ack_timeout = tokio::time::timeout(Duration::from_secs(10), async {
-        while let Some(msg) = conn.recv().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    if let Ok(ServerToProxy::RegisterAck {
-                        success,
-                        session_id: _,
-                        error,
-                        ..
-                    }) = serde_json::from_str::<ServerToProxy>(&text)
-                    {
-                        return Some((success, error));
-                    }
-                }
-                Ok(Message::Close(_)) => return None,
-                Err(_) => return None,
-                _ => continue,
-            }
-        }
-        None
-    })
-    .await;
-
-    match ack_timeout {
-        Ok(Some((true, _))) => {
-            info!("Session registered successfully");
-            Ok(())
-        }
-        Ok(Some((false, error))) => {
-            let err_msg = error.clone().unwrap_or_else(|| "Unknown error".to_string());
-            error!("Registration failed: {}", err_msg);
-            Err((Duration::ZERO, error))
-        }
-        Ok(None) => {
-            error!("Connection closed during registration");
-            Err((Duration::ZERO, None))
-        }
-        Err(_) => {
-            info!(
-                "No RegisterAck received (timeout), assuming success for backwards compatibility"
-            );
-            Ok(())
-        }
-    }
-}
 
 /// Events produced by the WebSocket reader for the shim's select loop.
 pub enum WsEvent {
     /// Text input from the portal web UI
-    Input(ShimPortalInput),
+    Input(PortalInput),
     /// Wiggum mode activation with the original prompt
-    WiggumActivation(ShimPortalInput),
+    WiggumActivation(PortalInput),
     /// Permission response from the portal
     PermissionResponse(PermissionResponseData),
     /// Output acknowledgment from the backend
@@ -177,44 +37,33 @@ pub enum WsEvent {
     FileDownloadRequest(shared::FileDownloadRequestFields),
 }
 
-pub struct ShimPortalInput {
-    pub text: String,
-    pub ack: Option<ShimPortalInputAck>,
-}
-
-pub struct ShimPortalInputAck {
-    pub session_id: uuid::Uuid,
-    pub seq: i64,
-}
-
-/// Spawn a WebSocket reader task (raw tokio-tungstenite).
+/// Spawn a WebSocket reader task for shim mode.
 ///
-/// Reads raw WS text messages, parses them as `ServerToProxy`, and dispatches
-/// events through a single channel for the shim's select loop.
-/// The `ws_write` handle is used internally for Heartbeat and InputAck responses.
+/// Reads typed `ServerToProxy` messages and dispatches events through a
+/// single channel for the shim's select loop. The `ws_write` handle is used
+/// internally for Heartbeat replies.
 pub fn spawn_ws_reader(
-    mut ws_read: SplitStream<WsStream>,
+    mut ws_read: WsRead,
     ws_write: SharedWsWrite,
     event_tx: mpsc::UnboundedSender<WsEvent>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        while let Some(msg) = ws_read.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    match handle_ws_text_message(&text, &event_tx, &ws_write).await {
-                        true => {}      // continue
-                        false => break, // disconnect or shutdown already sent
+        while let Some(result) = ws_read.recv().await {
+            match result {
+                Ok(msg) => {
+                    if !handle_server_message(msg, &event_tx, &ws_write).await {
+                        break;
                     }
                 }
-                Ok(Message::Close(_)) => {
-                    info!("WebSocket closed by server");
-                    break;
+                Err(ws_bridge::RecvError::Decode(e)) => {
+                    // Unknown or malformed message — skip it, matching the
+                    // tolerance of the previous raw-text reader.
+                    warn!("Ignoring undecodable WebSocket message: {}", e);
                 }
                 Err(e) => {
                     error!("WebSocket error: {}", e);
                     break;
                 }
-                _ => {}
             }
         }
         debug!("WebSocket reader ended");
@@ -222,35 +71,16 @@ pub fn spawn_ws_reader(
     })
 }
 
-/// Handle a raw text message from the WebSocket.
+/// Handle a typed message from the backend.
 /// Returns `true` to continue reading, `false` to stop.
-async fn handle_ws_text_message(
-    text: &str,
+async fn handle_server_message(
+    server_msg: ServerToProxy,
     event_tx: &mpsc::UnboundedSender<WsEvent>,
     ws_write: &SharedWsWrite,
 ) -> bool {
-    let server_msg = match serde_json::from_str::<ServerToProxy>(text) {
-        Ok(msg) => msg,
-        Err(_) => return true,
-    };
-
     match server_msg {
         ServerToProxy::ClaudeInput { content, send_mode } => {
-            let user_text = match &content {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-
-            let input = ShimPortalInput {
-                text: user_text,
-                ack: None,
-            };
-            let event = if send_mode == Some(SendMode::Wiggum) {
-                WsEvent::WiggumActivation(input)
-            } else {
-                WsEvent::Input(input)
-            };
-            event_tx.send(event).is_ok()
+            event_tx.send(input_event(content, send_mode, None)).is_ok()
         }
         ServerToProxy::SequencedInput {
             session_id,
@@ -258,21 +88,8 @@ async fn handle_ws_text_message(
             content,
             send_mode,
         } => {
-            let user_text = match &content {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-
-            let input = ShimPortalInput {
-                text: user_text,
-                ack: Some(ShimPortalInputAck { session_id, seq }),
-            };
-            let event = if send_mode == Some(SendMode::Wiggum) {
-                WsEvent::WiggumActivation(input)
-            } else {
-                WsEvent::Input(input)
-            };
-            event_tx.send(event).is_ok()
+            let ack = Some(PortalInputAck { session_id, seq });
+            event_tx.send(input_event(content, send_mode, ack)).is_ok()
         }
         ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
             request_id,
@@ -295,9 +112,7 @@ async fn handle_ws_text_message(
         } => event_tx.send(WsEvent::OutputAck(ack_seq)).is_ok(),
         ServerToProxy::Heartbeat => {
             let mut ws = ws_write.lock().await;
-            if let Ok(json) = serde_json::to_string(&ProxyToServer::Heartbeat) {
-                let _ = ws.send(Message::Text(json.into())).await;
-            }
+            let _ = ws.send(ProxyToServer::Heartbeat).await;
             true
         }
         ServerToProxy::ServerShutdown {
@@ -324,5 +139,17 @@ async fn handle_ws_text_message(
             event_tx.send(WsEvent::FileDownloadRequest(fields)).is_ok()
         }
         _ => true,
+    }
+}
+
+/// Map a portal input payload to the matching shim event.
+fn input_event(
+    content: serde_json::Value,
+    send_mode: Option<shared::SendMode>,
+    ack: Option<PortalInputAck>,
+) -> WsEvent {
+    match classify_portal_input(content, send_mode, ack) {
+        RoutedPortalInput::Wiggum(input) => WsEvent::WiggumActivation(input),
+        RoutedPortalInput::Input(input) => WsEvent::Input(input),
     }
 }
