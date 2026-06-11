@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.30
+
+- **One `issue_proxy_token` helper replaces four duplicated token-mint sites.** `mint_launch_token` (launchers), `create_token_handler` + `renew_token_handler` (proxy tokens — whose `ProxyInitConfig`/init-URL construction was also duplicated verbatim and is now a shared `token_response` helper), and `complete_device_flow` (device auth) all did the same load-user → `create_proxy_token` JWT → `hash_token` → `proxy_auth_tokens` row dance. The helper parameterizes persistence (`TokenPersist::Create { name }` vs `Renew { token_id }`, preserving renew's update-in-place semantics) and TTL. The issue's fifth site (`renew_launcher_token_for`) had already been deleted by #933. JWT claims, hashing, row contents, and log messages are unchanged — token semantics now change in one place.
+
 ## 2.8.25
 
 - **Dedupe `get_git_branch` (4 copies) and `get_repo_url` (2 copies) into `claude-session-lib`.** The canonical implementations in `proxy_session/git_metadata.rs` are now `pub` and re-exported from `claude_session_lib::proxy_session`; the verbatim copies in `proxy/src/main.rs`, `proxy/src/session.rs`, and `launcher/src/process_manager.rs` are deleted and their call sites pointed at the shared versions. All copies were byte-identical modulo comments — no behavior change. Net −109 lines.
