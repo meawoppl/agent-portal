@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.33
+
+- **CI dedup: one composite `setup-rust` action, one frontend build, matrix release.** `ci.yml` previously built the frontend in four jobs and pasted Install Rust/cache/trunk/protoc steps across eight; now `build-frontend` builds once and uploads `frontend/dist` as an artifact consumed by clippy/build-backend/test, the eight per-platform proxy/launcher jobs are one `build-binaries` matrix, and setup lives in `.github/actions/setup-rust` (which also carries the macOS clean-rustup workaround once instead of twice). `release.yml`'s five copy-pasted platform jobs are one matrix — uploaded artifact and release-asset filenames verified byte-identical against what `portal-update` expects. `container.yml` keeps its independent build (cross-workflow artifact handoff would couple it to CI's run lifecycle) but uses the composite action. Job display names, cache keys, runners, and codesign steps unchanged. actionlint-clean.
+
 ## 2.8.32
 
 - **`CurrentUserId` extractor + `AppState::conn()` replace the auth/DB preamble pasted into 33 REST handlers.** The extractor implements `FromRequestParts<Arc<AppState>>` over the existing `extract_user_id` (dev-mode bypass and disabled-user rejection reused, not reimplemented; rejection built from the same `AppError::into_response()`, so status/body are identical), which means a new handler can no longer forget the auth check. `AppState::conn()` centralizes pool checkout + `AppError::DbPool` mapping. Deliberately untouched: device-flow approve/deny (custom `DeviceFlowApiError` shape), `/api/me` (custom error mapping), Diesel `NotFound → 404` sites, and WebSocket paths with no request context. One inherent edge: requests that are both unauthenticated and malformed now get 401 before 400 (extractors run first) — auth-first is the point.

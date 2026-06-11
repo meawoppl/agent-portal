@@ -21,21 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
         with:
+          cache-key: "container-build"
           targets: wasm32-unknown-unknown
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "container-build"
-
-      - name: Install trunk
-        run: cargo install trunk --locked
+          protoc: "true"
+          trunk: "true"
 
       - name: Build frontend
         run: cd frontend && trunk build
