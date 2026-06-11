@@ -30,6 +30,27 @@ pub type SessionId = String;
 pub type ProxySender = mpsc::UnboundedSender<ServerToProxy>;
 pub type WebClientSender = mpsc::UnboundedSender<ServerToClient>;
 
+/// Fan a message out to every sender in `clients`, pruning senders whose
+/// channel has closed. The message is moved (not cloned) into the final
+/// send, so the common single-client case never deep-copies the payload.
+fn fanout_to_clients(clients: &mut Vec<WebClientSender>, msg: ServerToClient) {
+    let mut msg = Some(msg);
+    let mut idx = 0;
+    while idx < clients.len() {
+        let payload = if idx + 1 == clients.len() {
+            msg.take()
+        } else {
+            msg.clone()
+        };
+        let Some(payload) = payload else { return };
+        if clients[idx].send(payload).is_ok() {
+            idx += 1;
+        } else {
+            clients.remove(idx);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SessionManager {
     pub sessions: Arc<DashMap<SessionId, ProxySender>>,
@@ -169,16 +190,20 @@ impl SessionManager {
 
     pub fn broadcast_to_web_clients(&self, session_key: &SessionId, msg: ServerToClient) {
         if let Some(mut clients) = self.web_clients.get_mut(session_key) {
-            clients.retain(|sender| sender.send(msg.clone()).is_ok());
+            fanout_to_clients(clients.value_mut(), msg);
         }
     }
 
     pub fn send_to_session(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {
-        if let Some(sender) = self.sessions.get(session_key) {
-            if sender.send(msg.clone()).is_ok() {
-                return true;
-            }
-        }
+        let msg = match self.sessions.get(session_key) {
+            Some(sender) => match sender.send(msg) {
+                Ok(()) => return true,
+                // A closed channel hands the message back in the error, so
+                // there's no need to clone up front just in case.
+                Err(mpsc::error::SendError(msg)) => msg,
+            },
+            None => msg,
+        };
 
         self.queue_pending_message(session_key, msg)
     }
@@ -226,7 +251,7 @@ impl SessionManager {
 
     pub fn broadcast_to_user(&self, user_id: &Uuid, msg: ServerToClient) {
         if let Some(mut clients) = self.user_clients.get_mut(user_id) {
-            clients.retain(|sender| sender.send(msg.clone()).is_ok());
+            fanout_to_clients(clients.value_mut(), msg);
         }
     }
 
@@ -249,14 +274,10 @@ impl SessionManager {
             reconnect_delay_ms,
         };
         for mut entry in self.web_clients.iter_mut() {
-            entry
-                .value_mut()
-                .retain(|sender| sender.send(client_msg.clone()).is_ok());
+            fanout_to_clients(entry.value_mut(), client_msg.clone());
         }
         for mut entry in self.user_clients.iter_mut() {
-            entry
-                .value_mut()
-                .retain(|sender| sender.send(client_msg.clone()).is_ok());
+            fanout_to_clients(entry.value_mut(), client_msg.clone());
         }
 
         let launcher_msg = ServerToLauncher::ServerShutdown {
@@ -509,6 +530,60 @@ mod tests {
 
         let clients = mgr.web_clients.get("s1").unwrap();
         assert_eq!(clients.len(), 1);
+    }
+
+    #[test]
+    fn broadcast_delivers_when_last_client_closed() {
+        // The fanout moves the payload into the final send; make sure a
+        // closed channel in that last slot still prunes correctly and the
+        // open clients before it were already served.
+        let mgr = SessionManager::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx3, rx3) = mpsc::unbounded_channel();
+
+        mgr.add_web_client("s1".into(), tx1);
+        mgr.add_web_client("s1".into(), tx2);
+        mgr.add_web_client("s1".into(), tx3);
+
+        drop(rx3);
+
+        mgr.broadcast_to_web_clients(&"s1".into(), make_client_msg());
+
+        assert!(matches!(
+            rx1.try_recv().unwrap(),
+            ServerToClient::ClaudeOutput { .. }
+        ));
+        assert!(matches!(
+            rx2.try_recv().unwrap(),
+            ServerToClient::ClaudeOutput { .. }
+        ));
+        let clients = mgr.web_clients.get("s1").unwrap();
+        assert_eq!(clients.len(), 2);
+    }
+
+    #[test]
+    fn send_to_session_queues_message_returned_by_closed_channel() {
+        let mgr = SessionManager::new();
+        let (tx, rx) = mpsc::unbounded_channel();
+        mgr.register_session("s1".into(), tx);
+        drop(rx);
+
+        let queued = mgr.send_to_session(
+            &"s1".into(),
+            ServerToProxy::OutputAck {
+                session_id: Uuid::nil(),
+                ack_seq: 7,
+            },
+        );
+
+        assert!(queued);
+        let pending = mgr.pending_messages.get("s1").unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            pending.front().unwrap().msg,
+            ServerToProxy::OutputAck { ack_seq: 7, .. }
+        ));
     }
 
     #[test]
