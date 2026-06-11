@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use claude_session_lib::proxy_session::CodexThreadIdSink;
+use claude_session_lib::proxy_session::{get_git_branch, CodexThreadIdSink};
 use claude_session_lib::{
     run_connection_loop, ClaudeAgent, LoopResult, PortalInput, ProxySessionConfig,
 };
@@ -345,36 +345,5 @@ async fn run_session_task(
                 return Some(1);
             }
         }
-    }
-}
-
-fn get_git_branch(cwd: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let branch = String::from_utf8(output.stdout)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())?;
-
-    if branch == "HEAD" {
-        // Detached HEAD — return short commit hash
-        std::process::Command::new("git")
-            .args(["rev-parse", "--short", "HEAD"])
-            .current_dir(cwd)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| format!("detached:{}", s.trim()))
-    } else {
-        Some(branch)
     }
 }

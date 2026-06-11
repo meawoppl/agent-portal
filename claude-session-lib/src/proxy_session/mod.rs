@@ -23,10 +23,11 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+pub use git_metadata::{get_git_branch, get_repo_url};
+
 use git_metadata::{
     check_and_send_branch_update, check_and_send_branch_update_if_branch_changed,
-    codex_output_has_git_signal, get_git_branch, get_pr_url, get_repo_url, GitMetadataState,
-    GitRefreshTrigger,
+    codex_output_has_git_signal, get_pr_url, GitMetadataState, GitRefreshTrigger,
 };
 use output_forwarder::spawn_output_forwarder;
 use wiggum::{handle_session_event_with_wiggum, WiggumState};

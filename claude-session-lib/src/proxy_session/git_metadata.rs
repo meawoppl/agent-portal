@@ -48,7 +48,7 @@ impl GitRefreshTrigger {
 }
 
 /// Get the current git branch name, if in a git repository.
-pub(super) fn get_git_branch(cwd: &str) -> Option<String> {
+pub fn get_git_branch(cwd: &str) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(cwd)
@@ -79,7 +79,7 @@ pub(super) fn get_git_branch(cwd: &str) -> Option<String> {
 }
 
 /// Look up the GitHub repository URL using the `gh` CLI.
-pub(super) fn get_repo_url(cwd: &str) -> Option<String> {
+pub fn get_repo_url(cwd: &str) -> Option<String> {
     let output = std::process::Command::new("gh")
         .args(["repo", "view", "--json", "url", "-q", ".url"])
         .current_dir(cwd)
