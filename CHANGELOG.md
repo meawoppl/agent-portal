@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.50
+
+- **Permission dialog: keyboard handler and option-row loop deduped between standard and ExitPlanMode variants.** `nav_keydown` (ArrowUp/k, ArrowDown/j, Enter/Space with preventDefault — verbatim in both dialogs before) and `render_options` (cursor, selected classes, click-to-confirm) are now shared; each dialog still builds its own options list (standard keeps the 3-option Allow-&-Remember variant). The question-header badge's two near-identical branches collapsed to one with a conditional `<span class="badge">` (empty `html!{}` renders nothing — DOM identical). AskUserQuestion's distinct Enter-to-submit handler untouched. Net −44 lines.
+
 ## 2.8.36
 
 - **Remove the dashboard's dead cost-flash machinery.** `total_cost`/`cost_flash` were written on every Result message (with a 600ms flash-clear timeout) but never read by any `view()`, and the `on_cost_change` prop terminated in an explicit no-op callback "kept for API compatibility". Deleted end-to-end: the props, the `ClearCostFlash` msg arm, the struct fields, the whole Result-block cost computation in `handle_received_output`, and the no-op callback at the `<SessionView>` call site. −34 lines, one less fake data path.
