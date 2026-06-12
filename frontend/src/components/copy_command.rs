@@ -2,11 +2,9 @@
 //!
 //! A styled code block with a copy-to-clipboard button.
 
-use gloo::timers::callback::Timeout;
-use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::spawn_local;
-use web_sys::window;
 use yew::prelude::*;
+
+use crate::components::copy_button::copy_to_clipboard;
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct CopyCommandProps {
@@ -26,33 +24,7 @@ pub fn copy_command(props: &CopyCommandProps) -> Html {
         let copied = copied.clone();
 
         Callback::from(move |_: MouseEvent| {
-            let command = command.clone();
-            let copied = copied.clone();
-
-            spawn_local(async move {
-                if let Some(window) = window() {
-                    let navigator = window.navigator();
-                    // Use js_sys to access clipboard
-                    let clipboard = js_sys::Reflect::get(&navigator, &"clipboard".into())
-                        .ok()
-                        .and_then(|v| v.dyn_into::<web_sys::Clipboard>().ok());
-
-                    if let Some(clipboard) = clipboard {
-                        let promise = clipboard.write_text(&command);
-                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-
-                        // Show "Copied!" feedback
-                        copied.set(true);
-
-                        // Reset after 2 seconds
-                        let copied_reset = copied.clone();
-                        Timeout::new(2000, move || {
-                            copied_reset.set(false);
-                        })
-                        .forget();
-                    }
-                }
-            });
+            copy_to_clipboard(command.clone(), copied.clone(), 2000);
         })
     };
 

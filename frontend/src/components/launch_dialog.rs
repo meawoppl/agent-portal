@@ -1,11 +1,11 @@
 use crate::components::ProxyTokenSetup;
+use crate::hooks::use_escape;
 use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
 use shared::{AgentInstall, AgentType, DirectoryEntry, LauncherInfo};
 use uuid::Uuid;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -435,20 +435,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     };
 
     // Close on Escape key
-    {
-        let on_close = props.on_close.clone();
-        use_effect_with((), move |_| {
-            let listener =
-                gloo::events::EventListener::new(&gloo::utils::document(), "keydown", move |e| {
-                    if let Ok(ke) = e.clone().dyn_into::<web_sys::KeyboardEvent>() {
-                        if ke.key() == "Escape" {
-                            on_close.emit(());
-                        }
-                    }
-                });
-            move || drop(listener)
-        });
-    }
+    use_escape(props.on_close.clone());
 
     // Build breadcrumb segments from current path
     let path_str = (*dir.path).clone();
