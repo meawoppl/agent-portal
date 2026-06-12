@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.41
+
+- **`require_admin` now reuses `auth::extract_user` instead of re-implementing the cookie→user→disabled-check sequence.** −23 lines and one auth path instead of two. Two deliberate consistency changes: admin endpoints honor the dev-mode bypass like every other handler (grants nothing — the seeded dev user has `is_admin = FALSE` by column default, so dev-mode admin requests still get 403 unless manually promoted), and a stale cookie for a deleted user now yields 401 instead of a 404, matching all other authed handlers.
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
