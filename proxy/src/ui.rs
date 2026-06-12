@@ -249,12 +249,3 @@ pub fn print_update_failed(error: &str) {
     println!("  {} Update failed: {}", "✗".bright_red(), error);
     println!();
 }
-
-/// Print pending update applied message (Windows)
-pub fn print_pending_update_applied() {
-    println!();
-    println!(
-        "  {} Pending update applied successfully.",
-        "✓".bright_green()
-    );
-}
