@@ -75,7 +75,7 @@ log = "0.4"
 # Async utilities for WASM
 futures-util = "0.3"
 futures-channel = "0.3"
-uuid = { workspace = true, features = ["v4", "serde", "js"] }
+uuid = { workspace = true }
 chrono = { workspace = true, features = ["wasmbind"] }
 js-sys = "0.3.83"
 pulldown-cmark = { version = "0.13.0", default-features = false }

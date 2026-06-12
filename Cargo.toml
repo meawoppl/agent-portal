@@ -19,14 +19,30 @@ edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
 [workspace.dependencies]
-# Async runtime
-tokio = { version = "1.42", features = ["full"] }
+# Async runtime — union of features used across member crates:
+#   rt/rt-multi-thread/macros: #[tokio::main], #[tokio::test], spawn, select!
+#   sync: mpsc/oneshot channels; time: sleep/timeout/interval
+#   process: child process I/O; io-util/io-std: async read/write + stdin/stdout
+#   fs: async file ops; net: TcpListener (backend); signal: shutdown handling
+tokio = { version = "1.42", features = [
+    "fs",
+    "io-std",
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
 tokio-util = "0.7"
 
 # Web framework
 axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-full"] }
+tower-http = { version = "0.6", features = ["cors"] }
 
 # Database
 diesel = { version = "2.2", features = ["postgres", "r2d2", "chrono", "uuid", "serde_json", "numeric"] }
@@ -69,6 +85,12 @@ chrono = { version = "0.4", default-features = false, features = ["serde"] }
 
 # UUID
 uuid = { version = "1.11", features = ["v4", "serde", "js"] }
+
+# System info
+hostname = "0.4"
+
+# Config/data directory discovery
+directories = "5.0"
 
 # WebSocket bridge
 ws-bridge = "0.2.0"

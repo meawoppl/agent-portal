@@ -16,7 +16,7 @@ shared = { path = "../shared" }
 claude-codes = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 
 # Typed WebSocket client (connection comes from claude-session-lib's ws_bridge
 # usage; this direct dep is for the error types in the shim reader).
@@ -50,7 +50,7 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 
 # Hostname
-hostname = "0.4"
+hostname = { workspace = true }
 
 # URL parsing
 url = "2.5"
@@ -59,7 +59,7 @@ url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 
 # Config file management
-directories = "5.0"
+directories = { workspace = true }
 
 # Terminal colors
 colored = "2.1"
