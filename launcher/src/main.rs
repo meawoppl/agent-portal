@@ -179,11 +179,10 @@ async fn main() -> anyhow::Result<()> {
             Some(result.access_token)
         }
     };
-    let launcher_name = args.name.or(config.name).unwrap_or_else(|| {
-        hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "unknown".to_string())
-    });
+    let launcher_name = args
+        .name
+        .or(config.name)
+        .unwrap_or_else(claude_session_lib::hostname_or_unknown);
 
     let launcher_id = Uuid::new_v4();
 

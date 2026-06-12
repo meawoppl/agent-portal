@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use claude_session_lib::ClaudeAgent;
+use claude_session_lib::{default_session_name, ClaudeAgent};
 use session_lib::{Session, SessionConfig};
 use shared::api::{ResolveProxySessionRequest, ResolveProxySessionResponse};
 
@@ -183,15 +183,6 @@ fn init_tracing(session_id_tag: Option<Uuid>, verbose: bool) {
         // Interactive: human-readable format
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
-}
-
-fn default_session_name() -> String {
-    let hostname = hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string());
-    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    format!("{}-{}", hostname, timestamp)
 }
 
 /// Handle --check-update: check for updates without installing
@@ -688,12 +679,10 @@ async fn resolve_auth_token(
     config.set_session_auth(
         cwd.to_string(),
         SessionAuth {
-            user_id: result.user_id,
             auth_token: result.access_token.clone(),
             user_email: Some(result.user_email),
             last_used: chrono::Utc::now().to_rfc3339(),
             backend_url: None,
-            session_prefix: None,
         },
     );
     config.atomic_save()?;

@@ -21,7 +21,6 @@ dependencies = [
  "croner",
  "directories",
  "dirs",
- "hostname",
  "portal-auth",
  "portal-update",
  "reqwest",

@@ -7,7 +7,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const HEARTBEAT_INTERVAL: Duration =
+    Duration::from_secs(shared::protocol::LAUNCHER_HEARTBEAT_INTERVAL_SECS);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
 
 pub async fn run_launcher_loop(
@@ -37,9 +38,7 @@ pub async fn run_launcher_loop(
                     launcher_id,
                     launcher_name: launcher_name.to_string(),
                     auth_token: auth_token.map(|s| s.to_string()),
-                    hostname: hostname::get()
-                        .map(|h| h.to_string_lossy().to_string())
-                        .unwrap_or_default(),
+                    hostname: claude_session_lib::hostname_or_unknown(),
                     version: Some(env!("CARGO_PKG_VERSION").to_string()),
                     working_directory: std::env::current_dir()
                         .ok()
