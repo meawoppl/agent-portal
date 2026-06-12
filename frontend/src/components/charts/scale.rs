@@ -609,6 +609,18 @@ mod tests {
     }
 
     #[test]
+    fn format_axis_value_picks_compact_form() {
+        assert_eq!(format_axis_value(0.0), "0");
+        assert_eq!(format_axis_value(1.0), "1");
+        assert_eq!(format_axis_value(5.0), "5");
+        assert_eq!(format_axis_value(0.25), "0.25");
+        assert_eq!(format_axis_value(7.5), "7.5");
+        assert_eq!(format_axis_value(12.5), "12.5");
+        assert_eq!(format_axis_value(1500.0), "1.5k");
+        assert_eq!(format_axis_value(2500.0), "2.5k");
+    }
+
+    #[test]
     fn series_points_clamps_out_of_range() {
         // y_max=10 but value=20 → should clamp to top of chart, not flow off.
         let axis = YAxis::Linear {

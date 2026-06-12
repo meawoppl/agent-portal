@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.44
+
+- **Chart frame extracted: LinePlot and StackedArea share one frame implementation.** `charts/mod.rs` now hosts the `VIEW_*`/`PAD_*`/`PLOT_*` constants, `chart_empty`, `render_gridlines`, `render_x_labels`, `render_legend`, and a `chart_frame` wrapper (header + scale badge + legend + responsive SVG with rotated y-axis title); the component files keep only their geometry. StackedArea's local `value_to_y` wrapper (PAD_T baked in) deleted in favor of `scale::value_to_y` + explicit offset. Markup copied verbatim — zero rendered-output change; legend swatch styles deliberately stay per-component (they differ byte-wise). Two duplicate axis-format tests consolidated into one in scale.rs. Net −45 lines with each component file ~60% lighter on frame code.
+
 ## 2.8.43
 
 - **`handle_claude_output` reads the session row once per proxy output frame instead of twice.** The owner-only `select(sessions::user_id)` is hoisted above both consumers (image extraction and the message-insert gate); the full `Session` load — used only for `user_id` — is gone. Failure semantics per consumer are identical to before (lookup failure skips extraction and insert but never blocks `last_activity` or `OutputAck`); the second pool *checkout* is kept deliberately so no connection is held across CPU-bound base64 work and a transient pool error can't poison the ack path.
