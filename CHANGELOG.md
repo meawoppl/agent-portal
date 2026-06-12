@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.42
+
+- **One `ConfirmModal` component replaces five copy-pasted confirm dialogs.** Admin user actions, settings sessions/tokens panels, and the dashboard's Delete/Leave session modals all hand-rolled the same overlay + message + cancel/confirm markup. The new component parameterizes the three pre-existing CSS class families (`Standard` admin, `Panel` settings, `Danger` dashboard with title/warning) so the rendered DOM is byte-identical at every site; overlay-click-cancels and inner stop-propagation semantics preserved. The admin ban dialog (text-input modal) and token-renewed dialog (single "Done" button) were deliberately not migrated — they aren't confirm modals.
+
 ## 2.8.41
 
 - **`require_admin` now reuses `auth::extract_user` instead of re-implementing the cookie→user→disabled-check sequence.** −23 lines and one auth path instead of two. Two deliberate consistency changes: admin endpoints honor the dev-mode bypass like every other handler (grants nothing — the seeded dev user has `is_admin = FALSE` by column default, so dev-mode admin requests still get 403 unless manually promoted), and a stale cookie for a deleted user now yields 401 instead of a 404, matching all other authed handlers.
