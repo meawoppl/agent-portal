@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.48
+
+- **REST and WS replay share their three duplicated helpers.** `TurnMetric::into_wire()` (the 24-field row→wire mapping, previously written out twice) lives on the model; `sender_names()` (the character-identical user-id→name-or-email lookup) and `parse_iso_cursor()` (with its four tests) live in `handlers/helpers.rs`. One deliberate fix: WS replay now strips trailing `Z` from `replay_after` like the REST path always did — Z-suffixed watermarks previously parsed to `None` and silently triggered a full-history replay. Net −29 lines.
+
 ## 2.8.36
 
 - **Remove the dashboard's dead cost-flash machinery.** `total_cost`/`cost_flash` were written on every Result message (with a 600ms flash-clear timeout) but never read by any `view()`, and the `on_cost_change` prop terminated in an explicit no-op callback "kept for API compatibility". Deleted end-to-end: the props, the `ClearCostFlash` msg arm, the struct fields, the whole Result-block cost computation in `handle_received_output`, and the no-op callback at the `<SessionView>` call site. −34 lines, one less fake data path.
