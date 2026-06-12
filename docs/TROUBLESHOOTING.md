@@ -159,7 +159,7 @@ cd frontend && trunk build --release
 
 **Solution 1: Use dev mode**
 ```bash
-./scripts/test-dev.sh  # Uses dev mode automatically
+./scripts/dev.sh start  # Uses dev mode automatically
 ```
 
 **Solution 2: Configure OAuth**
@@ -250,7 +250,7 @@ sudo docker-compose up
 **Solution:**
 ```bash
 chmod +x scripts/*.sh
-./scripts/test-dev.sh
+./scripts/dev.sh start
 ```
 
 ## General Tips
@@ -264,7 +264,7 @@ rm -rf ~/.config/agent-portal/  # Remove cached auth
 cargo clean
 cd frontend && trunk clean && cd ..
 ./scripts/install-deps.sh
-./scripts/test-dev.sh
+./scripts/dev.sh start
 ```
 
 ### Check system requirements
@@ -326,7 +326,7 @@ If you're still stuck:
 
 2. Enable verbose output:
    ```bash
-   RUST_LOG=debug ./scripts/test-dev.sh
+   RUST_LOG=debug ./scripts/dev.sh start
    ```
 
 3. Try running components individually:

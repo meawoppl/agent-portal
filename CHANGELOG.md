@@ -4,6 +4,90 @@
 
 - **Docs drift fixed: log filename, stale workspace tree, completed workplans, loose migration file.** Four docs told users to tail `/tmp/agent-portal-backend.log` — a file nothing writes (scripts write `/tmp/claude-portal-backend.log`); references to the equally-fictional proxy log dropped. CLAUDE.md's workspace tree now matches `[workspace] members` exactly (adds `session-lib`/`claude-session-lib`/`codex-session-lib` with rustdoc-sourced descriptions), its AppState snippet matches the real struct, and the env-var table gains the missing `SPLASH_TEXT`. `PROXY_LIBRARY_EXTRACTION.md` and `SERVER_PAUSED_SESSIONS_WORKPLAN.md` get STATUS: COMPLETED banners citing the shipped artifacts. `fix_migration_names.sql` moved out of `backend/migrations/` to `scripts/` (with the checker's help-text pointer updated) so the migrations dir contains only migrations.
 
+## 2.8.59
+
+- **Session access checks centralized in `session_access.rs`.** One canonical `verify_session_reader` (any-role membership join, 404 on miss) replaces three near-identical implementations in messages, turn-metrics, and the WS auth module (now deleted); `is_session_mutator` is a thin wrapper over `verify_session_mutator` instead of a re-implementation (orphaned `can_mutate_role` + tests removed). The three owner checks in sessions.rs were NOT identical — delete accepts the `sessions.user_id` owner without a member row (404 on miss) while the member-management gates require an actual owner member row (403) — so two helpers preserve both semantics: `verify_session_owner` and `verify_owner_membership`. One nuance: the messages path used to map DB errors to 404; it now surfaces 500 like the other paths (authorization outcomes unchanged). Net −86 lines.
+
+## 2.8.58
+
+- **scripts/ cleanup: broken package names fixed, `test-dev.sh` deleted, shared `lib.sh`.** `test-oauth.sh` ran `cargo run -p proxy` — a package that doesn't exist (it's `claude-portal`), so the script failed at the proxy step; `clean.sh`/`test-oauth.sh` `pkill`ed the same wrong name (could never match). All fixed, plus `docker-compose` v1 → `docker compose` across scripts. `test-dev.sh` (~80% duplicate of `dev.sh`) is deleted with its references updated in TROUBLESHOOTING.md/install-deps/README. The dev DATABASE_URL literal (6 copies) now lives once in a sourced `scripts/lib.sh`; diesel/trunk auto-install lives only in `install-deps.sh` (dev.sh fails fast with a pointer); `up.sh` guards its macOS-only `open -a Docker` by `$OSTYPE` with a Linux `systemctl` path. Scripts still write `/tmp/claude-portal-backend.log` — doc alignment is #999's.
+
+## 2.8.57
+
+- **Launcher registration reuses the scheduled-task sync helpers instead of hand-building `ScheduledTaskConfig`.** The 45-line registration block (including a redundant hostname re-fetch from the launchers map) is now one call to a new `send_initial_schedule_sync(app_state, user_id, launcher_id, hostname, launcher_name)` — a single-launcher variant chosen deliberately over the broadcast `send_schedule_sync`, which (a) targets all of a user's launchers and (b) always sends even when empty (needed so deletes clear state), whereas registration historically sends nothing when no enabled tasks match the hostname. Both variants share a new `load_enabled_tasks` and all config construction flows through `task_to_config`, so the #995 field flatten lands in exactly one place. Same mpsc delivery, same log line.
+
+## 2.8.56
+
+- **Native-crate misc dedup: hostname helper, default session name, dead config fields, heartbeat constant.** `hostname_or_unknown()` in claude-session-lib replaces 7 inline copies (unified on `to_string_lossy`; non-UTF-8 edge cases now render lossily instead of three different fallback strings — normal hostnames byte-identical; portal-auth keeps its copy rather than inverting the dependency graph, and one proxy site keeps its no-fallback `Option<String>` semantics deliberately). `default_session_name` moved next to `ProxySessionConfig`. Write-only `ProxyConfig` fields removed: `SessionAuth.user_id`, `session_prefix` (+ setter + init-URL plumbing), `Preferences.auto_open_browser`. `atomic_save` delegates to `save_with_lock`. `probe.rs` uses `AgentType::as_str()`. Launcher's heartbeat cadence moved to `shared/src/protocol.rs` as `LAUNCHER_HEARTBEAT_INTERVAL_SECS` with a doc note that the backend deliberately has no staleness timeout (liveness = the WS connection). Two issue items were already done on main (#1003 removed the RegisterFields duplication and the `unreachable!`). Net −46 lines.
+
+## 2.8.55
+
+- **Repo-root scratch purged and `.gitignore` extended.** ~20 untracked artifacts (a 3.8MB `screenlog.1`, `parsing-dump/`, stray phone photos and AI-generated images, brand-mark source files duplicating `frontend/assets/`, `test-*.png/svg` plot outputs, `shim-mode.patch` + notes, a design doc for code that doesn't exist) were verified unreferenced and removed from the working tree. `.gitignore` now covers the patterns that demonstrably accumulate: `screenlog.*`, root `test-*.png/svg`, root `*.patch`, `parsing-dump/`.
+
+## 2.8.54
+
+- **Admin page: three PATCH-user handlers deduped; `/api/auth/me` no longer fetched redundantly.** `patch_user(user_id, body) -> bool` + `update_user_in(users, id, f)` collapse the toggle-admin/unban/confirm-ban triple to one-liners. The dashboard's leave-confirm now uses the `current_user_id` it already holds (typed `Option<Uuid>` now) instead of a second network round-trip, and the admin modal receives the id as a prop, skipping its own me-fetch; the standalone `/admin` route keeps its original fetch with 401→Home / 403→denied handling.
+
+## 2.8.53
+
+- **Shim cleanup: wiggum prompt single-sourced, one write_line, dead channel and fake retries gone, shared claude arg builder.** The wiggum DONE-loop prompt suffix existed in three byte-identical copies (drift would silently break loop semantics) — now `wiggum_prompt()` next to `WiggumState`. All six serialize→write→newline→flush sites in the shim use one generic `write_line` (newline/flush errors at four raw sites now surface like write errors instead of being ignored). The stdin-line channel feeding an empty select arm is deleted. Both "retry the same failing constructor" fallbacks (`warn!("continuing without persistence")` then `?`, and `unwrap_or_else(|_| …unwrap())`) reduced to honest single calls. `claude_cli_args()` in spawn.rs builds the CLI flag list once for the lib spawn, its diagnostic log, and the shim's respawn — a flag change can't miss the shim anymore. Net −56 lines.
+
+## 2.8.52
+
+- **ScheduledTask wire trio flattened around one `ScheduledTaskFields` core; MessageRole/PortalMessage serde simplified.** `ScheduledTaskConfig`/`CreateScheduledTaskRequest`/`ScheduledTaskInfo` repeated ~10 fields; they now `#[serde(flatten)]` a shared core (the `RegisterFields` pattern). Serialized key sets are byte-identical (only contiguous key order shifts; all consumers are serde) and Create's deserialization defaults are preserved exactly — five new wire-compat tests pin the JSON shapes including `last_session_id: null` and old-key-order parsing. As a side effect `task_to_config` became `pub(crate)` and launcher registration reuses it instead of hand-building the config. `MessageRole` gains `as_str()` with `Display` delegating (the `AgentType` pattern; `from_type_str` fallback verbatim), and `PortalMessage`'s always-"portal" `message_type` is now encoded once via a const + `with_content` constructor used by all six construction sites.
+
+## 2.8.51
+
+- **Session rail: dropdown options share one button shell and close-then-emit helper; dead tick counter removed.** `close_then(menu_session, action)` and `menu_option(extra_classes, label, hint, onclick)` absorb ~9 repeated button shells and 7 close-menu closures (hide/pause/leave/delete/share/schedule/copy-id/stop/blocked-stop); the blocked-stop and schedule options share one `open_schedule` callback. The sparkline tick effect's `Rc<Cell<u32>>` counter (incremented every 100ms, never read) is deleted. The compaction/task range loops folded into one `(ranges, class)` flat_map preserving render order. Deliberately distinct shells (two-click stop confirm, disabled spans, PR/repo links) untouched. Net −27 lines with far less repetition in the dropdown block.
+
+## 2.8.50
+
+- **Permission dialog: keyboard handler and option-row loop deduped between standard and ExitPlanMode variants.** `nav_keydown` (ArrowUp/k, ArrowDown/j, Enter/Space with preventDefault — verbatim in both dialogs before) and `render_options` (cursor, selected classes, click-to-confirm) are now shared; each dialog still builds its own options list (standard keeps the 3-option Allow-&-Remember variant). The question-header badge's two near-identical branches collapsed to one with a conditional `<span class="badge">` (empty `html!{}` renders nothing — DOM identical). AskUserQuestion's distinct Enter-to-submit handler untouched. Net −44 lines.
+
+## 2.8.49
+
+- **`update_task_handler` uses an `AsChangeset` struct instead of a ten-field load-merge-save; `list_runs` is typed.** `ScheduledTaskChangeset` (ten `Option`s built straight from the request; Diesel's default `treat_none_as_null = false` matches the old keep-existing semantics — verified safe since every updatable column is NOT NULL, so no `Option<Option<T>>` tri-state exists). The ownership pre-load stays (slimmed to an id select) deliberately: it must run before cron validation so nonexistent-task + invalid-cron stays 404, and the blanket diesel→AppError From would turn a filtered-update miss into a 500. `updated_at` still bumps on every request including empty bodies. `list_runs_handler` returns `Json<Vec<Session>>` instead of untyped `serde_json::Value` — byte-identical JSON.
+
+## 2.8.48
+
+- **REST and WS replay share their three duplicated helpers.** `TurnMetric::into_wire()` (the 24-field row→wire mapping, previously written out twice) lives on the model; `sender_names()` (the character-identical user-id→name-or-email lookup) and `parse_iso_cursor()` (with its four tests) live in `handlers/helpers.rs`. One deliberate fix: WS replay now strips trailing `Z` from `replay_after` like the REST path always did — Z-suffixed watermarks previously parsed to `None` and silently triggered a full-history replay. Net −29 lines.
+
+## 2.8.47
+
+- **Startup auto-update ceremony extracted to `portal_update::startup_auto_update`; proxy update handlers merged.** The apply-pending + check + 4-arm `UpdateResult` match was copy-pasted across proxy startup, launcher startup, and `cmd_update`; it's now one helper with a `check` flag (both startups apply pending updates unconditionally but gate the GitHub check on `--no-update` — preserved exactly). Proxy's `handle_check_update`/`handle_force_update` + a third inline copy merged into `handle_update(check_only)` — the differing arms were provably unreachable per mode. Also: `binary_name_for` replaces the second platform match (a new test pins all six names byte-for-byte against release assets, including the darwin rename), and the Windows binary-swap dance is one `swap_binary` helper with a `SwapError` enum keying the two callers' divergent fallbacks. Launcher's `UpdateAndRestart` path deliberately untouched (distinct restart-anyway semantics).
+
+## 2.8.46
+
+- **One clipboard helper and one escape-key implementation replace seven hand-rolled copies.** `copy_to_clipboard(text, copied, reset_ms)` (typed `web_sys` Clipboard API instead of the `js_sys::Reflect` dance) serves CopyButton/CopyCommand/CodeBlock with their original per-site reset timings preserved (1500/2000/2000ms). New `hooks/use_escape.rs`: `use_escape` (bubble, component lifetime) for the launch/schedule dialogs, `use_escape_capture(active, …)` for the ImageViewer (capture-phase, attached only while expanded, preventDefault+stopPropagation as before), and an `escape_listener` RAII helper for the struct-component ShareDialog — all three delegate to one implementation. Redundant `#[allow(dead_code)]` on ShareDialog's listener field removed. Net −45 lines.
+
+## 2.8.45
+
+- **Validation errors return 400 instead of 500.** Caller mistakes ("Invalid role" ×2 — now a shared `validate_member_role` helper — "User is already a member", "Owner cannot remove themselves", "Cannot change own role", "Invalid cron expression" ×2) were mapped to `AppError::Internal`, logging server faults for user typos and masking the message behind "Internal server error". All other `Internal` uses audited and left alone (genuine infra faults). Frontend: the share dialog's add-member 409 branch never fired (backend sent 500) — repointed at 400, so "User is already a member" / "Invalid role" now surface verbatim; the schedule dialog's generic `Error ({status})` display now shows the real cron message.
+
+## 2.8.44
+
+- **Chart frame extracted: LinePlot and StackedArea share one frame implementation.** `charts/mod.rs` now hosts the `VIEW_*`/`PAD_*`/`PLOT_*` constants, `chart_empty`, `render_gridlines`, `render_x_labels`, `render_legend`, and a `chart_frame` wrapper (header + scale badge + legend + responsive SVG with rotated y-axis title); the component files keep only their geometry. StackedArea's local `value_to_y` wrapper (PAD_T baked in) deleted in favor of `scale::value_to_y` + explicit offset. Markup copied verbatim — zero rendered-output change; legend swatch styles deliberately stay per-component (they differ byte-wise). Two duplicate axis-format tests consolidated into one in scale.rs. Net −45 lines with each component file ~60% lighter on frame code.
+
+## 2.8.43
+
+- **`handle_claude_output` reads the session row once per proxy output frame instead of twice.** The owner-only `select(sessions::user_id)` is hoisted above both consumers (image extraction and the message-insert gate); the full `Session` load — used only for `user_id` — is gone. Failure semantics per consumer are identical to before (lookup failure skips extraction and insert but never blocks `last_activity` or `OutputAck`); the second pool *checkout* is kept deliberately so no connection is held across CPU-bound base64 work and a transient pool error can't poison the ack path.
+
+## 2.8.42
+
+- **One `ConfirmModal` component replaces five copy-pasted confirm dialogs.** Admin user actions, settings sessions/tokens panels, and the dashboard's Delete/Leave session modals all hand-rolled the same overlay + message + cancel/confirm markup. The new component parameterizes the three pre-existing CSS class families (`Standard` admin, `Panel` settings, `Danger` dashboard with title/warning) so the rendered DOM is byte-identical at every site; overlay-click-cancels and inner stop-propagation semantics preserved. The admin ban dialog (text-input modal) and token-renewed dialog (single "Done" button) were deliberately not migrated — they aren't confirm modals.
+
+## 2.8.41
+
+- **`require_admin` now reuses `auth::extract_user` instead of re-implementing the cookie→user→disabled-check sequence.** −23 lines and one auth path instead of two. Two deliberate consistency changes: admin endpoints honor the dev-mode bypass like every other handler (grants nothing — the seeded dev user has `is_admin = FALSE` by column default, so dev-mode admin requests still get 403 unless manually promoted), and a stale cookie for a deleted user now yields 401 instead of a 404, matching all other authed handlers.
+
+## 2.8.40
+
+- **Hand-rolled base64url codecs replaced by the `base64` crate (×2, ~110 lines).** `shared/src/proxy_tokens.rs` and `proxy/src/util.rs` each reimplemented base64url; both now use a const lenient engine (URL_SAFE, no encode padding, `DecodePaddingMode::Indifferent`, allow-trailing-bits) that preserves every leniency the old decoders had: padding accepted anywhere it was before, whitespace pre-filtered, non-canonical trailing bits masked. One intentionally stricter case: length ≡ 1 (mod 4) inputs (which no encoder produces, and which the old code decoded into a garbage byte) now fail softly. Byte-identity pinned by RFC 4648 fixtures, an all-256-values round-trip, and a hardcoded `ProxyInitConfig` fixture. `base64` added to shared (WASM-safe).
+
+## 2.8.39
+
+- **Live messages no longer have their server timestamp clobbered by the browser clock.** `handle_proxy_message` folds the server `created_at` into `_created_at`, but the component's live path re-ran `inject_message_metadata` with `Date::now()`, overwriting it. The live path now uses `inject_created_at_if_absent` — browser-clock fallback only when the key is missing (error envelopes, pre-#784 backends keep their tooltips). REST history replay keeps overwrite semantics as before. Four new tests pin the behavior, including the no-clobber case.
+
 ## 2.8.38
 
 - **One `dev_user` helper + `DEV_USER_EMAIL` const replace nine `testing@testing.local` literals.** The dev test-user lookup was re-implemented across `auth.rs`, `main.rs` (seeding keeps its create logic but uses the const), `handlers/auth.rs` (dev_login + device dev path), `sessions.rs`, `launcher_socket.rs`, and `registration.rs`. `QueryResult<User>` return fits every site's error style (`?`, `.optional()`, `.expect()`, `.ok()`). Three id-only sites now select the full row — same filter, same error paths, identical semantics.

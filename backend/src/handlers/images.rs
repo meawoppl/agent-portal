@@ -40,7 +40,7 @@ pub const DEFAULT_IMAGE_STORE_TTL: Duration = Duration::from_secs(3600);
 /// `user_id` is the inserting user — used as the primary ownership check on
 /// `GET /api/images/{id}` (closes #786). `session_id` (if present) lets other
 /// members of the same session also read the image, mirroring how
-/// `verify_session_access` in `messages.rs` joins `session_members` for the
+/// `session_access::verify_session_reader` joins `session_members` for the
 /// message-list endpoint. Both fields are mandatory for new inserts; older
 /// images from before this PR are no longer in the bounded LRU and 404 cleanly.
 pub struct StoredImage {
@@ -279,7 +279,7 @@ impl ImageStore {
 ///
 /// Authenticated route (closes #786). Returns the bytes only if the caller
 /// is the inserting user OR is a member of the session that owns the image
-/// (matching how `messages.rs::verify_session_access` gates message reads).
+/// (matching how `session_access::verify_session_reader` gates message reads).
 /// On any access-failure we return `404 NOT_FOUND` — the same wire shape as
 /// "no such image" — so callers can't use the response to probe for the
 /// existence of an image they don't own (no existence oracle on UUIDs).
@@ -325,7 +325,7 @@ pub async fn serve_image(
 
 /// Does `user_id` appear in `session_members` for `session_id`?
 ///
-/// Mirrors `messages.rs::verify_session_access` but as a boolean — we don't
+/// Mirrors `session_access::verify_session_reader` but as a boolean — we don't
 /// need the full `Session` row here, just the membership check. Any DB error
 /// is treated as "not a member" (deny by default) since the only signal we
 /// emit to the client is the 404 above.

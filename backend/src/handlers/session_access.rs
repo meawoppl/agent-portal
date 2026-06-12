@@ -8,31 +8,101 @@
 //! which keeps owner-only paths working for sessions persisted before the
 //! membership table existed.
 //!
-//! Use [`can_mutate_role`] for pure role-string checks (the only thing the
-//! WebSocket fast-path can test cheaply), [`verify_session_mutator`] for the
-//! REST handlers (returns the typed Session row or an `AppError`), and
-//! [`is_session_mutator`] for the WebSocket handlers (returns a bool, logs
-//! warnings on database errors).
+//! Use [`verify_session_reader`] for read-only access (any membership role),
+//! [`verify_session_mutator`] for mutating REST handlers (returns the typed
+//! Session row or an `AppError`), [`is_session_mutator`] for the WebSocket
+//! handlers (returns a bool, logs warnings on database errors), and
+//! [`verify_session_owner`] / [`verify_owner_membership`] for owner-only
+//! paths.
 use crate::errors::AppError;
 use crate::AppState;
 use diesel::prelude::*;
 use tracing::{error, warn};
 use uuid::Uuid;
 
-/// Returns true if the given role string permits mutating the session.
+/// Read-access check: verify the caller is a member of the session with any
+/// role (including `viewer`).
 ///
-/// The valid roles in the `session_members` table are `owner`, `editor`, and
-/// `viewer`. Only `owner` and `editor` may mutate session state; `viewer` is
-/// read-only.
-pub fn can_mutate_role(role: &str) -> bool {
-    role == "owner" || role == "editor"
+/// Returns the session row on success, [`AppError::NotFound`] otherwise (we
+/// 404 rather than 403 to avoid leaking session existence to non-members).
+pub fn verify_session_reader(
+    conn: &mut diesel::pg::PgConnection,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> Result<crate::models::Session, AppError> {
+    use crate::schema::{session_members, sessions};
+    sessions::table
+        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+        .filter(sessions::id.eq(session_id))
+        .filter(session_members::user_id.eq(user_id))
+        .select(crate::models::Session::as_select())
+        .first::<crate::models::Session>(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Session not found"))
+}
+
+/// Owner check for destructive paths (e.g. session delete): accepts either
+/// the `sessions.user_id` owner (works even when no membership row exists,
+/// covering sessions persisted before the membership table) OR a
+/// `session_members.role = owner` row (the post-membership-table canonical
+/// owner).
+///
+/// Returns the session row on success, [`AppError::NotFound`] otherwise.
+pub fn verify_session_owner(
+    conn: &mut diesel::pg::PgConnection,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> Result<crate::models::Session, AppError> {
+    use crate::schema::{session_members, sessions};
+
+    if let Some(session) = sessions::table
+        .filter(sessions::id.eq(session_id))
+        .filter(sessions::user_id.eq(user_id))
+        .select(crate::models::Session::as_select())
+        .first::<crate::models::Session>(conn)
+        .optional()?
+    {
+        return Ok(session);
+    }
+
+    sessions::table
+        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+        .filter(sessions::id.eq(session_id))
+        .filter(session_members::user_id.eq(user_id))
+        .filter(session_members::role.eq("owner"))
+        .select(crate::models::Session::as_select())
+        .first::<crate::models::Session>(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Session not found"))
+}
+
+/// Owner gate for member-management paths (add member, change member role):
+/// requires a `session_members.role = owner` row — deliberately *without* the
+/// `sessions.user_id` fallback [`verify_session_owner`] has, and returning
+/// [`AppError::Forbidden`] (403) rather than 404, matching the historical
+/// member-management semantics.
+pub fn verify_owner_membership(
+    conn: &mut diesel::pg::PgConnection,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    use crate::schema::session_members;
+    session_members::table
+        .filter(session_members::session_id.eq(session_id))
+        .filter(session_members::user_id.eq(user_id))
+        .filter(session_members::role.eq("owner"))
+        .select(session_members::user_id)
+        .first::<Uuid>(conn)
+        .optional()?
+        .ok_or(AppError::Forbidden)?;
+    Ok(())
 }
 
 /// REST-facing check: verify the caller is allowed to mutate the session.
 ///
 /// Returns the session row on success, [`AppError::NotFound`] otherwise (we
 /// 404 rather than 403 to avoid leaking session existence to non-members,
-/// matching the existing `verify_session_access` shape).
+/// matching the [`verify_session_reader`] shape).
 pub fn verify_session_mutator(
     conn: &mut diesel::pg::PgConnection,
     session_id: Uuid,
@@ -85,91 +155,22 @@ pub fn is_session_mutator(app_state: &AppState, session_id: Uuid, user_id: Uuid)
         }
     };
 
-    use crate::schema::{session_members, sessions};
-
-    // Owner check (no member row required).
-    let is_owner: bool = match sessions::table
-        .filter(sessions::id.eq(session_id))
-        .filter(sessions::user_id.eq(user_id))
-        .select(sessions::id)
-        .first::<Uuid>(&mut conn)
-        .optional()
-    {
-        Ok(opt) => opt.is_some(),
-        Err(e) => {
-            error!(
-                "Failed to check owner status for session {} user {}: {}",
-                session_id, user_id, e
-            );
-            return false;
-        }
-    };
-
-    if is_owner {
-        return true;
-    }
-
-    // Member-role check.
-    let role: Option<String> = match session_members::table
-        .filter(session_members::session_id.eq(session_id))
-        .filter(session_members::user_id.eq(user_id))
-        .select(session_members::role)
-        .first::<String>(&mut conn)
-        .optional()
-    {
-        Ok(opt) => opt,
-        Err(e) => {
-            error!(
-                "Failed to query session member role for session {} user {}: {}",
-                session_id, user_id, e
-            );
-            return false;
-        }
-    };
-
-    match role.as_deref() {
-        Some(r) if can_mutate_role(r) => true,
-        Some(r) => {
+    match verify_session_mutator(&mut conn, session_id, user_id) {
+        Ok(_) => true,
+        Err(AppError::NotFound(_)) => {
             warn!(
-                "User {} attempted mutating action on session {} with non-mutator role '{}'",
-                user_id, session_id, r
-            );
-            false
-        }
-        None => {
-            warn!(
-                "User {} attempted mutating action on session {} without membership",
+                "User {} attempted mutating action on session {} without owner/editor access",
                 user_id, session_id
             );
             false
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn owner_role_can_mutate() {
-        assert!(can_mutate_role("owner"));
-    }
-
-    #[test]
-    fn editor_role_can_mutate() {
-        assert!(can_mutate_role("editor"));
-    }
-
-    #[test]
-    fn viewer_role_cannot_mutate() {
-        assert!(!can_mutate_role("viewer"));
-    }
-
-    #[test]
-    fn unknown_role_cannot_mutate() {
-        assert!(!can_mutate_role(""));
-        assert!(!can_mutate_role("admin"));
-        assert!(!can_mutate_role("OWNER")); // case sensitive — DB stores lowercase
+        Err(e) => {
+            error!(
+                "Failed to verify mutator access for session {} user {}: {:?}",
+                session_id, user_id, e
+            );
+            false
+        }
     }
 }
 

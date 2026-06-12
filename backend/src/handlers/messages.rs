@@ -1,6 +1,7 @@
 use crate::auth::CurrentUserId;
 use crate::errors::AppError;
-use crate::handlers::session_access::verify_session_mutator;
+use crate::handlers::helpers::{parse_iso_cursor, sender_names};
+use crate::handlers::session_access::{verify_session_mutator, verify_session_reader};
 use crate::models::{Message, NewMessage};
 use crate::schema::messages;
 use crate::AppState;
@@ -8,11 +9,9 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use shared::api::MessagesListResponse;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Hard upper bound on `limit` for `GET /api/sessions/{id}/messages`.
@@ -59,21 +58,6 @@ pub struct ListMessagesQuery {
     pub after: Option<String>,
 }
 
-/// Parse an ISO timestamp the same way the WebSocket replay path does
-/// (`web_client_socket.rs::replay_history`), accepting both the fractional
-/// (`%Y-%m-%dT%H:%M:%S%.f`) and second-precision (`%Y-%m-%dT%H:%M:%S`)
-/// forms emitted by the frontend's `js_sys::Date.toISOString()` and by the
-/// backend's own `NaiveDateTime` serializer respectively.
-fn parse_iso_cursor(s: &str) -> Option<NaiveDateTime> {
-    // Trim trailing `Z` if present — `js_sys::Date::to_iso_string` emits
-    // `2026-05-17T12:34:56.789Z`, but `NaiveDateTime::parse_from_str` rejects
-    // the timezone marker on a naive timestamp.
-    let trimmed = s.strip_suffix('Z').unwrap_or(s);
-    NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
-        .or_else(|_| NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S"))
-        .ok()
-}
-
 /// Request body for creating a new message
 #[derive(Debug, Deserialize)]
 pub struct CreateMessageRequest {
@@ -94,22 +78,6 @@ pub struct MessageWithSender {
     pub message: Message,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sender_name: Option<String>,
-}
-
-/// Verify that a user has access to a session (is a member with any role)
-fn verify_session_access(
-    conn: &mut diesel::pg::PgConnection,
-    session_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-) -> Result<crate::models::Session, AppError> {
-    use crate::schema::{session_members, sessions};
-    sessions::table
-        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
-        .filter(sessions::id.eq(session_id))
-        .filter(session_members::user_id.eq(user_id))
-        .select(crate::models::Session::as_select())
-        .first::<crate::models::Session>(conn)
-        .map_err(|_| AppError::NotFound("Session not found"))
 }
 
 /// Create a new message for a session
@@ -164,7 +132,7 @@ pub async fn list_messages(
 ) -> Result<Json<MessagesListResponse<MessageWithSender>>, AppError> {
     let mut conn = app_state.conn()?;
 
-    let _session = verify_session_access(&mut conn, session_id, current_user_id)?;
+    let _session = verify_session_reader(&mut conn, session_id, current_user_id)?;
 
     // Validate + parse params before touching the DB so a malformed cursor
     // fails fast with `400` rather than e.g. silently returning everything
@@ -230,26 +198,7 @@ pub async fn list_messages(
     };
 
     // Look up sender names for user-role messages
-    use crate::schema::users;
-    let user_ids: Vec<uuid::Uuid> = message_list
-        .iter()
-        .filter(|m| m.role == "user")
-        .map(|m| m.user_id)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let user_names: HashMap<uuid::Uuid, String> = if !user_ids.is_empty() {
-        users::table
-            .filter(users::id.eq_any(&user_ids))
-            .select((users::id, users::name, users::email))
-            .load::<(uuid::Uuid, Option<String>, String)>(&mut conn)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(id, name, email)| (id, name.unwrap_or(email)))
-            .collect()
-    } else {
-        HashMap::new()
-    };
+    let user_names = sender_names(&mut conn, &message_list);
 
     let total = message_list.len() as i64;
     let enriched: Vec<MessageWithSender> = message_list
@@ -280,42 +229,6 @@ pub async fn list_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_iso_cursor_accepts_fractional_seconds() {
-        let parsed = parse_iso_cursor("2026-05-17T12:34:56.789").expect("parse");
-        assert_eq!(
-            parsed.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
-            "2026-05-17 12:34:56.789"
-        );
-    }
-
-    #[test]
-    fn parse_iso_cursor_accepts_second_precision() {
-        let parsed = parse_iso_cursor("2026-05-17T12:34:56").expect("parse");
-        assert_eq!(
-            parsed.format("%Y-%m-%d %H:%M:%S").to_string(),
-            "2026-05-17 12:34:56"
-        );
-    }
-
-    #[test]
-    fn parse_iso_cursor_strips_trailing_z() {
-        // js_sys::Date::to_iso_string emits a trailing 'Z' marker; the
-        // NaiveDateTime parser rejects timezone info, so the helper must
-        // trim it. Otherwise frontend-emitted timestamps would all 400.
-        let parsed = parse_iso_cursor("2026-05-17T12:34:56.789Z").expect("parse");
-        assert_eq!(
-            parsed.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
-            "2026-05-17 12:34:56.789"
-        );
-    }
-
-    #[test]
-    fn parse_iso_cursor_rejects_garbage() {
-        assert!(parse_iso_cursor("not-a-timestamp").is_none());
-        assert!(parse_iso_cursor("").is_none());
-    }
 
     #[test]
     fn list_messages_query_defaults_all_none() {

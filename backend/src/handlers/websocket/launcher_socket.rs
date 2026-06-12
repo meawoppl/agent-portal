@@ -1,8 +1,8 @@
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
 use shared::{
-    AgentType, LauncherEndpoint, LauncherToServer, ScheduledTaskConfig, ServerToClient,
-    ServerToLauncher, ServerToProxy, SessionStatus,
+    LauncherEndpoint, LauncherToServer, ServerToClient, ServerToLauncher, ServerToProxy,
+    SessionStatus,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -187,50 +187,13 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     );
 
     // Send initial ScheduleSync with the user's scheduled tasks
-    if let Ok(mut db_conn) = app_state.db_pool.get() {
-        use crate::schema::scheduled_tasks;
-        let launcher_hostname = app_state
-            .session_manager
-            .launchers
-            .get(&launcher_id)
-            .map(|l| l.hostname.clone())
-            .unwrap_or_default();
-
-        let tasks: Vec<crate::models::ScheduledTask> = scheduled_tasks::table
-            .filter(scheduled_tasks::user_id.eq(user_id))
-            .filter(scheduled_tasks::enabled.eq(true))
-            .load(&mut db_conn)
-            .unwrap_or_default();
-
-        let task_configs: Vec<ScheduledTaskConfig> = tasks
-            .iter()
-            .filter(|t| t.hostname == launcher_hostname)
-            .map(|t| ScheduledTaskConfig {
-                id: t.id,
-                name: t.name.clone(),
-                cron_expression: t.cron_expression.clone(),
-                timezone: t.timezone.clone(),
-                working_directory: t.working_directory.clone(),
-                prompt: t.prompt.clone(),
-                claude_args: serde_json::from_value(t.claude_args.clone()).unwrap_or_default(),
-                agent_type: t.agent_type.parse().unwrap_or(AgentType::Claude),
-                enabled: t.enabled,
-                max_runtime_minutes: t.max_runtime_minutes,
-                last_session_id: t.last_session_id,
-            })
-            .collect();
-
-        if !task_configs.is_empty() {
-            let count = task_configs.len();
-            let _ = tx_for_sync.send(ServerToLauncher::ScheduleSync {
-                tasks: task_configs,
-            });
-            info!(
-                "Sent initial ScheduleSync with {} tasks to launcher '{}'",
-                count, launcher_name
-            );
-        }
-    }
+    crate::handlers::scheduled_tasks::send_initial_schedule_sync(
+        &app_state,
+        user_id,
+        launcher_id,
+        &hostname,
+        &launcher_name,
+    );
 
     let continuation_configs =
         super::continuations::load_scheduled_continuations(&app_state, launcher_id, user_id);

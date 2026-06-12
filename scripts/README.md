@@ -18,7 +18,7 @@ This will install:
 
 ```bash
 # Dev mode (easiest) - no OAuth required
-./scripts/test-dev.sh
+./scripts/dev.sh start
 
 # Full OAuth mode - requires .env with Google OAuth
 ./scripts/test-oauth.sh
@@ -30,29 +30,22 @@ This will install:
 ./scripts/db-shell.sh
 ```
 
-## test-dev.sh
+## dev.sh
 
-**Dev mode testing** - No OAuth required
+**Development environment manager** - No OAuth required
 
-This script:
-- Starts PostgreSQL in Docker
-- Runs database migrations
-- Builds frontend
-- Starts backend in dev mode (auto-creates test user)
-- Starts proxy
-- Opens browser to http://localhost:3000/
-
-**Features:**
-- ✅ Auto-authentication (testing@testing.local)
-- ✅ No Google OAuth setup needed
-- ✅ Perfect for quick testing and development
-
-**Usage:**
 ```bash
-./scripts/test-dev.sh
+./scripts/dev.sh start    # Start DB + migrations + frontend build + backend
+./scripts/dev.sh status   # Show status of all services
+./scripts/dev.sh logs     # Tail backend logs (or: logs db)
+./scripts/dev.sh stop     # Stop all services
+./scripts/dev.sh restart  # Restart all services
+./scripts/dev.sh build    # Rebuild frontend only
+./scripts/dev.sh nuke-db  # Delete all database data and start fresh
 ```
 
-Opens browser and you're automatically logged in!
+`start` runs the backend in dev mode (auto-authenticates as
+testing@testing.local) and leaves everything running in the background.
 
 ## test-oauth.sh
 
@@ -122,13 +115,16 @@ claude_portal=# \q
 ### 1. Start Database Only
 
 ```bash
-docker-compose -f docker-compose.test.yml up -d db
+docker compose -f docker-compose.test.yml up -d db
 
 # Wait for it to be ready
-docker-compose -f docker-compose.test.yml exec db pg_isready -U claude_portal
+docker compose -f docker-compose.test.yml exec db pg_isready -U claude_portal
 ```
 
 ### 2. Run Migrations
+
+The dev database URL lives in `scripts/lib.sh` (`DEV_DATABASE_URL`) and must
+match the credentials in `docker-compose.test.yml`:
 
 ```bash
 export DATABASE_URL="postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal"
@@ -155,7 +151,7 @@ cargo run -p backend
 ### 5. Start Proxy
 
 ```bash
-cargo run -p proxy -- \
+cargo run -p claude-portal -- \
   --backend-url ws://localhost:3000 \
   --session-name "my-session"
 ```
@@ -176,13 +172,13 @@ tail -f /tmp/claude-portal-backend.log
 
 ```bash
 # Check if database is running
-docker ps | grep agent-portal
+docker ps | grep claude-portal
 
 # If not, start it
-docker-compose -f docker-compose.test.yml up -d db
+docker compose -f docker-compose.test.yml up -d db
 
 # Check logs
-docker-compose -f docker-compose.test.yml logs db
+docker compose -f docker-compose.test.yml logs db
 ```
 
 ### "Port 5432 already in use"
@@ -230,21 +226,7 @@ These scripts are designed to work in CI environments:
 # .github/workflows/test.yml
 - name: Run tests
   run: |
-    ./scripts/test-dev.sh &
-    sleep 10
+    ./scripts/dev.sh start
     curl http://localhost:3000/
-    ./scripts/clean.sh
-```
-
-## Environment Variables
-
-Scripts respect these environment variables:
-
-- `DATABASE_URL` - Override database connection
-- `BACKEND_PORT` - Override backend port (default: 3000)
-- `DEV_MODE` - Enable dev mode (default: true for test-dev.sh)
-
-Example:
-```bash
-BACKEND_PORT=8080 ./scripts/test-dev.sh
+    ./scripts/dev.sh stop
 ```
