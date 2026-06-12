@@ -15,4 +15,3 @@ pub const AUTH_DEVICE_CODE: &str = "/api/auth/device/code";
 pub const AUTH_DEVICE_POLL: &str = "/api/auth/device/poll";
 pub const AUTH_DEVICE_APPROVE: &str = "/api/auth/device/approve";
 pub const AUTH_DEVICE_DENY: &str = "/api/auth/device/deny";
-pub const AUTH_DEVICE_ERROR: &str = "/api/auth/device/error";
