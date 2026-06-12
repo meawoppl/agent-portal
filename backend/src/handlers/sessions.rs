@@ -120,18 +120,13 @@ fn proxy_request_user_id(
     conn: &mut diesel::pg::PgConnection,
     auth_token: Option<&str>,
 ) -> Result<Uuid, AppError> {
-    use crate::schema::users;
-
     if let Some(token) = auth_token {
         return crate::handlers::proxy_tokens::verify_and_get_user(app_state, conn, token)
             .map(|(user_id, _)| user_id);
     }
 
     if app_state.dev_mode {
-        return Ok(users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .select(users::id)
-            .first::<Uuid>(conn)?);
+        return Ok(crate::auth::dev_user(conn)?.id);
     }
 
     Err(AppError::Unauthorized)
@@ -382,6 +377,14 @@ struct UserBasicInfo {
     name: Option<String>,
 }
 
+/// Validate a member role supplied by the caller
+fn validate_member_role(role: &str) -> Result<(), AppError> {
+    if role != "editor" && role != "viewer" {
+        return Err(AppError::BadRequest("Invalid role"));
+    }
+    Ok(())
+}
+
 /// List all members of a session
 pub async fn list_session_members(
     State(app_state): State<Arc<AppState>>,
@@ -431,9 +434,7 @@ pub async fn add_session_member(
     Path(session_id): Path<Uuid>,
     Json(req): Json<AddMemberRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    if req.role != "editor" && req.role != "viewer" {
-        return Err(AppError::Internal("Invalid role".to_string()));
-    }
+    validate_member_role(&req.role)?;
 
     let mut conn = app_state.conn()?;
 
@@ -461,7 +462,7 @@ pub async fn add_session_member(
         .optional()?;
 
     if existing.is_some() {
-        return Err(AppError::Internal("User is already a member".to_string()));
+        return Err(AppError::BadRequest("User is already a member"));
     }
 
     let new_member = NewSessionMember {
@@ -502,9 +503,7 @@ pub async fn remove_session_member(
     }
 
     if is_owner && current_user_id == target_user_id {
-        return Err(AppError::Internal(
-            "Owner cannot remove themselves".to_string(),
-        ));
+        return Err(AppError::BadRequest("Owner cannot remove themselves"));
     }
 
     let deleted = diesel::delete(
@@ -528,9 +527,7 @@ pub async fn update_session_member_role(
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMemberRoleRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    if req.role != "editor" && req.role != "viewer" {
-        return Err(AppError::Internal("Invalid role".to_string()));
-    }
+    validate_member_role(&req.role)?;
 
     let mut conn = app_state.conn()?;
 
@@ -545,7 +542,7 @@ pub async fn update_session_member_role(
         .ok_or(AppError::Forbidden)?;
 
     if current_user_id == target_user_id {
-        return Err(AppError::Internal("Cannot change own role".to_string()));
+        return Err(AppError::BadRequest("Cannot change own role"));
     }
 
     let updated = diesel::update(

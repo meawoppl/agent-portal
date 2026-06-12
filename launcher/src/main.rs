@@ -139,26 +139,18 @@ async fn main() -> anyhow::Result<()> {
         eprintln!();
     }
 
-    // Apply pending updates (Windows only)
-    if let Ok(true) = portal_update::apply_pending_update() {
-        info!("Pending update applied successfully");
-    }
-
-    // Auto-update on startup (unless --no-update)
-    if !args.no_update {
-        match portal_update::check_for_update(BINARY_PREFIX, false).await {
-            Ok(portal_update::UpdateResult::UpToDate) => {}
-            Ok(portal_update::UpdateResult::Updated) => {
-                info!("Launcher updated, please restart");
-                std::process::exit(0);
-            }
-            Ok(portal_update::UpdateResult::UpdateAvailable { .. }) => {}
-            Err(e) => {
-                warn!(
-                    "Update check failed: {}. Continuing with current version.",
-                    e
-                );
-            }
+    // Apply pending updates, then auto-update on startup (unless --no-update)
+    match portal_update::startup_auto_update(BINARY_PREFIX, !args.no_update).await {
+        Ok(true) => {
+            info!("Launcher updated, please restart");
+            std::process::exit(0);
+        }
+        Ok(false) => {}
+        Err(e) => {
+            warn!(
+                "Update check failed: {}. Continuing with current version.",
+                e
+            );
         }
     }
 
@@ -179,11 +171,10 @@ async fn main() -> anyhow::Result<()> {
             Some(result.access_token)
         }
     };
-    let launcher_name = args.name.or(config.name).unwrap_or_else(|| {
-        hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "unknown".to_string())
-    });
+    let launcher_name = args
+        .name
+        .or(config.name)
+        .unwrap_or_else(claude_session_lib::hostname_or_unknown);
 
     let launcher_id = Uuid::new_v4();
 
@@ -234,16 +225,8 @@ async fn cmd_login(args: &Args) -> anyhow::Result<()> {
 
 /// `agent-portal update` — update binary and restart service if running
 async fn cmd_update() -> anyhow::Result<()> {
-    // Apply any pending updates first (Windows)
-    if let Ok(true) = portal_update::apply_pending_update() {
-        info!("Pending update applied successfully");
-    }
-
-    match portal_update::check_for_update(BINARY_PREFIX, false).await {
-        Ok(portal_update::UpdateResult::UpToDate) => {
-            println!("agent-portal is already up to date.");
-        }
-        Ok(portal_update::UpdateResult::Updated) => {
+    match portal_update::startup_auto_update(BINARY_PREFIX, true).await {
+        Ok(true) => {
             println!("agent-portal updated successfully.");
             // Restart the service if it's installed and running
             if service::is_installed() {
@@ -253,8 +236,8 @@ async fn cmd_update() -> anyhow::Result<()> {
                 println!("Service restarted.");
             }
         }
-        Ok(portal_update::UpdateResult::UpdateAvailable { version, .. }) => {
-            println!("Update available: {}", version);
+        Ok(false) => {
+            println!("agent-portal is already up to date.");
         }
         Err(e) => {
             anyhow::bail!("Update failed: {}", e);
