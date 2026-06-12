@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.58
+
+- **scripts/ cleanup: broken package names fixed, `test-dev.sh` deleted, shared `lib.sh`.** `test-oauth.sh` ran `cargo run -p proxy` — a package that doesn't exist (it's `claude-portal`), so the script failed at the proxy step; `clean.sh`/`test-oauth.sh` `pkill`ed the same wrong name (could never match). All fixed, plus `docker-compose` v1 → `docker compose` across scripts. `test-dev.sh` (~80% duplicate of `dev.sh`) is deleted with its references updated in TROUBLESHOOTING.md/install-deps/README. The dev DATABASE_URL literal (6 copies) now lives once in a sourced `scripts/lib.sh`; diesel/trunk auto-install lives only in `install-deps.sh` (dev.sh fails fast with a pointer); `up.sh` guards its macOS-only `open -a Docker` by `$OSTYPE` with a Linux `systemctl` path. Scripts still write `/tmp/claude-portal-backend.log` — doc alignment is #999's.
+
 ## 2.8.37
 
 - **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
