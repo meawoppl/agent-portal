@@ -1,5 +1,6 @@
-use super::super::{format_duration, shorten_model_name};
+use super::super::shorten_model_name;
 use crate::components::markdown::render_markdown;
+use shared::fmt::format_duration;
 use yew::prelude::*;
 
 pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html {

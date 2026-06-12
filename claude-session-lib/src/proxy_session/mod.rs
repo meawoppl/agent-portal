@@ -1281,29 +1281,7 @@ async fn read_download_file(
     }
 }
 
-/// Truncate a string to max length
-pub(crate) fn truncate(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        s
-    } else {
-        // Find a safe UTF-8 boundary
-        let mut end = max_len;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        &s[..end]
-    }
-}
-
-/// Format duration in ms to human readable
-pub(crate) fn format_duration(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{}ms", ms)
-    } else if ms < 60000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        let mins = ms / 60000;
-        let secs = (ms % 60000) / 1000;
-        format!("{}m{}s", mins, secs)
-    }
-}
+// String helpers shared with the frontend (see `shared::fmt`). Note the
+// minute format is `"{}m {}s"` (with a space), matching the frontend
+// transcript — the old local copy here used `"{}m{}s"`.
+pub(crate) use shared::fmt::{format_duration, truncate_str as truncate};

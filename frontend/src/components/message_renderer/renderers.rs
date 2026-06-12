@@ -5,14 +5,15 @@ mod portal;
 mod system;
 mod tools;
 
+use super::shorten_model_name;
 use super::types::{OptimisticUserMessage, UserMessageMeta};
-use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
     has_askuserquestion_answers, render_askuserquestion_result,
 };
 use serde::Deserialize;
+use shared::fmt::format_duration;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;

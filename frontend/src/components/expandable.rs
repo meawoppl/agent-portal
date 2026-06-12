@@ -1,5 +1,5 @@
 use super::markdown::linkify_urls;
-use super::message_renderer::truncate_str;
+use shared::fmt::truncate_str;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
