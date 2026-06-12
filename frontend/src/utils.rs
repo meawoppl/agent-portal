@@ -136,3 +136,87 @@ pub fn extract_folder(path: &str) -> &str {
         .filter(|s| !s.is_empty())
         .unwrap_or(trimmed)
 }
+
+/// Read a value from browser localStorage, returning `None` when storage is
+/// unavailable (no window, storage disabled) or the key is absent.
+pub fn storage_get(key: &str) -> Option<String> {
+    window()?
+        .local_storage()
+        .ok()
+        .flatten()?
+        .get_item(key)
+        .ok()
+        .flatten()
+}
+
+/// Write a value to browser localStorage, silently doing nothing when
+/// storage is unavailable or the write fails.
+pub fn storage_set(key: &str, value: &str) {
+    if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(key, value);
+    }
+}
+
+/// Human-readable file size: `"512 B"`, `"1.5 KB"`, `"2.0 MB"`.
+pub fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+/// Format token count with K/M suffix for readability
+pub fn format_token_count(count: i64) -> String {
+    if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}K", count as f64 / 1_000.0)
+    } else {
+        count.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- format_file_size ---
+
+    #[test]
+    fn format_file_size_renders_bytes_under_one_kib() {
+        assert_eq!(format_file_size(0), "0 B");
+        assert_eq!(format_file_size(1), "1 B");
+        assert_eq!(format_file_size(512), "512 B");
+        assert_eq!(format_file_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_file_size_renders_kib_between_one_kib_and_one_mib() {
+        // 1024 is the boundary — exactly at it we cross to KB.
+        assert_eq!(format_file_size(1024), "1.0 KB");
+        assert_eq!(format_file_size(1536), "1.5 KB");
+        assert_eq!(format_file_size(1024 * 1024 - 1), "1024.0 KB");
+    }
+
+    #[test]
+    fn format_file_size_renders_mib_at_or_above_one_mib() {
+        assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_file_size(2 * 1024 * 1024), "2.0 MB");
+        assert_eq!(format_file_size(5 * 1024 * 1024 + 512 * 1024), "5.5 MB");
+    }
+
+    // --- format_token_count ---
+
+    #[test]
+    fn format_token_count_magnitudes() {
+        assert_eq!(format_token_count(999), "999");
+        assert_eq!(format_token_count(1_000), "1.0K");
+        assert_eq!(format_token_count(1_500), "1.5K");
+        assert_eq!(format_token_count(999_999), "1000.0K");
+        assert_eq!(format_token_count(1_000_000), "1.0M");
+        assert_eq!(format_token_count(2_345_678), "2.3M");
+    }
+}

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.64
+
+- **Frontend helper consolidation: localStorage, spend tiers, file sizes, token counts, model labels.** `utils::storage_get/storage_set` replace 9 inlined `window().local_storage()` chains (plus one bool-pref load/save pair helper in dashboard types); the spend-tier 1/10/100/1000/10000 ladder is encoded once (`spend_tier` + `spend_tier_class`) instead of twice in page.rs; `format_file_size` and `format_token_count` move to utils with their tests; the pill's `shorten_model_name` is renamed `compact_model_label`, killing the same-name-different-behavior import hazard; `window_param` (an exact duplicate of `TimeWindow::label`) is deleted. Deliberate skips, documented: two token formatters render genuinely different strings, `pair_label` ≠ `format_model_tier_label` (vendor-stripping/case differ — a doc note pins the divergence), and the expiry-helper duplication had already disappeared upstream. ~95 lines of duplicated logic removed.
+
 ## 2.8.63
 
 - **`shared::fmt` hosts the cross-crate `truncate_str`/`format_duration`; upload chunk constants live with the protocol.** The byte-identical UTF-8-boundary truncation and the accidentally-divergent duration formats (`"{}m {}s"` frontend vs `"{}m{}s"` proxy logs) are unified on the user-facing spaced form — visible only in proxy debug logs. Six fresh unit tests (the originals had drifted away entirely). `UPLOAD_CHUNK_SIZE`/`MAX_UPLOAD_CHUNK_BYTES`/`MAX_UPLOAD_TOTAL_CHUNKS` moved from frontend/backend into `shared/src/protocol.rs` with doc comments tying sender to validator (values unchanged; a stale "~3.2 GiB" doc figure corrected to 4 GiB).
