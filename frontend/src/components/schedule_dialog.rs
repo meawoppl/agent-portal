@@ -1,3 +1,4 @@
+use crate::hooks::use_escape;
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::api::{
@@ -6,7 +7,6 @@ use shared::api::{
 };
 use shared::{LauncherInfo, SessionInfo};
 use uuid::Uuid;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
@@ -176,22 +176,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
     let folder = utils::extract_folder(&working_directory);
 
     // Close on Escape
-    {
-        let on_close = props.on_close.clone();
-        use_effect_with((), move |_| {
-            let listener = gloo::events::EventListener::new(
-                &gloo::utils::document(),
-                "keydown",
-                move |event| {
-                    let e: &web_sys::KeyboardEvent = event.unchecked_ref();
-                    if e.key() == "Escape" {
-                        on_close.emit(());
-                    }
-                },
-            );
-            move || drop(listener)
-        });
-    }
+    use_escape(props.on_close.clone());
 
     // Fetch launcher version for this session's hostname
     {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.46
+
+- **One clipboard helper and one escape-key implementation replace seven hand-rolled copies.** `copy_to_clipboard(text, copied, reset_ms)` (typed `web_sys` Clipboard API instead of the `js_sys::Reflect` dance) serves CopyButton/CopyCommand/CodeBlock with their original per-site reset timings preserved (1500/2000/2000ms). New `hooks/use_escape.rs`: `use_escape` (bubble, component lifetime) for the launch/schedule dialogs, `use_escape_capture(active, …)` for the ImageViewer (capture-phase, attached only while expanded, preventDefault+stopPropagation as before), and an `escape_listener` RAII helper for the struct-component ShareDialog — all three delegate to one implementation. Redundant `#[allow(dead_code)]` on ShareDialog's listener field removed. Net −45 lines.
+
 ## 2.8.45
 
 - **Validation errors return 400 instead of 500.** Caller mistakes ("Invalid role" ×2 — now a shared `validate_member_role` helper — "User is already a member", "Owner cannot remove themselves", "Cannot change own role", "Invalid cron expression" ×2) were mapped to `AppError::Internal`, logging server faults for user typos and masking the message behind "Internal server error". All other `Internal` uses audited and left alone (genuine infra faults). Frontend: the share dialog's add-member 409 branch never fired (backend sent 500) — repointed at 400, so "User is already a member" / "Invalid role" now surface verbatim; the schedule dialog's generic `Error ({status})` display now shows the real cron message.
