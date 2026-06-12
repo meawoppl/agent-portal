@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.63
+
+- **`shared::fmt` hosts the cross-crate `truncate_str`/`format_duration`; upload chunk constants live with the protocol.** The byte-identical UTF-8-boundary truncation and the accidentally-divergent duration formats (`"{}m {}s"` frontend vs `"{}m{}s"` proxy logs) are unified on the user-facing spaced form — visible only in proxy debug logs. Six fresh unit tests (the originals had drifted away entirely). `UPLOAD_CHUNK_SIZE`/`MAX_UPLOAD_CHUNK_BYTES`/`MAX_UPLOAD_TOTAL_CHUNKS` moved from frontend/backend into `shared/src/protocol.rs` with doc comments tying sender to validator (values unchanged; a stale "~3.2 GiB" doc figure corrected to 4 GiB).
+
 ## 2.8.39
 
 - **Live messages no longer have their server timestamp clobbered by the browser clock.** `handle_proxy_message` folds the server `created_at` into `_created_at`, but the component's live path re-ran `inject_message_metadata` with `Date::now()`, overwriting it. The live path now uses `inject_created_at_if_absent` — browser-clock fallback only when the key is missing (error envelopes, pre-#784 backends keep their tooltips). REST history replay keeps overwrite semantics as before. Four new tests pin the behavior, including the no-clobber case.
