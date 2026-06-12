@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.54
+
+- **Admin page: three PATCH-user handlers deduped; `/api/auth/me` no longer fetched redundantly.** `patch_user(user_id, body) -> bool` + `update_user_in(users, id, f)` collapse the toggle-admin/unban/confirm-ban triple to one-liners. The dashboard's leave-confirm now uses the `current_user_id` it already holds (typed `Option<Uuid>` now) instead of a second network round-trip, and the admin modal receives the id as a prop, skipping its own me-fetch; the standalone `/admin` route keeps its original fetch with 401→Home / 403→denied handling.
+
 ## 2.8.53
 
 - **Shim cleanup: wiggum prompt single-sourced, one write_line, dead channel and fake retries gone, shared claude arg builder.** The wiggum DONE-loop prompt suffix existed in three byte-identical copies (drift would silently break loop semantics) — now `wiggum_prompt()` next to `WiggumState`. All six serialize→write→newline→flush sites in the shim use one generic `write_line` (newline/flush errors at four raw sites now surface like write errors instead of being ignored). The stdin-line channel feeding an empty select arm is deleted. Both "retry the same failing constructor" fallbacks (`warn!("continuing without persistence")` then `?`, and `unwrap_or_else(|_| …unwrap())`) reduced to honest single calls. `claude_cli_args()` in spawn.rs builds the CLI flag list once for the lib spawn, its diagnostic log, and the shim's respawn — a flag change can't miss the shim anymore. Net −56 lines.
