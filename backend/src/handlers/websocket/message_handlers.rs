@@ -171,17 +171,11 @@ pub fn handle_claude_output(
         }
     }
 
-    // Extract base64 images from portal messages and replace with URLs.
-    // This keeps WebSocket messages small — browsers fetch images via HTTP.
-    //
-    // The inserted images need a `user_id` for the auth check on
-    // `/api/images/{id}` (#786). We don't yet have the `Session` row in scope
-    // here — the DB lookup below also reads it — so we do an early, cheap
-    // owner-only `.select` here. If we can't resolve a user_id we *skip*
-    // image extraction rather than silently drop ownership: the original
-    // base64 just stays inline in the broadcast (slower but correct), and
-    // nothing un-owned ever lands in the cache.
-    let inserting_user_id: Option<Uuid> = db_session_id.and_then(|sid| {
+    // Resolve the session owner ONCE for both consumers below: image
+    // extraction (auth check on `/api/images/{id}`, #786) and the message
+    // insert (fallback `user_id`). A single cheap owner-only `.select`
+    // replaces the previous pair of per-message session lookups (#977).
+    let session_user_id: Option<Uuid> = db_session_id.and_then(|sid| {
         use crate::schema::sessions;
         let mut conn = db_pool.get().ok()?;
         sessions::table
@@ -190,7 +184,15 @@ pub fn handle_claude_output(
             .first::<Uuid>(&mut conn)
             .ok()
     });
-    let content = match inserting_user_id {
+
+    // Extract base64 images from portal messages and replace with URLs.
+    // This keeps WebSocket messages small — browsers fetch images via HTTP.
+    //
+    // If we couldn't resolve a user_id we *skip* image extraction rather
+    // than silently drop ownership: the original base64 just stays inline
+    // in the broadcast (slower but correct), and nothing un-owned ever
+    // lands in the cache.
+    let content = match session_user_id {
         Some(uid) => extract_portal_images(content, image_store, uid, db_session_id),
         None => content,
     };
@@ -208,10 +210,9 @@ pub fn handle_claude_output(
     if let (Some(session_id), Ok(mut conn)) = (db_session_id, db_pool.get()) {
         use crate::schema::{messages, sessions};
 
-        if let Ok(session) = sessions::table
-            .find(session_id)
-            .first::<crate::models::Session>(&mut conn)
-        {
+        // Only insert when the owner lookup above resolved — same gating the
+        // previous per-insert `Session` load provided (no row, no insert).
+        if let Some(owner_user_id) = session_user_id {
             let role = shared::MessageRole::from_type_str(
                 content
                     .get("type")
@@ -223,7 +224,7 @@ pub fn handle_claude_output(
             let actual_user_id = sender_info
                 .as_ref()
                 .map(|(id, _)| *id)
-                .unwrap_or(session.user_id);
+                .unwrap_or(owner_user_id);
 
             let new_message = crate::models::NewMessage {
                 session_id,

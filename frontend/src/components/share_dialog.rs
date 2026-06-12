@@ -4,11 +4,11 @@ use shared::api::{
     AddMemberRequest, SessionMemberInfo, SessionMembersResponse, UpdateMemberRoleRequest,
 };
 use uuid::Uuid;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
+use crate::hooks::escape_listener;
 use crate::utils::{self, On401};
 
 #[derive(Properties, PartialEq)]
@@ -37,7 +37,7 @@ pub struct ShareDialog {
     email_input: String,
     new_role: String,
     error: Option<String>,
-    #[allow(dead_code)] // RAII guard — must be held to keep listener active
+    // RAII guard — must be held to keep the Escape listener active
     _escape_listener: Option<EventListener>,
 }
 
@@ -47,13 +47,7 @@ impl Component for ShareDialog {
 
     fn create(ctx: &Context<Self>) -> Self {
         ctx.link().send_message(ShareDialogMsg::LoadMembers);
-        let on_close = ctx.props().on_close.clone();
-        let listener = EventListener::new(&gloo::utils::document(), "keydown", move |event| {
-            let e: &web_sys::KeyboardEvent = event.unchecked_ref();
-            if e.key() == "Escape" {
-                on_close.emit(());
-            }
-        });
+        let listener = escape_listener(ctx.props().on_close.clone());
         Self {
             members: Vec::new(),
             loading: true,
@@ -124,10 +118,14 @@ impl Component for ShareDialog {
                                 "User not found".to_string(),
                             ));
                         }
-                        Ok(response) if response.status() == 409 => {
-                            link.send_message(ShareDialogMsg::SetError(
-                                "User is already a member".to_string(),
-                            ));
+                        Ok(response) if response.status() == 400 => {
+                            let msg = response
+                                .text()
+                                .await
+                                .ok()
+                                .filter(|t| !t.is_empty())
+                                .unwrap_or_else(|| "Failed to add member".to_string());
+                            link.send_message(ShareDialogMsg::SetError(msg));
                         }
                         Ok(response) => {
                             log::error!("Failed to add member: {}", response.status());
