@@ -120,18 +120,13 @@ fn proxy_request_user_id(
     conn: &mut diesel::pg::PgConnection,
     auth_token: Option<&str>,
 ) -> Result<Uuid, AppError> {
-    use crate::schema::users;
-
     if let Some(token) = auth_token {
         return crate::handlers::proxy_tokens::verify_and_get_user(app_state, conn, token)
             .map(|(user_id, _)| user_id);
     }
 
     if app_state.dev_mode {
-        return Ok(users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .select(users::id)
-            .first::<Uuid>(conn)?);
+        return Ok(crate::auth::dev_user(conn)?.id);
     }
 
     Err(AppError::Unauthorized)
