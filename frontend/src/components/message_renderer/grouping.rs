@@ -358,6 +358,21 @@ pub fn group_messages(
     }
 
     for json in messages {
+        // Cumulative `turn/diff/updated` events are dropped entirely — Codex
+        // re-sends the whole-turn diff on every edit tick, so they pile up
+        // O(ticks) redundant cards (each the size of the full turn) on top of
+        // the per-file diffs that already show the same edits. Skipping here
+        // rather than in `classify` keeps the surrounding Codex events in one
+        // run instead of fragmenting the group around each dropped diff.
+        if agent_type == shared::AgentType::Codex {
+            use crate::components::codex_renderer::CodexEvent;
+            if matches!(
+                serde_json::from_str::<CodexEvent>(json),
+                Ok(CodexEvent::TurnDiffUpdated { .. })
+            ) {
+                continue;
+            }
+        }
         match classify(json, agent_type, current_user_id) {
             Some(identity) => match current.as_mut() {
                 Some((cur_identity, msgs)) if *cur_identity == identity => msgs.push(json.clone()),

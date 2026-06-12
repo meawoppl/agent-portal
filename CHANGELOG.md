@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.34
+
+- **Codex: drop cumulative `turn/diff/updated` cards and dedupe per-file patch updates.** Codex re-sends the entire turn diff on every edit tick, so transcripts accumulated O(ticks) redundant cards — each the size of the whole turn — on top of the per-file `item.completed{file_change}` diffs that already render the same edits. The events are now dropped in `group_messages` (before grouping, so Codex runs don't fragment around each dropped diff) with a no-op dispatcher arm kept for exhaustiveness. `item/fileChange/patchUpdated` events (also cumulative per file) now surface their `item_id` in `codex_event_item_id`, letting the existing group dedup keep only the final patch and collapse it against the matching lifecycle events. The `DiffCard` `cumulative` chip and `render_turn_diff` are deleted with their only producer.
+
 ## 2.8.33
 
 - **CI dedup: one composite `setup-rust` action, one frontend build, matrix release.** `ci.yml` previously built the frontend in four jobs and pasted Install Rust/cache/trunk/protoc steps across eight; now `build-frontend` builds once and uploads `frontend/dist` as an artifact consumed by clippy/build-backend/test, the eight per-platform proxy/launcher jobs are one `build-binaries` matrix, and setup lives in `.github/actions/setup-rust` (which also carries the macOS clean-rustup workaround once instead of twice). `release.yml`'s five copy-pasted platform jobs are one matrix — uploaded artifact and release-asset filenames verified byte-identical against what `portal-update` expects. `container.yml` keeps its independent build (cross-workflow artifact handoff would couple it to CI's run lifecycle) but uses the composite action. Job display names, cache keys, runners, and codesign steps unchanged. actionlint-clean.

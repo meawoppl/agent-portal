@@ -95,9 +95,6 @@ fn render_codex_event(
             item => render_item(item, true, session_id),
         },
         Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
-        Ok(CodexEvent::TurnDiffUpdated { params }) => {
-            render_turn_diff(params.as_ref().and_then(|p| p.diff.as_deref()))
-        }
         Ok(CodexEvent::FileChangePatchUpdated { params }) => {
             render_file_change_patch(params.as_ref().and_then(|p| p.changes.as_deref()))
         }
@@ -106,10 +103,18 @@ fn render_codex_event(
             params.as_ref().and_then(|p| p.explanation.as_deref()),
         ),
         Ok(CodexEvent::ThreadCompacted { params }) => render_context_compacted(params.as_ref()),
+        // Cumulative whole-turn diffs (`turn/diff/updated`) are dropped: Codex
+        // re-sends the entire turn diff on every edit tick, so they pile up
+        // O(ticks) redundant cards (each the size of the whole turn) on top of
+        // the per-file `item.completed{file_change}` diffs that already render
+        // the same edits. Dropped before grouping — see
+        // `grouping::group_messages` — so they never reach this renderer in
+        // practice; the no-op arm is kept for match exhaustiveness.
+        Ok(CodexEvent::TurnDiffUpdated { .. })
         // Per-chunk deltas — the consolidated content lands in `turn/plan/updated`
         // (for plans) or `item.completed` (for reasoning). Emit nothing for the
         // streaming chunks to avoid visual noise without losing information.
-        Ok(CodexEvent::PlanDelta { .. })
+        | Ok(CodexEvent::PlanDelta { .. })
         | Ok(CodexEvent::ReasoningSummaryPartAdded { .. })
         | Ok(CodexEvent::ReasoningTextDelta { .. }) => html! {},
         Ok(CodexEvent::Unknown) | Err(_) => {
@@ -344,24 +349,6 @@ fn render_error_block(message: Option<&str>) -> Html {
             </div>
             <div class="message-body">
                 <div class="error-text">{ message }</div>
-            </div>
-        </div>
-    }
-}
-
-fn render_turn_diff(diff: Option<&str>) -> Html {
-    let diff = diff.unwrap_or("");
-    if diff.trim().is_empty() {
-        // Empty deltas — don't render an empty block.
-        return html! {};
-    }
-    let source = super::diff::DiffSource::Unified {
-        text: diff.to_string(),
-    };
-    html! {
-        <div class="claude-message assistant-message">
-            <div class="message-body">
-                <super::diff::DiffCard {source} cumulative=true />
             </div>
         </div>
     }
