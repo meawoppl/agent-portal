@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.55
+
+- **Repo-root scratch purged and `.gitignore` extended.** ~20 untracked artifacts (a 3.8MB `screenlog.1`, `parsing-dump/`, stray phone photos and AI-generated images, brand-mark source files duplicating `frontend/assets/`, `test-*.png/svg` plot outputs, `shim-mode.patch` + notes, a design doc for code that doesn't exist) were verified unreferenced and removed from the working tree. `.gitignore` now covers the patterns that demonstrably accumulate: `screenlog.*`, root `test-*.png/svg`, root `*.patch`, `parsing-dump/`.
+
 ## 2.8.37
 
 - **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
