@@ -23,8 +23,8 @@ use web_sys::Element;
 use yew::prelude::*;
 
 use super::helpers::{
-    autoscroll_transition, classify_output_msg_type, inject_message_metadata, is_claude_awaiting,
-    reconcile_pending_sends, ActivityTag,
+    autoscroll_transition, classify_output_msg_type, inject_created_at_if_absent,
+    inject_message_metadata, is_claude_awaiting, reconcile_pending_sends, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
@@ -712,15 +712,19 @@ impl SessionView {
         ctx.props()
             .on_activity
             .emit((ctx.props().session.id, tag, js_sys::Date::now()));
-        // Inject _created_at for tooltip display. Live path has no server
-        // timestamp on the wire — use browser `now()` for the tooltip only;
-        // the reconnect-replay watermark is set separately from the
-        // server-assigned `created_at` in `WsEvent::Output` (closes #784).
+        // Inject _created_at for tooltip display only when the frame doesn't
+        // already carry one: `websocket.rs` folds the server-assigned
+        // `created_at` into the content before emitting `WsEvent::Output`,
+        // and that authoritative timestamp must win over the browser clock
+        // (#981). Frames without one (error envelopes, pre-#784 backends)
+        // fall back to `Date::now()`; the reconnect-replay watermark is set
+        // separately from the server `created_at` in `WsEvent::Output`
+        // (closes #784).
         let now_iso = js_sys::Date::new_0()
             .to_iso_string()
             .as_string()
             .unwrap_or_default();
-        let output = inject_message_metadata(&output, &now_iso, false, None, None);
+        let output = inject_created_at_if_absent(&output, &now_iso);
 
         reconcile_pending_sends(&mut self.pending_sends, tag, &output);
 

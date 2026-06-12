@@ -6,7 +6,7 @@ use super::types::{
     load_hidden_sessions, load_inactive_hidden, load_rail_position, load_show_cost,
     save_hidden_sessions, save_inactive_hidden, save_show_cost,
 };
-use crate::components::{LaunchDialog, TurnMetricsHeaderPill};
+use crate::components::{ConfirmModal, ConfirmModalStyle, LaunchDialog, TurnMetricsHeaderPill};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
@@ -75,7 +75,7 @@ pub fn dashboard_page() -> Html {
     let pending_leave = use_state(|| None::<Uuid>);
     let pending_delete = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
-    let current_user_id = use_state(|| None::<String>);
+    let current_user_id = use_state(|| None::<Uuid>);
     let app_title = use_state(|| "Agent Portal".to_string());
     let server_version = use_state(String::new);
     let activated_sessions = use_state(HashSet::<Uuid>::new);
@@ -140,7 +140,7 @@ pub fn dashboard_page() -> Html {
                 if let Ok(me) = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await
                 {
                     is_admin.set(me.is_admin);
-                    current_user_id.set(Some(me.id.to_string()));
+                    current_user_id.set(Some(me.id));
                 }
             });
             || ()
@@ -350,16 +350,13 @@ pub fn dashboard_page() -> Html {
     let on_confirm_leave = {
         let pending_leave = pending_leave.clone();
         let refresh = sessions_hook.refresh.clone();
+        let current_user_id = current_user_id.clone();
         Callback::from(move |_| {
             if let Some(session_id) = *pending_leave {
                 let refresh = refresh.clone();
                 let pending_leave = pending_leave.clone();
+                let user_id = *current_user_id;
                 spawn_local(async move {
-                    let user_id = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore)
-                        .await
-                        .ok()
-                        .map(|me| me.id.to_string());
-
                     if let Some(user_id) = user_id {
                         let api_endpoint = utils::api_url(&format!(
                             "/api/sessions/{}/members/{}",
@@ -836,7 +833,7 @@ pub fn dashboard_page() -> Html {
                                                 on_message_sent={on_message_sent.clone()}
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
-                                                current_user_id={(*current_user_id).clone()}
+                                                current_user_id={current_user_id.map(|id| id.to_string())}
                                                 interrupt_signal={*interrupt_signal}
                                             />
                                         </div>
@@ -906,17 +903,15 @@ pub fn dashboard_page() -> Html {
                         .unwrap_or("this session");
 
                     html! {
-                        <div class="modal-overlay" onclick={on_cancel_delete.clone()}>
-                            <div class="modal-content delete-confirm" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                <h2>{ "Delete Session?" }</h2>
-                                <p>{ format!("Are you sure you want to delete \"{}\"?", session_name) }</p>
-                                <p class="modal-warning">{ "All message history and session metadata will be permanently removed." }</p>
-                                <div class="modal-actions">
-                                    <button class="modal-cancel" onclick={on_cancel_delete.clone()}>{ "Cancel" }</button>
-                                    <button class="modal-confirm" onclick={on_confirm_delete.clone()}>{ "Delete" }</button>
-                                </div>
-                            </div>
-                        </div>
+                        <ConfirmModal
+                            title="Delete Session?"
+                            message={format!("Are you sure you want to delete \"{}\"?", session_name)}
+                            warning="All message history and session metadata will be permanently removed."
+                            confirm_label="Delete"
+                            style={ConfirmModalStyle::Danger}
+                            on_confirm={on_confirm_delete.clone()}
+                            on_cancel={on_cancel_delete.clone()}
+                        />
                     }
                 } else {
                     html! {}
@@ -926,7 +921,7 @@ pub fn dashboard_page() -> Html {
             // Admin modal — full-page overlay preserves dashboard state
             if *show_admin {
                 <div class="full-page-modal">
-                    <AdminPage on_close={close_admin.clone()} />
+                    <AdminPage on_close={close_admin.clone()} current_user_id={*current_user_id} />
                 </div>
             }
 
@@ -946,17 +941,15 @@ pub fn dashboard_page() -> Html {
                         .unwrap_or("this session");
 
                     html! {
-                        <div class="modal-overlay" onclick={on_cancel_leave.clone()}>
-                            <div class="modal-content delete-confirm" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                <h2>{ "Leave Session?" }</h2>
-                                <p>{ format!("Are you sure you want to leave \"{}\"?", session_name) }</p>
-                                <p class="modal-warning">{ "You will need to be re-invited to access this session again." }</p>
-                                <div class="modal-actions">
-                                    <button class="modal-cancel" onclick={on_cancel_leave.clone()}>{ "Cancel" }</button>
-                                    <button class="modal-confirm" onclick={on_confirm_leave.clone()}>{ "Leave" }</button>
-                                </div>
-                            </div>
-                        </div>
+                        <ConfirmModal
+                            title="Leave Session?"
+                            message={format!("Are you sure you want to leave \"{}\"?", session_name)}
+                            warning="You will need to be re-invited to access this session again."
+                            confirm_label="Leave"
+                            style={ConfirmModalStyle::Danger}
+                            on_confirm={on_confirm_leave.clone()}
+                            on_cancel={on_cancel_leave.clone()}
+                        />
                     }
                 } else {
                     html! {}

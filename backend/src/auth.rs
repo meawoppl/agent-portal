@@ -10,6 +10,18 @@ use crate::errors::AppError;
 use crate::models::User;
 use crate::AppState;
 
+/// Email of the test user that dev mode auto-creates and logs in as.
+pub const DEV_USER_EMAIL: &str = "testing@testing.local";
+
+/// Look up the dev-mode test user by email.
+pub fn dev_user(conn: &mut PgConnection) -> QueryResult<User> {
+    use crate::schema::users;
+
+    users::table
+        .filter(users::email.eq(DEV_USER_EMAIL))
+        .first::<User>(conn)
+}
+
 /// Return `Forbidden` for disabled accounts.
 fn reject_disabled_user(user: User) -> Result<User, AppError> {
     if user.disabled {
@@ -35,9 +47,7 @@ pub fn extract_user(app_state: &AppState, cookies: &Cookies) -> Result<User, App
     use crate::schema::users;
 
     if app_state.dev_mode {
-        let user = users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .first::<User>(&mut conn)?;
+        let user = dev_user(&mut conn)?;
         return reject_disabled_user(user);
     }
 

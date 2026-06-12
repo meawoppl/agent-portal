@@ -192,14 +192,14 @@ pub async fn run_launcher_loop(
                             for task_to_fire in scheduler.fire_due_tasks() {
                                 info!(
                                     "Firing scheduled task '{}' ({})",
-                                    task_to_fire.config.name, task_to_fire.config.id
+                                    task_to_fire.config.fields.name, task_to_fire.config.id
                                 );
                                 let msg = LauncherToServer::RequestLaunch {
                                     request_id: task_to_fire.request_id,
-                                    working_directory: task_to_fire.config.working_directory.clone(),
-                                    session_name: Some(task_to_fire.config.name.clone()),
-                                    claude_args: task_to_fire.config.claude_args.clone(),
-                                    agent_type: task_to_fire.config.agent_type,
+                                    working_directory: task_to_fire.config.fields.working_directory.clone(),
+                                    session_name: Some(task_to_fire.config.fields.name.clone()),
+                                    claude_args: task_to_fire.config.fields.claude_args.clone(),
+                                    agent_type: task_to_fire.config.fields.agent_type,
                                     scheduled_task_id: Some(task_to_fire.config.id),
                                     last_session_id: task_to_fire.config.last_session_id,
                                 };

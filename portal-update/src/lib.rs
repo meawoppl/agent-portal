@@ -57,21 +57,25 @@ impl Platform {
             ("unknown", "unknown")
         };
 
-        let binary_name = match (os, arch) {
-            ("linux", "x86_64") => format!("{}-linux-x86_64", binary_prefix),
-            ("linux", "aarch64") => format!("{}-linux-aarch64", binary_prefix),
-            ("darwin", "aarch64") => format!("{}-darwin-aarch64", binary_prefix),
-            ("darwin", "x86_64") => format!("{}-darwin-x86_64", binary_prefix),
-            ("windows", "x86_64") => format!("{}-windows-x86_64.exe", binary_prefix),
-            _ => binary_prefix.to_string(),
-        };
-
         Platform {
             os,
             arch,
-            binary_name,
+            binary_name: binary_name_for(binary_prefix, os, arch),
         }
     }
+}
+
+/// Compose the release-asset name for a platform, e.g.
+/// `claude-portal-linux-x86_64` or `agent-portal-windows-x86_64.exe`.
+///
+/// Note: the `os` string uses the release-asset convention ("darwin", not
+/// "macos"); `Platform::current` performs that mapping.
+fn binary_name_for(binary_prefix: &str, os: &str, arch: &str) -> String {
+    if os == "unknown" {
+        return binary_prefix.to_string();
+    }
+    let ext = if os == "windows" { ".exe" } else { "" };
+    format!("{}-{}-{}{}", binary_prefix, os, arch, ext)
 }
 
 /// GitHub release asset from the API
@@ -248,24 +252,13 @@ fn install_binary(self_path: &std::path::Path, new_binary: &[u8]) -> Result<()> 
     // On Windows, we can't replace a running executable directly
     #[cfg(windows)]
     {
-        // Try to rename the current binary to .old first
-        let old_path = self_path.with_extension("old.exe");
-        let _ = fs::remove_file(&old_path); // Remove any existing .old file
-
-        match fs::rename(self_path, &old_path) {
-            Ok(_) => {
-                // Successfully moved current binary, now rename temp to current
-                if let Err(e) = fs::rename(&temp_path, self_path) {
-                    // Try to restore the old binary
-                    let _ = fs::rename(&old_path, self_path);
-                    bail!("Failed to install update: {}", e);
-                }
-                // Clean up old binary
-                let _ = fs::remove_file(&old_path);
+        match swap_binary(self_path, &temp_path) {
+            Ok(()) => {
                 info!("Update installed successfully");
                 return Ok(());
             }
-            Err(_) => {
+            Err(SwapError::InstallFailed(e)) => bail!("Failed to install update: {}", e),
+            Err(SwapError::CurrentLocked(_)) => {
                 // Binary is locked - save as pending update
                 let pending_path = self_path.with_extension("new.exe");
                 fs::rename(&temp_path, &pending_path).context("Failed to save pending update")?;
@@ -287,11 +280,45 @@ fn install_binary(self_path: &std::path::Path, new_binary: &[u8]) -> Result<()> 
     }
 }
 
+/// How the Windows binary-swap dance failed
+#[cfg(windows)]
+enum SwapError {
+    /// The running binary could not be moved aside (likely still locked).
+    CurrentLocked(std::io::Error),
+    /// The new binary could not be moved into place; the old binary was
+    /// restored.
+    InstallFailed(std::io::Error),
+}
+
+/// Replace `self_path` with `new_path` using the Windows rename dance:
+/// remove any stale `.old.exe`, rename the current binary to `.old.exe`,
+/// rename the new binary into place, and restore the old binary if that
+/// final rename fails.
+#[cfg(windows)]
+fn swap_binary(self_path: &std::path::Path, new_path: &std::path::Path) -> Result<(), SwapError> {
+    let old_path = self_path.with_extension("old.exe");
+    let _ = fs::remove_file(&old_path); // Remove any existing .old file
+
+    // Try to move current to old
+    fs::rename(self_path, &old_path).map_err(SwapError::CurrentLocked)?;
+
+    // Move new binary to current
+    if let Err(e) = fs::rename(new_path, self_path) {
+        // Try to restore the old binary
+        let _ = fs::rename(&old_path, self_path);
+        return Err(SwapError::InstallFailed(e));
+    }
+
+    // Clean up old binary
+    let _ = fs::remove_file(&old_path);
+    Ok(())
+}
+
 /// Check for and apply pending updates (Windows only)
 ///
 /// On Windows, if the binary was locked during an update, we save the new
 /// version as `.new.exe`. This function checks for and applies that update.
-pub fn apply_pending_update() -> Result<bool> {
+fn apply_pending_update() -> Result<bool> {
     #[cfg(windows)]
     {
         let self_path = std::env::current_exe().context("Failed to get current executable path")?;
@@ -299,33 +326,82 @@ pub fn apply_pending_update() -> Result<bool> {
         if pending_path.exists() {
             info!("Found pending update at {}", pending_path.display());
 
-            // Try to replace the current binary
-            let old_path = self_path.with_extension("old.exe");
-            let _ = fs::remove_file(&old_path);
-
-            // Try to move current to old
-            match fs::rename(&self_path, &old_path) {
-                Ok(_) => {
-                    // Move pending to current
-                    if let Err(e) = fs::rename(&pending_path, &self_path) {
-                        // Restore old binary
-                        let _ = fs::rename(&old_path, &self_path);
-                        warn!("Failed to apply pending update: {}", e);
-                        return Ok(false);
-                    }
-                    // Clean up
-                    let _ = fs::remove_file(&old_path);
+            return match swap_binary(&self_path, &pending_path) {
+                Ok(()) => {
                     info!("Pending update applied successfully");
-                    return Ok(true);
+                    Ok(true)
                 }
-                Err(e) => {
+                Err(SwapError::InstallFailed(e)) => {
+                    warn!("Failed to apply pending update: {}", e);
+                    Ok(false)
+                }
+                Err(SwapError::CurrentLocked(e)) => {
                     warn!("Cannot apply pending update (binary still locked?): {}", e);
-                    return Ok(false);
+                    Ok(false)
                 }
-            }
+            };
         }
     }
 
     // No pending update or not Windows
     Ok(false)
+}
+
+/// Run the startup auto-update ceremony.
+///
+/// Applies any pending update from a previous run (Windows only), then —
+/// when `check` is true — checks GitHub for a newer release and installs it.
+///
+/// Returns `Ok(true)` when the binary was replaced and the process should
+/// restart, `Ok(false)` when it is already current (or `check` is false).
+/// Callers decide whether a check failure is fatal.
+pub async fn startup_auto_update(binary_prefix: &str, check: bool) -> Result<bool> {
+    // Failure to apply a pending update is non-fatal; the swap is logged
+    // and retried on the next startup.
+    let _ = apply_pending_update();
+
+    if !check {
+        return Ok(false);
+    }
+
+    match check_for_update(binary_prefix, false).await? {
+        UpdateResult::Updated => Ok(true),
+        UpdateResult::UpToDate | UpdateResult::UpdateAvailable { .. } => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::binary_name_for;
+
+    /// Release-asset names must match the assets uploaded by
+    /// `.github/workflows/release.yml` byte for byte. Note the macOS assets
+    /// use "darwin", not "macos".
+    #[test]
+    fn binary_names_match_release_assets() {
+        assert_eq!(
+            binary_name_for("claude-portal", "linux", "x86_64"),
+            "claude-portal-linux-x86_64"
+        );
+        assert_eq!(
+            binary_name_for("claude-portal", "linux", "aarch64"),
+            "claude-portal-linux-aarch64"
+        );
+        assert_eq!(
+            binary_name_for("claude-portal", "darwin", "aarch64"),
+            "claude-portal-darwin-aarch64"
+        );
+        assert_eq!(
+            binary_name_for("claude-portal", "darwin", "x86_64"),
+            "claude-portal-darwin-x86_64"
+        );
+        assert_eq!(
+            binary_name_for("agent-portal", "windows", "x86_64"),
+            "agent-portal-windows-x86_64.exe"
+        );
+        assert_eq!(
+            binary_name_for("agent-portal", "unknown", "unknown"),
+            "agent-portal"
+        );
+    }
 }
