@@ -18,8 +18,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    db::get_user_usage, errors::AppError, handlers::responses::EmptyResponse, models::User, schema,
-    AppState,
+    db::get_all_user_usage, errors::AppError, handlers::responses::EmptyResponse, models::User,
+    schema, AppState,
 };
 
 use shared::protocol::SESSION_COOKIE_NAME;
@@ -204,35 +204,31 @@ pub async fn list_users(
         .load(&mut conn)
         .map_err(|e| admin_db_query("Failed to load users", e))?;
 
-    // Get session counts and usage per user
-    let mut user_infos = Vec::with_capacity(users.len());
-    for user in users {
-        // Get session count
-        let session_count: i64 = schema::sessions::table
-            .filter(schema::sessions::user_id.eq(user.id))
-            .count()
-            .get_result(&mut conn)
-            .unwrap_or(0);
+    // Get session counts and usage for all users in two grouped queries
+    let usage_by_user = get_all_user_usage(&mut conn).unwrap_or_default();
 
-        // Get aggregated usage via helper
-        let usage = get_user_usage(&mut conn, user.id).unwrap_or_default();
+    let user_infos = users
+        .into_iter()
+        .map(|user| {
+            let usage = usage_by_user.get(&user.id).cloned().unwrap_or_default();
 
-        user_infos.push(AdminUserEntry {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            avatar_url: user.avatar_url,
-            is_admin: user.is_admin,
-            disabled: user.disabled,
-            created_at: user.created_at.to_string(),
-            session_count,
-            total_spend_usd: usage.cost_usd,
-            total_input_tokens: usage.input_tokens,
-            total_output_tokens: usage.output_tokens,
-            total_cache_creation_tokens: usage.cache_creation_tokens,
-            total_cache_read_tokens: usage.cache_read_tokens,
-        });
-    }
+            AdminUserEntry {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                avatar_url: user.avatar_url,
+                is_admin: user.is_admin,
+                disabled: user.disabled,
+                created_at: user.created_at.to_string(),
+                session_count: usage.session_count,
+                total_spend_usd: usage.cost_usd,
+                total_input_tokens: usage.input_tokens,
+                total_output_tokens: usage.output_tokens,
+                total_cache_creation_tokens: usage.cache_creation_tokens,
+                total_cache_read_tokens: usage.cache_read_tokens,
+            }
+        })
+        .collect();
 
     Ok(Json(AdminUsersResponse { users: user_infos }))
 }
