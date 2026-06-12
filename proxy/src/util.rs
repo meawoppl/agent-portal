@@ -11,8 +11,8 @@ use shared::ProxyInitConfig;
 /// - Just the base64 config part
 /// - A raw JWT token
 ///
-/// Returns (backend_url, token, session_prefix)
-pub fn parse_init_value(value: &str) -> Result<(Option<String>, String, Option<String>)> {
+/// Returns (backend_url, token)
+pub fn parse_init_value(value: &str) -> Result<(Option<String>, String)> {
     // Check if it's a URL
     if value.starts_with("http://") || value.starts_with("https://") {
         return parse_init_url(value);
@@ -20,18 +20,18 @@ pub fn parse_init_value(value: &str) -> Result<(Option<String>, String, Option<S
 
     // Check if it looks like a JWT (three base64 parts separated by dots)
     if value.contains('.') && value.split('.').count() == 3 {
-        return Ok((None, value.to_string(), None));
+        return Ok((None, value.to_string()));
     }
 
     // Try to decode as ProxyInitConfig
     match ProxyInitConfig::decode(value) {
-        Ok(config) => Ok((None, config.token, config.session_name_prefix)),
-        Err(_) => Ok((None, value.to_string(), None)),
+        Ok(config) => Ok((None, config.token)),
+        Err(_) => Ok((None, value.to_string())),
     }
 }
 
 /// Parse a full init URL
-fn parse_init_url(value: &str) -> Result<(Option<String>, String, Option<String>)> {
+fn parse_init_url(value: &str) -> Result<(Option<String>, String)> {
     use anyhow::Context;
 
     let url = url::Url::parse(value).context("Invalid init URL")?;
@@ -51,7 +51,7 @@ fn parse_init_url(value: &str) -> Result<(Option<String>, String, Option<String>
         let config = ProxyInitConfig::decode(config_part)
             .map_err(|e| anyhow::anyhow!("Failed to decode init config from URL: {}", e))?;
 
-        return Ok((Some(ws_url), config.token, config.session_name_prefix));
+        return Ok((Some(ws_url), config.token));
     }
 
     anyhow::bail!("Invalid init URL format. Expected: https://server.com/p/{{config}}")

@@ -78,6 +78,24 @@ pub struct ProxySessionConfig {
     pub codex_thread_id_sink: Option<CodexThreadIdSink>,
 }
 
+/// The local hostname, or `"unknown"` when the OS lookup fails.
+/// Non-UTF-8 hostnames are converted lossily (invalid bytes become U+FFFD).
+pub fn hostname_or_unknown() -> String {
+    hostname::get()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Default session name when the user doesn't supply one:
+/// `<hostname>-<YYYYmmdd-HHMMSS>` (local time).
+pub fn default_session_name() -> String {
+    format!(
+        "{}-{}",
+        hostname_or_unknown(),
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    )
+}
+
 /// Exponential backoff helper
 pub struct Backoff {
     current: u64,
@@ -471,10 +489,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
 
     // Send a portal message with session details
     {
-        let hostname = hostname::get()
-            .ok()
-            .and_then(|h| h.into_string().ok())
-            .unwrap_or_else(|| "unknown".to_string());
+        let hostname = hostname_or_unknown();
 
         let status_line = if session.first_connection {
             "**Session started**".to_string()
@@ -584,10 +599,7 @@ pub async fn register_session(
 ) -> Result<u32, Duration> {
     info!("Registering session...");
 
-    let hostname = hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string());
+    let hostname = hostname_or_unknown();
 
     let register_msg = ProxyToServer::Register(shared::RegisterFields {
         session_id: config.session_id,
