@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.50
+
+- **Permission dialog: keyboard handler and option-row loop deduped between standard and ExitPlanMode variants.** `nav_keydown` (ArrowUp/k, ArrowDown/j, Enter/Space with preventDefault — verbatim in both dialogs before) and `render_options` (cursor, selected classes, click-to-confirm) are now shared; each dialog still builds its own options list (standard keeps the 3-option Allow-&-Remember variant). The question-header badge's two near-identical branches collapsed to one with a conditional `<span class="badge">` (empty `html!{}` renders nothing — DOM identical). AskUserQuestion's distinct Enter-to-submit handler untouched. Net −44 lines.
+
 ## 2.8.49
 
 - **`update_task_handler` uses an `AsChangeset` struct instead of a ten-field load-merge-save; `list_runs` is typed.** `ScheduledTaskChangeset` (ten `Option`s built straight from the request; Diesel's default `treat_none_as_null = false` matches the old keep-existing semantics — verified safe since every updatable column is NOT NULL, so no `Option<Option<T>>` tri-state exists). The ownership pre-load stays (slimmed to an id select) deliberately: it must run before cron validation so nonexistent-task + invalid-cron stays 404, and the blanket diesel→AppError From would turn a filtered-update miss into a 500. `updated_at` still bumps on every request including empty bodies. `list_runs_handler` returns `Json<Vec<Session>>` instead of untyped `serde_json::Value` — byte-identical JSON.
