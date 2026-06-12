@@ -65,28 +65,26 @@ pub fn run_migrations_logged(pool: &DbPool) -> Result<()> {
 
 /// Create the dev-mode test user if it does not already exist.
 pub fn seed_dev_user(pool: &DbPool) -> Result<()> {
-    use crate::models::{self, NewUser};
-    use crate::schema::users::dsl::*;
+    use crate::auth::{dev_user, DEV_USER_EMAIL};
+    use crate::models::NewUser;
+    use crate::schema::users;
 
     let mut conn = pool.get()?;
-    let test_user = users
-        .filter(email.eq("testing@testing.local"))
-        .first::<models::User>(&mut conn)
-        .optional()?;
+    let test_user = dev_user(&mut conn).optional()?;
 
     if test_user.is_none() {
         let new_user = NewUser {
             google_id: "dev_mode_test_user".to_string(),
-            email: "testing@testing.local".to_string(),
+            email: DEV_USER_EMAIL.to_string(),
             name: Some("Test User".to_string()),
             avatar_url: None,
         };
 
-        diesel::insert_into(users)
+        diesel::insert_into(users::table)
             .values(&new_user)
             .execute(&mut conn)?;
 
-        tracing::info!("✓ Created test user: testing@testing.local");
+        tracing::info!("✓ Created test user: {}", DEV_USER_EMAIL);
     }
 
     Ok(())
