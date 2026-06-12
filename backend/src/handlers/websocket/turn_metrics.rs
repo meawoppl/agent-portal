@@ -118,36 +118,9 @@ pub fn handle_turn_metrics_report(
     );
 
     // Mirror the saved row back onto the wire-facing shape so the broadcast
-    // carries the server-assigned `id`. Field-by-field rather than `..` so
-    // the `TurnMetrics` shape stays explicitly synchronized with the DB row.
-    let payload = TurnMetrics {
-        id: Some(inserted.id),
-        // Always the just-inserted session id (the DB column is now nullable —
-        // for orphaned-from-session rows — but a freshly inserted row always
-        // has one). Use the resolved local rather than unwrapping the Option.
-        session_id,
-        user_message_id: inserted.user_message_id,
-        agent_type: inserted.agent_type,
-        model: inserted.model,
-        service_tier: inserted.service_tier,
-        started_at: inserted.started_at,
-        first_token_at: inserted.first_token_at,
-        completed_at: inserted.completed_at,
-        ttft_ms: inserted.ttft_ms,
-        total_duration_ms: inserted.total_duration_ms,
-        generation_duration_ms: inserted.generation_duration_ms,
-        max_inter_token_gap_ms: inserted.max_inter_token_gap_ms,
-        input_tokens: inserted.input_tokens,
-        output_tokens: inserted.output_tokens,
-        cache_creation_tokens: inserted.cache_creation_tokens,
-        cache_read_tokens: inserted.cache_read_tokens,
-        thinking_tokens: inserted.thinking_tokens,
-        stop_reason: inserted.stop_reason,
-        is_error: inserted.is_error,
-        tool_call_count: inserted.tool_call_count,
-        stream_restarts: inserted.stream_restarts,
-        total_cost_usd: inserted.total_cost_usd,
-    };
+    // carries the server-assigned `id`. A freshly inserted row always has a
+    // `session_id`, so the wire shape's non-null fallback never fires here.
+    let payload = inserted.into_wire();
 
     // Per-session broadcast: feeds the `SessionView` per-turn footer (PR 2).
     // Reaches web clients that explicitly opened the session view.
