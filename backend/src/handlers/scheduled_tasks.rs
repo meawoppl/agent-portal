@@ -11,7 +11,7 @@ use shared::api::{
     CreateScheduledTaskRequest, ScheduledTaskInfo, ScheduledTaskListResponse,
     UpdateScheduledTaskRequest,
 };
-use shared::{AgentType, ScheduledTaskConfig, ServerToLauncher};
+use shared::{AgentType, ScheduledTaskConfig, ScheduledTaskFields, ServerToLauncher};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -25,20 +25,27 @@ use crate::{
     AppState,
 };
 
+/// Extract the shared scheduled-task fields from a ScheduledTask model.
+fn task_to_fields(t: &ScheduledTask) -> ScheduledTaskFields {
+    ScheduledTaskFields {
+        name: t.name.clone(),
+        cron_expression: t.cron_expression.clone(),
+        timezone: t.timezone.clone(),
+        working_directory: t.working_directory.clone(),
+        prompt: t.prompt.clone(),
+        claude_args: serde_json::from_value(t.claude_args.clone()).unwrap_or_default(),
+        agent_type: t.agent_type.parse().unwrap_or(AgentType::Claude),
+        max_runtime_minutes: t.max_runtime_minutes,
+    }
+}
+
 /// Convert a ScheduledTask model to a ScheduledTaskInfo API response.
 fn task_to_info(t: ScheduledTask) -> ScheduledTaskInfo {
     ScheduledTaskInfo {
         id: t.id,
-        name: t.name,
-        cron_expression: t.cron_expression,
-        timezone: t.timezone,
+        fields: task_to_fields(&t),
         hostname: t.hostname,
-        working_directory: t.working_directory,
-        prompt: t.prompt,
-        claude_args: serde_json::from_value(t.claude_args).unwrap_or_default(),
-        agent_type: t.agent_type.parse().unwrap_or(AgentType::Claude),
         enabled: t.enabled,
-        max_runtime_minutes: t.max_runtime_minutes,
         last_session_id: t.last_session_id,
         last_run_at: t.last_run_at.map(|dt| dt.and_utc().to_rfc3339()),
         created_at: t.created_at.and_utc().to_rfc3339(),
@@ -47,18 +54,11 @@ fn task_to_info(t: ScheduledTask) -> ScheduledTaskInfo {
 }
 
 /// Convert a ScheduledTask model to a ScheduledTaskConfig protocol message.
-fn task_to_config(t: &ScheduledTask) -> ScheduledTaskConfig {
+pub(crate) fn task_to_config(t: &ScheduledTask) -> ScheduledTaskConfig {
     ScheduledTaskConfig {
         id: t.id,
-        name: t.name.clone(),
-        cron_expression: t.cron_expression.clone(),
-        timezone: t.timezone.clone(),
-        working_directory: t.working_directory.clone(),
-        prompt: t.prompt.clone(),
-        claude_args: serde_json::from_value(t.claude_args.clone()).unwrap_or_default(),
-        agent_type: t.agent_type.parse().unwrap_or(AgentType::Claude),
+        fields: task_to_fields(t),
         enabled: t.enabled,
-        max_runtime_minutes: t.max_runtime_minutes,
         last_session_id: t.last_session_id,
     }
 }
@@ -125,9 +125,9 @@ pub async fn create_task_handler(
     Json(req): Json<CreateScheduledTaskRequest>,
 ) -> Result<Json<ScheduledTaskInfo>, AppError> {
     // Basic cron validation: must have 5 space-separated fields
-    let fields: Vec<&str> = req.cron_expression.split_whitespace().collect();
-    if fields.len() != 5 {
-        warn!("Invalid cron expression: {}", req.cron_expression);
+    let cron_fields: Vec<&str> = req.fields.cron_expression.split_whitespace().collect();
+    if cron_fields.len() != 5 {
+        warn!("Invalid cron expression: {}", req.fields.cron_expression);
         return Err(AppError::Internal("Invalid cron expression".to_string()));
     }
 
@@ -135,15 +135,15 @@ pub async fn create_task_handler(
 
     let new_task = NewScheduledTask {
         user_id,
-        name: req.name,
-        cron_expression: req.cron_expression,
-        timezone: req.timezone,
+        name: req.fields.name,
+        cron_expression: req.fields.cron_expression,
+        timezone: req.fields.timezone,
         hostname: req.hostname,
-        working_directory: req.working_directory,
-        prompt: req.prompt,
-        claude_args: serde_json::to_value(req.claude_args).unwrap_or_default(),
-        agent_type: req.agent_type.as_str().to_string(),
-        max_runtime_minutes: req.max_runtime_minutes,
+        working_directory: req.fields.working_directory,
+        prompt: req.fields.prompt,
+        claude_args: serde_json::to_value(req.fields.claude_args).unwrap_or_default(),
+        agent_type: req.fields.agent_type.as_str().to_string(),
+        max_runtime_minutes: req.fields.max_runtime_minutes,
     };
 
     let saved: ScheduledTask = diesel::insert_into(scheduled_tasks::table)

@@ -671,27 +671,9 @@ pub struct MessagesListResponse<T> {
 /// Request to create a scheduled task
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateScheduledTaskRequest {
-    pub name: String,
-    pub cron_expression: String,
-    #[serde(default = "default_timezone")]
-    pub timezone: String,
+    #[serde(flatten)]
+    pub fields: crate::endpoints::ScheduledTaskFields,
     pub hostname: String,
-    pub working_directory: String,
-    pub prompt: String,
-    #[serde(default)]
-    pub claude_args: Vec<String>,
-    #[serde(default)]
-    pub agent_type: crate::AgentType,
-    #[serde(default = "default_max_runtime")]
-    pub max_runtime_minutes: i32,
-}
-
-fn default_timezone() -> String {
-    "UTC".to_string()
-}
-
-fn default_max_runtime() -> i32 {
-    30
 }
 
 /// Request to update a scheduled task (all fields optional)
@@ -723,16 +705,10 @@ pub struct UpdateScheduledTaskRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScheduledTaskInfo {
     pub id: uuid::Uuid,
-    pub name: String,
-    pub cron_expression: String,
-    pub timezone: String,
+    #[serde(flatten)]
+    pub fields: crate::endpoints::ScheduledTaskFields,
     pub hostname: String,
-    pub working_directory: String,
-    pub prompt: String,
-    pub claude_args: Vec<String>,
-    pub agent_type: crate::AgentType,
     pub enabled: bool,
-    pub max_runtime_minutes: i32,
     pub last_session_id: Option<uuid::Uuid>,
     pub last_run_at: Option<String>,
     pub created_at: String,
@@ -1363,5 +1339,106 @@ mod tests {
         assert!(json.get("ttft_ms").is_none());
         let parsed: TurnMetrics = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, metrics);
+    }
+
+    fn sample_task_fields() -> crate::endpoints::ScheduledTaskFields {
+        crate::endpoints::ScheduledTaskFields {
+            name: "nightly audit".to_string(),
+            cron_expression: "0 3 * * *".to_string(),
+            timezone: "UTC".to_string(),
+            working_directory: "/home/user/project".to_string(),
+            prompt: "Check deps".to_string(),
+            claude_args: vec!["--verbose".to_string()],
+            agent_type: crate::AgentType::Claude,
+            max_runtime_minutes: 30,
+        }
+    }
+
+    /// Pins the CreateScheduledTaskRequest wire shape: flattened fields must
+    /// produce the same keys/values as the pre-flatten struct, old field
+    /// order must still parse, and the timezone / max_runtime / claude_args /
+    /// agent_type defaults must be preserved.
+    #[test]
+    fn create_scheduled_task_request_wire_compat() {
+        let req = CreateScheduledTaskRequest {
+            fields: sample_task_fields(),
+            hostname: "buildbox".to_string(),
+        };
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"{
+                "name": "nightly audit",
+                "cron_expression": "0 3 * * *",
+                "timezone": "UTC",
+                "hostname": "buildbox",
+                "working_directory": "/home/user/project",
+                "prompt": "Check deps",
+                "claude_args": ["--verbose"],
+                "agent_type": "claude",
+                "max_runtime_minutes": 30
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(&req).unwrap(), expected);
+
+        // Old wire order (hostname between timezone and working_directory)
+        // still parses identically.
+        let parsed: CreateScheduledTaskRequest = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(parsed.fields, req.fields);
+        assert_eq!(parsed.hostname, "buildbox");
+
+        // Optional fields keep their historical defaults when omitted.
+        let minimal = r#"{
+            "name": "n",
+            "cron_expression": "* * * * *",
+            "hostname": "h",
+            "working_directory": "/tmp",
+            "prompt": "p"
+        }"#;
+        let parsed: CreateScheduledTaskRequest = serde_json::from_str(minimal).unwrap();
+        assert_eq!(parsed.fields.timezone, "UTC");
+        assert_eq!(parsed.fields.max_runtime_minutes, 30);
+        assert!(parsed.fields.claude_args.is_empty());
+        assert_eq!(parsed.fields.agent_type, crate::AgentType::Claude);
+    }
+
+    /// Pins the ScheduledTaskInfo wire shape, including the always-serialized
+    /// `last_session_id: null` for None.
+    #[test]
+    fn scheduled_task_info_wire_compat() {
+        let info = ScheduledTaskInfo {
+            id: uuid::Uuid::nil(),
+            fields: sample_task_fields(),
+            hostname: "buildbox".to_string(),
+            enabled: true,
+            last_session_id: None,
+            last_run_at: Some("2026-01-01T00:00:00+00:00".to_string()),
+            created_at: "2026-01-01T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-01T00:00:00+00:00".to_string(),
+        };
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"{
+                "id": "00000000-0000-0000-0000-000000000000",
+                "name": "nightly audit",
+                "cron_expression": "0 3 * * *",
+                "timezone": "UTC",
+                "hostname": "buildbox",
+                "working_directory": "/home/user/project",
+                "prompt": "Check deps",
+                "claude_args": ["--verbose"],
+                "agent_type": "claude",
+                "enabled": true,
+                "max_runtime_minutes": 30,
+                "last_session_id": null,
+                "last_run_at": "2026-01-01T00:00:00+00:00",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(&info).unwrap(), expected);
+
+        // Old wire order still parses identically.
+        let parsed: ScheduledTaskInfo = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, info);
     }
 }

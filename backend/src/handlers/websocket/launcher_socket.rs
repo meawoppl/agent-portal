@@ -1,8 +1,8 @@
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
 use shared::{
-    AgentType, LauncherEndpoint, LauncherToServer, ScheduledTaskConfig, ServerToClient,
-    ServerToLauncher, ServerToProxy, SessionStatus,
+    LauncherEndpoint, LauncherToServer, ScheduledTaskConfig, ServerToClient, ServerToLauncher,
+    ServerToProxy, SessionStatus,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -205,19 +205,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         let task_configs: Vec<ScheduledTaskConfig> = tasks
             .iter()
             .filter(|t| t.hostname == launcher_hostname)
-            .map(|t| ScheduledTaskConfig {
-                id: t.id,
-                name: t.name.clone(),
-                cron_expression: t.cron_expression.clone(),
-                timezone: t.timezone.clone(),
-                working_directory: t.working_directory.clone(),
-                prompt: t.prompt.clone(),
-                claude_args: serde_json::from_value(t.claude_args.clone()).unwrap_or_default(),
-                agent_type: t.agent_type.parse().unwrap_or(AgentType::Claude),
-                enabled: t.enabled,
-                max_runtime_minutes: t.max_runtime_minutes,
-                last_session_id: t.last_session_id,
-            })
+            .map(crate::handlers::scheduled_tasks::task_to_config)
             .collect();
 
         if !task_configs.is_empty() {

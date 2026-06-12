@@ -253,7 +253,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                             let has = data
                                 .tasks
                                 .iter()
-                                .any(|t| t.working_directory == wd && t.enabled);
+                                .any(|t| t.fields.working_directory == wd && t.enabled);
                             stop_has_tasks.set(has);
                         }
                     });
