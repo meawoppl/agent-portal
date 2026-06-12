@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.58
+
+- **scripts/ cleanup: broken package names fixed, `test-dev.sh` deleted, shared `lib.sh`.** `test-oauth.sh` ran `cargo run -p proxy` — a package that doesn't exist (it's `claude-portal`), so the script failed at the proxy step; `clean.sh`/`test-oauth.sh` `pkill`ed the same wrong name (could never match). All fixed, plus `docker-compose` v1 → `docker compose` across scripts. `test-dev.sh` (~80% duplicate of `dev.sh`) is deleted with its references updated in TROUBLESHOOTING.md/install-deps/README. The dev DATABASE_URL literal (6 copies) now lives once in a sourced `scripts/lib.sh`; diesel/trunk auto-install lives only in `install-deps.sh` (dev.sh fails fast with a pointer); `up.sh` guards its macOS-only `open -a Docker` by `$OSTYPE` with a Linux `systemctl` path. Scripts still write `/tmp/claude-portal-backend.log` — doc alignment is #999's.
+
 ## 2.8.57
 
 - **Launcher registration reuses the scheduled-task sync helpers instead of hand-building `ScheduledTaskConfig`.** The 45-line registration block (including a redundant hostname re-fetch from the launchers map) is now one call to a new `send_initial_schedule_sync(app_state, user_id, launcher_id, hostname, launcher_name)` — a single-launcher variant chosen deliberately over the broadcast `send_schedule_sync`, which (a) targets all of a user's launchers and (b) always sends even when empty (needed so deletes clear state), whereas registration historically sends nothing when no enabled tasks match the hostname. Both variants share a new `load_enabled_tasks` and all config construction flows through `task_to_config`, so the #995 field flatten lands in exactly one place. Same mpsc delivery, same log line.
