@@ -4,6 +4,26 @@
 
 - **Hand-rolled base64url codecs replaced by the `base64` crate (×2, ~110 lines).** `shared/src/proxy_tokens.rs` and `proxy/src/util.rs` each reimplemented base64url; both now use a const lenient engine (URL_SAFE, no encode padding, `DecodePaddingMode::Indifferent`, allow-trailing-bits) that preserves every leniency the old decoders had: padding accepted anywhere it was before, whitespace pre-filtered, non-canonical trailing bits masked. One intentionally stricter case: length ≡ 1 (mod 4) inputs (which no encoder produces, and which the old code decoded into a garbage byte) now fail softly. Byte-identity pinned by RFC 4648 fixtures, an all-256-values round-trip, and a hardcoded `ProxyInitConfig` fixture. `base64` added to shared (WASM-safe).
 
+## 2.8.39
+
+- **Live messages no longer have their server timestamp clobbered by the browser clock.** `handle_proxy_message` folds the server `created_at` into `_created_at`, but the component's live path re-ran `inject_message_metadata` with `Date::now()`, overwriting it. The live path now uses `inject_created_at_if_absent` — browser-clock fallback only when the key is missing (error envelopes, pre-#784 backends keep their tooltips). REST history replay keeps overwrite semantics as before. Four new tests pin the behavior, including the no-clobber case.
+
+## 2.8.38
+
+- **One `dev_user` helper + `DEV_USER_EMAIL` const replace nine `testing@testing.local` literals.** The dev test-user lookup was re-implemented across `auth.rs`, `main.rs` (seeding keeps its create logic but uses the const), `handlers/auth.rs` (dev_login + device dev path), `sessions.rs`, `launcher_socket.rs`, and `registration.rs`. `QueryResult<User>` return fits every site's error style (`?`, `.optional()`, `.expect()`, `.ok()`). Three id-only sites now select the full row — same filter, same error paths, identical semantics.
+
+## 2.8.37
+
+- **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
+
+## 2.8.36
+
+- **Remove the dashboard's dead cost-flash machinery.** `total_cost`/`cost_flash` were written on every Result message (with a 600ms flash-clear timeout) but never read by any `view()`, and the `on_cost_change` prop terminated in an explicit no-op callback "kept for API compatibility". Deleted end-to-end: the props, the `ClearCostFlash` msg arm, the struct fields, the whole Result-block cost computation in `handle_received_output`, and the no-op callback at the `<SessionView>` call site. −34 lines, one less fake data path.
+
+## 2.8.35
+
+- **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
+
 ## 2.8.34
 
 - **Codex: drop cumulative `turn/diff/updated` cards and dedupe per-file patch updates.** Codex re-sends the entire turn diff on every edit tick, so transcripts accumulated O(ticks) redundant cards — each the size of the whole turn — on top of the per-file `item.completed{file_change}` diffs that already render the same edits. The events are now dropped in `group_messages` (before grouping, so Codex runs don't fragment around each dropped diff) with a no-op dispatcher arm kept for exhaustiveness. `item/fileChange/patchUpdated` events (also cumulative per file) now surface their `item_id` in `codex_event_item_id`, letting the existing group dedup keep only the final patch and collapse it against the matching lifecycle events. The `DiffCard` `cumulative` chip and `render_turn_diff` are deleted with their only producer.

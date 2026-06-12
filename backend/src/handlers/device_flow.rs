@@ -157,11 +157,9 @@ pub async fn device_verify_page(
         Some(state) => (state.hostname.clone(), state.working_directory.clone()),
         None => {
             drop(store_lock);
-            return Redirect::temporary(&format!(
-                "{}?message=Invalid+or+expired+code",
-                routes::AUTH_DEVICE_ERROR
-            ))
-            .into_response();
+            // Unknown or expired code: send the user back to the code-entry
+            // form so they can try again.
+            return Redirect::temporary(routes::AUTH_DEVICE).into_response();
         }
     };
     drop(store_lock);
