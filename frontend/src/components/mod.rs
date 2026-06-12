@@ -1,5 +1,6 @@
 pub mod charts;
 pub mod codex_renderer;
+mod confirm_modal;
 pub mod copy_button;
 mod copy_command;
 mod count_up;
@@ -18,6 +19,7 @@ mod tool_renderers;
 mod turn_metrics_pill;
 mod voice_input;
 
+pub use confirm_modal::{ConfirmModal, ConfirmModalStyle};
 pub use copy_command::CopyCommand;
 pub use count_up::CountUp;
 pub use launch_dialog::LaunchDialog;

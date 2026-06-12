@@ -31,9 +31,6 @@ tracing-subscriber = { workspace = true }
 # UUID
 uuid = { workspace = true }
 
-# Hostname
-hostname = "0.4"
-
 # Time
 chrono = { workspace = true, features = ["std", "clock"] }
 chrono-tz = "0.10"

@@ -1,5 +1,7 @@
 # Claude Session Library
 
+> **STATUS: COMPLETED** — implemented as the `claude-session-lib/` workspace crate (with the agent-agnostic core later split into `session-lib/` and a Codex counterpart in `codex-session-lib/`). This document is kept as a historical design record; the crate-level rustdoc is authoritative.
+
 This document describes `claude-session-lib`, a library for managing Claude Code sessions programmatically.
 
 ## Goal

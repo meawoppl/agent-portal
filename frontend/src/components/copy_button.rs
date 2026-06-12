@@ -1,10 +1,24 @@
 //! Small reusable clipboard copy button.
 
 use gloo::timers::callback::Timeout;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{window, MouseEvent};
 use yew::prelude::*;
+
+/// Write `text` to the clipboard, set `copied` to `true` once the write
+/// completes, then reset it to `false` after `reset_ms` milliseconds.
+pub fn copy_to_clipboard(text: String, copied: UseStateHandle<bool>, reset_ms: u32) {
+    spawn_local(async move {
+        if let Some(window) = window() {
+            let clipboard = window.navigator().clipboard();
+            let promise = clipboard.write_text(&text);
+            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            copied.set(true);
+            let reset = copied.clone();
+            Timeout::new(reset_ms, move || reset.set(false)).forget();
+        }
+    });
+}
 
 #[derive(Properties, PartialEq)]
 pub struct CopyButtonProps {
@@ -26,23 +40,7 @@ pub fn copy_button(props: &CopyButtonProps) -> Html {
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
             e.prevent_default();
-            let text = text.to_string();
-            let copied = copied.clone();
-            spawn_local(async move {
-                if let Some(window) = window() {
-                    let navigator = window.navigator();
-                    let clipboard = js_sys::Reflect::get(&navigator, &"clipboard".into())
-                        .ok()
-                        .and_then(|v| v.dyn_into::<web_sys::Clipboard>().ok());
-                    if let Some(clipboard) = clipboard {
-                        let promise = clipboard.write_text(&text);
-                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-                        copied.set(true);
-                        let reset = copied.clone();
-                        Timeout::new(1500, move || reset.set(false)).forget();
-                    }
-                }
-            });
+            copy_to_clipboard(text.to_string(), copied.clone(), 1500);
         })
     };
 

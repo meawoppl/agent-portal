@@ -4,13 +4,12 @@
 //! Supports: headings, bold, italic, strikethrough, links, code blocks,
 //! inline code, blockquotes, lists, and tables.
 
-use gloo::timers::callback::Timeout;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::spawn_local;
-use web_sys::window;
 use yew::prelude::*;
+
+use crate::components::copy_button::copy_to_clipboard;
 
 /// Render markdown text as HTML, with a post-render hook that triggers KaTeX
 /// to render any LaTeX math expressions (`$...$`, `$$...$$`).
@@ -501,29 +500,7 @@ fn code_block(props: &CodeBlockProps) -> Html {
         let copied = copied.clone();
 
         Callback::from(move |_: MouseEvent| {
-            let code_text = code_text.clone();
-            let copied = copied.clone();
-
-            spawn_local(async move {
-                if let Some(window) = window() {
-                    let navigator = window.navigator();
-                    let clipboard = js_sys::Reflect::get(&navigator, &"clipboard".into())
-                        .ok()
-                        .and_then(|v| v.dyn_into::<web_sys::Clipboard>().ok());
-
-                    if let Some(clipboard) = clipboard {
-                        let promise = clipboard.write_text(&code_text);
-                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-
-                        copied.set(true);
-                        let copied_reset = copied.clone();
-                        Timeout::new(2000, move || {
-                            copied_reset.set(false);
-                        })
-                        .forget();
-                    }
-                }
-            });
+            copy_to_clipboard(code_text.clone(), copied.clone(), 2000);
         })
     };
 

@@ -1,3 +1,4 @@
+use crate::hooks::use_escape;
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::api::{
@@ -6,7 +7,6 @@ use shared::api::{
 };
 use shared::{LauncherInfo, SessionInfo};
 use uuid::Uuid;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
@@ -176,22 +176,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
     let folder = utils::extract_folder(&working_directory);
 
     // Close on Escape
-    {
-        let on_close = props.on_close.clone();
-        use_effect_with((), move |_| {
-            let listener = gloo::events::EventListener::new(
-                &gloo::utils::document(),
-                "keydown",
-                move |event| {
-                    let e: &web_sys::KeyboardEvent = event.unchecked_ref();
-                    if e.key() == "Escape" {
-                        on_close.emit(());
-                    }
-                },
-            );
-            move || drop(listener)
-        });
-    }
+    use_escape(props.on_close.clone());
 
     // Fetch launcher version for this session's hostname
     {
@@ -232,7 +217,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                     let filtered: Vec<_> = data
                         .tasks
                         .into_iter()
-                        .filter(|t| t.working_directory == wd)
+                        .filter(|t| t.fields.working_directory == wd)
                         .collect();
                     tasks.set(filtered);
                 }
@@ -273,13 +258,13 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         Callback::from(move |task_id: Uuid| {
             if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
                 let (has_skip, other_args) =
-                    strip_skip_permissions_args(&task.claude_args, task.agent_type);
+                    strip_skip_permissions_args(&task.fields.claude_args, task.fields.agent_type);
                 form.set(TaskForm {
-                    name: task.name.clone(),
-                    cron_expression: task.cron_expression.clone(),
-                    timezone: task.timezone.clone(),
-                    prompt: task.prompt.clone(),
-                    max_runtime_minutes: task.max_runtime_minutes,
+                    name: task.fields.name.clone(),
+                    cron_expression: task.fields.cron_expression.clone(),
+                    timezone: task.fields.timezone.clone(),
+                    prompt: task.fields.prompt.clone(),
+                    max_runtime_minutes: task.fields.max_runtime_minutes,
                     extra_args: other_args.join(" "),
                     skip_permissions: has_skip,
                 });
@@ -334,15 +319,17 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                 let result = match mode {
                     Some(FormMode::Create) => {
                         let body = CreateScheduledTaskRequest {
-                            name: data.name.trim().to_string(),
-                            cron_expression: data.cron_expression.trim().to_string(),
-                            timezone: data.timezone.clone(),
+                            fields: shared::ScheduledTaskFields {
+                                name: data.name.trim().to_string(),
+                                cron_expression: data.cron_expression.trim().to_string(),
+                                timezone: data.timezone.clone(),
+                                working_directory: wd,
+                                prompt: data.prompt.clone(),
+                                claude_args: claude_args.clone(),
+                                agent_type,
+                                max_runtime_minutes: data.max_runtime_minutes,
+                            },
                             hostname: host,
-                            working_directory: wd,
-                            prompt: data.prompt.clone(),
-                            claude_args: claude_args.clone(),
-                            agent_type,
-                            max_runtime_minutes: data.max_runtime_minutes,
                         };
                         Request::post(&utils::api_url("/api/scheduled-tasks"))
                             .json(&body)
@@ -537,13 +524,13 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             html! {
                                 <div class={classes!("sched-task-row", (!task.enabled).then_some("disabled"))}>
                                     <div class="sched-task-info">
-                                        <span class="sched-task-name">{ &task.name }</span>
-                                        <code class="sched-task-cron">{ &task.cron_expression }</code>
-                                        if task.timezone != "UTC" {
-                                            <span class="sched-task-tz">{ &task.timezone }</span>
+                                        <span class="sched-task-name">{ &task.fields.name }</span>
+                                        <code class="sched-task-cron">{ &task.fields.cron_expression }</code>
+                                        if task.fields.timezone != "UTC" {
+                                            <span class="sched-task-tz">{ &task.fields.timezone }</span>
                                         }
                                     </div>
-                                    <div class="sched-task-prompt-preview">{ &task.prompt }</div>
+                                    <div class="sched-task-prompt-preview">{ &task.fields.prompt }</div>
                                     <div class="sched-task-actions">
                                         <button class="sched-btn" onclick={Callback::from(move |_| on_edit.emit(task_id))}>
                                             { "Edit" }

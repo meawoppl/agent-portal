@@ -28,66 +28,8 @@ use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Double, Nullable, Text, Timestamptz};
 use serde::Deserialize;
 use shared::api::{MetricBucket, MetricBucketsResponse, TurnMetricsResponse};
-use shared::TurnMetrics;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-
-/// Verify that the caller is a member of the session. Reuses the same
-/// `session_members` join the messages handler uses — read access is
-/// "any role, including viewer," matching the metrics' visibility model
-/// (no mutation possible from this endpoint).
-fn verify_session_access(
-    conn: &mut diesel::pg::PgConnection,
-    session_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-) -> Result<(), AppError> {
-    use crate::schema::{session_members, sessions};
-    let exists = sessions::table
-        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
-        .filter(sessions::id.eq(session_id))
-        .filter(session_members::user_id.eq(user_id))
-        .select(sessions::id)
-        .first::<uuid::Uuid>(conn)
-        .optional()?;
-    if exists.is_none() {
-        return Err(AppError::NotFound("Session not found"));
-    }
-    Ok(())
-}
-
-/// Map a DB `TurnMetric` row into the wire-facing `shared::TurnMetrics`
-/// shape. Field-by-field rather than `From` impl so the two structs stay
-/// explicitly synchronized without one silently picking up a stray field
-/// from the other.
-fn row_to_wire(row: TurnMetric) -> TurnMetrics {
-    TurnMetrics {
-        id: Some(row.id),
-        // Nullable in the DB (orphaned-from-session rows); the wire shape keeps
-        // a non-null `Uuid`, so fall back to nil for rows whose session is gone.
-        session_id: row.session_id.unwrap_or_default(),
-        user_message_id: row.user_message_id,
-        agent_type: row.agent_type,
-        model: row.model,
-        service_tier: row.service_tier,
-        started_at: row.started_at,
-        first_token_at: row.first_token_at,
-        completed_at: row.completed_at,
-        ttft_ms: row.ttft_ms,
-        total_duration_ms: row.total_duration_ms,
-        generation_duration_ms: row.generation_duration_ms,
-        max_inter_token_gap_ms: row.max_inter_token_gap_ms,
-        input_tokens: row.input_tokens,
-        output_tokens: row.output_tokens,
-        cache_creation_tokens: row.cache_creation_tokens,
-        cache_read_tokens: row.cache_read_tokens,
-        thinking_tokens: row.thinking_tokens,
-        stop_reason: row.stop_reason,
-        is_error: row.is_error,
-        tool_call_count: row.tool_call_count,
-        stream_restarts: row.stream_restarts,
-        total_cost_usd: row.total_cost_usd,
-    }
-}
 
 /// `GET /api/sessions/{id}/turn-metrics` — returns all per-turn metrics rows
 /// for the session, ordered by `started_at ASC` so the SessionView's
@@ -103,7 +45,9 @@ pub async fn list_turn_metrics(
 ) -> Result<Json<TurnMetricsResponse>, AppError> {
     let mut conn = app_state.conn()?;
 
-    verify_session_access(&mut conn, session_id, current_user_id)?;
+    // Read access is "any role, including viewer," matching the metrics'
+    // visibility model (no mutation possible from this endpoint).
+    crate::handlers::session_access::verify_session_reader(&mut conn, session_id, current_user_id)?;
 
     use crate::schema::turn_metrics;
     let rows: Vec<TurnMetric> = turn_metrics::table
@@ -112,7 +56,7 @@ pub async fn list_turn_metrics(
         .select(TurnMetric::as_select())
         .load(&mut conn)?;
 
-    let metrics = rows.into_iter().map(row_to_wire).collect();
+    let metrics = rows.into_iter().map(TurnMetric::into_wire).collect();
     Ok(Json(TurnMetricsResponse { metrics }))
 }
 
@@ -152,7 +96,7 @@ pub async fn list_recent_user_turn_metrics(
     // left→right oldest→newest without a second pass on the frontend.
     rows.reverse();
 
-    let metrics = rows.into_iter().map(row_to_wire).collect();
+    let metrics = rows.into_iter().map(TurnMetric::into_wire).collect();
     Ok(Json(TurnMetricsResponse { metrics }))
 }
 

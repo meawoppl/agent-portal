@@ -18,11 +18,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    db::get_user_usage, errors::AppError, handlers::responses::EmptyResponse, models::User, schema,
-    AppState,
+    db::get_all_user_usage, errors::AppError, handlers::responses::EmptyResponse, models::User,
+    schema, AppState,
 };
-
-use shared::protocol::SESSION_COOKIE_NAME;
 
 // ============================================================================
 // Admin Guard - extracts and validates admin user from cookies
@@ -30,30 +28,9 @@ use shared::protocol::SESSION_COOKIE_NAME;
 
 /// Extract the current user from cookies and verify they are an admin.
 /// Returns the User if they are an admin, or an appropriate application error.
-pub async fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Result<User, AppError> {
-    // Extract user ID from signed session cookie
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or(AppError::Unauthorized)?;
+pub fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Result<User, AppError> {
+    let user = crate::auth::extract_user(app_state, cookies)?;
 
-    let user_id: Uuid = cookie.value().parse().map_err(|_| AppError::Unauthorized)?;
-
-    // Fetch user from database
-    let mut conn = app_state.conn()?;
-
-    let user = schema::users::table
-        .find(user_id)
-        .first::<User>(&mut conn)
-        .map_err(|_| AppError::NotFound("admin user"))?;
-
-    // Check if user is disabled
-    if user.disabled {
-        warn!("Disabled user {} attempted admin access", user.email);
-        return Err(AppError::Forbidden);
-    }
-
-    // Check if user is admin
     if !user.is_admin {
         warn!("Non-admin user {} attempted admin access", user.email);
         return Err(AppError::Forbidden);
@@ -115,7 +92,7 @@ pub async fn get_stats(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<Json<AdminStats>, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
     info!("Admin {} requested system stats", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -193,7 +170,7 @@ pub async fn list_users(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<Json<AdminUsersResponse>, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
     info!("Admin {} requested user list", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -204,35 +181,31 @@ pub async fn list_users(
         .load(&mut conn)
         .map_err(|e| admin_db_query("Failed to load users", e))?;
 
-    // Get session counts and usage per user
-    let mut user_infos = Vec::with_capacity(users.len());
-    for user in users {
-        // Get session count
-        let session_count: i64 = schema::sessions::table
-            .filter(schema::sessions::user_id.eq(user.id))
-            .count()
-            .get_result(&mut conn)
-            .unwrap_or(0);
+    // Get session counts and usage for all users in two grouped queries
+    let usage_by_user = get_all_user_usage(&mut conn).unwrap_or_default();
 
-        // Get aggregated usage via helper
-        let usage = get_user_usage(&mut conn, user.id).unwrap_or_default();
+    let user_infos = users
+        .into_iter()
+        .map(|user| {
+            let usage = usage_by_user.get(&user.id).cloned().unwrap_or_default();
 
-        user_infos.push(AdminUserEntry {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            avatar_url: user.avatar_url,
-            is_admin: user.is_admin,
-            disabled: user.disabled,
-            created_at: user.created_at.to_string(),
-            session_count,
-            total_spend_usd: usage.cost_usd,
-            total_input_tokens: usage.input_tokens,
-            total_output_tokens: usage.output_tokens,
-            total_cache_creation_tokens: usage.cache_creation_tokens,
-            total_cache_read_tokens: usage.cache_read_tokens,
-        });
-    }
+            AdminUserEntry {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                avatar_url: user.avatar_url,
+                is_admin: user.is_admin,
+                disabled: user.disabled,
+                created_at: user.created_at.to_string(),
+                session_count: usage.session_count,
+                total_spend_usd: usage.cost_usd,
+                total_input_tokens: usage.input_tokens,
+                total_output_tokens: usage.output_tokens,
+                total_cache_creation_tokens: usage.cache_creation_tokens,
+                total_cache_read_tokens: usage.cache_read_tokens,
+            }
+        })
+        .collect();
 
     Ok(Json(AdminUsersResponse { users: user_infos }))
 }
@@ -243,7 +216,7 @@ pub async fn update_user(
     Path(user_id): Path<Uuid>,
     Json(update): Json<UpdateUserRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
 
     // Prevent admin from demoting themselves
     if user_id == admin.id && update.is_admin == Some(false) {
@@ -353,7 +326,7 @@ pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<Json<AdminSessionsResponse>, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
     info!("Admin {} requested sessions list", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -401,7 +374,7 @@ pub async fn delete_session(
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
 
     let mut conn = app_state.conn()?;
 

@@ -1,11 +1,11 @@
 //! Hand-rolled `<svg>` line-chart component.
 //!
-//! Built directly on top of the pure helpers in [`super::scale`]. Each chart
-//! on the Performance page (throughput, TTFT, cache hit, cost-per-token)
-//! mounts one of these with a list of named series; the component computes
-//! "nice" y-axis bounds, draws the gridlines + axis labels, and emits one
-//! `<polyline>` per series. Width is 100 % of the container via a responsive
-//! `viewBox`.
+//! Built directly on top of the pure helpers in [`super::scale`] and the
+//! shared frame helpers in [`super`]. Each chart on the Performance page
+//! (throughput, TTFT, cache hit, cost-per-token) mounts one of these with a
+//! list of named series; the component computes "nice" y-axis bounds, draws
+//! the gridlines + axis labels, and emits one `<polyline>` per series. Width
+//! is 100 % of the container via a responsive `viewBox`.
 //!
 //! No chart library. SVG is plain DOM strings.
 
@@ -13,8 +13,12 @@ use chrono::{DateTime, Utc};
 use yew::prelude::*;
 
 use super::scale::{
-    format_axis_value, series_points_with_axis, time_axis_ticks, y_axis_for_values,
-    y_axis_tick_labels, AxisScale, BucketKind, TickLabel,
+    series_points_with_axis, time_axis_ticks, y_axis_for_values, y_axis_tick_labels, AxisScale,
+    BucketKind,
+};
+use super::{
+    chart_empty, chart_frame, render_gridlines, render_legend, render_x_labels, PAD_L, PAD_T,
+    PLOT_H, PLOT_W,
 };
 
 /// One labelled line in the chart. `dashed = true` is used for p95 traces
@@ -50,25 +54,10 @@ pub struct LinePlotProps {
     pub axis_scale: AxisScale,
 }
 
-/// Internal SVG canvas size. We render at 800×260 in the viewBox and let CSS
-/// scale to the container width — same approach as the Sparkline.
-const VIEW_W: f32 = 800.0;
-const VIEW_H: f32 = 260.0;
-/// Padding on each side of the plot area to leave room for axis labels.
-const PAD_L: f32 = 66.0;
-const PAD_R: f32 = 12.0;
-const PAD_T: f32 = 12.0;
-const PAD_B: f32 = 36.0;
-
 #[function_component(LinePlot)]
 pub fn line_plot(props: &LinePlotProps) -> Html {
     if props.buckets.is_empty() || props.series.iter().all(|s| s.values.is_empty()) {
-        return html! {
-            <div class="performance-chart">
-                <h3 class="chart-title">{ &props.title }</h3>
-                <div class="chart-empty">{ "No data" }</div>
-            </div>
-        };
+        return chart_empty(&props.title);
     }
 
     // Gather all finite y-values across all series for the axis range.
@@ -81,18 +70,9 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
         }
     }
     if all_y.is_empty() {
-        return html! {
-            <div class="performance-chart">
-                <h3 class="chart-title">{ &props.title }</h3>
-                <div class="chart-empty">{ "No data" }</div>
-            </div>
-        };
+        return chart_empty(&props.title);
     }
     let y_axis = y_axis_for_values(&all_y, props.axis_scale);
-
-    let plot_w = VIEW_W - PAD_L - PAD_R;
-    let plot_h = VIEW_H - PAD_T - PAD_B;
-    let viewbox = format!("0 0 {VIEW_W} {VIEW_H}");
 
     let x_ticks = time_axis_ticks(&props.buckets, props.bucket_kind, 6);
     let y_ticks = y_axis_tick_labels(&y_axis);
@@ -105,10 +85,10 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
         let runs = contiguous_runs(&s.values);
         for (start_idx, run) in runs {
             let scaled_w = (run.len() as f32 - 1.0).max(0.0)
-                * (plot_w / (props.buckets.len() as f32 - 1.0).max(1.0));
+                * (PLOT_W / (props.buckets.len() as f32 - 1.0).max(1.0));
             let offset_x =
-                (start_idx as f32) * (plot_w / (props.buckets.len() as f32 - 1.0).max(1.0));
-            let points = series_points_with_axis(&run, scaled_w.max(0.0), plot_h, &y_axis);
+                (start_idx as f32) * (PLOT_W / (props.buckets.len() as f32 - 1.0).max(1.0));
+            let points = series_points_with_axis(&run, scaled_w.max(0.0), PLOT_H, &y_axis);
             if points.is_empty() {
                 continue;
             }
@@ -127,95 +107,32 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
         }
     }
 
-    let gridlines: Html = y_ticks
-        .iter()
-        .map(|(v, frac)| {
-            let y = PAD_T + plot_h - frac * plot_h;
-            html! {
-                <>
-                    <line
-                        x1={format!("{:.2}", PAD_L)}
-                        x2={format!("{:.2}", PAD_L + plot_w)}
-                        y1={format!("{:.2}", y)}
-                        y2={format!("{:.2}", y)}
-                        class="chart-gridline"
-                    />
-                    <text
-                        x={format!("{:.2}", PAD_L - 6.0)}
-                        y={format!("{:.2}", y + 4.0)}
-                        class="chart-y-label"
-                        text-anchor="end"
-                    >
-                        { format_axis_value(*v) }
-                    </text>
-                </>
-            }
-        })
-        .collect();
+    let gridlines = render_gridlines(&y_ticks);
+    let x_labels = render_x_labels(&x_ticks);
+    let legend = render_legend(props.series.iter().map(|s| {
+        (
+            s.label.as_str(),
+            format!(
+                "background: {}; {}",
+                s.color,
+                if s.dashed { "background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--bg-darker) 3px 6px);" } else { "" }
+            ),
+        )
+    }));
 
-    let x_labels: Html = x_ticks
-        .iter()
-        .map(|TickLabel { frac, label }| {
-            let x = PAD_L + frac * plot_w;
-            html! {
-                <text
-                    x={format!("{:.2}", x)}
-                    y={format!("{:.2}", VIEW_H - PAD_B + 18.0)}
-                    class="chart-x-label"
-                    text-anchor="middle"
-                >
-                    { label.clone() }
-                </text>
-            }
-        })
-        .collect();
-
-    let legend: Html = props
-        .series
-        .iter()
-        .map(|s| {
-            html! {
-                <span class="chart-legend-item">
-                    <span class="chart-legend-swatch"
-                          style={format!(
-                              "background: {}; {}",
-                              s.color,
-                              if s.dashed { "background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--bg-darker) 3px 6px);" } else { "" }
-                          )}>
-                    </span>
-                    { &s.label }
-                </span>
-            }
-        })
-        .collect();
-
-    html! {
-        <div class="performance-chart">
-            <div class="chart-header">
-                <h3 class="chart-title">{ &props.title }</h3>
-                <span class="chart-scale-badge">{ props.axis_scale.label() }</span>
-            </div>
-            <div class="chart-legend">{ legend }</div>
-            <svg
-                class="performance-chart-svg"
-                viewBox={viewbox}
-                preserveAspectRatio="xMidYMid meet"
-            >
-                <text
-                    x={format!("{:.2}", 14.0)}
-                    y={format!("{:.2}", PAD_T + plot_h / 2.0)}
-                    class="chart-y-axis-title"
-                    text-anchor="middle"
-                    transform={format!("rotate(-90 14 {:.2})", PAD_T + plot_h / 2.0)}
-                >
-                    { &props.y_label }
-                </text>
+    chart_frame(
+        &props.title,
+        props.axis_scale,
+        &props.y_label,
+        legend,
+        html! {
+            <>
                 { gridlines }
                 { for polylines }
                 { x_labels }
-            </svg>
-        </div>
-    }
+            </>
+        },
+    )
 }
 
 /// Find every contiguous run of `Some(v)` values in the series. Returns
@@ -282,14 +199,5 @@ mod tests {
         let vals = vec![Some(1.0), Some(f64::NAN), Some(3.0)];
         let runs = contiguous_runs(&vals);
         assert_eq!(runs.len(), 2);
-    }
-
-    #[test]
-    fn format_axis_value_picks_compact_form() {
-        assert_eq!(format_axis_value(0.0), "0");
-        assert_eq!(format_axis_value(1.0), "1");
-        assert_eq!(format_axis_value(0.25), "0.25");
-        assert_eq!(format_axis_value(12.5), "12.5");
-        assert_eq!(format_axis_value(1500.0), "1.5k");
     }
 }

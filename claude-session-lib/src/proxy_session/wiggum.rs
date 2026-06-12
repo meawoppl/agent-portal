@@ -18,6 +18,15 @@ use super::{format_duration, ConnectionResult, SharedWsWrite};
 /// Maximum iterations for wiggum mode before auto-stopping
 const WIGGUM_MAX_ITERATIONS: u32 = 50;
 
+/// Build the wiggum loop prompt sent to the agent: the original user prompt
+/// plus the instruction suffix whose exact wording drives DONE-loop detection.
+pub fn wiggum_prompt(original: &str) -> String {
+    format!(
+        "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
+        original
+    )
+}
+
 /// Wiggum mode state
 #[derive(Debug, Clone)]
 pub struct WiggumState {
@@ -142,12 +151,9 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                         state.loop_start = Instant::now();
 
                         // Resend the prompt
-                        let wiggum_prompt = format!(
-                            "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
-                            state.original_prompt
-                        );
+                        let prompt = wiggum_prompt(&state.original_prompt);
                         if let Err(e) = claude_session
-                            .send_input(serde_json::Value::String(wiggum_prompt))
+                            .send_input(serde_json::Value::String(prompt))
                             .await
                         {
                             error!("Failed to resend wiggum prompt: {}", e);

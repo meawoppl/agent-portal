@@ -15,3 +15,11 @@ pub const DEVICE_CODE_EXPIRES_SECS: u64 = 300;
 /// Used by proxy/launcher to cap exponential backoff, and by the backend
 /// to determine how long to wait before cleaning up stale sessions.
 pub const MAX_RECONNECT_BACKOFF_SECS: u64 = 30;
+
+/// Interval (in seconds) between launcher heartbeats on the launcher
+/// WebSocket. The backend has no explicit heartbeat timeout — launcher
+/// liveness is the WebSocket connection itself — but it treats each
+/// heartbeat's `running_sessions` as the authoritative process list when
+/// reconciling desired sessions (see `LauncherToServer::LauncherHeartbeat`
+/// handling in the backend's launcher socket).
+pub const LAUNCHER_HEARTBEAT_INTERVAL_SECS: u64 = 30;
