@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.57
+
+- **Launcher registration reuses the scheduled-task sync helpers instead of hand-building `ScheduledTaskConfig`.** The 45-line registration block (including a redundant hostname re-fetch from the launchers map) is now one call to a new `send_initial_schedule_sync(app_state, user_id, launcher_id, hostname, launcher_name)` — a single-launcher variant chosen deliberately over the broadcast `send_schedule_sync`, which (a) targets all of a user's launchers and (b) always sends even when empty (needed so deletes clear state), whereas registration historically sends nothing when no enabled tasks match the hostname. Both variants share a new `load_enabled_tasks` and all config construction flows through `task_to_config`, so the #995 field flatten lands in exactly one place. Same mpsc delivery, same log line.
+
 ## 2.8.56
 
 - **Native-crate misc dedup: hostname helper, default session name, dead config fields, heartbeat constant.** `hostname_or_unknown()` in claude-session-lib replaces 7 inline copies (unified on `to_string_lossy`; non-UTF-8 edge cases now render lossily instead of three different fallback strings — normal hostnames byte-identical; portal-auth keeps its copy rather than inverting the dependency graph, and one proxy site keeps its no-fallback `Option<String>` semantics deliberately). `default_session_name` moved next to `ProxySessionConfig`. Write-only `ProxyConfig` fields removed: `SessionAuth.user_id`, `session_prefix` (+ setter + init-URL plumbing), `Preferences.auto_open_browser`. `atomic_save` delegates to `save_with_lock`. `probe.rs` uses `AgentType::as_str()`. Launcher's heartbeat cadence moved to `shared/src/protocol.rs` as `LAUNCHER_HEARTBEAT_INTERVAL_SECS` with a doc note that the backend deliberately has no staleness timeout (liveness = the WS connection). Two issue items were already done on main (#1003 removed the RegisterFields duplication and the `unreachable!`). Net −46 lines.
