@@ -3434,6 +3434,7 @@ dependencies = [
 name = "shared"
 version = "2.8.44"
 dependencies = [
+ "base64",
  "chrono",
  "claude-codes",
  "serde",

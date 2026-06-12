@@ -23,8 +23,8 @@ use web_sys::Element;
 use yew::prelude::*;
 
 use super::helpers::{
-    autoscroll_transition, classify_output_msg_type, inject_message_metadata, is_claude_awaiting,
-    reconcile_pending_sends, ActivityTag,
+    autoscroll_transition, classify_output_msg_type, inject_created_at_if_absent,
+    inject_message_metadata, is_claude_awaiting, reconcile_pending_sends, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
@@ -41,7 +41,6 @@ pub struct SessionViewProps {
     pub session: SessionInfo,
     pub focused: bool,
     pub on_awaiting_change: Callback<(Uuid, bool)>,
-    pub on_cost_change: Callback<(Uuid, f64)>,
     pub on_connected_change: Callback<(Uuid, bool)>,
     pub on_message_sent: Callback<Uuid>,
     #[allow(clippy::type_complexity)]
@@ -62,7 +61,6 @@ pub enum SessionViewMsg {
     WebSocketError(String),
     AttemptReconnect,
     CheckAwaiting,
-    ClearCostFlash,
     BranchChanged(Option<String>, Option<String>, Option<String>),
     /// PermissionHandler is mounted and handed us its inbound-request
     /// dispatcher. We store it so live `WsEvent::Permission` frames can be
@@ -127,8 +125,6 @@ pub struct SessionView {
     should_autoscroll: bool,
     #[allow(dead_code)]
     scroll_listener: Option<Closure<dyn Fn()>>,
-    total_cost: f64,
-    cost_flash: bool,
     /// Dispatcher into the mounted `PermissionHandler`. Stored once at child
     /// `create` time via `PermissionDispatcherRegistered`; live permission
     /// frames off the wire are forwarded through it so this component holds
@@ -231,8 +227,6 @@ impl Component for SessionView {
             messages_ref: NodeRef::default(),
             should_autoscroll: true,
             scroll_listener: None,
-            total_cost: 0.0,
-            cost_flash: false,
             permission_dispatcher: None,
             has_pending_permission: false,
             last_permission_request: None,
@@ -297,10 +291,6 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::ReceivedOutput(output) => self.handle_received_output(ctx, output),
-            SessionViewMsg::ClearCostFlash => {
-                self.cost_flash = false;
-                true
-            }
             SessionViewMsg::PermissionDispatcherRegistered(dispatcher) => {
                 self.permission_dispatcher = Some(dispatcher);
                 false
@@ -711,22 +701,6 @@ impl SessionView {
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: String) -> bool {
         let tag = classify_output_msg_type(&output);
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output) {
-            if let shared::ClaudeOutput::Result(res) = &claude_msg {
-                let cost = res.total_cost_usd;
-                if cost != self.total_cost {
-                    self.total_cost = cost;
-                    self.cost_flash = true;
-
-                    let session_id = ctx.props().session.id;
-                    ctx.props().on_cost_change.emit((session_id, cost));
-
-                    let link = ctx.link().clone();
-                    spawn_local(async move {
-                        gloo::timers::future::TimeoutFuture::new(600).await;
-                        link.send_message(SessionViewMsg::ClearCostFlash);
-                    });
-                }
-            }
             // Live task events: the `created_at` field isn't part of the
             // live wire envelope, so the panel falls back to `Date.now()`
             // — see `derive_task_events` for the two paths.
@@ -738,15 +712,19 @@ impl SessionView {
         ctx.props()
             .on_activity
             .emit((ctx.props().session.id, tag, js_sys::Date::now()));
-        // Inject _created_at for tooltip display. Live path has no server
-        // timestamp on the wire — use browser `now()` for the tooltip only;
-        // the reconnect-replay watermark is set separately from the
-        // server-assigned `created_at` in `WsEvent::Output` (closes #784).
+        // Inject _created_at for tooltip display only when the frame doesn't
+        // already carry one: `websocket.rs` folds the server-assigned
+        // `created_at` into the content before emitting `WsEvent::Output`,
+        // and that authoritative timestamp must win over the browser clock
+        // (#981). Frames without one (error envelopes, pre-#784 backends)
+        // fall back to `Date::now()`; the reconnect-replay watermark is set
+        // separately from the server `created_at` in `WsEvent::Output`
+        // (closes #784).
         let now_iso = js_sys::Date::new_0()
             .to_iso_string()
             .as_string()
             .unwrap_or_default();
-        let output = inject_message_metadata(&output, &now_iso, false, None, None);
+        let output = inject_created_at_if_absent(&output, &now_iso);
 
         reconcile_pending_sends(&mut self.pending_sends, tag, &output);
 

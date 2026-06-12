@@ -60,18 +60,7 @@ pub struct Session {
     pub claude_args: serde_json::Value,
 }
 
-#[derive(Debug, Insertable)]
-#[diesel(table_name = crate::schema::sessions)]
-pub struct NewSession {
-    pub user_id: Uuid,
-    pub session_name: String,
-    pub session_key: String,
-    pub working_directory: String,
-    pub status: String,
-    pub git_branch: Option<String>,
-}
-
-/// NewSession variant that allows specifying the ID (for when we want to use Claude's session ID)
+/// Insertable session that specifies the ID (so we can use Claude's session ID)
 #[derive(Debug, Insertable)]
 #[diesel(table_name = crate::schema::sessions)]
 pub struct NewSessionWithId {
