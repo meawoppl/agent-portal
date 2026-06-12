@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.66
+
+- **Cargo hygiene: tokio narrowed from `full` to 11 measured features; tower-http to `cors` only; nine deps hoisted to workspace.** The tokio feature set (`fs, io-std, io-util, macros, net, process, rt, rt-multi-thread, signal, sync, time`) was determined by grepping actual per-crate usage, not guesswork — five member crates also dropped their own `features = ["full"]` overrides. tower-http's unused `fs`/`trace`/`compression-full` removed (lockfile −92 lines). `serde`/`serde_json`/`uuid`/`chrono`/`thiserror`/`tracing`/`anyhow`/`hostname`/`directories` now use `workspace = true` across session-lib, claude-session-lib, codex-session-lib, portal-auth, portal-update, proxy, launcher (with per-crate feature additions like chrono `clock` made explicit where crates had been riding feature unification). claude-session-lib's unused `thiserror` and `directories` deps deleted; session-lib's thiserror moved 1→2. WASM targets verified unregressed; all three binaries link.
+
 ## 2.8.55
 
 - **Repo-root scratch purged and `.gitignore` extended.** ~20 untracked artifacts (a 3.8MB `screenlog.1`, `parsing-dump/`, stray phone photos and AI-generated images, brand-mark source files duplicating `frontend/assets/`, `test-*.png/svg` plot outputs, `shim-mode.patch` + notes, a design doc for code that doesn't exist) were verified unreferenced and removed from the working tree. `.gitignore` now covers the patterns that demonstrably accumulate: `screenlog.*`, root `test-*.png/svg`, root `*.patch`, `parsing-dump/`.
