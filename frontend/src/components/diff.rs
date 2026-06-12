@@ -9,22 +9,22 @@ pub enum DiffLine<'a> {
 
 /// Source for a `DiffCard` body: either two snapshots (Claude `Edit` /
 /// `Write`-style: compute the diff via LCS) or a pre-formatted unified-diff
-/// string (Codex `turn/diff/updated` / `item/fileChange/patchUpdated`: parse
-/// the existing patch text). Both paths funnel through `render_diff_html`,
-/// so the per-line styling and parser tests stay shared.
+/// string (Codex per-file `item/fileChange/patchUpdated`: parse the existing
+/// patch text). Both paths funnel through `render_diff_html`, so the per-line
+/// styling and parser tests stay shared.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiffSource {
     OldNew { old: String, new: String },
     Unified { text: String },
 }
 
-/// One shared diff card for both Claude (`Edit` tool) and Codex
-/// (`turn/diff/updated`, per-file `item/fileChange/patchUpdated`) — see #823.
+/// One shared diff card for both Claude (`Edit` tool) and Codex per-file
+/// (`item/fileChange/patchUpdated`) diffs — see #823.
 ///
 /// The card is the only place that gets the `.diff-card` framed treatment
 /// (background, rounded corners, scrollable body). Header fields are all
 /// optional so the card collapses to just a framed body when called without
-/// labels (e.g. a Codex cumulative turn diff with no file path).
+/// labels.
 #[derive(Properties, PartialEq)]
 pub struct DiffCardProps {
     pub source: DiffSource,
@@ -39,11 +39,6 @@ pub struct DiffCardProps {
     /// Claude `Edit { replace_all: true }` chip. Renders only when set.
     #[prop_or_default]
     pub replace_all: bool,
-    /// Codex turn-level cumulative diff label. Renders a `(cumulative)`
-    /// chip next to the title so the wire semantics aren't lost when the
-    /// card is visually identical to a per-file diff.
-    #[prop_or_default]
-    pub cumulative: bool,
 }
 
 #[function_component(DiffCard)]
@@ -72,11 +67,6 @@ pub fn diff_card(props: &DiffCardProps) -> Html {
                     <span class="diff-card-path">{ path }</span>
                 } else {
                     <span class="diff-card-title">{ "Diff" }</span>
-                }
-                if props.cumulative {
-                    <span class="diff-card-cumulative" title="Codex turn-level cumulative diff">
-                        { "(cumulative)" }
-                    </span>
                 }
                 if props.replace_all {
                     <span class="diff-card-replace-all">{ "(replace all)" }</span>

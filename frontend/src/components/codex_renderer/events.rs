@@ -303,13 +303,18 @@ pub fn codex_item_id(item: &CodexItem) -> &str {
 /// into a single rendered card (#776).
 pub fn codex_event_item_id(json: &str) -> Option<String> {
     let event: CodexEvent = serde_json::from_str(json).ok()?;
-    let item = match event {
+    match event {
         CodexEvent::ItemStarted { item }
         | CodexEvent::ItemUpdated { item }
-        | CodexEvent::ItemCompleted { item } => item?,
-        _ => return None,
-    };
-    Some(codex_item_id(&item).to_string())
+        | CodexEvent::ItemCompleted { item } => Some(codex_item_id(&item?).to_string()),
+        // Per-file patch updates (`item/fileChange/patchUpdated`) are cumulative
+        // too — Codex re-sends the full file patch on every tick. Surfacing
+        // their `item_id` here lets the group dedup keep only the final patch,
+        // and collapses them against the matching `item.*{file_change}`
+        // lifecycle events that carry the same id.
+        CodexEvent::FileChangePatchUpdated { params } => params.and_then(|p| p.item_id),
+        _ => None,
+    }
 }
 
 /// Check if a Codex message indicates "awaiting" (turn complete or turn failed)
