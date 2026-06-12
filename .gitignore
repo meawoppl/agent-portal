@@ -36,3 +36,10 @@ frontend/dist/
 
 # Stray files
 First Article*.zip
+
+# Terminal capture and local scratch artifacts
+screenlog.*
+/test-*.png
+/test-*.svg
+/*.patch
+parsing-dump/

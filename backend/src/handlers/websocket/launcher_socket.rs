@@ -732,13 +732,8 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
 }
 
 fn get_dev_user_id(app_state: &AppState) -> Uuid {
-    use crate::schema::users;
-    use diesel::prelude::*;
-
     let mut conn = app_state.db_pool.get().expect("DB connection for dev mode");
-    let user: crate::models::User = users::table
-        .filter(users::email.eq("testing@testing.local"))
-        .first(&mut conn)
-        .expect("Test user must exist in dev mode");
-    user.id
+    crate::auth::dev_user(&mut conn)
+        .expect("Test user must exist in dev mode")
+        .id
 }

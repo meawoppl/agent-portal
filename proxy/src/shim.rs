@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::session::{
-    ack_portal_input, connect_to_backend, get_git_branch, register_session, Backoff,
+    ack_portal_input, connect_to_backend, get_git_branch, register_session, wiggum_prompt, Backoff,
     PermissionResponseData, ProxySessionConfig, SharedWsWrite, WsEvent,
 };
 use anyhow::Result;
@@ -23,6 +23,7 @@ use claude_codes::io::{
     ControlResponsePayload, PermissionResult, UserMessage,
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
+use claude_session_lib::claude_cli_args;
 use session_lib::output_buffer::PendingOutputBuffer;
 use shared::ProxyToServer;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -78,10 +79,7 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
     });
 
     // Output buffer for reliable delivery to portal
-    let output_buffer = Arc::new(Mutex::new(
-        PendingOutputBuffer::new(config.session_id)
-            .unwrap_or_else(|_| PendingOutputBuffer::new(config.session_id).unwrap()),
-    ));
+    let output_buffer = Arc::new(Mutex::new(PendingOutputBuffer::new(config.session_id)?));
 
     // Channel for portal-sent message texts (for user echo dedup in VS Code).
     // The sender is used in the WS connection loop; the receiver lives in the
@@ -123,25 +121,11 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
 /// Spawn the claude binary with piped stdin/stdout/stderr.
 fn spawn_claude(config: &ProxySessionConfig) -> Result<tokio::process::Child> {
     let mut cmd = Command::new("claude");
-    cmd.arg("--print")
-        .arg("--verbose")
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--input-format")
-        .arg("stream-json")
-        .arg("--permission-prompt-tool")
-        .arg("stdio")
-        .arg("--replay-user-messages");
-
-    if config.resume {
-        cmd.arg("--resume").arg(config.session_id.to_string());
-    } else {
-        cmd.arg("--session-id").arg(config.session_id.to_string());
-    }
-
-    for arg in &config.claude_args {
-        cmd.arg(arg);
-    }
+    cmd.args(claude_cli_args(
+        config.session_id,
+        config.resume,
+        &config.claude_args,
+    ));
 
     cmd.current_dir(&config.working_directory);
     cmd.stdin(std::process::Stdio::piped());
@@ -251,15 +235,10 @@ async fn run_shim_loop(
             // Forward to VS Code stdout (when appropriate)
             if forward_to_vscode {
                 let mut stdout = our_stdout_for_reader.lock().await;
-                if let Err(e) = stdout.write_all(line.as_bytes()).await {
+                if let Err(e) = write_line(&mut *stdout, &line).await {
                     error!("Failed to write to stdout: {}", e);
                     break;
                 }
-                if let Err(e) = stdout.write_all(b"\n").await {
-                    error!("Failed to write newline to stdout: {}", e);
-                    break;
-                }
-                let _ = stdout.flush().await;
             }
 
             // Dispatch for portal forwarding (independent of VS Code decision).
@@ -328,7 +307,6 @@ async fn run_shim_loop(
     let claude_stdin_for_reader = claude_stdin.clone();
     let permissions_for_stdin = permissions.clone();
     let filtering_for_stdin = filtering_active.clone();
-    let (stdin_line_tx, mut stdin_line_rx) = mpsc::unbounded_channel::<String>();
 
     let stdin_reader_task = tokio::spawn(async move {
         while let Ok(Some(line)) = own_stdin_reader.next_line().await {
@@ -363,18 +341,10 @@ async fn run_shim_loop(
 
             // Always forward stdin to claude (transparency)
             let mut stdin = claude_stdin_for_reader.lock().await;
-            if let Err(e) = stdin.write_all(line.as_bytes()).await {
+            if let Err(e) = write_line(&mut *stdin, &line).await {
                 error!("Failed to write to claude stdin: {}", e);
                 break;
             }
-            if let Err(e) = stdin.write_all(b"\n").await {
-                error!("Failed to write newline to claude stdin: {}", e);
-                break;
-            }
-            let _ = stdin.flush().await;
-
-            // Also notify the WS loop (for input forwarding to portal if needed)
-            let _ = stdin_line_tx.send(line);
         }
         info!("Own stdin ended (parent process disconnected)");
     });
@@ -456,7 +426,6 @@ async fn run_shim_loop(
             conn,
             &mut output_line_rx,
             &mut perm_request_rx,
-            &mut stdin_line_rx,
             claude_stdin.clone(),
             permissions.clone(),
             output_buffer.clone(),
@@ -519,7 +488,6 @@ async fn run_shim_connection(
     conn: crate::session::NativeConnection,
     output_line_rx: &mut mpsc::UnboundedReceiver<(u64, serde_json::Value)>,
     perm_request_rx: &mut mpsc::UnboundedReceiver<ProxyToServer>,
-    stdin_line_rx: &mut mpsc::UnboundedReceiver<String>,
     claude_stdin: Arc<Mutex<tokio::process::ChildStdin>>,
     permissions: Arc<Mutex<HashMap<String, PermissionState>>>,
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
@@ -546,9 +514,7 @@ async fn run_shim_connection(
                         let claude_input =
                             ClaudeInput::user_message(&input.text, config.session_id);
                         if let Ok(json_line) = serde_json::to_string(&claude_input) {
-                            if let Err(e) =
-                                write_json_line_and_flush(&mut *stdin, &json_line).await
-                            {
+                            if let Err(e) = write_line(&mut *stdin, &json_line).await {
                                 error!("Failed to write portal input to claude: {}", e);
                                 break ShimConnectionResult::ClaudeExited;
                             }
@@ -562,17 +528,12 @@ async fn run_shim_connection(
                             "Portal wiggum input: {}",
                             &prompt_text[..prompt_text.len().min(60)]
                         );
-                        let wiggum_prompt = format!(
-                            "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
-                            prompt_text
-                        );
-                        let _ = portal_text_tx.send(wiggum_prompt.clone());
+                        let prompt = wiggum_prompt(&prompt_text);
+                        let _ = portal_text_tx.send(prompt.clone());
                         let mut stdin = claude_stdin.lock().await;
-                        let input = ClaudeInput::user_message(&wiggum_prompt, config.session_id);
+                        let input = ClaudeInput::user_message(&prompt, config.session_id);
                         if let Ok(json_line) = serde_json::to_string(&input) {
-                            if let Err(e) =
-                                write_json_line_and_flush(&mut *stdin, &json_line).await
-                            {
+                            if let Err(e) = write_line(&mut *stdin, &json_line).await {
                                 error!("Failed to write wiggum input to claude: {}", e);
                                 break ShimConnectionResult::ClaudeExited;
                             }
@@ -604,12 +565,10 @@ async fn run_shim_connection(
                             let ctrl_response: ControlResponseMessage = build_control_response(&perm_response).into();
                             if let Ok(json_line) = serde_json::to_string(&ctrl_response) {
                                 let mut stdin = claude_stdin.lock().await;
-                                if let Err(e) = stdin.write_all(json_line.as_bytes()).await {
+                                if let Err(e) = write_line(&mut *stdin, &json_line).await {
                                     error!("Failed to write permission response to claude: {}", e);
                                     break ShimConnectionResult::ClaudeExited;
                                 }
-                                let _ = stdin.write_all(b"\n").await;
-                                let _ = stdin.flush().await;
                             }
                         }
                     }
@@ -633,12 +592,10 @@ async fn run_shim_connection(
                         let mut stdin = claude_stdin.lock().await;
                         let input = ClaudeInput::interrupt();
                         if let Ok(json_line) = serde_json::to_string(&input) {
-                            if let Err(e) = stdin.write_all(json_line.as_bytes()).await {
+                            if let Err(e) = write_line(&mut *stdin, &json_line).await {
                                 error!("Failed to write interrupt to claude: {}", e);
                                 break ShimConnectionResult::ClaudeExited;
                             }
-                            let _ = stdin.write_all(b"\n").await;
-                            let _ = stdin.flush().await;
                         }
                     }
                     Some(WsEvent::FileDownloadRequest(request)) => {
@@ -679,9 +636,6 @@ async fn run_shim_connection(
                     break ShimConnectionResult::Disconnected;
                 }
             }
-
-            // Drain stdin lines (actual forwarding happens in the stdin reader task)
-            _ = stdin_line_rx.recv() => {}
         }
     };
 
@@ -689,11 +643,12 @@ async fn run_shim_connection(
     result
 }
 
-async fn write_json_line_and_flush<W>(writer: &mut W, json_line: &str) -> std::io::Result<()>
+/// Write a line followed by a newline, then flush.
+async fn write_line<W>(writer: &mut W, line: &str) -> std::io::Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
 {
-    writer.write_all(json_line.as_bytes()).await?;
+    writer.write_all(line.as_bytes()).await?;
     writer.write_all(b"\n").await?;
     writer.flush().await
 }
