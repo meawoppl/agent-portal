@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.8.37
+
+- **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
+
+## 2.8.36
+
+- **Remove the dashboard's dead cost-flash machinery.** `total_cost`/`cost_flash` were written on every Result message (with a 600ms flash-clear timeout) but never read by any `view()`, and the `on_cost_change` prop terminated in an explicit no-op callback "kept for API compatibility". Deleted end-to-end: the props, the `ClearCostFlash` msg arm, the struct fields, the whole Result-block cost computation in `handle_received_output`, and the no-op callback at the `<SessionView>` call site. −34 lines, one less fake data path.
+
+## 2.8.35
+
+- **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
+
 ## 2.8.34
 
 - **Codex: drop cumulative `turn/diff/updated` cards and dedupe per-file patch updates.** Codex re-sends the entire turn diff on every edit tick, so transcripts accumulated O(ticks) redundant cards — each the size of the whole turn — on top of the per-file `item.completed{file_change}` diffs that already render the same edits. The events are now dropped in `group_messages` (before grouping, so Codex runs don't fragment around each dropped diff) with a no-op dispatcher arm kept for exhaustiveness. `item/fileChange/patchUpdated` events (also cumulative per file) now surface their `item_id` in `codex_event_item_id`, letting the existing group dedup keep only the final patch and collapse it against the matching lifecycle events. The `DiffCard` `cumulative` chip and `render_turn_diff` are deleted with their only producer.
