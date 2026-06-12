@@ -48,6 +48,10 @@ fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
 
 /// Format an (agent, model, tier) group as a human-readable label for the
 /// dropdown and legend.
+///
+/// Deliberately not `turn_metrics_pill::format_model_tier_label`: this page
+/// shows the full model id (no vendor-prefix shortening), keeps the tier's
+/// original case, and adds codex / agent-without-model handling.
 fn pair_label(pair: &GroupKey) -> String {
     let base = match (pair.0.as_str(), pair.1.as_deref()) {
         ("codex", None) => "Codex".to_string(),
@@ -94,20 +98,6 @@ fn bucket_index(buckets: &[DateTime<Utc>], ts: DateTime<Utc>) -> Option<usize> {
     buckets.iter().position(|b| *b == ts)
 }
 
-/// Build the time-window query string for the selected radio button.
-/// The backend's window parser accepts an `Nh` / `Nd` suffix, so this is
-/// the exact value sent to `GET /api/metrics/turns?window=…`.
-fn window_param(window: TimeWindow) -> &'static str {
-    match window {
-        TimeWindow::Hours1 => "1h",
-        TimeWindow::Hours6 => "6h",
-        TimeWindow::Days1 => "1d",
-        TimeWindow::Days7 => "7d",
-        TimeWindow::Days30 => "30d",
-        TimeWindow::Days90 => "90d",
-    }
-}
-
 /// Build the bucket-granularity query string for the selected window.
 /// Pick high-fidelity buckets for the selected window. The charts only render
 /// a handful of x-axis labels, so dense buckets preserve real per-turn shape
@@ -133,6 +123,9 @@ enum TimeWindow {
 }
 
 impl TimeWindow {
+    /// Radio-button label, which doubles as the exact wire value sent to
+    /// `GET /api/metrics/turns?window=…` (the backend's window parser
+    /// accepts the same `Nh` / `Nd` suffix form).
     fn label(self) -> &'static str {
         match self {
             Self::Hours1 => "1h",
@@ -214,7 +207,7 @@ pub fn performance_panel() -> Html {
                 let path = format!(
                     "/api/metrics/turns?bucket={}&window={}",
                     bucket_param(window_val),
-                    window_param(window_val)
+                    window_val.label()
                 );
                 match utils::fetch_json::<MetricBucketsResponse>(&path, On401::Ignore).await {
                     Ok(data) => {
@@ -888,13 +881,14 @@ mod tests {
     }
 
     #[test]
-    fn window_param_strings() {
-        assert_eq!(window_param(TimeWindow::Hours1), "1h");
-        assert_eq!(window_param(TimeWindow::Hours6), "6h");
-        assert_eq!(window_param(TimeWindow::Days1), "1d");
-        assert_eq!(window_param(TimeWindow::Days7), "7d");
-        assert_eq!(window_param(TimeWindow::Days30), "30d");
-        assert_eq!(window_param(TimeWindow::Days90), "90d");
+    fn window_label_strings() {
+        // label() doubles as the wire `window=` param — keep both shapes valid.
+        assert_eq!(TimeWindow::Hours1.label(), "1h");
+        assert_eq!(TimeWindow::Hours6.label(), "6h");
+        assert_eq!(TimeWindow::Days1.label(), "1d");
+        assert_eq!(TimeWindow::Days7.label(), "7d");
+        assert_eq!(TimeWindow::Days30.label(), "30d");
+        assert_eq!(TimeWindow::Days90.label(), "90d");
     }
 
     /// Windows should stay granular enough to show shape; the chart axis

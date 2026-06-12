@@ -207,21 +207,11 @@ fn render_portal_image_header(file_path: Option<&str>, file_size: Option<u64>) -
             <span class="read-file-path">{ path }</span>
             {
                 if let Some(size) = file_size {
-                    html! { <span class="tool-meta">{ format_file_size(size) }</span> }
+                    html! { <span class="tool-meta">{ crate::utils::format_file_size(size) }</span> }
                 } else {
                     html! {}
                 }
             }
         </div>
-    }
-}
-
-fn format_file_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }

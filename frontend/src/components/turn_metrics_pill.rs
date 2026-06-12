@@ -70,7 +70,7 @@ pub(crate) fn pick_most_recent_model_tier(
 pub(crate) fn format_model_tier_label(model: &Option<String>, tier: &Option<String>) -> String {
     let short_model = model
         .as_deref()
-        .map(shorten_model_name)
+        .map(compact_model_label)
         .unwrap_or_else(|| "unknown".to_string());
     match tier.as_deref() {
         Some(t) if !t.is_empty() && !t.eq_ignore_ascii_case("standard") => {
@@ -82,7 +82,9 @@ pub(crate) fn format_model_tier_label(model: &Option<String>, tier: &Option<Stri
 
 /// Strip a vendor prefix + trailing dated suffix so a model name fits the
 /// chip. `claude-opus-4-5-20260301` → `opus-4-5`; `gpt-5-mini` → `5-mini`.
-fn shorten_model_name(model: &str) -> String {
+/// Named distinctly from `message_renderer::shorten_model_name` (which
+/// produces display names like "Opus 4.5") to avoid import mix-ups.
+fn compact_model_label(model: &str) -> String {
     let trimmed = model
         .strip_prefix("claude-")
         .or_else(|| model.strip_prefix("gpt-"))
@@ -329,12 +331,12 @@ mod tests {
     }
 
     #[test]
-    fn shorten_model_strips_vendor_prefix_and_dated_suffix() {
-        assert_eq!(shorten_model_name("claude-opus-4-7-20260301"), "opus-4-7");
-        assert_eq!(shorten_model_name("claude-sonnet-4-5"), "sonnet-4-5");
-        assert_eq!(shorten_model_name("gpt-5-mini"), "5-mini");
+    fn compact_model_label_strips_vendor_prefix_and_dated_suffix() {
+        assert_eq!(compact_model_label("claude-opus-4-7-20260301"), "opus-4-7");
+        assert_eq!(compact_model_label("claude-sonnet-4-5"), "sonnet-4-5");
+        assert_eq!(compact_model_label("gpt-5-mini"), "5-mini");
         // No prefix, no suffix → unchanged.
-        assert_eq!(shorten_model_name("haiku-4-5"), "haiku-4-5");
+        assert_eq!(compact_model_label("haiku-4-5"), "haiku-4-5");
     }
 
     #[test]
