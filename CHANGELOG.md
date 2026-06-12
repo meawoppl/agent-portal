@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.49
+
+- **`update_task_handler` uses an `AsChangeset` struct instead of a ten-field load-merge-save; `list_runs` is typed.** `ScheduledTaskChangeset` (ten `Option`s built straight from the request; Diesel's default `treat_none_as_null = false` matches the old keep-existing semantics — verified safe since every updatable column is NOT NULL, so no `Option<Option<T>>` tri-state exists). The ownership pre-load stays (slimmed to an id select) deliberately: it must run before cron validation so nonexistent-task + invalid-cron stays 404, and the blanket diesel→AppError From would turn a filtered-update miss into a 500. `updated_at` still bumps on every request including empty bodies. `list_runs_handler` returns `Json<Vec<Session>>` instead of untyped `serde_json::Value` — byte-identical JSON.
+
 ## 2.8.48
 
 - **REST and WS replay share their three duplicated helpers.** `TurnMetric::into_wire()` (the 24-field row→wire mapping, previously written out twice) lives on the model; `sender_names()` (the character-identical user-id→name-or-email lookup) and `parse_iso_cursor()` (with its four tests) live in `handlers/helpers.rs`. One deliberate fix: WS replay now strips trailing `Z` from `replay_after` like the REST path always did — Z-suffixed watermarks previously parsed to `None` and silently triggered a full-history replay. Net −29 lines.
