@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.55
+
+- **Repo-root scratch purged and `.gitignore` extended.** ~20 untracked artifacts (a 3.8MB `screenlog.1`, `parsing-dump/`, stray phone photos and AI-generated images, brand-mark source files duplicating `frontend/assets/`, `test-*.png/svg` plot outputs, `shim-mode.patch` + notes, a design doc for code that doesn't exist) were verified unreferenced and removed from the working tree. `.gitignore` now covers the patterns that demonstrably accumulate: `screenlog.*`, root `test-*.png/svg`, root `*.patch`, `parsing-dump/`.
+
 ## 2.8.54
 
 - **Admin page: three PATCH-user handlers deduped; `/api/auth/me` no longer fetched redundantly.** `patch_user(user_id, body) -> bool` + `update_user_in(users, id, f)` collapse the toggle-admin/unban/confirm-ban triple to one-liners. The dashboard's leave-confirm now uses the `current_user_id` it already holds (typed `Option<Uuid>` now) instead of a second network round-trip, and the admin modal receives the id as a prop, skipping its own me-fetch; the standalone `/admin` route keeps its original fetch with 401→Home / 403→denied handling.
