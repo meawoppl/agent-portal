@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.49
+
+- **`update_task_handler` uses an `AsChangeset` struct instead of a ten-field load-merge-save; `list_runs` is typed.** `ScheduledTaskChangeset` (ten `Option`s built straight from the request; Diesel's default `treat_none_as_null = false` matches the old keep-existing semantics — verified safe since every updatable column is NOT NULL, so no `Option<Option<T>>` tri-state exists). The ownership pre-load stays (slimmed to an id select) deliberately: it must run before cron validation so nonexistent-task + invalid-cron stays 404, and the blanket diesel→AppError From would turn a filtered-update miss into a 500. `updated_at` still bumps on every request including empty bodies. `list_runs_handler` returns `Json<Vec<Session>>` instead of untyped `serde_json::Value` — byte-identical JSON.
+
 ## 2.8.36
 
 - **Remove the dashboard's dead cost-flash machinery.** `total_cost`/`cost_flash` were written on every Result message (with a 600ms flash-clear timeout) but never read by any `view()`, and the `on_cost_change` prop terminated in an explicit no-op callback "kept for API compatibility". Deleted end-to-end: the props, the `ClearCostFlash` msg arm, the struct fields, the whole Result-block cost computation in `handle_received_output`, and the no-op callback at the `<SessionView>` call site. −34 lines, one less fake data path.
