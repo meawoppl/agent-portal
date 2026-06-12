@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "anyhow",
  "chrono",
@@ -230,12 +230,11 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "anyhow",
  "axum",
  "base64",
- "bigdecimal",
  "chrono",
  "clap",
  "claude-codes",
@@ -274,19 +273,6 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "bigdecimal"
-version = "0.4.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d6867f1565b3aad85681f1015055b087fcfd840d6aeee6eee7f2da317603695"
-dependencies = [
- "autocfg",
- "libm",
- "num-bigint",
- "num-integer",
- "num-traits",
-]
 
 [[package]]
 name = "bincode"
@@ -501,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "anyhow",
  "base64",
@@ -532,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "anyhow",
  "base64",
@@ -570,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -874,16 +860,12 @@ version = "2.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9940fb8467a0a06312218ed384185cb8536aa10d8ec017d0ce7fad2c1bd882d5"
 dependencies = [
- "bigdecimal",
  "bitflags",
  "byteorder",
  "chrono",
  "diesel_derives",
  "downcast-rs",
  "itoa",
- "num-bigint",
- "num-integer",
- "num-traits",
  "pq-sys",
  "r2d2",
  "serde_json",
@@ -1129,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "base64",
  "chrono",
@@ -2257,12 +2239,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
-name = "libm"
-version = "0.2.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
-
-[[package]]
 name = "libredox"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2691,7 +2667,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "anyhow",
  "colored",
@@ -2706,7 +2682,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "anyhow",
  "hex",
@@ -3369,7 +3345,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3431,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.8.60"
+version = "2.8.61"
 dependencies = [
  "base64",
  "chrono",

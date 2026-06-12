@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.8.60"
+version = "2.8.61"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -29,7 +29,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-full"] }
 
 # Database
-diesel = { version = "2.2", features = ["postgres", "r2d2", "chrono", "uuid", "serde_json", "numeric"] }
+diesel = { version = "2.2", features = ["postgres", "r2d2", "chrono", "uuid", "serde_json"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.61
+
+- **Admin user list: 1+7N queries → 3; `bigdecimal` dropped from the dependency tree.** `list_users` ran a session-count query plus `get_user_usage` (6 sequential SUMs with `BigDecimal` round-trips) per user — ~700 queries for a 100-user page. One `GROUP BY user_id` aggregate (with the CLAUDE.md-mandated `::bigint`/`::float8` casts) plus one `deleted_session_costs` load now join in memory; `get_user_usage` itself is deleted (list_users was its only caller). Semantics pinned against a live Postgres: no status filter (as before — replaced/inactive included), `COALESCE(...,0)` ≡ the old `unwrap_or(0)`, absent users get zeros, and usage-query errors still degrade to zeros instead of a 500. `bigdecimal` removed from backend and the diesel `numeric` feature from the workspace (zero `Numeric` columns in the schema) — Cargo.lock −24 lines.
+
 ## 2.8.60
 
 - **Docs drift fixed: log filename, stale workspace tree, completed workplans, loose migration file.** Four docs told users to tail `/tmp/agent-portal-backend.log` — a file nothing writes (scripts write `/tmp/claude-portal-backend.log`); references to the equally-fictional proxy log dropped. CLAUDE.md's workspace tree now matches `[workspace] members` exactly (adds `session-lib`/`claude-session-lib`/`codex-session-lib` with rustdoc-sourced descriptions), its AppState snippet matches the real struct, and the env-var table gains the missing `SPLASH_TEXT`. `PROXY_LIBRARY_EXTRACTION.md` and `SERVER_PAUSED_SESSIONS_WORKPLAN.md` get STATUS: COMPLETED banners citing the shipped artifacts. `fix_migration_names.sql` moved out of `backend/migrations/` to `scripts/` (with the checker's help-text pointer updated) so the migrations dir contains only migrations.
