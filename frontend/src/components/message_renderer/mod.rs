@@ -278,18 +278,6 @@ fn render_raw_json(json: &str) -> Html {
 
 // --- Utility functions (used by renderers and tool_renderers) ---
 
-pub fn truncate_str(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        s
-    } else {
-        let mut end = max_len;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        &s[..end]
-    }
-}
-
 pub(crate) fn shorten_model_name(model: &str) -> Option<String> {
     if model.is_empty() || model.starts_with('<') {
         return None;
@@ -345,18 +333,6 @@ pub(crate) fn shorten_model_name(model: &str) -> Option<String> {
         },
         None => model.split('-').next().unwrap_or(model).to_string(),
     })
-}
-
-pub fn format_duration(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{}ms", ms)
-    } else if ms < 60000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        let mins = ms / 60000;
-        let secs = (ms % 60000) / 1000;
-        format!("{}m {}s", mins, secs)
-    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use crate::components::markdown::linkify_urls;
-use crate::components::message_renderer::format_duration;
 use crate::components::tool_renderers::extract_tool_input;
 use serde_json::Value;
+use shared::fmt::format_duration;
 use shared::BashInput;
 use yew::prelude::*;
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.63
+
+- **`shared::fmt` hosts the cross-crate `truncate_str`/`format_duration`; upload chunk constants live with the protocol.** The byte-identical UTF-8-boundary truncation and the accidentally-divergent duration formats (`"{}m {}s"` frontend vs `"{}m{}s"` proxy logs) are unified on the user-facing spaced form — visible only in proxy debug logs. Six fresh unit tests (the originals had drifted away entirely). `UPLOAD_CHUNK_SIZE`/`MAX_UPLOAD_CHUNK_BYTES`/`MAX_UPLOAD_TOTAL_CHUNKS` moved from frontend/backend into `shared/src/protocol.rs` with doc comments tying sender to validator (values unchanged; a stale "~3.2 GiB" doc figure corrected to 4 GiB).
+
 ## 2.8.62
 
 - **Backend `main.rs` shrunk from 958 to 233 lines (`main()` 633 → 125).** New `background.rs` hosts `spawn_periodic(name, period, state, f)` — replacing five identical spawn/interval skeletons — plus the relocated spend-broadcast/retention/session-age/token-cleanup loops and the device-code purge (extracted from an inline closure). New `config.rs` owns all env parsing (`ServerConfig::from_env`) and the OAuth client build, log lines preserved verbatim and in order. `routes.rs` gains `build_router` with the full route table; the duplicate `/api/sessions/{id}` registration pair is one chained `get().delete()` and the two byte-identical governor configs are one `rate_limit(per_second, burst)` helper. `db.rs` gains `run_migrations_logged` and `seed_dev_user` (now built on #978's `dev_user`/`DEV_USER_EMAIL`). Startup order, intervals, env names/defaults, and graceful shutdown preserved exactly. Bonus: the unused direct `governor = 0.8` dep aligned to 0.10, dropping a duplicate from the lockfile.
