@@ -67,17 +67,14 @@ pub fn permission_dialog(props: &PermissionDialogProps) -> Html {
     render_standard_permission(props)
 }
 
-/// Render the standard permission dialog (Allow/Deny)
-fn render_standard_permission(props: &PermissionDialogProps) -> Html {
-    let perm = &props.permission;
-    let input_preview = format_permission_input(&perm.tool_name, &perm.input);
-    let has_suggestions = !perm.permission_suggestions.is_empty();
-
+/// Build the keyboard navigation callback shared by permission dialogs
+/// (arrow/vim keys to move the selection, Enter/Space to confirm)
+fn nav_keydown(props: &PermissionDialogProps) -> Callback<KeyboardEvent> {
     let on_select_up = props.on_select_up.clone();
     let on_select_down = props.on_select_down.clone();
     let on_confirm = props.on_confirm.clone();
 
-    let onkeydown = Callback::from(move |e: KeyboardEvent| match e.key().as_str() {
+    Callback::from(move |e: KeyboardEvent| match e.key().as_str() {
         "ArrowUp" | "k" => {
             e.prevent_default();
             on_select_up.emit(());
@@ -91,7 +88,43 @@ fn render_standard_permission(props: &PermissionDialogProps) -> Html {
             on_confirm.emit(());
         }
         _ => {}
-    });
+    })
+}
+
+/// Render the selectable option rows shared by permission dialogs
+fn render_options(props: &PermissionDialogProps, options: &[(&str, &str)]) -> Html {
+    options
+        .iter()
+        .enumerate()
+        .map(|(i, (class, label))| {
+            let is_selected = i == props.selected;
+            let cursor = if is_selected { ">" } else { " " };
+            let item_class = if is_selected {
+                format!("permission-option selected {}", class)
+            } else {
+                format!("permission-option {}", class)
+            };
+            let on_select_and_confirm = props.on_select_and_confirm.clone();
+            let onclick = Callback::from(move |_| {
+                on_select_and_confirm.emit(i);
+            });
+            html! {
+                <div class={item_class} {onclick}>
+                    <span class="option-cursor">{ cursor }</span>
+                    <span class="option-label">{ *label }</span>
+                </div>
+            }
+        })
+        .collect::<Html>()
+}
+
+/// Render the standard permission dialog (Allow/Deny)
+fn render_standard_permission(props: &PermissionDialogProps) -> Html {
+    let perm = &props.permission;
+    let input_preview = format_permission_input(&perm.tool_name, &perm.input);
+    let has_suggestions = !perm.permission_suggestions.is_empty();
+
+    let onkeydown = nav_keydown(props);
 
     // Build options list
     let options: Vec<(&str, &str)> = if has_suggestions {
@@ -125,27 +158,7 @@ fn render_standard_permission(props: &PermissionDialogProps) -> Html {
                 </div>
             </div>
             <div class="permission-options">
-                {
-                    options.iter().enumerate().map(|(i, (class, label))| {
-                        let is_selected = i == props.selected;
-                        let cursor = if is_selected { ">" } else { " " };
-                        let item_class = if is_selected {
-                            format!("permission-option selected {}", class)
-                        } else {
-                            format!("permission-option {}", class)
-                        };
-                        let on_select_and_confirm = props.on_select_and_confirm.clone();
-                        let onclick = Callback::from(move |_| {
-                            on_select_and_confirm.emit(i);
-                        });
-                        html! {
-                            <div class={item_class} {onclick}>
-                                <span class="option-cursor">{ cursor }</span>
-                                <span class="option-label">{ *label }</span>
-                            </div>
-                        }
-                    }).collect::<Html>()
-                }
+                { render_options(props, &options) }
             </div>
             <div class="permission-hint">
                 { "↑↓ or tap to select" }
@@ -220,48 +233,29 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
 
                     html! {
                         <div class={question_class}>
-                            {
-                                if !q.header.is_empty() {
-                                    html! {
-                                        <div class="question-header-badge">
-                                            <span class="badge">{ &q.header }</span>
-                                            {
-                                                if is_multi {
-                                                    html! { <span class="multi-badge">{ "multi-select" }</span> }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
-                                            {
-                                                if let Some(answer) = current_answer {
-                                                    html! { <span class="answer-badge">{ format!("✓ {}", answer) }</span> }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
-                                        </div>
-                                    }
-                                } else {
-                                    html! {
-                                        <div class="question-header-badge">
-                                            {
-                                                if is_multi {
-                                                    html! { <span class="multi-badge">{ "multi-select" }</span> }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
-                                            {
-                                                if let Some(answer) = current_answer {
-                                                    html! { <span class="answer-badge">{ format!("✓ {}", answer) }</span> }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
-                                        </div>
+                            <div class="question-header-badge">
+                                {
+                                    if !q.header.is_empty() {
+                                        html! { <span class="badge">{ &q.header }</span> }
+                                    } else {
+                                        html! {}
                                     }
                                 }
-                            }
+                                {
+                                    if is_multi {
+                                        html! { <span class="multi-badge">{ "multi-select" }</span> }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                                {
+                                    if let Some(answer) = current_answer {
+                                        html! { <span class="answer-badge">{ format!("✓ {}", answer) }</span> }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </div>
                             <div class="question-text">{ &q.question }</div>
                             <div class="question-options">
                                 {
@@ -359,25 +353,7 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
 fn render_exitplanmode_permission(props: &PermissionDialogProps) -> Html {
     let perm = &props.permission;
 
-    let on_select_up = props.on_select_up.clone();
-    let on_select_down = props.on_select_down.clone();
-    let on_confirm = props.on_confirm.clone();
-
-    let onkeydown = Callback::from(move |e: KeyboardEvent| match e.key().as_str() {
-        "ArrowUp" | "k" => {
-            e.prevent_default();
-            on_select_up.emit(());
-        }
-        "ArrowDown" | "j" => {
-            e.prevent_default();
-            on_select_down.emit(());
-        }
-        "Enter" | " " => {
-            e.prevent_default();
-            on_confirm.emit(());
-        }
-        _ => {}
-    });
+    let onkeydown = nav_keydown(props);
 
     // Decode the per-tool input typed instead of JSON-poking field names.
     // `perm.input` stays a `serde_json::Value` envelope (it carries different shapes per tool);
@@ -432,27 +408,7 @@ fn render_exitplanmode_permission(props: &PermissionDialogProps) -> Html {
                 }
             </div>
             <div class="permission-options">
-                {
-                    options.iter().enumerate().map(|(i, (class, label))| {
-                        let is_selected = i == props.selected;
-                        let cursor = if is_selected { ">" } else { " " };
-                        let item_class = if is_selected {
-                            format!("permission-option selected {}", class)
-                        } else {
-                            format!("permission-option {}", class)
-                        };
-                        let on_select_and_confirm = props.on_select_and_confirm.clone();
-                        let onclick = Callback::from(move |_| {
-                            on_select_and_confirm.emit(i);
-                        });
-                        html! {
-                            <div class={item_class} {onclick}>
-                                <span class="option-cursor">{ cursor }</span>
-                                <span class="option-label">{ *label }</span>
-                            </div>
-                        }
-                    }).collect::<Html>()
-                }
+                { render_options(props, &options) }
             </div>
             <div class="permission-hint">
                 { "↑↓ or tap to select" }

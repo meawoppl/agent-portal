@@ -269,6 +269,24 @@ pub struct NewScheduledTask {
     pub max_runtime_minutes: i32,
 }
 
+/// Partial update for a scheduled task. `None` fields are left unchanged
+/// (Diesel skips them with the default `treat_none_as_null = false`); all
+/// columns here are NOT NULL, so there is no set-to-null case to represent.
+#[derive(Debug, AsChangeset)]
+#[diesel(table_name = crate::schema::scheduled_tasks)]
+pub struct ScheduledTaskChangeset {
+    pub name: Option<String>,
+    pub cron_expression: Option<String>,
+    pub timezone: Option<String>,
+    pub hostname: Option<String>,
+    pub working_directory: Option<String>,
+    pub prompt: Option<String>,
+    pub claude_args: Option<serde_json::Value>,
+    pub agent_type: Option<String>,
+    pub enabled: Option<bool>,
+    pub max_runtime_minutes: Option<i32>,
+}
+
 // ============================================================================
 // Session Continuation Models
 // ============================================================================
@@ -345,6 +363,44 @@ pub struct TurnMetric {
     pub total_cost_usd: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub user_id: Uuid,
+}
+
+impl TurnMetric {
+    /// Map a DB `TurnMetric` row into the wire-facing `shared::TurnMetrics`
+    /// shape. Field-by-field rather than `From` impl so the two structs stay
+    /// explicitly synchronized without one silently picking up a stray field
+    /// from the other. Shared by the REST turn-metrics handlers and the
+    /// WebSocket persist-and-broadcast path.
+    pub fn into_wire(self) -> shared::TurnMetrics {
+        shared::TurnMetrics {
+            id: Some(self.id),
+            // Nullable in the DB (orphaned-from-session rows); the wire shape
+            // keeps a non-null `Uuid`, so fall back to nil for rows whose
+            // session is gone. Freshly inserted rows always carry one.
+            session_id: self.session_id.unwrap_or_default(),
+            user_message_id: self.user_message_id,
+            agent_type: self.agent_type,
+            model: self.model,
+            service_tier: self.service_tier,
+            started_at: self.started_at,
+            first_token_at: self.first_token_at,
+            completed_at: self.completed_at,
+            ttft_ms: self.ttft_ms,
+            total_duration_ms: self.total_duration_ms,
+            generation_duration_ms: self.generation_duration_ms,
+            max_inter_token_gap_ms: self.max_inter_token_gap_ms,
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            cache_creation_tokens: self.cache_creation_tokens,
+            cache_read_tokens: self.cache_read_tokens,
+            thinking_tokens: self.thinking_tokens,
+            stop_reason: self.stop_reason,
+            is_error: self.is_error,
+            tool_call_count: self.tool_call_count,
+            stream_restarts: self.stream_restarts,
+            total_cost_usd: self.total_cost_usd,
+        }
+    }
 }
 
 #[derive(Debug, Insertable)]
