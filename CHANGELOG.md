@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.56
+
+- **Native-crate misc dedup: hostname helper, default session name, dead config fields, heartbeat constant.** `hostname_or_unknown()` in claude-session-lib replaces 7 inline copies (unified on `to_string_lossy`; non-UTF-8 edge cases now render lossily instead of three different fallback strings — normal hostnames byte-identical; portal-auth keeps its copy rather than inverting the dependency graph, and one proxy site keeps its no-fallback `Option<String>` semantics deliberately). `default_session_name` moved next to `ProxySessionConfig`. Write-only `ProxyConfig` fields removed: `SessionAuth.user_id`, `session_prefix` (+ setter + init-URL plumbing), `Preferences.auto_open_browser`. `atomic_save` delegates to `save_with_lock`. `probe.rs` uses `AgentType::as_str()`. Launcher's heartbeat cadence moved to `shared/src/protocol.rs` as `LAUNCHER_HEARTBEAT_INTERVAL_SECS` with a doc note that the backend deliberately has no staleness timeout (liveness = the WS connection). Two issue items were already done on main (#1003 removed the RegisterFields duplication and the `unreachable!`). Net −46 lines.
+
 ## 2.8.37
 
 - **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
