@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.51
+
+- **Session rail: dropdown options share one button shell and close-then-emit helper; dead tick counter removed.** `close_then(menu_session, action)` and `menu_option(extra_classes, label, hint, onclick)` absorb ~9 repeated button shells and 7 close-menu closures (hide/pause/leave/delete/share/schedule/copy-id/stop/blocked-stop); the blocked-stop and schedule options share one `open_schedule` callback. The sparkline tick effect's `Rc<Cell<u32>>` counter (incremented every 100ms, never read) is deleted. The compaction/task range loops folded into one `(ranges, class)` flat_map preserving render order. Deliberately distinct shells (two-click stop confirm, disabled spans, PR/repo links) untouched. Net −27 lines with far less repetition in the dropdown block.
+
 ## 2.8.36
 
 - **Remove the dashboard's dead cost-flash machinery.** `total_cost`/`cost_flash` were written on every Result message (with a 600ms flash-clear timeout) but never read by any `view()`, and the `on_cost_change` prop terminated in an explicit no-op callback "kept for API compatibility". Deleted end-to-end: the props, the `ClearCostFlash` msg arm, the struct fields, the whole Result-block cost computation in `handle_received_output`, and the no-op callback at the `<SessionView>` call site. −34 lines, one less fake data path.
