@@ -1,3 +1,4 @@
+use crate::components::{ConfirmModal, ConfirmModalStyle};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::{
@@ -493,19 +494,12 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
             }
 
             if let Some((message, action)) = &*confirm_action {
-                <div class="modal-overlay" onclick={cancel_confirm.clone()}>
-                    <div class="confirm-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        <p>{ message }</p>
-                        <div class="confirm-actions">
-                            <button class="cancel-button" onclick={cancel_confirm.clone()}>
-                                { "Cancel" }
-                            </button>
-                            <button class="confirm-button" onclick={action.clone()}>
-                                { "Confirm" }
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ConfirmModal
+                    message={message.clone()}
+                    style={ConfirmModalStyle::Panel}
+                    on_confirm={action.clone()}
+                    on_cancel={cancel_confirm.clone()}
+                />
             }
         </>
     }
