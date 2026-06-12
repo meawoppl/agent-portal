@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.64
+
+- **Frontend helper consolidation: localStorage, spend tiers, file sizes, token counts, model labels.** `utils::storage_get/storage_set` replace 9 inlined `window().local_storage()` chains (plus one bool-pref load/save pair helper in dashboard types); the spend-tier 1/10/100/1000/10000 ladder is encoded once (`spend_tier` + `spend_tier_class`) instead of twice in page.rs; `format_file_size` and `format_token_count` move to utils with their tests; the pill's `shorten_model_name` is renamed `compact_model_label`, killing the same-name-different-behavior import hazard; `window_param` (an exact duplicate of `TimeWindow::label`) is deleted. Deliberate skips, documented: two token formatters render genuinely different strings, `pair_label` ≠ `format_model_tier_label` (vendor-stripping/case differ — a doc note pins the divergence), and the expiry-helper duplication had already disappeared upstream. ~95 lines of duplicated logic removed.
+
 ## 2.8.52
 
 - **ScheduledTask wire trio flattened around one `ScheduledTaskFields` core; MessageRole/PortalMessage serde simplified.** `ScheduledTaskConfig`/`CreateScheduledTaskRequest`/`ScheduledTaskInfo` repeated ~10 fields; they now `#[serde(flatten)]` a shared core (the `RegisterFields` pattern). Serialized key sets are byte-identical (only contiguous key order shifts; all consumers are serde) and Create's deserialization defaults are preserved exactly — five new wire-compat tests pin the JSON shapes including `last_session_id: null` and old-key-order parsing. As a side effect `task_to_config` became `pub(crate)` and launcher registration reuses it instead of hand-building the config. `MessageRole` gains `as_str()` with `Display` delegating (the `AgentType` pattern; `from_type_str` fallback verbatim), and `PortalMessage`'s always-"portal" `message_type` is now encoded once via a const + `with_content` constructor used by all six construction sites.
