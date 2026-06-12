@@ -118,10 +118,14 @@ impl Component for ShareDialog {
                                 "User not found".to_string(),
                             ));
                         }
-                        Ok(response) if response.status() == 409 => {
-                            link.send_message(ShareDialogMsg::SetError(
-                                "User is already a member".to_string(),
-                            ));
+                        Ok(response) if response.status() == 400 => {
+                            let msg = response
+                                .text()
+                                .await
+                                .ok()
+                                .filter(|t| !t.is_empty())
+                                .unwrap_or_else(|| "Failed to add member".to_string());
+                            link.send_message(ShareDialogMsg::SetError(msg));
                         }
                         Ok(response) => {
                             log::error!("Failed to add member: {}", response.status());
