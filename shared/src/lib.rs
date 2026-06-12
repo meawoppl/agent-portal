@@ -19,7 +19,7 @@ pub mod protocol;
 // API client types and trait
 pub mod api;
 pub use api::{
-    ApiError, CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage, ModelUsageEntry,
+    CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage, ModelUsageEntry,
     SoundSettingsResponse, TaskNotificationExtra, TurnMetrics, TurnMetricsResponse,
 };
 
@@ -247,14 +247,6 @@ pub struct SessionInfo {
     pub claude_args: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UserInfo {
-    pub id: Uuid,
-    pub email: String,
-    pub name: Option<String>,
-    pub avatar_url: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageRole {
@@ -457,12 +449,6 @@ impl std::fmt::Debug for PortalContent {
 // ============================================================================
 // Device Flow Types (shared between backend and proxy)
 // ============================================================================
-
-/// Request to poll for device flow completion
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DevicePollRequest {
-    pub device_code: String,
-}
 
 /// Response from device flow polling
 #[derive(Debug, Clone, Serialize, Deserialize)]
