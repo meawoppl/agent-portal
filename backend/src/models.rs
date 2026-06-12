@@ -280,6 +280,24 @@ pub struct NewScheduledTask {
     pub max_runtime_minutes: i32,
 }
 
+/// Partial update for a scheduled task. `None` fields are left unchanged
+/// (Diesel skips them with the default `treat_none_as_null = false`); all
+/// columns here are NOT NULL, so there is no set-to-null case to represent.
+#[derive(Debug, AsChangeset)]
+#[diesel(table_name = crate::schema::scheduled_tasks)]
+pub struct ScheduledTaskChangeset {
+    pub name: Option<String>,
+    pub cron_expression: Option<String>,
+    pub timezone: Option<String>,
+    pub hostname: Option<String>,
+    pub working_directory: Option<String>,
+    pub prompt: Option<String>,
+    pub claude_args: Option<serde_json::Value>,
+    pub agent_type: Option<String>,
+    pub enabled: Option<bool>,
+    pub max_runtime_minutes: Option<i32>,
+}
+
 // ============================================================================
 // Session Continuation Models
 // ============================================================================
