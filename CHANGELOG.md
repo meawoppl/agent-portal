@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.57
+
+- **Launcher registration reuses the scheduled-task sync helpers instead of hand-building `ScheduledTaskConfig`.** The 45-line registration block (including a redundant hostname re-fetch from the launchers map) is now one call to a new `send_initial_schedule_sync(app_state, user_id, launcher_id, hostname, launcher_name)` — a single-launcher variant chosen deliberately over the broadcast `send_schedule_sync`, which (a) targets all of a user's launchers and (b) always sends even when empty (needed so deletes clear state), whereas registration historically sends nothing when no enabled tasks match the hostname. Both variants share a new `load_enabled_tasks` and all config construction flows through `task_to_config`, so the #995 field flatten lands in exactly one place. Same mpsc delivery, same log line.
+
 ## 2.8.37
 
 - **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
