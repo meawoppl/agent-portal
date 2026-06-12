@@ -39,6 +39,36 @@ fn login_callback() -> Callback<MouseEvent> {
     })
 }
 
+/// Version + GitHub + bug-report footer shared by both splash variants.
+/// `github_icon` controls the icon span the marketing variant renders
+/// inside the GitHub link.
+fn splash_footer(github_icon: bool) -> Html {
+    html! {
+        <div class="splash-footer">
+            <span class="version">{ format!("v{}", VERSION) }</span>
+            <a
+                href="https://github.com/meawoppl/agent-portal"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="footer-link"
+            >
+                if github_icon {
+                    <span class="github-icon">{ "" }</span>
+                }
+                { "GitHub" }
+            </a>
+            <a
+                href="https://github.com/meawoppl/agent-portal/issues/new"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="footer-link bug-report"
+            >
+                { "Report a Bug" }
+            </a>
+        </div>
+    }
+}
+
 fn minimal_splash(heading: String) -> Html {
     let handle_login = login_callback();
 
@@ -54,25 +84,7 @@ fn minimal_splash(heading: String) -> Html {
                     { " Sign in with Google" }
                 </button>
 
-                <div class="splash-footer">
-                    <span class="version">{ format!("v{}", VERSION) }</span>
-                    <a
-                        href="https://github.com/meawoppl/agent-portal"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="footer-link"
-                    >
-                        { "GitHub" }
-                    </a>
-                    <a
-                        href="https://github.com/meawoppl/agent-portal/issues/new"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="footer-link bug-report"
-                    >
-                        { "Report a Bug" }
-                    </a>
-                </div>
+                { splash_footer(false) }
             </div>
         </div>
     }
@@ -185,26 +197,7 @@ fn marketing_splash() -> Html {
                     { " Sign in with Google" }
                 </button>
 
-                <div class="splash-footer">
-                    <span class="version">{ format!("v{}", VERSION) }</span>
-                    <a
-                        href="https://github.com/meawoppl/agent-portal"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="footer-link"
-                    >
-                        <span class="github-icon">{ "" }</span>
-                        { "GitHub" }
-                    </a>
-                    <a
-                        href="https://github.com/meawoppl/agent-portal/issues/new"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="footer-link bug-report"
-                    >
-                        { "Report a Bug" }
-                    </a>
-                </div>
+                { splash_footer(true) }
             </div>
         </div>
     }

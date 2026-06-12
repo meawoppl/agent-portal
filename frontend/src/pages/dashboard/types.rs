@@ -47,11 +47,6 @@ pub struct MessageData {
     /// Display name of the sender (looked up from users table)
     #[serde(default)]
     pub sender_name: Option<String>,
-    /// Which agent's wire format the `content` JSON came from
-    /// ("claude" / "codex"). `#[serde(default)]` keeps older API payloads
-    /// (and any in-flight messages that haven't been re-serialized) parseable.
-    #[serde(default)]
-    pub agent_type: String,
 }
 
 /// Response from the messages API endpoint — the shared envelope

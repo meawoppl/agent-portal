@@ -125,10 +125,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             sender_user_id,
             sender_name,
             // agent_type is plumbed through the wire (per-message tag) and
-            // available here for future multi-agent UI work — see
-            // #723. For now the frontend reads agent_type off the
-            // historical-read path (`MessageData::agent_type`); live
-            // dispatch stays agent-agnostic.
+            // available here for future multi-agent UI work — see #723.
+            // The frontend renders off the session-level agent_type; both
+            // the live and historical-read paths stay agent-agnostic.
             agent_type: _,
             created_at,
         } => {

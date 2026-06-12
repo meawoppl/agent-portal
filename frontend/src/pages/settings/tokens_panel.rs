@@ -137,6 +137,34 @@ struct NewTokenForm {
     expires_in_days: u32,
 }
 
+/// Success card shown after a token is created or renewed: the one-time
+/// secret, the init URL, the expiry, and a "Done" button.
+fn render_token_secret(
+    title: &str,
+    token_response: &CreateProxyTokenResponse,
+    on_done: Callback<MouseEvent>,
+) -> Html {
+    html! {
+        <div class="token-created-success">
+            <h3>{ title }</h3>
+            <p class="warning">
+                { "Copy this token now. It will not be shown again!" }
+            </p>
+            <div class="token-display">
+                <code>{ &token_response.token }</code>
+            </div>
+            <div class="init-url">
+                <label>{ "Or use this initialization URL:" }</label>
+                <code>{ &token_response.init_url }</code>
+            </div>
+            <p class="expires-info">
+                { format!("Expires: {}", utils::format_timestamp(&token_response.expires_at)) }
+            </p>
+            <button onclick={on_done}>{ "Done" }</button>
+        </div>
+    }
+}
+
 #[derive(Properties, PartialEq)]
 pub struct TokensPanelProps {
     pub on_tokens_loaded: Callback<Vec<ProxyTokenInfo>>,
@@ -372,23 +400,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                 if *show_create_form {
                     <div class="create-token-form">
                         if let Some(token_response) = &*created_token {
-                            <div class="token-created-success">
-                                <h3>{ "Token Created Successfully" }</h3>
-                                <p class="warning">
-                                    { "Copy this token now. It will not be shown again!" }
-                                </p>
-                                <div class="token-display">
-                                    <code>{ &token_response.token }</code>
-                                </div>
-                                <div class="init-url">
-                                    <label>{ "Or use this initialization URL:" }</label>
-                                    <code>{ &token_response.init_url }</code>
-                                </div>
-                                <p class="expires-info">
-                                    { format!("Expires: {}", utils::format_timestamp(&token_response.expires_at)) }
-                                </p>
-                                <button onclick={toggle_create_form.clone()}>{ "Done" }</button>
-                            </div>
+                            { render_token_secret("Token Created Successfully", token_response, toggle_create_form.clone()) }
                         } else {
                             <form onsubmit={on_create_token}>
                                 <div class="form-group">
@@ -469,26 +481,10 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                     Callback::from(move |_| renewed_token.set(None))
                 }}>
                     <div class="confirm-modal token-renewed-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        <div class="token-created-success">
-                            <h3>{ "Token Renewed" }</h3>
-                            <p class="warning">
-                                { "Copy this token now. It will not be shown again!" }
-                            </p>
-                            <div class="token-display">
-                                <code>{ &token_response.token }</code>
-                            </div>
-                            <div class="init-url">
-                                <label>{ "Or use this initialization URL:" }</label>
-                                <code>{ &token_response.init_url }</code>
-                            </div>
-                            <p class="expires-info">
-                                { format!("Expires: {}", utils::format_timestamp(&token_response.expires_at)) }
-                            </p>
-                            <button onclick={{
-                                let renewed_token = renewed_token.clone();
-                                Callback::from(move |_| renewed_token.set(None))
-                            }}>{ "Done" }</button>
-                        </div>
+                        { render_token_secret("Token Renewed", token_response, {
+                            let renewed_token = renewed_token.clone();
+                            Callback::from(move |_| renewed_token.set(None))
+                        }) }
                     </div>
                 </div>
             }

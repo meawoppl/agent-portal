@@ -236,12 +236,10 @@ fn render_turn_completed(
     // and the cache-hit-% chip universally drops (no cache breakdown on the
     // wire today); the chips that do render are tok/s, TTFT, tokens-in/out
     // (and max gap when > 1s).
-    let metrics_footer = match turn_metrics {
-        Some(m) => {
-            crate::components::message_renderer::turn_metrics_footer::render_turn_metrics_footer(m)
-        }
-        None => html! {},
-    };
+    let metrics_footer =
+        crate::components::message_renderer::turn_metrics_footer::render_turn_metrics_footer(
+            turn_metrics,
+        );
 
     html! {
         <div class="claude-message result-message success">
@@ -320,12 +318,10 @@ fn render_turn_failed(
     // Even a failed turn carries useful metrics (TTFT before the failure,
     // tokens consumed, stream_restarts on retried-and-still-failed rate
     // limits, etc.) — render the footer if we have a row for it.
-    let metrics_footer = match turn_metrics {
-        Some(m) => {
-            crate::components::message_renderer::turn_metrics_footer::render_turn_metrics_footer(m)
-        }
-        None => html! {},
-    };
+    let metrics_footer =
+        crate::components::message_renderer::turn_metrics_footer::render_turn_metrics_footer(
+            turn_metrics,
+        );
 
     html! {
         <div class="claude-message error-message-display">
