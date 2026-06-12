@@ -159,13 +159,11 @@ cargo run -p claude-portal -- \
 ## Log Files
 
 Scripts write logs to `/tmp/`:
-- `/tmp/agent-portal-backend.log` - Backend logs
-- `/tmp/agent-portal-proxy.log` - Proxy logs
+- `/tmp/claude-portal-backend.log` - Backend logs
 
 View logs:
 ```bash
-tail -f /tmp/agent-portal-backend.log
-tail -f /tmp/agent-portal-proxy.log
+tail -f /tmp/claude-portal-backend.log
 ```
 
 ## Troubleshooting

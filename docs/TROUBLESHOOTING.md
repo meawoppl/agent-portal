@@ -194,7 +194,7 @@ cargo run -p backend -- --dev-mode
 curl http://localhost:3000/
 
 # Check backend logs
-tail -f /tmp/agent-portal-backend.log
+tail -f /tmp/claude-portal-backend.log
 
 # Verify WebSocket endpoint
 wscat -c ws://localhost:3000/ws/session
@@ -321,8 +321,7 @@ If you're still stuck:
 
 1. Check the logs:
    ```bash
-   tail -f /tmp/agent-portal-backend.log
-   tail -f /tmp/agent-portal-proxy.log
+   tail -f /tmp/claude-portal-backend.log
    ```
 
 2. Enable verbose output:

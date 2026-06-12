@@ -1,5 +1,7 @@
 # Server-Side Paused Sessions Workplan
 
+> **STATUS: COMPLETED** — implemented: `sessions.paused` and `sessions.claude_args` columns exist in `backend/src/schema.rs`, and `POST /api/sessions/{id}/pause` / `POST /api/sessions/{id}/resume` routes are registered in `backend/src/main.rs`. Kept as a historical design record.
+
 ## Goal
 
 Prevent launcher/backend restarts from automatically resuming Claude sessions that the user has paused in the dashboard. Paused sessions must remain resumable on demand, but should not spawn `claude --resume <session_id>` during reconnect/startup because that reloads the full conversation and burns many tokens.

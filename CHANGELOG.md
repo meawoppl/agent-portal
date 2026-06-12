@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.60
+
+- **Docs drift fixed: log filename, stale workspace tree, completed workplans, loose migration file.** Four docs told users to tail `/tmp/agent-portal-backend.log` — a file nothing writes (scripts write `/tmp/claude-portal-backend.log`); references to the equally-fictional proxy log dropped. CLAUDE.md's workspace tree now matches `[workspace] members` exactly (adds `session-lib`/`claude-session-lib`/`codex-session-lib` with rustdoc-sourced descriptions), its AppState snippet matches the real struct, and the env-var table gains the missing `SPLASH_TEXT`. `PROXY_LIBRARY_EXTRACTION.md` and `SERVER_PAUSED_SESSIONS_WORKPLAN.md` get STATUS: COMPLETED banners citing the shipped artifacts. `fix_migration_names.sql` moved out of `backend/migrations/` to `scripts/` (with the checker's help-text pointer updated) so the migrations dir contains only migrations.
+
 ## 2.8.59
 
 - **Session access checks centralized in `session_access.rs`.** One canonical `verify_session_reader` (any-role membership join, 404 on miss) replaces three near-identical implementations in messages, turn-metrics, and the WS auth module (now deleted); `is_session_mutator` is a thin wrapper over `verify_session_mutator` instead of a re-implementation (orphaned `can_mutate_role` + tests removed). The three owner checks in sessions.rs were NOT identical — delete accepts the `sessions.user_id` owner without a member row (404 on miss) while the member-management gates require an actual owner member row (403) — so two helpers preserve both semantics: `verify_session_owner` and `verify_owner_membership`. One nuance: the messages path used to map DB errors to 404; it now surfaces 500 like the other paths (authorization outcomes unchanged). Net −86 lines.
