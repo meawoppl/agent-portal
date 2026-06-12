@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -18,9 +21,9 @@ warn() { echo -e "${YELLOW}⚠${NC} $1"; }
 
 cleanup() {
     log "Cleaning up..."
-    docker-compose -f docker-compose.test.yml down -v 2>/dev/null || true
+    docker compose -f docker-compose.test.yml down -v 2>/dev/null || true
     pkill -f "cargo run -p backend" 2>/dev/null || true
-    pkill -f "cargo run -p proxy" 2>/dev/null || true
+    pkill -f "cargo run -p claude-portal" 2>/dev/null || true
 }
 
 trap cleanup EXIT INT TERM
@@ -53,11 +56,11 @@ cleanup
 sleep 2
 
 log "🗄️  Starting PostgreSQL..."
-docker-compose -f docker-compose.test.yml up -d db
+docker compose -f docker-compose.test.yml up -d db
 
 log "⏳ Waiting for database..."
 for i in {1..30}; do
-    if docker-compose -f docker-compose.test.yml exec -T db pg_isready -U claude_portal > /dev/null 2>&1; then
+    if docker compose -f docker-compose.test.yml exec -T db pg_isready -U claude_portal > /dev/null 2>&1; then
         success "Database is ready"
         break
     fi
@@ -65,21 +68,13 @@ for i in {1..30}; do
     sleep 1
 done
 
-export DATABASE_URL="postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal"
+export DATABASE_URL="$DEV_DATABASE_URL"
 
 log "🔄 Running migrations..."
 
-# Check if diesel CLI is installed
 if ! command -v diesel &> /dev/null; then
-    warn "diesel CLI not installed. Installing now..."
-    echo "This may take a few minutes..."
-    if cargo install diesel_cli --no-default-features --features postgres; then
-        success "diesel CLI installed"
-    else
-        error "Failed to install diesel CLI. Install manually:"
-        echo "  cargo install diesel_cli --no-default-features --features postgres"
-        exit 1
-    fi
+    error "diesel CLI not installed. Run: ./scripts/install-deps.sh"
+    exit 1
 fi
 
 cd backend && diesel migration run && cd ..
@@ -106,7 +101,7 @@ done
 log "🔌 Starting proxy (will prompt for OAuth)..."
 echo ""
 
-cargo run -p proxy -- \
+cargo run -p claude-portal -- \
     --backend-url ws://localhost:3000 \
     --session-name "oauth-test-session" &
 PROXY_PID=$!

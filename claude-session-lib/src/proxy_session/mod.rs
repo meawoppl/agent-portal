@@ -9,6 +9,7 @@ mod ws_reader;
 
 pub(crate) use portal_reminder::inject_portal_reminder;
 
+pub use wiggum::wiggum_prompt;
 pub use ws_reader::{classify_portal_input, RoutedPortalInput};
 
 use std::sync::Arc;
@@ -75,6 +76,24 @@ pub struct ProxySessionConfig {
     /// Persist-back closure for the codex app-server thread id; see
     /// [`CodexThreadIdSink`] doc.
     pub codex_thread_id_sink: Option<CodexThreadIdSink>,
+}
+
+/// The local hostname, or `"unknown"` when the OS lookup fails.
+/// Non-UTF-8 hostnames are converted lossily (invalid bytes become U+FFFD).
+pub fn hostname_or_unknown() -> String {
+    hostname::get()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Default session name when the user doesn't supply one:
+/// `<hostname>-<YYYYmmdd-HHMMSS>` (local time).
+pub fn default_session_name() -> String {
+    format!(
+        "{}-{}",
+        hostname_or_unknown(),
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    )
 }
 
 /// Exponential backoff helper
@@ -218,17 +237,7 @@ impl<'a, A: Agent> SessionState<'a, A> {
         input_tx: mpsc::UnboundedSender<PortalInput>,
         input_rx: &'a mut mpsc::UnboundedReceiver<PortalInput>,
     ) -> Result<Self> {
-        let output_buffer = match PendingOutputBuffer::new(config.session_id) {
-            Ok(buf) => buf,
-            Err(e) => {
-                warn!(
-                    "Failed to create output buffer, continuing without persistence: {}",
-                    e
-                );
-                PendingOutputBuffer::new(config.session_id)?
-            }
-        };
-        let output_buffer = Arc::new(Mutex::new(output_buffer));
+        let output_buffer = Arc::new(Mutex::new(PendingOutputBuffer::new(config.session_id)?));
 
         Ok(Self {
             config,
@@ -480,10 +489,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
 
     // Send a portal message with session details
     {
-        let hostname = hostname::get()
-            .ok()
-            .and_then(|h| h.into_string().ok())
-            .unwrap_or_else(|| "unknown".to_string());
+        let hostname = hostname_or_unknown();
 
         let status_line = if session.first_connection {
             "**Session started**".to_string()
@@ -593,10 +599,7 @@ pub async fn register_session(
 ) -> Result<u32, Duration> {
     info!("Registering session...");
 
-    let hostname = hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string());
+    let hostname = hostname_or_unknown();
 
     let register_msg = ProxyToServer::Register(shared::RegisterFields {
         session_id: config.session_id,
@@ -893,17 +896,14 @@ async fn run_main_loop<A: Agent>(
                     &state.git_metadata,
                 )
                 .await;
-                let wiggum_prompt = format!(
-                    "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
-                    wiggum_input.text
-                );
+                let prompt = wiggum_prompt(&wiggum_input.text);
                 state.wiggum_state = Some(WiggumState {
                     original_prompt: wiggum_input.text,
                     iteration: 1,
                     loop_start: Instant::now(),
                     loop_durations: Vec::new(),
                 });
-                if let Err(e) = claude_session.send_input(serde_json::Value::String(wiggum_prompt)).await {
+                if let Err(e) = claude_session.send_input(serde_json::Value::String(prompt)).await {
                     error!("Failed to send wiggum prompt to Claude: {}", e);
                     return ConnectionResult::ClaudeExited;
                 }
@@ -1281,29 +1281,7 @@ async fn read_download_file(
     }
 }
 
-/// Truncate a string to max length
-pub(crate) fn truncate(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        s
-    } else {
-        // Find a safe UTF-8 boundary
-        let mut end = max_len;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        &s[..end]
-    }
-}
-
-/// Format duration in ms to human readable
-pub(crate) fn format_duration(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{}ms", ms)
-    } else if ms < 60000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        let mins = ms / 60000;
-        let secs = (ms % 60000) / 1000;
-        format!("{}m{}s", mins, secs)
-    }
-}
+// String helpers shared with the frontend (see `shared::fmt`). Note the
+// minute format is `"{}m {}s"` (with a space), matching the frontend
+// transcript — the old local copy here used `"{}m{}s"`.
+pub(crate) use shared::fmt::{format_duration, truncate_str as truncate};

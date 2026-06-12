@@ -52,7 +52,7 @@ if [[ $ERRORS -gt 0 ]]; then
     echo "  YYYY-MM-DD-HHMMSS_snake_case_description"
     echo ""
     echo "If renaming an existing migration, update the database with:"
-    echo "  See backend/migrations/fix_migration_names.sql for an example"
+    echo "  See scripts/fix_migration_names.sql for an example"
     exit 1
 else
     echo "PASSED: All migrations follow naming convention"

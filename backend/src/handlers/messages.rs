@@ -1,7 +1,7 @@
 use crate::auth::CurrentUserId;
 use crate::errors::AppError;
 use crate::handlers::helpers::{parse_iso_cursor, sender_names};
-use crate::handlers::session_access::verify_session_mutator;
+use crate::handlers::session_access::{verify_session_mutator, verify_session_reader};
 use crate::models::{Message, NewMessage};
 use crate::schema::messages;
 use crate::AppState;
@@ -80,22 +80,6 @@ pub struct MessageWithSender {
     pub sender_name: Option<String>,
 }
 
-/// Verify that a user has access to a session (is a member with any role)
-fn verify_session_access(
-    conn: &mut diesel::pg::PgConnection,
-    session_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-) -> Result<crate::models::Session, AppError> {
-    use crate::schema::{session_members, sessions};
-    sessions::table
-        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
-        .filter(sessions::id.eq(session_id))
-        .filter(session_members::user_id.eq(user_id))
-        .select(crate::models::Session::as_select())
-        .first::<crate::models::Session>(conn)
-        .map_err(|_| AppError::NotFound("Session not found"))
-}
-
 /// Create a new message for a session
 pub async fn create_message(
     State(app_state): State<Arc<AppState>>,
@@ -148,7 +132,7 @@ pub async fn list_messages(
 ) -> Result<Json<MessagesListResponse<MessageWithSender>>, AppError> {
     let mut conn = app_state.conn()?;
 
-    let _session = verify_session_access(&mut conn, session_id, current_user_id)?;
+    let _session = verify_session_reader(&mut conn, session_id, current_user_id)?;
 
     // Validate + parse params before touching the DB so a malformed cursor
     // fails fast with `400` rather than e.g. silently returning everything

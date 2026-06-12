@@ -17,6 +17,7 @@ use super::history::CommandHistory;
 use crate::components::VoiceInput;
 use crate::utils::format_file_size;
 use gloo::timers::callback::Timeout;
+use shared::protocol::UPLOAD_CHUNK_SIZE;
 use shared::{ClientToServer, SendMode};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
@@ -537,8 +538,7 @@ impl InputBar {
                 let uint8_array = js_sys::Uint8Array::new(&array_buffer);
                 let bytes = uint8_array.to_vec();
 
-                const CHUNK_SIZE: usize = 1024;
-                let total_chunks = bytes.len().div_ceil(CHUNK_SIZE).max(1) as u32;
+                let total_chunks = bytes.len().div_ceil(UPLOAD_CHUNK_SIZE).max(1) as u32;
                 let upload_id = Uuid::new_v4().to_string();
 
                 let ct = if content_type.is_empty() {
@@ -558,8 +558,8 @@ impl InputBar {
                 ));
 
                 for i in 0..total_chunks {
-                    let start = i as usize * CHUNK_SIZE;
-                    let end = ((i as usize + 1) * CHUNK_SIZE).min(bytes.len());
+                    let start = i as usize * UPLOAD_CHUNK_SIZE;
+                    let end = ((i as usize + 1) * UPLOAD_CHUNK_SIZE).min(bytes.len());
                     let chunk = &bytes[start..end];
                     let encoded =
                         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, chunk);
