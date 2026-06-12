@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.43
+
+- **`handle_claude_output` reads the session row once per proxy output frame instead of twice.** The owner-only `select(sessions::user_id)` is hoisted above both consumers (image extraction and the message-insert gate); the full `Session` load — used only for `user_id` — is gone. Failure semantics per consumer are identical to before (lookup failure skips extraction and insert but never blocks `last_activity` or `OutputAck`); the second pool *checkout* is kept deliberately so no connection is held across CPU-bound base64 work and a transient pool error can't poison the ack path.
+
 ## 2.8.42
 
 - **One `ConfirmModal` component replaces five copy-pasted confirm dialogs.** Admin user actions, settings sessions/tokens panels, and the dashboard's Delete/Leave session modals all hand-rolled the same overlay + message + cancel/confirm markup. The new component parameterizes the three pre-existing CSS class families (`Standard` admin, `Panel` settings, `Danger` dashboard with title/warning) so the rendered DOM is byte-identical at every site; overlay-click-cancels and inner stop-propagation semantics preserved. The admin ban dialog (text-input modal) and token-renewed dialog (single "Done" button) were deliberately not migrated — they aren't confirm modals.
