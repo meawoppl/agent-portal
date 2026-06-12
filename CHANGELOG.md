@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.45
+
+- **Validation errors return 400 instead of 500.** Caller mistakes ("Invalid role" ×2 — now a shared `validate_member_role` helper — "User is already a member", "Owner cannot remove themselves", "Cannot change own role", "Invalid cron expression" ×2) were mapped to `AppError::Internal`, logging server faults for user typos and masking the message behind "Internal server error". All other `Internal` uses audited and left alone (genuine infra faults). Frontend: the share dialog's add-member 409 branch never fired (backend sent 500) — repointed at 400, so "User is already a member" / "Invalid role" now surface verbatim; the schedule dialog's generic `Error ({status})` display now shows the real cron message.
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
