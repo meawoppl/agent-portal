@@ -1,4 +1,6 @@
 mod auth;
+mod background;
+mod config;
 mod db;
 mod errors;
 mod handlers;
@@ -9,25 +11,14 @@ mod schema;
 
 use crate::db::DbPool;
 use crate::handlers::device_flow::DeviceFlowStore;
-use axum::{
-    routing::{get, post},
-    Router,
-};
 use clap::Parser;
-use oauth2::{
-    basic::BasicClient, AuthUrl, ClientId, ClientSecret, EndpointNotSet, EndpointSet, RedirectUrl,
-    TokenUrl,
-};
-use shared::WsEndpoint;
-use std::{env, net::SocketAddr, sync::Arc};
-use tower_cookies::{CookieManagerLayer, Key};
-use tower_governor::governor::GovernorConfigBuilder;
-use tower_governor::key_extractor::SmartIpKeyExtractor;
-use tower_governor::GovernorLayer;
-use tower_http::cors::{Any, CorsLayer};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tower_cookies::Key;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use handlers::websocket::SessionManager;
+
+pub use crate::config::GoogleOAuthClient;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "agent-portal-backend")]
@@ -37,9 +28,6 @@ struct Args {
     #[arg(long)]
     dev_mode: bool,
 }
-
-type GoogleOAuthClient =
-    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -98,604 +86,96 @@ async fn main() -> anyhow::Result<()> {
     // Load environment variables
     dotenvy::dotenv().ok();
 
-    // Create database pool
+    // Create database pool and run pending migrations automatically
     let pool = db::create_pool()?;
-
-    // Run pending migrations automatically
-    tracing::info!("Running database migrations...");
-    match db::run_migrations(&pool) {
-        Ok(applied) => {
-            if applied.is_empty() {
-                tracing::info!("Database is up to date (no pending migrations)");
-            } else {
-                for migration in &applied {
-                    tracing::info!("Applied migration: {}", migration);
-                }
-                tracing::info!("Successfully applied {} migration(s)", applied.len());
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to run database migrations: {}", e);
-            return Err(e);
-        }
-    }
+    db::run_migrations_logged(&pool)?;
 
     // Create device flow store
     let device_flow_store = handlers::device_flow::DeviceFlowStore::default();
 
     // Create OAuth client (skip in dev mode)
-    let oauth_basic_client = if !args.dev_mode {
-        let client_id =
-            ClientId::new(env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set"));
-        let client_secret = ClientSecret::new(
-            env::var("GOOGLE_CLIENT_SECRET").expect("GOOGLE_CLIENT_SECRET must be set"),
-        );
-        let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())?;
-        let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string())?;
-        let redirect_uri = RedirectUrl::new(
-            env::var("GOOGLE_REDIRECT_URI").expect("GOOGLE_REDIRECT_URI must be set"),
-        )?;
-
-        Some(
-            BasicClient::new(client_id)
-                .set_client_secret(client_secret)
-                .set_auth_uri(auth_url)
-                .set_token_uri(token_url)
-                .set_redirect_uri(redirect_uri),
-        )
-    } else {
-        None
-    };
+    let oauth_basic_client = config::build_google_oauth_client(args.dev_mode)?;
 
     // Create test user in dev mode
     if args.dev_mode {
-        use diesel::prelude::*;
-        use models::NewUser;
-        use schema::users::dsl::*;
-
-        let mut conn = pool.get()?;
-        let test_user = users
-            .filter(email.eq("testing@testing.local"))
-            .first::<models::User>(&mut conn)
-            .optional()?;
-
-        if test_user.is_none() {
-            let new_user = NewUser {
-                google_id: "dev_mode_test_user".to_string(),
-                email: "testing@testing.local".to_string(),
-                name: Some("Test User".to_string()),
-                avatar_url: None,
-            };
-
-            diesel::insert_into(users)
-                .values(&new_user)
-                .execute(&mut conn)?;
-
-            tracing::info!("✓ Created test user: testing@testing.local");
-        }
+        db::seed_dev_user(&pool)?;
     }
 
     // Create session manager for WebSocket connections
     let session_manager = SessionManager::new();
 
-    // Deferred stale session cleanup: wait for proxies to reconnect before
-    // marking unreconnected sessions as disconnected. Without this grace
-    // period, a backend restart would immediately hide all sessions from the
-    // frontend (which only shows status="active") and users would have to
-    // restart launchers to get sessions back.
-    {
-        let startup_pool = pool.clone();
-        let startup_manager = session_manager.clone();
-        tokio::spawn(async move {
-            const RECONNECT_GRACE_SECS: u64 = shared::protocol::MAX_RECONNECT_BACKOFF_SECS * 2;
-            tracing::info!(
-                "Waiting {}s for proxies to reconnect before cleaning stale sessions",
-                RECONNECT_GRACE_SECS
-            );
-            tokio::time::sleep(std::time::Duration::from_secs(RECONNECT_GRACE_SECS)).await;
+    // Mark sessions whose proxies do not reconnect within the grace period
+    background::spawn_stale_session_cleanup(pool.clone(), session_manager.clone());
 
-            let connected_keys: std::collections::HashSet<String> = startup_manager
-                .registered_session_keys()
-                .into_iter()
-                .collect();
-
-            let Ok(mut conn) = startup_pool.get() else {
-                tracing::error!("Failed to get DB connection for stale session cleanup");
-                return;
-            };
-
-            use diesel::prelude::*;
-            use schema::sessions;
-
-            let active_sessions: Vec<(uuid::Uuid,)> = match sessions::table
-                .filter(sessions::status.eq(shared::SessionStatus::Active.as_str()))
-                .select((sessions::id,))
-                .load(&mut conn)
-            {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!("Failed to query active sessions for cleanup: {}", e);
-                    return;
-                }
-            };
-
-            let stale_ids: Vec<uuid::Uuid> = active_sessions
-                .into_iter()
-                .map(|(id,)| id)
-                .filter(|id| !connected_keys.contains(&id.to_string()))
-                .collect();
-
-            if stale_ids.is_empty() {
-                tracing::info!("No stale sessions to clean up after reconnect grace period");
-                return;
-            }
-
-            match diesel::update(sessions::table.filter(sessions::id.eq_any(&stale_ids)))
-                .set(sessions::status.eq(shared::SessionStatus::Disconnected.as_str()))
-                .execute(&mut conn)
-            {
-                Ok(updated) => {
-                    tracing::info!(
-                        "Marked {} stale sessions as disconnected ({}s grace period elapsed)",
-                        updated,
-                        RECONNECT_GRACE_SECS
-                    );
-                }
-                Err(e) => {
-                    tracing::error!("Failed to mark stale sessions as disconnected: {}", e);
-                }
-            }
-        });
-    }
-
-    // Get base URL from env or construct from host/port
-    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-    let public_url = env::var("BASE_URL").unwrap_or_else(|_| {
-        // Default to localhost for development
-        format!("http://localhost:{}", port)
-    });
-
-    // SESSION_SECRET backs both the signed-cookie key and the proxy/launcher
-    // JWT secret. Set it to a stable 64+ byte value in production so cookies
-    // and tokens survive a redeploy. When it is absent we generate a random
-    // ephemeral secret so the server still boots — at the cost of invalidating
-    // every cookie and token on restart. (It must never be a hard-coded
-    // constant: a known secret lets anyone forge tokens for any user.)
-    let session_secret = env::var("SESSION_SECRET").ok().unwrap_or_else(|| {
-        tracing::warn!(
-            "SESSION_SECRET is not set — generating a random ephemeral secret. \
-             All signed cookies and proxy/launcher JWTs will be invalidated on \
-             restart; set SESSION_SECRET to a stable 64+ byte value in production."
-        );
-        hex::encode(Key::generate().master())
-    });
-    let cookie_key = {
-        let bytes = session_secret.as_bytes();
-        if bytes.len() < 64 {
-            tracing::warn!("SESSION_SECRET should be at least 64 bytes, padding with zeros");
-            let mut padded = vec![0u8; 64];
-            padded[..bytes.len()].copy_from_slice(bytes);
-            Key::from(&padded)
-        } else {
-            Key::from(&bytes[..64])
-        }
-    };
-
-    // JWT secret for proxy tokens — same source as the cookie key above.
-    let jwt_secret = session_secret;
-
-    // App title (customizable via environment variable)
-    // In dev mode, override with a warning to make it obvious
-    let app_title = if args.dev_mode {
-        "⚠️ INSECURE DEV MODE ⚠️".to_string()
-    } else {
-        env::var("APP_TITLE").unwrap_or_else(|_| "Agent Portal".to_string())
-    };
-
-    let splash_text = env::var("SPLASH_TEXT").ok();
-
-    // Email access control (optional)
-    let allowed_email_domain = env::var("ALLOWED_EMAIL_DOMAIN").ok();
-    let allowed_emails = env::var("ALLOWED_EMAILS").ok().map(|s| {
-        s.split(',')
-            .map(|e| e.trim().to_lowercase())
-            .filter(|e| !e.is_empty())
-            .collect::<Vec<_>>()
-    });
-
-    if allowed_email_domain.is_some() || allowed_emails.is_some() {
-        tracing::info!(
-            "Email access control enabled: domain={:?}, specific_emails={}",
-            allowed_email_domain,
-            allowed_emails.as_ref().map(|e| e.len()).unwrap_or(0)
-        );
-    }
-
-    // Message retention settings
-    let message_retention_count: i64 = env::var("MESSAGE_RETENTION_COUNT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100);
-    let message_retention_days: u32 = env::var("MESSAGE_RETENTION_DAYS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(30);
-
-    let session_max_age_days: u32 = env::var("SESSION_MAX_AGE_DAYS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(14);
-
-    let max_image_mb: u32 = env::var("PORTAL_MAX_IMAGE_MB")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
-
-    // Image store eviction caps — both required to bound memory on long
-    // image-heavy sessions (see issue #787). Defaults are 256 MiB / 1 h.
-    let image_store_max_mb: u64 = env::var("PORTAL_IMAGE_STORE_MAX_MB")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(handlers::images::DEFAULT_IMAGE_STORE_MAX_BYTES / (1024 * 1024));
-    let image_store_ttl_secs: u64 = env::var("PORTAL_IMAGE_STORE_TTL_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(handlers::images::DEFAULT_IMAGE_STORE_TTL.as_secs());
-    let image_store_max_bytes = image_store_max_mb.saturating_mul(1024 * 1024);
-    let image_store_ttl = std::time::Duration::from_secs(image_store_ttl_secs);
-
-    tracing::info!(
-        "Message retention: max {} messages/session, {} days",
-        message_retention_count,
-        message_retention_days
-    );
-    tracing::info!(
-        "Session max age: {} days (0 = disabled)",
-        session_max_age_days
-    );
-    tracing::info!("Max image size: {} MB", max_image_mb);
-    tracing::info!(
-        "Image store cap: {} MB total, {}s TTL per entry",
-        image_store_max_mb,
-        image_store_ttl_secs
-    );
+    // Parse remaining configuration from environment variables
+    let config = config::ServerConfig::from_env(args.dev_mode);
 
     // Create app state
     let app_state = Arc::new(AppState {
         dev_mode: args.dev_mode,
-        db_pool: pool.clone(),
-        session_manager: session_manager.clone(),
+        db_pool: pool,
+        session_manager,
         oauth_basic_client,
-        device_flow_store: Some(device_flow_store.clone()),
-        public_url: public_url.clone(),
-        cookie_key,
-        jwt_secret,
-        app_title,
-        splash_text,
-        allowed_email_domain,
-        allowed_emails,
-        message_retention_count,
-        message_retention_days,
-        session_max_age_days,
-        max_image_mb,
-        image_store: handlers::images::ImageStore::new(image_store_max_bytes, image_store_ttl),
+        device_flow_store: Some(device_flow_store),
+        public_url: config.public_url,
+        cookie_key: config.cookie_key,
+        jwt_secret: config.jwt_secret,
+        app_title: config.app_title,
+        splash_text: config.splash_text,
+        allowed_email_domain: config.allowed_email_domain,
+        allowed_emails: config.allowed_emails,
+        message_retention_count: config.message_retention_count,
+        message_retention_days: config.message_retention_days,
+        session_max_age_days: config.session_max_age_days,
+        max_image_mb: config.max_image_mb,
+        image_store: handlers::images::ImageStore::new(
+            config.image_store_max_bytes,
+            config.image_store_ttl,
+        ),
     });
 
-    // Setup CORS
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    // Rate limiting configs (per IP via SmartIpKeyExtractor for proxy support)
-    let auth_rate_limit = Arc::new(
-        GovernorConfigBuilder::default()
-            .per_second(6)
-            .burst_size(10)
-            .key_extractor(SmartIpKeyExtractor)
-            .finish()
-            .unwrap(),
-    );
-
-    let download_rate_limit = Arc::new(
-        GovernorConfigBuilder::default()
-            .per_second(6)
-            .burst_size(10)
-            .key_extractor(SmartIpKeyExtractor)
-            .finish()
-            .unwrap(),
-    );
-
-    // Rate-limited device flow auth routes
-    let auth_device_routes = Router::new()
-        .route(
-            routes::AUTH_DEVICE_CODE,
-            post(handlers::device_flow::device_code),
-        )
-        .route(
-            routes::AUTH_DEVICE_POLL,
-            post(handlers::device_flow::device_poll),
-        )
-        .layer(GovernorLayer::new(auth_rate_limit))
-        .with_state(app_state.clone());
-
-    // Rate-limited download routes
-    let download_routes = Router::new()
-        .route(
-            "/api/download/install.sh",
-            get(handlers::downloads::install_script),
-        )
-        .route(
-            "/api/download/proxy",
-            get(handlers::downloads::proxy_binary).head(handlers::downloads::proxy_binary),
-        )
-        .layer(GovernorLayer::new(download_rate_limit))
-        .with_state(app_state.clone());
-
     // Build our application with routes
-    let app = Router::new()
-        // Health check endpoint
-        .route("/api/health", get(|| async { "OK" }))
-        // App configuration (public, no auth required)
-        .route("/api/config", get(handlers::config::get_config))
-        // Session API routes
-        .route("/api/sessions", get(handlers::sessions::list_sessions))
-        .route("/api/sessions/{id}", get(handlers::sessions::get_session))
-        .route(
-            "/api/sessions/{id}",
-            axum::routing::delete(handlers::sessions::delete_session),
-        )
-        .route(
-            "/api/sessions/{id}/stop",
-            post(handlers::sessions::stop_session),
-        )
-        .route(
-            "/api/sessions/{id}/pause",
-            post(handlers::sessions::pause_session),
-        )
-        .route(
-            "/api/sessions/{id}/resume",
-            post(handlers::sessions::resume_session),
-        )
-        // Session member management routes
-        .route(
-            "/api/sessions/{id}/members",
-            get(handlers::sessions::list_session_members)
-                .post(handlers::sessions::add_session_member),
-        )
-        .route(
-            "/api/sessions/{id}/members/{user_id}",
-            axum::routing::delete(handlers::sessions::remove_session_member)
-                .patch(handlers::sessions::update_session_member_role),
-        )
-        .route(
-            "/api/sessions/{id}/messages",
-            get(handlers::messages::list_messages).post(handlers::messages::create_message),
-        )
-        .route(
-            "/api/sessions/{id}/turn-metrics",
-            get(handlers::turn_metrics::list_turn_metrics),
-        )
-        .route(
-            "/api/metrics/recent",
-            get(handlers::turn_metrics::list_recent_user_turn_metrics),
-        )
-        .route(
-            "/api/metrics/turns",
-            get(handlers::turn_metrics::list_aggregated_turn_metrics),
-        )
-        // Proxy token management endpoints
-        .route(
-            "/api/proxy/resolve-session",
-            post(handlers::sessions::resolve_proxy_session),
-        )
-        .route(
-            "/api/proxy-tokens",
-            get(handlers::proxy_tokens::list_tokens_handler)
-                .post(handlers::proxy_tokens::create_token_handler),
-        )
-        .route(
-            "/api/proxy-tokens/{id}",
-            axum::routing::delete(handlers::proxy_tokens::revoke_token_handler),
-        )
-        .route(
-            "/api/proxy-tokens/{id}/renew",
-            post(handlers::proxy_tokens::renew_token_handler),
-        )
-        // Image serving endpoint — authenticated (closes #786). Auth check
-        // lives in the handler via `extract_user_id`, matching the pattern
-        // every other cookie-gated handler in this router uses.
-        .route("/api/images/{id}", get(handlers::images::serve_image))
-        .route(
-            "/api/sessions/{id}/files/pull",
-            get(handlers::files::pull_session_file),
-        )
-        // Scheduled task management endpoints
-        .route(
-            "/api/scheduled-tasks",
-            get(handlers::scheduled_tasks::list_tasks_handler)
-                .post(handlers::scheduled_tasks::create_task_handler),
-        )
-        .route(
-            "/api/scheduled-tasks/{id}",
-            axum::routing::patch(handlers::scheduled_tasks::update_task_handler)
-                .delete(handlers::scheduled_tasks::delete_task_handler),
-        )
-        .route(
-            "/api/scheduled-tasks/{id}/runs",
-            get(handlers::scheduled_tasks::list_runs_handler),
-        )
-        // Sound settings
-        .route(
-            "/api/settings/sound",
-            get(handlers::sound_settings::get_sound_settings)
-                .put(handlers::sound_settings::save_sound_settings),
-        )
-        // Auth routes (under /api/auth)
-        .route(routes::AUTH_GOOGLE, get(handlers::auth::login))
-        .route(routes::AUTH_GOOGLE_CALLBACK, get(handlers::auth::callback))
-        .route(routes::AUTH_ME, get(handlers::auth::me))
-        .route(routes::AUTH_LOGOUT, get(handlers::auth::logout))
-        .route(routes::AUTH_DEV_LOGIN, get(handlers::auth::dev_login))
-        // Device-specific login endpoint (separate from regular web login)
-        .route(routes::AUTH_DEVICE_LOGIN, get(handlers::auth::device_login))
-        // Non-rate-limited device flow endpoints (verify page, approve, deny are user-facing)
-        .route(
-            routes::AUTH_DEVICE,
-            get(handlers::device_flow::device_verify_page),
-        )
-        .route(
-            routes::AUTH_DEVICE_APPROVE,
-            post(handlers::device_flow::device_approve),
-        )
-        .route(
-            routes::AUTH_DEVICE_DENY,
-            post(handlers::device_flow::device_deny),
-        )
-        // WebSocket routes (paths from ws-bridge endpoint definitions)
-        .route(
-            shared::SessionEndpoint::PATH,
-            get(handlers::websocket::handle_session_websocket),
-        )
-        .route(
-            shared::ImageUploadEndpoint::PATH,
-            get(handlers::websocket::handle_image_upload_websocket),
-        )
-        .route(
-            shared::ClientEndpoint::PATH,
-            get(handlers::websocket::handle_web_client_websocket),
-        )
-        .route(
-            shared::LauncherEndpoint::PATH,
-            get(handlers::websocket::handle_launcher_websocket),
-        )
-        // Launcher API routes
-        .route("/api/launchers", get(handlers::launchers::list_launchers))
-        .route(
-            "/api/launchers/{launcher_id}/directories",
-            get(handlers::launchers::list_directories),
-        )
-        .route("/api/launch", post(handlers::launchers::launch_session))
-        .route(
-            "/api/launchers/{launcher_id}/update",
-            post(handlers::launchers::update_launcher),
-        )
-        .route(
-            "/api/launchers/{launcher_id}/probe-agents",
-            get(handlers::launchers::probe_agents),
-        )
-        // Admin dashboard routes (admin-only)
-        .route("/api/admin/stats", get(handlers::admin::get_stats))
-        .route("/api/admin/users", get(handlers::admin::list_users))
-        .route(
-            "/api/admin/users/{id}",
-            axum::routing::patch(handlers::admin::update_user),
-        )
-        .route("/api/admin/sessions", get(handlers::admin::list_sessions))
-        .route(
-            "/api/admin/sessions/{id}",
-            axum::routing::delete(handlers::admin::delete_session),
-        )
-        // Add single unified state
-        .with_state(app_state.clone())
-        // Merge rate-limited route groups
-        .merge(auth_device_routes)
-        .merge(download_routes)
-        // Serve embedded frontend assets with SPA fallback
-        .merge(
-            memory_serve::load!()
-                .index_file(Some("/index.html"))
-                .fallback(Some("/index.html"))
-                .fallback_status(axum::http::StatusCode::OK)
-                .html_cache_control(memory_serve::CacheControl::NoCache)
-                .cache_control(memory_serve::CacheControl::Long)
-                .into_router(),
-        );
+    let app = routes::build_router(app_state.clone());
 
-    // Add CORS and cookie management
-    let app = app.layer(CookieManagerLayer::new()).layer(cors);
-
-    // Spawn background task to broadcast user spend updates
-    {
-        let app_state = app_state.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            loop {
-                interval.tick().await;
-                if app_state.session_manager.user_clients.is_empty() {
-                    continue;
-                }
-                broadcast_user_spend_updates(&app_state).await;
-            }
-        });
-        tracing::info!("Started user spend broadcast task (every 30 seconds)");
-    }
-
-    // Spawn background task to purge expired device flow codes (runs every 60 seconds)
-    {
-        let store = device_flow_store.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-            loop {
-                interval.tick().await;
-                let mut map = store.write().await;
-                let before = map.len();
-                map.retain(|_, state| state.expires_at > std::time::SystemTime::now());
-                let removed = before - map.len();
-                if removed > 0 {
-                    tracing::debug!("Purged {} expired device flow codes", removed);
-                }
-            }
-        });
-        tracing::info!("Started device flow cleanup task (every 60 seconds)");
-    }
-
-    // Spawn background task for message retention cleanup (runs every 60 seconds)
-    {
-        let app_state = app_state.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-            loop {
-                interval.tick().await;
-                run_retention_cleanup(&app_state).await;
-            }
-        });
-        tracing::info!("Started message retention task (every 60 seconds)");
-    }
-
-    // Spawn background task for session age cleanup (runs every hour)
+    // Spawn background maintenance tasks
+    background::spawn_periodic(
+        "user spend broadcast task (every 30 seconds)",
+        Duration::from_secs(30),
+        app_state.clone(),
+        background::broadcast_user_spend_updates,
+    );
+    background::spawn_periodic(
+        "device flow cleanup task (every 60 seconds)",
+        Duration::from_secs(60),
+        app_state.clone(),
+        background::purge_expired_device_codes,
+    );
+    background::spawn_periodic(
+        "message retention task (every 60 seconds)",
+        Duration::from_secs(60),
+        app_state.clone(),
+        background::run_retention_cleanup,
+    );
     if app_state.session_max_age_days > 0 {
-        let max_age_days = app_state.session_max_age_days;
-        let app_state_clone = app_state.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
-            loop {
-                interval.tick().await;
-                run_session_age_cleanup(&app_state_clone).await;
-            }
-        });
-        tracing::info!(
-            "Started session age cleanup task (every hour, max age {} days)",
-            max_age_days
+        background::spawn_periodic(
+            &format!(
+                "session age cleanup task (every hour, max age {} days)",
+                app_state.session_max_age_days
+            ),
+            Duration::from_secs(3600),
+            app_state.clone(),
+            background::run_session_age_cleanup,
         );
     }
-
-    // Spawn background task for expired proxy token cleanup (runs every hour)
-    {
-        let app_state = app_state.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
-            loop {
-                interval.tick().await;
-                run_expired_token_cleanup(&app_state).await;
-            }
-        });
-        tracing::info!("Started expired proxy token cleanup task (every hour)");
-    }
+    background::spawn_periodic(
+        "expired proxy token cleanup task (every hour)",
+        Duration::from_secs(3600),
+        app_state.clone(),
+        background::run_expired_token_cleanup,
+    );
 
     // Run the server with graceful shutdown
-    let addr = format!("{}:{}", host, port);
+    let addr = format!("{}:{}", config.host, config.port);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Listening on {}", listener.local_addr()?);
@@ -750,209 +230,4 @@ async fn shutdown_signal(app_state: Arc<AppState>) {
     // Give clients a moment to receive the message
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     tracing::info!("Shutdown complete");
-}
-
-/// Query user spend from DB and broadcast to all connected web clients
-async fn broadcast_user_spend_updates(app_state: &Arc<AppState>) {
-    use diesel::prelude::*;
-    use shared::{ServerToClient, SessionCost};
-
-    let connected_user_ids = app_state.session_manager.get_all_user_ids();
-    if connected_user_ids.is_empty() {
-        return;
-    }
-
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for spend broadcast");
-        return;
-    };
-
-    // Single query: fetch all sessions with cost > 0 for all connected users
-    type CostRow = (uuid::Uuid, uuid::Uuid, f64, i64, i64, i64, i64);
-    let all_sessions: Vec<CostRow> = match schema::sessions::table
-        .filter(schema::sessions::user_id.eq_any(&connected_user_ids))
-        .filter(schema::sessions::total_cost_usd.gt(0.0))
-        .select((
-            schema::sessions::user_id,
-            schema::sessions::id,
-            schema::sessions::total_cost_usd,
-            schema::sessions::input_tokens,
-            schema::sessions::output_tokens,
-            schema::sessions::cache_creation_tokens,
-            schema::sessions::cache_read_tokens,
-        ))
-        .load(&mut conn)
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!("Failed to query session costs for spend broadcast: {}", e);
-            return;
-        }
-    };
-
-    // Single query: fetch deleted session costs for all connected users
-    let deleted_costs: Vec<(uuid::Uuid, f64)> = schema::deleted_session_costs::table
-        .filter(schema::deleted_session_costs::user_id.eq_any(&connected_user_ids))
-        .filter(schema::deleted_session_costs::cost_usd.gt(0.0))
-        .select((
-            schema::deleted_session_costs::user_id,
-            schema::deleted_session_costs::cost_usd,
-        ))
-        .load(&mut conn)
-        .unwrap_or_default();
-
-    // Build a map of user_id -> deleted cost
-    let deleted_cost_map: std::collections::HashMap<uuid::Uuid, f64> =
-        deleted_costs.into_iter().collect();
-
-    // Group sessions by user_id
-    let mut user_sessions: std::collections::HashMap<uuid::Uuid, Vec<SessionCost>> =
-        std::collections::HashMap::new();
-    let mut user_active_cost: std::collections::HashMap<uuid::Uuid, f64> =
-        std::collections::HashMap::new();
-
-    for (uid, sid, cost, inp, outp, cache_create, cache_read) in all_sessions {
-        *user_active_cost.entry(uid).or_default() += cost;
-        user_sessions.entry(uid).or_default().push(SessionCost {
-            session_id: sid,
-            total_cost_usd: cost,
-            input_tokens: inp,
-            output_tokens: outp,
-            cache_creation_tokens: cache_create,
-            cache_read_tokens: cache_read,
-        });
-    }
-
-    // Broadcast to each connected user
-    for uid in &connected_user_ids {
-        let active_cost = user_active_cost.get(uid).copied().unwrap_or(0.0);
-        let deleted_cost = deleted_cost_map.get(uid).copied().unwrap_or(0.0);
-        let total_spend = active_cost + deleted_cost;
-        let session_costs = user_sessions.remove(uid).unwrap_or_default();
-
-        if total_spend > 0.0 || !session_costs.is_empty() {
-            app_state.session_manager.broadcast_to_user(
-                uid,
-                ServerToClient::UserSpendUpdate {
-                    total_spend_usd: total_spend,
-                    session_costs,
-                },
-            );
-        }
-    }
-}
-
-/// Run retention cleanup: delete old messages and truncate per-session counts
-async fn run_retention_cleanup(app_state: &Arc<AppState>) {
-    use handlers::retention::{run_retention_cleanup, RetentionConfig};
-
-    let session_ids = app_state.session_manager.drain_pending_truncations();
-
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for retention cleanup");
-        return;
-    };
-
-    let config = RetentionConfig::new(
-        app_state.message_retention_count,
-        app_state.message_retention_days,
-    );
-
-    let (age_deleted, count_deleted) = run_retention_cleanup(&mut conn, session_ids, config);
-
-    if age_deleted > 0 || count_deleted > 0 {
-        tracing::info!(
-            "Retention cleanup complete: {} old, {} over-limit",
-            age_deleted,
-            count_deleted
-        );
-    }
-}
-
-/// Delete sessions whose last_activity is older than SESSION_MAX_AGE_DAYS
-async fn run_session_age_cleanup(app_state: &Arc<AppState>) {
-    use diesel::prelude::*;
-    use handlers::helpers::delete_session_with_data;
-
-    let max_days = app_state.session_max_age_days;
-    if max_days == 0 {
-        return;
-    }
-
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for session age cleanup");
-        return;
-    };
-
-    // Set a 5-second timeout for cleanup queries
-    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
-        tracing::warn!(
-            "Failed to set statement_timeout for session age cleanup: {}",
-            e
-        );
-    }
-
-    let cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(i64::from(max_days));
-
-    let old_sessions: Vec<models::Session> = match schema::sessions::table
-        .filter(schema::sessions::last_activity.lt(cutoff))
-        .load(&mut conn)
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("Failed to query old sessions: {}", e);
-            return;
-        }
-    };
-
-    if old_sessions.is_empty() {
-        return;
-    }
-
-    let mut deleted = 0;
-    for session in &old_sessions {
-        match delete_session_with_data(&mut conn, session, true) {
-            Ok(_) => deleted += 1,
-            Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
-        }
-    }
-
-    tracing::info!(
-        "Session age cleanup: deleted {} sessions older than {} days",
-        deleted,
-        max_days
-    );
-}
-
-/// Delete proxy auth tokens whose expiration is more than 7 days in the past.
-async fn run_expired_token_cleanup(app_state: &Arc<AppState>) {
-    use diesel::prelude::*;
-
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for expired token cleanup");
-        return;
-    };
-
-    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
-        tracing::warn!(
-            "Failed to set statement_timeout for expired token cleanup: {}",
-            e
-        );
-    }
-
-    let token_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(7);
-    match diesel::delete(
-        schema::proxy_auth_tokens::table
-            .filter(schema::proxy_auth_tokens::expires_at.lt(token_cutoff)),
-    )
-    .execute(&mut conn)
-    {
-        Ok(0) => {}
-        Ok(count) => {
-            tracing::info!("Expired token cleanup: deleted {} tokens", count);
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete expired tokens: {}", e);
-        }
-    }
 }
