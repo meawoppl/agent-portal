@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.44
+
+- **Chart frame extracted: LinePlot and StackedArea share one frame implementation.** `charts/mod.rs` now hosts the `VIEW_*`/`PAD_*`/`PLOT_*` constants, `chart_empty`, `render_gridlines`, `render_x_labels`, `render_legend`, and a `chart_frame` wrapper (header + scale badge + legend + responsive SVG with rotated y-axis title); the component files keep only their geometry. StackedArea's local `value_to_y` wrapper (PAD_T baked in) deleted in favor of `scale::value_to_y` + explicit offset. Markup copied verbatim — zero rendered-output change; legend swatch styles deliberately stay per-component (they differ byte-wise). Two duplicate axis-format tests consolidated into one in scale.rs. Net −45 lines with each component file ~60% lighter on frame code.
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
