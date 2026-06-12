@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.40
+
+- **Hand-rolled base64url codecs replaced by the `base64` crate (×2, ~110 lines).** `shared/src/proxy_tokens.rs` and `proxy/src/util.rs` each reimplemented base64url; both now use a const lenient engine (URL_SAFE, no encode padding, `DecodePaddingMode::Indifferent`, allow-trailing-bits) that preserves every leniency the old decoders had: padding accepted anywhere it was before, whitespace pre-filtered, non-canonical trailing bits masked. One intentionally stricter case: length ≡ 1 (mod 4) inputs (which no encoder produces, and which the old code decoded into a garbage byte) now fail softly. Byte-identity pinned by RFC 4648 fixtures, an all-256-values round-trip, and a hardcoded `ProxyInitConfig` fixture. `base64` added to shared (WASM-safe).
+
 ## 2.8.34
 
 - **Codex: drop cumulative `turn/diff/updated` cards and dedupe per-file patch updates.** Codex re-sends the entire turn diff on every edit tick, so transcripts accumulated O(ticks) redundant cards — each the size of the whole turn — on top of the per-file `item.completed{file_change}` diffs that already render the same edits. The events are now dropped in `group_messages` (before grouping, so Codex runs don't fragment around each dropped diff) with a no-op dispatcher arm kept for exhaustiveness. `item/fileChange/patchUpdated` events (also cumulative per file) now surface their `item_id` in `codex_event_item_id`, letting the existing group dedup keep only the final patch and collapse it against the matching lifecycle events. The `DiffCard` `cumulative` chip and `render_turn_diff` are deleted with their only producer.
