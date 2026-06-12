@@ -329,6 +329,33 @@ pub(super) fn inject_message_metadata(
     val.to_string()
 }
 
+/// Inject `_created_at` into a wire-JSON message string only when the key is
+/// absent, returning a new JSON string. Used by the live
+/// `handle_received_output` path: `websocket.rs` already folds the
+/// server-assigned `created_at` into `WsEvent::Output` content, and that
+/// authoritative timestamp must not be clobbered by the browser-clock
+/// fallback (#981). Frames that arrive without one (error envelopes, a
+/// pre-#784 backend) still get the `Date::now()` fallback for tooltips.
+///
+/// Returns the original `content` unchanged when the JSON parse fails or the
+/// value isn't an object — same contract as [`inject_message_metadata`].
+pub(super) fn inject_created_at_if_absent(content: &str, created_at: &str) -> String {
+    let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) else {
+        return content.to_string();
+    };
+    let Some(obj) = val.as_object_mut() else {
+        return content.to_string();
+    };
+    if obj.contains_key("_created_at") {
+        return content.to_string();
+    }
+    obj.insert(
+        "_created_at".to_string(),
+        serde_json::Value::String(created_at.to_string()),
+    );
+    val.to_string()
+}
+
 /// Drain pending optimistic-send entries when the server confirms our input.
 ///
 /// - [`ActivityTag::User`] echo: match by content (via [`extract_user_text`])
@@ -623,6 +650,47 @@ mod tests {
         // _created_at slot to inject into, return as-is so callers don't
         // re-serialize it into a quoted-string blob.
         let out = inject_message_metadata("\"hello\"", "ts", false, None, None);
+        assert_eq!(out, "\"hello\"");
+    }
+
+    // --- inject_created_at_if_absent ---
+
+    #[test]
+    fn inject_created_at_if_absent_preserves_existing_server_timestamp() {
+        // The live path: websocket.rs already folded the server `created_at`
+        // into the frame — the browser-clock fallback must not clobber it
+        // (#981).
+        let server_ts = "2026-05-18T12:00:00Z";
+        let input = format!(r#"{{"type":"assistant","content":"hi","_created_at":"{server_ts}"}}"#);
+        let out = inject_created_at_if_absent(&input, "2026-05-18T12:34:56Z");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["_created_at"], server_ts,
+            "server timestamp must survive the component-side injection"
+        );
+    }
+
+    #[test]
+    fn inject_created_at_if_absent_adds_timestamp_when_missing() {
+        // Frames with no server timestamp (error envelopes, pre-#784
+        // backends) still get the browser-clock fallback for tooltips.
+        let out = inject_created_at_if_absent(
+            r#"{"type":"assistant","content":"hi"}"#,
+            "2026-05-18T12:34:56Z",
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["_created_at"], "2026-05-18T12:34:56Z");
+    }
+
+    #[test]
+    fn inject_created_at_if_absent_returns_input_unchanged_for_invalid_json() {
+        let out = inject_created_at_if_absent("not-json", "ts");
+        assert_eq!(out, "not-json");
+    }
+
+    #[test]
+    fn inject_created_at_if_absent_returns_input_unchanged_for_non_object_json() {
+        let out = inject_created_at_if_absent("\"hello\"", "ts");
         assert_eq!(out, "\"hello\"");
     }
 

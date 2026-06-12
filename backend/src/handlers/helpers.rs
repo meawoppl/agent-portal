@@ -1,13 +1,57 @@
-use crate::models::{NewDeletedSessionCosts, Session};
+use crate::models::{Message, NewDeletedSessionCosts, Session};
 use crate::schema::{
     deleted_session_costs, messages, pending_inputs, pending_permission_requests, session_members,
-    sessions,
+    sessions, users,
 };
+use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel::PgConnection;
+use std::collections::{HashMap, HashSet};
 use tracing::error;
 use uuid::Uuid;
+
+/// Parse an ISO timestamp cursor, accepting both the fractional
+/// (`%Y-%m-%dT%H:%M:%S%.f`) and second-precision (`%Y-%m-%dT%H:%M:%S`)
+/// forms emitted by the frontend's `js_sys::Date.toISOString()` and by the
+/// backend's own `NaiveDateTime` serializer respectively. Shared by the REST
+/// `list_messages` pagination cursors and the WebSocket replay watermark.
+pub fn parse_iso_cursor(s: &str) -> Option<NaiveDateTime> {
+    // Trim trailing `Z` if present — `js_sys::Date::to_iso_string` emits
+    // `2026-05-17T12:34:56.789Z`, but `NaiveDateTime::parse_from_str` rejects
+    // the timezone marker on a naive timestamp.
+    let trimmed = s.strip_suffix('Z').unwrap_or(s);
+    NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
+        .or_else(|_| NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S"))
+        .ok()
+}
+
+/// Look up display names for the senders of the user-role messages in
+/// `message_list`: collect the distinct `user_id`s, load `(id, name, email)`
+/// for each, and map to name-or-email. Shared by the REST `list_messages`
+/// handler and the WebSocket history replay so both enrich user messages
+/// identically. Lookup failures degrade to an empty map (no sender names)
+/// rather than erroring.
+pub fn sender_names(conn: &mut PgConnection, message_list: &[Message]) -> HashMap<Uuid, String> {
+    let user_ids: Vec<Uuid> = message_list
+        .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| m.user_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    if user_ids.is_empty() {
+        return HashMap::new();
+    }
+    users::table
+        .filter(users::id.eq_any(&user_ids))
+        .select((users::id, users::name, users::email))
+        .load::<(Uuid, Option<String>, String)>(conn)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, name, email)| (id, name.unwrap_or(email)))
+        .collect()
+}
 
 /// Error type for helper operations
 pub struct DeleteSessionError(String);
@@ -170,4 +214,45 @@ pub fn delete_user_sessions(
         })?;
 
     Ok((deleted_sessions, deleted_messages, deleted_members))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_iso_cursor_accepts_fractional_seconds() {
+        let parsed = parse_iso_cursor("2026-05-17T12:34:56.789").expect("parse");
+        assert_eq!(
+            parsed.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            "2026-05-17 12:34:56.789"
+        );
+    }
+
+    #[test]
+    fn parse_iso_cursor_accepts_second_precision() {
+        let parsed = parse_iso_cursor("2026-05-17T12:34:56").expect("parse");
+        assert_eq!(
+            parsed.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-05-17 12:34:56"
+        );
+    }
+
+    #[test]
+    fn parse_iso_cursor_strips_trailing_z() {
+        // js_sys::Date::to_iso_string emits a trailing 'Z' marker; the
+        // NaiveDateTime parser rejects timezone info, so the helper must
+        // trim it. Otherwise frontend-emitted timestamps would all 400.
+        let parsed = parse_iso_cursor("2026-05-17T12:34:56.789Z").expect("parse");
+        assert_eq!(
+            parsed.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            "2026-05-17 12:34:56.789"
+        );
+    }
+
+    #[test]
+    fn parse_iso_cursor_rejects_garbage() {
+        assert!(parse_iso_cursor("not-a-timestamp").is_none());
+        assert!(parse_iso_cursor("").is_none());
+    }
 }

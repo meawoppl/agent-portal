@@ -4,6 +4,9 @@
 //! These allow the proxy CLI to authenticate without going through
 //! the device flow each time.
 
+use base64::alphabet;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -112,81 +115,28 @@ pub struct ProxyTokenListResponse {
 }
 
 // ============================================================================
-// Base64 URL-safe encoding/decoding (no external dependency needed)
+// Base64 URL-safe encoding/decoding
 // ============================================================================
 
-const BASE64_URL_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+/// URL-safe base64 engine: encodes without padding; decodes leniently
+/// (optional padding, non-canonical trailing bits) to keep accepting every
+/// input the previous hand-rolled decoder accepted.
+const BASE64_URL: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::URL_SAFE,
+    GeneralPurposeConfig::new()
+        .with_encode_padding(false)
+        .with_decode_padding_mode(DecodePaddingMode::Indifferent)
+        .with_decode_allow_trailing_bits(true),
+);
 
 fn base64_url_encode(input: &[u8]) -> String {
-    let mut result = String::new();
-    let mut i = 0;
-
-    while i < input.len() {
-        let b0 = input[i] as usize;
-        let b1 = if i + 1 < input.len() {
-            input[i + 1] as usize
-        } else {
-            0
-        };
-        let b2 = if i + 2 < input.len() {
-            input[i + 2] as usize
-        } else {
-            0
-        };
-
-        result.push(BASE64_URL_ALPHABET[b0 >> 2] as char);
-        result.push(BASE64_URL_ALPHABET[((b0 & 0x03) << 4) | (b1 >> 4)] as char);
-
-        if i + 1 < input.len() {
-            result.push(BASE64_URL_ALPHABET[((b1 & 0x0f) << 2) | (b2 >> 6)] as char);
-        }
-
-        if i + 2 < input.len() {
-            result.push(BASE64_URL_ALPHABET[b2 & 0x3f] as char);
-        }
-
-        i += 3;
-    }
-
-    result
+    BASE64_URL.encode(input)
 }
 
 fn base64_url_decode(input: &str) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut result = Vec::new();
-    let chars: Vec<u8> = input
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .map(|c| {
-            BASE64_URL_ALPHABET
-                .iter()
-                .position(|&x| x == c as u8)
-                .map(|p| p as u8)
-                .ok_or_else(|| format!("Invalid base64url character: {}", c))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut i = 0;
-    while i < chars.len() {
-        let b0 = chars[i];
-        let b1 = if i + 1 < chars.len() { chars[i + 1] } else { 0 };
-        let b2 = if i + 2 < chars.len() { chars[i + 2] } else { 0 };
-        let b3 = if i + 3 < chars.len() { chars[i + 3] } else { 0 };
-
-        result.push((b0 << 2) | (b1 >> 4));
-
-        if i + 2 < chars.len() {
-            result.push((b1 << 4) | (b2 >> 2));
-        }
-
-        if i + 3 < chars.len() {
-            result.push((b2 << 6) | b3);
-        }
-
-        i += 4;
-    }
-
-    Ok(result)
+    // The previous decoder ignored whitespace anywhere in the input.
+    let filtered: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    Ok(BASE64_URL.decode(filtered)?)
 }
 
 #[cfg(test)]
@@ -199,6 +149,66 @@ mod tests {
         let encoded = base64_url_encode(original);
         let decoded = base64_url_decode(&encoded).unwrap();
         assert_eq!(original.to_vec(), decoded);
+    }
+
+    #[test]
+    fn test_base64_url_roundtrip_all_byte_values() {
+        let original: Vec<u8> = (0u8..=255).collect();
+        let encoded = base64_url_encode(&original);
+        let decoded = base64_url_decode(&encoded).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_base64_url_known_fixtures() {
+        // Outputs must match the previous hand-rolled encoder exactly.
+        assert_eq!(base64_url_encode(b""), "");
+        assert_eq!(base64_url_encode(b"f"), "Zg");
+        assert_eq!(base64_url_encode(b"fo"), "Zm8");
+        assert_eq!(base64_url_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_url_encode(b"Hello, World!"), "SGVsbG8sIFdvcmxkIQ");
+        // Bytes that exercise the URL-safe alphabet characters - and _
+        assert_eq!(base64_url_encode(&[0xfb, 0xff]), "-_8");
+
+        assert_eq!(base64_url_decode("Zg").unwrap(), b"f".to_vec());
+        assert_eq!(
+            base64_url_decode("SGVsbG8sIFdvcmxkIQ").unwrap(),
+            b"Hello, World!".to_vec()
+        );
+        assert_eq!(base64_url_decode("-_8").unwrap(), vec![0xfb, 0xff]);
+    }
+
+    #[test]
+    fn test_base64_url_decode_leniency() {
+        // Whitespace anywhere is ignored (as the old decoder did).
+        assert_eq!(
+            base64_url_decode("SGVs bG8s\nIFdvcmxkIQ").unwrap(),
+            b"Hello, World!".to_vec()
+        );
+        // Trailing padding is tolerated.
+        assert_eq!(
+            base64_url_decode("SGVsbG8sIFdvcmxkIQ==").unwrap(),
+            b"Hello, World!".to_vec()
+        );
+        // Non-canonical trailing bits are tolerated (as the old decoder did).
+        assert_eq!(base64_url_decode("Zh").unwrap(), b"f".to_vec());
+        // Invalid characters are rejected.
+        assert!(base64_url_decode("ab$c").is_err());
+        // Standard (non-URL-safe) alphabet is rejected.
+        assert!(base64_url_decode("+/").is_err());
+    }
+
+    #[test]
+    fn test_proxy_init_config_decode_fixture() {
+        // Encoded form of {"t":"tok","n":"pre"} produced by the previous
+        // hand-rolled encoder; must keep decoding.
+        let encoded = "eyJ0IjoidG9rIiwibiI6InByZSJ9";
+        let decoded = ProxyInitConfig::decode(encoded).unwrap();
+        assert_eq!(decoded.token, "tok");
+        assert_eq!(decoded.session_name_prefix, Some("pre".to_string()));
+
+        // And the encoder must reproduce it byte-for-byte.
+        assert_eq!(decoded.encode().unwrap(), encoded);
     }
 
     #[test]

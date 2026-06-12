@@ -11,6 +11,7 @@ use overview_tab::AdminOverviewTab;
 use sessions_tab::AdminSessionsTab;
 use users_tab::AdminUsersTab;
 
+use crate::components::ConfirmModal;
 use crate::utils::{self, FetchError, On401};
 use crate::Route;
 use gloo_net::http::Request;
@@ -527,15 +528,11 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             {
                 if let Some((ref message, ref action)) = *confirm_action {
                     html! {
-                        <div class="modal-overlay" onclick={on_cancel_confirm.clone()}>
-                            <div class="modal-content confirm-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                <p>{ message }</p>
-                                <div class="modal-actions">
-                                    <button class="modal-cancel" onclick={on_cancel_confirm.clone()}>{ "Cancel" }</button>
-                                    <button class="modal-confirm" onclick={action.clone()}>{ "Confirm" }</button>
-                                </div>
-                            </div>
-                        </div>
+                        <ConfirmModal
+                            message={message.clone()}
+                            on_confirm={action.clone()}
+                            on_cancel={on_cancel_confirm.clone()}
+                        />
                     }
                 } else {
                     html! {}

@@ -42,12 +42,13 @@ pub struct RegisterFields {
     pub claude_args: Vec<String>,
 }
 
-/// Configuration for a scheduled task, sent from backend to launcher via ScheduleSync.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScheduledTaskConfig {
-    pub id: Uuid,
+/// Core scheduled-task fields shared by `ScheduledTaskConfig`,
+/// `CreateScheduledTaskRequest`, and `ScheduledTaskInfo` via `#[serde(flatten)]`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScheduledTaskFields {
     pub name: String,
     pub cron_expression: String,
+    #[serde(default = "default_timezone")]
     pub timezone: String,
     pub working_directory: String,
     pub prompt: String,
@@ -55,8 +56,25 @@ pub struct ScheduledTaskConfig {
     pub claude_args: Vec<String>,
     #[serde(default)]
     pub agent_type: AgentType,
-    pub enabled: bool,
+    #[serde(default = "default_max_runtime_minutes")]
     pub max_runtime_minutes: i32,
+}
+
+fn default_timezone() -> String {
+    "UTC".to_string()
+}
+
+fn default_max_runtime_minutes() -> i32 {
+    30
+}
+
+/// Configuration for a scheduled task, sent from backend to launcher via ScheduleSync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduledTaskConfig {
+    pub id: Uuid,
+    #[serde(flatten)]
+    pub fields: ScheduledTaskFields,
+    pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_session_id: Option<Uuid>,
 }
@@ -1000,15 +1018,17 @@ mod tests {
         let msg = ServerToLauncher::ScheduleSync {
             tasks: vec![ScheduledTaskConfig {
                 id: Uuid::nil(),
-                name: "nightly audit".into(),
-                cron_expression: "0 3 * * *".into(),
-                timezone: "UTC".into(),
-                working_directory: "/home/user/project".into(),
-                prompt: "Check deps".into(),
-                claude_args: vec![],
-                agent_type: AgentType::Claude,
+                fields: ScheduledTaskFields {
+                    name: "nightly audit".into(),
+                    cron_expression: "0 3 * * *".into(),
+                    timezone: "UTC".into(),
+                    working_directory: "/home/user/project".into(),
+                    prompt: "Check deps".into(),
+                    claude_args: vec![],
+                    agent_type: AgentType::Claude,
+                    max_runtime_minutes: 30,
+                },
                 enabled: true,
-                max_runtime_minutes: 30,
                 last_session_id: None,
             }],
         };
@@ -1018,10 +1038,71 @@ mod tests {
         match parsed {
             ServerToLauncher::ScheduleSync { tasks } => {
                 assert_eq!(tasks.len(), 1);
-                assert_eq!(tasks[0].name, "nightly audit");
+                assert_eq!(tasks[0].fields.name, "nightly audit");
             }
             _ => panic!("Wrong variant"),
         }
+    }
+
+    /// Pins the ScheduledTaskConfig wire shape: flattened fields must produce
+    /// the same keys/values as the pre-flatten struct, and JSON in the old
+    /// field order (as emitted by older backends) must still deserialize.
+    #[test]
+    fn scheduled_task_config_wire_compat() {
+        let config = ScheduledTaskConfig {
+            id: Uuid::nil(),
+            fields: ScheduledTaskFields {
+                name: "nightly audit".into(),
+                cron_expression: "0 3 * * *".into(),
+                timezone: "UTC".into(),
+                working_directory: "/home/user/project".into(),
+                prompt: "Check deps".into(),
+                claude_args: vec!["--verbose".into()],
+                agent_type: AgentType::Claude,
+                max_runtime_minutes: 30,
+            },
+            enabled: true,
+            last_session_id: None,
+        };
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"{
+                "id": "00000000-0000-0000-0000-000000000000",
+                "name": "nightly audit",
+                "cron_expression": "0 3 * * *",
+                "timezone": "UTC",
+                "working_directory": "/home/user/project",
+                "prompt": "Check deps",
+                "claude_args": ["--verbose"],
+                "agent_type": "claude",
+                "enabled": true,
+                "max_runtime_minutes": 30
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(&config).unwrap(), expected);
+
+        // Old wire order (enabled before max_runtime_minutes) still parses.
+        let old_wire = r#"{
+            "id": "00000000-0000-0000-0000-000000000000",
+            "name": "nightly audit",
+            "cron_expression": "0 3 * * *",
+            "timezone": "UTC",
+            "working_directory": "/home/user/project",
+            "prompt": "Check deps",
+            "claude_args": ["--verbose"],
+            "agent_type": "claude",
+            "enabled": true,
+            "max_runtime_minutes": 30,
+            "last_session_id": "11111111-1111-1111-1111-111111111111"
+        }"#;
+        let parsed: ScheduledTaskConfig = serde_json::from_str(old_wire).unwrap();
+        assert_eq!(parsed.fields.name, "nightly audit");
+        assert_eq!(parsed.fields.max_runtime_minutes, 30);
+        assert!(parsed.enabled);
+        assert_eq!(
+            parsed.last_session_id,
+            Some(Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap())
+        );
     }
 
     #[test]
