@@ -194,11 +194,16 @@ fn default_session_name() -> String {
     format!("{}-{}", hostname, timestamp)
 }
 
-/// Handle --check-update: check for updates without installing
-async fn handle_check_update() -> Result<()> {
-    ui::print_checking_for_updates();
+/// Handle --check-update / --update: query GitHub releases and either
+/// report on a newer version (`check_only`) or install it.
+async fn handle_update(check_only: bool) -> Result<()> {
+    if check_only {
+        ui::print_checking_for_updates();
+    } else {
+        ui::print_updating_from_github();
+    }
 
-    match update::check_for_update_github(true).await {
+    match update::check_for_update_github(check_only).await {
         Ok(update::UpdateResult::UpToDate) => {
             ui::print_up_to_date();
             Ok(())
@@ -207,40 +212,21 @@ async fn handle_check_update() -> Result<()> {
             version,
             download_url,
         }) => {
+            // Only returned with check_only=true
             ui::print_update_available(&version, &download_url);
             Ok(())
         }
         Ok(update::UpdateResult::Updated) => {
-            // Shouldn't happen with check_only=true
+            // Only returned with check_only=false
             ui::print_update_complete();
             Ok(())
         }
         Err(e) => {
-            ui::print_update_check_failed(&e.to_string());
-            Err(e)
-        }
-    }
-}
-
-/// Handle --update: force update from GitHub releases
-async fn handle_force_update() -> Result<()> {
-    ui::print_updating_from_github();
-
-    match update::check_for_update_github(false).await {
-        Ok(update::UpdateResult::UpToDate) => {
-            ui::print_up_to_date();
-            Ok(())
-        }
-        Ok(update::UpdateResult::Updated) => {
-            ui::print_update_complete();
-            Ok(())
-        }
-        Ok(update::UpdateResult::UpdateAvailable { .. }) => {
-            // Shouldn't happen with check_only=false
-            Ok(())
-        }
-        Err(e) => {
-            ui::print_update_failed(&e.to_string());
+            if check_only {
+                ui::print_update_check_failed(&e.to_string());
+            } else {
+                ui::print_update_failed(&e.to_string());
+            }
             Err(e)
         }
     }
@@ -256,39 +242,37 @@ async fn main() -> Result<()> {
 
     // Skip update checks and UI output entirely in shim mode
     if !args.shim {
-        if let Ok(true) = update::apply_pending_update() {
-            ui::print_pending_update_applied();
+        // Apply any pending update, then auto-update before anything else —
+        // unless updates are disabled (--no-update, --init, --logout) or an
+        // explicit update command is handled below with its own UI.
+        let auto_check = !args.no_update
+            && !args.check_update
+            && !args.update
+            && args.init.is_none()
+            && !args.logout;
+        match update::startup_auto_update(auto_check).await {
+            Ok(true) => {
+                ui::print_update_complete();
+                std::process::exit(0);
+            }
+            Ok(false) => {
+                // Continue normally
+            }
+            Err(e) => {
+                warn!(
+                    "Update check failed: {}. Continuing with current version.",
+                    e
+                );
+            }
         }
 
-        // Handle explicit update commands first
+        // Handle explicit update commands
         if args.check_update {
-            return handle_check_update().await;
+            return handle_update(true).await;
         }
 
         if args.update {
-            return handle_force_update().await;
-        }
-
-        // Check for updates before anything else (unless --no-update or --init/--logout)
-        if !args.no_update && args.init.is_none() && !args.logout {
-            match update::check_for_update_github(false).await {
-                Ok(update::UpdateResult::UpToDate) => {
-                    // Continue normally
-                }
-                Ok(update::UpdateResult::Updated) => {
-                    ui::print_update_complete();
-                    std::process::exit(0);
-                }
-                Ok(update::UpdateResult::UpdateAvailable { .. }) => {
-                    // Shouldn't happen since check_only=false, but handle gracefully
-                }
-                Err(e) => {
-                    warn!(
-                        "Update check failed: {}. Continuing with current version.",
-                        e
-                    );
-                }
-            }
+            return handle_update(false).await;
         }
     }
 
