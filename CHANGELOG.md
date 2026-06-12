@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.54
+
+- **Admin page: three PATCH-user handlers deduped; `/api/auth/me` no longer fetched redundantly.** `patch_user(user_id, body) -> bool` + `update_user_in(users, id, f)` collapse the toggle-admin/unban/confirm-ban triple to one-liners. The dashboard's leave-confirm now uses the `current_user_id` it already holds (typed `Option<Uuid>` now) instead of a second network round-trip, and the admin modal receives the id as a prop, skipping its own me-fetch; the standalone `/admin` route keeps its original fetch with 401→Home / 403→denied handling.
+
 ## 2.8.37
 
 - **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
