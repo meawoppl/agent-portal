@@ -6,8 +6,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if Docker daemon is running
 if ! docker info >/dev/null 2>&1; then
-    echo "Starting Docker Desktop..."
-    open -a Docker
+    case "$OSTYPE" in
+        darwin*)
+            echo "Starting Docker Desktop..."
+            open -a Docker
+            ;;
+        linux*)
+            echo "Starting Docker daemon via systemctl..."
+            if ! systemctl start docker 2>/dev/null && ! sudo systemctl start docker; then
+                echo "Error: failed to start the Docker daemon."
+                echo "Start it manually (e.g. 'sudo systemctl start docker') and re-run."
+                exit 1
+            fi
+            ;;
+        *)
+            echo "Error: Docker daemon is not running and \$OSTYPE '$OSTYPE' is not recognized."
+            echo "Start Docker manually and re-run."
+            exit 1
+            ;;
+    esac
 
     echo -n "Waiting for Docker"
     for i in {1..60}; do

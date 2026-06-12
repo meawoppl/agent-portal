@@ -27,8 +27,10 @@ agent-portal/
 ├── backend/             # Axum server (native only)
 ├── frontend/            # Yew WASM app (WASM target)
 ├── proxy/               # CLI wrapper "claude-portal" (native only)
+├── session-lib/         # Agent-agnostic session-management core (Agent trait, Session<A>)
+├── claude-session-lib/  # Claude backend for session-lib (ClaudeAgent, owns claude CLI process)
+├── codex-session-lib/   # Codex backend for session-lib (CodexAgent, owns codex app-server process)
 ├── launcher/            # Persistent daemon "agent-portal" (native only)
-├── claude-session-lib/  # Library for managing Claude CLI sessions
 ├── portal-auth/         # Shared OAuth device flow client
 └── portal-update/       # Shared auto-update logic
 ```
@@ -69,18 +71,20 @@ pub struct AppState {
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub session_manager: SessionManager,
-    pub oauth_basic_client: Option<BasicClient>,
+    pub oauth_basic_client: Option<GoogleOAuthClient>,
     pub device_flow_store: Option<DeviceFlowStore>,
     pub public_url: String,
     pub cookie_key: Key,
     pub jwt_secret: String,
     pub app_title: String,
+    pub splash_text: Option<String>,
     pub allowed_email_domain: Option<String>,
     pub allowed_emails: Option<Vec<String>>,
     pub message_retention_count: i64,
     pub message_retention_days: u32,
     pub session_max_age_days: u32,
     pub max_image_mb: u32,
+    pub image_store: handlers::images::ImageStore,
 }
 ```
 
@@ -232,7 +236,7 @@ diesel migration generate add_feature_name
 # Creates: YYYY-MM-DD-HHMMSS_add_feature_name/
 ```
 
-**If renaming existing migrations:** After renaming a migration directory, existing databases need their `__diesel_schema_migrations` table updated. See `backend/migrations/fix_migration_names.sql` for an example.
+**If renaming existing migrations:** After renaming a migration directory, existing databases need their `__diesel_schema_migrations` table updated. See `scripts/fix_migration_names.sql` for an example.
 
 ### Adding a New API Endpoint
 
@@ -535,7 +539,7 @@ sessions::table.filter(sessions::id.eq(...))
 **Fix**:
 1. Check backend is running: `curl http://localhost:3000/`
 2. Verify WebSocket URL: should be `ws://localhost:3000` (not `wss://`)
-3. Check backend logs: `tail -f /tmp/agent-portal-backend.log`
+3. Check backend logs: `tail -f /tmp/claude-portal-backend.log`
 4. Try dev mode authentication: backend with `--dev-mode`
 
 ## Code Conventions
@@ -726,6 +730,7 @@ When making changes, verify:
 | `PORT` | Listen port | Optional (default: 3000) |
 | `BASE_URL` | Public URL for OAuth callbacks | Optional |
 | `APP_TITLE` | Custom title in top bar | Optional (default: Agent Portal) |
+| `SPLASH_TEXT` | Custom splash text on login page | Optional |
 | `ALLOWED_EMAIL_DOMAIN` | Restrict to email domain | Optional |
 | `ALLOWED_EMAILS` | Comma-separated allowed emails | Optional |
 | `MESSAGE_RETENTION_COUNT` | Max messages per session | Optional (default: 100) |

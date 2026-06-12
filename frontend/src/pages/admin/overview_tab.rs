@@ -5,17 +5,6 @@ use yew::prelude::*;
 
 use super::AdminStats;
 
-/// Format token count with K/M suffix for readability
-fn format_tokens(count: i64) -> String {
-    if count >= 1_000_000 {
-        format!("{:.1}M", count as f64 / 1_000_000.0)
-    } else if count >= 1_000 {
-        format!("{:.1}K", count as f64 / 1_000.0)
-    } else {
-        count.to_string()
-    }
-}
-
 #[derive(Properties, PartialEq)]
 struct StatCardProps {
     label: String,
@@ -77,11 +66,11 @@ pub fn admin_overview_tab(props: &AdminOverviewTabProps) -> Html {
                     />
                     <StatCard
                         label="Input Tokens"
-                        value={format_tokens(s.total_input_tokens)}
+                        value={utils::format_token_count(s.total_input_tokens)}
                     />
                     <StatCard
                         label="Output Tokens"
-                        value={format_tokens(s.total_output_tokens)}
+                        value={utils::format_token_count(s.total_output_tokens)}
                     />
                 </div>
             </div>

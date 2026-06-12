@@ -48,6 +48,10 @@ fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
 
 /// Format an (agent, model, tier) group as a human-readable label for the
 /// dropdown and legend.
+///
+/// Deliberately not `turn_metrics_pill::format_model_tier_label`: this page
+/// shows the full model id (no vendor-prefix shortening), keeps the tier's
+/// original case, and adds codex / agent-without-model handling.
 fn pair_label(pair: &GroupKey) -> String {
     let base = match (pair.0.as_str(), pair.1.as_deref()) {
         ("codex", None) => "Codex".to_string(),
@@ -94,20 +98,6 @@ fn bucket_index(buckets: &[DateTime<Utc>], ts: DateTime<Utc>) -> Option<usize> {
     buckets.iter().position(|b| *b == ts)
 }
 
-/// Build the time-window query string for the selected radio button.
-/// The backend's window parser accepts an `Nh` / `Nd` suffix, so this is
-/// the exact value sent to `GET /api/metrics/turns?window=…`.
-fn window_param(window: TimeWindow) -> &'static str {
-    match window {
-        TimeWindow::Hours1 => "1h",
-        TimeWindow::Hours6 => "6h",
-        TimeWindow::Days1 => "1d",
-        TimeWindow::Days7 => "7d",
-        TimeWindow::Days30 => "30d",
-        TimeWindow::Days90 => "90d",
-    }
-}
-
 /// Build the bucket-granularity query string for the selected window.
 /// Pick high-fidelity buckets for the selected window. The charts only render
 /// a handful of x-axis labels, so dense buckets preserve real per-turn shape
@@ -133,6 +123,9 @@ enum TimeWindow {
 }
 
 impl TimeWindow {
+    /// Radio-button label, which doubles as the exact wire value sent to
+    /// `GET /api/metrics/turns?window=…` (the backend's window parser
+    /// accepts the same `Nh` / `Nd` suffix form).
     fn label(self) -> &'static str {
         match self {
             Self::Hours1 => "1h",
@@ -214,7 +207,7 @@ pub fn performance_panel() -> Html {
                 let path = format!(
                     "/api/metrics/turns?bucket={}&window={}",
                     bucket_param(window_val),
-                    window_param(window_val)
+                    window_val.label()
                 );
                 match utils::fetch_json::<MetricBucketsResponse>(&path, On401::Ignore).await {
                     Ok(data) => {
@@ -392,64 +385,22 @@ fn render_charts(
     }
 
     // ------------ a) Throughput trend: p50 (solid) + p95 (dashed) ------------
-    let mut throughput_series: Vec<LineSeries> = Vec::new();
-    for (idx, pair) in active_pairs.iter().enumerate() {
-        let color = pair_color(idx);
-        let label = pair_label(pair);
-        let mut p50_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        let mut p95_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        for ts in &bucket_axis {
-            let row = indexed.get(&(pair.clone(), *ts));
-            p50_vals.push(row.and_then(|r| r.throughput_p50_tps));
-            p95_vals.push(row.and_then(|r| r.throughput_p95_tps));
-        }
-        if p50_vals.iter().any(Option::is_some) {
-            throughput_series.push(LineSeries {
-                label: format!("{label} p50"),
-                color: color.to_string(),
-                dashed: false,
-                values: p50_vals,
-            });
-        }
-        if p95_vals.iter().any(Option::is_some) {
-            throughput_series.push(LineSeries {
-                label: format!("{label} p95"),
-                color: color.to_string(),
-                dashed: true,
-                values: p95_vals,
-            });
-        }
-    }
+    let throughput_series = build_p50_p95_series(
+        &indexed,
+        &bucket_axis,
+        &active_pairs,
+        |r| r.throughput_p50_tps,
+        |r| r.throughput_p95_tps,
+    );
 
     // ------------ b) TTFT trend: p50 (solid) + p95 (dashed) seconds ----------
-    let mut ttft_series: Vec<LineSeries> = Vec::new();
-    for (idx, pair) in active_pairs.iter().enumerate() {
-        let color = pair_color(idx);
-        let label = pair_label(pair);
-        let mut p50_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        let mut p95_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        for ts in &bucket_axis {
-            let row = indexed.get(&(pair.clone(), *ts));
-            p50_vals.push(row.and_then(|r| r.ttft_p50_ms).map(|ms| ms as f64 / 1000.0));
-            p95_vals.push(row.and_then(|r| r.ttft_p95_ms).map(|ms| ms as f64 / 1000.0));
-        }
-        if p50_vals.iter().any(Option::is_some) {
-            ttft_series.push(LineSeries {
-                label: format!("{label} p50"),
-                color: color.to_string(),
-                dashed: false,
-                values: p50_vals,
-            });
-        }
-        if p95_vals.iter().any(Option::is_some) {
-            ttft_series.push(LineSeries {
-                label: format!("{label} p95"),
-                color: color.to_string(),
-                dashed: true,
-                values: p95_vals,
-            });
-        }
-    }
+    let ttft_series = build_p50_p95_series(
+        &indexed,
+        &bucket_axis,
+        &active_pairs,
+        |r| r.ttft_p50_ms.map(|ms| ms as f64 / 1000.0),
+        |r| r.ttft_p95_ms.map(|ms| ms as f64 / 1000.0),
+    );
 
     // ------------ c) Stop-reason stacked area ---------------------------------
     let stop_reason_series = build_stop_reason_series(buckets, &bucket_axis, &active_pairs);
@@ -504,6 +455,47 @@ fn render_charts(
             />
         </div>
     }
+}
+
+/// Build paired p50 (solid) / p95 (dashed) line series per active pair,
+/// like the existing [`build_cache_hit_series`]. `p50` / `p95` extract the
+/// already-scaled value from a bucket row; series with no values are dropped.
+fn build_p50_p95_series(
+    indexed: &BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket>,
+    bucket_axis: &[DateTime<Utc>],
+    active_pairs: &[GroupKey],
+    p50: impl Fn(&MetricBucket) -> Option<f64>,
+    p95: impl Fn(&MetricBucket) -> Option<f64>,
+) -> Vec<LineSeries> {
+    let mut out: Vec<LineSeries> = Vec::new();
+    for (idx, pair) in active_pairs.iter().enumerate() {
+        let color = pair_color(idx);
+        let label = pair_label(pair);
+        let mut p50_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
+        let mut p95_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
+        for ts in bucket_axis {
+            let row = indexed.get(&(pair.clone(), *ts));
+            p50_vals.push(row.and_then(|r| p50(r)));
+            p95_vals.push(row.and_then(|r| p95(r)));
+        }
+        if p50_vals.iter().any(Option::is_some) {
+            out.push(LineSeries {
+                label: format!("{label} p50"),
+                color: color.to_string(),
+                dashed: false,
+                values: p50_vals,
+            });
+        }
+        if p95_vals.iter().any(Option::is_some) {
+            out.push(LineSeries {
+                label: format!("{label} p95"),
+                color: color.to_string(),
+                dashed: true,
+                values: p95_vals,
+            });
+        }
+    }
+    out
 }
 
 /// Aggregate stop-reason counts across the active pairs into a fixed-order
@@ -888,13 +880,14 @@ mod tests {
     }
 
     #[test]
-    fn window_param_strings() {
-        assert_eq!(window_param(TimeWindow::Hours1), "1h");
-        assert_eq!(window_param(TimeWindow::Hours6), "6h");
-        assert_eq!(window_param(TimeWindow::Days1), "1d");
-        assert_eq!(window_param(TimeWindow::Days7), "7d");
-        assert_eq!(window_param(TimeWindow::Days30), "30d");
-        assert_eq!(window_param(TimeWindow::Days90), "90d");
+    fn window_label_strings() {
+        // label() doubles as the wire `window=` param — keep both shapes valid.
+        assert_eq!(TimeWindow::Hours1.label(), "1h");
+        assert_eq!(TimeWindow::Hours6.label(), "6h");
+        assert_eq!(TimeWindow::Days1.label(), "1d");
+        assert_eq!(TimeWindow::Days7.label(), "7d");
+        assert_eq!(TimeWindow::Days30.label(), "30d");
+        assert_eq!(TimeWindow::Days90.label(), "90d");
     }
 
     /// Windows should stay granular enough to show shape; the chart axis

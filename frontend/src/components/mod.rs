@@ -13,6 +13,7 @@ pub mod message_renderer;
 mod proxy_token_setup;
 mod schedule_dialog;
 mod share_dialog;
+pub mod skip_permissions;
 pub mod sparkline;
 pub mod time_ago;
 mod tool_renderers;

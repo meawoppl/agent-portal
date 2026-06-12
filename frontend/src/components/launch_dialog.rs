@@ -1,3 +1,4 @@
+use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
 use crate::components::ProxyTokenSetup;
 use crate::hooks::use_escape;
 use crate::utils::{self, FetchError, On401};
@@ -45,31 +46,26 @@ fn agent_installed(installs: &[AgentInstall], agent_type: AgentType) -> Option<b
         .map(|a| a.installed)
 }
 
-struct AgentConfig {
-    args_placeholder: &'static str,
-    skip_permissions_args: &'static [&'static str],
-    skip_permissions_label: Option<&'static str>,
+fn args_placeholder(agent_type: shared::AgentType) -> &'static str {
+    match agent_type {
+        shared::AgentType::Claude => "ex: --model sonnet --allowedTools \"Bash Edit\"",
+        shared::AgentType::Codex => "ex: -c model=gpt-5.5 -c model_reasoning_effort=high",
+    }
 }
 
-fn agent_config(agent_type: shared::AgentType) -> AgentConfig {
-    match agent_type {
-        shared::AgentType::Claude => AgentConfig {
-            args_placeholder: "ex: --model sonnet --allowedTools \"Bash Edit\"",
-            skip_permissions_args: &["--dangerously-skip-permissions"],
-            skip_permissions_label: Some("--dangerously-skip-permissions"),
-        },
-        shared::AgentType::Codex => AgentConfig {
-            args_placeholder: "ex: -c model=gpt-5.5 -c model_reasoning_effort=high",
-            skip_permissions_args: &[
-                "-c",
-                "approval_policy=never",
-                "-c",
-                "sandbox_mode=danger-full-access",
-            ],
-            skip_permissions_label: Some(
-                "-c approval_policy=never -c sandbox_mode=danger-full-access",
-            ),
-        },
+/// One row in the directory browser: folder/file icon plus name, with an
+/// optional click handler (folders navigate; files are inert).
+fn dir_entry(is_dir: bool, name: &str, onclick: Option<Callback<MouseEvent>>) -> Html {
+    let (class, icon) = if is_dir {
+        ("dir-entry dir-entry-folder", "\u{1F4C1}")
+    } else {
+        ("dir-entry dir-entry-file", "\u{1F4C4}")
+    };
+    html! {
+        <div {class} {onclick}>
+            <span class="dir-entry-icon">{ icon }</span>
+            <span class="dir-entry-name">{ name }</span>
+        </div>
     }
 }
 
@@ -378,9 +374,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 .split_whitespace()
                 .map(|s| s.to_string())
                 .collect();
-            let cfg = agent_config(*agent_type);
             if *skip_permissions {
-                claude_args.extend(cfg.skip_permissions_args.iter().map(|arg| arg.to_string()));
+                claude_args.extend(
+                    skip_permissions_args(*agent_type)
+                        .iter()
+                        .map(|arg| arg.to_string()),
+                );
             }
 
             let launcher_id = *selected_launcher;
@@ -466,8 +465,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let selected_info: Option<LauncherInfo> = (*selected_launcher)
         .and_then(|lid| launchers.iter().find(|l| l.launcher_id == lid).cloned());
 
-    let cfg = agent_config(*agent_type);
-
     // Per-agent install hints for the dropdown labels and the inline warning.
     let claude_label = match agent_installed(&agent_installs, AgentType::Claude) {
         Some(false) => "Claude (not installed)".to_string(),
@@ -501,39 +498,22 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             .entries
             .iter()
             .map(|entry| {
-                if entry.is_dir {
+                let onclick = entry.is_dir.then(|| {
                     let base = if (*dir.path).ends_with('/') {
                         (*dir.path).clone()
                     } else {
                         parent_path(&dir.path)
                     };
                     let child = format!("{}{}/", base, entry.name);
-                    let onclick = {
-                        let navigate_to = navigate_to.clone();
-                        Callback::from(move |_: MouseEvent| navigate_to.emit(child.clone()))
-                    };
-                    html! {
-                        <div class="dir-entry dir-entry-folder" onclick={onclick}>
-                            <span class="dir-entry-icon">{ "\u{1F4C1}" }</span>
-                            <span class="dir-entry-name">{ &entry.name }</span>
-                        </div>
-                    }
-                } else {
-                    html! {
-                        <div class="dir-entry dir-entry-file">
-                            <span class="dir-entry-icon">{ "\u{1F4C4}" }</span>
-                            <span class="dir-entry-name">{ &entry.name }</span>
-                        </div>
-                    }
-                }
+                    let navigate_to = navigate_to.clone();
+                    Callback::from(move |_: MouseEvent| navigate_to.emit(child.clone()))
+                });
+                dir_entry(entry.is_dir, &entry.name, onclick)
             })
             .collect::<Html>();
         html! {
             <>
-                <div class="dir-entry dir-entry-folder" onclick={on_up}>
-                    <span class="dir-entry-icon">{ "\u{1F4C1}" }</span>
-                    <span class="dir-entry-name">{ ".." }</span>
-                </div>
+                { dir_entry(true, "..", Some(on_up)) }
                 { entries_html }
             </>
         }
@@ -671,25 +651,23 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         <label>{ "Extra CLI Arguments (optional)" }</label>
                         <input
                             type="text"
-                            placeholder={cfg.args_placeholder}
+                            placeholder={args_placeholder(*agent_type)}
                             value={(*extra_args).clone()}
                             oninput={on_args_input}
                         />
                     </div>
 
                     // Permission bypass checkbox (agent-specific)
-                    if let Some(label) = cfg.skip_permissions_label {
-                        <div class="launch-field launch-checkbox">
-                            <label>
-                                <input
-                                    type="checkbox"
-                                    checked={*skip_permissions}
-                                    onchange={on_skip_permissions.clone()}
-                                />
-                                { format!(" {}", label) }
-                            </label>
-                        </div>
-                    }
+                    <div class="launch-field launch-checkbox">
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={*skip_permissions}
+                                onchange={on_skip_permissions.clone()}
+                            />
+                            { format!(" {}", skip_permissions_label(*agent_type)) }
+                        </label>
+                    </div>
 
                     if let Some(ref err) = *error_msg {
                         <p class="launch-error">{ err }</p>

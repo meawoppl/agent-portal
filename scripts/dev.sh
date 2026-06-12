@@ -14,7 +14,6 @@ NC='\033[0m' # No Color
 # PID file locations
 PID_DIR="/tmp/claude-portal-dev"
 BACKEND_PID_FILE="$PID_DIR/backend.pid"
-DB_CONTAINER="agent-portal-db"
 
 # Log file locations
 BACKEND_LOG="/tmp/claude-portal-backend.log"
@@ -41,6 +40,8 @@ mkdir -p "$PID_DIR"
 # Get the script's directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+source "$SCRIPT_DIR/lib.sh"
 
 cd "$PROJECT_ROOT"
 
@@ -91,11 +92,11 @@ start_db() {
 
 # Run migrations
 run_migrations() {
-    export DATABASE_URL="postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal"
+    export DATABASE_URL="$DEV_DATABASE_URL"
 
     if ! command -v diesel &> /dev/null; then
-        warn "diesel CLI not installed. Installing..."
-        cargo install diesel_cli --no-default-features --features postgres
+        error "diesel CLI not installed. Run: ./scripts/install-deps.sh"
+        return 1
     fi
 
     log "Running database migrations..."
@@ -113,8 +114,8 @@ run_migrations() {
 # Build frontend
 build_frontend() {
     if ! command -v trunk &> /dev/null; then
-        warn "trunk not installed. Installing..."
-        cargo install --locked trunk
+        error "trunk not installed. Run: ./scripts/install-deps.sh"
+        return 1
     fi
 
     log "Building frontend..."
@@ -136,7 +137,7 @@ start_backend() {
         return 0
     fi
 
-    export DATABASE_URL="postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal"
+    export DATABASE_URL="$DEV_DATABASE_URL"
     export DEV_MODE=true
 
     log "Starting backend in dev mode..."

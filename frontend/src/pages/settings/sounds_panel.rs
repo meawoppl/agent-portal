@@ -35,12 +35,7 @@ pub fn sounds_panel() -> Html {
                         if let Ok(cfg) = serde_json::from_value::<SoundConfig>(json) {
                             // Sync to localStorage for play_sound() runtime
                             if let Ok(s) = serde_json::to_string(&cfg) {
-                                if let Some(storage) = web_sys::window()
-                                    .and_then(|w| w.local_storage().ok())
-                                    .flatten()
-                                {
-                                    let _ = storage.set_item(STORAGE_KEY, &s);
-                                }
+                                utils::storage_set(STORAGE_KEY, &s);
                             }
                             config.set(cfg);
                         }
@@ -97,12 +92,7 @@ pub fn sounds_panel() -> Html {
                     Ok(resp) if resp.ok() => {
                         // Update localStorage so play_sound() uses new settings
                         if let Ok(s) = serde_json::to_string(&cfg) {
-                            if let Some(storage) = web_sys::window()
-                                .and_then(|w| w.local_storage().ok())
-                                .flatten()
-                            {
-                                let _ = storage.set_item(STORAGE_KEY, &s);
-                            }
+                            utils::storage_set(STORAGE_KEY, &s);
                         }
                         dirty.set(false);
                         save_feedback.set(Some("Saved!"));

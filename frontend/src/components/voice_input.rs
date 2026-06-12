@@ -17,7 +17,6 @@
 
 use gloo::timers::callback::Timeout;
 use js_sys::{Array, Function, Object, Promise, Reflect};
-use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{spawn_local, JsFuture};
@@ -116,10 +115,6 @@ fn stop_media_stream(stream: &JsValue) {
 /// Props for the VoiceInput component
 #[derive(Properties, PartialEq)]
 pub struct VoiceInputProps {
-    /// Session ID — retained so callers can keep using `{session_id}` without
-    /// caring that the component no longer needs it.
-    #[prop_or_default]
-    pub session_id: Option<Uuid>,
     /// Callback when recording state changes
     pub on_recording_change: Callback<bool>,
     /// Callback when a final transcription is ready to send

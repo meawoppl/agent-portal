@@ -41,6 +41,12 @@ pub struct ShareDialog {
     _escape_listener: Option<EventListener>,
 }
 
+/// Log a fetch failure (with its detail) and surface `msg` in the dialog.
+fn fail(link: &yew::html::Scope<ShareDialog>, msg: &str, detail: String) {
+    log::error!("{}: {}", msg, detail);
+    link.send_message(ShareDialogMsg::SetError(msg.to_string()));
+}
+
 impl Component for ShareDialog {
     type Message = ShareDialogMsg;
     type Properties = ShareDialogProps;
@@ -75,10 +81,7 @@ impl Component for ShareDialog {
                             link.send_message(ShareDialogMsg::MembersLoaded(data.members));
                         }
                         Err(e) => {
-                            log::error!("Failed to load members: {}", e);
-                            link.send_message(ShareDialogMsg::SetError(
-                                "Failed to load members".to_string(),
-                            ));
+                            fail(&link, "Failed to load members", e.to_string());
                         }
                     }
                 });
@@ -128,16 +131,10 @@ impl Component for ShareDialog {
                             link.send_message(ShareDialogMsg::SetError(msg));
                         }
                         Ok(response) => {
-                            log::error!("Failed to add member: {}", response.status());
-                            link.send_message(ShareDialogMsg::SetError(
-                                "Failed to add member".to_string(),
-                            ));
+                            fail(&link, "Failed to add member", response.status().to_string());
                         }
                         Err(e) => {
-                            log::error!("Failed to add member: {:?}", e);
-                            link.send_message(ShareDialogMsg::SetError(
-                                "Failed to add member".to_string(),
-                            ));
+                            fail(&link, "Failed to add member", format!("{:?}", e));
                         }
                     }
                 });
@@ -162,16 +159,14 @@ impl Component for ShareDialog {
                             link.send_message(ShareDialogMsg::MemberRemoved(user_id));
                         }
                         Ok(response) => {
-                            log::error!("Failed to remove member: {}", response.status());
-                            link.send_message(ShareDialogMsg::SetError(
-                                "Failed to remove member".to_string(),
-                            ));
+                            fail(
+                                &link,
+                                "Failed to remove member",
+                                response.status().to_string(),
+                            );
                         }
                         Err(e) => {
-                            log::error!("Failed to remove member: {:?}", e);
-                            link.send_message(ShareDialogMsg::SetError(
-                                "Failed to remove member".to_string(),
-                            ));
+                            fail(&link, "Failed to remove member", format!("{:?}", e));
                         }
                     }
                 });
@@ -197,16 +192,14 @@ impl Component for ShareDialog {
                             link.send_message(ShareDialogMsg::RoleChanged(user_id, role));
                         }
                         Ok(response) => {
-                            log::error!("Failed to change role: {}", response.status());
-                            link.send_message(ShareDialogMsg::SetError(
-                                "Failed to change role".to_string(),
-                            ));
+                            fail(
+                                &link,
+                                "Failed to change role",
+                                response.status().to_string(),
+                            );
                         }
                         Err(e) => {
-                            log::error!("Failed to change role: {:?}", e);
-                            link.send_message(ShareDialogMsg::SetError(
-                                "Failed to change role".to_string(),
-                            ));
+                            fail(&link, "Failed to change role", format!("{:?}", e));
                         }
                     }
                 });

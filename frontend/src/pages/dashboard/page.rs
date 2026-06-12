@@ -24,6 +24,36 @@ use yew::prelude::*;
 // Dashboard Page - Main Orchestrating Component
 // =============================================================================
 
+/// Map total spend to its tier on the $1 / $10 / $100 / $1,000 / $10,000
+/// ladder (0 = below $1, 5 = at or above $10,000).
+fn spend_tier(spend: f64) -> u8 {
+    if spend >= 10000.0 {
+        5
+    } else if spend >= 1000.0 {
+        4
+    } else if spend >= 100.0 {
+        3
+    } else if spend >= 10.0 {
+        2
+    } else if spend >= 1.0 {
+        1
+    } else {
+        0
+    }
+}
+
+/// CSS class for the spend badge, derived from the spend tier.
+fn spend_tier_class(tier: u8) -> &'static str {
+    match tier {
+        5 => "spend-10000",
+        4 => "spend-1000",
+        3 => "spend-100",
+        2 => "spend-10",
+        1 => "spend-1",
+        _ => "",
+    }
+}
+
 #[function_component(DashboardPage)]
 pub fn dashboard_page() -> Html {
     // Use the sessions hook for fetching and polling
@@ -90,19 +120,7 @@ pub fn dashboard_page() -> Html {
         let spend_animating = spend_animating.clone();
         let prev_spend_tier = prev_spend_tier.clone();
         let spend_initialized = spend_initialized.clone();
-        let current_tier = if total_user_spend >= 10000.0 {
-            5u8
-        } else if total_user_spend >= 1000.0 {
-            4
-        } else if total_user_spend >= 100.0 {
-            3
-        } else if total_user_spend >= 10.0 {
-            2
-        } else if total_user_spend >= 1.0 {
-            1
-        } else {
-            0
-        };
+        let current_tier = spend_tier(total_user_spend);
         use_effect_with(current_tier, move |tier| {
             let tier = *tier;
             if !*spend_initialized {
@@ -684,19 +702,7 @@ pub fn dashboard_page() -> Html {
                     <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
                     {
                         if total_user_spend > 0.0 {
-                            let tier_class = if total_user_spend >= 10000.0 {
-                                "spend-10000"
-                            } else if total_user_spend >= 1000.0 {
-                                "spend-1000"
-                            } else if total_user_spend >= 100.0 {
-                                "spend-100"
-                            } else if total_user_spend >= 10.0 {
-                                "spend-10"
-                            } else if total_user_spend >= 1.0 {
-                                "spend-1"
-                            } else {
-                                ""
-                            };
+                            let tier_class = spend_tier_class(spend_tier(total_user_spend));
                             let spend_class = classes!(
                                 "total-spend-badge",
                                 tier_class,

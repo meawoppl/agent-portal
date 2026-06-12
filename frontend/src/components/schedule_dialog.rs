@@ -1,3 +1,6 @@
+use crate::components::skip_permissions::{
+    skip_permissions_args, skip_permissions_label, strip_skip_permissions_args,
+};
 use crate::hooks::use_escape;
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
@@ -12,13 +15,6 @@ use yew::prelude::*;
 
 /// Minimum launcher version that supports scheduled tasks.
 const MIN_LAUNCHER_VERSION: &str = "2.1.2";
-const CLAUDE_SKIP_PERMISSIONS_ARGS: &[&str] = &["--dangerously-skip-permissions"];
-const CODEX_SKIP_PERMISSIONS_ARGS: &[&str] = &[
-    "-c",
-    "approval_policy=never",
-    "-c",
-    "sandbox_mode=danger-full-access",
-];
 
 fn version_sufficient(version: &str) -> bool {
     let parse = |s: &str| -> Option<(u64, u64, u64)> {
@@ -35,45 +31,6 @@ fn version_sufficient(version: &str) -> bool {
         return true;
     };
     have >= need
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| value.to_string()).collect()
-    }
-
-    #[test]
-    fn strips_legacy_codex_full_auto() {
-        let (has_skip, other_args) = strip_skip_permissions_args(
-            &args(&["--model", "o3", "--full-auto"]),
-            shared::AgentType::Codex,
-        );
-
-        assert!(has_skip);
-        assert_eq!(other_args, args(&["--model", "o3"]));
-    }
-
-    #[test]
-    fn strips_codex_config_override_skip_args() {
-        let (has_skip, other_args) = strip_skip_permissions_args(
-            &args(&[
-                "-c",
-                "model=o3",
-                "-c",
-                "approval_policy=never",
-                "-c",
-                "sandbox_mode=danger-full-access",
-                "--strict-config",
-            ]),
-            shared::AgentType::Codex,
-        );
-
-        assert!(has_skip);
-        assert_eq!(other_args, args(&["-c", "model=o3", "--strict-config"]));
-    }
 }
 
 #[derive(Properties, PartialEq)]
@@ -97,64 +54,6 @@ struct TaskForm {
 enum FormMode {
     Create,
     Edit(Uuid),
-}
-
-fn skip_permissions_args(agent_type: shared::AgentType) -> &'static [&'static str] {
-    match agent_type {
-        shared::AgentType::Claude => CLAUDE_SKIP_PERMISSIONS_ARGS,
-        shared::AgentType::Codex => CODEX_SKIP_PERMISSIONS_ARGS,
-    }
-}
-
-fn skip_permissions_label(agent_type: shared::AgentType) -> &'static str {
-    match agent_type {
-        shared::AgentType::Claude => "--dangerously-skip-permissions",
-        shared::AgentType::Codex => "-c approval_policy=never -c sandbox_mode=danger-full-access",
-    }
-}
-
-fn strip_skip_permissions_args(
-    args: &[String],
-    agent_type: shared::AgentType,
-) -> (bool, Vec<String>) {
-    let mut has_skip = false;
-    let mut other_args = Vec::new();
-    let mut i = 0;
-
-    while i < args.len() {
-        let arg = args[i].as_str();
-
-        if arg == "--dangerously-skip-permissions" {
-            has_skip = true;
-            i += 1;
-            continue;
-        }
-
-        // Legacy Codex UI value. Keep recognizing it so editing an existing
-        // task rewrites the removed flag into the current config overrides.
-        if agent_type == shared::AgentType::Codex && arg == "--full-auto" {
-            has_skip = true;
-            i += 1;
-            continue;
-        }
-
-        if i + 1 < args.len()
-            && arg == "-c"
-            && matches!(
-                args[i + 1].as_str(),
-                "approval_policy=never" | "sandbox_mode=danger-full-access"
-            )
-        {
-            has_skip = true;
-            i += 2;
-            continue;
-        }
-
-        other_args.push(args[i].clone());
-        i += 1;
-    }
-
-    (has_skip, other_args)
 }
 
 use super::cron_describe;
@@ -427,20 +326,12 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
     };
 
     // Form input handlers
-    let set_field = |field: &'static str| {
+    let set_field = |setter: fn(&mut TaskForm, String)| {
         let form = form.clone();
         Callback::from(move |e: InputEvent| {
             let input: web_sys::HtmlInputElement = e.target_unchecked_into();
             let mut f = (*form).clone();
-            match field {
-                "name" => f.name = input.value(),
-                "cron_expression" => f.cron_expression = input.value(),
-                "timezone" => f.timezone = input.value(),
-                "max_runtime_minutes" => {
-                    f.max_runtime_minutes = input.value().parse().unwrap_or(30)
-                }
-                _ => {}
-            }
+            setter(&mut f, input.value());
             form.set(f);
         })
     };
@@ -451,16 +342,6 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
             let mut f = (*form).clone();
             f.prompt = input.value();
-            form.set(f);
-        })
-    };
-
-    let on_extra_args_input = {
-        let form = form.clone();
-        Callback::from(move |e: InputEvent| {
-            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            let mut f = (*form).clone();
-            f.extra_args = input.value();
             form.set(f);
         })
     };
@@ -565,7 +446,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             type="text"
                                             placeholder="Nightly Code Review"
                                             value={form.name.clone()}
-                                            oninput={set_field("name")}
+                                            oninput={set_field(|f, v| f.name = v)}
                                             required=true
                                         />
                                     </div>
@@ -576,7 +457,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                                 type="text"
                                                 placeholder="0 3 * * *"
                                                 value={form.cron_expression.clone()}
-                                                oninput={set_field("cron_expression")}
+                                                oninput={set_field(|f, v| f.cron_expression = v)}
                                                 required=true
                                             />
                                             <span class="sched-hint">{ "min hour dom month dow" }</span>
@@ -594,7 +475,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                                 type="text"
                                                 placeholder="UTC"
                                                 value={form.timezone.clone()}
-                                                oninput={set_field("timezone")}
+                                                oninput={set_field(|f, v| f.timezone = v)}
                                             />
                                         </div>
                                         <div class="sched-field sched-field-sm">
@@ -604,7 +485,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                                 min="1"
                                                 max="1440"
                                                 value={form.max_runtime_minutes.to_string()}
-                                                oninput={set_field("max_runtime_minutes")}
+                                                oninput={set_field(|f, v| f.max_runtime_minutes = v.parse().unwrap_or(30))}
                                             />
                                         </div>
                                     </div>
@@ -624,7 +505,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             type="text"
                                             placeholder="--model sonnet --verbose"
                                             value={form.extra_args.clone()}
-                                            oninput={on_extra_args_input}
+                                            oninput={set_field(|f, v| f.extra_args = v)}
                                         />
                                     </div>
                                     <div class="sched-field sched-checkbox">
