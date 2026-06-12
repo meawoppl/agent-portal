@@ -27,7 +27,7 @@ use yew::prelude::*;
 #[derive(Properties, PartialEq)]
 pub struct InputBarProps {
     /// Session this bar is for. Used to seed the command-history localStorage
-    /// key and as the `session_id` prop for the embedded `VoiceInput`.
+    /// key.
     pub session_id: Uuid,
     /// Whether the parent session is currently focused. When `true`, the bar
     /// grabs textarea focus on transitions.
@@ -50,6 +50,17 @@ pub struct InputBarProps {
     /// Fires once per submit (text or upload) so the parent can bump its
     /// per-session "I sent something" bookkeeping.
     pub on_message_sent: Callback<()>,
+}
+
+/// Auto-resize the textarea to fit its content. Measures the scroll height
+/// with overflow hidden to prevent the scrollbar from narrowing the text
+/// area and causing layout bounce.
+fn autosize(el: &HtmlTextAreaElement) {
+    let elem: &Element = el.as_ref();
+    elem.set_attribute("style", "height: 0; overflow-y: hidden")
+        .ok();
+    elem.set_attribute("style", &format!("height: {}px", el.scroll_height()))
+        .ok();
 }
 
 /// Channel from the parent to the bar.
@@ -300,14 +311,7 @@ impl Component for InputBar {
 
         let handle_input = link.callback(|e: InputEvent| {
             let input: HtmlTextAreaElement = e.target_unchecked_into();
-            let el: &Element = input.as_ref();
-            // Measure content height with overflow hidden to prevent
-            // scrollbar from narrowing the text area and causing layout
-            // bounce.
-            el.set_attribute("style", "height: 0; overflow-y: hidden")
-                .ok();
-            el.set_attribute("style", &format!("height: {}px", input.scroll_height()))
-                .ok();
+            autosize(&input);
             InputBarMsg::UpdateInput(input.value())
         });
 
@@ -461,14 +465,11 @@ impl InputBar {
     fn set_input_text(&self, text: &str) {
         if let Some(el) = self.input_ref.cast::<HtmlTextAreaElement>() {
             el.set_value(text);
-            let elem: &Element = el.as_ref();
             if text.is_empty() {
+                let elem: &Element = el.as_ref();
                 elem.remove_attribute("style").ok();
             } else {
-                elem.set_attribute("style", "height: 0; overflow-y: hidden")
-                    .ok();
-                elem.set_attribute("style", &format!("height: {}px", el.scroll_height()))
-                    .ok();
+                autosize(&el);
             }
         }
     }
@@ -653,7 +654,6 @@ impl InputBar {
 
     fn render_voice_input(&self, ctx: &Context<Self>) -> Html {
         let link = ctx.link();
-        let session_id = ctx.props().session_id;
         let on_recording_change = link.callback(InputBarMsg::VoiceRecordingChanged);
         let on_transcription = link.callback(InputBarMsg::VoiceTranscription);
         let on_interim_transcription = link.callback(InputBarMsg::VoiceInterimTranscription);
@@ -661,7 +661,6 @@ impl InputBar {
         let button_ref = self.voice_button_ref.clone();
         html! {
             <VoiceInput
-                session_id={Some(session_id)}
                 {on_recording_change}
                 {on_transcription}
                 on_interim_transcription={Some(on_interim_transcription)}

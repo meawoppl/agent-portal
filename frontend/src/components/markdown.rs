@@ -568,10 +568,10 @@ fn render_table(
         }
     }
 
-    // Separate head from body
-    let (head, body): (Vec<_>, Vec<_>) = parts.into_iter().enumerate().partition(|(i, _)| *i == 0);
-    let head_html: Html = head.into_iter().map(|(_, h)| h).collect();
-    let body_html: Html = body.into_iter().map(|(_, h)| h).collect();
+    // Separate head (first part) from body (the rest)
+    let mut parts = parts.into_iter();
+    let head_html: Html = parts.next().into_iter().collect();
+    let body_html: Html = parts.collect();
 
     html! {
         <div class="md-table-wrapper">
@@ -583,13 +583,13 @@ fn render_table(
     }
 }
 
-/// Render table header row
-/// Note: pulldown-cmark puts TableCells directly inside TableHead (no TableRow wrapper)
-fn render_table_head(
+/// Render the `<th>`/`<td>` cells of one table row (header or body).
+fn render_table_cells(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
     session_id: Option<Uuid>,
-) -> Html {
+    is_header: bool,
+) -> Vec<Html> {
     let mut cells: Vec<Html> = Vec::new();
     let mut i = 0;
     let mut col = 0;
@@ -604,7 +604,11 @@ fn render_table_head(
                     .copied()
                     .unwrap_or(pulldown_cmark::Alignment::None);
                 let style = alignment_style(align);
-                cells.push(html! { <th class="md-table-header" style={style}>{ inner_html }</th> });
+                cells.push(if is_header {
+                    html! { <th class="md-table-header" style={style}>{ inner_html }</th> }
+                } else {
+                    html! { <td class="md-table-cell" style={style}>{ inner_html }</td> }
+                });
                 col += 1;
                 i += consumed;
             }
@@ -614,6 +618,17 @@ fn render_table_head(
         }
     }
 
+    cells
+}
+
+/// Render table header row
+/// Note: pulldown-cmark puts TableCells directly inside TableHead (no TableRow wrapper)
+fn render_table_head(
+    events: &[Event],
+    alignments: &[pulldown_cmark::Alignment],
+    session_id: Option<Uuid>,
+) -> Html {
+    let cells = render_table_cells(events, alignments, session_id, true);
     html! { <thead class="md-table-head"><tr class="md-table-row">{ for cells }</tr></thead> }
 }
 
@@ -623,30 +638,7 @@ fn render_table_row(
     alignments: &[pulldown_cmark::Alignment],
     session_id: Option<Uuid>,
 ) -> Html {
-    let mut cells: Vec<Html> = Vec::new();
-    let mut i = 0;
-    let mut col = 0;
-
-    while i < events.len() {
-        match &events[i] {
-            Event::Start(Tag::TableCell) => {
-                let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableCell);
-                let inner_html = render_events(&inner, session_id);
-                let align = alignments
-                    .get(col)
-                    .copied()
-                    .unwrap_or(pulldown_cmark::Alignment::None);
-                let style = alignment_style(align);
-                cells.push(html! { <td class="md-table-cell" style={style}>{ inner_html }</td> });
-                col += 1;
-                i += consumed;
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-
+    let cells = render_table_cells(events, alignments, session_id, false);
     html! { <tr class="md-table-row">{ for cells }</tr> }
 }
 

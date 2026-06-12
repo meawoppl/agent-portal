@@ -426,19 +426,15 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
         })
     };
 
-    // Tab click handlers
-    let on_overview_tab = {
+    // Tab click handlers — one-line closure factory, see `make_sort_handler`
+    // in `users_tab.rs` for the pattern.
+    let make_tab_handler = |tab: AdminTab| {
         let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(AdminTab::Overview))
+        Callback::from(move |_: MouseEvent| active_tab.set(tab))
     };
-    let on_users_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(AdminTab::Users))
-    };
-    let on_sessions_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(AdminTab::Sessions))
-    };
+    let on_overview_tab = make_tab_handler(AdminTab::Overview);
+    let on_users_tab = make_tab_handler(AdminTab::Users);
+    let on_sessions_tab = make_tab_handler(AdminTab::Sessions);
 
     // Cancel confirmation
     let on_cancel_confirm = {

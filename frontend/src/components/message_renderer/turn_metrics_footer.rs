@@ -177,8 +177,15 @@ pub fn build_chip_list(metrics: &TurnMetrics) -> Vec<String> {
 /// on mount — and is appended last. It only appears when `thinking_tokens > 0`,
 /// which is the Codex reasoning case; Claude turns record `0` here (the wire
 /// folds reasoning into `output_tokens`) so the chip naturally drops.
-pub fn render_turn_metrics_footer(metrics: &TurnMetrics) -> Html {
+///
+/// Takes an `Option` and renders nothing for `None` so callers can pass
+/// their `Option<&TurnMetrics>` straight through.
+pub fn render_turn_metrics_footer(metrics: Option<&TurnMetrics>) -> Html {
     use crate::components::CountUp;
+
+    let Some(metrics) = metrics else {
+        return html! {};
+    };
 
     let text_chips = build_chip_list(metrics);
     let has_thinking = metrics.thinking_tokens > 0;

@@ -30,6 +30,28 @@ fn preserve_user_newlines(text: &str) -> String {
     text.replace('\n', "  \n")
 }
 
+/// Extract the joined text content and tool-result presence from a user
+/// message's content blocks. Shared by [`render_user_message`] and
+/// [`render_user_message_content`].
+fn user_message_text_and_tool_results(msg: &shared::UserMessage) -> (String, bool) {
+    let blocks = &msg.message.content;
+
+    let text_content: String = blocks
+        .iter()
+        .filter_map(|block| match block {
+            shared::ContentBlock::Text(t) => Some(t.text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let has_tool_results = blocks
+        .iter()
+        .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
+
+    (text_content, has_tool_results)
+}
+
 // --- Message renderers ---
 
 pub fn render_optimistic_user_message(
@@ -70,20 +92,7 @@ pub fn render_user_message(
         _ => "You".to_string(),
     };
     let pending_class = if meta.pending { " pending" } else { "" };
-    let blocks = msg.message.content.clone();
-
-    let text_content: String = blocks
-        .iter()
-        .filter_map(|block| match block {
-            shared::ContentBlock::Text(t) => Some(t.text.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let has_tool_results = blocks
-        .iter()
-        .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
+    let (text_content, has_tool_results) = user_message_text_and_tool_results(msg);
 
     if has_tool_results {
         html! {
@@ -125,29 +134,15 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
         }
     }
 
-    let blocks = msg.message.content.clone();
-    let has_tool_results = blocks
-        .iter()
-        .any(|b| matches!(b, shared::ContentBlock::ToolResult(_)));
+    let (text_content, has_tool_results) = user_message_text_and_tool_results(msg);
 
     if has_tool_results {
-        render_content_blocks(&blocks, session_id)
+        render_content_blocks(&msg.message.content, session_id)
+    } else if text_content.is_empty() {
+        html! {}
     } else {
-        let text_content = blocks
-            .iter()
-            .filter_map(|block| match block {
-                shared::ContentBlock::Text(t) => Some(t.text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        if text_content.is_empty() {
-            html! {}
-        } else {
-            html! {
-                <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
-            }
+        html! {
+            <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
         }
     }
 }
@@ -460,10 +455,7 @@ pub fn render_result_message(
     // broadcast for that turn (the wire order is "Result frame first,
     // metrics broadcast second"). Renders nothing in those cases — the
     // chip strip lights up retroactively on the next render.
-    let metrics_footer = match turn_metrics {
-        Some(m) => super::turn_metrics_footer::render_turn_metrics_footer(m),
-        None => html! {},
-    };
+    let metrics_footer = super::turn_metrics_footer::render_turn_metrics_footer(turn_metrics);
 
     if is_error {
         if let Some(error_html) = try_render_api_error(msg.result.as_deref()) {

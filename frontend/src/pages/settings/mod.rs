@@ -52,35 +52,18 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         })
     };
 
-    let on_sessions_tab = {
+    // Tab click handlers — one-line closure factory, see `make_sort_handler`
+    // in `admin/users_tab.rs` for the pattern.
+    let make_tab_handler = |tab: SettingsTab| {
         let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(SettingsTab::Sessions))
+        Callback::from(move |_: MouseEvent| active_tab.set(tab))
     };
-
-    let on_tokens_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(SettingsTab::Tokens))
-    };
-
-    let on_launchers_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(SettingsTab::Launchers))
-    };
-
-    let on_sounds_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(SettingsTab::Sounds))
-    };
-
-    let on_performance_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(SettingsTab::Performance))
-    };
-
-    let on_appearance_tab = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |_| active_tab.set(SettingsTab::Appearance))
-    };
+    let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
+    let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
+    let on_launchers_tab = make_tab_handler(SettingsTab::Launchers);
+    let on_sounds_tab = make_tab_handler(SettingsTab::Sounds);
+    let on_performance_tab = make_tab_handler(SettingsTab::Performance);
+    let on_appearance_tab = make_tab_handler(SettingsTab::Appearance);
 
     let go_back = {
         let on_close = props.on_close.clone();

@@ -392,64 +392,22 @@ fn render_charts(
     }
 
     // ------------ a) Throughput trend: p50 (solid) + p95 (dashed) ------------
-    let mut throughput_series: Vec<LineSeries> = Vec::new();
-    for (idx, pair) in active_pairs.iter().enumerate() {
-        let color = pair_color(idx);
-        let label = pair_label(pair);
-        let mut p50_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        let mut p95_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        for ts in &bucket_axis {
-            let row = indexed.get(&(pair.clone(), *ts));
-            p50_vals.push(row.and_then(|r| r.throughput_p50_tps));
-            p95_vals.push(row.and_then(|r| r.throughput_p95_tps));
-        }
-        if p50_vals.iter().any(Option::is_some) {
-            throughput_series.push(LineSeries {
-                label: format!("{label} p50"),
-                color: color.to_string(),
-                dashed: false,
-                values: p50_vals,
-            });
-        }
-        if p95_vals.iter().any(Option::is_some) {
-            throughput_series.push(LineSeries {
-                label: format!("{label} p95"),
-                color: color.to_string(),
-                dashed: true,
-                values: p95_vals,
-            });
-        }
-    }
+    let throughput_series = build_p50_p95_series(
+        &indexed,
+        &bucket_axis,
+        &active_pairs,
+        |r| r.throughput_p50_tps,
+        |r| r.throughput_p95_tps,
+    );
 
     // ------------ b) TTFT trend: p50 (solid) + p95 (dashed) seconds ----------
-    let mut ttft_series: Vec<LineSeries> = Vec::new();
-    for (idx, pair) in active_pairs.iter().enumerate() {
-        let color = pair_color(idx);
-        let label = pair_label(pair);
-        let mut p50_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        let mut p95_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
-        for ts in &bucket_axis {
-            let row = indexed.get(&(pair.clone(), *ts));
-            p50_vals.push(row.and_then(|r| r.ttft_p50_ms).map(|ms| ms as f64 / 1000.0));
-            p95_vals.push(row.and_then(|r| r.ttft_p95_ms).map(|ms| ms as f64 / 1000.0));
-        }
-        if p50_vals.iter().any(Option::is_some) {
-            ttft_series.push(LineSeries {
-                label: format!("{label} p50"),
-                color: color.to_string(),
-                dashed: false,
-                values: p50_vals,
-            });
-        }
-        if p95_vals.iter().any(Option::is_some) {
-            ttft_series.push(LineSeries {
-                label: format!("{label} p95"),
-                color: color.to_string(),
-                dashed: true,
-                values: p95_vals,
-            });
-        }
-    }
+    let ttft_series = build_p50_p95_series(
+        &indexed,
+        &bucket_axis,
+        &active_pairs,
+        |r| r.ttft_p50_ms.map(|ms| ms as f64 / 1000.0),
+        |r| r.ttft_p95_ms.map(|ms| ms as f64 / 1000.0),
+    );
 
     // ------------ c) Stop-reason stacked area ---------------------------------
     let stop_reason_series = build_stop_reason_series(buckets, &bucket_axis, &active_pairs);
@@ -504,6 +462,47 @@ fn render_charts(
             />
         </div>
     }
+}
+
+/// Build paired p50 (solid) / p95 (dashed) line series per active pair,
+/// like the existing [`build_cache_hit_series`]. `p50` / `p95` extract the
+/// already-scaled value from a bucket row; series with no values are dropped.
+fn build_p50_p95_series(
+    indexed: &BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket>,
+    bucket_axis: &[DateTime<Utc>],
+    active_pairs: &[GroupKey],
+    p50: impl Fn(&MetricBucket) -> Option<f64>,
+    p95: impl Fn(&MetricBucket) -> Option<f64>,
+) -> Vec<LineSeries> {
+    let mut out: Vec<LineSeries> = Vec::new();
+    for (idx, pair) in active_pairs.iter().enumerate() {
+        let color = pair_color(idx);
+        let label = pair_label(pair);
+        let mut p50_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
+        let mut p95_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
+        for ts in bucket_axis {
+            let row = indexed.get(&(pair.clone(), *ts));
+            p50_vals.push(row.and_then(|r| p50(r)));
+            p95_vals.push(row.and_then(|r| p95(r)));
+        }
+        if p50_vals.iter().any(Option::is_some) {
+            out.push(LineSeries {
+                label: format!("{label} p50"),
+                color: color.to_string(),
+                dashed: false,
+                values: p50_vals,
+            });
+        }
+        if p95_vals.iter().any(Option::is_some) {
+            out.push(LineSeries {
+                label: format!("{label} p95"),
+                color: color.to_string(),
+                dashed: true,
+                values: p95_vals,
+            });
+        }
+    }
+    out
 }
 
 /// Aggregate stop-reason counts across the active pairs into a fixed-order
