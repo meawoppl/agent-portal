@@ -45,14 +45,9 @@ pub async fn device_login(
 ) -> Result<impl IntoResponse, AppError> {
     // In dev mode, auto-login and redirect to device approval page
     if app_state.oauth_basic_client.is_none() {
-        use crate::schema::users::dsl::*;
-
         let mut conn = app_state.conn()?;
 
-        let user = users
-            .filter(email.eq("testing@testing.local"))
-            .first::<User>(&mut conn)
-            .map_err(dev_user_lookup_error)?;
+        let user = crate::auth::dev_user(&mut conn).map_err(dev_user_lookup_error)?;
 
         if user.disabled {
             info!("Banned user {} attempted dev device login", user.email);
@@ -214,14 +209,9 @@ pub async fn dev_login(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<impl IntoResponse, AppError> {
-    use crate::schema::users::dsl::*;
-
     let mut conn = app_state.conn()?;
 
-    let user = users
-        .filter(email.eq("testing@testing.local"))
-        .first::<User>(&mut conn)
-        .map_err(dev_user_lookup_error)?;
+    let user = crate::auth::dev_user(&mut conn).map_err(dev_user_lookup_error)?;
 
     // Check if user is banned
     if user.disabled {
@@ -230,7 +220,10 @@ pub async fn dev_login(
         return Ok(banned_redirect(reason));
     }
 
-    info!("Dev mode: auto-logged in as testing@testing.local");
+    info!(
+        "Dev mode: auto-logged in as {}",
+        crate::auth::DEV_USER_EMAIL
+    );
 
     add_session_cookie(&cookies, &app_state, &user);
 

@@ -151,27 +151,24 @@ async fn main() -> anyhow::Result<()> {
     if args.dev_mode {
         use diesel::prelude::*;
         use models::NewUser;
-        use schema::users::dsl::*;
+        use schema::users;
 
         let mut conn = pool.get()?;
-        let test_user = users
-            .filter(email.eq("testing@testing.local"))
-            .first::<models::User>(&mut conn)
-            .optional()?;
+        let test_user = auth::dev_user(&mut conn).optional()?;
 
         if test_user.is_none() {
             let new_user = NewUser {
                 google_id: "dev_mode_test_user".to_string(),
-                email: "testing@testing.local".to_string(),
+                email: auth::DEV_USER_EMAIL.to_string(),
                 name: Some("Test User".to_string()),
                 avatar_url: None,
             };
 
-            diesel::insert_into(users)
+            diesel::insert_into(users::table)
                 .values(&new_user)
                 .execute(&mut conn)?;
 
-            tracing::info!("✓ Created test user: testing@testing.local");
+            tracing::info!("✓ Created test user: {}", auth::DEV_USER_EMAIL);
         }
     }
 

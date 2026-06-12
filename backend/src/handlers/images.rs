@@ -124,8 +124,8 @@ impl ImageStore {
         }
     }
 
-    /// Build a store with the project defaults — for tests and as a fallback
-    /// when env vars aren't set.
+    /// Build a store with the project defaults.
+    #[cfg(test)]
     pub fn with_defaults() -> Self {
         Self::new(DEFAULT_IMAGE_STORE_MAX_BYTES, DEFAULT_IMAGE_STORE_TTL)
     }
@@ -272,13 +272,6 @@ impl ImageStore {
     /// expired past its TTL, or has been evicted to stay under the byte cap.
     pub fn get(&self, id: &Uuid) -> Option<Arc<StoredImage>> {
         self.images.get(id)
-    }
-
-    /// Approximate number of live entries — exposed for telemetry/tests.
-    /// Note: mini-moka's `entry_count` is best-effort and may briefly include
-    /// entries that have just been scheduled for eviction.
-    pub fn count(&self) -> u64 {
-        self.images.entry_count()
     }
 }
 
