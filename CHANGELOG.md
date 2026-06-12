@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.51
+
+- **Session rail: dropdown options share one button shell and close-then-emit helper; dead tick counter removed.** `close_then(menu_session, action)` and `menu_option(extra_classes, label, hint, onclick)` absorb ~9 repeated button shells and 7 close-menu closures (hide/pause/leave/delete/share/schedule/copy-id/stop/blocked-stop); the blocked-stop and schedule options share one `open_schedule` callback. The sparkline tick effect's `Rc<Cell<u32>>` counter (incremented every 100ms, never read) is deleted. The compaction/task range loops folded into one `(ranges, class)` flat_map preserving render order. Deliberately distinct shells (two-click stop confirm, disabled spans, PR/repo links) untouched. Net −27 lines with far less repetition in the dropdown block.
+
 ## 2.8.50
 
 - **Permission dialog: keyboard handler and option-row loop deduped between standard and ExitPlanMode variants.** `nav_keydown` (ArrowUp/k, ArrowDown/j, Enter/Space with preventDefault — verbatim in both dialogs before) and `render_options` (cursor, selected classes, click-to-confirm) are now shared; each dialog still builds its own options list (standard keeps the 3-option Allow-&-Remember variant). The question-header badge's two near-identical branches collapsed to one with a conditional `<span class="badge">` (empty `html!{}` renders nothing — DOM identical). AskUserQuestion's distinct Enter-to-submit handler untouched. Net −44 lines.
