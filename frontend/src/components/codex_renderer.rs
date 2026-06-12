@@ -1,9 +1,9 @@
 use super::copy_button::CopyButton;
 use super::expandable::ExpandableText;
 use super::markdown::render_markdown_for_session;
-use super::message_renderer::format_duration;
 use codex_codes::io::items::{FileUpdateChange, ThreadItem};
 use serde_json::Value;
+use shared::fmt::format_duration;
 use uuid::Uuid;
 use yew::prelude::*;
 

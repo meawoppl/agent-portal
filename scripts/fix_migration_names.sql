@@ -11,7 +11,7 @@
 -- Usage: Run this via docker exec or psql:
 --   docker exec <container> psql -U claude_portal -f /path/to/fix_migration_names.sql
 --   -- or --
---   psql $DATABASE_URL -f backend/migrations/fix_migration_names.sql
+--   psql $DATABASE_URL -f scripts/fix_migration_names.sql
 --
 -- Safe to run multiple times (uses idempotent UPDATE statements).
 

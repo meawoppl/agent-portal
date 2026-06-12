@@ -78,6 +78,24 @@ pub struct ProxySessionConfig {
     pub codex_thread_id_sink: Option<CodexThreadIdSink>,
 }
 
+/// The local hostname, or `"unknown"` when the OS lookup fails.
+/// Non-UTF-8 hostnames are converted lossily (invalid bytes become U+FFFD).
+pub fn hostname_or_unknown() -> String {
+    hostname::get()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Default session name when the user doesn't supply one:
+/// `<hostname>-<YYYYmmdd-HHMMSS>` (local time).
+pub fn default_session_name() -> String {
+    format!(
+        "{}-{}",
+        hostname_or_unknown(),
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    )
+}
+
 /// Exponential backoff helper
 pub struct Backoff {
     current: u64,
@@ -471,10 +489,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
 
     // Send a portal message with session details
     {
-        let hostname = hostname::get()
-            .ok()
-            .and_then(|h| h.into_string().ok())
-            .unwrap_or_else(|| "unknown".to_string());
+        let hostname = hostname_or_unknown();
 
         let status_line = if session.first_connection {
             "**Session started**".to_string()
@@ -584,10 +599,7 @@ pub async fn register_session(
 ) -> Result<u32, Duration> {
     info!("Registering session...");
 
-    let hostname = hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string());
+    let hostname = hostname_or_unknown();
 
     let register_msg = ProxyToServer::Register(shared::RegisterFields {
         session_id: config.session_id,
@@ -1269,29 +1281,7 @@ async fn read_download_file(
     }
 }
 
-/// Truncate a string to max length
-pub(crate) fn truncate(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        s
-    } else {
-        // Find a safe UTF-8 boundary
-        let mut end = max_len;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        &s[..end]
-    }
-}
-
-/// Format duration in ms to human readable
-pub(crate) fn format_duration(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{}ms", ms)
-    } else if ms < 60000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        let mins = ms / 60000;
-        let secs = (ms % 60000) / 1000;
-        format!("{}m{}s", mins, secs)
-    }
-}
+// String helpers shared with the frontend (see `shared::fmt`). Note the
+// minute format is `"{}m {}s"` (with a space), matching the frontend
+// transcript — the old local copy here used `"{}m{}s"`.
+pub(crate) use shared::fmt::{format_duration, truncate_str as truncate};

@@ -121,10 +121,7 @@ fn summarize_input(input: &Value) -> String {
             .map(|(k, v)| match v {
                 Value::String(s) => {
                     let truncated = if s.len() > 40 {
-                        format!(
-                            "{}...",
-                            crate::components::message_renderer::truncate_str(s, 40)
-                        )
+                        format!("{}...", shared::fmt::truncate_str(s, 40))
                     } else {
                         s.clone()
                     };

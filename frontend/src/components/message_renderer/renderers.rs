@@ -5,8 +5,8 @@ mod portal;
 mod system;
 mod tools;
 
+use super::shorten_model_name;
 use super::types::{OptimisticUserMessage, UserMessageMeta};
-use super::{format_duration, shorten_model_name};
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
@@ -14,6 +14,7 @@ use crate::components::tool_renderers::{
 };
 use crate::hooks::use_escape_capture;
 use serde::Deserialize;
+use shared::fmt::format_duration;
 use uuid::Uuid;
 use yew::prelude::*;
 

@@ -163,8 +163,7 @@ impl Default for SoundConfig {
 }
 
 fn load_config() -> Option<SoundConfig> {
-    let storage = web_sys::window()?.local_storage().ok()??;
-    let json = storage.get_item(STORAGE_KEY).ok()??;
+    let json = crate::utils::storage_get(STORAGE_KEY)?;
     serde_json::from_str(&json).ok()
 }
 

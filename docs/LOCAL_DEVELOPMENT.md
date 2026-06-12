@@ -52,7 +52,7 @@ Access the database directly:
 ### Backend
 
 - **URL**: http://localhost:3000
-- **Log file**: `/tmp/agent-portal-backend.log`
+- **Log file**: `/tmp/claude-portal-backend.log`
 - **Mode**: Dev mode (OAuth bypassed)
 - **Test user**: `testing@testing.local`
 

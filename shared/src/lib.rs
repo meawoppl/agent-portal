@@ -16,6 +16,9 @@ pub use image_upload::{ImageUploadClientMsg, ImageUploadEndpoint, ImageUploadSer
 // Protocol constants shared between backend and proxy
 pub mod protocol;
 
+// String/number formatting helpers shared between frontend and native crates
+pub mod fmt;
+
 // API client types and trait
 pub mod api;
 pub use api::{

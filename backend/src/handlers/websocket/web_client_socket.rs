@@ -270,7 +270,10 @@ fn handle_web_register(
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
 ) -> bool {
-    match super::auth::verify_session_access(app_state, session_id, user_id) {
+    let access = app_state.conn().and_then(|mut conn| {
+        crate::handlers::session_access::verify_session_reader(&mut conn, session_id, user_id)
+    });
+    match access {
         Ok(_session) => {
             let key = session_id.to_string();
             *session_key = Some(key.clone());
@@ -286,10 +289,10 @@ fn handle_web_register(
             replay_pending_permission(db_pool, session_id, tx);
             false
         }
-        Err(_) => {
+        Err(e) => {
             warn!(
-                "User {} attempted to access session {} they don't own",
-                user_id, session_id
+                "User {} attempted to access session {} they don't own: {:?}",
+                user_id, session_id, e
             );
             let _ = tx.send(ServerToClient::Error {
                 message: "Access denied: you don't own this session".to_string(),

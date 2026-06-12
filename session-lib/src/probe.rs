@@ -27,10 +27,7 @@ pub fn probe_all_agents() -> Vec<(AgentType, ProbeResult)> {
 /// Probe one agent. Returns the resolved binary path (via `which`) and the
 /// `--version` output trimmed. `installed` is true iff `--version` exited 0.
 pub fn probe_agent(agent: AgentType) -> ProbeResult {
-    let name = match agent {
-        AgentType::Claude => "claude",
-        AgentType::Codex => "codex",
-    };
+    let name = agent.as_str();
 
     let resolved_path = which::which(name).ok();
     if resolved_path.is_none() {

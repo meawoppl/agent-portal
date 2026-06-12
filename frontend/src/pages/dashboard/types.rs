@@ -1,5 +1,6 @@
 //! Shared types for the dashboard module
 
+use crate::utils::{storage_get, storage_set};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -93,39 +94,34 @@ pub fn parse_ask_user_question(input: &serde_json::Value) -> Option<AskUserQuest
     serde_json::from_value(input.clone()).ok()
 }
 
+/// Load a boolean preference from localStorage (default: false)
+fn load_bool_pref(key: &str) -> bool {
+    storage_get(key).map(|v| v == "true").unwrap_or(false)
+}
+
+/// Save a boolean preference to localStorage
+fn save_bool_pref(key: &str, value: bool) {
+    storage_set(key, if value { "true" } else { "false" });
+}
+
 /// Load whether inactive sessions section is hidden from localStorage
 pub fn load_inactive_hidden() -> bool {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(INACTIVE_HIDDEN_STORAGE_KEY).ok().flatten())
-        .map(|v| v == "true")
-        .unwrap_or(false)
+    load_bool_pref(INACTIVE_HIDDEN_STORAGE_KEY)
 }
 
 /// Save inactive hidden state to localStorage
 pub fn save_inactive_hidden(hidden: bool) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(
-            INACTIVE_HIDDEN_STORAGE_KEY,
-            if hidden { "true" } else { "false" },
-        );
-    }
+    save_bool_pref(INACTIVE_HIDDEN_STORAGE_KEY, hidden);
 }
 
 /// Load cost display preference from localStorage (default: hidden)
 pub fn load_show_cost() -> bool {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(SHOW_COST_STORAGE_KEY).ok().flatten())
-        .map(|v| v == "true")
-        .unwrap_or(false)
+    load_bool_pref(SHOW_COST_STORAGE_KEY)
 }
 
 /// Save cost display preference to localStorage
 pub fn save_show_cost(show: bool) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(SHOW_COST_STORAGE_KEY, if show { "true" } else { "false" });
-    }
+    save_bool_pref(SHOW_COST_STORAGE_KEY, show);
 }
 
 /// Where the session pill rail sits on the dashboard.
@@ -174,30 +170,19 @@ impl RailPosition {
 
 /// Load rail position preference from localStorage (default: top).
 pub fn load_rail_position() -> RailPosition {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| {
-            storage
-                .get_item(RAIL_ORIENTATION_STORAGE_KEY)
-                .ok()
-                .flatten()
-        })
+    storage_get(RAIL_ORIENTATION_STORAGE_KEY)
         .and_then(|v| RailPosition::from_str(&v))
         .unwrap_or(RailPosition::Top)
 }
 
 /// Save rail position preference to localStorage.
 pub fn save_rail_position(position: RailPosition) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(RAIL_ORIENTATION_STORAGE_KEY, position.as_str());
-    }
+    storage_set(RAIL_ORIENTATION_STORAGE_KEY, position.as_str());
 }
 
 /// Load hidden session IDs from localStorage
 pub fn load_hidden_sessions() -> HashSet<Uuid> {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(HIDDEN_SESSIONS_STORAGE_KEY).ok().flatten())
+    storage_get(HIDDEN_SESSIONS_STORAGE_KEY)
         .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
         .map(|ids| ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect())
         .unwrap_or_default()
@@ -205,11 +190,9 @@ pub fn load_hidden_sessions() -> HashSet<Uuid> {
 
 /// Save hidden session IDs to localStorage
 pub fn save_hidden_sessions(hidden: &HashSet<Uuid>) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let ids: Vec<String> = hidden.iter().map(|id| id.to_string()).collect();
-        if let Ok(json) = serde_json::to_string(&ids) {
-            let _ = storage.set_item(HIDDEN_SESSIONS_STORAGE_KEY, &json);
-        }
+    let ids: Vec<String> = hidden.iter().map(|id| id.to_string()).collect();
+    if let Ok(json) = serde_json::to_string(&ids) {
+        storage_set(HIDDEN_SESSIONS_STORAGE_KEY, &json);
     }
 }
 

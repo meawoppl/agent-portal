@@ -15,7 +15,9 @@
 
 use super::history::CommandHistory;
 use crate::components::VoiceInput;
+use crate::utils::format_file_size;
 use gloo::timers::callback::Timeout;
+use shared::protocol::UPLOAD_CHUNK_SIZE;
 use shared::{ClientToServer, SendMode};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
@@ -537,8 +539,7 @@ impl InputBar {
                 let uint8_array = js_sys::Uint8Array::new(&array_buffer);
                 let bytes = uint8_array.to_vec();
 
-                const CHUNK_SIZE: usize = 1024;
-                let total_chunks = bytes.len().div_ceil(CHUNK_SIZE).max(1) as u32;
+                let total_chunks = bytes.len().div_ceil(UPLOAD_CHUNK_SIZE).max(1) as u32;
                 let upload_id = Uuid::new_v4().to_string();
 
                 let ct = if content_type.is_empty() {
@@ -558,8 +559,8 @@ impl InputBar {
                 ));
 
                 for i in 0..total_chunks {
-                    let start = i as usize * CHUNK_SIZE;
-                    let end = ((i as usize + 1) * CHUNK_SIZE).min(bytes.len());
+                    let start = i as usize * UPLOAD_CHUNK_SIZE;
+                    let end = ((i as usize + 1) * UPLOAD_CHUNK_SIZE).min(bytes.len());
                     let chunk = &bytes[start..end];
                     let encoded =
                         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, chunk);
@@ -773,18 +774,6 @@ impl InputBar {
     }
 }
 
-/// Human-readable file size: `"512 B"`, `"1.5 KB"`, `"2.0 MB"`. Pulled out
-/// so the format is unit-testable without a `web_sys::File`.
-fn format_file_size(size: u64) -> String {
-    if size < 1024 {
-        format!("{} B", size)
-    } else if size < 1024 * 1024 {
-        format!("{:.1} KB", size as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
-    }
-}
-
 /// Compose the combined user-text + file-list message the upload pipeline
 /// sends to Claude after the last chunk lands. Pulled out so the message
 /// shape (preserved verbatim from the pre-extraction behavior) is
@@ -811,31 +800,6 @@ fn build_upload_message(user_input: &str, files: &[(String, u64)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- format_file_size ---
-
-    #[test]
-    fn format_file_size_renders_bytes_under_one_kib() {
-        assert_eq!(format_file_size(0), "0 B");
-        assert_eq!(format_file_size(1), "1 B");
-        assert_eq!(format_file_size(512), "512 B");
-        assert_eq!(format_file_size(1023), "1023 B");
-    }
-
-    #[test]
-    fn format_file_size_renders_kib_between_one_kib_and_one_mib() {
-        // 1024 is the boundary — exactly at it we cross to KB.
-        assert_eq!(format_file_size(1024), "1.0 KB");
-        assert_eq!(format_file_size(1536), "1.5 KB");
-        assert_eq!(format_file_size(1024 * 1024 - 1), "1024.0 KB");
-    }
-
-    #[test]
-    fn format_file_size_renders_mib_at_or_above_one_mib() {
-        assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
-        assert_eq!(format_file_size(2 * 1024 * 1024), "2.0 MB");
-        assert_eq!(format_file_size(5 * 1024 * 1024 + 512 * 1024), "5.5 MB");
-    }
 
     // --- build_upload_message ---
 

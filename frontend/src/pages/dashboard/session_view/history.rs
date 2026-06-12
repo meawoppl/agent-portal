@@ -1,7 +1,7 @@
 //! Command history management for SessionView
 
+use crate::utils::{storage_get, storage_set};
 use uuid::Uuid;
-use web_sys::Storage;
 
 /// Maximum number of commands to keep in history
 pub const MAX_HISTORY: usize = 100;
@@ -41,21 +41,13 @@ impl CommandHistory {
         self.session_id.map(|id| format!("command_history_{}", id))
     }
 
-    /// Get localStorage handle
-    fn get_storage() -> Option<Storage> {
-        web_sys::window()?.local_storage().ok().flatten()
-    }
-
     /// Load history from localStorage
     fn load_from_storage(&mut self) {
         let Some(key) = self.storage_key() else {
             return;
         };
-        let Some(storage) = Self::get_storage() else {
-            return;
-        };
 
-        if let Ok(Some(data)) = storage.get_item(&key) {
+        if let Some(data) = storage_get(&key) {
             if let Ok(entries) = serde_json::from_str::<Vec<String>>(&data) {
                 self.entries = entries;
                 // Trim to max if somehow over limit
@@ -72,12 +64,9 @@ impl CommandHistory {
         let Some(key) = self.storage_key() else {
             return;
         };
-        let Some(storage) = Self::get_storage() else {
-            return;
-        };
 
         if let Ok(data) = serde_json::to_string(&self.entries) {
-            let _ = storage.set_item(&key, &data);
+            storage_set(&key, &data);
         }
     }
 

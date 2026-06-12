@@ -1,22 +1,9 @@
 use super::{SessionId, SessionManager};
 use base64::Engine;
+use shared::protocol::{MAX_UPLOAD_CHUNK_BYTES, MAX_UPLOAD_TOTAL_CHUNKS};
 use shared::ServerToProxy;
 use std::collections::{HashMap, HashSet};
 use tracing::{info, warn};
-
-/// Hard ceiling on the number of chunks per upload. With `MAX_CHUNK_BYTES = 64
-/// KiB` this caps any single upload at `MAX_TOTAL_CHUNKS * MAX_CHUNK_BYTES`
-/// (~3.2 GiB), but the **binding** limit is `effective_max_total_bytes` (the
-/// `PORTAL_MAX_IMAGE_MB` cap, see `handle_file_upload_chunk`) — this constant
-/// only stops obviously-pathological `total_chunks` values from being accepted
-/// at `Start` time. Per-chunk decoded size is what the previous
-/// `MAX_TOTAL_CHUNKS = 51_200` constant implicitly (and incorrectly) assumed.
-const MAX_TOTAL_CHUNKS: u32 = 65_536;
-
-/// Per-chunk decoded byte cap. Enforced after base64-decoding each chunk so
-/// the server's total-byte budget can't be bypassed by a client sending
-/// arbitrarily-large chunks (the prior behavior — see #785).
-const MAX_CHUNK_BYTES: usize = 64 * 1024; // 64 KiB
 
 /// Tracks metadata for an in-progress upload so we can validate chunks.
 /// `received_indices` is the unique set of chunk indices we've accepted —
@@ -56,7 +43,7 @@ pub(super) fn handle_file_upload_start(
     total_size: u64,
     max_image_mb: u32,
 ) {
-    if total_chunks == 0 || total_chunks > MAX_TOTAL_CHUNKS {
+    if total_chunks == 0 || total_chunks > MAX_UPLOAD_TOTAL_CHUNKS {
         warn!(
             "Invalid total_chunks {} for upload {}",
             total_chunks, upload_id
@@ -139,7 +126,7 @@ fn validate_and_record_chunk(
     if upload.received_indices.contains(&chunk_index) {
         return ChunkOutcome::Ignore;
     }
-    if decoded_len > MAX_CHUNK_BYTES {
+    if decoded_len > MAX_UPLOAD_CHUNK_BYTES {
         return ChunkOutcome::Abort("per-chunk byte cap exceeded");
     }
 
@@ -265,7 +252,7 @@ mod tests {
     //!
     //!   * duplicate `chunk_index` → ignored, no counter bump
     //!   * `chunk_index >= total_chunks` → ignored
-    //!   * decoded chunk > `MAX_CHUNK_BYTES` → abort
+    //!   * decoded chunk > `MAX_UPLOAD_CHUNK_BYTES` → abort
     //!   * running decoded bytes > `min(total_size, server cap)` → abort
     //!   * complete only when **distinct** indices == `total_chunks`
     //!
@@ -320,7 +307,7 @@ mod tests {
     #[test]
     fn per_chunk_byte_cap_aborts_upload() {
         let mut upload = upload_with(2, u64::MAX, u64::MAX);
-        let outcome = validate_and_record_chunk(&mut upload, 0, MAX_CHUNK_BYTES + 1);
+        let outcome = validate_and_record_chunk(&mut upload, 0, MAX_UPLOAD_CHUNK_BYTES + 1);
         assert!(
             matches!(outcome, ChunkOutcome::Abort(_)),
             "expected Abort, got {:?}",
@@ -452,7 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_chunk_e2e_oversize_chunk_aborts_and_drops_pending() {
-        // A chunk decoding to > MAX_CHUNK_BYTES must abort the upload and
+        // A chunk decoding to > MAX_UPLOAD_CHUNK_BYTES must abort the upload and
         // remove the pending entry, so subsequent chunks for the same
         // upload_id are silently dropped (the unknown-upload_id path).
         let session_manager = SessionManager::new();
@@ -464,7 +451,7 @@ mod tests {
         let upload_id = "u2".to_string();
         pending_uploads.insert(upload_id.clone(), upload_with(2, u64::MAX, u64::MAX));
 
-        let oversize = vec![0u8; MAX_CHUNK_BYTES + 1];
+        let oversize = vec![0u8; MAX_UPLOAD_CHUNK_BYTES + 1];
         let b64 = base64::engine::general_purpose::STANDARD.encode(&oversize);
 
         handle_file_upload_chunk(
