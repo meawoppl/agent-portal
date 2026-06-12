@@ -43,23 +43,17 @@ pub struct DirectorySession {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionAuth {
-    pub user_id: String,
     pub auth_token: String,
     pub user_email: Option<String>,
     pub last_used: String,
     #[serde(default)]
     pub backend_url: Option<String>,
-    #[serde(default)]
-    pub session_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Preferences {
     #[serde(default)]
     pub default_backend_url: Option<String>,
-
-    #[serde(default)]
-    pub auto_open_browser: bool,
 }
 
 /// File lock for atomic config operations
@@ -170,25 +164,9 @@ impl ProxyConfig {
     /// This prevents race conditions when multiple proxy instances run in the same directory
     pub fn atomic_save(&self) -> Result<()> {
         let path = Self::config_path()?;
-
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).context("Failed to create config directory")?;
-        }
-
-        // Acquire lock
-        let _lock = ConfigLock::acquire(&path)?;
-
-        // Write to temp file first
-        let temp_path = path.with_extension("tmp");
-        let contents = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
-        fs::write(&temp_path, &contents).context("Failed to write temp config file")?;
-
-        // Atomic rename
-        fs::rename(&temp_path, &path).context("Failed to rename config file")?;
-
+        let lock = ConfigLock::acquire(&path)?;
+        self.save_with_lock(&lock)
         // Lock is released on drop
-        Ok(())
     }
 
     /// Load config with file locking (for read-modify-write operations)
@@ -250,12 +228,6 @@ impl ProxyConfig {
     pub fn set_backend_url(&mut self, working_dir: &str, url: &str) {
         if let Some(auth) = self.sessions.get_mut(working_dir) {
             auth.backend_url = Some(url.to_string());
-        }
-    }
-
-    pub fn set_session_prefix(&mut self, working_dir: &str, prefix: &str) {
-        if let Some(auth) = self.sessions.get_mut(working_dir) {
-            auth.session_prefix = Some(prefix.to_string());
         }
     }
 

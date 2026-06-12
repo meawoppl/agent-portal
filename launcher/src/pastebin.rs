@@ -50,9 +50,7 @@ fn build_info() -> String {
 }
 
 fn system_info() -> String {
-    let hostname = hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "<unknown>".into());
+    let hostname = claude_session_lib::hostname_or_unknown();
 
     let uname = std::process::Command::new("uname")
         .arg("-a")

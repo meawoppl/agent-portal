@@ -74,12 +74,12 @@ impl Scheduler {
             .into_iter()
             .map(|config| {
                 let next_fire = if config.enabled && !running_task_ids.contains(&config.id) {
-                    compute_next_fire(&config.cron_expression, &config.timezone)
+                    compute_next_fire(&config.fields.cron_expression, &config.fields.timezone)
                 } else {
                     None
                 };
                 if let Some(ref next) = next_fire {
-                    info!("Task '{}': next fire at {}", config.name, next);
+                    info!("Task '{}': next fire at {}", config.fields.name, next);
                 }
                 ActiveTask { config, next_fire }
             })
@@ -184,10 +184,12 @@ impl Scheduler {
             if running_task_ids.contains(&task.config.id) {
                 info!(
                     "Skipping task '{}': previous run still active",
-                    task.config.name
+                    task.config.fields.name
                 );
-                task.next_fire =
-                    compute_next_fire(&task.config.cron_expression, &task.config.timezone);
+                task.next_fire = compute_next_fire(
+                    &task.config.fields.cron_expression,
+                    &task.config.fields.timezone,
+                );
                 continue;
             }
 
@@ -197,7 +199,7 @@ impl Scheduler {
                 PendingLaunch {
                     task_id: task.config.id,
                     last_session_id: task.config.last_session_id,
-                    prompt: task.config.prompt.clone(),
+                    prompt: task.config.fields.prompt.clone(),
                 },
             ));
             to_fire.push(TaskToFire {
@@ -205,10 +207,16 @@ impl Scheduler {
                 config: task.config.clone(),
             });
 
-            info!("Firing task '{}' ({})", task.config.name, task.config.id);
-            task.next_fire = compute_next_fire(&task.config.cron_expression, &task.config.timezone);
+            info!(
+                "Firing task '{}' ({})",
+                task.config.fields.name, task.config.id
+            );
+            task.next_fire = compute_next_fire(
+                &task.config.fields.cron_expression,
+                &task.config.fields.timezone,
+            );
             if let Some(ref next) = task.next_fire {
-                info!("Task '{}': next fire at {}", task.config.name, next);
+                info!("Task '{}': next fire at {}", task.config.fields.name, next);
             }
         }
 
@@ -241,7 +249,7 @@ impl Scheduler {
                 .tasks
                 .iter()
                 .find(|t| t.config.id == pending.task_id)
-                .map(|t| t.config.max_runtime_minutes)
+                .map(|t| t.config.fields.max_runtime_minutes)
                 .unwrap_or(30);
 
             self.running.insert(
@@ -338,15 +346,17 @@ mod tests {
     fn make_task(name: &str, cron: &str) -> ScheduledTaskConfig {
         ScheduledTaskConfig {
             id: Uuid::new_v4(),
-            name: name.to_string(),
-            cron_expression: cron.to_string(),
-            timezone: "UTC".to_string(),
-            working_directory: "/tmp".to_string(),
-            prompt: "test prompt".to_string(),
-            claude_args: vec![],
-            agent_type: AgentType::Claude,
+            fields: shared::ScheduledTaskFields {
+                name: name.to_string(),
+                cron_expression: cron.to_string(),
+                timezone: "UTC".to_string(),
+                working_directory: "/tmp".to_string(),
+                prompt: "test prompt".to_string(),
+                claude_args: vec![],
+                agent_type: AgentType::Claude,
+                max_runtime_minutes: 30,
+            },
             enabled: true,
-            max_runtime_minutes: 30,
             last_session_id: None,
         }
     }

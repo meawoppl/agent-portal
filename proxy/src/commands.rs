@@ -24,7 +24,7 @@ pub fn handle_init(
     init_value: &str,
     backend_url_override: Option<&str>,
 ) -> Result<()> {
-    let (parsed_backend_url, token, session_prefix) = util::parse_init_value(init_value)?;
+    let (parsed_backend_url, token) = util::parse_init_value(init_value)?;
 
     // Resolve backend URL: CLI override > parsed from init value (required)
     let backend_url = backend_url_override
@@ -43,12 +43,10 @@ pub fn handle_init(
     config.set_session_auth(
         cwd.to_string(),
         SessionAuth {
-            user_id: String::new(),
             auth_token: token,
             user_email: user_email.clone(),
             last_used: chrono::Utc::now().to_rfc3339(),
             backend_url: Some(backend_url.clone()),
-            session_prefix: session_prefix.clone(),
         },
     );
 
@@ -57,11 +55,6 @@ pub fn handle_init(
 
     // Also set as the global default so it works in other directories
     config.preferences.default_backend_url = Some(backend_url.clone());
-
-    // Save session name prefix if provided
-    if let Some(prefix) = session_prefix {
-        config.set_session_prefix(cwd, &prefix);
-    }
 
     config.atomic_save()?;
 

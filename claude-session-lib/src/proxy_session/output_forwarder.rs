@@ -130,16 +130,15 @@ pub fn spawn_output_forwarder(
                             None => Err(anyhow::anyhow!("no auth token available for upload")),
                         };
                         match result {
-                            Ok(url) => shared::PortalMessage {
-                                message_type: "portal".to_string(),
-                                content: vec![shared::PortalContent::Image {
+                            Ok(url) => shared::PortalMessage::with_content(vec![
+                                shared::PortalContent::Image {
                                     media_type,
                                     data: url,
                                     file_path: Some(file_path),
                                     file_size: Some(file_size),
                                     source_type: Some("url".to_string()),
-                                }],
-                            },
+                                },
+                            ]),
                             Err(e) => {
                                 warn!("Chunked image upload failed: {}", e);
                                 shared::PortalMessage::text(format!("Image upload failed: {}", e))

@@ -135,19 +135,10 @@ impl ProcessManager {
             Some(id) => (id, true),
             None => (Uuid::new_v4(), false),
         };
-        let default_name = {
-            let hostname = hostname::get()
-                .ok()
-                .and_then(|h| h.into_string().ok())
-                .unwrap_or_else(|| "unknown".to_string());
-            let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-            format!("{}-{}", hostname, timestamp)
-        };
         let name = params
             .session_name
-            .as_deref()
-            .unwrap_or(&default_name)
-            .to_string();
+            .clone()
+            .unwrap_or_else(claude_session_lib::default_session_name);
 
         let git_branch = get_git_branch(&working_directory);
 
