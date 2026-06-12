@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.61
+
+- **Admin user list: 1+7N queries → 3; `bigdecimal` dropped from the dependency tree.** `list_users` ran a session-count query plus `get_user_usage` (6 sequential SUMs with `BigDecimal` round-trips) per user — ~700 queries for a 100-user page. One `GROUP BY user_id` aggregate (with the CLAUDE.md-mandated `::bigint`/`::float8` casts) plus one `deleted_session_costs` load now join in memory; `get_user_usage` itself is deleted (list_users was its only caller). Semantics pinned against a live Postgres: no status filter (as before — replaced/inactive included), `COALESCE(...,0)` ≡ the old `unwrap_or(0)`, absent users get zeros, and usage-query errors still degrade to zeros instead of a 500. `bigdecimal` removed from backend and the diesel `numeric` feature from the workspace (zero `Numeric` columns in the schema) — Cargo.lock −24 lines.
+
 ## 2.8.39
 
 - **Live messages no longer have their server timestamp clobbered by the browser clock.** `handle_proxy_message` folds the server `created_at` into `_created_at`, but the component's live path re-ran `inject_message_metadata` with `Date::now()`, overwriting it. The live path now uses `inject_created_at_if_absent` — browser-clock fallback only when the key is missing (error envelopes, pre-#784 backends keep their tooltips). REST history replay keeps overwrite semantics as before. Four new tests pin the behavior, including the no-clobber case.
