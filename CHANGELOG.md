@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.46
+
+- **One clipboard helper and one escape-key implementation replace seven hand-rolled copies.** `copy_to_clipboard(text, copied, reset_ms)` (typed `web_sys` Clipboard API instead of the `js_sys::Reflect` dance) serves CopyButton/CopyCommand/CodeBlock with their original per-site reset timings preserved (1500/2000/2000ms). New `hooks/use_escape.rs`: `use_escape` (bubble, component lifetime) for the launch/schedule dialogs, `use_escape_capture(active, …)` for the ImageViewer (capture-phase, attached only while expanded, preventDefault+stopPropagation as before), and an `escape_listener` RAII helper for the struct-component ShareDialog — all three delegate to one implementation. Redundant `#[allow(dead_code)]` on ShareDialog's listener field removed. Net −45 lines.
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
