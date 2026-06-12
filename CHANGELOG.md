@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.52
+
+- **ScheduledTask wire trio flattened around one `ScheduledTaskFields` core; MessageRole/PortalMessage serde simplified.** `ScheduledTaskConfig`/`CreateScheduledTaskRequest`/`ScheduledTaskInfo` repeated ~10 fields; they now `#[serde(flatten)]` a shared core (the `RegisterFields` pattern). Serialized key sets are byte-identical (only contiguous key order shifts; all consumers are serde) and Create's deserialization defaults are preserved exactly — five new wire-compat tests pin the JSON shapes including `last_session_id: null` and old-key-order parsing. As a side effect `task_to_config` became `pub(crate)` and launcher registration reuses it instead of hand-building the config. `MessageRole` gains `as_str()` with `Display` delegating (the `AgentType` pattern; `from_type_str` fallback verbatim), and `PortalMessage`'s always-"portal" `message_type` is now encoded once via a const + `with_content` constructor used by all six construction sites.
+
 ## 2.8.51
 
 - **Session rail: dropdown options share one button shell and close-then-emit helper; dead tick counter removed.** `close_then(menu_session, action)` and `menu_option(extra_classes, label, hint, onclick)` absorb ~9 repeated button shells and 7 close-menu closures (hide/pause/leave/delete/share/schedule/copy-id/stop/blocked-stop); the blocked-stop and schedule options share one `open_schedule` callback. The sparkline tick effect's `Rc<Cell<u32>>` counter (incremented every 100ms, never read) is deleted. The compaction/task range loops folded into one `(ranges, class)` flat_map preserving render order. Deliberately distinct shells (two-click stop confirm, disabled spans, PR/repo links) untouched. Net −27 lines with far less repetition in the dropdown block.
