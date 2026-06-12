@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.53
+
+- **Shim cleanup: wiggum prompt single-sourced, one write_line, dead channel and fake retries gone, shared claude arg builder.** The wiggum DONE-loop prompt suffix existed in three byte-identical copies (drift would silently break loop semantics) — now `wiggum_prompt()` next to `WiggumState`. All six serialize→write→newline→flush sites in the shim use one generic `write_line` (newline/flush errors at four raw sites now surface like write errors instead of being ignored). The stdin-line channel feeding an empty select arm is deleted. Both "retry the same failing constructor" fallbacks (`warn!("continuing without persistence")` then `?`, and `unwrap_or_else(|_| …unwrap())`) reduced to honest single calls. `claude_cli_args()` in spawn.rs builds the CLI flag list once for the lib spawn, its diagnostic log, and the shim's respawn — a flag change can't miss the shim anymore. Net −56 lines.
+
 ## 2.8.52
 
 - **ScheduledTask wire trio flattened around one `ScheduledTaskFields` core; MessageRole/PortalMessage serde simplified.** `ScheduledTaskConfig`/`CreateScheduledTaskRequest`/`ScheduledTaskInfo` repeated ~10 fields; they now `#[serde(flatten)]` a shared core (the `RegisterFields` pattern). Serialized key sets are byte-identical (only contiguous key order shifts; all consumers are serde) and Create's deserialization defaults are preserved exactly — five new wire-compat tests pin the JSON shapes including `last_session_id: null` and old-key-order parsing. As a side effect `task_to_config` became `pub(crate)` and launcher registration reuses it instead of hand-building the config. `MessageRole` gains `as_str()` with `Display` delegating (the `AgentType` pattern; `from_type_str` fallback verbatim), and `PortalMessage`'s always-"portal" `message_type` is now encoded once via a const + `with_content` constructor used by all six construction sites.

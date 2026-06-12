@@ -9,6 +9,7 @@ mod ws_reader;
 
 pub(crate) use portal_reminder::inject_portal_reminder;
 
+pub use wiggum::wiggum_prompt;
 pub use ws_reader::{classify_portal_input, RoutedPortalInput};
 
 use std::sync::Arc;
@@ -218,17 +219,7 @@ impl<'a, A: Agent> SessionState<'a, A> {
         input_tx: mpsc::UnboundedSender<PortalInput>,
         input_rx: &'a mut mpsc::UnboundedReceiver<PortalInput>,
     ) -> Result<Self> {
-        let output_buffer = match PendingOutputBuffer::new(config.session_id) {
-            Ok(buf) => buf,
-            Err(e) => {
-                warn!(
-                    "Failed to create output buffer, continuing without persistence: {}",
-                    e
-                );
-                PendingOutputBuffer::new(config.session_id)?
-            }
-        };
-        let output_buffer = Arc::new(Mutex::new(output_buffer));
+        let output_buffer = Arc::new(Mutex::new(PendingOutputBuffer::new(config.session_id)?));
 
         Ok(Self {
             config,
@@ -893,17 +884,14 @@ async fn run_main_loop<A: Agent>(
                     &state.git_metadata,
                 )
                 .await;
-                let wiggum_prompt = format!(
-                    "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
-                    wiggum_input.text
-                );
+                let prompt = wiggum_prompt(&wiggum_input.text);
                 state.wiggum_state = Some(WiggumState {
                     original_prompt: wiggum_input.text,
                     iteration: 1,
                     loop_start: Instant::now(),
                     loop_durations: Vec::new(),
                 });
-                if let Err(e) = claude_session.send_input(serde_json::Value::String(wiggum_prompt)).await {
+                if let Err(e) = claude_session.send_input(serde_json::Value::String(prompt)).await {
                     error!("Failed to send wiggum prompt to Claude: {}", e);
                     return ConnectionResult::ClaudeExited;
                 }
