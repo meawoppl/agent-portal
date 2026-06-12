@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.43
+
+- **`handle_claude_output` reads the session row once per proxy output frame instead of twice.** The owner-only `select(sessions::user_id)` is hoisted above both consumers (image extraction and the message-insert gate); the full `Session` load — used only for `user_id` — is gone. Failure semantics per consumer are identical to before (lookup failure skips extraction and insert but never blocks `last_activity` or `OutputAck`); the second pool *checkout* is kept deliberately so no connection is held across CPU-bound base64 work and a transient pool error can't poison the ack path.
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
