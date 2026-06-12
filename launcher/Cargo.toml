@@ -13,7 +13,7 @@ path = "src/main.rs"
 shared = { path = "../shared" }
 
 # Async runtime
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -49,5 +49,5 @@ portal-update = { path = "../portal-update" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 tokio-util.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-directories = "5.0"
+directories = { workspace = true }
 serde_json.workspace = true
