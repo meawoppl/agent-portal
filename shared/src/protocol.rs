@@ -40,3 +40,11 @@ pub const MAX_UPLOAD_CHUNK_BYTES: usize = 64 * 1024; // 64 KiB
 /// is the per-server `PORTAL_MAX_IMAGE_MB` byte cap — this constant only
 /// stops obviously-pathological `total_chunks` values from being accepted.
 pub const MAX_UPLOAD_TOTAL_CHUNKS: u32 = 65_536;
+
+/// Interval (in seconds) between launcher heartbeats on the launcher
+/// WebSocket. The backend has no explicit heartbeat timeout — launcher
+/// liveness is the WebSocket connection itself — but it treats each
+/// heartbeat's `running_sessions` as the authoritative process list when
+/// reconciling desired sessions (see `LauncherToServer::LauncherHeartbeat`
+/// handling in the backend's launcher socket).
+pub const LAUNCHER_HEARTBEAT_INTERVAL_SECS: u64 = 30;

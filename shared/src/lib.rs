@@ -263,9 +263,9 @@ pub enum MessageRole {
     Unknown,
 }
 
-impl std::fmt::Display for MessageRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
+impl MessageRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
             Self::System => "system",
             Self::Assistant => "assistant",
             Self::User => "user",
@@ -273,12 +273,10 @@ impl std::fmt::Display for MessageRole {
             Self::Error => "error",
             Self::Portal => "portal",
             Self::Unknown => "unknown",
-        };
-        f.write_str(s)
+        }
     }
-}
 
-impl MessageRole {
+    /// Parse a message-type string; any unrecognized value maps to `Unknown`.
     pub fn from_type_str(s: &str) -> Self {
         match s {
             "system" => Self::System,
@@ -289,6 +287,12 @@ impl MessageRole {
             "portal" => Self::Portal,
             _ => Self::Unknown,
         }
+    }
+}
+
+impl std::fmt::Display for MessageRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -303,24 +307,29 @@ pub struct PortalMessage {
 }
 
 impl PortalMessage {
-    pub fn text(text: String) -> Self {
+    /// The invariant `"type"` tag value for portal messages.
+    pub const MESSAGE_TYPE: &'static str = "portal";
+
+    /// Build a portal message with the invariant `"type":"portal"` tag.
+    pub fn with_content(content: Vec<PortalContent>) -> Self {
         Self {
-            message_type: "portal".to_string(),
-            content: vec![PortalContent::Text { text }],
+            message_type: Self::MESSAGE_TYPE.to_string(),
+            content,
         }
     }
 
+    pub fn text(text: String) -> Self {
+        Self::with_content(vec![PortalContent::Text { text }])
+    }
+
     pub fn image(media_type: String, data: String) -> Self {
-        Self {
-            message_type: "portal".to_string(),
-            content: vec![PortalContent::Image {
-                media_type,
-                data,
-                file_path: None,
-                file_size: None,
-                source_type: None,
-            }],
-        }
+        Self::with_content(vec![PortalContent::Image {
+            media_type,
+            data,
+            file_path: None,
+            file_size: None,
+            source_type: None,
+        }])
     }
 
     pub fn image_with_info(
@@ -329,26 +338,20 @@ impl PortalMessage {
         file_path: Option<String>,
         file_size: Option<u64>,
     ) -> Self {
-        Self {
-            message_type: "portal".to_string(),
-            content: vec![PortalContent::Image {
-                media_type,
-                data,
-                file_path,
-                file_size,
-                source_type: None,
-            }],
-        }
+        Self::with_content(vec![PortalContent::Image {
+            media_type,
+            data,
+            file_path,
+            file_size,
+            source_type: None,
+        }])
     }
 
     /// Build a collapsible "portal features reminder" message — same envelope
     /// as text/image portal messages, rendered with a header bar and a
     /// click-to-expand body on the frontend.
     pub fn reminder(title: String, body: String) -> Self {
-        Self {
-            message_type: "portal".to_string(),
-            content: vec![PortalContent::Reminder { title, body }],
-        }
+        Self::with_content(vec![PortalContent::Reminder { title, body }])
     }
 
     pub fn continuation_prompt(
@@ -357,15 +360,12 @@ impl PortalMessage {
         status: String,
         source_message: String,
     ) -> Self {
-        Self {
-            message_type: "portal".to_string(),
-            content: vec![PortalContent::ContinuationPrompt {
-                continuation_id,
-                reset_at,
-                status,
-                source_message,
-            }],
-        }
+        Self::with_content(vec![PortalContent::ContinuationPrompt {
+            continuation_id,
+            reset_at,
+            status,
+            source_message,
+        }])
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -505,5 +505,48 @@ mod tests {
 
         let replaced: SessionStatus = serde_json::from_str("\"replaced\"").unwrap();
         assert_eq!(replaced, SessionStatus::Replaced);
+    }
+
+    #[test]
+    fn message_role_as_str_matches_serde_encoding() {
+        let roles = [
+            MessageRole::System,
+            MessageRole::Assistant,
+            MessageRole::User,
+            MessageRole::Result,
+            MessageRole::Error,
+            MessageRole::Portal,
+            MessageRole::Unknown,
+        ];
+        for role in roles {
+            // Display / as_str must agree with the serde wire encoding.
+            let json = serde_json::to_string(&role).unwrap();
+            assert_eq!(json, format!("\"{}\"", role.as_str()));
+            assert_eq!(role.to_string(), role.as_str());
+            // from_type_str round-trips every known encoding.
+            assert_eq!(MessageRole::from_type_str(role.as_str()), role);
+        }
+        // Unrecognized strings fall back to Unknown.
+        assert_eq!(
+            MessageRole::from_type_str("not-a-role"),
+            MessageRole::Unknown
+        );
+        assert_eq!(MessageRole::from_type_str(""), MessageRole::Unknown);
+    }
+
+    #[test]
+    fn portal_message_serializes_with_portal_tag() {
+        let msg = PortalMessage::text("hello".to_string());
+        let json = msg.to_json();
+        assert_eq!(json["type"], "portal");
+        assert_eq!(json["content"][0]["type"], "text");
+        assert_eq!(json["content"][0]["text"], "hello");
+
+        let custom = PortalMessage::with_content(vec![PortalContent::Reminder {
+            title: "t".to_string(),
+            body: "b".to_string(),
+        }]);
+        assert_eq!(custom.message_type, PortalMessage::MESSAGE_TYPE);
+        assert_eq!(custom.to_json()["type"], "portal");
     }
 }

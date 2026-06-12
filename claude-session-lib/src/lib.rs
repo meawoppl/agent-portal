@@ -13,11 +13,12 @@ pub mod proxy_session;
 mod spawn;
 
 pub use agent::ClaudeAgent;
+pub use spawn::claude_cli_args;
 
 // Re-export the proxy session helpers used by the proxy binary.
 pub use proxy_session::{
-    run_connection_loop, ConnectionResult, LoopResult, PortalInput, ProxySessionConfig,
-    SessionState,
+    default_session_name, hostname_or_unknown, run_connection_loop, ConnectionResult, LoopResult,
+    PortalInput, ProxySessionConfig, SessionState,
 };
 
 // Convenience re-exports so existing consumers don't all have to add

@@ -357,7 +357,7 @@ psql $DATABASE_URL
 lsof -i :3000
 
 # Check logs
-tail -f /tmp/agent-portal-backend.log
+tail -f /tmp/claude-portal-backend.log
 ```
 
 **Frontend won't build:**

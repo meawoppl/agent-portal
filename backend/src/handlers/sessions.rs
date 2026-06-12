@@ -175,31 +175,14 @@ pub async fn delete_session(
 ) -> Result<EmptyResponse, AppError> {
     let mut conn = app_state.conn()?;
 
-    use crate::schema::{session_members, sessions};
-
     // Delete remains owner-only — editors can mutate session state but not
-    // destroy the row. We accept either the `sessions.user_id` owner (works
-    // even when no membership row exists) OR a `session_members.role = owner`
-    // row (the post-membership-table canonical owner).
-    let owned_by_user = sessions::table
-        .filter(sessions::id.eq(session_id))
-        .filter(sessions::user_id.eq(current_user_id))
-        .select(Session::as_select())
-        .first::<Session>(&mut conn)
-        .optional()?;
-
-    let session = match owned_by_user {
-        Some(s) => s,
-        None => sessions::table
-            .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
-            .filter(sessions::id.eq(session_id))
-            .filter(session_members::user_id.eq(current_user_id))
-            .filter(session_members::role.eq("owner"))
-            .select(Session::as_select())
-            .first::<Session>(&mut conn)
-            .optional()?
-            .ok_or(AppError::NotFound("Session not found"))?,
-    };
+    // destroy the row. See `session_access::verify_session_owner` for the
+    // sessions.user_id / owner-member-row acceptance rules.
+    let session = crate::handlers::session_access::verify_session_owner(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
 
     app_state.session_manager.disconnect_session(session_id);
     app_state.session_manager.stop_session_on_launcher(
@@ -377,6 +360,14 @@ struct UserBasicInfo {
     name: Option<String>,
 }
 
+/// Validate a member role supplied by the caller
+fn validate_member_role(role: &str) -> Result<(), AppError> {
+    if role != "editor" && role != "viewer" {
+        return Err(AppError::BadRequest("Invalid role"));
+    }
+    Ok(())
+}
+
 /// List all members of a session
 pub async fn list_session_members(
     State(app_state): State<Arc<AppState>>,
@@ -426,21 +417,17 @@ pub async fn add_session_member(
     Path(session_id): Path<Uuid>,
     Json(req): Json<AddMemberRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    if req.role != "editor" && req.role != "viewer" {
-        return Err(AppError::Internal("Invalid role".to_string()));
-    }
+    validate_member_role(&req.role)?;
 
     let mut conn = app_state.conn()?;
 
     use crate::schema::{session_members, users};
 
-    session_members::table
-        .filter(session_members::session_id.eq(session_id))
-        .filter(session_members::user_id.eq(current_user_id))
-        .filter(session_members::role.eq("owner"))
-        .first::<SessionMember>(&mut conn)
-        .optional()?
-        .ok_or(AppError::Forbidden)?;
+    crate::handlers::session_access::verify_owner_membership(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
 
     let target_user_id: Uuid = users::table
         .filter(users::email.eq(&req.email))
@@ -456,7 +443,7 @@ pub async fn add_session_member(
         .optional()?;
 
     if existing.is_some() {
-        return Err(AppError::Internal("User is already a member".to_string()));
+        return Err(AppError::BadRequest("User is already a member"));
     }
 
     let new_member = NewSessionMember {
@@ -497,9 +484,7 @@ pub async fn remove_session_member(
     }
 
     if is_owner && current_user_id == target_user_id {
-        return Err(AppError::Internal(
-            "Owner cannot remove themselves".to_string(),
-        ));
+        return Err(AppError::BadRequest("Owner cannot remove themselves"));
     }
 
     let deleted = diesel::delete(
@@ -523,24 +508,20 @@ pub async fn update_session_member_role(
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMemberRoleRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    if req.role != "editor" && req.role != "viewer" {
-        return Err(AppError::Internal("Invalid role".to_string()));
-    }
+    validate_member_role(&req.role)?;
 
     let mut conn = app_state.conn()?;
 
     use crate::schema::session_members;
 
-    session_members::table
-        .filter(session_members::session_id.eq(session_id))
-        .filter(session_members::user_id.eq(current_user_id))
-        .filter(session_members::role.eq("owner"))
-        .first::<SessionMember>(&mut conn)
-        .optional()?
-        .ok_or(AppError::Forbidden)?;
+    crate::handlers::session_access::verify_owner_membership(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
 
     if current_user_id == target_user_id {
-        return Err(AppError::Internal("Cannot change own role".to_string()));
+        return Err(AppError::BadRequest("Cannot change own role"));
     }
 
     let updated = diesel::update(

@@ -159,7 +159,7 @@ cd frontend && trunk build --release
 
 **Solution 1: Use dev mode**
 ```bash
-./scripts/test-dev.sh  # Uses dev mode automatically
+./scripts/dev.sh start  # Uses dev mode automatically
 ```
 
 **Solution 2: Configure OAuth**
@@ -194,7 +194,7 @@ cargo run -p backend -- --dev-mode
 curl http://localhost:3000/
 
 # Check backend logs
-tail -f /tmp/agent-portal-backend.log
+tail -f /tmp/claude-portal-backend.log
 
 # Verify WebSocket endpoint
 wscat -c ws://localhost:3000/ws/session
@@ -250,7 +250,7 @@ sudo docker-compose up
 **Solution:**
 ```bash
 chmod +x scripts/*.sh
-./scripts/test-dev.sh
+./scripts/dev.sh start
 ```
 
 ## General Tips
@@ -264,7 +264,7 @@ rm -rf ~/.config/agent-portal/  # Remove cached auth
 cargo clean
 cd frontend && trunk clean && cd ..
 ./scripts/install-deps.sh
-./scripts/test-dev.sh
+./scripts/dev.sh start
 ```
 
 ### Check system requirements
@@ -321,13 +321,12 @@ If you're still stuck:
 
 1. Check the logs:
    ```bash
-   tail -f /tmp/agent-portal-backend.log
-   tail -f /tmp/agent-portal-proxy.log
+   tail -f /tmp/claude-portal-backend.log
    ```
 
 2. Enable verbose output:
    ```bash
-   RUST_LOG=debug ./scripts/test-dev.sh
+   RUST_LOG=debug ./scripts/dev.sh start
    ```
 
 3. Try running components individually:

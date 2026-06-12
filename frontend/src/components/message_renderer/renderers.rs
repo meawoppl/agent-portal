@@ -12,10 +12,10 @@ use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
     has_askuserquestion_answers, render_askuserquestion_result,
 };
+use crate::hooks::use_escape_capture;
 use serde::Deserialize;
 use shared::fmt::format_duration;
 use uuid::Uuid;
-use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
 pub(crate) use assistant::assistant_label;
@@ -297,32 +297,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     // Close lightbox on Escape key (capture phase so it doesn't trigger nav mode)
     {
         let expanded = expanded.clone();
-        use_effect_with(*expanded, move |is_expanded| {
-            let listener = if *is_expanded {
-                let expanded = expanded.clone();
-                let options = gloo::events::EventListenerOptions {
-                    phase: gloo::events::EventListenerPhase::Capture,
-                    passive: false,
-                };
-                Some(gloo::events::EventListener::new_with_options(
-                    &gloo::utils::document(),
-                    "keydown",
-                    options,
-                    move |event| {
-                        if let Some(ke) = event.dyn_ref::<web_sys::KeyboardEvent>() {
-                            if ke.key() == "Escape" {
-                                ke.prevent_default();
-                                ke.stop_propagation();
-                                expanded.set(false);
-                            }
-                        }
-                    },
-                ))
-            } else {
-                None
-            };
-            move || drop(listener)
-        });
+        use_escape_capture(*expanded, Callback::from(move |()| expanded.set(false)));
     }
 
     let on_thumb_click = {

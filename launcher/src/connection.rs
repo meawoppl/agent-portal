@@ -7,7 +7,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const HEARTBEAT_INTERVAL: Duration =
+    Duration::from_secs(shared::protocol::LAUNCHER_HEARTBEAT_INTERVAL_SECS);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
 
 pub async fn run_launcher_loop(
@@ -37,9 +38,7 @@ pub async fn run_launcher_loop(
                     launcher_id,
                     launcher_name: launcher_name.to_string(),
                     auth_token: auth_token.map(|s| s.to_string()),
-                    hostname: hostname::get()
-                        .map(|h| h.to_string_lossy().to_string())
-                        .unwrap_or_default(),
+                    hostname: claude_session_lib::hostname_or_unknown(),
                     version: Some(env!("CARGO_PKG_VERSION").to_string()),
                     working_directory: std::env::current_dir()
                         .ok()
@@ -193,14 +192,14 @@ pub async fn run_launcher_loop(
                             for task_to_fire in scheduler.fire_due_tasks() {
                                 info!(
                                     "Firing scheduled task '{}' ({})",
-                                    task_to_fire.config.name, task_to_fire.config.id
+                                    task_to_fire.config.fields.name, task_to_fire.config.id
                                 );
                                 let msg = LauncherToServer::RequestLaunch {
                                     request_id: task_to_fire.request_id,
-                                    working_directory: task_to_fire.config.working_directory.clone(),
-                                    session_name: Some(task_to_fire.config.name.clone()),
-                                    claude_args: task_to_fire.config.claude_args.clone(),
-                                    agent_type: task_to_fire.config.agent_type,
+                                    working_directory: task_to_fire.config.fields.working_directory.clone(),
+                                    session_name: Some(task_to_fire.config.fields.name.clone()),
+                                    claude_args: task_to_fire.config.fields.claude_args.clone(),
+                                    agent_type: task_to_fire.config.fields.agent_type,
                                     scheduled_task_id: Some(task_to_fire.config.id),
                                     last_session_id: task_to_fire.config.last_session_id,
                                 };
