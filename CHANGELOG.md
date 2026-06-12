@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.65
+
+- **Frontend misc dedup sweep: 11 consolidations + dead props removed.** Highlights: the skip-permissions CLI arg tables (duplicated between launch and schedule dialogs, with `strip_skip_permissions_args` needing to recognize exactly what they emit) now live in one `skip_permissions.rs` module with a drift-guard test; `set_field("name")`'s silent string-typo fallthrough replaced by typed setter closures; the throughput/TTFT series builders, token-secret cards, ShareDialog error arms (×5), splash footer, tab-switch callbacks (×9), markdown table cell renderers, user-message extraction, and `Option<TurnMetrics>` footer matches (×3) each collapsed to one implementation; `dir_entry`/`autosize` helpers extracted. Dead code: `VoiceInput.session_id` (kept "for API compatibility" — gone), `MessageData.agent_type` (deserialized, never read; stale comment corrected), `pub` dropped from `sparkline::ACCENT_COLOR`. The `MessageRenderer.session_id` prop flagged by the audit turned out LIVE post-#1005 and stays. Net −79 lines with all rendered DOM byte-identical (314 tests).
+
 ## 2.8.54
 
 - **Admin page: three PATCH-user handlers deduped; `/api/auth/me` no longer fetched redundantly.** `patch_user(user_id, body) -> bool` + `update_user_in(users, id, f)` collapse the toggle-admin/unban/confirm-ban triple to one-liners. The dashboard's leave-confirm now uses the `current_user_id` it already holds (typed `Option<Uuid>` now) instead of a second network round-trip, and the admin modal receives the id as a prop, skipping its own me-fetch; the standalone `/admin` route keeps its original fetch with 401→Home / 403→denied handling.
