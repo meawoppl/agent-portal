@@ -4,6 +4,50 @@
 
 - **Startup auto-update ceremony extracted to `portal_update::startup_auto_update`; proxy update handlers merged.** The apply-pending + check + 4-arm `UpdateResult` match was copy-pasted across proxy startup, launcher startup, and `cmd_update`; it's now one helper with a `check` flag (both startups apply pending updates unconditionally but gate the GitHub check on `--no-update` — preserved exactly). Proxy's `handle_check_update`/`handle_force_update` + a third inline copy merged into `handle_update(check_only)` — the differing arms were provably unreachable per mode. Also: `binary_name_for` replaces the second platform match (a new test pins all six names byte-for-byte against release assets, including the darwin rename), and the Windows binary-swap dance is one `swap_binary` helper with a `SwapError` enum keying the two callers' divergent fallbacks. Launcher's `UpdateAndRestart` path deliberately untouched (distinct restart-anyway semantics).
 
+## 2.8.46
+
+- **One clipboard helper and one escape-key implementation replace seven hand-rolled copies.** `copy_to_clipboard(text, copied, reset_ms)` (typed `web_sys` Clipboard API instead of the `js_sys::Reflect` dance) serves CopyButton/CopyCommand/CodeBlock with their original per-site reset timings preserved (1500/2000/2000ms). New `hooks/use_escape.rs`: `use_escape` (bubble, component lifetime) for the launch/schedule dialogs, `use_escape_capture(active, …)` for the ImageViewer (capture-phase, attached only while expanded, preventDefault+stopPropagation as before), and an `escape_listener` RAII helper for the struct-component ShareDialog — all three delegate to one implementation. Redundant `#[allow(dead_code)]` on ShareDialog's listener field removed. Net −45 lines.
+
+## 2.8.45
+
+- **Validation errors return 400 instead of 500.** Caller mistakes ("Invalid role" ×2 — now a shared `validate_member_role` helper — "User is already a member", "Owner cannot remove themselves", "Cannot change own role", "Invalid cron expression" ×2) were mapped to `AppError::Internal`, logging server faults for user typos and masking the message behind "Internal server error". All other `Internal` uses audited and left alone (genuine infra faults). Frontend: the share dialog's add-member 409 branch never fired (backend sent 500) — repointed at 400, so "User is already a member" / "Invalid role" now surface verbatim; the schedule dialog's generic `Error ({status})` display now shows the real cron message.
+
+## 2.8.44
+
+- **Chart frame extracted: LinePlot and StackedArea share one frame implementation.** `charts/mod.rs` now hosts the `VIEW_*`/`PAD_*`/`PLOT_*` constants, `chart_empty`, `render_gridlines`, `render_x_labels`, `render_legend`, and a `chart_frame` wrapper (header + scale badge + legend + responsive SVG with rotated y-axis title); the component files keep only their geometry. StackedArea's local `value_to_y` wrapper (PAD_T baked in) deleted in favor of `scale::value_to_y` + explicit offset. Markup copied verbatim — zero rendered-output change; legend swatch styles deliberately stay per-component (they differ byte-wise). Two duplicate axis-format tests consolidated into one in scale.rs. Net −45 lines with each component file ~60% lighter on frame code.
+
+## 2.8.43
+
+- **`handle_claude_output` reads the session row once per proxy output frame instead of twice.** The owner-only `select(sessions::user_id)` is hoisted above both consumers (image extraction and the message-insert gate); the full `Session` load — used only for `user_id` — is gone. Failure semantics per consumer are identical to before (lookup failure skips extraction and insert but never blocks `last_activity` or `OutputAck`); the second pool *checkout* is kept deliberately so no connection is held across CPU-bound base64 work and a transient pool error can't poison the ack path.
+
+## 2.8.42
+
+- **One `ConfirmModal` component replaces five copy-pasted confirm dialogs.** Admin user actions, settings sessions/tokens panels, and the dashboard's Delete/Leave session modals all hand-rolled the same overlay + message + cancel/confirm markup. The new component parameterizes the three pre-existing CSS class families (`Standard` admin, `Panel` settings, `Danger` dashboard with title/warning) so the rendered DOM is byte-identical at every site; overlay-click-cancels and inner stop-propagation semantics preserved. The admin ban dialog (text-input modal) and token-renewed dialog (single "Done" button) were deliberately not migrated — they aren't confirm modals.
+
+## 2.8.41
+
+- **`require_admin` now reuses `auth::extract_user` instead of re-implementing the cookie→user→disabled-check sequence.** −23 lines and one auth path instead of two. Two deliberate consistency changes: admin endpoints honor the dev-mode bypass like every other handler (grants nothing — the seeded dev user has `is_admin = FALSE` by column default, so dev-mode admin requests still get 403 unless manually promoted), and a stale cookie for a deleted user now yields 401 instead of a 404, matching all other authed handlers.
+
+## 2.8.40
+
+- **Hand-rolled base64url codecs replaced by the `base64` crate (×2, ~110 lines).** `shared/src/proxy_tokens.rs` and `proxy/src/util.rs` each reimplemented base64url; both now use a const lenient engine (URL_SAFE, no encode padding, `DecodePaddingMode::Indifferent`, allow-trailing-bits) that preserves every leniency the old decoders had: padding accepted anywhere it was before, whitespace pre-filtered, non-canonical trailing bits masked. One intentionally stricter case: length ≡ 1 (mod 4) inputs (which no encoder produces, and which the old code decoded into a garbage byte) now fail softly. Byte-identity pinned by RFC 4648 fixtures, an all-256-values round-trip, and a hardcoded `ProxyInitConfig` fixture. `base64` added to shared (WASM-safe).
+
+## 2.8.39
+
+- **Live messages no longer have their server timestamp clobbered by the browser clock.** `handle_proxy_message` folds the server `created_at` into `_created_at`, but the component's live path re-ran `inject_message_metadata` with `Date::now()`, overwriting it. The live path now uses `inject_created_at_if_absent` — browser-clock fallback only when the key is missing (error envelopes, pre-#784 backends keep their tooltips). REST history replay keeps overwrite semantics as before. Four new tests pin the behavior, including the no-clobber case.
+
+## 2.8.38
+
+- **One `dev_user` helper + `DEV_USER_EMAIL` const replace nine `testing@testing.local` literals.** The dev test-user lookup was re-implemented across `auth.rs`, `main.rs` (seeding keeps its create logic but uses the const), `handlers/auth.rs` (dev_login + device dev path), `sessions.rs`, `launcher_socket.rs`, and `registration.rs`. `QueryResult<User>` return fits every site's error style (`?`, `.optional()`, `.expect()`, `.ok()`). Three id-only sites now select the full row — same filter, same error paths, identical semantics.
+
+## 2.8.37
+
+- **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
+
+## 2.8.36
+
+- **Remove the dashboard's dead cost-flash machinery.** `total_cost`/`cost_flash` were written on every Result message (with a 600ms flash-clear timeout) but never read by any `view()`, and the `on_cost_change` prop terminated in an explicit no-op callback "kept for API compatibility". Deleted end-to-end: the props, the `ClearCostFlash` msg arm, the struct fields, the whole Result-block cost computation in `handle_received_output`, and the no-op callback at the `<SessionView>` call site. −34 lines, one less fake data path.
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.

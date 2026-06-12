@@ -128,7 +128,7 @@ pub async fn create_task_handler(
     let fields: Vec<&str> = req.cron_expression.split_whitespace().collect();
     if fields.len() != 5 {
         warn!("Invalid cron expression: {}", req.cron_expression);
-        return Err(AppError::Internal("Invalid cron expression".to_string()));
+        return Err(AppError::BadRequest("Invalid cron expression"));
     }
 
     let mut conn = app_state.conn()?;
@@ -179,7 +179,7 @@ pub async fn update_task_handler(
         let fields: Vec<&str> = cron.split_whitespace().collect();
         if fields.len() != 5 {
             warn!("Invalid cron expression in update: {}", cron);
-            return Err(AppError::Internal("Invalid cron expression".to_string()));
+            return Err(AppError::BadRequest("Invalid cron expression"));
         }
     }
 
