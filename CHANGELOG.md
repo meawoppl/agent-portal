@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.59
+
+- **Session access checks centralized in `session_access.rs`.** One canonical `verify_session_reader` (any-role membership join, 404 on miss) replaces three near-identical implementations in messages, turn-metrics, and the WS auth module (now deleted); `is_session_mutator` is a thin wrapper over `verify_session_mutator` instead of a re-implementation (orphaned `can_mutate_role` + tests removed). The three owner checks in sessions.rs were NOT identical — delete accepts the `sessions.user_id` owner without a member row (404 on miss) while the member-management gates require an actual owner member row (403) — so two helpers preserve both semantics: `verify_session_owner` and `verify_owner_membership`. One nuance: the messages path used to map DB errors to 404; it now surfaces 500 like the other paths (authorization outcomes unchanged). Net −86 lines.
+
 ## 2.8.38
 
 - **One `dev_user` helper + `DEV_USER_EMAIL` const replace nine `testing@testing.local` literals.** The dev test-user lookup was re-implemented across `auth.rs`, `main.rs` (seeding keeps its create logic but uses the const), `handlers/auth.rs` (dev_login + device dev path), `sessions.rs`, `launcher_socket.rs`, and `registration.rs`. `QueryResult<User>` return fits every site's error style (`?`, `.optional()`, `.expect()`, `.ok()`). Three id-only sites now select the full row — same filter, same error paths, identical semantics.
