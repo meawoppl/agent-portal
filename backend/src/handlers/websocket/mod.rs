@@ -1,4 +1,3 @@
-mod auth;
 mod continuations;
 mod image_upload_socket;
 pub mod launcher_socket;

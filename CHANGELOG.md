@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.59
+
+- **Session access checks centralized in `session_access.rs`.** One canonical `verify_session_reader` (any-role membership join, 404 on miss) replaces three near-identical implementations in messages, turn-metrics, and the WS auth module (now deleted); `is_session_mutator` is a thin wrapper over `verify_session_mutator` instead of a re-implementation (orphaned `can_mutate_role` + tests removed). The three owner checks in sessions.rs were NOT identical — delete accepts the `sessions.user_id` owner without a member row (404 on miss) while the member-management gates require an actual owner member row (403) — so two helpers preserve both semantics: `verify_session_owner` and `verify_owner_membership`. One nuance: the messages path used to map DB errors to 404; it now surfaces 500 like the other paths (authorization outcomes unchanged). Net −86 lines.
+
 ## 2.8.58
 
 - **scripts/ cleanup: broken package names fixed, `test-dev.sh` deleted, shared `lib.sh`.** `test-oauth.sh` ran `cargo run -p proxy` — a package that doesn't exist (it's `claude-portal`), so the script failed at the proxy step; `clean.sh`/`test-oauth.sh` `pkill`ed the same wrong name (could never match). All fixed, plus `docker-compose` v1 → `docker compose` across scripts. `test-dev.sh` (~80% duplicate of `dev.sh`) is deleted with its references updated in TROUBLESHOOTING.md/install-deps/README. The dev DATABASE_URL literal (6 copies) now lives once in a sourced `scripts/lib.sh`; diesel/trunk auto-install lives only in `install-deps.sh` (dev.sh fails fast with a pointer); `up.sh` guards its macOS-only `open -a Docker` by `$OSTYPE` with a Linux `systemctl` path. Scripts still write `/tmp/claude-portal-backend.log` — doc alignment is #999's.

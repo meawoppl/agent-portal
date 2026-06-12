@@ -31,29 +31,6 @@ use shared::api::{MetricBucket, MetricBucketsResponse, TurnMetricsResponse};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// Verify that the caller is a member of the session. Reuses the same
-/// `session_members` join the messages handler uses — read access is
-/// "any role, including viewer," matching the metrics' visibility model
-/// (no mutation possible from this endpoint).
-fn verify_session_access(
-    conn: &mut diesel::pg::PgConnection,
-    session_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-) -> Result<(), AppError> {
-    use crate::schema::{session_members, sessions};
-    let exists = sessions::table
-        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
-        .filter(sessions::id.eq(session_id))
-        .filter(session_members::user_id.eq(user_id))
-        .select(sessions::id)
-        .first::<uuid::Uuid>(conn)
-        .optional()?;
-    if exists.is_none() {
-        return Err(AppError::NotFound("Session not found"));
-    }
-    Ok(())
-}
-
 /// `GET /api/sessions/{id}/turn-metrics` — returns all per-turn metrics rows
 /// for the session, ordered by `started_at ASC` so the SessionView's
 /// pair-by-ordering join walks correctly without a second sort. No
@@ -68,7 +45,9 @@ pub async fn list_turn_metrics(
 ) -> Result<Json<TurnMetricsResponse>, AppError> {
     let mut conn = app_state.conn()?;
 
-    verify_session_access(&mut conn, session_id, current_user_id)?;
+    // Read access is "any role, including viewer," matching the metrics'
+    // visibility model (no mutation possible from this endpoint).
+    crate::handlers::session_access::verify_session_reader(&mut conn, session_id, current_user_id)?;
 
     use crate::schema::turn_metrics;
     let rows: Vec<TurnMetric> = turn_metrics::table
