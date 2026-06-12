@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.39
+
+- **Live messages no longer have their server timestamp clobbered by the browser clock.** `handle_proxy_message` folds the server `created_at` into `_created_at`, but the component's live path re-ran `inject_message_metadata` with `Date::now()`, overwriting it. The live path now uses `inject_created_at_if_absent` — browser-clock fallback only when the key is missing (error envelopes, pre-#784 backends keep their tooltips). REST history replay keeps overwrite semantics as before. Four new tests pin the behavior, including the no-clobber case.
+
 ## 2.8.34
 
 - **Codex: drop cumulative `turn/diff/updated` cards and dedupe per-file patch updates.** Codex re-sends the entire turn diff on every edit tick, so transcripts accumulated O(ticks) redundant cards — each the size of the whole turn — on top of the per-file `item.completed{file_change}` diffs that already render the same edits. The events are now dropped in `group_messages` (before grouping, so Codex runs don't fragment around each dropped diff) with a no-op dispatcher arm kept for exhaustiveness. `item/fileChange/patchUpdated` events (also cumulative per file) now surface their `item_id` in `codex_event_item_id`, letting the existing group dedup keep only the final patch and collapse it against the matching lifecycle events. The `DiffCard` `cumulative` chip and `render_turn_diff` are deleted with their only producer.
