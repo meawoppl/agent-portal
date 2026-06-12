@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.45
+
+- **Validation errors return 400 instead of 500.** Caller mistakes ("Invalid role" ×2 — now a shared `validate_member_role` helper — "User is already a member", "Owner cannot remove themselves", "Cannot change own role", "Invalid cron expression" ×2) were mapped to `AppError::Internal`, logging server faults for user typos and masking the message behind "Internal server error". All other `Internal` uses audited and left alone (genuine infra faults). Frontend: the share dialog's add-member 409 branch never fired (backend sent 500) — repointed at 400, so "User is already a member" / "Invalid role" now surface verbatim; the schedule dialog's generic `Error ({status})` display now shows the real cron message.
+
 ## 2.8.44
 
 - **Chart frame extracted: LinePlot and StackedArea share one frame implementation.** `charts/mod.rs` now hosts the `VIEW_*`/`PAD_*`/`PLOT_*` constants, `chart_empty`, `render_gridlines`, `render_x_labels`, `render_legend`, and a `chart_frame` wrapper (header + scale badge + legend + responsive SVG with rotated y-axis title); the component files keep only their geometry. StackedArea's local `value_to_y` wrapper (PAD_T baked in) deleted in favor of `scale::value_to_y` + explicit offset. Markup copied verbatim — zero rendered-output change; legend swatch styles deliberately stay per-component (they differ byte-wise). Two duplicate axis-format tests consolidated into one in scale.rs. Net −45 lines with each component file ~60% lighter on frame code.
