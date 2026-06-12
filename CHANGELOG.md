@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.67
+
+- **Thinking-token chip no longer "resets" after tool calls.** The CLI's `estimated_tokens` is cumulative across a turn, but each tool call or assistant message splits the marker run into a new `Thinking` group, mounting a fresh `CountUp` whose odometer re-raced from 0 up to the full cumulative total — most visibly right after the final edit before the answer. `CountUp` gains a `start` prop (consulted on mount, clamped to `0..=target`), and a new `thinking_chip_starts` pass seeds each chip with the previous burst's peak within the same turn, resetting at turn terminators. The count now reads continuously across splits; if the marker stream ever restarts low, the clamp degrades to a static display rather than a backwards animation. Pinned by a grouping test (`[0, 150, 0]` across a split + terminator).
+
 ## 2.8.66
 
 - **Cargo hygiene: tokio narrowed from `full` to 11 measured features; tower-http to `cors` only; nine deps hoisted to workspace.** The tokio feature set (`fs, io-std, io-util, macros, net, process, rt, rt-multi-thread, signal, sync, time`) was determined by grepping actual per-crate usage, not guesswork — five member crates also dropped their own `features = ["full"]` overrides. tower-http's unused `fs`/`trace`/`compression-full` removed (lockfile −92 lines). `serde`/`serde_json`/`uuid`/`chrono`/`thiserror`/`tracing`/`anyhow`/`hostname`/`directories` now use `workspace = true` across session-lib, claude-session-lib, codex-session-lib, portal-auth, portal-update, proxy, launcher (with per-crate feature additions like chrono `clock` made explicit where crates had been riding feature unification). claude-session-lib's unused `thiserror` and `directories` deps deleted; session-lib's thiserror moved 1→2. WASM targets verified unregressed; all three binaries link.

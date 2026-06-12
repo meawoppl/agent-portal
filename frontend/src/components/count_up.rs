@@ -6,9 +6,9 @@
 //! when the target keeps growing (e.g. live `thinking_tokens` estimates arriving
 //! one after another), the number keeps ticking upward smoothly instead of
 //! snapping back to 0 and re-racing on every update. On mount the current value
-//! is 0, so the first reveal still rolls 0→target. The timer is dropped once the
-//! target is reached and on unmount, so historical transcript cards never leave
-//! an interval running.
+//! is `start` (0 by default), so the first reveal rolls start→target. The timer
+//! is dropped once the target is reached and on unmount, so historical
+//! transcript cards never leave an interval running.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -27,6 +27,13 @@ const FRAME_MS: u32 = 40;
 pub struct CountUpProps {
     /// Final value to roll up to. Values `<= 0` render a static `0`.
     pub target: i64,
+    /// Value the odometer starts from on mount, clamped to `0..=target`.
+    /// Lets a chip that logically continues an earlier count — e.g. a
+    /// thinking burst whose run was split by a tool call — pick up where its
+    /// predecessor left off instead of re-racing from 0. Consulted only on
+    /// mount; later target changes resume from the displayed value as before.
+    #[prop_or(0)]
+    pub start: i64,
     /// Optional label rendered immediately after the number (e.g. `" thinking"`).
     #[prop_or_default]
     pub suffix: AttrValue,
@@ -39,7 +46,8 @@ pub struct CountUpProps {
 #[function_component(CountUp)]
 pub fn count_up(props: &CountUpProps) -> Html {
     let target = props.target.max(0);
-    let value = use_state(|| 0i64);
+    let initial = props.start.clamp(0, target);
+    let value = use_state(|| initial);
     // Hold the live interval so we can cancel it both when it reaches the target
     // and on unmount (dropping the `Interval` cancels it).
     let interval = use_mut_ref(|| None::<Interval>);

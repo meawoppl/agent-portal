@@ -9,7 +9,9 @@
 //! `tasks_panel.rs`.
 
 use crate::components::message_renderer::MessageRenderer;
-use crate::components::{group_is_turn_terminator, group_messages, MessageGroupRenderer};
+use crate::components::{
+    group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroupRenderer,
+};
 use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
 use shared::api::{ErrorMessage, TurnMetricsResponse};
@@ -469,6 +471,9 @@ impl Component for SessionView {
                 }
             })
             .collect();
+        // Seed each thinking chip's odometer with the prior burst's max in
+        // its turn so tool-call splits don't re-race the count from 0.
+        let thinking_starts = thinking_chip_starts(&groups);
 
         html! {
             <div class="session-view">
@@ -478,7 +483,8 @@ impl Component for SessionView {
                             groups.into_iter().enumerate().map(|(i, group)| {
                                 let key = group.key(i);
                                 let metrics = group_metrics.get(i).cloned().flatten();
-                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
+                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                             }).collect::<Html>()
                         }
                         { for self.pending_sends.iter().enumerate().map(|(i, json)| {

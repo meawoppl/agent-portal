@@ -334,6 +334,45 @@ pub fn group_is_turn_terminator(group: &MessageGroup) -> bool {
     }
 }
 
+/// Per-group odometer seed for the `thinking` chips: for each group, the
+/// running `thinking_tokens` maximum across *earlier* groups in the same
+/// turn (0 for non-`Thinking` groups).
+///
+/// The Claude CLI's `estimated_tokens` is cumulative across a turn, but a
+/// run of markers gets split into separate `Thinking` groups whenever a
+/// tool call or assistant message lands between them. Each split mounts a
+/// fresh chip whose odometer would otherwise re-race from 0 up to the full
+/// cumulative total — visually "resetting" the count after every tool use,
+/// including the final one before the answer. Seeding each chip with the
+/// previous burst's max keeps the count continuous across splits. The
+/// running max resets at turn terminators so the next turn's first chip
+/// starts from 0 again. Callers clamp the seed to the chip's own target,
+/// so a marker stream that ever restarts low degrades to a static display
+/// rather than a backwards animation.
+pub fn thinking_chip_starts(groups: &[MessageGroup]) -> Vec<i64> {
+    let mut running_max = 0i64;
+    groups
+        .iter()
+        .map(|group| match group {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Thinking,
+                messages,
+                ..
+            } => {
+                let start = running_max;
+                running_max = running_max.max(thinking_tokens_estimate(messages));
+                start
+            }
+            _ => {
+                if group_is_turn_terminator(group) {
+                    running_max = 0;
+                }
+                0
+            }
+        })
+        .collect()
+}
+
 /// Walk `messages` and collapse consecutive same-category runs into
 /// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
 /// `MessageGroup::Single`.
