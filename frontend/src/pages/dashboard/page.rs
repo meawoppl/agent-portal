@@ -75,7 +75,7 @@ pub fn dashboard_page() -> Html {
     let pending_leave = use_state(|| None::<Uuid>);
     let pending_delete = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
-    let current_user_id = use_state(|| None::<String>);
+    let current_user_id = use_state(|| None::<Uuid>);
     let app_title = use_state(|| "Agent Portal".to_string());
     let server_version = use_state(String::new);
     let activated_sessions = use_state(HashSet::<Uuid>::new);
@@ -140,7 +140,7 @@ pub fn dashboard_page() -> Html {
                 if let Ok(me) = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await
                 {
                     is_admin.set(me.is_admin);
-                    current_user_id.set(Some(me.id.to_string()));
+                    current_user_id.set(Some(me.id));
                 }
             });
             || ()
@@ -350,16 +350,13 @@ pub fn dashboard_page() -> Html {
     let on_confirm_leave = {
         let pending_leave = pending_leave.clone();
         let refresh = sessions_hook.refresh.clone();
+        let current_user_id = current_user_id.clone();
         Callback::from(move |_| {
             if let Some(session_id) = *pending_leave {
                 let refresh = refresh.clone();
                 let pending_leave = pending_leave.clone();
+                let user_id = *current_user_id;
                 spawn_local(async move {
-                    let user_id = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore)
-                        .await
-                        .ok()
-                        .map(|me| me.id.to_string());
-
                     if let Some(user_id) = user_id {
                         let api_endpoint = utils::api_url(&format!(
                             "/api/sessions/{}/members/{}",
@@ -836,7 +833,7 @@ pub fn dashboard_page() -> Html {
                                                 on_message_sent={on_message_sent.clone()}
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
-                                                current_user_id={(*current_user_id).clone()}
+                                                current_user_id={current_user_id.map(|id| id.to_string())}
                                                 interrupt_signal={*interrupt_signal}
                                             />
                                         </div>
@@ -926,7 +923,7 @@ pub fn dashboard_page() -> Html {
             // Admin modal — full-page overlay preserves dashboard state
             if *show_admin {
                 <div class="full-page-modal">
-                    <AdminPage on_close={close_admin.clone()} />
+                    <AdminPage on_close={close_admin.clone()} current_user_id={*current_user_id} />
                 </div>
             }
 

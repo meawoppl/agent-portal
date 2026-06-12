@@ -43,6 +43,41 @@ enum AdminTab {
 #[derive(Properties, PartialEq)]
 pub struct AdminPageProps {
     pub on_close: Callback<()>,
+    /// Current user's id when the parent already knows it (e.g. the dashboard
+    /// modal); skips the redundant `/api/auth/me` fetch.
+    #[prop_or_default]
+    pub current_user_id: Option<Uuid>,
+}
+
+/// PATCH a user via the admin API. Returns true when the server applied the
+/// update (HTTP 204).
+async fn patch_user(user_id: Uuid, body: &UpdateUserRequest) -> bool {
+    let api_endpoint = utils::api_url(&format!("/api/admin/users/{}", user_id));
+    match Request::patch(&api_endpoint)
+        .json(body)
+        .unwrap()
+        .send()
+        .await
+    {
+        Ok(response) => response.status() == 204,
+        Err(e) => {
+            log::error!("Failed to update user: {:?}", e);
+            false
+        }
+    }
+}
+
+/// Apply `f` to the matching user in the local list and re-set the state.
+fn update_user_in(
+    users: &UseStateHandle<Vec<AdminUserInfo>>,
+    user_id: Uuid,
+    f: impl FnOnce(&mut AdminUserInfo),
+) {
+    let mut updated = (**users).clone();
+    if let Some(user) = updated.iter_mut().find(|u| u.id == user_id) {
+        f(user);
+    }
+    users.set(updated);
 }
 
 #[function_component(AdminPage)]
@@ -53,7 +88,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let sessions = use_state(Vec::<AdminSessionInfo>::new);
     let loading = use_state(|| true);
     let error = use_state(|| None::<String>);
-    let current_user_id = use_state(|| None::<Uuid>);
+    let current_user_id = use_state(|| props.current_user_id);
     let confirm_action = use_state(|| None::<(String, Callback<MouseEvent>)>);
     // Ban dialog state - when set, shows ban modal with reason input
     let ban_dialog = use_state(|| None::<Uuid>);
@@ -61,31 +96,33 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
 
     let navigator = use_navigator().unwrap();
 
-    // Fetch current user to get their ID
+    // Fetch current user to get their ID (skipped when the parent supplied it)
     {
         let current_user_id = current_user_id.clone();
         let error = error.clone();
         let navigator = navigator.clone();
         use_effect_with((), move |_| {
-            spawn_local(async move {
-                match utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await {
-                    Ok(me) => {
-                        current_user_id.set(Some(me.id));
+            if current_user_id.is_none() {
+                spawn_local(async move {
+                    match utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await {
+                        Ok(me) => {
+                            current_user_id.set(Some(me.id));
+                        }
+                        Err(FetchError::Status(401)) => {
+                            navigator.push(&Route::Home);
+                        }
+                        Err(FetchError::Status(403)) => {
+                            error.set(Some(
+                                "Access denied. Admin privileges required.".to_string(),
+                            ));
+                        }
+                        Err(FetchError::Network(e)) => {
+                            error.set(Some(format!("Failed to fetch user: {}", e)));
+                        }
+                        Err(_) => {}
                     }
-                    Err(FetchError::Status(401)) => {
-                        navigator.push(&Route::Home);
-                    }
-                    Err(FetchError::Status(403)) => {
-                        error.set(Some(
-                            "Access denied. Admin privileges required.".to_string(),
-                        ));
-                    }
-                    Err(FetchError::Network(e)) => {
-                        error.set(Some(format!("Failed to fetch user: {}", e)));
-                    }
-                    Err(_) => {}
-                }
-            });
+                });
+            }
             || ()
         });
     }
@@ -225,29 +262,12 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                 let confirm = confirm_inner.clone();
                 let new_admin_status = !is_currently_admin;
                 spawn_local(async move {
-                    let api_endpoint = utils::api_url(&format!("/api/admin/users/{}", user_id));
                     let body = UpdateUserRequest {
                         is_admin: Some(new_admin_status),
                         ..Default::default()
                     };
-                    match Request::patch(&api_endpoint)
-                        .json(&body)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.status() == 204 {
-                                let mut updated = (*users).clone();
-                                if let Some(user) = updated.iter_mut().find(|u| u.id == user_id) {
-                                    user.is_admin = new_admin_status;
-                                }
-                                users.set(updated);
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to update user: {:?}", e);
-                        }
+                    if patch_user(user_id, &body).await {
+                        update_user_in(&users, user_id, |u| u.is_admin = new_admin_status);
                     }
                     confirm.set(None);
                 });
@@ -279,31 +299,13 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                     let users = users_inner.clone();
                     let confirm = confirm_inner.clone();
                     spawn_local(async move {
-                        let api_endpoint = utils::api_url(&format!("/api/admin/users/{}", user_id));
                         let body = UpdateUserRequest {
                             disabled: Some(false),
                             ban_reason: Some(None),
                             ..Default::default()
                         };
-                        match Request::patch(&api_endpoint)
-                            .json(&body)
-                            .unwrap()
-                            .send()
-                            .await
-                        {
-                            Ok(response) => {
-                                if response.status() == 204 {
-                                    let mut updated = (*users).clone();
-                                    if let Some(user) = updated.iter_mut().find(|u| u.id == user_id)
-                                    {
-                                        user.disabled = false;
-                                    }
-                                    users.set(updated);
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("Failed to update user: {:?}", e);
-                            }
+                        if patch_user(user_id, &body).await {
+                            update_user_in(&users, user_id, |u| u.disabled = false);
                         }
                         confirm.set(None);
                     });
@@ -329,7 +331,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
 
             if let Some(user_id) = *ban_dialog {
                 spawn_local(async move {
-                    let api_endpoint = utils::api_url(&format!("/api/admin/users/{}", user_id));
                     let body = UpdateUserRequest {
                         disabled: Some(true),
                         ban_reason: Some(if reason.is_empty() {
@@ -339,24 +340,8 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                         }),
                         ..Default::default()
                     };
-                    match Request::patch(&api_endpoint)
-                        .json(&body)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.status() == 204 {
-                                let mut updated = (*users).clone();
-                                if let Some(user) = updated.iter_mut().find(|u| u.id == user_id) {
-                                    user.disabled = true;
-                                }
-                                users.set(updated);
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to ban user: {:?}", e);
-                        }
+                    if patch_user(user_id, &body).await {
+                        update_user_in(&users, user_id, |u| u.disabled = true);
                     }
                     ban_dialog.set(None);
                 });
