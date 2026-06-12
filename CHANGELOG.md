@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.48
+
+- **REST and WS replay share their three duplicated helpers.** `TurnMetric::into_wire()` (the 24-field row→wire mapping, previously written out twice) lives on the model; `sender_names()` (the character-identical user-id→name-or-email lookup) and `parse_iso_cursor()` (with its four tests) live in `handlers/helpers.rs`. One deliberate fix: WS replay now strips trailing `Z` from `replay_after` like the REST path always did — Z-suffixed watermarks previously parsed to `None` and silently triggered a full-history replay. Net −29 lines.
+
 ## 2.8.47
 
 - **Startup auto-update ceremony extracted to `portal_update::startup_auto_update`; proxy update handlers merged.** The apply-pending + check + 4-arm `UpdateResult` match was copy-pasted across proxy startup, launcher startup, and `cmd_update`; it's now one helper with a `check` flag (both startups apply pending updates unconditionally but gate the GitHub check on `--no-update` — preserved exactly). Proxy's `handle_check_update`/`handle_force_update` + a third inline copy merged into `handle_update(check_only)` — the differing arms were provably unreachable per mode. Also: `binary_name_for` replaces the second platform match (a new test pins all six names byte-for-byte against release assets, including the darwin rename), and the Windows binary-swap dance is one `swap_binary` helper with a `SwapError` enum keying the two callers' divergent fallbacks. Launcher's `UpdateAndRestart` path deliberately untouched (distinct restart-anyway semantics).
