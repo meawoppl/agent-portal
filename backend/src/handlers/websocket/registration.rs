@@ -294,8 +294,6 @@ fn get_user_id_from_token(
     conn: &mut diesel::PgConnection,
     auth_token: Option<&str>,
 ) -> Option<Uuid> {
-    use crate::schema::users;
-
     if let Some(token) = auth_token {
         match super::super::proxy_tokens::verify_and_get_user(app_state, conn, token) {
             Ok((user_id, email)) => {
@@ -309,11 +307,7 @@ fn get_user_id_from_token(
     }
 
     if app_state.dev_mode {
-        users::table
-            .filter(users::email.eq("testing@testing.local"))
-            .select(users::id)
-            .first::<Uuid>(conn)
-            .ok()
+        crate::auth::dev_user(conn).map(|user| user.id).ok()
     } else {
         None
     }
