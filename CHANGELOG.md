@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.60
+
+- **Docs drift fixed: log filename, stale workspace tree, completed workplans, loose migration file.** Four docs told users to tail `/tmp/agent-portal-backend.log` — a file nothing writes (scripts write `/tmp/claude-portal-backend.log`); references to the equally-fictional proxy log dropped. CLAUDE.md's workspace tree now matches `[workspace] members` exactly (adds `session-lib`/`claude-session-lib`/`codex-session-lib` with rustdoc-sourced descriptions), its AppState snippet matches the real struct, and the env-var table gains the missing `SPLASH_TEXT`. `PROXY_LIBRARY_EXTRACTION.md` and `SERVER_PAUSED_SESSIONS_WORKPLAN.md` get STATUS: COMPLETED banners citing the shipped artifacts. `fix_migration_names.sql` moved out of `backend/migrations/` to `scripts/` (with the checker's help-text pointer updated) so the migrations dir contains only migrations.
+
 ## 2.8.38
 
 - **One `dev_user` helper + `DEV_USER_EMAIL` const replace nine `testing@testing.local` literals.** The dev test-user lookup was re-implemented across `auth.rs`, `main.rs` (seeding keeps its create logic but uses the const), `handlers/auth.rs` (dev_login + device dev path), `sessions.rs`, `launcher_socket.rs`, and `registration.rs`. `QueryResult<User>` return fits every site's error style (`?`, `.optional()`, `.expect()`, `.ok()`). Three id-only sites now select the full row — same filter, same error paths, identical semantics.
