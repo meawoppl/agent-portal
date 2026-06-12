@@ -6,7 +6,7 @@ use super::types::{
     load_hidden_sessions, load_inactive_hidden, load_rail_position, load_show_cost,
     save_hidden_sessions, save_inactive_hidden, save_show_cost,
 };
-use crate::components::{LaunchDialog, TurnMetricsHeaderPill};
+use crate::components::{ConfirmModal, ConfirmModalStyle, LaunchDialog, TurnMetricsHeaderPill};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
@@ -470,13 +470,6 @@ pub fn dashboard_page() -> Html {
         })
     };
 
-    let on_cost_change = {
-        Callback::from(move |(_session_id, _cost): (Uuid, f64)| {
-            // Costs now come from the websocket hook, so this is a no-op
-            // but we keep it for API compatibility with SessionView
-        })
-    };
-
     let on_connected_change = {
         let connected_sessions = connected_sessions.clone();
         Callback::from(move |(session_id, connected): (Uuid, bool)| {
@@ -839,7 +832,6 @@ pub fn dashboard_page() -> Html {
                                                 session={session.clone()}
                                                 focused={is_focused}
                                                 on_awaiting_change={on_awaiting_change.clone()}
-                                                on_cost_change={on_cost_change.clone()}
                                                 on_connected_change={on_connected_change.clone()}
                                                 on_message_sent={on_message_sent.clone()}
                                                 on_branch_change={on_branch_change.clone()}
@@ -914,17 +906,15 @@ pub fn dashboard_page() -> Html {
                         .unwrap_or("this session");
 
                     html! {
-                        <div class="modal-overlay" onclick={on_cancel_delete.clone()}>
-                            <div class="modal-content delete-confirm" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                <h2>{ "Delete Session?" }</h2>
-                                <p>{ format!("Are you sure you want to delete \"{}\"?", session_name) }</p>
-                                <p class="modal-warning">{ "All message history and session metadata will be permanently removed." }</p>
-                                <div class="modal-actions">
-                                    <button class="modal-cancel" onclick={on_cancel_delete.clone()}>{ "Cancel" }</button>
-                                    <button class="modal-confirm" onclick={on_confirm_delete.clone()}>{ "Delete" }</button>
-                                </div>
-                            </div>
-                        </div>
+                        <ConfirmModal
+                            title="Delete Session?"
+                            message={format!("Are you sure you want to delete \"{}\"?", session_name)}
+                            warning="All message history and session metadata will be permanently removed."
+                            confirm_label="Delete"
+                            style={ConfirmModalStyle::Danger}
+                            on_confirm={on_confirm_delete.clone()}
+                            on_cancel={on_cancel_delete.clone()}
+                        />
                     }
                 } else {
                     html! {}
@@ -954,17 +944,15 @@ pub fn dashboard_page() -> Html {
                         .unwrap_or("this session");
 
                     html! {
-                        <div class="modal-overlay" onclick={on_cancel_leave.clone()}>
-                            <div class="modal-content delete-confirm" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                <h2>{ "Leave Session?" }</h2>
-                                <p>{ format!("Are you sure you want to leave \"{}\"?", session_name) }</p>
-                                <p class="modal-warning">{ "You will need to be re-invited to access this session again." }</p>
-                                <div class="modal-actions">
-                                    <button class="modal-cancel" onclick={on_cancel_leave.clone()}>{ "Cancel" }</button>
-                                    <button class="modal-confirm" onclick={on_confirm_leave.clone()}>{ "Leave" }</button>
-                                </div>
-                            </div>
-                        </div>
+                        <ConfirmModal
+                            title="Leave Session?"
+                            message={format!("Are you sure you want to leave \"{}\"?", session_name)}
+                            warning="You will need to be re-invited to access this session again."
+                            confirm_label="Leave"
+                            style={ConfirmModalStyle::Danger}
+                            on_confirm={on_confirm_leave.clone()}
+                            on_cancel={on_cancel_leave.clone()}
+                        />
                     }
                 } else {
                     html! {}
