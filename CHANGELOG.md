@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.53
+
+- **Shim cleanup: wiggum prompt single-sourced, one write_line, dead channel and fake retries gone, shared claude arg builder.** The wiggum DONE-loop prompt suffix existed in three byte-identical copies (drift would silently break loop semantics) — now `wiggum_prompt()` next to `WiggumState`. All six serialize→write→newline→flush sites in the shim use one generic `write_line` (newline/flush errors at four raw sites now surface like write errors instead of being ignored). The stdin-line channel feeding an empty select arm is deleted. Both "retry the same failing constructor" fallbacks (`warn!("continuing without persistence")` then `?`, and `unwrap_or_else(|_| …unwrap())`) reduced to honest single calls. `claude_cli_args()` in spawn.rs builds the CLI flag list once for the lib spawn, its diagnostic log, and the shim's respawn — a flag change can't miss the shim anymore. Net −56 lines.
+
 ## 2.8.37
 
 - **Backend dead code: `NewSession`, `ImageStore::count()`, dangling device-error route.** `NewSession` was never inserted (all five insert sites use `NewSessionWithId`); `ImageStore::count()` had no callers and `with_defaults()` is now `#[cfg(test)]` (its only callers are tests); `routes::AUTH_DEVICE_ERROR` pointed at a route registered nowhere — invalid/expired device codes redirected to the SPA fallback with a `?message=` param nothing rendered. They now redirect to the device-code entry form so users can retry.
