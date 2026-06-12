@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "anyhow",
  "chrono",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "anyhow",
  "axum",
@@ -243,7 +243,7 @@ dependencies = [
  "diesel_migrations",
  "dotenvy",
  "futures-util",
- "governor 0.8.1",
+ "governor",
  "hex",
  "jsonwebtoken",
  "memory-serve",
@@ -273,6 +273,19 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "bigdecimal"
+version = "0.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d6867f1565b3aad85681f1015055b087fcfd840d6aeee6eee7f2da317603695"
+dependencies = [
+ "autocfg",
+ "libm",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
 
 [[package]]
 name = "bincode"
@@ -487,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "anyhow",
  "base64",
@@ -518,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "anyhow",
  "base64",
@@ -556,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -860,12 +873,16 @@ version = "2.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9940fb8467a0a06312218ed384185cb8536aa10d8ec017d0ce7fad2c1bd882d5"
 dependencies = [
+ "bigdecimal",
  "bitflags",
  "byteorder",
  "chrono",
  "diesel_derives",
  "downcast-rs",
  "itoa",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
  "pq-sys",
  "r2d2",
  "serde_json",
@@ -1111,7 +1128,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "base64",
  "chrono",
@@ -1706,29 +1723,6 @@ dependencies = [
 
 [[package]]
 name = "governor"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be93b4ec2e4710b04d9264c0c7350cdd62a8c20e5e4ac732552ebb8f0debe8eb"
-dependencies = [
- "cfg-if",
- "dashmap 6.1.0",
- "futures-sink",
- "futures-timer",
- "futures-util",
- "getrandom 0.3.4",
- "no-std-compat",
- "nonzero_ext",
- "parking_lot",
- "portable-atomic",
- "quanta",
- "rand 0.9.4",
- "smallvec",
- "spinning_top",
- "web-time",
-]
-
-[[package]]
-name = "governor"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9efcab3c1958580ff1f25a2a41be1668f7603d849bb63af523b208a3cc1223b8"
@@ -2239,6 +2233,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
 name = "libredox"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2406,12 +2406,6 @@ dependencies = [
  "security-framework-sys",
  "tempfile",
 ]
-
-[[package]]
-name = "no-std-compat"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b93853da6d84c2e3c7d730d6473e8817692dd89be387eb01b94d7f108ecb5b8c"
 
 [[package]]
 name = "nonempty"
@@ -2667,7 +2661,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "anyhow",
  "colored",
@@ -2682,7 +2676,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "anyhow",
  "hex",
@@ -3345,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3407,7 +3401,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.8.61"
+version = "2.8.62"
 dependencies = [
  "base64",
  "chrono",
@@ -3991,7 +3985,7 @@ checksum = "44de9b94d849d3c46e06a883d72d408c2de6403367b39df2b1c9d9e7b6736fe6"
 dependencies = [
  "axum",
  "forwarded-header-value",
- "governor 0.10.4",
+ "governor",
  "http 1.4.0",
  "pin-project",
  "thiserror 2.0.18",

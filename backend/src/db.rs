@@ -42,6 +42,55 @@ pub fn run_migrations(pool: &DbPool) -> Result<Vec<String>> {
     Ok(applied)
 }
 
+/// Run pending database migrations, logging each applied migration.
+pub fn run_migrations_logged(pool: &DbPool) -> Result<()> {
+    tracing::info!("Running database migrations...");
+    match run_migrations(pool) {
+        Ok(applied) => {
+            if applied.is_empty() {
+                tracing::info!("Database is up to date (no pending migrations)");
+            } else {
+                for migration in &applied {
+                    tracing::info!("Applied migration: {}", migration);
+                }
+                tracing::info!("Successfully applied {} migration(s)", applied.len());
+            }
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Failed to run database migrations: {}", e);
+            Err(e)
+        }
+    }
+}
+
+/// Create the dev-mode test user if it does not already exist.
+pub fn seed_dev_user(pool: &DbPool) -> Result<()> {
+    use crate::auth::{dev_user, DEV_USER_EMAIL};
+    use crate::models::NewUser;
+    use crate::schema::users;
+
+    let mut conn = pool.get()?;
+    let test_user = dev_user(&mut conn).optional()?;
+
+    if test_user.is_none() {
+        let new_user = NewUser {
+            google_id: "dev_mode_test_user".to_string(),
+            email: DEV_USER_EMAIL.to_string(),
+            name: Some("Test User".to_string()),
+            avatar_url: None,
+        };
+
+        diesel::insert_into(users::table)
+            .values(&new_user)
+            .execute(&mut conn)?;
+
+        tracing::info!("✓ Created test user: {}", DEV_USER_EMAIL);
+    }
+
+    Ok(())
+}
+
 /// Aggregated usage data for a user (includes both active and deleted sessions)
 #[derive(Debug, Default, Clone)]
 pub struct UserUsage {

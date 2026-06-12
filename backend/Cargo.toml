@@ -75,7 +75,7 @@ tower-cookies = { version = "0.11", features = ["signed"] }
 memory-serve = "2.1"
 ws-bridge = { workspace = true, features = ["server"] }
 tower_governor = "0.8.0"
-governor = "0.8"
+governor = "0.10"
 base64 = "0.22.1"
 
 [build-dependencies]
