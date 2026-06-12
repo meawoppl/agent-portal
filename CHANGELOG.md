@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.42
+
+- **One `ConfirmModal` component replaces five copy-pasted confirm dialogs.** Admin user actions, settings sessions/tokens panels, and the dashboard's Delete/Leave session modals all hand-rolled the same overlay + message + cancel/confirm markup. The new component parameterizes the three pre-existing CSS class families (`Standard` admin, `Panel` settings, `Danger` dashboard with title/warning) so the rendered DOM is byte-identical at every site; overlay-click-cancels and inner stop-propagation semantics preserved. The admin ban dialog (text-input modal) and token-renewed dialog (single "Done" button) were deliberately not migrated — they aren't confirm modals.
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
