@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.47
+
+- **Startup auto-update ceremony extracted to `portal_update::startup_auto_update`; proxy update handlers merged.** The apply-pending + check + 4-arm `UpdateResult` match was copy-pasted across proxy startup, launcher startup, and `cmd_update`; it's now one helper with a `check` flag (both startups apply pending updates unconditionally but gate the GitHub check on `--no-update` — preserved exactly). Proxy's `handle_check_update`/`handle_force_update` + a third inline copy merged into `handle_update(check_only)` — the differing arms were provably unreachable per mode. Also: `binary_name_for` replaces the second platform match (a new test pins all six names byte-for-byte against release assets, including the darwin rename), and the Windows binary-swap dance is one `swap_binary` helper with a `SwapError` enum keying the two callers' divergent fallbacks. Launcher's `UpdateAndRestart` path deliberately untouched (distinct restart-anyway semantics).
+
 ## 2.8.35
 
 - **Delete dead `shared` types: `UserInfo`, `ApiError` (+ manual `Display`/`Error` impls), `DevicePollRequest`.** All three were grep-verified unreferenced across every consumer crate (`UserInfo` was a strict subset of `MeResponse`; `DevicePollRequest` an exact field duplicate of the live `DeviceFlowPollRequest`). `DevicePollResponse` stays — #1006 made it the canonical wire type. Pure deletions, −46 lines.
