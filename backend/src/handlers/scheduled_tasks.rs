@@ -20,7 +20,7 @@ use crate::{
     auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
-    models::{NewScheduledTask, ScheduledTask},
+    models::{NewScheduledTask, ScheduledTask, ScheduledTaskChangeset, Session},
     schema::scheduled_tasks,
     AppState,
 };
@@ -128,7 +128,7 @@ pub async fn create_task_handler(
     let fields: Vec<&str> = req.cron_expression.split_whitespace().collect();
     if fields.len() != 5 {
         warn!("Invalid cron expression: {}", req.cron_expression);
-        return Err(AppError::Internal("Invalid cron expression".to_string()));
+        return Err(AppError::BadRequest("Invalid cron expression"));
     }
 
     let mut conn = app_state.conn()?;
@@ -168,10 +168,11 @@ pub async fn update_task_handler(
     let mut conn = app_state.conn()?;
 
     // Verify ownership
-    let existing: ScheduledTask = scheduled_tasks::table
+    scheduled_tasks::table
         .filter(scheduled_tasks::id.eq(task_id))
         .filter(scheduled_tasks::user_id.eq(user_id))
-        .first(&mut conn)
+        .select(scheduled_tasks::id)
+        .first::<Uuid>(&mut conn)
         .map_err(|_| AppError::NotFound("scheduled task"))?;
 
     // Validate cron if provided
@@ -179,51 +180,31 @@ pub async fn update_task_handler(
         let fields: Vec<&str> = cron.split_whitespace().collect();
         if fields.len() != 5 {
             warn!("Invalid cron expression in update: {}", cron);
-            return Err(AppError::Internal("Invalid cron expression".to_string()));
+            return Err(AppError::BadRequest("Invalid cron expression"));
         }
     }
 
-    // Apply updates field by field (load-modify-save pattern)
-    let name = req.name.unwrap_or(existing.name);
-    let cron_expression = req.cron_expression.unwrap_or(existing.cron_expression);
-    let timezone = req.timezone.unwrap_or(existing.timezone);
-    let hostname = match req.hostname {
-        Some(h) => h,
-        None => existing.hostname,
+    let changeset = ScheduledTaskChangeset {
+        name: req.name,
+        cron_expression: req.cron_expression,
+        timezone: req.timezone,
+        hostname: req.hostname,
+        working_directory: req.working_directory,
+        prompt: req.prompt,
+        claude_args: req
+            .claude_args
+            .map(|args| serde_json::to_value(args).unwrap_or_default()),
+        agent_type: req.agent_type.map(|at| at.as_str().to_string()),
+        enabled: req.enabled,
+        max_runtime_minutes: req.max_runtime_minutes,
     };
-    let working_directory = req.working_directory.unwrap_or(existing.working_directory);
-    let prompt = req.prompt.unwrap_or(existing.prompt);
-    let claude_args = req
-        .claude_args
-        .map(|args| serde_json::to_value(args).unwrap_or_default())
-        .unwrap_or(existing.claude_args);
-    let agent_type = req
-        .agent_type
-        .map(|at| at.as_str().to_string())
-        .unwrap_or(existing.agent_type);
-    let enabled = req.enabled.unwrap_or(existing.enabled);
-    let max_runtime_minutes = req
-        .max_runtime_minutes
-        .unwrap_or(existing.max_runtime_minutes);
 
     let updated: ScheduledTask = diesel::update(
         scheduled_tasks::table
             .filter(scheduled_tasks::id.eq(task_id))
             .filter(scheduled_tasks::user_id.eq(user_id)),
     )
-    .set((
-        scheduled_tasks::name.eq(&name),
-        scheduled_tasks::cron_expression.eq(&cron_expression),
-        scheduled_tasks::timezone.eq(&timezone),
-        scheduled_tasks::hostname.eq(&hostname),
-        scheduled_tasks::working_directory.eq(&working_directory),
-        scheduled_tasks::prompt.eq(&prompt),
-        scheduled_tasks::claude_args.eq(&claude_args),
-        scheduled_tasks::agent_type.eq(&agent_type),
-        scheduled_tasks::enabled.eq(enabled),
-        scheduled_tasks::max_runtime_minutes.eq(max_runtime_minutes),
-        scheduled_tasks::updated_at.eq(diesel::dsl::now),
-    ))
+    .set((&changeset, scheduled_tasks::updated_at.eq(diesel::dsl::now)))
     .get_result(&mut conn)?;
 
     info!("Updated scheduled task '{}' ({})", updated.name, updated.id);
@@ -271,22 +252,23 @@ pub async fn list_runs_handler(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
     Path(task_id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<Vec<Session>>, AppError> {
     let mut conn = app_state.conn()?;
 
     // Verify task ownership
-    let _task: ScheduledTask = scheduled_tasks::table
+    scheduled_tasks::table
         .filter(scheduled_tasks::id.eq(task_id))
         .filter(scheduled_tasks::user_id.eq(user_id))
-        .first(&mut conn)
+        .select(scheduled_tasks::id)
+        .first::<Uuid>(&mut conn)
         .map_err(|_| AppError::NotFound("scheduled task"))?;
 
     use crate::schema::sessions;
-    let runs: Vec<crate::models::Session> = sessions::table
+    let runs: Vec<Session> = sessions::table
         .filter(sessions::scheduled_task_id.eq(task_id))
         .order(sessions::created_at.desc())
         .limit(50)
         .load(&mut conn)?;
 
-    Ok(Json(serde_json::to_value(runs).unwrap_or_default()))
+    Ok(Json(runs))
 }
