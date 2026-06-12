@@ -470,13 +470,6 @@ pub fn dashboard_page() -> Html {
         })
     };
 
-    let on_cost_change = {
-        Callback::from(move |(_session_id, _cost): (Uuid, f64)| {
-            // Costs now come from the websocket hook, so this is a no-op
-            // but we keep it for API compatibility with SessionView
-        })
-    };
-
     let on_connected_change = {
         let connected_sessions = connected_sessions.clone();
         Callback::from(move |(session_id, connected): (Uuid, bool)| {
@@ -839,7 +832,6 @@ pub fn dashboard_page() -> Html {
                                                 session={session.clone()}
                                                 focused={is_focused}
                                                 on_awaiting_change={on_awaiting_change.clone()}
-                                                on_cost_change={on_cost_change.clone()}
                                                 on_connected_change={on_connected_change.clone()}
                                                 on_message_sent={on_message_sent.clone()}
                                                 on_branch_change={on_branch_change.clone()}
