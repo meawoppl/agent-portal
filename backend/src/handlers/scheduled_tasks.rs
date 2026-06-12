@@ -63,19 +63,28 @@ fn task_to_config(t: &ScheduledTask) -> ScheduledTaskConfig {
     }
 }
 
+/// Load a user's enabled scheduled tasks. Returns None if no DB connection.
+fn load_enabled_tasks(app_state: &AppState, user_id: Uuid) -> Option<Vec<ScheduledTask>> {
+    match app_state.db_pool.get() {
+        Ok(mut conn) => Some(
+            scheduled_tasks::table
+                .filter(scheduled_tasks::user_id.eq(user_id))
+                .filter(scheduled_tasks::enabled.eq(true))
+                .load(&mut conn)
+                .unwrap_or_default(),
+        ),
+        Err(e) => {
+            error!("Failed to get DB connection for ScheduleSync: {}", e);
+            None
+        }
+    }
+}
+
 /// Send ScheduleSync to all connected launchers for a user.
 /// Filters tasks by launcher hostname.
 fn send_schedule_sync(app_state: &AppState, user_id: Uuid) {
-    let tasks: Vec<ScheduledTask> = match app_state.db_pool.get() {
-        Ok(mut conn) => scheduled_tasks::table
-            .filter(scheduled_tasks::user_id.eq(user_id))
-            .filter(scheduled_tasks::enabled.eq(true))
-            .load(&mut conn)
-            .unwrap_or_default(),
-        Err(e) => {
-            error!("Failed to get DB connection for ScheduleSync: {}", e);
-            return;
-        }
+    let Some(tasks) = load_enabled_tasks(app_state, user_id) else {
+        return;
     };
 
     let launchers = app_state.session_manager.get_launchers_for_user(&user_id);
@@ -95,6 +104,44 @@ fn send_schedule_sync(app_state: &AppState, user_id: Uuid) {
                 launcher.launcher_name, launcher.launcher_id
             );
         }
+    }
+}
+
+/// Send the initial ScheduleSync to a single newly-registered launcher.
+/// Filters the user's enabled tasks by the launcher's hostname and, unlike
+/// the broadcast in `send_schedule_sync`, sends nothing when no tasks match.
+pub(crate) fn send_initial_schedule_sync(
+    app_state: &AppState,
+    user_id: Uuid,
+    launcher_id: Uuid,
+    hostname: &str,
+    launcher_name: &str,
+) {
+    let Some(tasks) = load_enabled_tasks(app_state, user_id) else {
+        return;
+    };
+
+    let task_configs: Vec<ScheduledTaskConfig> = tasks
+        .iter()
+        .filter(|t| t.hostname == hostname)
+        .map(task_to_config)
+        .collect();
+
+    if task_configs.is_empty() {
+        return;
+    }
+
+    let count = task_configs.len();
+    if app_state.session_manager.send_to_launcher(
+        &launcher_id,
+        ServerToLauncher::ScheduleSync {
+            tasks: task_configs,
+        },
+    ) {
+        info!(
+            "Sent initial ScheduleSync with {} tasks to launcher '{}'",
+            count, launcher_name
+        );
     }
 }
 
