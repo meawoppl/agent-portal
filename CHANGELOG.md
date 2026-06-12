@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.41
+
+- **`require_admin` now reuses `auth::extract_user` instead of re-implementing the cookie→user→disabled-check sequence.** −23 lines and one auth path instead of two. Two deliberate consistency changes: admin endpoints honor the dev-mode bypass like every other handler (grants nothing — the seeded dev user has `is_admin = FALSE` by column default, so dev-mode admin requests still get 403 unless manually promoted), and a stale cookie for a deleted user now yields 401 instead of a 404, matching all other authed handlers.
+
 ## 2.8.40
 
 - **Hand-rolled base64url codecs replaced by the `base64` crate (×2, ~110 lines).** `shared/src/proxy_tokens.rs` and `proxy/src/util.rs` each reimplemented base64url; both now use a const lenient engine (URL_SAFE, no encode padding, `DecodePaddingMode::Indifferent`, allow-trailing-bits) that preserves every leniency the old decoders had: padding accepted anywhere it was before, whitespace pre-filtered, non-canonical trailing bits masked. One intentionally stricter case: length ≡ 1 (mod 4) inputs (which no encoder produces, and which the old code decoded into a garbage byte) now fail softly. Byte-identity pinned by RFC 4648 fixtures, an all-256-values round-trip, and a hardcoded `ProxyInitConfig` fixture. `base64` added to shared (WASM-safe).
