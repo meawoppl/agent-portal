@@ -1,4 +1,4 @@
-use crate::components::ShareDialog;
+use crate::components::{ConfirmModal, ConfirmModalStyle, ShareDialog};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::api::SessionsResponse;
@@ -232,19 +232,12 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
             </section>
 
             if let Some((message, action)) = &*confirm_action {
-                <div class="modal-overlay" onclick={cancel_confirm.clone()}>
-                    <div class="confirm-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        <p>{ message }</p>
-                        <div class="confirm-actions">
-                            <button class="cancel-button" onclick={cancel_confirm.clone()}>
-                                { "Cancel" }
-                            </button>
-                            <button class="confirm-button" onclick={action.clone()}>
-                                { "Confirm" }
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ConfirmModal
+                    message={message.clone()}
+                    style={ConfirmModalStyle::Panel}
+                    on_confirm={action.clone()}
+                    on_cancel={cancel_confirm.clone()}
+                />
             }
 
             if let Some(session_id) = *share_session_id {

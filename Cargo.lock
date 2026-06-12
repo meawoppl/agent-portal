@@ -21,7 +21,6 @@ dependencies = [
  "croner",
  "directories",
  "dirs",
- "hostname",
  "portal-auth",
  "portal-update",
  "reqwest",
@@ -3410,6 +3409,7 @@ dependencies = [
 name = "shared"
 version = "2.8.61"
 dependencies = [
+ "base64",
  "chrono",
  "claude-codes",
  "serde",

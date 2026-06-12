@@ -1,4 +1,5 @@
 use super::WebClientSender;
+use crate::handlers::helpers::{parse_iso_cursor, sender_names};
 use diesel::prelude::*;
 use shared::ServerToClient;
 use tracing::{error, info};
@@ -40,11 +41,10 @@ pub(super) fn replay_history(
 
     use crate::schema::messages;
 
-    let replay_after_time = replay_after.as_ref().and_then(|ts| {
-        chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%.f")
-            .or_else(|_| chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S"))
-            .ok()
-    });
+    // Same cursor parser as the REST `list_messages` handler — including the
+    // trailing-`Z` strip, so frontend `js_sys::Date.toISOString()` watermarks
+    // parse instead of silently falling back to a full-history replay.
+    let replay_after_time = replay_after.as_deref().and_then(parse_iso_cursor);
 
     let history: Vec<crate::models::Message> = if let Some(after) = replay_after_time {
         messages::table
@@ -75,26 +75,7 @@ pub(super) fn replay_history(
     }
 
     // Look up sender names for user-role messages
-    use crate::schema::users;
-    let user_ids: Vec<Uuid> = history
-        .iter()
-        .filter(|m| m.role == "user")
-        .map(|m| m.user_id)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let user_names: std::collections::HashMap<Uuid, String> = if !user_ids.is_empty() {
-        users::table
-            .filter(users::id.eq_any(&user_ids))
-            .select((users::id, users::name, users::email))
-            .load::<(Uuid, Option<String>, String)>(&mut conn)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(id, name, email)| (id, name.unwrap_or(email)))
-            .collect()
-    } else {
-        std::collections::HashMap::new()
-    };
+    let user_names = sender_names(&mut conn, &history);
 
     // Surface the server-assigned `created_at` for the latest row so the
     // frontend can use it directly as its reconnect-replay watermark

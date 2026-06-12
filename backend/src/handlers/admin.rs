@@ -22,38 +22,15 @@ use crate::{
     schema, AppState,
 };
 
-use shared::protocol::SESSION_COOKIE_NAME;
-
 // ============================================================================
 // Admin Guard - extracts and validates admin user from cookies
 // ============================================================================
 
 /// Extract the current user from cookies and verify they are an admin.
 /// Returns the User if they are an admin, or an appropriate application error.
-pub async fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Result<User, AppError> {
-    // Extract user ID from signed session cookie
-    let cookie = cookies
-        .signed(&app_state.cookie_key)
-        .get(SESSION_COOKIE_NAME)
-        .ok_or(AppError::Unauthorized)?;
+pub fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Result<User, AppError> {
+    let user = crate::auth::extract_user(app_state, cookies)?;
 
-    let user_id: Uuid = cookie.value().parse().map_err(|_| AppError::Unauthorized)?;
-
-    // Fetch user from database
-    let mut conn = app_state.conn()?;
-
-    let user = schema::users::table
-        .find(user_id)
-        .first::<User>(&mut conn)
-        .map_err(|_| AppError::NotFound("admin user"))?;
-
-    // Check if user is disabled
-    if user.disabled {
-        warn!("Disabled user {} attempted admin access", user.email);
-        return Err(AppError::Forbidden);
-    }
-
-    // Check if user is admin
     if !user.is_admin {
         warn!("Non-admin user {} attempted admin access", user.email);
         return Err(AppError::Forbidden);
@@ -115,7 +92,7 @@ pub async fn get_stats(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<Json<AdminStats>, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
     info!("Admin {} requested system stats", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -193,7 +170,7 @@ pub async fn list_users(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<Json<AdminUsersResponse>, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
     info!("Admin {} requested user list", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -239,7 +216,7 @@ pub async fn update_user(
     Path(user_id): Path<Uuid>,
     Json(update): Json<UpdateUserRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
 
     // Prevent admin from demoting themselves
     if user_id == admin.id && update.is_admin == Some(false) {
@@ -349,7 +326,7 @@ pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
 ) -> Result<Json<AdminSessionsResponse>, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
     info!("Admin {} requested sessions list", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -397,7 +374,7 @@ pub async fn delete_session(
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let admin = require_admin(&app_state, &cookies).await?;
+    let admin = require_admin(&app_state, &cookies)?;
 
     let mut conn = app_state.conn()?;
 
