@@ -12,6 +12,36 @@ use claude_codes::AsyncClient as ClaudeAsyncClient;
 use session_lib::error::SessionError;
 use session_lib::snapshot::SessionConfig;
 
+/// Build the argument list for the `claude` CLI (everything after the binary
+/// path). Shared by the library spawn path and the proxy's shim mode so flag
+/// changes can't drift between the two.
+pub fn claude_cli_args(session_id: uuid::Uuid, resume: bool, extra_args: &[String]) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--print",
+        "--verbose",
+        "--output-format",
+        "stream-json",
+        "--input-format",
+        "stream-json",
+        "--permission-prompt-tool",
+        "stdio",
+        "--replay-user-messages",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+
+    if resume {
+        args.push("--resume".to_string());
+    } else {
+        args.push("--session-id".to_string());
+    }
+    args.push(session_id.to_string());
+
+    args.extend(extra_args.iter().cloned());
+    args
+}
+
 /// Spawn the Claude process and return its async client.
 pub(crate) async fn spawn_claude(
     config: &SessionConfig,
@@ -20,54 +50,18 @@ pub(crate) async fn spawn_claude(
 
     log_claude_info(claude_path);
 
+    let args = claude_cli_args(config.session_id, config.resume, &config.extra_args);
+
     let mut cmd = Command::new(claude_path);
-    cmd.arg("--print")
-        .arg("--verbose")
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--input-format")
-        .arg("stream-json")
-        .arg("--permission-prompt-tool")
-        .arg("stdio")
-        .arg("--replay-user-messages");
-
-    if config.resume {
-        cmd.arg("--resume").arg(config.session_id.to_string());
-    } else {
-        cmd.arg("--session-id").arg(config.session_id.to_string());
-    }
-
-    for arg in &config.extra_args {
-        cmd.arg(arg);
-    }
-
+    cmd.args(&args);
     cmd.current_dir(&config.working_directory);
 
     // Log the full command for diagnostics.
-    let args: Vec<_> = std::iter::once(claude_path.to_string_lossy().to_string())
-        .chain(
-            [
-                "--print",
-                "--verbose",
-                "--output-format",
-                "stream-json",
-                "--input-format",
-                "stream-json",
-                "--permission-prompt-tool",
-                "stdio",
-                "--replay-user-messages",
-            ]
-            .iter()
-            .map(|s| s.to_string()),
-        )
-        .chain(if config.resume {
-            vec!["--resume".to_string(), config.session_id.to_string()]
-        } else {
-            vec!["--session-id".to_string(), config.session_id.to_string()]
-        })
-        .chain(config.extra_args.iter().cloned())
-        .collect();
-    tracing::info!("Spawning Claude: {}", args.join(" "));
+    tracing::info!(
+        "Spawning Claude: {} {}",
+        claude_path.to_string_lossy(),
+        args.join(" ")
+    );
 
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

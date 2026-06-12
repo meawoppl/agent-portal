@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.8.54
+
+- **Admin page: three PATCH-user handlers deduped; `/api/auth/me` no longer fetched redundantly.** `patch_user(user_id, body) -> bool` + `update_user_in(users, id, f)` collapse the toggle-admin/unban/confirm-ban triple to one-liners. The dashboard's leave-confirm now uses the `current_user_id` it already holds (typed `Option<Uuid>` now) instead of a second network round-trip, and the admin modal receives the id as a prop, skipping its own me-fetch; the standalone `/admin` route keeps its original fetch with 401→Home / 403→denied handling.
+
+## 2.8.53
+
+- **Shim cleanup: wiggum prompt single-sourced, one write_line, dead channel and fake retries gone, shared claude arg builder.** The wiggum DONE-loop prompt suffix existed in three byte-identical copies (drift would silently break loop semantics) — now `wiggum_prompt()` next to `WiggumState`. All six serialize→write→newline→flush sites in the shim use one generic `write_line` (newline/flush errors at four raw sites now surface like write errors instead of being ignored). The stdin-line channel feeding an empty select arm is deleted. Both "retry the same failing constructor" fallbacks (`warn!("continuing without persistence")` then `?`, and `unwrap_or_else(|_| …unwrap())`) reduced to honest single calls. `claude_cli_args()` in spawn.rs builds the CLI flag list once for the lib spawn, its diagnostic log, and the shim's respawn — a flag change can't miss the shim anymore. Net −56 lines.
+
+## 2.8.52
+
+- **ScheduledTask wire trio flattened around one `ScheduledTaskFields` core; MessageRole/PortalMessage serde simplified.** `ScheduledTaskConfig`/`CreateScheduledTaskRequest`/`ScheduledTaskInfo` repeated ~10 fields; they now `#[serde(flatten)]` a shared core (the `RegisterFields` pattern). Serialized key sets are byte-identical (only contiguous key order shifts; all consumers are serde) and Create's deserialization defaults are preserved exactly — five new wire-compat tests pin the JSON shapes including `last_session_id: null` and old-key-order parsing. As a side effect `task_to_config` became `pub(crate)` and launcher registration reuses it instead of hand-building the config. `MessageRole` gains `as_str()` with `Display` delegating (the `AgentType` pattern; `from_type_str` fallback verbatim), and `PortalMessage`'s always-"portal" `message_type` is now encoded once via a const + `with_content` constructor used by all six construction sites.
+
 ## 2.8.51
 
 - **Session rail: dropdown options share one button shell and close-then-emit helper; dead tick counter removed.** `close_then(menu_session, action)` and `menu_option(extra_classes, label, hint, onclick)` absorb ~9 repeated button shells and 7 close-menu closures (hide/pause/leave/delete/share/schedule/copy-id/stop/blocked-stop); the blocked-stop and schedule options share one `open_schedule` callback. The sparkline tick effect's `Rc<Cell<u32>>` counter (incremented every 100ms, never read) is deleted. The compaction/task range loops folded into one `(ranges, class)` flat_map preserving render order. Deliberately distinct shells (two-click stop confirm, disabled spans, PR/repo links) untouched. Net −27 lines with far less repetition in the dropdown block.
