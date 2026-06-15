@@ -58,6 +58,8 @@ pub struct Session {
     pub scheduled_task_id: Option<Uuid>,
     pub paused: bool,
     pub claude_args: serde_json::Value,
+    pub launch_failure_count: i32,
+    pub last_launch_attempt_at: Option<NaiveDateTime>,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)

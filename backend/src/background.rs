@@ -318,4 +318,31 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
             tracing::error!("Failed to delete expired tokens: {}", e);
         }
     }
+
+    // Delete leaked launcher-spawned tokens (#1045). These are minted per
+    // launch and only ever bound to a session on a *successful* proxy
+    // registration; a launch whose proxy never registers leaves a
+    // never-expiring, never-bound, never-revoked token behind. A legitimate
+    // launch token is bound within seconds, so any still unbound an hour after
+    // creation belongs to a failed launch and is safe to delete.
+    let leak_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::hours(1);
+    match diesel::delete(
+        schema::proxy_auth_tokens::table
+            .filter(
+                schema::proxy_auth_tokens::name
+                    .eq(crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME),
+            )
+            .filter(schema::proxy_auth_tokens::session_id.is_null())
+            .filter(schema::proxy_auth_tokens::created_at.lt(leak_cutoff)),
+    )
+    .execute(&mut conn)
+    {
+        Ok(0) => {}
+        Ok(count) => {
+            tracing::info!("Leaked launch-token cleanup: deleted {} tokens", count);
+        }
+        Err(e) => {
+            tracing::error!("Failed to delete leaked launch tokens: {}", e);
+        }
+    }
 }

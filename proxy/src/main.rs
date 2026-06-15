@@ -706,6 +706,10 @@ async fn run_proxy_session(mut config: ProxySessionConfig) -> Result<()> {
                     return Ok(());
                 }
             }
+            Ok(session::LoopResult::RegistrationRejected) => {
+                warn!("Registration rejected by server; re-authentication may be required");
+                return Ok(());
+            }
             Err(e) => {
                 return Err(e);
             }

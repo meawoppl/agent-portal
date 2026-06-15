@@ -135,6 +135,10 @@ pub fn register_or_update_session(
             .set((
                 sessions::status.eq(SessionStatus::Active.as_str()),
                 sessions::paused.eq(false),
+                // A successful registration means launches are working again,
+                // so clear the launch-failure backoff state (#1045).
+                sessions::launch_failure_count.eq(0),
+                sessions::last_launch_attempt_at.eq(None::<chrono::NaiveDateTime>),
                 sessions::last_activity.eq(diesel::dsl::now),
                 sessions::working_directory.eq(params.working_directory),
                 sessions::git_branch.eq(params.git_branch),
