@@ -313,15 +313,26 @@ fn handle_launcher_message(
                     if let Ok(mut conn) = app_state.db_pool.get() {
                         use crate::schema::sessions;
                         use diesel::prelude::*;
+                        // Record the failure WITHOUT pausing. Pausing here used
+                        // to wedge the session permanently: `paused` doubles as
+                        // the user's "don't relaunch" flag, and reconcile only
+                        // ever relaunches `paused = false` sessions, so a single
+                        // transient launch failure removed the session from
+                        // reconcile forever (#1045). Instead we bump a failure
+                        // counter and timestamp; reconcile keeps retrying with
+                        // exponential backoff, and a successful registration
+                        // resets the counter.
                         if let Err(e) = diesel::update(sessions::table.find(session_id))
                             .set((
-                                sessions::paused.eq(true),
+                                sessions::launch_failure_count
+                                    .eq(sessions::launch_failure_count + 1),
+                                sessions::last_launch_attempt_at.eq(diesel::dsl::now),
                                 sessions::status.eq(SessionStatus::Disconnected.as_str()),
                                 sessions::updated_at.eq(diesel::dsl::now),
                             ))
                             .execute(&mut conn)
                         {
-                            warn!("Failed to mark failed launch {} paused: {}", session_id, e);
+                            warn!("Failed to record launch failure for {}: {}", session_id, e);
                         }
                     }
                 }
@@ -673,6 +684,8 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         }
     };
 
+    let now = chrono::Utc::now().naive_utc();
+
     for session in desired {
         if running_sessions.contains(&session.id)
             || app_state
@@ -682,6 +695,18 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
                 .any(|entry| *entry.value() == session.id)
         {
             continue;
+        }
+
+        // Back off relaunching sessions that have recently failed to launch.
+        // Without this, a session that can never launch (e.g. a missing
+        // working directory) would be relaunched on every heartbeat, minting
+        // a fresh token each time (#1045). A successful registration resets
+        // `launch_failure_count` to 0, so this only throttles the failing case.
+        if let Some(last_attempt) = session.last_launch_attempt_at {
+            let backoff = launch_backoff(session.launch_failure_count);
+            if now < last_attempt + backoff {
+                continue;
+            }
         }
 
         let Ok(auth_token) = crate::handlers::launchers::mint_launch_token(app_state, user_id)
@@ -731,9 +756,55 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
     }
 }
 
+/// Exponential backoff between relaunch attempts for a session that keeps
+/// failing to launch: 30s, 1m, 2m, … capped at 15 minutes. `failure_count`
+/// is the number of consecutive failures so far (0 means "never failed", so
+/// no backoff). See #1045.
+fn launch_backoff(failure_count: i32) -> chrono::Duration {
+    if failure_count <= 0 {
+        return chrono::Duration::zero();
+    }
+    // Cap the shift so `30 << n` can't overflow, then cap the result at 15min.
+    let shift = (failure_count - 1).min(5) as u32;
+    let secs = (30u64 << shift).min(900);
+    chrono::Duration::seconds(secs as i64)
+}
+
 fn get_dev_user_id(app_state: &AppState) -> Uuid {
     let mut conn = app_state.db_pool.get().expect("DB connection for dev mode");
     crate::auth::dev_user(&mut conn)
         .expect("Test user must exist in dev mode")
         .id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::launch_backoff;
+
+    #[test]
+    fn backoff_is_zero_until_first_failure() {
+        // Never-failed sessions (count 0, or a defensive negative) get no
+        // backoff so reconcile launches them immediately.
+        assert_eq!(launch_backoff(0).num_seconds(), 0);
+        assert_eq!(launch_backoff(-3).num_seconds(), 0);
+    }
+
+    #[test]
+    fn backoff_doubles_then_caps_at_15_minutes() {
+        assert_eq!(launch_backoff(1).num_seconds(), 30);
+        assert_eq!(launch_backoff(2).num_seconds(), 60);
+        assert_eq!(launch_backoff(3).num_seconds(), 120);
+        assert_eq!(launch_backoff(4).num_seconds(), 240);
+        assert_eq!(launch_backoff(5).num_seconds(), 480);
+        // 30 << 5 = 960, capped to the 900s (15min) ceiling.
+        assert_eq!(launch_backoff(6).num_seconds(), 900);
+    }
+
+    #[test]
+    fn backoff_saturates_without_overflow_for_large_counts() {
+        // The shift is clamped, so even an absurd failure count stays at the
+        // cap rather than overflowing the left-shift.
+        assert_eq!(launch_backoff(1000).num_seconds(), 900);
+        assert_eq!(launch_backoff(i32::MAX).num_seconds(), 900);
+    }
 }

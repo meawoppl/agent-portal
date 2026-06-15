@@ -165,6 +165,8 @@ diesel::table! {
         scheduled_task_id -> Nullable<Uuid>,
         paused -> Bool,
         claude_args -> Jsonb,
+        launch_failure_count -> Int4,
+        last_launch_attempt_at -> Nullable<Timestamp>,
     }
 }
 

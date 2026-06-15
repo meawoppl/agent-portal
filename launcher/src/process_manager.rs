@@ -301,6 +301,18 @@ async fn run_session_task(
                 info!("Session {} exited normally", config.session_id);
                 return Some(0);
             }
+            Ok(LoopResult::RegistrationRejected) => {
+                // The token this proxy was launched with is dead (revoked or
+                // expired). Exit so the launcher removes us from its running
+                // set; reconcile will relaunch with a freshly minted token
+                // (#1045). Staying alive and reconnecting would just hammer
+                // the backend forever and block that relaunch.
+                warn!(
+                    "Session {} registration rejected by server, exiting for relaunch",
+                    config.session_id
+                );
+                return Some(1);
+            }
             Ok(LoopResult::SessionNotFound) => {
                 if !config.resume {
                     info!("Session {} not found, not resuming", config.session_id);

@@ -166,6 +166,10 @@ pub enum ConnectionResult {
     ServerShutdown(Duration),
     /// Session was terminated by the server (do not reconnect)
     SessionTerminated,
+    /// The backend rejected registration (revoked/expired token, unauthorized).
+    /// Reconnecting with the same token can never succeed, so the proxy must
+    /// stop rather than hammer the backend forever (#1045).
+    RegistrationRejected,
 }
 
 /// Result from the connection loop
@@ -174,6 +178,22 @@ pub enum LoopResult {
     NormalExit,
     /// Session not found - caller should restart with fresh session
     SessionNotFound,
+    /// Registration was rejected by the backend. The launcher should let the
+    /// process exit; reconcile will relaunch it with a freshly minted token
+    /// (#1045).
+    RegistrationRejected,
+}
+
+/// Why a [`register_session`] attempt did not yield a usable connection.
+pub enum RegisterError {
+    /// The backend explicitly rejected registration (`RegisterAck` with
+    /// `success: false`) — a revoked/expired token or an unauthorized
+    /// session. Retrying with the same credentials will never succeed, so the
+    /// caller must not reconnect.
+    Rejected,
+    /// A transient failure (connection dropped, send failed). The caller
+    /// should reconnect after backing off for the given duration.
+    Transient(Duration),
 }
 
 /// Permission response data (from frontend to Claude)
@@ -401,6 +421,14 @@ pub async fn run_connection_loop<A: Agent>(
                 session.persist_buffer().await;
                 return Ok(LoopResult::NormalExit);
             }
+            ConnectionResult::RegistrationRejected => {
+                error!(
+                    "Registration rejected by server (token revoked/expired or unauthorized); \
+                     not reconnecting"
+                );
+                session.persist_buffer().await;
+                return Ok(LoopResult::RegistrationRejected);
+            }
         }
     }
 }
@@ -424,7 +452,8 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     // Register with backend and wait for acknowledgment
     let max_image_mb = match register_session(&mut conn, &config_with_branch).await {
         Ok(mb) => mb,
-        Err(duration) => return ConnectionResult::Disconnected(duration),
+        Err(RegisterError::Transient(duration)) => return ConnectionResult::Disconnected(duration),
+        Err(RegisterError::Rejected) => return ConnectionResult::RegistrationRejected,
     };
 
     // Look up PR URL and repo URL for the current branch and send as SessionUpdate
@@ -596,7 +625,7 @@ pub async fn connect_to_backend(
 pub async fn register_session(
     conn: &mut NativeConnection,
     config: &ProxySessionConfig,
-) -> Result<u32, Duration> {
+) -> Result<u32, RegisterError> {
     info!("Registering session...");
 
     let hostname = hostname_or_unknown();
@@ -621,7 +650,7 @@ pub async fn register_session(
 
     if conn.send(register_msg).await.is_err() {
         error!("Failed to send registration message");
-        return Err(Duration::ZERO);
+        return Err(RegisterError::Transient(Duration::ZERO));
     }
 
     // Wait for RegisterAck with timeout
@@ -651,12 +680,14 @@ pub async fn register_session(
         }
         Ok(Some((false, error, _))) => {
             let err_msg = error.as_deref().unwrap_or("Unknown error");
-            error!("Registration failed: {}", err_msg);
-            Err(Duration::ZERO)
+            error!("Registration rejected by server: {}", err_msg);
+            Err(RegisterError::Rejected)
         }
         Ok(None) => {
+            // The socket closed before any RegisterAck arrived — a transient
+            // connection problem, not an explicit rejection. Reconnect.
             error!("Connection closed during registration");
-            Err(Duration::ZERO)
+            Err(RegisterError::Transient(Duration::ZERO))
         }
         Err(_) => {
             // Timeout - assume success for backwards compatibility with older backends
