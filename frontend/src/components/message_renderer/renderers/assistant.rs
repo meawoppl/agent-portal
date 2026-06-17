@@ -205,9 +205,14 @@ pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Html 
                             render_image_source(&img.source, None)
                         }
                         ContentBlock::Thinking(th) => {
+                            let sig_title = if th.signature.is_empty() {
+                                "No signature on this thinking block.".to_string()
+                            } else {
+                                format!("Encrypted thinking signature:\n{}", th.signature)
+                            };
                             html! {
                                 <div class="thinking-block">
-                                    <span class="thinking-label">{ "thinking" }</span>
+                                    <span class="thinking-label" title={sig_title}>{ "thinking" }</span>
                                     if th.thinking.trim().is_empty() {
                                         <div class="thinking-content muted" title="Thinking text was omitted by the model; the encrypted signature is preserved in the raw message.">
                                             { "thinking omitted" }
