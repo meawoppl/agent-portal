@@ -155,11 +155,29 @@ pub fn handle_claude_output(
                         content
                     );
                 }
-                if sys.is_task_notification() && sys.as_task_notification().is_none() {
-                    warn!(
-                        "task_notification message matched subtype but failed struct parse: {}",
-                        content
-                    );
+                if sys.is_task_notification() {
+                    match sys.as_task_notification() {
+                        Some(notif) => {
+                            // A sub-agent (Task tool) just finished. Its tokens
+                            // aren't in the parent's `result.usage`, so fold the
+                            // completed task's cumulative `total_tokens` into the
+                            // session's running sub-agent total (see
+                            // `SessionManager::subagent_tokens`). `task_notification`
+                            // fires once per task, so summing is exact.
+                            if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref())
+                            {
+                                session_manager
+                                    .subagent_tokens
+                                    .entry(sid)
+                                    .and_modify(|v| *v += usage.total_tokens as i64)
+                                    .or_insert(usage.total_tokens as i64);
+                            }
+                        }
+                        None => warn!(
+                            "task_notification message matched subtype but failed struct parse: {}",
+                            content
+                        ),
+                    }
                 }
             }
         }
@@ -255,7 +273,12 @@ pub fn handle_claude_output(
             }
 
             if role == shared::MessageRole::Result {
-                store_result_metadata(&mut conn, session_id, &content);
+                let subagent_tokens = session_manager
+                    .subagent_tokens
+                    .get(&session_id)
+                    .map(|v| *v)
+                    .unwrap_or(0);
+                store_result_metadata(&mut conn, session_id, &content, subagent_tokens);
             }
 
             session_manager.queue_truncation(session_id);
@@ -306,10 +329,14 @@ pub fn handle_claude_output(
 /// Extract and store cost and token usage from result messages.
 /// Tries typed deserialization via `claude_codes::io::ResultMessage` first,
 /// falls back to manual JSON extraction for forward compatibility.
+/// `subagent_tokens` is the session's running total of sub-agent (Task tool)
+/// tokens, folded into `output_tokens` because `result.usage` covers only the
+/// parent conversation. See `SessionManager::subagent_tokens`.
 fn store_result_metadata(
     conn: &mut diesel::PgConnection,
     session_id: Uuid,
     content: &serde_json::Value,
+    subagent_tokens: i64,
 ) {
     use crate::schema::sessions;
 
@@ -326,7 +353,7 @@ fn store_result_metadata(
             if let Err(e) = diesel::update(sessions::table.find(session_id))
                 .set((
                     sessions::input_tokens.eq(usage.input_tokens as i64),
-                    sessions::output_tokens.eq(usage.output_tokens as i64),
+                    sessions::output_tokens.eq(usage.output_tokens as i64 + subagent_tokens),
                     sessions::cache_creation_tokens.eq(usage.cache_creation_input_tokens as i64),
                     sessions::cache_read_tokens.eq(usage.cache_read_input_tokens as i64),
                 ))
@@ -371,7 +398,7 @@ fn store_result_metadata(
         if let Err(e) = diesel::update(sessions::table.find(session_id))
             .set((
                 sessions::input_tokens.eq(input_tokens.unwrap_or(0)),
-                sessions::output_tokens.eq(output_tokens.unwrap_or(0)),
+                sessions::output_tokens.eq(output_tokens.unwrap_or(0) + subagent_tokens),
                 sessions::cache_creation_tokens.eq(cache_creation.unwrap_or(0)),
                 sessions::cache_read_tokens.eq(cache_read.unwrap_or(0)),
             ))
@@ -444,5 +471,31 @@ mod tests {
         assert_eq!(parse_send_mode("normal"), Some(SendMode::Normal));
         assert_eq!(parse_send_mode("wiggum"), Some(SendMode::Wiggum));
         assert_eq!(parse_send_mode("unknown"), None);
+    }
+
+    /// Guards the wire contract the sub-agent token fold relies on: a
+    /// `task_notification` system message must parse and expose
+    /// `usage.total_tokens`. If the SDK reshapes this, the fold silently stops
+    /// counting — so pin it.
+    #[test]
+    fn task_notification_exposes_total_tokens() {
+        let content = serde_json::json!({
+            "type": "system",
+            "subtype": "task_notification",
+            "session_id": "s1",
+            "task_id": "t1",
+            "status": "completed",
+            "summary": "done",
+            "usage": { "duration_ms": 1000, "tool_uses": 3, "total_tokens": 68694 }
+        });
+        let parsed = shared::ClaudeOutput::deserialize(&content).expect("parses as ClaudeOutput");
+        let shared::ClaudeOutput::System(sys) = parsed else {
+            panic!("expected a system message");
+        };
+        assert!(sys.is_task_notification());
+        let notif = sys
+            .as_task_notification()
+            .expect("task_notification struct parse");
+        assert_eq!(notif.usage.expect("usage present").total_tokens, 68694);
     }
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.73
+
+- **Session token totals now include sub-agent (Task tool) tokens for Claude sessions.** `store_result_metadata` wrote `sessions.output_tokens` straight from `result.usage`, which covers only the *parent* conversation — sub-agents (Explore/Plan/etc.) run as separate API conversations whose tokens arrive on `task_notification` frames (`TaskUsage.total_tokens`) and were never aggregated, so per-session totals and the admin spend dashboard under-counted. `SessionManager` gains a `subagent_tokens` map; each completed `task_notification` (the SDK emits it once per task, with cumulative `total_tokens`) adds into the session's running total, and `store_result_metadata` folds that into `output_tokens` at result time. Cost (`total_cost_usd`) was already inclusive via the CLI's session-wide figure, so this closes the cost-right/tokens-low asymmetry. New `task_notification_exposes_total_tokens` test pins the wire contract the fold depends on. (Codex sub-agent tokens are a separate path with an unresolved delivery question and are not covered here. The per-turn `turn_metrics` footer is also a separate path, unchanged.)
+
 ## 2.8.72
 
 - **`spawn_ws_reader` no longer takes 11 arguments (closes #1052).** The reader's eight `mpsc`/`oneshot` senders are bundled into a new `WsReaderChannels` struct (`claude-session-lib/src/proxy_session/ws_reader.rs`), dropping the signature to three params (`ws_read`, `channels`, `heartbeat`) and removing the `#[allow(clippy::too_many_arguments)]` plus its stale `// TODO … issue #271` comment (the referenced issue was closed without the refactor being done). The struct is destructured at the top of the function so the body and the call site (`proxy_session/mod.rs`) are otherwise unchanged — pure mechanical refactor, no behavior change. Clippy passes with the allow removed.
