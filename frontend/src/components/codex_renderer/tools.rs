@@ -1,3 +1,4 @@
+use super::events::CollabAgentToolCallItem;
 use super::item_card_classes;
 use crate::components::diff::{DiffCard, DiffSource};
 use crate::components::expandable::ExpandableText;
@@ -227,4 +228,73 @@ pub(super) fn render_todo_list(items: &[TodoItem], completed: bool) -> Html {
         </div>
     };
     tool_card("\u{2611}", "Todo List".into(), None, body, completed)
+}
+
+pub(super) fn render_collab_agent_tool_call(it: &CollabAgentToolCallItem, completed: bool) -> Html {
+    // Card title: "Spawn Agent" for the common spawnAgent tool, otherwise
+    // surface the raw tool name so unrecognized collaboration tools still read.
+    let name = match it.tool.as_deref() {
+        Some("spawnAgent") | None => "Spawn Agent".to_string(),
+        Some(other) => format!("Agent: {}", other),
+    };
+
+    // Status line mirrors render_command_execution's composition: the item
+    // status plus model + reasoning-effort meta when present.
+    let mut status_text = it
+        .status
+        .clone()
+        .unwrap_or_else(|| "running...".to_string());
+    let mut meta_bits: Vec<String> = Vec::new();
+    if let Some(model) = it.model.as_deref().filter(|s| !s.is_empty()) {
+        meta_bits.push(model.to_string());
+    }
+    if let Some(effort) = it.reasoning_effort.as_deref().filter(|s| !s.is_empty()) {
+        meta_bits.push(format!("effort: {}", effort));
+    }
+    if !meta_bits.is_empty() {
+        status_text = format!("{} \u{00b7} {}", status_text, meta_bits.join(" \u{00b7} "));
+    }
+
+    let prompt = it.prompt.as_deref().unwrap_or("");
+
+    let body = html! {
+        <>
+            {
+                if !prompt.is_empty() {
+                    html! {
+                        <ExpandableText
+                            full_text={prompt.to_string()}
+                            max_len=500
+                            tag="pre"
+                            class={classes!("tool-input-content")}
+                        />
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if !it.agents_states.is_empty() {
+                    html! {
+                        <div class="codex-todo-list">
+                            { for it.agents_states.iter().map(|(thread_id, state)| {
+                                html! {
+                                    <div class="codex-todo">
+                                        <span class="codex-todo-marker">{ "\u{1F916}" }</span>
+                                        <span class="codex-todo-text">
+                                            { format!("{} \u{2014} {}", thread_id, state.status) }
+                                        </span>
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+        </>
+    };
+
+    tool_card("\u{1F916}", name, Some(status_text), body, completed)
 }

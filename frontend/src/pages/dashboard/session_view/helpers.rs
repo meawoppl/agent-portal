@@ -231,7 +231,9 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
         CodexEvent::ItemStarted { item: Some(item) }
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
-            CodexItem::ContextCompaction(_) => Some(ActivityTag::Assistant),
+            CodexItem::ContextCompaction(_) | CodexItem::CollabAgentToolCall(_) => {
+                Some(ActivityTag::Assistant)
+            }
             CodexItem::Thread(ThreadItem::Error(_)) => Some(ActivityTag::Error),
             CodexItem::Thread(ThreadItem::CommandExecution(ref it))
                 if command_execution_reads_file(&it.command) =>

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.71
+
+- **Codex `collabAgentToolCall` / `spawnAgent` items now render as a tool card (closes #1049).** Codex's multi-agent collaboration calls aren't modeled in the `codex-codes` `ThreadItem`, so they previously fell through to the raw-JSON fallback card. Added a local mirror `CollabAgentToolCallItem` (+ `AgentState`) to the `#[serde(untagged)] CodexItem` enum in `frontend/src/components/codex_renderer/events.rs` — same pattern as the existing `ContextCompactionItem` mirror — tagged `TODO(SDK)` pending an upstream `codex-codes` variant. `render_collab_agent_tool_call` (`codex_renderer/tools.rs`) shows a 🤖 "Spawn Agent" card: status + model + reasoning effort as meta, the spawn prompt as expandable `pre`, and a compact child-agent list (thread id → status). Dispatched in `codex_renderer.rs`; sparkline `classify_codex_event` updated for exhaustiveness. New deserialization test from the real wire payload; 317 frontend tests pass.
+
 ## 2.8.70
 
 - **Thinking blocks expose their encrypted signature on mouseover.** `claude-codes`' `ThinkingBlock` carries a `signature` (the encrypted attestation of the thinking content) alongside `thinking`, but the renderer only ever showed the text. The `thinking` label (`frontend/src/components/message_renderer/renderers/assistant.rs`) now carries a `title` tooltip with the full signature (or "No signature on this thinking block." when absent), and `.thinking-label` gets `cursor: help` + `width: fit-content` so the hover affordance is discoverable and hugs the label text.

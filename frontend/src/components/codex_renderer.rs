@@ -14,8 +14,8 @@ use events::thread_item_id;
 pub use events::{codex_event_item_id, is_codex_terminal_event, CodexEvent, CodexItem};
 use events::{CodexError, CodexUsage, ContextCompactedParams, TurnPlanStep};
 use tools::{
-    render_command_execution, render_diff_card, render_file_change, render_mcp_tool_call,
-    render_todo_list, render_web_search,
+    render_collab_agent_tool_call, render_command_execution, render_diff_card, render_file_change,
+    render_mcp_tool_call, render_todo_list, render_web_search,
 };
 
 // --- Components ---
@@ -144,6 +144,7 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
     };
     match item {
         CodexItem::ContextCompaction(_) => render_context_compaction_item(completed),
+        CodexItem::CollabAgentToolCall(it) => render_collab_agent_tool_call(it, completed),
         CodexItem::Thread(item) => match item {
             ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed, session_id),
             ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
@@ -698,6 +699,66 @@ mod tests {
         assert_eq!(
             codex_event_item_id(json).as_deref(),
             Some("9edb35c0-6b6b-407f-84e3-d03a03050a2a")
+        );
+    }
+
+    /// agent-portal#1049 — Codex emits multi-agent `collabAgentToolCall`
+    /// items (e.g. `spawnAgent`) that codex-codes does not model as a
+    /// `ThreadItem` variant. They must parse into the local
+    /// `CodexItem::CollabAgentToolCall` mirror and render through the spawn-agent
+    /// card, not fall through to the raw JSON renderer.
+    #[test]
+    fn event_item_completed_collab_agent_tool_call() {
+        let json = r#"{
+            "type": "item.completed",
+            "item": {
+                "type": "collabAgentToolCall",
+                "tool": "spawnAgent",
+                "id": "call_i1HC5jbTllWgsrMnJjqmRU05",
+                "model": "gpt-5.5",
+                "reasoningEffort": "medium",
+                "status": "completed",
+                "senderThreadId": "019ed195-44b1-77e0-a234-10307ce08eac",
+                "receiverThreadIds": ["019ed247-768f-7603-8c71-911fd841766e"],
+                "agentsStates": {
+                    "019ed247-768f-7603-8c71-911fd841766e": { "status": "pendingInit" }
+                },
+                "prompt": "In /home/... inspect the current main branch shape ..."
+            }
+        }"#;
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        let CodexEvent::ItemCompleted {
+            item: Some(CodexItem::CollabAgentToolCall(item)),
+        } = event
+        else {
+            panic!(
+                "expected ItemCompleted{{CollabAgentToolCall}}, got {:?}",
+                event
+            );
+        };
+        assert_eq!(item.id, "call_i1HC5jbTllWgsrMnJjqmRU05");
+        assert_eq!(item.tool.as_deref(), Some("spawnAgent"));
+        assert_eq!(item.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(item.reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(item.status.as_deref(), Some("completed"));
+        assert_eq!(
+            item.sender_thread_id.as_deref(),
+            Some("019ed195-44b1-77e0-a234-10307ce08eac")
+        );
+        assert_eq!(
+            item.receiver_thread_ids,
+            vec!["019ed247-768f-7603-8c71-911fd841766e".to_string()]
+        );
+        assert_eq!(item.agents_states.len(), 1);
+        assert_eq!(
+            item.agents_states["019ed247-768f-7603-8c71-911fd841766e"].status,
+            "pendingInit"
+        );
+        assert!(item.prompt.as_deref().unwrap().contains("main branch"));
+
+        assert_eq!(
+            codex_event_item_id(json).as_deref(),
+            Some("call_i1HC5jbTllWgsrMnJjqmRU05")
         );
     }
 
