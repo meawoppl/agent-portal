@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.70
+
+- **Thinking blocks expose their encrypted signature on mouseover.** `claude-codes`' `ThinkingBlock` carries a `signature` (the encrypted attestation of the thinking content) alongside `thinking`, but the renderer only ever showed the text. The `thinking` label (`frontend/src/components/message_renderer/renderers/assistant.rs`) now carries a `title` tooltip with the full signature (or "No signature on this thinking block." when absent), and `.thinking-label` gets `cursor: help` + `width: fit-content` so the hover affordance is discoverable and hugs the label text.
+
 ## 2.8.69
 
 - **Codex bash command cards no longer overflow horizontally.** A Codex command rendered into `<pre class="tool-input-content">` (`frontend/src/components/codex_renderer/tools.rs`), but `.tool-input-content` was never styled — so the bare `<pre>` defaulted to `white-space: pre` and a long single-line command ran off the side of the card instead of wrapping, the way Claude's bash card and Codex's own `.tool-result-content` already do. Added a `.tool-input-content` rule to `frontend/styles/tools/base.css` mirroring `.tool-result-content` (`white-space: pre-wrap; word-break: break-word;` plus the shared mono font/size), so the command wraps and stays contained. Also fixes the Codex web-search query `<pre>` that shares the class.

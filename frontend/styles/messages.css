@@ -752,7 +752,9 @@
     letter-spacing: 0.05em;
     color: var(--text-muted);
     display: block;
+    width: fit-content;
     margin-bottom: 0.25rem;
+    cursor: help;
 }
 
 .thinking-content {
