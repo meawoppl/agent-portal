@@ -96,6 +96,8 @@ pub enum CodexItem {
     // TODO(SDK #930): move this variant to codex-codes once the generated
     // ThreadItem model includes `contextCompaction`.
     ContextCompaction(ContextCompactionItem),
+    // TODO(SDK): codex-codes has no collabAgentToolCall ThreadItem variant; local mirror — see agent-portal#1049
+    CollabAgentToolCall(CollabAgentToolCallItem),
     Thread(ThreadItem),
 }
 
@@ -110,6 +112,50 @@ pub struct ContextCompactionItem {
 enum ContextCompactionItemType {
     #[serde(rename = "contextCompaction", alias = "context_compaction")]
     ContextCompaction,
+}
+
+/// Local mirror of Codex's `collabAgentToolCall` item (multi-agent
+/// collaboration: `spawnAgent` and friends). codex-codes does not model this
+/// as a `ThreadItem` variant yet, so it would otherwise fall through to the
+/// raw-JSON renderer. See agent-portal#1049.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollabAgentToolCallItem {
+    pub id: String,
+    /// Discriminant gate for the untagged `CodexItem` enum — without a typed
+    /// `type` field this struct (all-optional otherwise) would shadow every
+    /// upstream `ThreadItem` carrying an `id`.
+    #[serde(rename = "type")]
+    item_type: CollabAgentToolCallItemType,
+    /// The collaboration tool invoked, e.g. `"spawnAgent"`.
+    #[serde(default)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default, rename = "reasoningEffort", alias = "reasoning_effort")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, rename = "senderThreadId", alias = "sender_thread_id")]
+    pub sender_thread_id: Option<String>,
+    #[serde(default, rename = "receiverThreadIds", alias = "receiver_thread_ids")]
+    pub receiver_thread_ids: Vec<String>,
+    /// Child-agent thread id → its current state.
+    #[serde(default, rename = "agentsStates", alias = "agents_states")]
+    pub agents_states: std::collections::BTreeMap<String, AgentState>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum CollabAgentToolCallItemType {
+    #[serde(rename = "collabAgentToolCall", alias = "collab_agent_tool_call")]
+    CollabAgentToolCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentState {
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -292,6 +338,7 @@ pub fn thread_item_id(item: &ThreadItem) -> &str {
 pub fn codex_item_id(item: &CodexItem) -> &str {
     match item {
         CodexItem::ContextCompaction(it) => &it.id,
+        CodexItem::CollabAgentToolCall(it) => &it.id,
         CodexItem::Thread(it) => thread_item_id(it),
     }
 }
