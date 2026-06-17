@@ -34,7 +34,9 @@ use git_metadata::{
 };
 use output_forwarder::spawn_output_forwarder;
 use wiggum::{handle_session_event_with_wiggum, WiggumState};
-use ws_reader::{spawn_ws_reader, FileDownloadEvent, FileReceiveState, FileUploadEvent};
+use ws_reader::{
+    spawn_ws_reader, FileDownloadEvent, FileReceiveState, FileUploadEvent, WsReaderChannels,
+};
 
 /// Type alias for the native WebSocket connection
 pub type NativeConnection = ws_bridge::native_client::Connection<SessionEndpoint>;
@@ -766,16 +768,18 @@ async fn run_message_loop<A: Agent>(
     // Spawn WebSocket reader task
     let reader_task = spawn_ws_reader(
         ws_read,
-        session.input_tx.clone(),
-        perm_tx,
-        ack_tx,
-        disconnect_tx,
-        wiggum_tx,
-        graceful_shutdown_tx,
-        session_terminated_tx,
+        WsReaderChannels {
+            input_tx: session.input_tx.clone(),
+            perm_tx,
+            ack_tx,
+            disconnect_tx,
+            wiggum_tx,
+            graceful_shutdown_tx,
+            session_terminated_tx,
+            file_upload_tx,
+            file_download_tx,
+        },
         heartbeat.clone(),
-        file_upload_tx,
-        file_download_tx,
     );
 
     // Create connection state (per-connection channels and timing)
