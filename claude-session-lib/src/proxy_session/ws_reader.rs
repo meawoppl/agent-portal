@@ -111,21 +111,39 @@ pub(super) enum WsMessageResult {
     SessionTerminated,
 }
 
+/// Outbound channels the WebSocket reader dispatches received messages into.
+///
+/// Bundles every `mpsc`/`oneshot` sender used by [`spawn_ws_reader`] so the
+/// spawn signature stays small. Field names mirror the call-site locals.
+pub(super) struct WsReaderChannels {
+    pub input_tx: mpsc::UnboundedSender<super::PortalInput>,
+    pub perm_tx: mpsc::UnboundedSender<PermissionResponseData>,
+    pub ack_tx: mpsc::UnboundedSender<u64>,
+    pub disconnect_tx: tokio::sync::oneshot::Sender<()>,
+    pub wiggum_tx: mpsc::UnboundedSender<super::PortalInput>,
+    pub graceful_shutdown_tx: mpsc::UnboundedSender<GracefulShutdown>,
+    pub session_terminated_tx: tokio::sync::oneshot::Sender<()>,
+    pub file_upload_tx: mpsc::UnboundedSender<FileUploadEvent>,
+    pub file_download_tx: mpsc::UnboundedSender<FileDownloadEvent>,
+}
+
 /// Spawn the WebSocket reader task
-#[allow(clippy::too_many_arguments)] // TODO: refactor to event enum (issue #271)
 pub(super) fn spawn_ws_reader(
     mut ws_read: WsRead,
-    input_tx: mpsc::UnboundedSender<super::PortalInput>,
-    perm_tx: mpsc::UnboundedSender<PermissionResponseData>,
-    ack_tx: mpsc::UnboundedSender<u64>,
-    disconnect_tx: tokio::sync::oneshot::Sender<()>,
-    wiggum_tx: mpsc::UnboundedSender<super::PortalInput>,
-    graceful_shutdown_tx: mpsc::UnboundedSender<GracefulShutdown>,
-    session_terminated_tx: tokio::sync::oneshot::Sender<()>,
+    channels: WsReaderChannels,
     heartbeat: session_lib::heartbeat::HeartbeatTracker,
-    file_upload_tx: mpsc::UnboundedSender<FileUploadEvent>,
-    file_download_tx: mpsc::UnboundedSender<FileDownloadEvent>,
 ) -> tokio::task::JoinHandle<()> {
+    let WsReaderChannels {
+        input_tx,
+        perm_tx,
+        ack_tx,
+        disconnect_tx,
+        wiggum_tx,
+        graceful_shutdown_tx,
+        session_terminated_tx,
+        file_upload_tx,
+        file_download_tx,
+    } = channels;
     tokio::spawn(async move {
         while let Some(result) = ws_read.recv().await {
             match result {

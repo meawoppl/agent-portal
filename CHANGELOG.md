@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.72
+
+- **`spawn_ws_reader` no longer takes 11 arguments (closes #1052).** The reader's eight `mpsc`/`oneshot` senders are bundled into a new `WsReaderChannels` struct (`claude-session-lib/src/proxy_session/ws_reader.rs`), dropping the signature to three params (`ws_read`, `channels`, `heartbeat`) and removing the `#[allow(clippy::too_many_arguments)]` plus its stale `// TODO … issue #271` comment (the referenced issue was closed without the refactor being done). The struct is destructured at the top of the function so the body and the call site (`proxy_session/mod.rs`) are otherwise unchanged — pure mechanical refactor, no behavior change. Clippy passes with the allow removed.
+
 ## 2.8.71
 
 - **Codex `collabAgentToolCall` / `spawnAgent` items now render as a tool card (closes #1049).** Codex's multi-agent collaboration calls aren't modeled in the `codex-codes` `ThreadItem`, so they previously fell through to the raw-JSON fallback card. Added a local mirror `CollabAgentToolCallItem` (+ `AgentState`) to the `#[serde(untagged)] CodexItem` enum in `frontend/src/components/codex_renderer/events.rs` — same pattern as the existing `ContextCompactionItem` mirror — tagged `TODO(SDK)` pending an upstream `codex-codes` variant. `render_collab_agent_tool_call` (`codex_renderer/tools.rs`) shows a 🤖 "Spawn Agent" card: status + model + reasoning effort as meta, the spawn prompt as expandable `pre`, and a compact child-agent list (thread id → status). Dispatched in `codex_renderer.rs`; sparkline `classify_codex_event` updated for exhaustiveness. New deserialization test from the real wire payload; 317 frontend tests pass.
