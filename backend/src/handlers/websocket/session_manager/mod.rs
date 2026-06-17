@@ -53,6 +53,14 @@ pub struct SessionManager {
     pub pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     pub last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
+    /// Running lifetime total of sub-agent (Task tool) tokens per session.
+    /// Claude's `result.usage` reports only the parent conversation; sub-agents
+    /// run as separate API conversations whose tokens arrive on `task_notification`
+    /// frames (`TaskUsage.total_tokens`, cumulative-per-task, emitted once at
+    /// completion). We sum each completed task's total here and fold it into the
+    /// session's `output_tokens` at result time so session totals (and the admin
+    /// spend dashboard) don't under-count sub-agent usage.
+    pub subagent_tokens: Arc<DashMap<Uuid, i64>>,
     /// Monotonic counter for connection generations (prevents stale cleanup)
     gen_counter: Arc<AtomicU64>,
     /// Current connection generation per session
@@ -75,6 +83,7 @@ impl Default for SessionManager {
             pending_file_downloads: Arc::new(DashMap::new()),
             pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
+            subagent_tokens: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
             connection_gen: Arc::new(DashMap::new()),
         }
