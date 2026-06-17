@@ -273,6 +273,13 @@ async fn run_session_task(
 
         let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<PortalInput>();
 
+        // Track how long this attempt stays alive. A session that exits almost
+        // immediately, over and over, is a crash loop — reconcile relaunches it
+        // on every heartbeat (and `launch_failure_count` stays 0 because it does
+        // register), so the elapsed time is the only signal that distinguishes
+        // "ran for hours then ended" from "died on spawn 40 times".
+        let started = std::time::Instant::now();
+
         // run_connection_loop is generic over A: Agent, so we dispatch
         // here on the AnySession variant. Everything else
         // (cancellation, retry-on-SessionNotFound) is agent-agnostic.
@@ -296,9 +303,21 @@ async fn run_session_task(
 
         let _ = session.stop().await;
 
+        let alive = started.elapsed();
         match result {
             Ok(LoopResult::NormalExit) => {
-                info!("Session {} exited normally", config.session_id);
+                if alive < std::time::Duration::from_secs(10) {
+                    warn!(
+                        "Session {} exited normally after only {:.1?} — possible crash loop \
+                         (agent registered then exited near-instantly; reconcile will relaunch)",
+                        config.session_id, alive
+                    );
+                } else {
+                    info!(
+                        "Session {} exited normally after {:.1?}",
+                        config.session_id, alive
+                    );
+                }
                 return Some(0);
             }
             Ok(LoopResult::RegistrationRejected) => {
@@ -308,8 +327,8 @@ async fn run_session_task(
                 // (#1045). Staying alive and reconnecting would just hammer
                 // the backend forever and block that relaunch.
                 warn!(
-                    "Session {} registration rejected by server, exiting for relaunch",
-                    config.session_id
+                    "Session {} registration rejected by server after {:.1?}, exiting for relaunch",
+                    config.session_id, alive
                 );
                 return Some(1);
             }
@@ -322,15 +341,18 @@ async fn run_session_task(
                 let old_id = config.session_id;
                 let new_id = Uuid::new_v4();
                 warn!(
-                    "Session {} not found, retrying as fresh session {}",
-                    old_id, new_id
+                    "Session {} not found after {:.1?} (resume target missing), retrying as fresh session {}",
+                    old_id, alive, new_id
                 );
                 config.session_id = new_id;
                 config.resume = false;
                 config.replaces_session_id = Some(old_id);
             }
             Err(e) => {
-                error!("Session {} failed: {}", config.session_id, e);
+                error!(
+                    "Session {} failed after {:.1?}: {}",
+                    config.session_id, alive, e
+                );
                 return Some(1);
             }
         }

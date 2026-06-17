@@ -6,7 +6,7 @@ use shared::{
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::LauncherConnection;
@@ -705,6 +705,14 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         if let Some(last_attempt) = session.last_launch_attempt_at {
             let backoff = launch_backoff(session.launch_failure_count);
             if now < last_attempt + backoff {
+                debug!(
+                    "Reconcile skipping session {} on launcher {}: backoff \
+                     (launch_failure_count={}, {}s until next attempt)",
+                    session.id,
+                    launcher_id,
+                    session.launch_failure_count,
+                    (last_attempt + backoff - now).num_seconds()
+                );
                 continue;
             }
         }
@@ -727,6 +735,16 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             .agent_type
             .parse()
             .unwrap_or(shared::AgentType::Claude);
+
+        info!(
+            "Reconcile relaunching session {} ({}) on launcher {}: resume, \
+             launch_failure_count={}, dir={}",
+            session.id,
+            session.session_name,
+            launcher_id,
+            session.launch_failure_count,
+            session.working_directory
+        );
 
         let launch_msg = ServerToLauncher::LaunchSession {
             request_id,
