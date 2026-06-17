@@ -87,6 +87,17 @@
     text-overflow: ellipsis;
 }
 
+/* Block tool input (e.g. a Codex bash command rendered as a `pre`). A bare
+   `pre` defaults to `white-space: pre`, which overflows the card for long
+   single-line commands. Wrap it, mirroring `.tool-result-content`. */
+.tool-input-content {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
 /* ==========================================================================
    Expandable Text / Lines
    ========================================================================== */
