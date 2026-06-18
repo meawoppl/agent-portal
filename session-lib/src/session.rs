@@ -43,7 +43,25 @@ pub struct Session<A: Agent> {
     pending_permission: Option<PendingPermission>,
     /// Receiver for events from the I/O task.
     event_rx: Option<mpsc::UnboundedReceiver<IoEvent>>,
+    /// Handle to the spawned I/O task, so `stop` (and `Drop`) can abort it and
+    /// reap the agent process. The task otherwise parks in `client.receive()`
+    /// and an idle agent process would outlive the session — dropping the
+    /// command channel alone does not end it. Aborting drops the task's client,
+    /// which (with `kill_on_drop` on the spawn) kills the child.
+    io_task: Option<tokio::task::JoinHandle<()>>,
     _agent: PhantomData<A>,
+}
+
+impl<A: Agent> Drop for Session<A> {
+    /// Safety net: if a `Session` is dropped without `stop()` (e.g. its owning
+    /// task was aborted), abort the I/O task so the agent process doesn't leak.
+    /// Drop can't await, so this is best-effort — `kill_on_drop` on the spawn
+    /// does the actual reaping once the task drops its client.
+    fn drop(&mut self) {
+        if let Some(handle) = self.io_task.take() {
+            handle.abort();
+        }
+    }
 }
 
 impl<A: Agent> Session<A> {
@@ -57,7 +75,7 @@ impl<A: Agent> Session<A> {
         // Let the agent backend spawn its I/O task. Backends that need to do
         // synchronous setup (spawn process, handshake, etc.) before the task
         // loop starts may do so here and surface failures as `SessionError`.
-        let _handle = A::spawn_io_task(config.clone(), command_rx, event_tx)?;
+        let handle = A::spawn_io_task(config.clone(), command_rx, event_tx)?;
 
         Ok(Self {
             id: config.session_id,
@@ -67,6 +85,7 @@ impl<A: Agent> Session<A> {
             state: SessionState::Running,
             pending_permission: None,
             event_rx: Some(event_rx),
+            io_task: Some(handle),
             _agent: PhantomData,
         })
     }
@@ -83,13 +102,13 @@ impl<A: Agent> Session<A> {
         let mut config = snapshot.config;
         config.resume = true;
 
-        let (command_tx, event_rx) = if snapshot.was_running {
+        let (command_tx, event_rx, io_task) = if snapshot.was_running {
             let (event_tx, event_rx) = mpsc::unbounded_channel();
             let (command_tx, command_rx) = mpsc::unbounded_channel();
-            let _handle = A::spawn_io_task(config.clone(), command_rx, event_tx)?;
-            (Some(command_tx), Some(event_rx))
+            let handle = A::spawn_io_task(config.clone(), command_rx, event_tx)?;
+            (Some(command_tx), Some(event_rx), Some(handle))
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         let state = if command_tx.is_some() {
@@ -106,6 +125,7 @@ impl<A: Agent> Session<A> {
             state,
             pending_permission: snapshot.pending_permission,
             event_rx,
+            io_task,
             _agent: PhantomData,
         })
     }
@@ -382,12 +402,21 @@ impl<A: Agent> Session<A> {
         Ok(())
     }
 
-    /// Gracefully stop the session.
+    /// Gracefully stop the session and reap the agent process.
     pub async fn stop(&mut self) -> Result<(), SessionError> {
-        // Dropping the command_tx will cause the I/O task to exit,
-        // which in turn will drop the client and terminate the process.
+        // Drop the channels first so the I/O task stops accepting input.
         self.command_tx = None;
         self.event_rx = None;
+        // Then abort and await the I/O task. Dropping the command channel alone
+        // is not enough — the task parks in `client.receive()` and would keep an
+        // idle agent process alive indefinitely. Aborting drops the task's
+        // client; with `kill_on_drop` on the spawn that kills the child. Awaiting
+        // (the abort yields a cancelled `JoinError`) makes stop synchronous with
+        // teardown so callers don't race a still-dying process.
+        if let Some(handle) = self.io_task.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
         self.state = SessionState::Exited { code: 0 };
         Ok(())
     }
@@ -418,5 +447,66 @@ impl<A: Agent> Session<A> {
     /// Get pending output count.
     pub fn pending_output_count(&self) -> usize {
         self.buffer.pending_count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // `STARTED` flips once the mock io-task is actually running (so we don't
+    // abort it before it begins); `GUARD_DROPPED` flips when it's dropped, which
+    // proves `stop` aborted it.
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    static GUARD_DROPPED: AtomicBool = AtomicBool::new(false);
+
+    struct DropFlag;
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            GUARD_DROPPED.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// An agent whose io-task parks forever (like a real one waiting on
+    /// `client.receive()`), holding a guard so we can observe it being dropped.
+    struct ParkAgent;
+    impl Agent for ParkAgent {
+        fn spawn_io_task(
+            _config: SessionConfig,
+            _command_rx: mpsc::UnboundedReceiver<IoCommand>,
+            _event_tx: mpsc::UnboundedSender<IoEvent>,
+        ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+            Ok(tokio::spawn(async {
+                let _guard = DropFlag;
+                STARTED.store(true, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_aborts_and_reaps_io_task() {
+        STARTED.store(false, Ordering::SeqCst);
+        GUARD_DROPPED.store(false, Ordering::SeqCst);
+        let mut session = Session::<ParkAgent>::new(SessionConfig::default())
+            .await
+            .unwrap();
+
+        // Let the spawned task actually start (and create its guard) before we
+        // stop it, so the test exercises aborting a *running* parked task.
+        while !STARTED.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        assert!(!GUARD_DROPPED.load(Ordering::SeqCst));
+
+        // stop() must abort the parked task and await it, so by the time it
+        // returns the task has run its drop. Dropping the command channel alone
+        // would not end a task parked in `client.receive()`.
+        session.stop().await.unwrap();
+        assert!(
+            GUARD_DROPPED.load(Ordering::SeqCst),
+            "stop() should abort the io task and reap it"
+        );
     }
 }

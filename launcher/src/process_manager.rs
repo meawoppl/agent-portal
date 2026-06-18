@@ -150,6 +150,21 @@ impl ProcessManager {
             Some(id) => (id, true),
             None => (Uuid::new_v4(), false),
         };
+
+        // Dedup guard: never spawn a second task for a session that's already
+        // running. A reconcile/launch race (the backend's running/pending sets
+        // are eventually consistent) could otherwise overwrite the `ManagedTask`
+        // in the map — orphaning the old task (its cancel token lost, so it can
+        // never be stopped) and double-spawning the agent process. That's the
+        // "two claude procs for one session id" symptom. Treat it as a no-op.
+        if self.tasks.contains_key(&session_id) {
+            warn!(
+                "Session {} already running; ignoring duplicate launch request",
+                session_id
+            );
+            return Ok(session_id);
+        }
+
         let name = params
             .session_name
             .clone()
