@@ -166,6 +166,7 @@ pub async fn run_launcher_loop(
                             let msg = LauncherToServer::SessionExited {
                                 session_id: exited.session_id,
                                 exit_code: exited.exit_code,
+                                reason: exited.reason,
                             };
                             if ws_sender.send(msg).await.is_err() {
                                 warn!("Failed to send session exited notification");

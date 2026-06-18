@@ -7,12 +7,19 @@ use uuid::Uuid;
 
 use claude_session_lib::proxy_session::{get_git_branch, CodexThreadIdSink};
 use claude_session_lib::{
-    run_connection_loop, ClaudeAgent, LoopResult, PortalInput, ProxySessionConfig,
+    claude_transcript_status, run_connection_loop, ClaudeAgent, LoopResult, PortalInput,
+    ProxySessionConfig, TranscriptStatus,
 };
 use codex_session_lib::CodexAgent;
 use session_lib::{Session, SessionConfig};
+use shared::SessionExitReason;
 
 use crate::path_policy;
+
+/// A `NormalExit` that lands faster than this after spawn is treated as a crash
+/// loop (`SessionExitReason::CrashedEarly`) rather than a healthy completion, so
+/// the backend can back off relaunching it. Matches the launcher's warn log.
+const CRASH_LOOP_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Path to the launcher's sidecar codex-thread map: `session_id -> thread_id`.
 /// Lives next to `launcher.json` in `ProjectDirs` so it ships with the same
@@ -62,6 +69,14 @@ fn make_codex_thread_id_sink(session_id: Uuid) -> CodexThreadIdSink {
 pub struct SessionExited {
     pub session_id: Uuid,
     pub exit_code: Option<i32>,
+    pub reason: SessionExitReason,
+}
+
+/// What a `run_session_task` run produced: a process exit code (for logs) plus
+/// a typed reason the backend uses to decide whether to throttle relaunch.
+struct TaskOutcome {
+    exit_code: Option<i32>,
+    reason: SessionExitReason,
 }
 
 struct ManagedTask {
@@ -167,10 +182,11 @@ impl ProcessManager {
         let cancel_clone = cancel.clone();
 
         let handle = tokio::spawn(async move {
-            let exit_code = run_session_task(proxy_config, cancel_clone).await;
+            let outcome = run_session_task(proxy_config, cancel_clone).await;
             let _ = exit_tx.send(SessionExited {
                 session_id,
-                exit_code,
+                exit_code: outcome.exit_code,
+                reason: outcome.reason,
             });
         });
 
@@ -236,13 +252,39 @@ impl AnySession {
     }
 }
 
-/// Run a single proxy session as an in-process task.
-/// Returns an exit code: Some(0) for normal exit, Some(1) for error, None for abort.
+/// Run a single proxy session as an in-process task. Returns the process exit
+/// code (for logs) plus a typed [`SessionExitReason`] the backend uses to throttle
+/// crash loops.
 async fn run_session_task(
     mut config: ProxySessionConfig,
     cancel: CancellationToken,
-) -> Option<i32> {
+) -> TaskOutcome {
     loop {
+        // Pre-flight: if we're about to `claude --resume <id>` but the local
+        // transcript is gone, claude exits near-instantly and reconcile would
+        // relaunch forever. Detect it up front and rotate to a fresh session in
+        // one step, instead of crash-looping until claude happens to emit
+        // "No conversation found". Claude-only (codex has no transcript file);
+        // `Unknown` (path-encoding uncertainty) falls through to a normal spawn.
+        if config.resume
+            && config.agent_type == shared::AgentType::Claude
+            && claude_transcript_status(
+                std::path::Path::new(&config.working_directory),
+                config.session_id,
+            ) == TranscriptStatus::Missing
+        {
+            let old_id = config.session_id;
+            let new_id = Uuid::new_v4();
+            warn!(
+                "Session {} resume target transcript missing; rotating to fresh session {} without spawning",
+                old_id, new_id
+            );
+            config.session_id = new_id;
+            config.resume = false;
+            config.replaces_session_id = Some(old_id);
+            continue;
+        }
+
         // On resume, look up the codex app-server thread id we persisted
         // on the previous launch. Missing entry / claude sessions yield
         // `None` and the codex io-task falls back to `thread_start`.
@@ -267,7 +309,10 @@ async fn run_session_task(
             Ok(s) => s,
             Err(e) => {
                 error!("Failed to create {} session: {}", config.agent_type, e);
-                return Some(1);
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::Error,
+                };
             }
         };
 
@@ -297,7 +342,10 @@ async fn run_session_task(
             _ = cancel.cancelled() => {
                 info!("Session {} cancelled by stop request", config.session_id);
                 let _ = session.stop().await;
-                return Some(0);
+                return TaskOutcome {
+                    exit_code: Some(0),
+                    reason: SessionExitReason::Stopped,
+                };
             }
         };
 
@@ -306,19 +354,29 @@ async fn run_session_task(
         let alive = started.elapsed();
         match result {
             Ok(LoopResult::NormalExit) => {
-                if alive < std::time::Duration::from_secs(10) {
+                // A near-instant clean exit is a crash loop, not a completion.
+                // Tell the backend so it backs off relaunching (the wall-clock
+                // gap is the only signal — it did register, so the launch
+                // "succeeded"). A healthy run resets the backoff counter.
+                if alive < CRASH_LOOP_THRESHOLD {
                     warn!(
-                        "Session {} exited normally after only {:.1?} — possible crash loop \
-                         (agent registered then exited near-instantly; reconcile will relaunch)",
+                        "Session {} exited normally after only {:.1?} — likely crash loop, \
+                         reporting CrashedEarly so reconcile backs off",
                         config.session_id, alive
                     );
-                } else {
-                    info!(
-                        "Session {} exited normally after {:.1?}",
-                        config.session_id, alive
-                    );
+                    return TaskOutcome {
+                        exit_code: Some(0),
+                        reason: SessionExitReason::CrashedEarly,
+                    };
                 }
-                return Some(0);
+                info!(
+                    "Session {} exited normally after {:.1?}",
+                    config.session_id, alive
+                );
+                return TaskOutcome {
+                    exit_code: Some(0),
+                    reason: SessionExitReason::Completed,
+                };
             }
             Ok(LoopResult::RegistrationRejected) => {
                 // The token this proxy was launched with is dead (revoked or
@@ -330,12 +388,18 @@ async fn run_session_task(
                     "Session {} registration rejected by server after {:.1?}, exiting for relaunch",
                     config.session_id, alive
                 );
-                return Some(1);
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::RegistrationRejected,
+                };
             }
             Ok(LoopResult::SessionNotFound) => {
                 if !config.resume {
                     info!("Session {} not found, not resuming", config.session_id);
-                    return Some(0);
+                    return TaskOutcome {
+                        exit_code: Some(0),
+                        reason: SessionExitReason::ResumeTargetMissing,
+                    };
                 }
                 // Retry with a fresh session
                 let old_id = config.session_id;
@@ -353,7 +417,10 @@ async fn run_session_task(
                     "Session {} failed after {:.1?}: {}",
                     config.session_id, alive, e
                 );
-                return Some(1);
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::Error,
+                };
             }
         }
     }

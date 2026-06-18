@@ -135,10 +135,12 @@ pub fn register_or_update_session(
             .set((
                 sessions::status.eq(SessionStatus::Active.as_str()),
                 sessions::paused.eq(false),
-                // A successful registration means launches are working again,
-                // so clear the launch-failure backoff state (#1045).
-                sessions::launch_failure_count.eq(0),
-                sessions::last_launch_attempt_at.eq(None::<chrono::NaiveDateTime>),
+                // Note: launch_failure_count is intentionally NOT reset here. A
+                // crash-looping session registers successfully on every attempt
+                // (then exits ~1s later), so resetting on registration kept the
+                // backoff pinned at zero. The counter is now reset only on a
+                // healthy completed run (see `record_exit_for_backoff`), so it
+                // reflects runtime health and the crash-loop backoff can escalate.
                 sessions::last_activity.eq(diesel::dsl::now),
                 sessions::working_directory.eq(params.working_directory),
                 sessions::git_branch.eq(params.git_branch),

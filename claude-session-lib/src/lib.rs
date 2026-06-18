@@ -11,9 +11,11 @@ pub mod agent;
 pub mod io_task;
 pub mod proxy_session;
 mod spawn;
+pub mod transcript;
 
 pub use agent::ClaudeAgent;
 pub use spawn::claude_cli_args;
+pub use transcript::{claude_transcript_status, TranscriptStatus};
 
 // Re-export the proxy session helpers used by the proxy binary.
 pub use proxy_session::{
