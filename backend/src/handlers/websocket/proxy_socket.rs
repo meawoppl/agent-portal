@@ -253,6 +253,7 @@ fn handle_proxy_message(
             git_branch,
             pr_url,
             repo_url,
+            open_prs,
         } => {
             handle_session_update(
                 session_manager,
@@ -263,6 +264,7 @@ fn handle_proxy_message(
                 git_branch,
                 pr_url,
                 repo_url,
+                open_prs,
             );
         }
         ProxyToServer::InputAck {
@@ -318,10 +320,14 @@ fn handle_session_update(
     git_branch: Option<String>,
     pr_url: Option<String>,
     repo_url: Option<String>,
+    open_prs: Vec<shared::PrRef>,
 ) {
     let Some(current_session_id) = db_session_id else {
         return;
     };
+    // Store as a JSON array; the column is `jsonb NOT NULL DEFAULT '[]'`.
+    let open_prs_json =
+        serde_json::to_value(&open_prs).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
     let mut conn = match db_pool.get() {
         Ok(conn) => conn,
         Err(e) => {
@@ -347,14 +353,19 @@ fn handle_session_update(
             sessions::git_branch.eq(&git_branch),
             sessions::pr_url.eq(&pr_url),
             sessions::repo_url.eq(&repo_url),
+            sessions::open_prs.eq(&open_prs_json),
         ))
         .execute(&mut conn)
     {
         error!("Failed to update session metadata: {}", e);
     } else {
         info!(
-            "Updated session {}: branch={:?} pr_url={:?} repo_url={:?}",
-            current_session_id, git_branch, pr_url, repo_url
+            "Updated session {}: branch={:?} pr_url={:?} repo_url={:?} open_prs={}",
+            current_session_id,
+            git_branch,
+            pr_url,
+            repo_url,
+            open_prs.len()
         );
 
         if let Some(ref key) = session_key {
@@ -365,6 +376,7 @@ fn handle_session_update(
                     git_branch,
                     pr_url,
                     repo_url,
+                    open_prs,
                 },
             );
         }

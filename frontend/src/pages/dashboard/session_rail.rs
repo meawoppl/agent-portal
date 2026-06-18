@@ -554,35 +554,47 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             html! {}
         };
 
-        let repo_option = if let Some(ref url) = session.pr_url {
-            let pr_number = url.rsplit('/').next().unwrap_or("").to_string();
-            let label = if pr_number.is_empty() {
-                "Open PR".to_string()
+        let repo_option = {
+            // Repo root link on top, then one row per open PR sorted by number.
+            let repo_link = if let Some(ref url) = session.repo_url {
+                let href = url.clone();
+                html! {
+                    <a class="pill-menu-option pr-link" href={href} target="_blank"
+                       onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                        { "Open Repository" }
+                        <span class="option-hint">{ "GitHub" }</span>
+                    </a>
+                }
             } else {
-                format!("Open PR #{}", pr_number)
+                html! {}
             };
-            let href = url.clone();
-            html! {
-                <a class="pill-menu-option pr-link" href={href} target="_blank"
-                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                    { label }
-                    <span class="option-hint">{ "GitHub" }</span>
-                </a>
-            }
-        } else if let Some(ref url) = session.repo_url {
-            let href = url.clone();
-            html! {
-                <a class="pill-menu-option pr-link" href={href} target="_blank"
-                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                    { "Open Repository" }
-                    <span class="option-hint">{ "GitHub" }</span>
-                </a>
-            }
-        } else {
-            html! {
-                <span class="pill-menu-option disabled">
-                    { "No Repository Detected" }
-                </span>
+
+            let mut prs = session.open_prs.clone();
+            prs.sort_by_key(|p| p.number);
+            let pr_rows = prs
+                .iter()
+                .map(|pr| {
+                    let href = pr.url.clone();
+                    let branch = pr.branch.clone();
+                    html! {
+                        <a class="pill-menu-option pr-link" href={href} target="_blank"
+                           title={branch.clone()}
+                           onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                            { format!("Open PR #{}", pr.number) }
+                            <span class="option-hint">{ branch }</span>
+                        </a>
+                    }
+                })
+                .collect::<Html>();
+
+            if session.repo_url.is_none() && prs.is_empty() {
+                html! {
+                    <span class="pill-menu-option disabled">
+                        { "No Repository Detected" }
+                    </span>
+                }
+            } else {
+                html! { <>{ repo_link }{ pr_rows }</> }
             }
         };
 
@@ -814,13 +826,27 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                         <span class="pill-hostname">{ hostname }</span>
                         { version_badge }
                     </span>
-                    {
-                        if let Some(ref branch) = session.git_branch {
+                    { {
+                        // Show open PR numbers (each with its branch as a hover
+                        // tooltip); fall back to the branch name, then "No VCS".
+                        let mut prs = session.open_prs.clone();
+                        prs.sort_by_key(|p| p.number);
+                        if !prs.is_empty() {
+                            html! {
+                                <span class="pill-branch pill-prs">
+                                    { for prs.iter().map(|pr| html! {
+                                        <span class="pill-pr-num" title={pr.branch.clone()}>
+                                            { format!("#{}", pr.number) }
+                                        </span>
+                                    }) }
+                                </span>
+                            }
+                        } else if let Some(ref branch) = session.git_branch {
                             html! { <span class="pill-branch" title={branch.clone()}>{ branch }</span> }
                         } else {
                             html! { <span class="pill-branch pill-no-vcs">{ "No VCS" }</span> }
                         }
-                    }
+                    } }
                 </span>
                 // Codex text badge removed — the agent-type watermark behind the
                 // pill (anthropic-mark.svg / openai-mark.png) carries this signal.

@@ -233,6 +233,9 @@ pub enum ProxyToServer {
         pr_url: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         repo_url: Option<String>,
+        /// All open PRs in the repo, sorted by number.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        open_prs: Vec<crate::PrRef>,
     },
 
     /// Acknowledge receipt of input messages
@@ -438,6 +441,9 @@ pub enum ServerToClient {
         pr_url: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         repo_url: Option<String>,
+        /// All open PRs in the repo, sorted by number.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        open_prs: Vec<crate::PrRef>,
     },
 
     /// User spend data update

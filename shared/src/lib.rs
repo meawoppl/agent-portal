@@ -207,6 +207,20 @@ pub struct LauncherInfo {
     pub version: String,
 }
 
+/// A single open GitHub pull request associated with a session's repository.
+///
+/// Carried as a list so the session pill can show every open PR (one row per
+/// PR, repo-root link above them) and use the branch as a hover tooltip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrRef {
+    /// PR number (e.g. 34). Used for the `#34` pill label and sort order.
+    pub number: i64,
+    /// Full GitHub PR URL.
+    pub url: String,
+    /// Head branch name (`headRefName`), shown as the pill tooltip.
+    pub branch: String,
+}
+
 /// API types for HTTP endpoints
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -235,6 +249,10 @@ pub struct SessionInfo {
     /// GitHub repository URL
     #[serde(default)]
     pub repo_url: Option<String>,
+    /// All open PRs in the session's repo, sorted by number. Drives the pill's
+    /// PR list (one row each) and the `#34 #35` collapsed label.
+    #[serde(default)]
+    pub open_prs: Vec<PrRef>,
     /// Which agent CLI backs this session (claude or codex)
     #[serde(default)]
     pub agent_type: AgentType,

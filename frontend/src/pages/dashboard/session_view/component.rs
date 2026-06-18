@@ -46,7 +46,13 @@ pub struct SessionViewProps {
     pub on_connected_change: Callback<(Uuid, bool)>,
     pub on_message_sent: Callback<Uuid>,
     #[allow(clippy::type_complexity)]
-    pub on_branch_change: Callback<(Uuid, Option<String>, Option<String>, Option<String>)>,
+    pub on_branch_change: Callback<(
+        Uuid,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Vec<shared::PrRef>,
+    )>,
     #[prop_or_default]
     pub on_activity: Callback<(Uuid, ActivityTag, f64)>,
     #[prop_or_default]
@@ -63,7 +69,12 @@ pub enum SessionViewMsg {
     WebSocketError(String),
     AttemptReconnect,
     CheckAwaiting,
-    BranchChanged(Option<String>, Option<String>, Option<String>),
+    BranchChanged(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Vec<shared::PrRef>,
+    ),
     /// PermissionHandler is mounted and handed us its inbound-request
     /// dispatcher. We store it so live `WsEvent::Permission` frames can be
     /// forwarded without the parent owning any permission state.
@@ -356,11 +367,11 @@ impl Component for SessionView {
                     .emit((session_id, is_awaiting));
                 false
             }
-            SessionViewMsg::BranchChanged(branch, pr_url, repo_url) => {
+            SessionViewMsg::BranchChanged(branch, pr_url, repo_url, open_prs) => {
                 let session_id = ctx.props().session.id;
                 ctx.props()
                     .on_branch_change
-                    .emit((session_id, branch, pr_url, repo_url));
+                    .emit((session_id, branch, pr_url, repo_url, open_prs));
                 false
             }
             SessionViewMsg::TasksDispatcherRegistered(dispatcher) => {
@@ -565,9 +576,10 @@ impl SessionView {
                 }
                 false
             }
-            WsEvent::BranchChanged(branch, pr_url, repo_url) => {
-                ctx.link()
-                    .send_message(SessionViewMsg::BranchChanged(branch, pr_url, repo_url));
+            WsEvent::BranchChanged(branch, pr_url, repo_url, open_prs) => {
+                ctx.link().send_message(SessionViewMsg::BranchChanged(
+                    branch, pr_url, repo_url, open_prs,
+                ));
                 false
             }
             WsEvent::TurnMetrics(metrics) => {

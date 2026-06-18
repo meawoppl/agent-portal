@@ -30,7 +30,7 @@ pub use git_metadata::{get_git_branch, get_repo_url};
 
 use git_metadata::{
     check_and_send_branch_update, check_and_send_branch_update_if_branch_changed,
-    codex_output_has_git_signal, get_pr_url, GitMetadataState, GitRefreshTrigger,
+    codex_output_has_git_signal, get_open_prs, get_pr_url, GitMetadataState, GitRefreshTrigger,
 };
 use output_forwarder::spawn_output_forwarder;
 use wiggum::{handle_session_event_with_wiggum, WiggumState};
@@ -458,17 +458,20 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
         Err(RegisterError::Rejected) => return ConnectionResult::RegistrationRejected,
     };
 
-    // Look up PR URL and repo URL for the current branch and send as SessionUpdate
+    // Look up PR URL, repo URL, and the repo's open PRs for the current branch
+    // and send as the initial SessionUpdate (so the pill populates immediately).
     let repo_url = get_repo_url(&session.config.working_directory);
     let pr_url = config_with_branch
         .git_branch
         .as_deref()
         .and_then(|b| get_pr_url(&session.config.working_directory, b));
+    let open_prs = get_open_prs(&session.config.working_directory);
     let update_msg = ProxyToServer::SessionUpdate {
         session_id: config_with_branch.session_id,
         git_branch: config_with_branch.git_branch.clone(),
         pr_url,
         repo_url,
+        open_prs,
     };
     if conn.send(update_msg).await.is_err() {
         error!("Failed to send initial session update");
