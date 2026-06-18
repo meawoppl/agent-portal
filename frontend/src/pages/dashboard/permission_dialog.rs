@@ -170,22 +170,20 @@ fn render_standard_permission(props: &PermissionDialogProps) -> Html {
 /// Render the AskUserQuestion specialized UI - supports multiple questions
 /// Free-text "Other" answer row for [`render_ask_user_question`].
 ///
-/// Deliberately its own keyed component. The field used to live inline in
-/// `render_ask_user_question` — a plain `fn -> Html` the parent re-renders on
-/// every keystroke. As a controlled `<input value={…}>` re-derived from parent
-/// props each render, the DOM node was rebuilt per keystroke, so focus (and the
-/// caret) bounced out of the field.
+/// Self-contained on purpose. It must live in its OWN container, not inside
+/// `.question-options`: those option rows re-render their `class` (selected ↔
+/// unselected) on every keystroke, and a text `<input>` sharing that churning
+/// list gets remounted by Yew's reconciliation — the node is torn down and
+/// rebuilt per keystroke, so focus drops and you can only enter one character
+/// at a time.
 ///
-/// Owning the draft in local `use_state` keeps the node stable: keystrokes
-/// touch local state only, the parent is notified via `on_input`, and the field
-/// re-seeds from `initial` solely when the answer changes from the outside
-/// (e.g. the user clicks a preset option, which clears the draft).
+/// It owns its draft in local `use_state` and only *emits* upward — it never
+/// reads the answer back from props. So neither sibling churn nor a parent
+/// answer change touches the input node (focus + caret stay put), and clicking
+/// a preset option no longer wipes the typed text.
 #[derive(Properties, PartialEq)]
 struct CustomAnswerInputProps {
-    /// The custom answer text, or empty when a preset option/multi-select join
-    /// is the active selection. Re-seeds the field only on external changes.
-    initial: String,
-    /// Whether the typed answer is the active selection (drives the icon).
+    /// Whether the typed answer is the active selection (drives the icon only).
     selected: bool,
     /// Emits the typed text upward (the parent binds the question index).
     on_input: Callback<String>,
@@ -193,20 +191,7 @@ struct CustomAnswerInputProps {
 
 #[function_component(CustomAnswerInput)]
 fn custom_answer_input(props: &CustomAnswerInputProps) -> Html {
-    let draft = use_state(|| props.initial.clone());
-
-    // Re-seed only when `initial` changes from the outside (selecting a preset
-    // clears it). While typing, `draft` and `initial` stay in lockstep, so this
-    // is a no-op on keystrokes and never fights the user's caret.
-    {
-        let draft = draft.clone();
-        use_effect_with(props.initial.clone(), move |initial| {
-            if *draft != *initial {
-                draft.set(initial.clone());
-            }
-            || ()
-        });
-    }
+    let draft = use_state(String::new);
 
     let oninput = {
         let draft = draft.clone();
@@ -361,7 +346,10 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                                         };
 
                                         html! {
-                                            <div class={item_class} onclick={onclick}>
+                                            // Key each option row so Yew matches them by key across
+                                            // re-renders instead of churning the list when the
+                                            // selected class flips on every keystroke.
+                                            <div class={item_class} key={opt_idx.to_string()} onclick={onclick}>
                                                 <span class="option-icon">{ icon }</span>
                                                 <div class="option-content">
                                                     <span class="option-label">{ &opt.label }</span>
@@ -377,42 +365,38 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                                         }
                                     }).collect::<Html>()
                                 }
-                                { {
-                                    // Free-text escape hatch so users aren't railroaded into
-                                    // the preset options (mirrors AskUserQuestion's built-in
-                                    // "Other"). Covers Claude and Codex, which share this frame.
-                                    // The answer is whatever is typed; it's "selected" when the
-                                    // current answer matches no option (single) or the toggled
-                                    // multi-select join. Rendered via the keyed CustomAnswerInput
-                                    // so typing doesn't tear down the field (see its doc comment).
-                                    let joined_multi: String = multi_selected
-                                        .iter()
-                                        .filter_map(|&i| q.options.get(i).map(|o| o.label.clone()))
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    let matches_option =
-                                        q.options.iter().any(|o| current_answer == Some(&o.label));
-                                    let matches_multi = !joined_multi.is_empty()
-                                        && current_answer.map(|a| a == &joined_multi).unwrap_or(false);
-                                    let custom_value = match current_answer {
-                                        Some(a) if !matches_option && !matches_multi => a.clone(),
-                                        _ => String::new(),
-                                    };
-                                    let custom_selected = !custom_value.is_empty();
-                                    let on_set_answer = props.on_set_answer.clone();
-                                    let on_input = Callback::from(move |value: String| {
-                                        on_set_answer.emit((q_idx, value));
-                                    });
-                                    html! {
-                                        <CustomAnswerInput
-                                            key={format!("custom-{q_idx}")}
-                                            initial={custom_value}
-                                            selected={custom_selected}
-                                            {on_input}
-                                        />
-                                    }
-                                } }
                             </div>
+                            { {
+                                // Free-text "Other" escape hatch in its OWN container, deliberately
+                                // OUTSIDE `.question-options`. The option rows above re-render their
+                                // class every keystroke; an <input> sharing that list got remounted
+                                // (focus loss, one char at a time). Isolated here the input node is
+                                // positionally stable and keeps focus. See CustomAnswerInput's doc.
+                                // `selected` only highlights the row when the active answer matches
+                                // no preset (single) or the multi-select join.
+                                let joined_multi: String = multi_selected
+                                    .iter()
+                                    .filter_map(|&i| q.options.get(i).map(|o| o.label.clone()))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                let matches_option =
+                                    q.options.iter().any(|o| current_answer == Some(&o.label));
+                                let matches_multi = !joined_multi.is_empty()
+                                    && current_answer.map(|a| a == &joined_multi).unwrap_or(false);
+                                let custom_active = matches!(
+                                    current_answer,
+                                    Some(a) if !a.is_empty() && !matches_option && !matches_multi
+                                );
+                                let on_set_answer = props.on_set_answer.clone();
+                                let on_input = Callback::from(move |value: String| {
+                                    on_set_answer.emit((q_idx, value));
+                                });
+                                html! {
+                                    <div class="question-custom-row">
+                                        <CustomAnswerInput selected={custom_active} {on_input} />
+                                    </div>
+                                }
+                            } }
                             {
                                 // For multi-select questions, show a "Set Answer" button
                                 if is_multi && !multi_selected.is_empty() {

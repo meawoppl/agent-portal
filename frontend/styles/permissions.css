@@ -226,6 +226,13 @@
     gap: 0.4rem;
 }
 
+/* The free-text "Other" row lives outside `.question-options` (so the option
+   list re-rendering its selected class on each keystroke can't remount the
+   <input> and steal focus). Re-add the gap the list would have provided. */
+.ask-user-question .question-custom-row {
+    margin-top: 0.4rem;
+}
+
 .ask-user-question .question-option {
     display: flex;
     align-items: flex-start;
