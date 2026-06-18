@@ -184,7 +184,9 @@ pub async fn create_task_handler(
         user_id,
         name: req.fields.name,
         cron_expression: req.fields.cron_expression,
-        timezone: req.fields.timezone,
+        // Normalize abbreviations (PST/EST/…) to IANA so the launcher's
+        // chrono_tz parse succeeds instead of silently using UTC (#1064).
+        timezone: shared::timezone::canonicalize_timezone(&req.fields.timezone),
         hostname: req.hostname,
         working_directory: req.fields.working_directory,
         prompt: req.fields.prompt,
@@ -234,7 +236,10 @@ pub async fn update_task_handler(
     let changeset = ScheduledTaskChangeset {
         name: req.name,
         cron_expression: req.cron_expression,
-        timezone: req.timezone,
+        // Normalize abbreviations to IANA on update too (#1064).
+        timezone: req
+            .timezone
+            .map(|tz| shared::timezone::canonicalize_timezone(&tz)),
         hostname: req.hostname,
         working_directory: req.working_directory,
         prompt: req.prompt,

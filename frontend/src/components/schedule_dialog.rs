@@ -33,6 +33,22 @@ fn version_sufficient(version: &str) -> bool {
     have >= need
 }
 
+/// The browser's IANA timezone (e.g. `America/Los_Angeles`) via
+/// `Intl.DateTimeFormat().resolvedOptions().timeZone`, or `"UTC"` if it can't
+/// be read. Seeding the schedule field with this starts it as a valid IANA name
+/// instead of an abbreviation the launcher can't parse (#1064).
+fn detected_timezone() -> String {
+    let fmt = js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &js_sys::Object::new());
+    js_sys::Reflect::get(
+        &fmt.resolved_options(),
+        &wasm_bindgen::JsValue::from_str("timeZone"),
+    )
+    .ok()
+    .and_then(|v| v.as_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| "UTC".to_string())
+}
+
 #[derive(Properties, PartialEq)]
 pub struct ScheduleDialogProps {
     pub session: SessionInfo,
@@ -139,7 +155,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let error_msg = error_msg.clone();
         Callback::from(move |_| {
             form.set(TaskForm {
-                timezone: "UTC".to_string(),
+                timezone: detected_timezone(),
                 max_runtime_minutes: 30,
                 skip_permissions: true,
                 ..Default::default()
@@ -221,7 +237,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             fields: shared::ScheduledTaskFields {
                                 name: data.name.trim().to_string(),
                                 cron_expression: data.cron_expression.trim().to_string(),
-                                timezone: data.timezone.clone(),
+                                timezone: shared::timezone::canonicalize_timezone(&data.timezone),
                                 working_directory: wd,
                                 prompt: data.prompt.clone(),
                                 claude_args: claude_args.clone(),
@@ -240,7 +256,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                         let body = UpdateScheduledTaskRequest {
                             name: Some(data.name.trim().to_string()),
                             cron_expression: Some(data.cron_expression.trim().to_string()),
-                            timezone: Some(data.timezone.clone()),
+                            timezone: Some(shared::timezone::canonicalize_timezone(&data.timezone)),
                             prompt: Some(data.prompt.clone()),
                             max_runtime_minutes: Some(data.max_runtime_minutes),
                             claude_args: Some(claude_args.clone()),
@@ -473,10 +489,18 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             <label>{ "Timezone" }</label>
                                             <input
                                                 type="text"
-                                                placeholder="UTC"
+                                                list="sched-tz-list"
+                                                placeholder="America/Los_Angeles"
                                                 value={form.timezone.clone()}
                                                 oninput={set_field(|f, v| f.timezone = v)}
                                             />
+                                            <datalist id="sched-tz-list">
+                                                {
+                                                    shared::timezone::COMMON_IANA_ZONES.iter().map(|tz| {
+                                                        html! { <option value={*tz} /> }
+                                                    }).collect::<Html>()
+                                                }
+                                            </datalist>
                                         </div>
                                         <div class="sched-field sched-field-sm">
                                             <label>{ "Timeout (min)" }</label>

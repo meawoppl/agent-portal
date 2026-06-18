@@ -317,10 +317,17 @@ fn compute_next_fire(cron_expr: &str, timezone: &str) -> Option<DateTime<Utc>> {
         }
     };
 
-    let tz: chrono_tz::Tz = match timezone.parse() {
+    // Canonicalize common abbreviations (PST/EST/…) to IANA names first;
+    // chrono_tz only accepts IANA. Unknown values pass through and fail the
+    // parse below, falling back to UTC. See issue #1064.
+    let canonical = shared::timezone::canonicalize_timezone(timezone);
+    let tz: chrono_tz::Tz = match canonical.parse() {
         Ok(t) => t,
         Err(_) => {
-            error!("Invalid timezone '{}', falling back to UTC", timezone);
+            error!(
+                "Unrecognized timezone '{}' (resolved '{}'), falling back to UTC",
+                timezone, canonical
+            );
             chrono_tz::UTC
         }
     };
@@ -409,6 +416,19 @@ mod tests {
     fn compute_next_fire_invalid_timezone_falls_back_to_utc() {
         let result = compute_next_fire("0 3 * * *", "Invalid/Timezone");
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn compute_next_fire_accepts_abbreviation() {
+        // "PST" used to silently fall back to UTC (issue #1064); it must now
+        // resolve to the same instant as its IANA equivalent.
+        let abbrev = compute_next_fire("0 3 * * *", "PST");
+        let iana = compute_next_fire("0 3 * * *", "America/Los_Angeles");
+        assert!(abbrev.is_some());
+        // Compare at second granularity: croner carries the sub-second fraction
+        // of each call's `Utc::now()` into the result, so the two instants differ
+        // by microseconds even though they resolve to the same scheduled second.
+        assert_eq!(abbrev.map(|d| d.timestamp()), iana.map(|d| d.timestamp()));
     }
 
     #[test]
