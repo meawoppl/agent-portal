@@ -19,6 +19,9 @@ pub mod protocol;
 // String/number formatting helpers shared between frontend and native crates
 pub mod fmt;
 
+// Timezone canonicalization (abbreviation -> IANA) shared across crates
+pub mod timezone;
+
 // API client types and trait
 pub mod api;
 pub use api::{
