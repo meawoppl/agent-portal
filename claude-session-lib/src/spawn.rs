@@ -65,7 +65,12 @@ pub(crate) async fn spawn_claude(
 
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stderr(std::process::Stdio::piped())
+        // Kill the child when its `Child` handle drops. The I/O task owns the
+        // client (and thus the child); when the task is aborted on stop/drop,
+        // this guarantees the claude process is reaped rather than orphaned and
+        // left holding its transcript and a WebSocket open.
+        .kill_on_drop(true);
 
     let child = cmd.spawn().map_err(SessionError::SpawnFailed)?;
 
