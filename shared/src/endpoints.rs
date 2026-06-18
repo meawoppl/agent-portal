@@ -505,6 +505,30 @@ impl WsEndpoint for LauncherEndpoint {
     type ClientMsg = LauncherToServer;
 }
 
+/// Why a proxy session task ended, as classified by the launcher. Lets the
+/// backend distinguish a healthy run that finished from an instant crash loop
+/// (which it throttles with launch backoff) without guessing from the exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionExitReason {
+    /// Ran for a healthy duration then exited. Resets launch backoff.
+    #[default]
+    Completed,
+    /// Registered but exited almost immediately — a likely crash loop. The
+    /// backend bumps `launch_failure_count` so reconcile backs off.
+    CrashedEarly,
+    /// A `--resume` whose local conversation was gone; rotated to a fresh
+    /// session. Also throttled, since it tends to recur until cleaned up.
+    ResumeTargetMissing,
+    /// Backend rejected registration (revoked/expired token). Relaunched with a
+    /// fresh token; not a failure to back off.
+    RegistrationRejected,
+    /// Stopped by the user / cancellation. Not a failure.
+    Stopped,
+    /// Errored (spawn or runtime). Neutral for backoff.
+    Error,
+}
+
 /// Messages the launcher sends to the backend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -553,6 +577,11 @@ pub enum LauncherToServer {
     SessionExited {
         session_id: Uuid,
         exit_code: Option<i32>,
+        /// Why the session ended, so the backend can throttle crash loops.
+        /// `#[serde(default)]` keeps older launchers (no `reason`) deserializing
+        /// as `Completed` (the neutral default).
+        #[serde(default)]
+        reason: SessionExitReason,
     },
 
     /// Directory listing response
@@ -702,6 +731,28 @@ mod tests {
     #[test]
     fn session_endpoint_path() {
         assert_eq!(SessionEndpoint::PATH, "/ws/session");
+    }
+
+    #[test]
+    fn session_exited_reason_defaults_for_old_launchers() {
+        // An older launcher omits `reason`; it must deserialize as the neutral
+        // default rather than failing, so a mixed-version fleet keeps working.
+        let json = r#"{"type":"SessionExited","session_id":"00000000-0000-0000-0000-000000000000","exit_code":0}"#;
+        let msg: LauncherToServer = serde_json::from_str(json).unwrap();
+        match msg {
+            LauncherToServer::SessionExited { reason, .. } => {
+                assert_eq!(reason, SessionExitReason::Completed);
+            }
+            _ => panic!("expected SessionExited"),
+        }
+    }
+
+    #[test]
+    fn session_exit_reason_roundtrips() {
+        let json = serde_json::to_string(&SessionExitReason::CrashedEarly).unwrap();
+        assert_eq!(json, "\"crashed_early\"");
+        let back: SessionExitReason = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, SessionExitReason::CrashedEarly);
     }
 
     #[test]

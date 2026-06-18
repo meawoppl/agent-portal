@@ -22,3 +22,7 @@ hostname = { workspace = true }
 which = "8.0.0"
 ws-bridge = { workspace = true, features = ["native-client"] }
 rand = "0.8"
+dirs = "6.0.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -371,12 +371,21 @@ fn handle_launcher_message(
         LauncherToServer::SessionExited {
             session_id,
             exit_code,
+            reason,
         } => {
-            info!("Proxy exited: session={}, code={:?}", session_id, exit_code);
-            // The proxy holding this session's token has exited; revoke the
-            // token so it can't be reused. A resume mints a fresh one. See #932.
+            info!(
+                "Proxy exited: session={}, code={:?}, reason={:?}",
+                session_id, exit_code, reason
+            );
             if let Ok(mut conn) = app_state.db_pool.get() {
+                // The proxy holding this session's token has exited; revoke the
+                // token so it can't be reused. A resume mints a fresh one. See #932.
                 crate::handlers::proxy_tokens::revoke_tokens_for_session(&mut conn, session_id);
+                // Throttle crash loops: a session that registered then exited
+                // near-instantly, or whose resume target was gone, bumps the
+                // launch-failure counter so reconcile backs off; a healthy run
+                // resets it. See #1045 and the crash-loop investigation.
+                record_exit_for_backoff(&mut conn, session_id, reason);
             }
             app_state.session_manager.broadcast_to_user(
                 &user_id,
@@ -771,6 +780,48 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
                 session.id, launcher_id
             );
         }
+    }
+}
+
+/// Adjust a session's launch-backoff state from why its proxy exited.
+///
+/// `CrashedEarly` / `ResumeTargetMissing` bump `launch_failure_count` (so
+/// `launch_backoff` throttles the next relaunch); a healthy `Completed` run
+/// resets it. Other reasons are neutral. This is the counterpart to the
+/// launch-failure bump in the `LaunchSessionResult` handler — together they make
+/// `launch_failure_count` reflect *runtime* health, not just whether the spawn
+/// itself succeeded, which is why the reset moved off registration (a crash loop
+/// registers every time). See the crash-loop investigation.
+fn record_exit_for_backoff(
+    conn: &mut diesel::PgConnection,
+    session_id: Uuid,
+    reason: shared::SessionExitReason,
+) {
+    use crate::schema::sessions;
+    use diesel::prelude::*;
+    use shared::SessionExitReason::*;
+
+    let result = match reason {
+        CrashedEarly | ResumeTargetMissing => diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::launch_failure_count.eq(sessions::launch_failure_count + 1),
+                sessions::last_launch_attempt_at.eq(diesel::dsl::now),
+                sessions::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(conn),
+        Completed => diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::launch_failure_count.eq(0),
+                sessions::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(conn),
+        RegistrationRejected | Stopped | Error => Ok(0),
+    };
+    if let Err(e) = result {
+        warn!(
+            "Failed to record exit backoff for session {}: {}",
+            session_id, e
+        );
     }
 }
 
