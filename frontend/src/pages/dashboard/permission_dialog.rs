@@ -168,6 +168,79 @@ fn render_standard_permission(props: &PermissionDialogProps) -> Html {
 }
 
 /// Render the AskUserQuestion specialized UI - supports multiple questions
+/// Free-text "Other" answer row for [`render_ask_user_question`].
+///
+/// Deliberately its own keyed component. The field used to live inline in
+/// `render_ask_user_question` — a plain `fn -> Html` the parent re-renders on
+/// every keystroke. As a controlled `<input value={…}>` re-derived from parent
+/// props each render, the DOM node was rebuilt per keystroke, so focus (and the
+/// caret) bounced out of the field.
+///
+/// Owning the draft in local `use_state` keeps the node stable: keystrokes
+/// touch local state only, the parent is notified via `on_input`, and the field
+/// re-seeds from `initial` solely when the answer changes from the outside
+/// (e.g. the user clicks a preset option, which clears the draft).
+#[derive(Properties, PartialEq)]
+struct CustomAnswerInputProps {
+    /// The custom answer text, or empty when a preset option/multi-select join
+    /// is the active selection. Re-seeds the field only on external changes.
+    initial: String,
+    /// Whether the typed answer is the active selection (drives the icon).
+    selected: bool,
+    /// Emits the typed text upward (the parent binds the question index).
+    on_input: Callback<String>,
+}
+
+#[function_component(CustomAnswerInput)]
+fn custom_answer_input(props: &CustomAnswerInputProps) -> Html {
+    let draft = use_state(|| props.initial.clone());
+
+    // Re-seed only when `initial` changes from the outside (selecting a preset
+    // clears it). While typing, `draft` and `initial` stay in lockstep, so this
+    // is a no-op on keystrokes and never fights the user's caret.
+    {
+        let draft = draft.clone();
+        use_effect_with(props.initial.clone(), move |initial| {
+            if *draft != *initial {
+                draft.set(initial.clone());
+            }
+            || ()
+        });
+    }
+
+    let oninput = {
+        let draft = draft.clone();
+        let on_input = props.on_input.clone();
+        Callback::from(move |e: InputEvent| {
+            let value = e.target_unchecked_into::<HtmlInputElement>().value();
+            draft.set(value.clone());
+            on_input.emit(value);
+        })
+    };
+
+    let row_class = if props.selected {
+        "question-option custom selected"
+    } else {
+        "question-option custom"
+    };
+    let icon = if props.selected { "●" } else { "○" };
+
+    html! {
+        <div class={row_class}>
+            <span class="option-icon">{ icon }</span>
+            <div class="option-content">
+                <input
+                    type="text"
+                    class="question-custom-input"
+                    placeholder="Something else…"
+                    value={(*draft).clone()}
+                    {oninput}
+                />
+            </div>
+        </div>
+    }
+}
+
 fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuestionInput) -> Html {
     let total_questions = parsed.questions.len();
     let answers_count = props.question_answers.len();
@@ -310,7 +383,8 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                                     // "Other"). Covers Claude and Codex, which share this frame.
                                     // The answer is whatever is typed; it's "selected" when the
                                     // current answer matches no option (single) or the toggled
-                                    // multi-select join.
+                                    // multi-select join. Rendered via the keyed CustomAnswerInput
+                                    // so typing doesn't tear down the field (see its doc comment).
                                     let joined_multi: String = multi_selected
                                         .iter()
                                         .filter_map(|&i| q.options.get(i).map(|o| o.label.clone()))
@@ -325,30 +399,17 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                                         _ => String::new(),
                                     };
                                     let custom_selected = !custom_value.is_empty();
-                                    let row_class = if custom_selected {
-                                        "question-option custom selected"
-                                    } else {
-                                        "question-option custom"
-                                    };
-                                    let icon = if custom_selected { "●" } else { "○" };
                                     let on_set_answer = props.on_set_answer.clone();
-                                    let oninput = Callback::from(move |e: InputEvent| {
-                                        let value = e.target_unchecked_into::<HtmlInputElement>().value();
+                                    let on_input = Callback::from(move |value: String| {
                                         on_set_answer.emit((q_idx, value));
                                     });
                                     html! {
-                                        <div class={row_class}>
-                                            <span class="option-icon">{ icon }</span>
-                                            <div class="option-content">
-                                                <input
-                                                    type="text"
-                                                    class="question-custom-input"
-                                                    placeholder="Something else…"
-                                                    value={custom_value}
-                                                    {oninput}
-                                                />
-                                            </div>
-                                        </div>
+                                        <CustomAnswerInput
+                                            key={format!("custom-{q_idx}")}
+                                            initial={custom_value}
+                                            selected={custom_selected}
+                                            {on_input}
+                                        />
                                     }
                                 } }
                             </div>
