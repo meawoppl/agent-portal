@@ -167,6 +167,7 @@ diesel::table! {
         claude_args -> Jsonb,
         launch_failure_count -> Int4,
         last_launch_attempt_at -> Nullable<Timestamp>,
+        launch_lease_until -> Nullable<Timestamp>,
     }
 }
 

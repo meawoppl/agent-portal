@@ -328,6 +328,9 @@ fn handle_launcher_message(
                                     .eq(sessions::launch_failure_count + 1),
                                 sessions::last_launch_attempt_at.eq(diesel::dsl::now),
                                 sessions::status.eq(SessionStatus::Disconnected.as_str()),
+                                // Release the launch lease so backoff (above) is
+                                // the sole gate on the next retry.
+                                sessions::launch_lease_until.eq(None::<chrono::NaiveDateTime>),
                                 sessions::updated_at.eq(diesel::dsl::now),
                             ))
                             .execute(&mut conn)
@@ -696,13 +699,10 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
     let now = chrono::Utc::now().naive_utc();
 
     for session in desired {
-        if running_sessions.contains(&session.id)
-            || app_state
-                .session_manager
-                .pending_launch_sessions
-                .iter()
-                .any(|entry| *entry.value() == session.id)
-        {
+        // Skip sessions the launcher last reported as running. The launch lease
+        // below (not the in-memory pending set) is the authoritative guard for
+        // the in-flight window.
+        if running_sessions.contains(&session.id) {
             continue;
         }
 
@@ -722,6 +722,39 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
                     session.launch_failure_count,
                     (last_attempt + backoff - now).num_seconds()
                 );
+                continue;
+            }
+        }
+
+        // Atomically claim a short launch lease before sending. This conditional
+        // UPDATE is the single source of truth for "a launch is in flight": only
+        // one reconcile (across heartbeats, or even backend instances) can flip a
+        // NULL/expired lease to a fresh deadline, so it closes the double-launch
+        // race the eventually-consistent running/pending sets left open. The
+        // lease self-expires (LAUNCH_LEASE_SECS), so a launcher that dies
+        // mid-launch doesn't wedge the session out of reconcile — unlike the old
+        // no-TTL pending set. Registration and launch-failure both clear it.
+        let lease_until = now + chrono::Duration::seconds(LAUNCH_LEASE_SECS);
+        match diesel::update(
+            sessions::table.find(session.id).filter(
+                sessions::launch_lease_until
+                    .is_null()
+                    .or(sessions::launch_lease_until.lt(now)),
+            ),
+        )
+        .set(sessions::launch_lease_until.eq(Some(lease_until)))
+        .execute(&mut conn)
+        {
+            Ok(1) => {}
+            Ok(_) => {
+                debug!(
+                    "Reconcile skipping session {} on launcher {}: launch lease held",
+                    session.id, launcher_id
+                );
+                continue;
+            }
+            Err(e) => {
+                warn!("Failed to claim launch lease for {}: {}", session.id, e);
                 continue;
             }
         }
@@ -824,6 +857,12 @@ fn record_exit_for_backoff(
         );
     }
 }
+
+/// How long a reconcile launch lease is held before it self-expires. Covers the
+/// window between sending `LaunchSession` and the proxy registering (or the
+/// launch failing). Long enough to outlast a normal spawn+register, short enough
+/// that a launcher dying mid-launch frees the session for retry promptly.
+const LAUNCH_LEASE_SECS: i64 = 60;
 
 /// Exponential backoff between relaunch attempts for a session that keeps
 /// failing to launch: 30s, 1m, 2m, … capped at 15 minutes. `failure_count`
