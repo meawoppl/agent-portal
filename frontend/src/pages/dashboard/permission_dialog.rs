@@ -1,7 +1,7 @@
 //! Permission dialog components for tool authorization and user questions
 
 use std::collections::{HashMap, HashSet};
-use web_sys::KeyboardEvent;
+use web_sys::{HtmlInputElement, KeyboardEvent};
 use yew::prelude::*;
 
 use shared::{AllowedPrompt, ToolInput};
@@ -304,6 +304,53 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                                         }
                                     }).collect::<Html>()
                                 }
+                                { {
+                                    // Free-text escape hatch so users aren't railroaded into
+                                    // the preset options (mirrors AskUserQuestion's built-in
+                                    // "Other"). Covers Claude and Codex, which share this frame.
+                                    // The answer is whatever is typed; it's "selected" when the
+                                    // current answer matches no option (single) or the toggled
+                                    // multi-select join.
+                                    let joined_multi: String = multi_selected
+                                        .iter()
+                                        .filter_map(|&i| q.options.get(i).map(|o| o.label.clone()))
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    let matches_option =
+                                        q.options.iter().any(|o| current_answer == Some(&o.label));
+                                    let matches_multi = !joined_multi.is_empty()
+                                        && current_answer.map(|a| a == &joined_multi).unwrap_or(false);
+                                    let custom_value = match current_answer {
+                                        Some(a) if !matches_option && !matches_multi => a.clone(),
+                                        _ => String::new(),
+                                    };
+                                    let custom_selected = !custom_value.is_empty();
+                                    let row_class = if custom_selected {
+                                        "question-option custom selected"
+                                    } else {
+                                        "question-option custom"
+                                    };
+                                    let icon = if custom_selected { "●" } else { "○" };
+                                    let on_set_answer = props.on_set_answer.clone();
+                                    let oninput = Callback::from(move |e: InputEvent| {
+                                        let value = e.target_unchecked_into::<HtmlInputElement>().value();
+                                        on_set_answer.emit((q_idx, value));
+                                    });
+                                    html! {
+                                        <div class={row_class}>
+                                            <span class="option-icon">{ icon }</span>
+                                            <div class="option-content">
+                                                <input
+                                                    type="text"
+                                                    class="question-custom-input"
+                                                    placeholder="Something else…"
+                                                    value={custom_value}
+                                                    {oninput}
+                                                />
+                                            </div>
+                                        </div>
+                                    }
+                                } }
                             </div>
                             {
                                 // For multi-select questions, show a "Set Answer" button

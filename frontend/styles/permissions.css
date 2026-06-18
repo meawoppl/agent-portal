@@ -258,6 +258,32 @@
     color: var(--accent);
 }
 
+/* Free-text "something else" row: the option frame stays put (no pointer
+   cursor — the input owns interaction) and the text field fills it. */
+.ask-user-question .question-option.custom {
+    cursor: default;
+}
+
+.ask-user-question .question-custom-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.45rem;
+}
+
+.ask-user-question .question-custom-input::placeholder {
+    color: var(--text-muted);
+}
+
+.ask-user-question .question-custom-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
 .ask-user-question .option-content {
     display: flex;
     flex-direction: column;

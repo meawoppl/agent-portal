@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.76
+
+- **AskUserQuestion frames now have a free-text "something else" answer.** The interactive question dialog (`permission_dialog.rs` `render_ask_user_question`) previously only let you pick a preset option, railroading you when none fit. Each question now has a `Something else…` text row; typing sets that question's answer to your custom text, and it shows as selected (matching no option / multi-select join). A blank field un-answers the question (`permission_handler.rs` removes rather than stores an empty string), so it doesn't falsely satisfy the submit gate. Because Codex's `ToolRequestUserInput` is normalized to the same `AskUserQuestion` permission shape and rendered by this same frame, both Claude and Codex questions get the escape hatch from one change. CSS for the input in `permissions.css`. 317 frontend tests pass.
+
 ## 2.8.75
 
 - **Launch/restore hardening, phase 1 of 4: typed exit reason + deterministic resume.** First slice of the session launch/restore refactor. Two structural gaps fixed:
