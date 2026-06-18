@@ -544,6 +544,59 @@ sessions::table.filter(sessions::id.eq(...))
 
 ## Code Conventions
 
+### Doing It The Right Way
+
+When you hit a bug, fix the **root cause** with the idiomatic pattern — don't paper
+over it with a workaround that leaves the trap in place for the next person.
+Concretely, that means:
+
+- **Fix the cause, not the symptom.** If focus bounces, a controlled input is
+  being recreated — fix the ownership, don't add a `setTimeout`-style refocus hack.
+- **Use the framework's grain.** Reach for the idiomatic construct (a keyed
+  sub-component, a hook, a typed enum variant) before hand-rolling.
+- **Land it cleanly.** Work on a fresh branch off `main` (don't pile onto
+  unrelated WIP), bump the version, and verify it builds before handing it back.
+- **Leave a marker.** Capture the non-obvious "why" in a doc comment so the fix
+  isn't silently reverted later.
+
+**Concrete pattern — focus-stable text inputs in Yew.** A controlled
+`<input value={…}>` whose value is re-derived from parent props and round-tripped
+through parent state on every keystroke gets its DOM node torn down and rebuilt
+per keystroke — focus and the caret bounce out. Don't band-aid it with manual
+refocus. Instead, **own the draft in a keyed sub-component** with local
+`use_state`, notify the parent via a callback, and re-seed from props only on
+genuine external changes:
+
+```rust
+// ❌ WRONG - controlled input re-derived from parent props inside a
+//            re-rendering `fn -> Html`; node is recreated each keystroke
+let oninput = Callback::from(move |e: InputEvent| {
+    on_set_answer.emit((q_idx, value_of(e)));   // round-trips through parent state
+});
+html! { <input value={parent_derived_value} {oninput} /> }
+
+// ✅ RIGHT - keyed sub-component owns the draft locally; node is stable
+#[function_component(CustomAnswerInput)]
+fn custom_answer_input(props: &CustomAnswerInputProps) -> Html {
+    let draft = use_state(|| props.initial.clone());
+    // re-seed only when `initial` changes from the outside (no-op while typing)
+    { let draft = draft.clone();
+      use_effect_with(props.initial.clone(), move |initial| {
+          if *draft != *initial { draft.set(initial.clone()); }
+          || () }); }
+    let oninput = { let draft = draft.clone(); let on_input = props.on_input.clone();
+        Callback::from(move |e: InputEvent| {
+            let v = e.target_unchecked_into::<HtmlInputElement>().value();
+            draft.set(v.clone()); on_input.emit(v); }) };
+    html! { <input value={(*draft).clone()} {oninput} /> }
+}
+// rendered with a stable key so Yew preserves the instance across re-renders:
+//   <CustomAnswerInput key={format!("custom-{q_idx}")} .. />
+```
+
+See `frontend/src/pages/dashboard/permission_dialog.rs` (`CustomAnswerInput`) for
+the live example.
+
 ### Dead Code
 
 **Remove dead code aggressively.** Do not:
