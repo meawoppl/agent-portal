@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use shared::AgentType;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -71,6 +71,44 @@ pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn launcher_id_path() -> PathBuf {
+    config_dir().join("launcher_id")
+}
+
+/// A stable launcher identity that survives restarts.
+///
+/// Reconcile selects a launcher's desired sessions by `sessions.launcher_id`,
+/// so minting a fresh random id on every boot stranded a restarted launcher's
+/// own sessions — none matched the new id until each proxy happened to
+/// reconnect on its own. Persisting the id (creating one on first run) lets a
+/// restarted launcher reclaim and relaunch its prior sessions.
+pub fn persistent_launcher_id() -> Uuid {
+    read_or_create_id(&launcher_id_path())
+}
+
+/// Read a UUID from `path`, or generate one and write it. Split out from
+/// [`persistent_launcher_id`] so it can be tested against a temp path.
+fn read_or_create_id(path: &Path) -> Uuid {
+    if let Ok(contents) = std::fs::read_to_string(path) {
+        if let Ok(id) = Uuid::parse_str(contents.trim()) {
+            return id;
+        }
+    }
+    let id = Uuid::new_v4();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) = std::fs::write(path, id.to_string()) {
+        tracing::warn!(
+            "Failed to persist launcher id to {} ({}); using ephemeral id {} for this run",
+            path.display(),
+            e,
+            id
+        );
+    }
+    id
+}
+
 pub fn clear_sessions() -> anyhow::Result<()> {
     let mut config = load_config();
     if !config.sessions.is_empty() {
@@ -84,6 +122,30 @@ pub fn clear_sessions() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launcher_id_is_stable_across_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher_id");
+        // Created on first call, identical on the second (survives "restart").
+        let first = read_or_create_id(&path);
+        assert!(path.exists());
+        let second = read_or_create_id(&path);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn launcher_id_regenerates_on_garbage() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher_id");
+        std::fs::write(&path, "not-a-uuid").unwrap();
+        let id = read_or_create_id(&path);
+        // A fresh valid id was written back over the garbage.
+        assert_eq!(
+            Uuid::parse_str(std::fs::read_to_string(&path).unwrap().trim()).unwrap(),
+            id
+        );
+    }
 
     #[test]
     fn parse_full_config() {

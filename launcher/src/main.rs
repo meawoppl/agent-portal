@@ -9,7 +9,6 @@ mod service;
 use clap::{Parser, Subcommand};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 #[command(name = "agent-portal")]
@@ -176,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
         .or(config.name)
         .unwrap_or_else(claude_session_lib::hostname_or_unknown);
 
-    let launcher_id = Uuid::new_v4();
+    let launcher_id = config::persistent_launcher_id();
 
     tracing::info!(
         "Starting launcher '{}' (id: {})",
