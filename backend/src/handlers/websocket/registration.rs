@@ -141,6 +141,11 @@ pub fn register_or_update_session(
                 // backoff pinned at zero. The counter is now reset only on a
                 // healthy completed run (see `record_exit_for_backoff`), so it
                 // reflects runtime health and the crash-loop backoff can escalate.
+                //
+                // Release the launch lease: registration means this launch is no
+                // longer in flight, so reconcile may claim it again once the
+                // session stops running.
+                sessions::launch_lease_until.eq(None::<chrono::NaiveDateTime>),
                 sessions::last_activity.eq(diesel::dsl::now),
                 sessions::working_directory.eq(params.working_directory),
                 sessions::git_branch.eq(params.git_branch),
