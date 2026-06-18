@@ -148,7 +148,14 @@ impl Component for PermissionHandler {
                 true
             }
             PermissionHandlerMsg::SetQuestionAnswer(question_idx, answer) => {
-                self.question_answers.insert(question_idx, answer);
+                // A blank answer (e.g. a cleared "something else" field)
+                // un-answers the question rather than counting an empty string
+                // as a valid answer.
+                if answer.trim().is_empty() {
+                    self.question_answers.remove(&question_idx);
+                } else {
+                    self.question_answers.insert(question_idx, answer);
+                }
                 self.multi_select_options.remove(&question_idx);
                 true
             }
