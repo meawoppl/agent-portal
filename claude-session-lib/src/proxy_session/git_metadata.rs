@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use claude_codes::io::ContentBlock;
 use claude_codes::ClaudeOutput;
-use shared::ProxyToServer;
+use shared::{PrRef, ProxyToServer};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 use uuid::Uuid;
@@ -16,6 +16,7 @@ pub(super) struct GitMetadataState {
     pub current_branch: Arc<Mutex<Option<String>>>,
     pub current_pr_url: Arc<Mutex<Option<String>>>,
     pub current_repo_url: Arc<Mutex<Option<String>>>,
+    pub current_open_prs: Arc<Mutex<Vec<PrRef>>>,
 }
 
 impl GitMetadataState {
@@ -24,6 +25,7 @@ impl GitMetadataState {
             current_branch: Arc::new(Mutex::new(git_branch)),
             current_pr_url: Arc::new(Mutex::new(None)),
             current_repo_url: Arc::new(Mutex::new(None)),
+            current_open_prs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -113,6 +115,57 @@ pub(super) fn get_pr_url(cwd: &str, branch: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// List all open PRs in the repo via the `gh` CLI, sorted by number ascending.
+/// Returns an empty list if `gh` is unavailable, errors, or there are none.
+pub(super) fn get_open_prs(cwd: &str) -> Vec<PrRef> {
+    let output = std::process::Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,url,headRefName",
+        ])
+        .current_dir(cwd)
+        .output()
+        .ok();
+    let Some(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    // Parse via Value so we don't depend on a serde-derive struct here.
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).unwrap_or(serde_json::Value::Null);
+    let mut prs: Vec<PrRef> = parsed
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let number = item.get("number")?.as_i64()?;
+                    let url = item.get("url")?.as_str()?.to_string();
+                    let branch = item
+                        .get("headRefName")
+                        .and_then(|b| b.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    Some(PrRef {
+                        number,
+                        url,
+                        branch,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    prs.sort_by_key(|p| p.number);
+    prs
+}
+
 pub(super) fn claude_output_has_git_signal(output: &ClaudeOutput) -> bool {
     if let ClaudeOutput::User(user) = output {
         for block in &user.message.content {
@@ -189,16 +242,19 @@ pub(super) async fn check_and_send_branch_update(
         .as_deref()
         .and_then(|b| get_pr_url(working_directory, b));
     let new_repo_url = get_repo_url(working_directory);
+    let new_open_prs = get_open_prs(working_directory);
 
     let mut branch_guard = state.current_branch.lock().await;
     let mut pr_guard = state.current_pr_url.lock().await;
     let mut repo_guard = state.current_repo_url.lock().await;
+    let mut open_prs_guard = state.current_open_prs.lock().await;
 
     let branch_changed = *branch_guard != new_branch;
     let pr_changed = *pr_guard != new_pr_url;
     let repo_changed = *repo_guard != new_repo_url;
+    let open_prs_changed = *open_prs_guard != new_open_prs;
 
-    if branch_changed || pr_changed || repo_changed {
+    if branch_changed || pr_changed || repo_changed || open_prs_changed {
         if branch_changed {
             debug!(
                 "Git branch changed: {:?} -> {:?}",
@@ -208,19 +264,29 @@ pub(super) async fn check_and_send_branch_update(
         if pr_changed {
             debug!("PR URL changed: {:?} -> {:?}", *pr_guard, new_pr_url);
         }
+        if open_prs_changed {
+            debug!(
+                "Open PRs changed: {} -> {}",
+                open_prs_guard.len(),
+                new_open_prs.len()
+            );
+        }
         *branch_guard = new_branch.clone();
         *pr_guard = new_pr_url.clone();
         *repo_guard = new_repo_url.clone();
+        *open_prs_guard = new_open_prs.clone();
 
         drop(branch_guard);
         drop(pr_guard);
         drop(repo_guard);
+        drop(open_prs_guard);
 
         let update_msg = ProxyToServer::SessionUpdate {
             session_id,
             git_branch: new_branch,
             pr_url: new_pr_url,
             repo_url: new_repo_url,
+            open_prs: new_open_prs,
         };
 
         let mut ws = ws_write.lock().await;

@@ -61,6 +61,10 @@ pub struct Session {
     pub launch_failure_count: i32,
     pub last_launch_attempt_at: Option<NaiveDateTime>,
     pub launch_lease_until: Option<NaiveDateTime>,
+    /// All open PRs in the repo as a JSON array of `shared::PrRef`
+    /// (`[{number,url,branch}]`). Surfaces on the wire via `SessionWithRole`'s
+    /// flatten, where the frontend deserializes it into `Vec<PrRef>`.
+    pub open_prs: serde_json::Value,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)

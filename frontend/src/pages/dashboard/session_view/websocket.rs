@@ -26,7 +26,12 @@ pub enum WsEvent {
     /// initial load.
     HistoryBatch(Vec<String>, Option<String>),
     Permission(PendingPermission),
-    BranchChanged(Option<String>, Option<String>, Option<String>),
+    BranchChanged(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Vec<shared::PrRef>,
+    ),
     ContinuationStatus {
         continuation_id: Uuid,
         status: String,
@@ -199,8 +204,11 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             git_branch,
             pr_url,
             repo_url,
+            open_prs,
         } => {
-            on_event.emit(WsEvent::BranchChanged(git_branch, pr_url, repo_url));
+            on_event.emit(WsEvent::BranchChanged(
+                git_branch, pr_url, repo_url, open_prs,
+            ));
         }
         // PR 2 of N: route the typed per-turn metrics frame into the
         // SessionView instead of silently dropping it. The previous
@@ -522,7 +530,7 @@ mod tests {
             WsEvent::Output(_, _) => "Output",
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",
-            WsEvent::BranchChanged(_, _, _) => "BranchChanged",
+            WsEvent::BranchChanged(_, _, _, _) => "BranchChanged",
             WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",
         }

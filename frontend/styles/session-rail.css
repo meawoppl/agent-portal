@@ -275,6 +275,23 @@
     font-size: 0.65rem;
 }
 
+/* Open-PR numbers on the collapsed pill: one span per PR, each carrying its
+   branch name as a hover tooltip. LTR so "#34 #35" reads left-to-right (the
+   plain branch view uses rtl to keep the tail visible when truncated). */
+.pill-branch.pill-prs {
+    direction: ltr;
+    font-style: normal;
+}
+
+.pill-pr-num {
+    margin-inline-end: 5px;
+    cursor: help;
+}
+
+.pill-pr-num:last-child {
+    margin-inline-end: 0;
+}
+
 .session-pill.status-disconnected .pill-branch {
     color: var(--text-secondary);
 }
