@@ -293,7 +293,10 @@ fn render_turn_completed(
                     }
                 }
                 {
-                    if let Some(status) = status {
+                    // The `✓ completed` label already conveys a normal finish;
+                    // only surface the raw status when it says something else
+                    // (a non-"completed" stop reason), so it isn't shown twice.
+                    if let Some(status) = status.filter(|s| !s.eq_ignore_ascii_case("completed")) {
                         html! {
                             <span class="stat-item stop-reason" title={status_title.clone()}>
                                 { status }
