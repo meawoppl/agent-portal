@@ -85,6 +85,13 @@ pub struct PermissionHandler {
     multi_select_options: HashMap<usize, HashSet<usize>>,
     question_answers: QuestionAnswers,
     dialog_ref: NodeRef,
+    /// Focus the dialog container exactly once when it appears, never on the
+    /// re-renders that typing triggers. Without this gate, `rendered()` called
+    /// `el.focus()` after *every* render, so each keystroke in the "Other"
+    /// field yanked focus back to the container — you could only enter one
+    /// character at a time. Set when a request arrives or the session regains
+    /// focus; cleared once consumed in `rendered()`.
+    needs_focus: bool,
 }
 
 impl Component for PermissionHandler {
@@ -104,14 +111,29 @@ impl Component for PermissionHandler {
             multi_select_options: HashMap::new(),
             question_answers: QuestionAnswers::new(),
             dialog_ref: NodeRef::default(),
+            needs_focus: false,
         }
     }
 
+    fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
+        // Re-grab keyboard-nav focus only when the session transitions *into*
+        // focus with a dialog already pending — not on unrelated prop changes
+        // (which would re-introduce the focus-steal during typing).
+        if ctx.props().focused && !old_props.focused && self.request.is_some() {
+            self.needs_focus = true;
+        }
+        true
+    }
+
     fn rendered(&mut self, ctx: &Context<Self>, _first_render: bool) {
-        if self.request.is_some() && ctx.props().focused {
+        // Only when a dialog just appeared (or the session regained focus),
+        // and only while this session is focused — clear the flag once we've
+        // actually grabbed focus, so typing-triggered re-renders never refocus.
+        if self.needs_focus && ctx.props().focused {
             if let Some(el) = self.dialog_ref.cast::<web_sys::HtmlElement>() {
                 let _ = el.focus();
             }
+            self.needs_focus = false;
         }
     }
 
@@ -123,6 +145,9 @@ impl Component for PermissionHandler {
                 self.selected = 0;
                 self.question_answers.clear();
                 self.multi_select_options.clear();
+                // A dialog just appeared — grab keyboard-nav focus once on the
+                // next render (consumed in `rendered`), not on every keystroke.
+                self.needs_focus = true;
                 if was_empty {
                     ctx.props().on_pending_changed.emit(true);
                 }
