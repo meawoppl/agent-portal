@@ -280,7 +280,7 @@
 .codex-item-in-progress .tool-use-header::before,
 .codex-item-in-progress .message-header::before {
     content: "\25CF"; /* filled bullet */
-    color: #e0af68; /* tokyo-night orange — matches portal "in-flight" cues */
+    color: var(--warning); /* tokyo-night orange — portal "in-flight" cue */
     margin-right: 0.5rem;
     animation: codex-item-pulse 1.5s ease-in-out infinite;
     font-size: 0.7em;
@@ -294,16 +294,62 @@
 }
 
 .codex-item-in-progress .tool-meta {
-    color: #e0af68;
+    color: var(--warning);
     font-style: italic;
 }
 
-/* Honour reduced-motion: skip the pulse, keep the dot static. */
+/* Command-execution status meta (Bash cards): outcome color from the palette,
+ * with a ✓/✗ glyph that pops in when the running→completed event lands. The
+ * card's DOM node is reused across that transition (shared dedup key), so the
+ * pulse stops and this completed status fades/pops in rather than snapping. */
+.codex-cmd-status {
+    transition: color 0.25s ease;
+}
+
+.codex-cmd-status.running {
+    color: var(--warning);
+    font-style: italic;
+}
+
+.codex-cmd-status.ok {
+    color: var(--success);
+}
+
+.codex-cmd-status.err {
+    color: var(--error);
+}
+
+.codex-cmd-glyph {
+    display: inline-block;
+    margin-right: 0.3em;
+    animation: codex-check-pop 0.25s ease-out;
+}
+
+@keyframes codex-check-pop {
+    from {
+        opacity: 0;
+        transform: scale(0.6);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Honour reduced-motion: skip the pulse and the check pop, keep colors static. */
 @media (prefers-reduced-motion: reduce) {
     .codex-item-in-progress .tool-use-header::before,
     .codex-item-in-progress .message-header::before {
         animation: none;
         opacity: 0.85;
+    }
+
+    .codex-cmd-glyph {
+        animation: none;
+    }
+
+    .codex-cmd-status {
+        transition: none;
     }
 }
 
