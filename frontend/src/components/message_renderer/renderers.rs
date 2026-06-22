@@ -465,6 +465,7 @@ pub fn render_result_message(
                     { error_html }
                     <div class={classes!("claude-message", "result-message", status_class)}>
                         <div class="result-stats-bar">
+                            <span class={classes!("result-done-label", status_class)}>{ "failed" }</span>
                             <span class={classes!("result-status", status_class)}>{ "✗" }</span>
                             <span class="stat-item duration" title={timing_tooltip.clone()}>
                                 { format_duration(duration_ms) }
@@ -481,6 +482,9 @@ pub fn render_result_message(
     html! {
         <div class={classes!("claude-message", "result-message", status_class)}>
             <div class="result-stats-bar">
+                <span class={classes!("result-done-label", status_class)}>
+                    { if is_error { "failed" } else { "completed" } }
+                </span>
                 <span class={classes!("result-status", status_class)}>
                     { if is_error { "✗" } else { "✓" } }
                 </span>
