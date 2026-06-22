@@ -894,6 +894,21 @@
     color: var(--error);
 }
 
+/* "completed" / "failed" label shown to the LEFT of the ✓/✗ glyph. Matches the
+ * codex Bash card's completed status — palette color, normal weight. The
+ * stats-bar's flex `gap` spaces it from the glyph. */
+.result-message .result-done-label {
+    font-size: 0.8rem;
+}
+
+.result-message .result-done-label.success {
+    color: var(--success);
+}
+
+.result-message .result-done-label.error {
+    color: var(--error);
+}
+
 .result-message .stat-item {
     color: var(--text-secondary);
     cursor: help;
