@@ -13,13 +13,7 @@ use yew::prelude::*;
 /// and a tool-use-header with icon + name + optional `status` meta line.
 /// Returns `html! {}` when `body` is empty so callers can short-circuit
 /// empty-data cases by handing in a no-op body.
-fn tool_card(
-    icon: &str,
-    name: String,
-    status: Option<String>,
-    body: Html,
-    completed: bool,
-) -> Html {
+fn tool_card(icon: &str, name: String, status: Option<Html>, body: Html, completed: bool) -> Html {
     html! {
         <div class={item_card_classes(completed)}>
             <div class="message-body">
@@ -40,6 +34,36 @@ fn tool_card(
     }
 }
 
+/// Build the command-execution status meta: an outcome-colored label
+/// (palette: `--success` / `--error` / `--warning`) with a ✓/✗ glyph that
+/// pops in on completion. Styling + the fade live in `messages.css`
+/// (`.codex-cmd-status` / `.codex-cmd-glyph`).
+fn command_status_meta(it: &CommandExecutionItem, completed: bool) -> Html {
+    if !completed {
+        return html! { <span class="codex-cmd-status running">{ "running\u{2026}" }</span> };
+    }
+    let (kind, glyph, label) = match it.exit_code {
+        Some(0) => ("ok", "\u{2713}", "completed".to_string()),
+        Some(code) => ("err", "\u{2717}", format!("exit {code}")),
+        None => match it.status {
+            CommandExecutionStatus::Completed => ("ok", "\u{2713}", "completed".to_string()),
+            CommandExecutionStatus::Failed => ("err", "\u{2717}", "failed".to_string()),
+            CommandExecutionStatus::Declined => ("err", "\u{2717}", "declined".to_string()),
+            CommandExecutionStatus::InProgress => ("running", "", "running\u{2026}".to_string()),
+        },
+    };
+    html! {
+        <span class={classes!("codex-cmd-status", kind)}>
+            { if glyph.is_empty() {
+                html! {}
+            } else {
+                html! { <span class="codex-cmd-glyph">{ glyph }</span> }
+            } }
+            { label }
+        </span>
+    }
+}
+
 pub(super) fn render_command_execution(it: &CommandExecutionItem, completed: bool) -> Html {
     let cmd = if it.command.is_empty() {
         "(unknown command)"
@@ -47,16 +71,6 @@ pub(super) fn render_command_execution(it: &CommandExecutionItem, completed: boo
         it.command.as_str()
     };
     let out = it.aggregated_output.as_deref().unwrap_or("");
-
-    let status_text = if completed {
-        match it.exit_code {
-            Some(0) => "completed".to_string(),
-            Some(code) => format!("exit {}", code),
-            None => command_status_label(&it.status).to_string(),
-        }
-    } else {
-        "running...".to_string()
-    };
 
     let is_error = it.exit_code.is_some_and(|c| c != 0);
 
@@ -88,16 +102,8 @@ pub(super) fn render_command_execution(it: &CommandExecutionItem, completed: boo
         </>
     };
 
-    tool_card("$", "Bash".into(), Some(status_text), body, completed)
-}
-
-fn command_status_label(status: &CommandExecutionStatus) -> &'static str {
-    match status {
-        CommandExecutionStatus::InProgress => "in_progress",
-        CommandExecutionStatus::Completed => "completed",
-        CommandExecutionStatus::Failed => "failed",
-        CommandExecutionStatus::Declined => "declined",
-    }
+    let status = command_status_meta(it, completed);
+    tool_card("$", "Bash".into(), Some(status), body, completed)
 }
 
 fn patch_status_label(status: &PatchApplyStatus) -> &'static str {
@@ -136,7 +142,7 @@ pub(super) fn render_file_change(it: &FileChangeItem, completed: bool) -> Html {
     tool_card(
         "\u{1f4dd}",
         "File Changes".into(),
-        Some(status_label),
+        Some(html! { { status_label } }),
         body,
         completed,
     )
@@ -183,7 +189,7 @@ pub(super) fn render_mcp_tool_call(it: &McpToolCallItem, completed: bool) -> Htm
     tool_card(
         "\u{1f50c}",
         format!("{} / {}", server, tool),
-        Some(status),
+        Some(html! { { status } }),
         html! {},
         completed,
     )
@@ -296,5 +302,11 @@ pub(super) fn render_collab_agent_tool_call(it: &CollabAgentToolCallItem, comple
         </>
     };
 
-    tool_card("\u{1F916}", name, Some(status_text), body, completed)
+    tool_card(
+        "\u{1F916}",
+        name,
+        Some(html! { { status_text } }),
+        body,
+        completed,
+    )
 }

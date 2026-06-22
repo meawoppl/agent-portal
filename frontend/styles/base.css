@@ -10,6 +10,7 @@
     --link-visited: #9d7cd8;
     --success: #9ece6a;
     --error: #f7768e;
+    --warning: #e0af68;
     --border: #292e42;
     --font-mono: 'Courier New', Consolas, 'Liberation Mono', monospace;
 }
