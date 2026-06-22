@@ -245,8 +245,8 @@ fn render_turn_completed(
     html! {
         <div class="claude-message result-message success">
             <div class="result-stats-bar">
-                <span class="result-done-label success">{ "completed" }</span>
                 <span class="result-status success">{ "\u{2713}" }</span>
+                <span class="result-done-label success">{ "completed" }</span>
                 {
                     if let Some(ms) = duration_ms {
                         html! {
