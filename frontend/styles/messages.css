@@ -303,6 +303,7 @@
  * card's DOM node is reused across that transition (shared dedup key), so the
  * pulse stops and this completed status fades/pops in rather than snapping. */
 .codex-cmd-status {
+    display: inline-block;
     transition: color 0.25s ease;
 }
 
@@ -317,6 +318,49 @@
 
 .codex-cmd-status.err {
     color: var(--error);
+}
+
+/* Animated ellipsis after "running": cycles . → .. → ... → . The span is
+ * empty in markup; the dots come from the keyframes. Fixed inline-block width
+ * reserves space for three dots so the row doesn't jiggle as they change. */
+.codex-running-dots {
+    display: inline-block;
+    width: 1.1em;
+    text-align: left;
+}
+
+.codex-running-dots::after {
+    content: ".";
+    animation: codex-running-dots 1.2s steps(1, end) infinite;
+}
+
+@keyframes codex-running-dots {
+    0% {
+        content: ".";
+    }
+    33% {
+        content: "..";
+    }
+    66% {
+        content: "...";
+    }
+}
+
+/* Completed status pops in (scale + fade) when it replaces the running label,
+ * so running → completed/failed morphs rather than snapping. */
+.codex-cmd-status.done {
+    animation: codex-status-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes codex-status-pop {
+    from {
+        opacity: 0;
+        transform: scale(0.8) translateY(1px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
 }
 
 .codex-cmd-glyph {
@@ -344,7 +388,13 @@
         opacity: 0.85;
     }
 
-    .codex-cmd-glyph {
+    .codex-cmd-glyph,
+    .codex-cmd-status.done {
+        animation: none;
+    }
+
+    .codex-running-dots::after {
+        content: "\2026"; /* static ellipsis, no cycling */
         animation: none;
     }
 
