@@ -39,8 +39,17 @@ fn tool_card(icon: &str, name: String, status: Option<Html>, body: Html, complet
 /// pops in on completion. Styling + the fade live in `messages.css`
 /// (`.codex-cmd-status` / `.codex-cmd-glyph`).
 fn command_status_meta(it: &CommandExecutionItem, completed: bool) -> Html {
+    // "running" with a CSS-animated ellipsis (. .. ... cycling); the empty
+    // `.codex-running-dots` span is filled by the `codex-running-dots` keyframes.
+    let running = || {
+        html! {
+            <span class="codex-cmd-status running">
+                { "running" }<span class="codex-running-dots"></span>
+            </span>
+        }
+    };
     if !completed {
-        return html! { <span class="codex-cmd-status running">{ "running\u{2026}" }</span> };
+        return running();
     }
     let (kind, glyph, label) = match it.exit_code {
         Some(0) => ("ok", "\u{2713}", "completed".to_string()),
@@ -49,16 +58,13 @@ fn command_status_meta(it: &CommandExecutionItem, completed: bool) -> Html {
             CommandExecutionStatus::Completed => ("ok", "\u{2713}", "completed".to_string()),
             CommandExecutionStatus::Failed => ("err", "\u{2717}", "failed".to_string()),
             CommandExecutionStatus::Declined => ("err", "\u{2717}", "declined".to_string()),
-            CommandExecutionStatus::InProgress => ("running", "", "running\u{2026}".to_string()),
+            CommandExecutionStatus::InProgress => return running(),
         },
     };
+    // `done` drives the pop-in; `ok`/`err` the palette color.
     html! {
-        <span class={classes!("codex-cmd-status", kind)}>
-            { if glyph.is_empty() {
-                html! {}
-            } else {
-                html! { <span class="codex-cmd-glyph">{ glyph }</span> }
-            } }
+        <span class={classes!("codex-cmd-status", "done", kind)}>
+            <span class="codex-cmd-glyph">{ glyph }</span>
             { label }
         </span>
     }
