@@ -152,7 +152,7 @@ pub async fn send_agent_message(
     {
         Ok(seq) => seq,
         Err(e) => {
-            error!("Failed to bump input_seq for session {}: {}", target_id, e);
+            error!("INPUT_SEQ_BUMP_FAILED session={}: {}", target_id, e);
             1
         }
     };
@@ -167,8 +167,10 @@ pub async fn send_agent_message(
         .values(&new_input)
         .execute(&mut conn)
     {
+        // Same stable marker as the WS input path so one alert rule catches
+        // both. See CLAUDE.md "Schema-drift alerting".
         error!(
-            "Failed to persist pending input for session {} (delivering live anyway): {}",
+            "PENDING_INPUT_PERSIST_FAILED session={} (delivered live): {}",
             target_id, e
         );
     }

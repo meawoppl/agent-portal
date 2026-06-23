@@ -428,7 +428,10 @@ fn handle_web_input(
                 .values(&new_input)
                 .execute(&mut conn)
             {
-                error!("Failed to store pending input: {}", e);
+                // Stable marker for log-based alerting: a recurring persist
+                // failure here usually means schema drift (e.g. a migration
+                // recorded-but-not-applied). See CLAUDE.md "Schema-drift alerting".
+                error!("PENDING_INPUT_PERSIST_FAILED session={}: {}", session_id, e);
             }
             next_seq
         }

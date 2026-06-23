@@ -238,6 +238,26 @@ diesel migration generate add_feature_name
 
 **If renaming existing migrations:** After renaming a migration directory, existing databases need their `__diesel_schema_migrations` table updated. See `scripts/fix_migration_names.sql` for an example.
 
+### Migration hygiene: avoiding "recorded-but-not-applied" drift
+
+The backend trusts `__diesel_schema_migrations`: at startup it only runs migrations **not listed** there. If that table claims a migration is applied but the actual DDL never ran, Diesel **skips it**, the backend starts cleanly, and the missing column only surfaces as a **runtime write failure** (e.g. `column "send_mode" of relation "pending_inputs" does not exist`). This bit us once — every input INSERT failed (silently on the web path, as a 500 on the agent path) while reads worked.
+
+To avoid it:
+
+- **Never hand-edit `__diesel_schema_migrations` without making the schema match.** Reconciling renamed migrations (`fix_migration_names.sql`) inserts version rows — only do that when the columns those migrations add **physically exist**. After any such reconcile, verify with `\d <table>`.
+- **Don't restore partial/mismatched DB snapshots** (a snapshot of the migrations table without the corresponding columns produces exactly this drift).
+- **Symptom → fix:** a `column "…" does not exist` at runtime on a table whose migration *is* recorded means recorded-but-not-applied drift. Fix by applying the column directly (`ALTER TABLE … ADD COLUMN IF NOT EXISTS …` matching the migration's `up.sql`); the migrations table already records it, so future restarts stay consistent.
+
+### Schema-drift alerting
+
+DB write failures on the input path are **swallowed** (logged, then delivery continues) so a transient DB hiccup never drops a live message. The downside is drift can hide in the logs. Both write paths emit a stable marker — alert on it:
+
+```
+PENDING_INPUT_PERSIST_FAILED   # pending_inputs INSERT failed (web + agent paths)
+```
+
+A recurring `PENDING_INPUT_PERSIST_FAILED` right after a deploy almost always means schema drift (a migration recorded-but-not-applied) — see above. A one-off is likely a transient DB blip.
+
 ### Adding a New API Endpoint
 
 1. **Add handler** in `backend/src/handlers/`:
