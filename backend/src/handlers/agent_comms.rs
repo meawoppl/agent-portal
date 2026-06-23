@@ -127,10 +127,25 @@ pub async fn send_agent_message(
         .map_err(|_| AppError::NotFound("session"))?;
 
     // Attribute the message so the recipient knows where it came from. An
-    // agent sender supplies its own session id (`from`); the human web page
-    // doesn't, so fall back to the sending user's display name.
+    // agent sender supplies its own session id (`from`); we tag the bumper with
+    // that session's agent type (claude/codex) so the UI can render
+    // "Message from Codex (<short>)". The human web page sends no `from`, so
+    // fall back to the sending user's display name.
     let bumper = match req.from.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(from) => format!("[message from agent {from}]"),
+        Some(from) => {
+            let sender_agent = from
+                .parse::<Uuid>()
+                .ok()
+                .and_then(|id| {
+                    sessions::table
+                        .find(id)
+                        .select(sessions::agent_type)
+                        .first::<String>(&mut conn)
+                        .ok()
+                })
+                .unwrap_or_else(|| "agent".to_string());
+            format!("[message from {sender_agent} {from}]")
+        }
         None => format!(
             "[portal message from {}]",
             user_display_name(&mut conn, user_id)
