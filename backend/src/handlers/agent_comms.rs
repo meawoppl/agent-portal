@@ -14,7 +14,7 @@ use axum::{
 };
 use diesel::prelude::*;
 use tower_cookies::Cookies;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use shared::api::{
@@ -139,12 +139,23 @@ pub async fn send_agent_message(
     };
     let content = serde_json::Value::String(format!("{bumper}\n{message}"));
 
-    // Mirror the WS input path: bump the per-session seq, persist a pending
-    // input row, then forward to the live proxy (queued if disconnected).
-    let seq: i64 = diesel::update(sessions::table.find(target_id))
+    // Mirror the WS input path's *tolerant* handling (see `handle_web_input`):
+    // the seq bump and the pending-input row are best-effort — that path
+    // `.unwrap_or`s the update and only logs an INSERT failure, then still
+    // delivers live. Propagating these as `?` is what turned a latent input-
+    // pipeline write error (one the WS path silently swallows) into a 500 on
+    // every send. Delivering to the live proxy is what actually matters.
+    let seq: i64 = match diesel::update(sessions::table.find(target_id))
         .set(sessions::input_seq.eq(sessions::input_seq + 1))
         .returning(sessions::input_seq)
-        .get_result(&mut conn)?;
+        .get_result(&mut conn)
+    {
+        Ok(seq) => seq,
+        Err(e) => {
+            error!("Failed to bump input_seq for session {}: {}", target_id, e);
+            1
+        }
+    };
 
     let new_input = NewPendingInput {
         session_id: target_id,
@@ -152,9 +163,15 @@ pub async fn send_agent_message(
         content: serde_json::to_string(&content).unwrap_or_default(),
         send_mode: None,
     };
-    diesel::insert_into(pending_inputs::table)
+    if let Err(e) = diesel::insert_into(pending_inputs::table)
         .values(&new_input)
-        .execute(&mut conn)?;
+        .execute(&mut conn)
+    {
+        error!(
+            "Failed to persist pending input for session {} (delivering live anyway): {}",
+            target_id, e
+        );
+    }
 
     let delivered = app_state.session_manager.send_to_session(
         &session.session_key,
