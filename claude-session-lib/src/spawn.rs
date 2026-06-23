@@ -55,10 +55,9 @@ pub(crate) async fn spawn_claude(
     let mut cmd = Command::new(claude_path);
     cmd.args(&args);
     cmd.current_dir(&config.working_directory);
-
-    // Expose this session's id so tools the agent spawns (notably
-    // `agent-portal message send`) can attribute messages as coming from it.
-    cmd.env("PORTAL_SESSION_ID", config.session_id.to_string());
+    // Note: no need to inject a session-id env var — Claude Code already
+    // exports `CLAUDE_CODE_SESSION_ID` (equal to the `--session-id` we pass) to
+    // the tools it spawns, which `agent-portal message` reads for attribution.
 
     // Log the full command for diagnostics.
     tracing::info!(

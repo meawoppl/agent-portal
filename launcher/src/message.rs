@@ -3,11 +3,23 @@
 //! authenticated with the launcher's stored proxy token (`launcher.json`) — so
 //! an agent can just shell out to `agent-portal message send …` with no extra
 //! credentials. The message is delivered to the target session's agent as an
-//! input turn, attributed with this session's id (`$PORTAL_SESSION_ID`).
+//! input turn, attributed with the sender's session id.
 
 use anyhow::{anyhow, Context, Result};
 
 use shared::api::{AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse};
+
+/// The calling agent's own session id, read from whatever it already exposes —
+/// no portal-side injection needed. Claude Code sets `CLAUDE_CODE_SESSION_ID`
+/// to the id we spawned it with (`--session-id <portal id>`), so it equals the
+/// portal session id. `PORTAL_SESSION_ID` is kept as a manual/explicit
+/// override. Returns `None` for callers that expose neither (e.g. a human
+/// shell), in which case the recipient falls back to user attribution.
+fn sender_session_id() -> Option<String> {
+    ["CLAUDE_CODE_SESSION_ID", "PORTAL_SESSION_ID"]
+        .into_iter()
+        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
+}
 
 /// Resolve the HTTP API base URL and auth token from the launcher config.
 fn api_base() -> Result<(String, String)> {
@@ -43,7 +55,7 @@ pub async fn list() -> Result<()> {
         println!("No sessions found.");
         return Ok(());
     }
-    let self_id = std::env::var("PORTAL_SESSION_ID").ok();
+    let self_id = sender_session_id();
     for s in &data.sessions {
         let marker = if self_id.as_deref() == Some(&s.id.to_string()) {
             " (this session)"
@@ -62,9 +74,7 @@ pub async fn list() -> Result<()> {
 /// session as an input turn.
 pub async fn send(agent_id: &str, message: &str) -> Result<()> {
     let (base, token) = api_base()?;
-    let from = std::env::var("PORTAL_SESSION_ID")
-        .ok()
-        .filter(|s| !s.is_empty());
+    let from = sender_session_id();
     let resp = reqwest::Client::new()
         .post(format!("{base}/api/agent/sessions/{agent_id}/message"))
         .bearer_auth(&token)
