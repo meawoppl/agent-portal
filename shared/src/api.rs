@@ -925,6 +925,44 @@ pub struct MetricBucketsResponse {
     pub buckets: Vec<MetricBucket>,
 }
 
+// ---- Inter-agent messaging --------------------------------------------------
+
+/// One of the caller's sessions, as listed for the agent-messaging page/API
+/// (`GET /api/agent/sessions`). A lightweight summary — enough to pick a
+/// recipient — not the full `SessionInfo`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSessionInfo {
+    pub id: Uuid,
+    pub session_name: String,
+    pub working_directory: String,
+    pub agent_type: String,
+    pub status: String,
+    pub hostname: String,
+}
+
+/// Response for `GET /api/agent/sessions`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSessionsResponse {
+    #[serde(default)]
+    pub sessions: Vec<AgentSessionInfo>,
+}
+
+/// Body for `POST /api/agent/sessions/{id}/message`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SendAgentMessageRequest {
+    pub message: String,
+}
+
+/// Response for `POST /api/agent/sessions/{id}/message`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SendAgentMessageResponse {
+    /// True if a live proxy received it; false means it was queued for the
+    /// session's next reconnect.
+    pub delivered: bool,
+    /// The input sequence number assigned to the injected message.
+    pub seq: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

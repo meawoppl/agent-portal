@@ -8,8 +8,8 @@ pub mod utils;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 use pages::{
-    access_denied::AccessDeniedPage, admin::AdminPage, banned::BannedPage,
-    dashboard::DashboardPage, settings::SettingsPage, splash::SplashPage,
+    access_denied::AccessDeniedPage, admin::AdminPage, agent_messaging::AgentMessagingPage,
+    banned::BannedPage, dashboard::DashboardPage, settings::SettingsPage, splash::SplashPage,
 };
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -24,6 +24,8 @@ pub enum Route {
     Settings,
     #[at("/admin")]
     Admin,
+    #[at("/agents")]
+    Agents,
     #[at("/banned")]
     Banned,
     #[at("/access-denied")]
@@ -52,6 +54,7 @@ fn switch(routes: Route) -> Html {
         Route::Dashboard => html! { <DashboardPage /> },
         Route::Settings => html! { <SettingsRoute /> },
         Route::Admin => html! { <AdminRoute /> },
+        Route::Agents => html! { <AgentMessagingPage /> },
         Route::Banned => html! { <BannedPage /> },
         Route::AccessDenied => html! { <AccessDeniedPage /> },
     }

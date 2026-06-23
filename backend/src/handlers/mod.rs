@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod agent_comms;
 pub mod auth;
 pub mod config;
 pub mod device_flow;

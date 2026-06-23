@@ -25,7 +25,8 @@ pub mod timezone;
 // API client types and trait
 pub mod api;
 pub use api::{
-    CodexPermissionInput, CompactionExtra, InitExtra, ModelUsage, ModelUsageEntry,
+    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, CompactionExtra, InitExtra,
+    ModelUsage, ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse,
     SoundSettingsResponse, TaskNotificationExtra, TurnMetrics, TurnMetricsResponse,
 };
 

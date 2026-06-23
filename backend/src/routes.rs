@@ -119,6 +119,16 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/sessions/{id}/turn-metrics",
             get(handlers::turn_metrics::list_turn_metrics),
         )
+        // Inter-agent messaging: list your sessions, post a message into one
+        // (cookie or Bearer-token auth; same-user only).
+        .route(
+            "/api/agent/sessions",
+            get(handlers::agent_comms::list_agent_sessions),
+        )
+        .route(
+            "/api/agent/sessions/{id}/message",
+            post(handlers::agent_comms::send_agent_message),
+        )
         .route(
             "/api/metrics/recent",
             get(handlers::turn_metrics::list_recent_user_turn_metrics),
