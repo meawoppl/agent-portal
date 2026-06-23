@@ -52,6 +52,16 @@ fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
     load_codex_threads().get(&session_id).cloned()
 }
 
+/// Reverse of the persisted map: given a codex thread id (which a codex agent
+/// exposes as `$CODEX_THREAD_ID`), find the portal session id it belongs to.
+/// Lets `agent-portal message` attribute codex senders with no injection.
+pub(crate) fn session_id_for_codex_thread(thread_id: &str) -> Option<Uuid> {
+    load_codex_threads()
+        .into_iter()
+        .find(|(_, tid)| tid == thread_id)
+        .map(|(session_id, _)| session_id)
+}
+
 fn make_codex_thread_id_sink(session_id: Uuid) -> CodexThreadIdSink {
     std::sync::Arc::new(move |thread_id: String| {
         let mut map = load_codex_threads();
