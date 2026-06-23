@@ -84,35 +84,50 @@ pub fn render_optimistic_user_message(
 /// Parse the `[message from agent <session-id>]\n<body>` bumper that
 /// `agent-portal message` prepends to inter-agent messages. Returns
 /// `(sender_session_id, body)` when it matches.
-fn parse_other_agent_message(text: &str) -> Option<(String, String)> {
-    let rest = text.strip_prefix("[message from agent ")?;
+/// Parse the inter-agent bumper `[message from <agent_type> <session-id>]\n<body>`
+/// (older messages use the literal `agent` in place of the type). Returns
+/// `(agent_type, sender_session_id, body)`.
+fn parse_other_agent_message(text: &str) -> Option<(String, String, String)> {
+    let rest = text.strip_prefix("[message from ")?;
     let close = rest.find(']')?;
-    let sender = rest[..close].trim().to_string();
+    let (agent_type, sender) = rest[..close].trim().split_once(' ')?;
+    let sender = sender.trim();
     if sender.is_empty() {
         return None;
     }
     let body = rest[close + 1..]
         .trim_start_matches(['\n', ' '])
         .to_string();
-    Some((sender, body))
+    Some((agent_type.trim().to_string(), sender.to_string(), body))
+}
+
+/// Friendly display name for a sender's agent type.
+fn agent_label(agent_type: &str) -> &'static str {
+    match agent_type.to_ascii_lowercase().as_str() {
+        "claude" => "Claude",
+        "codex" => "Codex",
+        _ => "agent",
+    }
 }
 
 /// Render an inter-agent message as its own type: a distinct badge + accent
-/// (the sender's short session id, full id on hover) so it reads as coming
-/// from another agent rather than the viewer's own input.
+/// reading e.g. "Message from Codex (9466a628)" (full session id on hover), so
+/// it's clearly from another agent rather than the viewer's own input.
 fn render_other_agent_message(
+    agent_type: &str,
     sender: &str,
     body: &str,
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
     let short = sender.split('-').next().unwrap_or(sender);
+    let label = agent_label(agent_type);
     html! {
         <div class="claude-message user-message other-agent-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge other-agent"
-                    title={format!("Message from agent session {sender}")}>
-                    { format!("\u{21a9} agent {short}") }
+                    title={format!("Message from {label} session {sender}")}>
+                    { format!("Message from {label} ({short})") }
                 </span>
                 <CopyButton text={body.to_string()} title="Copy message" />
             </div>
@@ -143,8 +158,8 @@ pub fn render_user_message(
     // as a user message prefixed with the `[message from agent <id>]` bumper.
     // Render those as their own "other-agent" type rather than the user's own.
     if !has_tool_results {
-        if let Some((sender, body)) = parse_other_agent_message(&text_content) {
-            return render_other_agent_message(&sender, &body, timestamp, session_id);
+        if let Some((agent_type, sender, body)) = parse_other_agent_message(&text_content) {
+            return render_other_agent_message(&agent_type, &sender, &body, timestamp, session_id);
         }
     }
 
