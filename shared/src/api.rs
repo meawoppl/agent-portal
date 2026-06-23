@@ -951,6 +951,11 @@ pub struct AgentSessionsResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SendAgentMessageRequest {
     pub message: String,
+    /// Sender's session id, when sent by an agent (the `agent-portal message
+    /// send` CLI fills this from `$PORTAL_SESSION_ID`). Drives the recipient's
+    /// attribution bumper. Absent for the human web page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
 }
 
 /// Response for `POST /api/agent/sessions/{id}/message`.

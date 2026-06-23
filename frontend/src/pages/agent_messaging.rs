@@ -68,7 +68,10 @@ pub fn agent_messaging_page() -> Html {
             let message = message.clone();
             let status = status.clone();
             spawn_local(async move {
-                let body = SendAgentMessageRequest { message: text };
+                let body = SendAgentMessageRequest {
+                    message: text,
+                    from: None,
+                };
                 let result = Request::post(&utils::api_url(&format!(
                     "/api/agent/sessions/{}/message",
                     target

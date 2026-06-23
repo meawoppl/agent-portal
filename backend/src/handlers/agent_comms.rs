@@ -127,9 +127,17 @@ pub async fn send_agent_message(
         .first(&mut conn)
         .map_err(|_| AppError::NotFound("session"))?;
 
-    // Attribute the message so the recipient knows where it came from.
-    let sender = user_display_name(&mut conn, user_id);
-    let content = serde_json::Value::String(format!("[portal message from {sender}]\n{message}"));
+    // Attribute the message so the recipient knows where it came from. An
+    // agent sender supplies its own session id (`from`); the human web page
+    // doesn't, so fall back to the sending user's display name.
+    let bumper = match req.from.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(from) => format!("[message from agent {from}]"),
+        None => format!(
+            "[portal message from {}]",
+            user_display_name(&mut conn, user_id)
+        ),
+    };
+    let content = serde_json::Value::String(format!("{bumper}\n{message}"));
 
     // Mirror the WS input path: bump the per-session seq, persist a pending
     // input row, then forward to the live proxy (queued if disconnected).

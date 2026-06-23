@@ -1,5 +1,6 @@
 mod config;
 mod connection;
+mod message;
 mod pastebin;
 mod path_policy;
 mod process_manager;
@@ -56,6 +57,24 @@ enum Command {
     Service {
         #[command(subcommand)]
         action: ServiceAction,
+    },
+    /// Message your other agent sessions
+    Message {
+        #[command(subcommand)]
+        action: MessageAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum MessageAction {
+    /// List your sessions (agents) you can message
+    List,
+    /// Send a message into another session's agent
+    Send {
+        /// Target session id
+        agent_id: String,
+        /// Message text
+        message: String,
     },
 }
 
@@ -123,6 +142,14 @@ async fn main() -> anyhow::Result<()> {
                 ServiceAction::Restart => service::restart(),
                 ServiceAction::Logs { lines, follow } => service::logs(lines, follow),
                 ServiceAction::Pastebin => pastebin::upload_diagnostics().await,
+            };
+        }
+        Some(Command::Message { action }) => {
+            return match action {
+                MessageAction::List => message::list().await,
+                MessageAction::Send { agent_id, message } => {
+                    message::send(&agent_id, &message).await
+                }
             };
         }
         None => {}
