@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 mod client_fanout;
 mod correlation;
+mod input_queue;
 mod launcher_registry;
 mod pending_queue;
 mod proxy_lifecycle;

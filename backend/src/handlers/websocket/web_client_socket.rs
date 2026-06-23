@@ -3,7 +3,6 @@ use super::replay::replay_history;
 use super::uploads::{handle_file_upload_chunk, handle_file_upload_start, PendingUpload};
 use super::{SessionId, SessionManager, WebClientSender};
 use crate::handlers::session_access::is_session_mutator;
-use crate::models::NewPendingInput;
 use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
@@ -408,59 +407,12 @@ fn handle_web_input(
         }
     }
 
-    let seq = match db_pool.get() {
-        Ok(mut conn) => {
-            use crate::schema::{pending_inputs, sessions};
-
-            let next_seq: i64 = diesel::update(sessions::table.find(session_id))
-                .set(sessions::input_seq.eq(sessions::input_seq + 1))
-                .returning(sessions::input_seq)
-                .get_result(&mut conn)
-                .unwrap_or(1);
-
-            let new_input = NewPendingInput {
-                session_id,
-                seq_num: next_seq,
-                content: serde_json::to_string(&content).unwrap_or_default(),
-                send_mode: send_mode.map(|mode| mode.as_str().to_string()),
-            };
-            if let Err(e) = diesel::insert_into(pending_inputs::table)
-                .values(&new_input)
-                .execute(&mut conn)
-            {
-                // Stable marker for log-based alerting: a recurring persist
-                // failure here usually means schema drift (e.g. a migration
-                // recorded-but-not-applied). See CLAUDE.md "Schema-drift alerting".
-                error!("PENDING_INPUT_PERSIST_FAILED session={}: {}", session_id, e);
-            }
-            next_seq
-        }
-        Err(e) => {
-            error!("Failed to get db connection for pending input: {}", e);
-            0
-        }
-    };
-
-    if seq > 0 {
-        if !session_manager.send_to_session(
-            key,
-            ServerToProxy::SequencedInput {
-                session_id,
-                seq,
-                content,
-                send_mode,
-            },
-        ) {
-            warn!(
-                "Failed to send to session '{}', session not found in SessionManager (input queued)",
-                key
-            );
-        }
-    } else if !session_manager
-        .send_to_session(key, ServerToProxy::ClaudeInput { content, send_mode })
-    {
+    // Seq bump + best-effort persist + live delivery, shared with the
+    // agent-messaging send path (see SessionManager::enqueue_input).
+    let outcome = session_manager.enqueue_input(db_pool, key, session_id, content, send_mode);
+    if !outcome.delivered {
         warn!(
-            "Failed to send to session '{}', session not found in SessionManager",
+            "Failed to send to session '{}', session not found in SessionManager (input queued)",
             key
         );
     }

@@ -14,16 +14,15 @@ use axum::{
 };
 use diesel::prelude::*;
 use tower_cookies::Cookies;
-use tracing::{error, info};
+use tracing::info;
 use uuid::Uuid;
 
 use shared::api::{
     AgentSessionInfo, AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse,
 };
-use shared::ServerToProxy;
 
 use crate::errors::AppError;
-use crate::models::{NewPendingInput, Session};
+use crate::models::Session;
 use crate::AppState;
 
 /// Resolve the calling user from a `Bearer` proxy token if present, otherwise
@@ -116,7 +115,7 @@ pub async fn send_agent_message(
     }
 
     let mut conn = app_state.conn()?;
-    use crate::schema::{pending_inputs, session_members, sessions};
+    use crate::schema::{session_members, sessions};
 
     // Authorize: the caller must be a member of the target session.
     let session: Session = sessions::table
@@ -139,56 +138,24 @@ pub async fn send_agent_message(
     };
     let content = serde_json::Value::String(format!("{bumper}\n{message}"));
 
-    // Mirror the WS input path's *tolerant* handling (see `handle_web_input`):
-    // the seq bump and the pending-input row are best-effort — that path
-    // `.unwrap_or`s the update and only logs an INSERT failure, then still
-    // delivers live. Propagating these as `?` is what turned a latent input-
-    // pipeline write error (one the WS path silently swallows) into a 500 on
-    // every send. Delivering to the live proxy is what actually matters.
-    let seq: i64 = match diesel::update(sessions::table.find(target_id))
-        .set(sessions::input_seq.eq(sessions::input_seq + 1))
-        .returning(sessions::input_seq)
-        .get_result(&mut conn)
-    {
-        Ok(seq) => seq,
-        Err(e) => {
-            error!("INPUT_SEQ_BUMP_FAILED session={}: {}", target_id, e);
-            1
-        }
-    };
-
-    let new_input = NewPendingInput {
-        session_id: target_id,
-        seq_num: seq,
-        content: serde_json::to_string(&content).unwrap_or_default(),
-        send_mode: None,
-    };
-    if let Err(e) = diesel::insert_into(pending_inputs::table)
-        .values(&new_input)
-        .execute(&mut conn)
-    {
-        // Same stable marker as the WS input path so one alert rule catches
-        // both. See CLAUDE.md "Schema-drift alerting".
-        error!(
-            "PENDING_INPUT_PERSIST_FAILED session={} (delivered live): {}",
-            target_id, e
-        );
-    }
-
-    let delivered = app_state.session_manager.send_to_session(
+    // Seq bump + best-effort persist + live delivery, shared with the web
+    // input path (see SessionManager::enqueue_input). DB write faults are
+    // logged, not fatal — the message still reaches a live agent.
+    let outcome = app_state.session_manager.enqueue_input(
+        &app_state.db_pool,
         &session.session_key,
-        ServerToProxy::SequencedInput {
-            session_id: target_id,
-            seq,
-            content,
-            send_mode: None,
-        },
+        target_id,
+        content,
+        None,
     );
 
     info!(
-        "Agent message: user {} -> session {} (seq {}, live={})",
-        user_id, target_id, seq, delivered
+        "Agent message: user {} -> session {} (seq {}, delivered={}, persisted={})",
+        user_id, target_id, outcome.seq, outcome.delivered, outcome.persisted
     );
 
-    Ok(Json(SendAgentMessageResponse { delivered, seq }))
+    Ok(Json(SendAgentMessageResponse {
+        delivered: outcome.delivered,
+        seq: outcome.seq,
+    }))
 }
