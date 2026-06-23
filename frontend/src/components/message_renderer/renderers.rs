@@ -81,6 +81,50 @@ pub fn render_optimistic_user_message(
     }
 }
 
+/// Parse the `[message from agent <session-id>]\n<body>` bumper that
+/// `agent-portal message` prepends to inter-agent messages. Returns
+/// `(sender_session_id, body)` when it matches.
+fn parse_other_agent_message(text: &str) -> Option<(String, String)> {
+    let rest = text.strip_prefix("[message from agent ")?;
+    let close = rest.find(']')?;
+    let sender = rest[..close].trim().to_string();
+    if sender.is_empty() {
+        return None;
+    }
+    let body = rest[close + 1..]
+        .trim_start_matches(['\n', ' '])
+        .to_string();
+    Some((sender, body))
+}
+
+/// Render an inter-agent message as its own type: a distinct badge + accent
+/// (the sender's short session id, full id on hover) so it reads as coming
+/// from another agent rather than the viewer's own input.
+fn render_other_agent_message(
+    sender: &str,
+    body: &str,
+    timestamp: Option<&str>,
+    session_id: Uuid,
+) -> Html {
+    let short = sender.split('-').next().unwrap_or(sender);
+    html! {
+        <div class="claude-message user-message other-agent-message">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
+                <span class="message-type-badge other-agent"
+                    title={format!("Message from agent session {sender}")}>
+                    { format!("\u{21a9} agent {short}") }
+                </span>
+                <CopyButton text={body.to_string()} title="Copy message" />
+            </div>
+            <div class="message-body">
+                <div class="user-text">
+                    { render_markdown_for_session(&preserve_user_newlines(body), session_id) }
+                </div>
+            </div>
+        </div>
+    }
+}
+
 pub fn render_user_message(
     msg: &shared::UserMessage,
     meta: &UserMessageMeta,
@@ -94,6 +138,15 @@ pub fn render_user_message(
     };
     let pending_class = if meta.pending { " pending" } else { "" };
     let (text_content, has_tool_results) = user_message_text_and_tool_results(msg);
+
+    // Messages injected by `agent-portal message` arrive (echoed by the agent)
+    // as a user message prefixed with the `[message from agent <id>]` bumper.
+    // Render those as their own "other-agent" type rather than the user's own.
+    if !has_tool_results {
+        if let Some((sender, body)) = parse_other_agent_message(&text_content) {
+            return render_other_agent_message(&sender, &body, timestamp, session_id);
+        }
+    }
 
     if has_tool_results {
         html! {

@@ -124,6 +124,19 @@
     color: #7dcfff;
 }
 
+/* Inter-agent message (`agent-portal message send`): the "external" link hue
+   so it reads as coming from another agent, distinct from the user's own. */
+.message-type-badge.other-agent {
+    background: rgba(187, 154, 247, 0.2);
+    color: var(--link-color);
+    text-transform: none;
+}
+
+.other-agent-message {
+    border-left: 3px solid var(--link-color);
+    background: rgba(187, 154, 247, 0.04);
+}
+
 .portal-message {
     border-left: 3px solid #7dcfff;
 }
