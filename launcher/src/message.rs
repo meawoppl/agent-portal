@@ -9,16 +9,28 @@ use anyhow::{anyhow, Context, Result};
 
 use shared::api::{AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse};
 
-/// The calling agent's own session id, read from whatever it already exposes —
-/// no portal-side injection needed. Claude Code sets `CLAUDE_CODE_SESSION_ID`
-/// to the id we spawned it with (`--session-id <portal id>`), so it equals the
-/// portal session id. `PORTAL_SESSION_ID` is kept as a manual/explicit
-/// override. Returns `None` for callers that expose neither (e.g. a human
-/// shell), in which case the recipient falls back to user attribution.
+/// The calling agent's own portal session id, read from whatever the agent
+/// already exposes — no portal-side injection needed:
+///
+/// - Claude Code sets `CLAUDE_CODE_SESSION_ID` to the id we spawn it with
+///   (`--session-id <portal id>`), so it already *is* the portal session id.
+/// - Codex sets `CODEX_THREAD_ID`, which is *not* the portal id, so we reverse
+///   it through the launcher's `codex_threads.json` map to the portal session.
+/// - `PORTAL_SESSION_ID` is honored as a manual/explicit override.
+///
+/// Returns `None` when none apply (e.g. a human shell), in which case the
+/// recipient falls back to user attribution.
 fn sender_session_id() -> Option<String> {
-    ["CLAUDE_CODE_SESSION_ID", "PORTAL_SESSION_ID"]
-        .into_iter()
-        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
+    let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
+
+    if let Some(id) = env("CLAUDE_CODE_SESSION_ID").or_else(|| env("PORTAL_SESSION_ID")) {
+        return Some(id);
+    }
+    if let Some(thread_id) = env("CODEX_THREAD_ID") {
+        return crate::process_manager::session_id_for_codex_thread(&thread_id)
+            .map(|id| id.to_string());
+    }
+    None
 }
 
 /// Resolve the HTTP API base URL and auth token from the launcher config.
