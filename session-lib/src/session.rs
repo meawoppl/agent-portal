@@ -7,11 +7,12 @@
 use std::marker::PhantomData;
 
 use chrono::Utc;
-use claude_codes::io::{ControlResponse, PermissionResult};
-use claude_codes::{ClaudeInput, ClaudeOutput};
+use claude_codes::io::{ControlResponse, PermissionResult, PermissionSuggestion};
+use claude_codes::ClaudeInput;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+use crate::adapter::{AgentAdapter, AgentOutput, ClaudeAdapter};
 use crate::agent::Agent;
 use crate::buffer::OutputBuffer;
 use crate::error::SessionError;
@@ -172,55 +173,61 @@ impl<A: Agent> Session<A> {
                 Some(IoEvent::Output(boxed_output)) => {
                     let output = *boxed_output;
 
-                    // Buffer the output.
+                    // Buffer the raw output before classifying (preserve ordering).
                     let output_value = serde_json::to_value(&output).unwrap_or_default();
-                    self.buffer.push(output_value);
+                    self.buffer.push(output_value.clone());
 
-                    // Check for "No conversation found" error (session not found locally).
-                    if let ClaudeOutput::Result(ref res) = output {
-                        if res.is_error
-                            && res
-                                .errors
-                                .iter()
-                                .any(|e| e.contains("No conversation found"))
-                        {
-                            self.state = SessionState::Exited { code: 1 };
-                            self.command_tx = None;
-                            self.event_rx = None;
-                            return Some(SessionEvent::SessionNotFound);
-                        }
-                    }
-
-                    // Permission requests are emitted as `PermissionRequest`,
-                    // not `Output`, so the consumer doesn't see them twice.
-                    if let ClaudeOutput::ControlRequest(ref req) = output {
-                        if let claude_codes::io::ControlRequestPayload::CanUseTool(ref tool_req) =
-                            req.request
-                        {
-                            let request_id = req.request_id.clone();
-                            self.pending_permission = Some(PendingPermission {
-                                request_id: request_id.clone(),
-                                tool_name: tool_req.tool_name.clone(),
-                                input: tool_req.input.clone(),
-                                requested_at: Utc::now(),
-                            });
-                            self.state = SessionState::WaitingForPermission;
-
-                            return Some(SessionEvent::PermissionRequest {
+                    // Delegate protocol classification to the agent adapter. Claude
+                    // is 1:1 (one raw unit → one decision) but handle the Vec
+                    // generally so the loop matches the trait contract.
+                    let mut adapter = ClaudeAdapter;
+                    let mut visible = false;
+                    for decision in adapter.classify(output_value) {
+                        match decision {
+                            AgentOutput::NotFound => {
+                                self.state = SessionState::Exited { code: 1 };
+                                self.command_tx = None;
+                                self.event_rx = None;
+                                return Some(SessionEvent::SessionNotFound);
+                            }
+                            AgentOutput::PermissionRequest {
                                 request_id,
-                                tool_name: tool_req.tool_name.clone(),
-                                input: tool_req.input.clone(),
-                                permission_suggestions: tool_req.permission_suggestions.clone(),
-                            });
+                                tool_name,
+                                input,
+                                suggestions,
+                            } => {
+                                // Recover the typed suggestions from the adapter's
+                                // opaque JSON round-trip (it serialized them).
+                                let permission_suggestions: Vec<PermissionSuggestion> = suggestions
+                                    .into_iter()
+                                    .filter_map(|s| serde_json::from_value(s).ok())
+                                    .collect();
+                                self.pending_permission = Some(PendingPermission {
+                                    request_id: request_id.clone(),
+                                    tool_name: tool_name.clone(),
+                                    input: input.clone(),
+                                    requested_at: Utc::now(),
+                                });
+                                self.state = SessionState::WaitingForPermission;
+                                return Some(SessionEvent::PermissionRequest {
+                                    request_id,
+                                    tool_name,
+                                    input,
+                                    permission_suggestions,
+                                });
+                            }
+                            // Internal ack / nothing for the consumer — skip it and
+                            // let the outer loop pull the next event.
+                            AgentOutput::Noop => {}
+                            // User-visible output: forward the ORIGINAL typed value.
+                            AgentOutput::Visible(_) => visible = true,
                         }
                     }
 
-                    // Skip ControlResponse (acks from Claude, not useful to callers).
-                    if matches!(output, ClaudeOutput::ControlResponse(_)) {
-                        continue;
+                    if visible {
+                        return Some(SessionEvent::Output(Box::new(output)));
                     }
-
-                    return Some(SessionEvent::Output(Box::new(output)));
+                    continue;
                 }
                 Some(IoEvent::RawOutput(value)) => {
                     self.buffer.push(value.clone());
