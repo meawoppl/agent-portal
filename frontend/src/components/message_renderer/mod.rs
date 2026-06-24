@@ -610,6 +610,23 @@ mod tests {
         .to_string()
     }
 
+    fn plain_user_text_from_sender(text: &str, user_id: &str, name: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": text}]
+            },
+            "_sender": {
+                "user_id": user_id,
+                "name": name,
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string()
+    }
+
     fn codex_item_started_agent_message(text: &str) -> String {
         serde_json::json!({
             "type": "item.started",
@@ -681,6 +698,37 @@ mod tests {
     }
 
     #[test]
+    fn user_grouping_splits_by_sender_identity() {
+        let messages = vec![
+            plain_user_text_from_sender("first from me", "user_a", "Matt"),
+            plain_user_text_from_sender("second from me", "user_a", "Matt"),
+            plain_user_text_from_sender("from someone else", "user_b", "Alex"),
+            plain_user_text_from_sender("back to me", "user_a", "Matt"),
+        ];
+
+        let groups = group_messages(&messages, shared::AgentType::Claude, Some("user_a"));
+        assert_eq!(groups.len(), 3);
+
+        let labels: Vec<_> = groups
+            .iter()
+            .map(|group| match group {
+                MessageGroup::IdentityGroup {
+                    category: GroupCategory::User,
+                    label,
+                    ..
+                } => label.as_str(),
+                other => panic!("expected User identity group, got {:?}", other),
+            })
+            .collect();
+        assert_eq!(labels, vec!["You", "Alex", "You"]);
+
+        match &groups[0] {
+            MessageGroup::IdentityGroup { messages, .. } => assert_eq!(messages.len(), 2),
+            other => panic!("expected first User group, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn user_run_breaks_on_intervening_assistant() {
         let messages = vec![
             plain_user_text("question one"),
@@ -689,6 +737,50 @@ mod tests {
         ];
         let groups = group_for_tests(&messages);
         assert_eq!(groups.len(), 3);
+    }
+
+    #[test]
+    fn turn_terminator_detection_covers_claude_and_codex() {
+        let claude_result = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 100,
+            "duration_api_ms": 80,
+            "num_turns": 1,
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "total_cost_usd": 0.0,
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+        let codex_completed = serde_json::json!({
+            "type": "turn.completed",
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+        let codex_failed = serde_json::json!({
+            "type": "turn.failed",
+            "error": {"message": "nope"},
+            "_created_at": "2026-05-17T10:00:00.000Z",
+        })
+        .to_string();
+
+        for json in [claude_result, codex_completed, codex_failed] {
+            assert!(
+                group_is_turn_terminator(&MessageGroup::Single(json)),
+                "single terminator frame should be recognized"
+            );
+        }
+        assert!(!group_is_turn_terminator(&MessageGroup::Single(
+            plain_user_text("hello")
+        )));
+        assert!(!group_is_turn_terminator(&MessageGroup::IdentityGroup {
+            category: GroupCategory::User,
+            label: "You".to_string(),
+            badge_class: "user".to_string(),
+            messages: vec![plain_user_text("hello")],
+        }));
     }
 
     /// A run of `thinking_tokens` markers must collapse into a single
