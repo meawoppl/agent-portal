@@ -1,19 +1,18 @@
+mod dispatch;
 mod grouping;
 mod renderers;
 pub mod turn_metrics_footer;
 pub mod types;
 
-use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 use yew::prelude::*;
 
-use super::agent_frame::{AgentFrame, AgentFrameRegistry, FrameRenderer};
+use dispatch::FrameRenderContext;
 #[cfg(test)]
 use grouping::classify;
 use grouping::{extract_raw_iso, visible_group_indices, GroupCategory};
 pub use grouping::{group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroup};
-use types::{user_meta_from_json, ClaudeMessage};
 
 /// Format an already-extracted `_created_at` ISO string as local time.
 /// Takes the `extract_raw_iso` result rather than the raw JSON so the
@@ -58,76 +57,17 @@ pub struct MessageRendererProps {
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
     let raw_iso = extract_raw_iso(&props.json);
     let ts = raw_iso.as_deref().and_then(local_timestamp);
-    let frame = AgentFrameRegistry::parse(&props.json, props.agent_type);
-
-    // Dispatch on the message shape, not the agent. `User` (the proxy's
-    // synthetic echo) and `Portal` (the backend's portal-content envelope)
-    // are protocol-agnostic and must render the same way on Claude and
-    // Codex sessions — otherwise the Codex renderer's catch-all turns them
-    // into raw JSON blocks. Codex-specific shapes (`item.started`,
-    // `turn.completed`, …) don't match any `ClaudeMessage` variant and fall
-    // through to the codex renderer below.
-    match AgentFrameRegistry::renderer_for(&frame) {
-        FrameRenderer::Claude => match frame {
-            AgentFrame::Claude(ClaudeMessage::System(msg)) => {
-                renderers::render_system_message(&msg, ts.as_deref())
-            }
-            AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
-                renderers::render_assistant_message(
-                    &msg,
-                    ts.as_deref(),
-                    raw_iso.as_deref(),
-                    props.session_id,
-                )
-            }
-            AgentFrame::Claude(ClaudeMessage::Result(msg)) => {
-                renderers::render_result_message(&msg, props.turn_metrics.as_ref())
-            }
-            AgentFrame::Claude(ClaudeMessage::User(msg)) => {
-                let meta = user_meta_from_json(&props.json);
-                renderers::render_user_message(
-                    &msg,
-                    &meta,
-                    props.current_user_id.as_deref(),
-                    ts.as_deref(),
-                    props.session_id,
-                )
-            }
-            AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
-                renderers::render_optimistic_user_message(
-                    &msg,
-                    props.current_user_id.as_deref(),
-                    ts.as_deref(),
-                    props.session_id,
-                )
-            }
-            AgentFrame::Claude(ClaudeMessage::Error(msg)) => {
-                renderers::render_error_message(&msg, ts.as_deref())
-            }
-            AgentFrame::Claude(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(
-                &msg,
-                ts.as_deref(),
-                props.session_id,
-                &props.continuation_statuses,
-                props.on_schedule_continuation.clone(),
-            ),
-            AgentFrame::Claude(ClaudeMessage::RateLimitEvent(msg)) => {
-                renderers::render_rate_limit_event(&msg, ts.as_deref())
-            }
-            AgentFrame::Claude(ClaudeMessage::Unknown)
-            | AgentFrame::Codex(_)
-            | AgentFrame::RawJson => render_raw_json(&props.json),
-        },
-        FrameRenderer::Codex => match frame {
-            AgentFrame::Codex(event) => super::codex_renderer::render_codex_frame(
-                &event,
-                props.session_id,
-                props.turn_metrics.as_ref(),
-            ),
-            _ => html! {},
-        },
-        FrameRenderer::RawJson => render_raw_json(&props.json),
-    }
+    dispatch::render_frame(FrameRenderContext {
+        json: &props.json,
+        agent_type: props.agent_type,
+        session_id: props.session_id,
+        timestamp: ts.as_deref(),
+        raw_iso: raw_iso.as_deref(),
+        current_user_id: props.current_user_id.as_deref(),
+        turn_metrics: props.turn_metrics.as_ref(),
+        continuation_statuses: &props.continuation_statuses,
+        on_schedule_continuation: props.on_schedule_continuation.clone(),
+    })
 }
 
 #[derive(Properties, PartialEq)]
@@ -226,7 +166,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                             let key = extract_raw_iso(json)
                                 .map(|iso| format!("m-{}", iso))
                                 .unwrap_or_else(|| format!("m{}", i));
-                            html! { <div {key} class="grouped-message-part">{ render_identity_group_part(json, props.agent_type, props.session_id, &props.continuation_statuses, props.on_schedule_continuation.clone()) }</div> }
+                            html! { <div {key} class="grouped-message-part">{ dispatch::render_identity_group_part(json, props.agent_type, props.session_id, &props.continuation_statuses, props.on_schedule_continuation.clone()) }</div> }
                         })}
                     </div>
                     if let Some(iso) = last_iso {
@@ -237,62 +177,6 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 </div>
             }
         }
-    }
-}
-
-fn render_identity_group_part(
-    json: &str,
-    agent_type: shared::AgentType,
-    session_id: Uuid,
-    continuation_statuses: &HashMap<Uuid, String>,
-    on_schedule_continuation: Callback<Uuid>,
-) -> Html {
-    let frame = AgentFrameRegistry::parse(json, agent_type);
-    match frame {
-        AgentFrame::Claude(ClaudeMessage::User(msg)) => {
-            renderers::render_user_message_content(&msg, session_id)
-        }
-        AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
-            renderers::render_optimistic_user_message_content(&msg, session_id)
-        }
-        AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
-            renderers::render_assistant_message_content(&msg, session_id)
-        }
-        AgentFrame::Claude(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(
-            &msg,
-            session_id,
-            continuation_statuses,
-            on_schedule_continuation,
-        ),
-        AgentFrame::Codex(event) => {
-            super::codex_renderer::render_codex_frame_content(&event, session_id)
-        }
-        _ => html! {},
-    }
-}
-
-fn render_raw_json(json: &str) -> Html {
-    let display = serde_json::from_str::<Value>(json)
-        .ok()
-        .and_then(|v| serde_json::to_string_pretty(&v).ok())
-        .unwrap_or_else(|| json.to_string());
-
-    html! {
-        <div class="claude-message raw-message">
-            <div class="message-header">
-                <span class="message-type-badge raw">{ "Unrecognized Message" }</span>
-            </div>
-            <div class="message-body">
-                <pre class="raw-json">{ display }</pre>
-                <p class="raw-message-hint">
-                    { "This message type is not yet supported by the portal. " }
-                    <a href="https://github.com/meawoppl/rust-code-agent-sdks/issues"
-                       target="_blank" rel="noopener noreferrer">
-                        { "Report this issue" }
-                    </a>
-                </p>
-            </div>
-        </div>
     }
 }
 
