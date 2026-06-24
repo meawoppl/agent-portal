@@ -328,6 +328,8 @@ mod tests {
             output_tokens_sum: 3_400,
             cache_read_tokens_sum: 800,
             cache_creation_tokens_sum: 200,
+            thinking_tokens_sum: 120,
+            subagent_tokens_sum: 450,
             total_cost_usd_sum: Some(0.18),
             stop_reason_counts: counts,
         };
@@ -357,6 +359,8 @@ mod tests {
             output_tokens_sum: 0,
             cache_read_tokens_sum: 0,
             cache_creation_tokens_sum: 0,
+            thinking_tokens_sum: 0,
+            subagent_tokens_sum: 0,
             total_cost_usd_sum: None,
             stop_reason_counts: BTreeMap::new(),
         };

@@ -32,6 +32,8 @@
 //!   (output_tokens)` out — `compact_count` returns the integer for values
 //!   `< 1000`, and a one-decimal-k abbreviation (`"1.5k"`, `"2.1k"`) for
 //!   `≥ 1000`. Always renders (zero tokens is a meaningful signal).
+//! - **Thinking/subagent tokens**: rendered as count-up chips after the
+//!   regular text chips when the corresponding counter is positive.
 //! - **Cache hit %**: `cache_read / (input + cache_read + cache_creation) *
 //!   100`. Omitted when all three are zero — for Codex turns this is
 //!   universally true today (the proxy doesn't surface cache breakdown), so
@@ -172,11 +174,10 @@ pub fn build_chip_list(metrics: &TurnMetrics) -> Vec<String> {
 /// `result-message` card; chips are separated by the `·` character (a
 /// `<span class="turn-metric-sep">` so the CSS can dim it independently).
 ///
-/// The text chips come from [`build_chip_list`]. The reasoning-token chip is
-/// rendered separately as an animated odometer (`CountUp`) — it rolls 0→total
-/// on mount — and is appended last. It only appears when `thinking_tokens > 0`,
-/// which is the Codex reasoning case; Claude turns record `0` here (the wire
-/// folds reasoning into `output_tokens`) so the chip naturally drops.
+/// The text chips come from [`build_chip_list`]. The reasoning-token and
+/// subagent-token chips are rendered separately as animated odometers
+/// (`CountUp`) — they roll 0→total on mount — and are appended last. They only
+/// appear when their counters are positive.
 ///
 /// Takes an `Option` and renders nothing for `None` so callers can pass
 /// their `Option<&TurnMetrics>` straight through.
@@ -189,7 +190,8 @@ pub fn render_turn_metrics_footer(metrics: Option<&TurnMetrics>) -> Html {
 
     let text_chips = build_chip_list(metrics);
     let has_thinking = metrics.thinking_tokens > 0;
-    if text_chips.is_empty() && !has_thinking {
+    let has_subagent = metrics.subagent_tokens > 0;
+    if text_chips.is_empty() && !has_thinking && !has_subagent {
         return html! {};
     }
 
@@ -201,6 +203,13 @@ pub fn render_turn_metrics_footer(metrics: Option<&TurnMetrics>) -> Html {
         chips.push(html! {
             <span class="turn-metric-chip thinking-chip">
                 <CountUp target={metrics.thinking_tokens} suffix={" thinking"} compact={true} />
+            </span>
+        });
+    }
+    if has_subagent {
+        chips.push(html! {
+            <span class="turn-metric-chip subagent-chip">
+                <CountUp target={metrics.subagent_tokens} suffix={" subagent"} compact={true} />
             </span>
         });
     }
