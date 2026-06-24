@@ -116,6 +116,18 @@ pub struct TurnMetrics {
     pub cache_read_tokens: i64,
     #[serde(default)]
     pub thinking_tokens: i64,
+    /// Tokens consumed by spawned subagents (Claude `Task` / sidechains, Codex
+    /// sub-threads), rolled up and reported separately from the main turn's
+    /// tokens — mirroring the Claude binary's distinct `<subagent_tokens>`
+    /// line in its result `<usage>` envelope.
+    ///
+    /// `0` when the agent doesn't run subagents on the turn, or when the
+    /// agent's wire protocol doesn't surface the rollup. The Claude
+    /// stream-json `usage` shape exposes no subagent field today, so claude
+    /// turns always report `0` until the SDK does — see the upstream gap noted
+    /// at the claude `TurnOutcome` build site.
+    #[serde(default)]
+    pub subagent_tokens: i64,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_reason: Option<String>,

@@ -179,7 +179,7 @@ impl TurnTracker {
             None
         };
 
-        Some(TurnMetrics {
+        let metrics = TurnMetrics {
             id: None,
             session_id: self.session_id,
             user_message_id: None,
@@ -198,12 +198,40 @@ impl TurnTracker {
             cache_creation_tokens: outcome.cache_creation_tokens,
             cache_read_tokens: outcome.cache_read_tokens,
             thinking_tokens: outcome.thinking_tokens,
+            subagent_tokens: outcome.subagent_tokens,
             stop_reason: outcome.stop_reason,
             is_error: outcome.is_error,
             tool_call_count: turn.tool_call_count,
             stream_restarts: turn.stream_restarts,
             total_cost_usd: outcome.total_cost_usd,
-        })
+        };
+
+        // Structured per-turn performance + token-accounting log. One line per
+        // finalized turn across every agent backend, so the most accurate
+        // token counts we have are always observable in the proxy logs (not
+        // only after they round-trip through the backend/DB). Subagent tokens
+        // are logged distinctly, mirroring the Claude binary's own breakdown.
+        tracing::info!(
+            target: "turn_metrics",
+            session_id = %metrics.session_id,
+            agent_type = %metrics.agent_type,
+            model = metrics.model.as_deref().unwrap_or("unknown"),
+            service_tier = metrics.service_tier.as_deref().unwrap_or("-"),
+            input_tokens = metrics.input_tokens,
+            output_tokens = metrics.output_tokens,
+            cache_creation_tokens = metrics.cache_creation_tokens,
+            cache_read_tokens = metrics.cache_read_tokens,
+            thinking_tokens = metrics.thinking_tokens,
+            subagent_tokens = metrics.subagent_tokens,
+            ttft_ms = metrics.ttft_ms.unwrap_or(-1),
+            total_duration_ms = metrics.total_duration_ms.unwrap_or(-1),
+            tool_call_count = metrics.tool_call_count,
+            is_error = metrics.is_error,
+            stop_reason = metrics.stop_reason.as_deref().unwrap_or("-"),
+            "turn finalized"
+        );
+
+        Some(metrics)
     }
 }
 
@@ -221,6 +249,11 @@ pub struct TurnOutcome {
     pub cache_creation_tokens: i64,
     pub cache_read_tokens: i64,
     pub thinking_tokens: i64,
+    /// Tokens consumed by subagents spawned during the turn (Claude `Task` /
+    /// sidechains, Codex sub-threads), rolled up separately from the main
+    /// turn's tokens. `0` when no subagents ran or the agent protocol doesn't
+    /// surface the rollup. See [`shared::TurnMetrics::subagent_tokens`].
+    pub subagent_tokens: i64,
     pub stop_reason: Option<String>,
     pub is_error: bool,
     pub total_cost_usd: Option<f64>,
@@ -251,6 +284,7 @@ mod tests {
             cache_creation_tokens: 0,
             cache_read_tokens: 10,
             thinking_tokens: 3,
+            subagent_tokens: 25,
             stop_reason: Some("end_turn".to_string()),
             is_error: false,
             total_cost_usd: Some(0.005),
@@ -344,6 +378,8 @@ mod tests {
         assert_eq!(m.stream_restarts, 1);
         assert_eq!(m.total_cost_usd, Some(0.005));
         assert_eq!(m.model.as_deref(), Some("claude-opus-4-7"));
+        // Subagent token rollup flows verbatim from the terminator outcome.
+        assert_eq!(m.subagent_tokens, 25);
     }
 
     /// Codex turns have no cost on the wire. Finalize must accept `None` and
@@ -364,6 +400,7 @@ mod tests {
             cache_creation_tokens: 0,
             cache_read_tokens: 0,
             thinking_tokens: 0,
+            subagent_tokens: 0,
             stop_reason: Some("completed".to_string()),
             is_error: false,
             total_cost_usd: None,

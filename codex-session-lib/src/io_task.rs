@@ -358,6 +358,13 @@ pub(crate) async fn codex_io_task(
                                         .as_ref()
                                         .map(|u| u.reasoning_output_tokens)
                                         .unwrap_or(0),
+                                    // Subagent (sub-thread) token attribution
+                                    // lands in the companion Codex PR, which
+                                    // accumulates child-thread usage (threads
+                                    // whose `parent_thread_id` is this turn's
+                                    // thread) and folds it in here. Reported
+                                    // as 0 until then.
+                                    subagent_tokens: 0,
                                     stop_reason: Some(status.to_string()),
                                     is_error,
                                     total_cost_usd: None,

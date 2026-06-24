@@ -199,6 +199,7 @@ diesel::table! {
         total_cost_usd -> Nullable<Float8>,
         created_at -> Timestamptz,
         user_id -> Uuid,
+        subagent_tokens -> Int8,
     }
 }
 

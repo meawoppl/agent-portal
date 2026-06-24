@@ -370,6 +370,7 @@ pub struct TurnMetric {
     pub total_cost_usd: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub user_id: Uuid,
+    pub subagent_tokens: i64,
 }
 
 impl TurnMetric {
@@ -401,6 +402,7 @@ impl TurnMetric {
             cache_creation_tokens: self.cache_creation_tokens,
             cache_read_tokens: self.cache_read_tokens,
             thinking_tokens: self.thinking_tokens,
+            subagent_tokens: self.subagent_tokens,
             stop_reason: self.stop_reason,
             is_error: self.is_error,
             tool_call_count: self.tool_call_count,
@@ -431,6 +433,7 @@ pub struct NewTurnMetric {
     pub cache_creation_tokens: i64,
     pub cache_read_tokens: i64,
     pub thinking_tokens: i64,
+    pub subagent_tokens: i64,
     pub stop_reason: Option<String>,
     pub is_error: bool,
     pub tool_call_count: i32,
