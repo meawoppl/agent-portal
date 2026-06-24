@@ -79,7 +79,7 @@ async fn handle_server_message(
     ws_write: &SharedWsWrite,
 ) -> bool {
     match server_msg {
-        ServerToProxy::ClaudeInput { content, send_mode } => {
+        ServerToProxy::AgentInput { content, send_mode } => {
             event_tx.send(input_event(content, send_mode, None)).is_ok()
         }
         ServerToProxy::SequencedInput {

@@ -111,7 +111,7 @@ pub fn handle_session_limit_reached(
     if let Some(key) = session_key {
         session_manager.broadcast_to_web_clients(
             key,
-            ServerToClient::ClaudeOutput {
+            ServerToClient::AgentOutput {
                 content: portal.to_json(),
                 sender_user_id: None,
                 sender_name: None,
@@ -279,7 +279,7 @@ fn update_terminal_status(
                     let row_created_at = insert_portal_message(&mut conn, &session, &portal);
                     app_state.session_manager.broadcast_to_web_clients(
                         &session_id.to_string(),
-                        ServerToClient::ClaudeOutput {
+                        ServerToClient::AgentOutput {
                             content: portal.to_json(),
                             sender_user_id: None,
                             sender_name: None,

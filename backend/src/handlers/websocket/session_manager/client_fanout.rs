@@ -108,11 +108,11 @@ mod tests {
 
         assert!(matches!(
             rx1.try_recv().unwrap(),
-            ServerToClient::ClaudeOutput { .. }
+            ServerToClient::AgentOutput { .. }
         ));
         assert!(matches!(
             rx2.try_recv().unwrap(),
-            ServerToClient::ClaudeOutput { .. }
+            ServerToClient::AgentOutput { .. }
         ));
     }
 
@@ -131,7 +131,7 @@ mod tests {
 
         assert!(matches!(
             rx2.try_recv().unwrap(),
-            ServerToClient::ClaudeOutput { .. }
+            ServerToClient::AgentOutput { .. }
         ));
 
         let clients = mgr.web_clients.get("s1").unwrap();
@@ -158,11 +158,11 @@ mod tests {
 
         assert!(matches!(
             rx1.try_recv().unwrap(),
-            ServerToClient::ClaudeOutput { .. }
+            ServerToClient::AgentOutput { .. }
         ));
         assert!(matches!(
             rx2.try_recv().unwrap(),
-            ServerToClient::ClaudeOutput { .. }
+            ServerToClient::AgentOutput { .. }
         ));
         let clients = mgr.web_clients.get("s1").unwrap();
         assert_eq!(clients.len(), 2);
@@ -179,7 +179,7 @@ mod tests {
 
         assert!(matches!(
             rx.try_recv().unwrap(),
-            ServerToClient::ClaudeOutput { .. }
+            ServerToClient::AgentOutput { .. }
         ));
     }
 

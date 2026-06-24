@@ -23,7 +23,8 @@ pub enum ClientToServer {
     Register(RegisterFields),
 
     /// User sends input to Claude
-    ClaudeInput {
+    #[serde(rename = "ClaudeInput")]
+    AgentInput {
         content: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
@@ -51,7 +52,8 @@ pub enum ClientToServer {
 #[serde(tag = "type")]
 pub enum ServerToClient {
     /// Output from Claude Code
-    ClaudeOutput {
+    #[serde(rename = "ClaudeOutput")]
+    AgentOutput {
         content: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         sender_user_id: Option<String>,

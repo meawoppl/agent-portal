@@ -25,7 +25,8 @@ pub enum ProxyToServer {
     Register(RegisterFields),
 
     /// Raw output from Claude Code (unsequenced fallback)
-    ClaudeOutput {
+    #[serde(rename = "ClaudeOutput")]
+    AgentOutput {
         content: serde_json::Value,
         /// Which agent's wire format the `content` JSON came from.
         ///
@@ -137,7 +138,8 @@ pub enum ServerToProxy {
     Heartbeat,
 
     /// User input (unsequenced fallback)
-    ClaudeInput {
+    #[serde(rename = "ClaudeInput")]
+    AgentInput {
         content: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
