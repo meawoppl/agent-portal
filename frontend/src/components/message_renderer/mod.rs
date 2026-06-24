@@ -242,21 +242,24 @@ fn render_identity_group_part(
     continuation_statuses: &HashMap<Uuid, String>,
     on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
-    match ClaudeMessage::parse(json) {
-        Ok(ClaudeMessage::User(msg)) => renderers::render_user_message_content(&msg, session_id),
-        Ok(ClaudeMessage::OptimisticUser(msg)) => {
+    let frame = AgentFrameRegistry::parse(json, agent_type);
+    match frame {
+        AgentFrame::Claude(ClaudeMessage::User(msg)) => {
+            renderers::render_user_message_content(&msg, session_id)
+        }
+        AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
             renderers::render_optimistic_user_message_content(&msg, session_id)
         }
-        Ok(ClaudeMessage::Assistant(msg)) => {
+        AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
             renderers::render_assistant_message_content(&msg, session_id)
         }
-        Ok(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(
+        AgentFrame::Claude(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(
             &msg,
             session_id,
             continuation_statuses,
             on_schedule_continuation,
         ),
-        _ if agent_type == shared::AgentType::Codex => {
+        AgentFrame::Codex(_) => {
             super::codex_renderer::render_codex_message_content(json, session_id)
         }
         _ => html! {},
