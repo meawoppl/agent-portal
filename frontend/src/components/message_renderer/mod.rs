@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use yew::prelude::*;
 
+use super::agent_frame::{AgentFrame, AgentFrameRegistry, FrameRenderer};
 #[cfg(test)]
 use grouping::classify;
 use grouping::{extract_raw_iso, visible_group_indices, GroupCategory};
@@ -57,7 +58,7 @@ pub struct MessageRendererProps {
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
     let raw_iso = extract_raw_iso(&props.json);
     let ts = raw_iso.as_deref().and_then(local_timestamp);
-    let parsed = ClaudeMessage::parse(&props.json);
+    let frame = AgentFrameRegistry::parse(&props.json, props.agent_type);
 
     // Dispatch on the message shape, not the agent. `User` (the proxy's
     // synthetic echo) and `Portal` (the backend's portal-content envelope)
@@ -66,61 +67,61 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
     // into raw JSON blocks. Codex-specific shapes (`item.started`,
     // `turn.completed`, …) don't match any `ClaudeMessage` variant and fall
     // through to the codex renderer below.
-    match parsed {
-        Ok(ClaudeMessage::System(msg)) => {
-            return renderers::render_system_message(&msg, ts.as_deref());
-        }
-        Ok(ClaudeMessage::Assistant(msg)) => {
-            return renderers::render_assistant_message(
-                &msg,
-                ts.as_deref(),
-                raw_iso.as_deref(),
-                props.session_id,
-            );
-        }
-        Ok(ClaudeMessage::Result(msg)) => {
-            return renderers::render_result_message(&msg, props.turn_metrics.as_ref());
-        }
-        Ok(ClaudeMessage::User(msg)) => {
-            let meta = user_meta_from_json(&props.json);
-            return renderers::render_user_message(
-                &msg,
-                &meta,
-                props.current_user_id.as_deref(),
-                ts.as_deref(),
-                props.session_id,
-            );
-        }
-        Ok(ClaudeMessage::OptimisticUser(msg)) => {
-            return renderers::render_optimistic_user_message(
-                &msg,
-                props.current_user_id.as_deref(),
-                ts.as_deref(),
-                props.session_id,
-            );
-        }
-        Ok(ClaudeMessage::Error(msg)) => {
-            return renderers::render_error_message(&msg, ts.as_deref());
-        }
-        Ok(ClaudeMessage::Portal(msg)) => {
-            return renderers::render_portal_message(
+    match AgentFrameRegistry::renderer_for(&frame) {
+        FrameRenderer::Claude => match frame {
+            AgentFrame::Claude(ClaudeMessage::System(msg)) => {
+                renderers::render_system_message(&msg, ts.as_deref())
+            }
+            AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
+                renderers::render_assistant_message(
+                    &msg,
+                    ts.as_deref(),
+                    raw_iso.as_deref(),
+                    props.session_id,
+                )
+            }
+            AgentFrame::Claude(ClaudeMessage::Result(msg)) => {
+                renderers::render_result_message(&msg, props.turn_metrics.as_ref())
+            }
+            AgentFrame::Claude(ClaudeMessage::User(msg)) => {
+                let meta = user_meta_from_json(&props.json);
+                renderers::render_user_message(
+                    &msg,
+                    &meta,
+                    props.current_user_id.as_deref(),
+                    ts.as_deref(),
+                    props.session_id,
+                )
+            }
+            AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
+                renderers::render_optimistic_user_message(
+                    &msg,
+                    props.current_user_id.as_deref(),
+                    ts.as_deref(),
+                    props.session_id,
+                )
+            }
+            AgentFrame::Claude(ClaudeMessage::Error(msg)) => {
+                renderers::render_error_message(&msg, ts.as_deref())
+            }
+            AgentFrame::Claude(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(
                 &msg,
                 ts.as_deref(),
                 props.session_id,
                 &props.continuation_statuses,
                 props.on_schedule_continuation.clone(),
-            );
+            ),
+            AgentFrame::Claude(ClaudeMessage::RateLimitEvent(msg)) => {
+                renderers::render_rate_limit_event(&msg, ts.as_deref())
+            }
+            AgentFrame::Claude(ClaudeMessage::Unknown)
+            | AgentFrame::Codex(_)
+            | AgentFrame::RawJson => render_raw_json(&props.json),
+        },
+        FrameRenderer::Codex => {
+            html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} session_id={props.session_id} turn_metrics={props.turn_metrics.clone()} /> }
         }
-        Ok(ClaudeMessage::RateLimitEvent(msg)) => {
-            return renderers::render_rate_limit_event(&msg, ts.as_deref());
-        }
-        Ok(ClaudeMessage::Unknown) | Err(_) => {}
-    }
-
-    if props.agent_type == shared::AgentType::Codex {
-        html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} session_id={props.session_id} turn_metrics={props.turn_metrics.clone()} /> }
-    } else {
-        render_raw_json(&props.json)
+        FrameRenderer::RawJson => render_raw_json(&props.json),
     }
 }
 
