@@ -1012,6 +1012,16 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_math_skips_fenced_code() {
+        let input = "Before\n```rust\nlet s = \"$not_math$\";\n```\nAfter $real_math$.";
+        let (out, blocks) = extract_math_placeholders(input);
+
+        assert_eq!(blocks, vec!["$real_math$"]);
+        assert!(out.contains("let s = \"$not_math$\";"));
+        assert_eq!(restore_math(&out, &blocks), input);
+    }
+
+    #[test]
     fn test_extract_math_skips_dollar_amounts() {
         // "$5 and $10" looks like inline math to a naïve scanner but isn't.
         let input = "I have $5 and $10 left.";
@@ -1114,6 +1124,30 @@ Where:\n\
     }
 
     #[test]
+    fn hash_and_absolute_paths_are_regular_links() {
+        assert_eq!(
+            classify_link_destination("#details", None),
+            LinkDestination::ExternalOrRelative("#details".to_string())
+        );
+        assert_eq!(
+            classify_link_destination("/api/sessions", None),
+            LinkDestination::ExternalOrRelative("/api/sessions".to_string())
+        );
+    }
+
+    #[test]
+    fn non_link_angle_destinations_render_as_literal_text() {
+        assert_eq!(
+            classify_link_destination("crate::components::Thing", None),
+            LinkDestination::LiteralAngleText
+        );
+        assert_eq!(
+            classify_link_destination("not a url", None),
+            LinkDestination::LiteralAngleText
+        );
+    }
+
+    #[test]
     fn portal_file_markdown_link_rewrites_description_to_download_href() {
         let session_id = Uuid::parse_str("11111111-2222-3333-4444-555555555555")
             .expect("static uuid should parse");
@@ -1122,6 +1156,23 @@ Where:\n\
             classify_link_destination("portal://file/docs/portal link.svg", Some(session_id)),
             LinkDestination::PortalDownload(
                 "/api/sessions/11111111-2222-3333-4444-555555555555/files/pull?path=docs%2Fportal%20link.svg"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn portal_file_markdown_link_encodes_nested_special_chars() {
+        let session_id = Uuid::parse_str("11111111-2222-3333-4444-555555555555")
+            .expect("static uuid should parse");
+
+        assert_eq!(
+            classify_link_destination(
+                "portal://file/reports/final report (v2).md",
+                Some(session_id)
+            ),
+            LinkDestination::PortalDownload(
+                "/api/sessions/11111111-2222-3333-4444-555555555555/files/pull?path=reports%2Ffinal%20report%20(v2).md"
                     .to_string()
             )
         );
