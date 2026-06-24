@@ -16,6 +16,7 @@
 //! Heterogeneous consumers (e.g. the launcher) wrap the per-agent
 //! `Session<A>` in an enum at the dispatch boundary.
 
+pub mod adapter;
 pub mod agent;
 pub mod buffer;
 pub mod error;
@@ -27,6 +28,7 @@ pub mod session;
 pub mod snapshot;
 pub mod turn_tracker;
 
+pub use adapter::{AgentAdapter, AgentOutput, ClaudeAdapter, PermissionDecision};
 pub use agent::Agent;
 pub use buffer::{BufferedOutput, OutputBuffer};
 pub use error::SessionError;
