@@ -1,8 +1,5 @@
-use super::copy_button::CopyButton;
-use super::expandable::ExpandableText;
 use super::markdown::render_markdown_for_session;
 use codex_codes::io::items::{FileUpdateChange, ThreadItem};
-use serde_json::Value;
 use shared::fmt::format_duration;
 use uuid::Uuid;
 use yew::prelude::*;
@@ -18,69 +15,48 @@ use tools::{
     render_mcp_tool_call, render_todo_list, render_web_search,
 };
 
-// --- Components ---
-
-#[derive(Properties, PartialEq)]
-pub struct CodexMessageRendererProps {
-    pub json: String,
-    pub session_id: Uuid,
-    /// Per-turn metrics for the terminator card, if any. Forwarded down
-    /// into `render_turn_completed` / `render_turn_failed` so the chip-strip
-    /// footer renders beneath the existing result card. PR 2 of N.
-    #[prop_or_default]
-    pub turn_metrics: Option<shared::TurnMetrics>,
+/// Render a parsed Codex frame as a standalone message card.
+pub fn render_codex_frame(
+    event: &CodexEvent,
+    session_id: Uuid,
+    turn_metrics: Option<&shared::TurnMetrics>,
+) -> Html {
+    render_codex_event(event, session_id, false, turn_metrics)
 }
 
-#[function_component(CodexMessageRenderer)]
-pub fn codex_message_renderer(props: &CodexMessageRendererProps) -> Html {
-    render_codex_event(
-        &props.json,
-        props.session_id,
-        false,
-        props.turn_metrics.as_ref(),
-    )
+/// Render the content-only body for a parsed Codex frame inside an
+/// `IdentityGroup`.
+pub fn render_codex_frame_content(event: &CodexEvent, session_id: Uuid) -> Html {
+    render_codex_event(event, session_id, true, None)
 }
 
-/// Render the content-only body for a codex message inside an
-/// `IdentityGroup` — agent messages drop their card wrapper (the group
-/// header already carries the badge), everything else renders as it would
-/// standalone, and unrecognized events emit nothing instead of the raw-JSON
-/// card (the group classifier never admits them, so there is nothing to
-/// debug there).
-pub fn render_codex_message_content(json: &str, session_id: Uuid) -> Html {
-    render_codex_event(json, session_id, true, None)
-}
-
-/// Single dispatcher over `CodexEvent` for both the standalone card path
-/// (`CodexMessageRenderer`) and the grouped content path
-/// (`render_codex_message_content`). `bare_agent_message` selects the
-/// grouped behavior: agent messages render content-only (no card chrome)
-/// and unparseable/unknown events render nothing rather than the raw card.
+/// Single dispatcher over parsed `CodexEvent` for both the standalone card
+/// path and the grouped content path. `bare_agent_message` selects the grouped
+/// behavior: agent messages render content-only (no card chrome), while other
+/// events render as they would standalone.
 fn render_codex_event(
-    json: &str,
+    event: &CodexEvent,
     session_id: Uuid,
     bare_agent_message: bool,
     turn_metrics: Option<&shared::TurnMetrics>,
 ) -> Html {
-    let parsed: Result<CodexEvent, _> = serde_json::from_str(json);
-
-    match parsed {
-        Ok(CodexEvent::ThreadStarted { .. }) => html! {},
-        Ok(CodexEvent::TurnStarted {}) => html! {},
-        Ok(CodexEvent::TurnCompleted {
+    match event {
+        CodexEvent::ThreadStarted { .. } => html! {},
+        CodexEvent::TurnStarted {} => html! {},
+        CodexEvent::TurnCompleted {
             usage,
             duration_ms,
             turn_id,
             status,
-        }) => render_turn_completed(
+        } => render_turn_completed(
             usage.as_ref(),
-            duration_ms,
+            *duration_ms,
             turn_id.as_deref(),
             status.as_deref(),
             turn_metrics,
         ),
-        Ok(CodexEvent::TurnFailed { error }) => render_turn_failed(error.as_ref(), turn_metrics),
-        Ok(CodexEvent::ItemStarted { item }) | Ok(CodexEvent::ItemUpdated { item }) => {
+        CodexEvent::TurnFailed { error } => render_turn_failed(error.as_ref(), turn_metrics),
+        CodexEvent::ItemStarted { item } | CodexEvent::ItemUpdated { item } => {
             match item.as_ref() {
                 Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
                     render_agent_message_content(&it.text, session_id)
@@ -88,21 +64,21 @@ fn render_codex_event(
                 item => render_item(item, false, session_id),
             }
         }
-        Ok(CodexEvent::ItemCompleted { item }) => match item.as_ref() {
+        CodexEvent::ItemCompleted { item } => match item.as_ref() {
             Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
                 render_agent_message_content(&it.text, session_id)
             }
             item => render_item(item, true, session_id),
         },
-        Ok(CodexEvent::Error { message }) => render_error_block(message.as_deref()),
-        Ok(CodexEvent::FileChangePatchUpdated { params }) => {
+        CodexEvent::Error { message } => render_error_block(message.as_deref()),
+        CodexEvent::FileChangePatchUpdated { params } => {
             render_file_change_patch(params.as_ref().and_then(|p| p.changes.as_deref()))
         }
-        Ok(CodexEvent::TurnPlanUpdated { params }) => render_turn_plan(
+        CodexEvent::TurnPlanUpdated { params } => render_turn_plan(
             params.as_ref().and_then(|p| p.plan.as_deref()),
             params.as_ref().and_then(|p| p.explanation.as_deref()),
         ),
-        Ok(CodexEvent::ThreadCompacted { params }) => render_context_compacted(params.as_ref()),
+        CodexEvent::ThreadCompacted { params } => render_context_compacted(params.as_ref()),
         // Cumulative whole-turn diffs (`turn/diff/updated`) are dropped: Codex
         // re-sends the entire turn diff on every edit tick, so they pile up
         // O(ticks) redundant cards (each the size of the whole turn) on top of
@@ -110,20 +86,14 @@ fn render_codex_event(
         // the same edits. Dropped before grouping — see
         // `grouping::group_messages` — so they never reach this renderer in
         // practice; the no-op arm is kept for match exhaustiveness.
-        Ok(CodexEvent::TurnDiffUpdated { .. })
+        CodexEvent::TurnDiffUpdated { .. }
         // Per-chunk deltas — the consolidated content lands in `turn/plan/updated`
         // (for plans) or `item.completed` (for reasoning). Emit nothing for the
         // streaming chunks to avoid visual noise without losing information.
-        | Ok(CodexEvent::PlanDelta { .. })
-        | Ok(CodexEvent::ReasoningSummaryPartAdded { .. })
-        | Ok(CodexEvent::ReasoningTextDelta { .. }) => html! {},
-        Ok(CodexEvent::Unknown) | Err(_) => {
-            if bare_agent_message {
-                html! {}
-            } else {
-                render_raw_codex(json)
-            }
-        }
+        | CodexEvent::PlanDelta { .. }
+        | CodexEvent::ReasoningSummaryPartAdded { .. }
+        | CodexEvent::ReasoningTextDelta { .. }
+        | CodexEvent::Unknown => html! {},
     }
 }
 
@@ -470,32 +440,6 @@ fn render_context_compaction_item(completed: bool) -> Html {
                         <div class="compaction-description">{ title }</div>
                     </div>
                 </div>
-            </div>
-        </div>
-    }
-}
-
-fn render_raw_codex(json: &str) -> Html {
-    let display = serde_json::from_str::<Value>(json)
-        .ok()
-        .and_then(|v| serde_json::to_string_pretty(&v).ok())
-        .unwrap_or_else(|| json.to_string());
-
-    html! {
-        <div class="claude-message raw-message">
-            <div class="message-header">
-                <span class="message-type-badge raw">{ "Codex Raw" }</span>
-                // Copy button so the user can paste the raw event into an
-                // issue or chat to request a typed renderer for it.
-                <CopyButton text={display.clone()} title="Copy raw event" />
-            </div>
-            <div class="message-body">
-                <ExpandableText
-                    full_text={display}
-                    max_len=500
-                    tag="pre"
-                    class={classes!("raw-json")}
-                />
             </div>
         </div>
     }
