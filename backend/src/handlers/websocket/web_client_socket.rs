@@ -99,7 +99,7 @@ fn handle_web_client_message(
             session_key,
             verified_session_id,
         ),
-        ClientToServer::ClaudeInput { content, send_mode } => {
+        ClientToServer::AgentInput { content, send_mode } => {
             // Gate on editor/owner role — re-queried on each input so role
             // revocations take effect immediately for already-connected viewers.
             // See `session_access::is_session_mutator` for the layered rules.
@@ -396,7 +396,7 @@ fn handle_web_input(
 
             session_manager.broadcast_to_web_clients(
                 key,
-                ServerToClient::ClaudeOutput {
+                ServerToClient::AgentOutput {
                     content: portal.to_json(),
                     sender_user_id: None,
                     sender_name: None,

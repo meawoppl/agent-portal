@@ -704,7 +704,7 @@ impl SessionView {
         self.pending_sends.push(optimistic_msg);
 
         if let Some(ref sender) = self.ws_sender {
-            let msg = ClientToServer::ClaudeInput {
+            let msg = ClientToServer::AgentInput {
                 content: serde_json::Value::String(input),
                 send_mode: if send_mode == SendMode::Normal {
                     None

@@ -205,7 +205,7 @@ async fn handle_ws_message(
     }
 
     match proxy_msg {
-        ServerToProxy::ClaudeInput { content, send_mode } => {
+        ServerToProxy::AgentInput { content, send_mode } => {
             return route_portal_input(content, send_mode, None, input_tx, wiggum_tx);
         }
         ServerToProxy::SequencedInput {

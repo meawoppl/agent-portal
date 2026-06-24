@@ -581,7 +581,7 @@ impl InputBar {
             }
 
             let combined = build_upload_message(&user_input, &uploaded_files);
-            on_send_frame.emit(ClientToServer::ClaudeInput {
+            on_send_frame.emit(ClientToServer::AgentInput {
                 content: serde_json::Value::String(combined),
                 send_mode: None,
             });

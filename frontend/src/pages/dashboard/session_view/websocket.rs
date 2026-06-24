@@ -125,7 +125,7 @@ pub fn connect_websocket(
 /// Handle incoming server message and emit appropriate events
 fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     match msg {
-        ServerToClient::ClaudeOutput {
+        ServerToClient::AgentOutput {
             content,
             sender_user_id,
             sender_name,
@@ -269,7 +269,7 @@ mod tests {
         let (tx, mut rx) = futures_channel::mpsc::unbounded::<ClientToServer>();
 
         for i in 0..N {
-            let msg = ClientToServer::ClaudeInput {
+            let msg = ClientToServer::AgentInput {
                 content: serde_json::Value::String(format!("msg-{i}")),
                 send_mode: None,
             };
@@ -279,7 +279,7 @@ mod tests {
 
         for i in 0..N {
             match rx.try_recv() {
-                Ok(ClientToServer::ClaudeInput { content, .. }) => {
+                Ok(ClientToServer::AgentInput { content, .. }) => {
                     assert_eq!(
                         content.as_str(),
                         Some(format!("msg-{i}").as_str()),
@@ -331,7 +331,7 @@ mod tests {
             send_message(&tx_a, ClientToServer::Interrupt);
             send_message(
                 &tx_b,
-                ClientToServer::ClaudeInput {
+                ClientToServer::AgentInput {
                     content: serde_json::Value::String(format!("b-{i}")),
                     send_mode: None,
                 },
@@ -391,7 +391,7 @@ mod tests {
     fn claude_output_with_created_at_emits_server_timestamp() {
         let (cb, sink) = capture();
         let server_ts = "2026-05-18T12:34:56.789012".to_string();
-        let msg = ServerToClient::ClaudeOutput {
+        let msg = ServerToClient::AgentOutput {
             content: serde_json::json!({"type": "assistant", "text": "hi"}),
             sender_user_id: None,
             sender_name: None,
@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn claude_output_without_created_at_emits_none_watermark() {
         let (cb, sink) = capture();
-        let msg = ServerToClient::ClaudeOutput {
+        let msg = ServerToClient::AgentOutput {
             content: serde_json::json!({"type": "assistant"}),
             sender_user_id: None,
             sender_name: None,

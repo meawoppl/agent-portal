@@ -315,7 +315,7 @@ pub fn handle_claude_output(
     if let Some(ref key) = session_key {
         session_manager.broadcast_to_web_clients(
             key,
-            ServerToClient::ClaudeOutput {
+            ServerToClient::AgentOutput {
                 content,
                 sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
                 sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),

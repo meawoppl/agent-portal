@@ -129,7 +129,7 @@ pub(super) mod test_support {
     }
 
     pub fn make_client_msg() -> ServerToClient {
-        ServerToClient::ClaudeOutput {
+        ServerToClient::AgentOutput {
             content: serde_json::json!({"text": "hello"}),
             sender_user_id: None,
             sender_name: None,

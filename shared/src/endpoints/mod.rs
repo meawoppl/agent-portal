@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn client_to_server_claude_input_roundtrip() {
-        let msg = ClientToServer::ClaudeInput {
+        let msg = ClientToServer::AgentInput {
             content: serde_json::json!({"text": "hi"}),
             send_mode: None,
         };
@@ -112,7 +112,7 @@ mod tests {
         assert!(json.contains(r#""type":"ClaudeInput""#));
         let parsed: ClientToServer = serde_json::from_str(&json).unwrap();
         match parsed {
-            ClientToServer::ClaudeInput { send_mode, .. } => {
+            ClientToServer::AgentInput { send_mode, .. } => {
                 assert!(send_mode.is_none());
             }
             _ => panic!("Wrong variant"),
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn server_to_client_output_roundtrip() {
-        let msg = ServerToClient::ClaudeOutput {
+        let msg = ServerToClient::AgentOutput {
             content: serde_json::json!({"type": "assistant", "text": "hello"}),
             sender_user_id: None,
             sender_name: None,
@@ -131,7 +131,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServerToClient::ClaudeOutput {
+            ServerToClient::AgentOutput {
                 content,
                 agent_type,
                 created_at,
@@ -154,7 +154,7 @@ mod tests {
         let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
         let parsed: ServerToClient = serde_json::from_str(json).unwrap();
         match parsed {
-            ServerToClient::ClaudeOutput { created_at, .. } => {
+            ServerToClient::AgentOutput { created_at, .. } => {
                 assert!(created_at.is_none());
             }
             _ => panic!("Wrong variant"),
@@ -219,7 +219,7 @@ mod tests {
         let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
         let parsed: ProxyToServer = serde_json::from_str(json).unwrap();
         match parsed {
-            ProxyToServer::ClaudeOutput { agent_type, .. } => {
+            ProxyToServer::AgentOutput { agent_type, .. } => {
                 assert_eq!(agent_type, AgentType::Claude);
             }
             _ => panic!("Wrong variant"),
@@ -228,7 +228,7 @@ mod tests {
         let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
         let parsed: ServerToClient = serde_json::from_str(json).unwrap();
         match parsed {
-            ServerToClient::ClaudeOutput { agent_type, .. } => {
+            ServerToClient::AgentOutput { agent_type, .. } => {
                 assert_eq!(agent_type, AgentType::Claude);
             }
             _ => panic!("Wrong variant"),

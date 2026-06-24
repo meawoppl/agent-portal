@@ -195,7 +195,7 @@ fn handle_proxy_message(
                 return ControlFlow::Break(());
             }
         }
-        ProxyToServer::ClaudeOutput {
+        ProxyToServer::AgentOutput {
             content,
             agent_type,
         } => {

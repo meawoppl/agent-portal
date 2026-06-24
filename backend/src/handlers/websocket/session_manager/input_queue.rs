@@ -101,7 +101,7 @@ impl SessionManager {
         } else {
             self.send_to_session(
                 session_key,
-                ServerToProxy::ClaudeInput { content, send_mode },
+                ServerToProxy::AgentInput { content, send_mode },
             )
         };
 
