@@ -415,6 +415,7 @@ mod tests {
             cache_creation_tokens: 0,
             cache_read_tokens: 84,
             thinking_tokens: 0,
+            subagent_tokens: 0,
             stop_reason: Some("end_turn".to_string()),
             is_error: false,
             tool_call_count: 0,
@@ -470,6 +471,7 @@ mod tests {
             cache_creation_tokens: 0,
             cache_read_tokens: 0, // all zero → cache chip drops
             thinking_tokens: 0,
+            subagent_tokens: 0,
             stop_reason: None,
             is_error: false,
             tool_call_count: 0,

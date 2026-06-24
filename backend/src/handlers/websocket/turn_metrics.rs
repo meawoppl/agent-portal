@@ -93,6 +93,7 @@ pub fn handle_turn_metrics_report(
         cache_creation_tokens: metrics.cache_creation_tokens,
         cache_read_tokens: metrics.cache_read_tokens,
         thinking_tokens: metrics.thinking_tokens,
+        subagent_tokens: metrics.subagent_tokens,
         stop_reason: metrics.stop_reason.clone(),
         is_error: metrics.is_error,
         tool_call_count: metrics.tool_call_count,

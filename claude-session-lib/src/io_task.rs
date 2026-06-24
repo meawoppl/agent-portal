@@ -206,6 +206,19 @@ pub(crate) async fn claude_io_task(
                                     .map(|u| u.cache_read_input_tokens as i64)
                                     .unwrap_or(0),
                                 thinking_tokens: 0,
+                                // The Claude binary tracks subagent (`Task` /
+                                // sidechain) tokens and surfaces them as a
+                                // distinct `<subagent_tokens>` line in its
+                                // result `<usage>` envelope, but the
+                                // stream-json `usage` shape the proxy receives
+                                // exposes no subagent field (claude-codes
+                                // `UsageInfo` carries only input/output/cache/
+                                // service_tier). So we can't attribute
+                                // subagent tokens on the Claude path yet.
+                                // TODO(SDK #169): once claude-codes exposes
+                                // the result `<usage>` subagent rollup,
+                                // populate this instead of reporting 0.
+                                subagent_tokens: 0,
                                 stop_reason: r.stop_reason.clone(),
                                 is_error: r.is_error,
                                 total_cost_usd: Some(r.total_cost_usd),

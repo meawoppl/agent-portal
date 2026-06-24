@@ -297,6 +297,7 @@ mod tests {
             cache_creation_tokens: 0,
             cache_read_tokens: 50,
             thinking_tokens: 0,
+            subagent_tokens: 0,
             stop_reason: None,
             is_error: false,
             tool_call_count: 0,
