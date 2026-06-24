@@ -118,9 +118,14 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
             | AgentFrame::Codex(_)
             | AgentFrame::RawJson => render_raw_json(&props.json),
         },
-        FrameRenderer::Codex => {
-            html! { <super::codex_renderer::CodexMessageRenderer json={props.json.clone()} session_id={props.session_id} turn_metrics={props.turn_metrics.clone()} /> }
-        }
+        FrameRenderer::Codex => match frame {
+            AgentFrame::Codex(event) => super::codex_renderer::render_codex_frame(
+                &event,
+                props.session_id,
+                props.turn_metrics.as_ref(),
+            ),
+            _ => html! {},
+        },
         FrameRenderer::RawJson => render_raw_json(&props.json),
     }
 }
@@ -259,8 +264,8 @@ fn render_identity_group_part(
             continuation_statuses,
             on_schedule_continuation,
         ),
-        AgentFrame::Codex(_) => {
-            super::codex_renderer::render_codex_message_content(json, session_id)
+        AgentFrame::Codex(event) => {
+            super::codex_renderer::render_codex_frame_content(&event, session_id)
         }
         _ => html! {},
     }
