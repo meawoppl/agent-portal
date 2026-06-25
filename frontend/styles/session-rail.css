@@ -512,7 +512,7 @@
     min-width: 160px;
     display: none;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     z-index: 100;
 }
@@ -584,6 +584,51 @@ a.pill-menu-option.pr-link {
 
 a.pill-menu-option.pr-link:hover {
     background: rgba(122, 162, 247, 0.15);
+}
+
+.pill-menu-submenu {
+    position: relative;
+}
+
+.pill-menu-submenu > .pill-menu-option {
+    width: 100%;
+}
+
+.repo-submenu-trigger {
+    position: relative;
+    padding-right: 1.8rem;
+}
+
+.repo-submenu-trigger::after {
+    content: "›";
+    position: absolute;
+    right: 0.7rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.pill-submenu-panel {
+    position: absolute;
+    left: calc(100% + 4px);
+    top: 0;
+    display: none;
+    min-width: 220px;
+    max-width: 320px;
+    max-height: min(360px, calc(100vh - 2rem));
+    overflow-y: auto;
+    flex-direction: column;
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.pill-menu-submenu:hover .pill-submenu-panel,
+.pill-menu-submenu:focus-within .pill-submenu-panel {
+    display: flex;
 }
 
 .pill-menu-option.disabled {
