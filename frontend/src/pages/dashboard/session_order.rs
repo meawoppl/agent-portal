@@ -24,29 +24,23 @@ use uuid::Uuid;
 /// Total, deterministic display-order key for a session.
 ///
 /// Lexicographic tuple, coarsest discriminant first:
-/// 1. display folder (lowercased) — groups sessions by repo/worktree leaf name
-/// 2. full working directory (lowercased) — separates sibling worktrees that
-///    share a leaf name
-/// 3. git branch — distinct worktrees of one repo differ here
-/// 4. agent type — claude vs codex in the same dir
-/// 5. hostname — same dir mirrored across machines
-/// 6. created-at then session name — stable human-meaningful ordering
-/// 7. `id` — unique final tie-breaker, so no two sessions ever compare equal
+/// 1. top-level folder name (lowercased) — groups sessions by repo
+/// 2. agent type — orders the agents working that repo (e.g. claude, codex)
+/// 3. `id` — unique final tie-breaker, so no two sessions ever compare equal
+///
+/// Deliberately **does not** key on `git_branch` (or working_directory /
+/// hostname / timestamps). Branch is derived by best-effort detection that can
+/// flap between polls (and is wrong under worktrees — see #1067); keying on it
+/// made pills reorder when the branch reading changed. Folder + agent + id is
+/// the stable identity that doesn't move when branch detection wobbles.
 ///
 /// Because the key ends in the unique `id`, the order is *total*: the same set
 /// of sessions always sorts identically no matter what order the poll returned
-/// them in.
-fn display_sort_key(
-    s: &SessionInfo,
-) -> (String, String, String, String, String, String, String, Uuid) {
+/// them in, and never depends on branch state.
+fn display_sort_key(s: &SessionInfo) -> (String, String, Uuid) {
     (
         crate::utils::extract_folder(&s.working_directory).to_lowercase(),
-        s.working_directory.to_lowercase(),
-        s.git_branch.clone().unwrap_or_default(),
         s.agent_type.as_str().to_string(),
-        s.hostname.to_lowercase(),
-        s.created_at.clone(),
-        s.session_name.clone(),
         s.id,
     )
 }
@@ -162,8 +156,43 @@ mod tests {
 
         let ids = |v: &[SessionInfo]| v.iter().map(|s| s.id).collect::<Vec<_>>();
         assert_eq!(ids(&first), ids(&second));
-        // wt1 sorts before wt2 on the full-working-directory key.
+        // wt1 sorts before wt2 on the top-level folder name.
         assert_eq!(ids(&first), vec![a, b]);
+    }
+
+    /// Two different agents in the same repo order by agent type, and that
+    /// order is immune to `git_branch` flapping — the case Matt flagged.
+    /// Branch detection wobbles (and is wrong under worktrees, #1067), so it
+    /// must not participate in ordering.
+    #[test]
+    fn two_agents_same_repo_order_by_agent_ignoring_branch() {
+        let claude = Uuid::from_u128(100);
+        let codex = Uuid::from_u128(200);
+        let mk = || {
+            let mut c = session(claude, "/home/me/app", "h", Some("main"));
+            c.agent_type = AgentType::Claude;
+            let mut x = session(codex, "/home/me/app", "h", Some("feature"));
+            x.agent_type = AgentType::Codex;
+            vec![x, c] // codex-first input order on purpose
+        };
+
+        let mut v = mk();
+        v.sort_by(session_display_cmp);
+        // "claude" < "codex" → claude first, regardless of input order.
+        assert_eq!(
+            v.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![claude, codex]
+        );
+
+        // Flip/clear both branches — order must NOT change (branch isn't keyed).
+        let mut v2 = mk();
+        v2[0].git_branch = Some("totally-different".to_string());
+        v2[1].git_branch = None;
+        v2.sort_by(session_display_cmp);
+        assert_eq!(
+            v2.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![claude, codex]
+        );
     }
 
     /// Focus stays attached to its session id even after the surrounding list
