@@ -241,6 +241,16 @@ pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Html 
                         ContentBlock::ContainerUpload(upload) => {
                             render_container_upload(&upload.data)
                         }
+                        ContentBlock::Fallback(fb) => {
+                            // Typed model-fallback notice: the response switched
+                            // models mid-stream (e.g. overload fallback). Render
+                            // the from → to transition rather than a raw blob.
+                            html! {
+                                <div class="assistant-text model-fallback-notice">
+                                    { format!("Model fallback: {} → {}", fb.from.model, fb.to.model) }
+                                </div>
+                            }
+                        }
                         ContentBlock::Unknown(value) => {
                             render_unknown_block(value)
                         }

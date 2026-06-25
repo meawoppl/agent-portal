@@ -600,6 +600,15 @@
     word-wrap: break-word;
 }
 
+.model-fallback-notice {
+    background: rgba(224, 175, 104, 0.08);
+    border-left: 3px solid #e0af68;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    padding: 0.45rem 0.65rem;
+}
+
 /* Clickable links in messages */
 .message-link {
     color: var(--link-color);

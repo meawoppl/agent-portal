@@ -421,6 +421,12 @@ fn log_claude_output(output: &ClaudeOutput) {
                     ContentBlock::ContainerUpload(_) => {
                         debug!("← [assistant] container_upload block");
                     }
+                    ContentBlock::Fallback(fb) => {
+                        debug!(
+                            "← [assistant] model fallback: {} → {}",
+                            fb.from.model, fb.to.model
+                        );
+                    }
                     ContentBlock::Unknown(v) => {
                         let block_type =
                             v.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
