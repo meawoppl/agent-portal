@@ -32,6 +32,10 @@ use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
 };
+use super::state::{
+    insert_turn_metrics_sorted, push_message_with_limit, retain_newest_items,
+    sort_turn_metrics_by_start,
+};
 use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
 use super::websocket::{connect_websocket, send_message, WsEvent};
@@ -426,12 +430,12 @@ impl Component for SessionView {
                 // started_at ASC defensively even though the backend
                 // already orders that way — the join walk depends on
                 // strict order.
-                metrics.sort_by_key(|m| m.started_at);
+                sort_turn_metrics_by_start(&mut metrics);
                 self.turn_metrics = metrics;
                 true
             }
             SessionViewMsg::TurnMetricsReceived(metrics) => {
-                self.insert_turn_metrics(*metrics);
+                insert_turn_metrics_sorted(&mut self.turn_metrics, *metrics);
                 true
             }
             SessionViewMsg::ScheduleLimitContinuation(continuation_id) => {
@@ -555,10 +559,7 @@ impl SessionView {
             }
             WsEvent::HistoryBatch(messages, last_created_at) => {
                 self.messages.extend(messages);
-                if self.messages.len() > MAX_MESSAGES_PER_SESSION {
-                    let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;
-                    self.messages.drain(0..excess);
-                }
+                retain_newest_items(&mut self.messages, MAX_MESSAGES_PER_SESSION);
                 // Set the reconnect-replay watermark to the server-assigned
                 // timestamp of the latest message in the batch (closes
                 // #784). Empty batches (or a pre-#784 backend that didn't
@@ -598,31 +599,6 @@ impl SessionView {
         }
     }
 
-    /// Insert a single live `TurnMetrics` into the buffer, preserving
-    /// `started_at ASC` order and deduping by `id`.
-    ///
-    /// Dedup matters because two paths can deliver the same row: the REST
-    /// hydration loads the canonical DB-ordered list, and the broadcast
-    /// pipeline replays whatever the backend pushed. If the user reconnects
-    /// shortly after a turn completed, the broadcast for that row may
-    /// arrive after the REST hydration that already contains it — without
-    /// dedup the chip strip would be paired against the wrong turn from
-    /// that point on. Match on `Some(id)` so two backfilled `None` rows
-    /// (impossible today but a defensive guard) don't collapse together.
-    fn insert_turn_metrics(&mut self, metrics: TurnMetrics) {
-        if let Some(new_id) = metrics.id {
-            if let Some(slot) = self.turn_metrics.iter_mut().find(|m| m.id == Some(new_id)) {
-                *slot = metrics;
-                return;
-            }
-        }
-        let pos = self
-            .turn_metrics
-            .binary_search_by(|m| m.started_at.cmp(&metrics.started_at))
-            .unwrap_or_else(|p| p);
-        self.turn_metrics.insert(pos, metrics);
-    }
-
     /// Hydrate the message buffer + task panel from a REST history batch.
     /// Each message is classified once via [`classify_output_msg_type`],
     /// task events are forwarded to the panel via [`derive_task_events`],
@@ -635,8 +611,7 @@ impl SessionView {
         last_timestamp: Option<String>,
     ) {
         if messages.len() > MAX_MESSAGES_PER_SESSION {
-            let excess = messages.len() - MAX_MESSAGES_PER_SESSION;
-            messages.drain(0..excess);
+            retain_newest_items(&mut messages, MAX_MESSAGES_PER_SESSION);
         }
         let session_id = ctx.props().session.id;
         self.dispatch_tasks(TasksInbound::ClearForReplay);
@@ -746,11 +721,7 @@ impl SessionView {
 
         reconcile_pending_sends(&mut self.pending_sends, tag, &output);
 
-        self.messages.push(output);
-        if self.messages.len() > MAX_MESSAGES_PER_SESSION {
-            let excess = self.messages.len() - MAX_MESSAGES_PER_SESSION;
-            self.messages.drain(0..excess);
-        }
+        push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
         true
     }
 

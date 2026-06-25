@@ -17,6 +17,7 @@ pub(super) mod helpers;
 mod history;
 mod input_bar;
 mod permission_handler;
+mod state;
 mod tasks_panel;
 mod types;
 mod websocket;
