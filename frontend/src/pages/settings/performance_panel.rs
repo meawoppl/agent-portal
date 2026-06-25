@@ -411,6 +411,10 @@ fn render_charts(
     // ------------ e) Cost per output token (skips codex / no-cost rows) ------
     let cost_series = build_cost_per_token_series(&indexed, &bucket_axis, &active_pairs);
 
+    // ------------ f) Auxiliary token volume (reasoning + subagents) ----------
+    let auxiliary_token_series =
+        build_auxiliary_token_series(&indexed, &bucket_axis, &active_pairs);
+
     html! {
         <div class="performance-charts">
             <LinePlot
@@ -451,6 +455,14 @@ fn render_charts(
                 buckets={bucket_axis.clone()}
                 bucket_kind={bucket_kind}
                 series={cost_series}
+                axis_scale={axis_scale}
+            />
+            <LinePlot
+                title="Auxiliary tokens"
+                y_label="tokens"
+                buckets={bucket_axis.clone()}
+                bucket_kind={bucket_kind}
+                series={auxiliary_token_series}
                 axis_scale={axis_scale}
             />
         </div>
@@ -640,6 +652,49 @@ fn build_cost_per_token_series(
     out
 }
 
+/// Plot reasoning/thinking tokens and subagent tokens per bucket. The two
+/// lines share the model/tier color; subagent tokens use the dashed variant so
+/// the relationship stays readable even when multiple pairs are active.
+fn build_auxiliary_token_series(
+    indexed: &BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket>,
+    bucket_axis: &[DateTime<Utc>],
+    active_pairs: &[GroupKey],
+) -> Vec<LineSeries> {
+    let mut out: Vec<LineSeries> = Vec::new();
+    for (idx, pair) in active_pairs.iter().enumerate() {
+        let color = pair_color(idx);
+        let label = pair_label(pair);
+        let mut thinking_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
+        let mut subagent_vals: Vec<Option<f64>> = Vec::with_capacity(bucket_axis.len());
+        for ts in bucket_axis {
+            let row = indexed.get(&(pair.clone(), *ts));
+            thinking_vals.push(row.and_then(|r| positive_i64(r.thinking_tokens_sum)));
+            subagent_vals.push(row.and_then(|r| positive_i64(r.subagent_tokens_sum)));
+        }
+        if thinking_vals.iter().any(Option::is_some) {
+            out.push(LineSeries {
+                label: format!("{label} thinking"),
+                color: color.to_string(),
+                dashed: false,
+                values: thinking_vals,
+            });
+        }
+        if subagent_vals.iter().any(Option::is_some) {
+            out.push(LineSeries {
+                label: format!("{label} subagent"),
+                color: color.to_string(),
+                dashed: true,
+                values: subagent_vals,
+            });
+        }
+    }
+    out
+}
+
+fn positive_i64(value: i64) -> Option<f64> {
+    (value > 0).then_some(value as f64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,6 +727,8 @@ mod tests {
             output_tokens_sum: 200,
             cache_read_tokens_sum: 500,
             cache_creation_tokens_sum: 100,
+            thinking_tokens_sum: 0,
+            subagent_tokens_sum: 0,
             total_cost_usd_sum: Some(0.05),
             stop_reason_counts: counts,
         }
@@ -877,6 +934,29 @@ mod tests {
         // $0.10 / 100 out * 1000 = $1.00 per 1k out
         let v = series[0].values[0].unwrap();
         assert!((v - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn build_auxiliary_token_series_splits_thinking_and_subagent() {
+        let t1 = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let mut b = mk_bucket(t1, Some("gpt-5"), Some("standard"), None, None, vec![]);
+        b.thinking_tokens_sum = 1500;
+        b.subagent_tokens_sum = 275;
+        let buckets = vec![b];
+        let axis = distinct_bucket_starts(&buckets);
+        let pairs = distinct_pairs(&buckets);
+        let mut indexed: BTreeMap<(GroupKey, DateTime<Utc>), &MetricBucket> = BTreeMap::new();
+        for bb in &buckets {
+            indexed.insert((bucket_group_key(bb), bb.bucket_start), bb);
+        }
+
+        let series = build_auxiliary_token_series(&indexed, &axis, &pairs);
+        assert_eq!(series.len(), 2);
+        assert_eq!(series[0].label, "gpt-5 thinking");
+        assert_eq!(series[0].values, vec![Some(1500.0)]);
+        assert_eq!(series[1].label, "gpt-5 subagent");
+        assert!(series[1].dashed);
+        assert_eq!(series[1].values, vec![Some(275.0)]);
     }
 
     #[test]

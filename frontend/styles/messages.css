@@ -997,6 +997,11 @@
     white-space: nowrap;
 }
 
+.turn-metric-chip.thinking-chip,
+.turn-metric-chip.subagent-chip {
+    color: var(--accent-secondary, var(--accent));
+}
+
 .turn-metric-sep {
     color: var(--text-muted, var(--text-secondary));
     opacity: 0.5;

@@ -21,6 +21,8 @@ pub enum SparklineMetric {
     Ttft,
     MaxGap,
     CacheHit,
+    Thinking,
+    Subagent,
 }
 
 impl SparklineMetric {
@@ -30,6 +32,8 @@ impl SparklineMetric {
             Self::Ttft => "TTFT",
             Self::MaxGap => "max gap",
             Self::CacheHit => "cache hit",
+            Self::Thinking => "thinking",
+            Self::Subagent => "subagent",
         }
     }
 
@@ -39,6 +43,8 @@ impl SparklineMetric {
             SparklineMetric::Ttft,
             SparklineMetric::MaxGap,
             SparklineMetric::CacheHit,
+            SparklineMetric::Thinking,
+            SparklineMetric::Subagent,
         ]
     }
 }
@@ -154,6 +160,8 @@ fn metric_value(m: &TurnMetrics, metric: SparklineMetric) -> Option<f64> {
             }
             Some((m.cache_read_tokens as f64 / denom) * 100.0)
         }
+        SparklineMetric::Thinking => (m.thinking_tokens > 0).then_some(m.thinking_tokens as f64),
+        SparklineMetric::Subagent => (m.subagent_tokens > 0).then_some(m.subagent_tokens as f64),
     }
 }
 
@@ -165,6 +173,16 @@ fn format_current_value(metric: SparklineMetric, value: f64) -> String {
         SparklineMetric::Ttft => format!("TTFT {value:.2}s"),
         SparklineMetric::MaxGap => format!("gap {value:.1}s"),
         SparklineMetric::CacheHit => format!("cache {:.0}%", value),
+        SparklineMetric::Thinking => format!("{} thinking", compact_metric_count(value)),
+        SparklineMetric::Subagent => format!("{} subagent", compact_metric_count(value)),
+    }
+}
+
+fn compact_metric_count(value: f64) -> String {
+    if value < 1000.0 {
+        format!("{value:.0}")
+    } else {
+        format!("{:.1}k", value / 1000.0)
     }
 }
 
@@ -412,6 +430,28 @@ mod tests {
     }
 
     #[test]
+    fn project_auxiliary_tokens_skips_zero_and_keeps_positive_values() {
+        let mut first = mk(Some("gpt-5"), Some("standard"), 0);
+        first.thinking_tokens = 0;
+        first.subagent_tokens = 0;
+        let mut second = mk(Some("gpt-5"), Some("standard"), 1);
+        second.thinking_tokens = 1500;
+        second.subagent_tokens = 275;
+        let buf = vec![first, second];
+
+        let model = Some("gpt-5".to_string());
+        let tier = Some("standard".to_string());
+        assert_eq!(
+            project_metric(&buf, &model, &tier, SparklineMetric::Thinking),
+            vec![1500.0]
+        );
+        assert_eq!(
+            project_metric(&buf, &model, &tier, SparklineMetric::Subagent),
+            vec![275.0]
+        );
+    }
+
+    #[test]
     fn format_current_value_formats_each_metric() {
         assert_eq!(
             format_current_value(SparklineMetric::TokPerSec, 47.234),
@@ -428,6 +468,14 @@ mod tests {
         assert_eq!(
             format_current_value(SparklineMetric::CacheHit, 83.7),
             "cache 84%"
+        );
+        assert_eq!(
+            format_current_value(SparklineMetric::Thinking, 1500.0),
+            "1.5k thinking"
+        );
+        assert_eq!(
+            format_current_value(SparklineMetric::Subagent, 275.0),
+            "275 subagent"
         );
     }
 }

@@ -4,7 +4,7 @@
 //! manages multi-turn conversations via thread/turn lifecycle. Converts
 //! JSON-RPC notifications into exec-format JSONL events for the frontend.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::time::Instant;
 
@@ -215,6 +215,7 @@ pub(crate) async fn codex_io_task(
     // can plug it into the finalized `TurnMetrics`.
     let mut current_turn_usage: Option<codex_codes::TokenUsageBreakdown> = None;
     let mut current_turn_model: Option<String> = None;
+    let mut subagent_token_tracker = CodexSubagentTokenTracker::new(thread_id.clone());
 
     loop {
         if turn_active {
@@ -232,6 +233,13 @@ pub(crate) async fn codex_io_task(
                                 if let codex_codes::Notification::TurnStarted(p) = notif {
                                     current_turn_id = Some(p.turn.id.clone());
                                     current_turn_model = thread_model.clone();
+                                    subagent_token_tracker.start_parent_turn();
+                                }
+                                if let codex_codes::Notification::ThreadStarted(p) = notif {
+                                    subagent_token_tracker.observe_thread_started(
+                                        &p.thread.id,
+                                        p.thread.parent_thread_id.as_deref(),
+                                    );
                                 }
                                 if let codex_codes::Notification::ModelRerouted(p) = notif {
                                     let matches_current_turn = current_turn_id
@@ -249,18 +257,33 @@ pub(crate) async fn codex_io_task(
                                 if let codex_codes::Notification::ThreadTokenUsageUpdated(p) =
                                     notif
                                 {
-                                    latest_token_usage = Some((
-                                        p.turn_id.clone(),
-                                        CodexUsageEvent {
-                                            last: p.token_usage.last.clone(),
-                                            total: p.token_usage.total.clone(),
-                                            model_context_window: p.token_usage.model_context_window,
-                                        },
-                                    ));
-                                    // Latch the per-turn breakdown so the
-                                    // finalized `TurnMetrics` can carry
-                                    // the token counts.
-                                    current_turn_usage = Some(p.token_usage.last.clone());
+                                    let is_current_main_turn = p.thread_id == thread_id
+                                        && current_turn_id
+                                            .as_deref()
+                                            .is_some_and(|turn_id| turn_id == p.turn_id);
+                                    if is_current_main_turn {
+                                        latest_token_usage = Some((
+                                            p.turn_id.clone(),
+                                            CodexUsageEvent {
+                                                last: p.token_usage.last.clone(),
+                                                total: p.token_usage.total.clone(),
+                                                model_context_window: p
+                                                    .token_usage
+                                                    .model_context_window,
+                                            },
+                                        ));
+                                        // Latch the per-turn breakdown so the
+                                        // finalized `TurnMetrics` can carry
+                                        // the main-thread token counts.
+                                        current_turn_usage = Some(p.token_usage.last.clone());
+                                    } else {
+                                        subagent_token_tracker
+                                            .observe_token_usage(
+                                                &p.thread_id,
+                                                &p.turn_id,
+                                                &p.token_usage.last,
+                                            );
+                                    }
                                 }
                                 // Content / tool frames for the metrics tracker.
                                 // Pragmatic "first content frame" definition for
@@ -358,13 +381,8 @@ pub(crate) async fn codex_io_task(
                                         .as_ref()
                                         .map(|u| u.reasoning_output_tokens)
                                         .unwrap_or(0),
-                                    // Subagent (sub-thread) token attribution
-                                    // lands in the companion Codex PR, which
-                                    // accumulates child-thread usage (threads
-                                    // whose `parent_thread_id` is this turn's
-                                    // thread) and folds it in here. Reported
-                                    // as 0 until then.
-                                    subagent_tokens: 0,
+                                    subagent_tokens: subagent_token_tracker
+                                        .take_current_turn_tokens(),
                                     stop_reason: Some(status.to_string()),
                                     is_error,
                                     total_cost_usd: None,
@@ -386,6 +404,7 @@ pub(crate) async fn codex_io_task(
                                     }
                                 }
                                 current_turn_model = None;
+                                subagent_token_tracker.end_parent_turn();
                             }
                             let latest_usage_for_msg =
                                 if let codex_codes::ServerMessage::Notification(
@@ -673,6 +692,72 @@ fn non_empty_string(value: String) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct CodexSubagentTokenTracker {
+    parent_thread_id: String,
+    subagent_thread_ids: HashSet<String>,
+    parent_turn_active: bool,
+    current_turn_tokens_by_child_turn: HashMap<(String, String), i64>,
+}
+
+impl CodexSubagentTokenTracker {
+    fn new(parent_thread_id: String) -> Self {
+        Self {
+            parent_thread_id,
+            subagent_thread_ids: HashSet::new(),
+            parent_turn_active: false,
+            current_turn_tokens_by_child_turn: HashMap::new(),
+        }
+    }
+
+    fn start_parent_turn(&mut self) {
+        self.parent_turn_active = true;
+        self.current_turn_tokens_by_child_turn.clear();
+    }
+
+    fn end_parent_turn(&mut self) {
+        self.parent_turn_active = false;
+    }
+
+    fn observe_thread_started(&mut self, thread_id: &str, parent_thread_id: Option<&str>) {
+        if parent_thread_id == Some(self.parent_thread_id.as_str()) {
+            self.subagent_thread_ids.insert(thread_id.to_string());
+        }
+    }
+
+    fn observe_token_usage(
+        &mut self,
+        thread_id: &str,
+        turn_id: &str,
+        usage: &codex_codes::TokenUsageBreakdown,
+    ) {
+        if !self.parent_turn_active || !self.subagent_thread_ids.contains(thread_id) {
+            return;
+        }
+        self.current_turn_tokens_by_child_turn.insert(
+            (thread_id.to_string(), turn_id.to_string()),
+            token_breakdown_total(usage),
+        );
+    }
+
+    fn take_current_turn_tokens(&mut self) -> i64 {
+        let total = self.current_turn_tokens_by_child_turn.values().sum();
+        self.current_turn_tokens_by_child_turn.clear();
+        total
+    }
+}
+
+fn token_breakdown_total(usage: &codex_codes::TokenUsageBreakdown) -> i64 {
+    if usage.total_tokens > 0 {
+        usage.total_tokens
+    } else {
+        usage.input_tokens
+            + usage.cached_input_tokens
+            + usage.output_tokens
+            + usage.reasoning_output_tokens
+    }
+}
+
 fn configured_codex_model(overrides: &[(String, String)], trailing: &[String]) -> Option<String> {
     overrides
         .iter()
@@ -760,5 +845,80 @@ mod tests {
         let trailing = strings(&[]);
 
         assert!(configured_codex_model(&overrides, &trailing).is_none());
+    }
+
+    fn usage(
+        total: i64,
+        input: i64,
+        cached: i64,
+        output: i64,
+        reasoning: i64,
+    ) -> codex_codes::TokenUsageBreakdown {
+        codex_codes::TokenUsageBreakdown {
+            input_tokens: input,
+            cached_input_tokens: cached,
+            output_tokens: output,
+            reasoning_output_tokens: reasoning,
+            total_tokens: total,
+        }
+    }
+
+    #[test]
+    fn subagent_tracker_counts_child_thread_usage_during_parent_turn() {
+        let mut tracker = CodexSubagentTokenTracker::new("parent-thread".to_string());
+        tracker.observe_thread_started("child-thread", Some("parent-thread"));
+
+        tracker.start_parent_turn();
+        tracker.observe_token_usage("child-thread", "child-turn-1", &usage(37, 0, 0, 0, 0));
+        tracker.observe_token_usage("child-thread", "child-turn-2", &usage(11, 0, 0, 0, 0));
+
+        assert_eq!(tracker.take_current_turn_tokens(), 48);
+        tracker.end_parent_turn();
+    }
+
+    #[test]
+    fn subagent_tracker_uses_last_usage_per_child_turn() {
+        let mut tracker = CodexSubagentTokenTracker::new("parent-thread".to_string());
+        tracker.observe_thread_started("child-thread", Some("parent-thread"));
+
+        tracker.start_parent_turn();
+        tracker.observe_token_usage("child-thread", "child-turn", &usage(37, 0, 0, 0, 0));
+        tracker.observe_token_usage("child-thread", "child-turn", &usage(41, 0, 0, 0, 0));
+
+        assert_eq!(tracker.take_current_turn_tokens(), 41);
+    }
+
+    #[test]
+    fn subagent_tracker_ignores_parent_sibling_and_inactive_usage() {
+        let mut tracker = CodexSubagentTokenTracker::new("parent-thread".to_string());
+        tracker.observe_thread_started("child-thread", Some("parent-thread"));
+        tracker.observe_thread_started("sibling-thread", Some("other-parent"));
+
+        tracker.observe_token_usage("child-thread", "child-turn", &usage(100, 0, 0, 0, 0));
+        tracker.start_parent_turn();
+        tracker.observe_token_usage("parent-thread", "parent-turn", &usage(100, 0, 0, 0, 0));
+        tracker.observe_token_usage("sibling-thread", "sibling-turn", &usage(100, 0, 0, 0, 0));
+        tracker.observe_token_usage("unknown-thread", "unknown-turn", &usage(100, 0, 0, 0, 0));
+
+        assert_eq!(tracker.take_current_turn_tokens(), 0);
+    }
+
+    #[test]
+    fn subagent_tracker_resets_on_new_parent_turn() {
+        let mut tracker = CodexSubagentTokenTracker::new("parent-thread".to_string());
+        tracker.observe_thread_started("child-thread", Some("parent-thread"));
+
+        tracker.start_parent_turn();
+        tracker.observe_token_usage("child-thread", "child-turn", &usage(7, 0, 0, 0, 0));
+        assert_eq!(tracker.take_current_turn_tokens(), 7);
+        tracker.end_parent_turn();
+
+        tracker.start_parent_turn();
+        assert_eq!(tracker.take_current_turn_tokens(), 0);
+    }
+
+    #[test]
+    fn token_breakdown_total_falls_back_when_total_tokens_missing() {
+        assert_eq!(token_breakdown_total(&usage(0, 10, 3, 5, 2)), 20);
     }
 }

@@ -226,6 +226,10 @@ struct AggregateRow {
     cache_read_tokens_sum: i64,
     #[diesel(sql_type = BigInt)]
     cache_creation_tokens_sum: i64,
+    #[diesel(sql_type = BigInt)]
+    thinking_tokens_sum: i64,
+    #[diesel(sql_type = BigInt)]
+    subagent_tokens_sum: i64,
     #[diesel(sql_type = Nullable<Double>)]
     total_cost_usd_sum: Option<f64>,
 }
@@ -301,6 +305,8 @@ pub async fn list_aggregated_turn_metrics(
             COALESCE(SUM(tm.output_tokens), 0)::bigint AS output_tokens_sum, \
             COALESCE(SUM(tm.cache_read_tokens), 0)::bigint AS cache_read_tokens_sum, \
             COALESCE(SUM(tm.cache_creation_tokens), 0)::bigint AS cache_creation_tokens_sum, \
+            COALESCE(SUM(tm.thinking_tokens), 0)::bigint AS thinking_tokens_sum, \
+            COALESCE(SUM(tm.subagent_tokens), 0)::bigint AS subagent_tokens_sum, \
             SUM(tm.total_cost_usd)::float8 AS total_cost_usd_sum \
         FROM turn_metrics tm \
         WHERE tm.user_id = $2 \
@@ -389,6 +395,8 @@ pub async fn list_aggregated_turn_metrics(
                 output_tokens_sum: row.output_tokens_sum,
                 cache_read_tokens_sum: row.cache_read_tokens_sum,
                 cache_creation_tokens_sum: row.cache_creation_tokens_sum,
+                thinking_tokens_sum: row.thinking_tokens_sum,
+                subagent_tokens_sum: row.subagent_tokens_sum,
                 total_cost_usd_sum: row.total_cost_usd_sum,
                 stop_reason_counts,
             }
@@ -480,6 +488,8 @@ mod tests {
                 output_tokens_sum: 12_345,
                 cache_read_tokens_sum: 1_000,
                 cache_creation_tokens_sum: 200,
+                thinking_tokens_sum: 300,
+                subagent_tokens_sum: 900,
                 total_cost_usd_sum: Some(0.18),
                 stop_reason_counts: {
                     let mut m = BTreeMap::new();

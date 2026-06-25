@@ -200,6 +200,10 @@ pub struct MetricBucket {
     pub output_tokens_sum: i64,
     pub cache_read_tokens_sum: i64,
     pub cache_creation_tokens_sum: i64,
+    #[serde(default)]
+    pub thinking_tokens_sum: i64,
+    #[serde(default)]
+    pub subagent_tokens_sum: i64,
     // Cost
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_cost_usd_sum: Option<f64>,
