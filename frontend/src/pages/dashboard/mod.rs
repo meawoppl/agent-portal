@@ -8,6 +8,7 @@
 
 mod page;
 mod permission_dialog;
+mod session_order;
 mod session_rail;
 mod session_view;
 mod types;

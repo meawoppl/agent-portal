@@ -1,5 +1,6 @@
 //! Dashboard page - Main session management interface
 
+use super::session_order;
 use super::session_rail::{ActivityRef, SessionRail};
 use super::session_view::SessionView;
 use super::types::{
@@ -95,7 +96,11 @@ pub fn dashboard_page() -> Html {
     let show_launch_dialog = use_state(|| false);
     let show_admin = use_state(|| false);
     let show_settings = use_state(|| false);
-    let focused_index = use_state(|| 0usize);
+    // Focus is tracked by `session_id` (the source of truth), not by array
+    // index — see `session_order` / issue #1094. The display index is derived
+    // from this each render, so a reordered poll never bounces focus onto a
+    // different session.
+    let focused_id = use_state(|| None::<Uuid>);
     let awaiting_sessions = use_state(HashSet::<Uuid>::new);
     let hidden_sessions = use_state(load_hidden_sessions);
     let inactive_hidden = use_state(load_inactive_hidden);
@@ -182,23 +187,15 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Get DB-authoritative sessions sorted by repo name, then hostname. A
-    // disconnected, unpaused session is desired-running and should stay visible
-    // while the launcher reconciles it.
+    // Get DB-authoritative sessions in a total, deterministic display order
+    // (see `session_order`). A disconnected, unpaused session is
+    // desired-running and should stay visible while the launcher reconciles it.
     let active_sessions: Vec<SessionInfo> = {
         let mut sorted: Vec<SessionInfo> = sessions.to_vec();
-        sorted.sort_by(|a, b| {
-            let folder_a = utils::extract_folder(&a.working_directory);
-            let folder_b = utils::extract_folder(&b.working_directory);
-            match folder_a.to_lowercase().cmp(&folder_b.to_lowercase()) {
-                std::cmp::Ordering::Equal => {
-                    let hostname_a = &a.hostname;
-                    let hostname_b = &b.hostname;
-                    hostname_a.to_lowercase().cmp(&hostname_b.to_lowercase())
-                }
-                other => other,
-            }
-        });
+        // Total, deterministic order keyed down to the unique session id, so
+        // the displayed order is a pure function of the session *set* and never
+        // depends on the order `/api/sessions` happened to return (issue #1094).
+        sorted.sort_by(session_order::session_display_cmp);
         sorted
     };
 
@@ -211,11 +208,22 @@ pub fn dashboard_page() -> Html {
         hidden
     };
 
+    // Derive the focused display index from the focused session id against the
+    // current sorted order. Falls back to the first non-hidden session when the
+    // focused id is absent (nothing focused yet, or the focused session was
+    // deleted / left). The rail, keyboard nav, and focus render all consume
+    // this derived index.
+    let focused_index: usize = session_order::resolve_focus_index(
+        &active_sessions,
+        *focused_id,
+        &effective_hidden_sessions,
+    );
+
     // On initial load, focus first non-hidden session and activate all non-hidden sessions
     {
         let active_sessions = active_sessions.clone();
         let effective_hidden_sessions = effective_hidden_sessions.clone();
-        let focused_index = focused_index.clone();
+        let focused_id = focused_id.clone();
         let initial_focus_set = initial_focus_set.clone();
         let activated_sessions = activated_sessions.clone();
 
@@ -223,12 +231,15 @@ pub fn dashboard_page() -> Html {
             (active_sessions.len(), loading),
             move |(session_count, is_loading)| {
                 if !*initial_focus_set && !*is_loading && *session_count > 0 {
-                    let first_non_hidden_idx = active_sessions
+                    // Focus the first non-hidden session by id (falls through to
+                    // the first session if all are hidden).
+                    let first_focus = active_sessions
                         .iter()
-                        .position(|s| !effective_hidden_sessions.contains(&s.id))
-                        .unwrap_or(0);
+                        .find(|s| !effective_hidden_sessions.contains(&s.id))
+                        .or_else(|| active_sessions.first())
+                        .map(|s| s.id);
 
-                    focused_index.set(first_non_hidden_idx);
+                    focused_id.set(first_focus);
 
                     // Activate all non-hidden sessions so they load in background
                     let mut activated = (*activated_sessions).clone();
@@ -250,17 +261,13 @@ pub fn dashboard_page() -> Html {
     {
         let sessions_at_launch = sessions_at_launch.clone();
         let active_sessions = active_sessions.clone();
-        let focused_index = focused_index.clone();
+        let focused_id = focused_id.clone();
         let activated_sessions = activated_sessions.clone();
 
         use_effect_with(active_sessions.clone(), move |sessions| {
             if let Some(ref snapshot) = *sessions_at_launch {
-                if let Some((idx, session)) = sessions
-                    .iter()
-                    .enumerate()
-                    .find(|(_, s)| !snapshot.contains(&s.id))
-                {
-                    focused_index.set(idx);
+                if let Some(session) = sessions.iter().find(|s| !snapshot.contains(&s.id)) {
+                    focused_id.set(Some(session.id));
                     let mut activated = (*activated_sessions).clone();
                     activated.insert(session.id);
                     activated_sessions.set(activated);
@@ -273,14 +280,17 @@ pub fn dashboard_page() -> Html {
 
     // Session selection callback
     let on_select_session = {
-        let focused_index = focused_index.clone();
+        let focused_id = focused_id.clone();
         let activated_sessions = activated_sessions.clone();
         let active_sessions = active_sessions.clone();
+        // The rail / keyboard nav emit a display index valid against the order
+        // that produced the current render; translate it to the session id so
+        // focus stays attached to that session across later reorders.
         Callback::from(move |index: usize| {
             crate::audio::ensure_audio_context();
             crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
-            focused_index.set(index);
             if let Some(session) = active_sessions.get(index) {
+                focused_id.set(Some(session.id));
                 let mut activated = (*activated_sessions).clone();
                 activated.insert(session.id);
                 activated_sessions.set(activated);
@@ -311,7 +321,7 @@ pub fn dashboard_page() -> Html {
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
-        focused_index: *focused_index,
+        focused_index,
         hidden_sessions: effective_hidden_sessions.clone(),
         connected_sessions: (*connected_sessions).clone(),
         inactive_hidden: *inactive_hidden,
@@ -804,7 +814,7 @@ pub fn dashboard_page() -> Html {
                     // Session Rail
                     <SessionRail
                         sessions={active_sessions.clone()}
-                        focused_index={*focused_index}
+                        focused_index={focused_index}
                         awaiting_sessions={(*awaiting_sessions).clone()}
                         hidden_sessions={effective_hidden_sessions.clone()}
                         inactive_hidden={*inactive_hidden}
@@ -825,7 +835,7 @@ pub fn dashboard_page() -> Html {
                     <div class={classes!("session-views-container", if keyboard_nav.nav_mode { Some("nav-mode") } else { None })}>
                         {
                             active_sessions.iter().enumerate().map(|(index, session)| {
-                                let is_focused = index == *focused_index;
+                                let is_focused = index == focused_index;
                                 let is_activated = activated_sessions.contains(&session.id);
                                 if is_activated {
                                     html! {
