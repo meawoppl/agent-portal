@@ -9,7 +9,7 @@ use crate::utils::{self, On401};
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
 use shared::api::ScheduledTaskListResponse;
-use shared::SessionInfo;
+use shared::{PrRef, SessionInfo};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -50,6 +50,49 @@ pub struct SparklineView {
 impl SparklineView {
     pub fn is_empty(&self) -> bool {
         self.ticks.is_empty() && self.compaction_ranges.is_empty() && self.task_ranges.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pr(number: i64, branch: &str) -> PrRef {
+        PrRef {
+            number,
+            url: format!("https://github.com/example/repo/pull/{number}"),
+            branch: branch.to_string(),
+        }
+    }
+
+    #[test]
+    fn sorted_prs_orders_by_number() {
+        let prs = vec![pr(42, "z"), pr(7, "a"), pr(13, "m")];
+
+        let sorted = sorted_prs(&prs);
+
+        assert_eq!(
+            sorted.iter().map(|pr| pr.number).collect::<Vec<_>>(),
+            vec![7, 13, 42]
+        );
+    }
+
+    #[test]
+    fn repo_pr_menu_hint_describes_collapsed_content() {
+        assert_eq!(
+            repo_pr_menu_hint(Some("https://github.com/r/o"), 0),
+            "Repository"
+        );
+        assert_eq!(
+            repo_pr_menu_hint(Some("https://github.com/r/o"), 1),
+            "Repository + 1 PR"
+        );
+        assert_eq!(
+            repo_pr_menu_hint(Some("https://github.com/r/o"), 3),
+            "Repository + PRs"
+        );
+        assert_eq!(repo_pr_menu_hint(None, 1), "1 PR");
+        assert_eq!(repo_pr_menu_hint(None, 4), "PRs");
     }
 }
 
@@ -215,6 +258,82 @@ fn menu_option(extra: Classes, label: &str, hint: &str, onclick: Callback<MouseE
             { label }
             <span class="option-hint">{ hint }</span>
         </button>
+    }
+}
+
+fn sorted_prs(prs: &[PrRef]) -> Vec<PrRef> {
+    let mut prs = prs.to_vec();
+    prs.sort_by_key(|p| p.number);
+    prs
+}
+
+fn repo_pr_menu_hint(repo_url: Option<&str>, pr_count: usize) -> &'static str {
+    match (repo_url.is_some(), pr_count) {
+        (true, 0) => "Repository",
+        (true, 1) => "Repository + 1 PR",
+        (true, _) => "Repository + PRs",
+        (false, 1) => "1 PR",
+        (false, _) => "PRs",
+    }
+}
+
+fn repo_pr_submenu(session: &SessionInfo) -> Html {
+    let prs = sorted_prs(&session.open_prs);
+    if session.repo_url.is_none() && prs.is_empty() {
+        return html! {
+            <span class="pill-menu-option disabled">
+                { "No Repository Detected" }
+            </span>
+        };
+    }
+
+    let repo_link = if let Some(ref url) = session.repo_url {
+        let href = url.clone();
+        html! {
+            <a class="pill-menu-option pr-link" href={href} target="_blank"
+               onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                { "Open Repository" }
+                <span class="option-hint">{ "GitHub" }</span>
+            </a>
+        }
+    } else {
+        html! {}
+    };
+
+    let pr_rows = prs
+        .iter()
+        .map(|pr| {
+            let href = pr.url.clone();
+            let branch = pr.branch.clone();
+            html! {
+                <a class="pill-menu-option pr-link" href={href} target="_blank"
+                   title={branch.clone()}
+                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                    { format!("Open PR #{}", pr.number) }
+                    <span class="option-hint">{ branch }</span>
+                </a>
+            }
+        })
+        .collect::<Html>();
+
+    html! {
+        <div class="pill-menu-submenu">
+            <button
+                type="button"
+                class="pill-menu-option repo-submenu-trigger"
+                aria-haspopup="true"
+                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
+            >
+                { "Repo / PRs" }
+                <span class="option-hint">
+                    { repo_pr_menu_hint(session.repo_url.as_deref(), prs.len()) }
+                </span>
+            </button>
+            <div class="pill-submenu-panel" role="menu">
+                { repo_link }
+                { pr_rows }
+            </div>
+        </div>
     }
 }
 
@@ -554,49 +673,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             html! {}
         };
 
-        let repo_option = {
-            // Repo root link on top, then one row per open PR sorted by number.
-            let repo_link = if let Some(ref url) = session.repo_url {
-                let href = url.clone();
-                html! {
-                    <a class="pill-menu-option pr-link" href={href} target="_blank"
-                       onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        { "Open Repository" }
-                        <span class="option-hint">{ "GitHub" }</span>
-                    </a>
-                }
-            } else {
-                html! {}
-            };
-
-            let mut prs = session.open_prs.clone();
-            prs.sort_by_key(|p| p.number);
-            let pr_rows = prs
-                .iter()
-                .map(|pr| {
-                    let href = pr.url.clone();
-                    let branch = pr.branch.clone();
-                    html! {
-                        <a class="pill-menu-option pr-link" href={href} target="_blank"
-                           title={branch.clone()}
-                           onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                            { format!("Open PR #{}", pr.number) }
-                            <span class="option-hint">{ branch }</span>
-                        </a>
-                    }
-                })
-                .collect::<Html>();
-
-            if session.repo_url.is_none() && prs.is_empty() {
-                html! {
-                    <span class="pill-menu-option disabled">
-                        { "No Repository Detected" }
-                    </span>
-                }
-            } else {
-                html! { <>{ repo_link }{ pr_rows }</> }
-            }
-        };
+        let repo_option = repo_pr_submenu(session);
 
         let share_option = if session.my_role == "owner" {
             let on_share = close_then(menu_session.clone(), {
@@ -829,8 +906,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     { {
                         // Show open PR numbers (each with its branch as a hover
                         // tooltip); fall back to the branch name, then "No VCS".
-                        let mut prs = session.open_prs.clone();
-                        prs.sort_by_key(|p| p.number);
+                        let prs = sorted_prs(&session.open_prs);
                         if !prs.is_empty() {
                             html! {
                                 <span class="pill-branch pill-prs">

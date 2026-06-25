@@ -673,6 +673,15 @@
         justify-content: center;
     }
 
+    .pill-submenu-panel {
+        position: static;
+        min-width: 0;
+        max-width: none;
+        max-height: 240px;
+        margin: 0 0.4rem 0.4rem;
+        box-shadow: none;
+    }
+
     .permission-option {
         min-height: 44px;
         padding: 0.5rem 0.6rem;
