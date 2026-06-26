@@ -50,6 +50,11 @@ pub struct Session<A: Agent> {
     /// command channel alone does not end it. Aborting drops the task's client,
     /// which (with `kill_on_drop` on the spawn) kills the child.
     io_task: Option<tokio::task::JoinHandle<()>>,
+    /// OS pid of the agent process, learned from `IoEvent::AgentStarted`.
+    /// `stop()` uses it to signal the agent's process group directly, since
+    /// `kill_on_drop` doesn't fire when the SDK keeps the child alive in
+    /// detached tasks (#927).
+    agent_pid: Option<u32>,
     _agent: PhantomData<A>,
 }
 
@@ -62,6 +67,54 @@ impl<A: Agent> Drop for Session<A> {
         if let Some(handle) = self.io_task.take() {
             handle.abort();
         }
+        // Capture a queued AgentStarted pid (sync `try_recv`) so an
+        // immediate-drop-after-spawn still reaps the agent (#927 review).
+        self.capture_pending_agent_pid();
+        // Best-effort SIGKILL of the agent's process group. Drop can't await,
+        // so we can't do the graceful SIGTERM dance `stop()` does — but a
+        // synchronous group SIGKILL still prevents the orphan (#927) that
+        // `kill_on_drop` misses.
+        #[cfg(unix)]
+        if let Some(pid) = self.agent_pid.take() {
+            signal_process_group(pid, libc::SIGKILL);
+        }
+    }
+}
+
+/// Signal the process group led by `pid` (the agent was spawned as a group
+/// leader, so its pgid == pid). Negative pid targets the whole group, reaping
+/// tools the agent spawned. Best-effort: a dead group yields `ESRCH`, ignored.
+#[cfg(unix)]
+fn signal_process_group(pid: u32, sig: libc::c_int) {
+    // SAFETY: `kill(2)` with a group target and a fixed signal has no memory
+    // safety implications; the worst case is `ESRCH` for an already-dead group.
+    unsafe {
+        libc::kill(-(pid as i32), sig);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod kill_tests {
+    use super::signal_process_group;
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+
+    /// The whole point of #927: a SIGKILL to the agent's *group* reaps the
+    /// process even when the immediate child handle is never dropped. Spawn a
+    /// long `sleep` as its own group leader, group-kill it, and confirm it dies.
+    #[test]
+    fn group_kill_reaps_a_detached_process() {
+        let mut cmd = Command::new("sleep");
+        cmd.arg("60").process_group(0); // own group: pgid == pid
+        let mut child = cmd.spawn().expect("spawn sleep");
+        let pid = child.id();
+
+        signal_process_group(pid, libc::SIGKILL);
+
+        // `wait` reaps promptly because the process was killed; a leaked
+        // process would hang here. The exit is signal-terminated, not success.
+        let status = child.wait().expect("wait on killed child");
+        assert!(!status.success(), "process should have been killed");
     }
 }
 
@@ -87,6 +140,7 @@ impl<A: Agent> Session<A> {
             pending_permission: None,
             event_rx: Some(event_rx),
             io_task: Some(handle),
+            agent_pid: None,
             _agent: PhantomData,
         })
     }
@@ -127,6 +181,7 @@ impl<A: Agent> Session<A> {
             pending_permission: snapshot.pending_permission,
             event_rx,
             io_task,
+            agent_pid: None,
             _agent: PhantomData,
         })
     }
@@ -170,6 +225,11 @@ impl<A: Agent> Session<A> {
             let event_rx = self.event_rx.as_mut()?;
 
             match event_rx.recv().await {
+                Some(IoEvent::AgentStarted { pid }) => {
+                    // Record the agent pid for `stop()`'s group-kill (#927);
+                    // not a consumer-facing event, so keep looping.
+                    self.agent_pid = pid;
+                }
                 Some(IoEvent::Output(boxed_output)) => {
                     let output = *boxed_output;
 
@@ -409,8 +469,25 @@ impl<A: Agent> Session<A> {
         Ok(())
     }
 
+    /// Drain any queued events to capture a not-yet-consumed
+    /// `IoEvent::AgentStarted` pid. `next_event` normally records it, but an
+    /// immediate stop/cancel right after spawn can run before `next_event`
+    /// ever drains the channel — without this, the group-kill in `stop()` /
+    /// `Drop` would be skipped and the agent orphaned anyway (#927 review).
+    fn capture_pending_agent_pid(&mut self) {
+        if let Some(rx) = self.event_rx.as_mut() {
+            while let Ok(event) = rx.try_recv() {
+                if let IoEvent::AgentStarted { pid } = event {
+                    self.agent_pid = pid;
+                }
+            }
+        }
+    }
+
     /// Gracefully stop the session and reap the agent process.
     pub async fn stop(&mut self) -> Result<(), SessionError> {
+        // Capture a queued pid before dropping the receiver below.
+        self.capture_pending_agent_pid();
         // Drop the channels first so the I/O task stops accepting input.
         self.command_tx = None;
         self.event_rx = None;
@@ -423,6 +500,17 @@ impl<A: Agent> Session<A> {
         if let Some(handle) = self.io_task.take() {
             handle.abort();
             let _ = handle.await;
+        }
+        // Explicitly terminate the agent's process group. `kill_on_drop` is
+        // unreliable here — the SDK's `AsyncClient` keeps the child alive in
+        // detached tasks, so aborting the I/O task doesn't drop (and thus
+        // doesn't kill) it, orphaning the agent process (#927). SIGTERM first
+        // for a clean shutdown, then SIGKILL after a short grace period.
+        #[cfg(unix)]
+        if let Some(pid) = self.agent_pid.take() {
+            signal_process_group(pid, libc::SIGTERM);
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            signal_process_group(pid, libc::SIGKILL);
         }
         self.state = SessionState::Exited { code: 0 };
         Ok(())

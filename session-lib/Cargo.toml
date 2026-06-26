@@ -22,3 +22,8 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 directories = { workspace = true }
 which = "8.0.0"
+
+# Unix-only: signal the agent's process group on stop/drop so the agent
+# process can't be orphaned when `kill_on_drop` doesn't fire (#927).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

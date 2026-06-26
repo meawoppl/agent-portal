@@ -43,9 +43,13 @@ pub fn claude_cli_args(session_id: uuid::Uuid, resume: bool, extra_args: &[Strin
 }
 
 /// Spawn the Claude process and return its async client.
+/// Spawn the `claude` CLI and return the client plus the OS process id (when
+/// available). The pid lets `Session::stop` signal the agent's process group
+/// directly, rather than relying solely on `kill_on_drop` (which the SDK's
+/// detached-task ownership of the `Child` defeats — see #927).
 pub(crate) async fn spawn_claude(
     config: &SessionConfig,
-) -> Result<ClaudeAsyncClient, SessionError> {
+) -> Result<(ClaudeAsyncClient, Option<u32>), SessionError> {
     let claude_path = config.claude_path.as_deref().unwrap_or(Path::new("claude"));
 
     log_claude_info(claude_path);
@@ -75,11 +79,21 @@ pub(crate) async fn spawn_claude(
         // left holding its transcript and a WebSocket open.
         .kill_on_drop(true);
 
-    let child = cmd.spawn().map_err(SessionError::SpawnFailed)?;
+    // Put the agent in its own process group so `Session::stop` can signal the
+    // whole tree (claude + tools it spawns), not just the immediate PID. We
+    // can't rely on `kill_on_drop` alone: the SDK's `AsyncClient` keeps the
+    // `Child` alive in detached internal tasks, so an aborted I/O task never
+    // drops it and the claude process is orphaned (#927).
+    #[cfg(unix)]
+    cmd.process_group(0);
 
-    ClaudeAsyncClient::new(child).map_err(|e| {
+    let child = cmd.spawn().map_err(SessionError::SpawnFailed)?;
+    let pid = child.id();
+
+    let client = ClaudeAsyncClient::new(child).map_err(|e| {
         SessionError::CommunicationError(format!("Failed to create ClaudeAsyncClient: {}", e))
-    })
+    })?;
+    Ok((client, pid))
 }
 
 /// Log the resolved path and version of the claude binary for diagnostics.
