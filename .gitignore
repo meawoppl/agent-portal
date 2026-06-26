@@ -43,3 +43,4 @@ screenlog.*
 /test-*.svg
 /*.patch
 parsing-dump/
+/image.png
