@@ -390,4 +390,52 @@ mod tests {
         assert_eq!(input.text, "hello");
         assert!(input.display_event.is_none());
     }
+
+    #[test]
+    fn classify_preserves_ack_and_client_msg_id_for_normal_input() {
+        // The delivery-progress pipeline (#939) depends on client_msg_id and the
+        // seq ack surviving classification — dropping either silently breaks the
+        // optimistic-row advance / pending-input replay.
+        let session_id = uuid::Uuid::nil();
+        let client_msg_id = uuid::Uuid::from_u128(7);
+        let ack = super::super::PortalInputAck {
+            session_id,
+            seq: 42,
+        };
+
+        let RoutedPortalInput::Input(input) = classify_portal_input(
+            serde_json::Value::String("hi".to_string()),
+            None,
+            Some(ack),
+            Some(client_msg_id),
+        ) else {
+            panic!("expected normal input");
+        };
+
+        assert_eq!(input.client_msg_id, Some(client_msg_id));
+        let ack = input.ack.expect("ack preserved");
+        assert_eq!(ack.seq, 42);
+        assert_eq!(ack.session_id, session_id);
+    }
+
+    #[test]
+    fn classify_wiggum_preserves_ack_and_client_msg_id() {
+        let client_msg_id = uuid::Uuid::from_u128(9);
+        let ack = super::super::PortalInputAck {
+            session_id: uuid::Uuid::nil(),
+            seq: 5,
+        };
+
+        let RoutedPortalInput::Wiggum(input) = classify_portal_input(
+            serde_json::Value::String("activate".to_string()),
+            Some(SendMode::Wiggum),
+            Some(ack),
+            Some(client_msg_id),
+        ) else {
+            panic!("expected wiggum activation");
+        };
+
+        assert_eq!(input.client_msg_id, Some(client_msg_id));
+        assert_eq!(input.ack.expect("ack preserved").seq, 5);
+    }
 }

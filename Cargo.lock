@@ -567,6 +567,7 @@ dependencies = [
  "shared",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

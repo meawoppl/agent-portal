@@ -1471,3 +1471,159 @@ async fn read_download_file(
 // minute format is `"{}m {}s"` (with a space), matching the frontend
 // transcript — the old local copy here used `"{}m{}s"`.
 pub(crate) use shared::fmt::{format_duration, truncate_str as truncate};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn backoff_doubles_then_saturates_at_max() {
+        let mut b = Backoff::new();
+        assert_eq!(b.current_secs(), 1);
+        b.advance();
+        assert_eq!(b.current_secs(), 2);
+        b.advance();
+        assert_eq!(b.current_secs(), 4);
+        // Many advances must clamp at the protocol cap, never overflow past it.
+        for _ in 0..40 {
+            b.advance();
+        }
+        assert_eq!(
+            b.current_secs(),
+            shared::protocol::MAX_RECONNECT_BACKOFF_SECS
+        );
+    }
+
+    #[test]
+    fn backoff_reset_if_stable_only_resets_past_threshold() {
+        let mut b = Backoff::new();
+        b.advance();
+        b.advance();
+        // Below the 30s stability threshold: keep backing off.
+        b.reset_if_stable(Duration::from_secs(29));
+        assert_eq!(b.current_secs(), 4);
+        // At/over the threshold: a stable connection earns a reset to initial.
+        b.reset_if_stable(Duration::from_secs(30));
+        assert_eq!(b.current_secs(), 1);
+    }
+
+    #[test]
+    fn backoff_reset_is_unconditional() {
+        let mut b = Backoff::new();
+        b.advance();
+        b.advance();
+        b.reset();
+        assert_eq!(b.current_secs(), 1);
+    }
+
+    fn download_request(path: &str, max_bytes: u64) -> shared::FileDownloadRequestFields {
+        shared::FileDownloadRequestFields {
+            request_id: Uuid::nil(),
+            path: path.to_string(),
+            max_bytes,
+        }
+    }
+
+    #[tokio::test]
+    async fn read_download_file_returns_valid_file() {
+        use base64::Engine;
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("hello.txt"), b"hi there")
+            .await
+            .unwrap();
+
+        let resp = read_download_file(
+            dir.path().to_str().unwrap(),
+            &download_request("hello.txt", 1024),
+        )
+        .await;
+
+        assert!(resp.success);
+        assert_eq!(resp.filename.as_deref(), Some("hello.txt"));
+        assert_eq!(resp.size, Some(8));
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(resp.data_base64.unwrap())
+            .unwrap();
+        assert_eq!(decoded, b"hi there");
+    }
+
+    #[tokio::test]
+    async fn read_download_file_rejects_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let resp = read_download_file(
+            dir.path().to_str().unwrap(),
+            &download_request("/etc/passwd", 1024),
+        )
+        .await;
+        assert!(!resp.success);
+        assert_eq!(resp.error.as_deref(), Some("invalid relative path"));
+    }
+
+    #[tokio::test]
+    async fn read_download_file_rejects_parent_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let resp = read_download_file(
+            dir.path().to_str().unwrap(),
+            &download_request("../secrets.txt", 1024),
+        )
+        .await;
+        assert!(!resp.success);
+        assert_eq!(resp.error.as_deref(), Some("invalid relative path"));
+    }
+
+    #[tokio::test]
+    async fn read_download_file_reports_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let resp = read_download_file(
+            dir.path().to_str().unwrap(),
+            &download_request("nope.txt", 1024),
+        )
+        .await;
+        assert!(!resp.success);
+        assert_eq!(resp.error.as_deref(), Some("file not found"));
+    }
+
+    #[tokio::test]
+    async fn read_download_file_enforces_size_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("big.bin"), vec![0u8; 100])
+            .await
+            .unwrap();
+        let resp = read_download_file(
+            dir.path().to_str().unwrap(),
+            &download_request("big.bin", 10),
+        )
+        .await;
+        assert!(!resp.success);
+        assert_eq!(resp.error.as_deref(), Some("file exceeds size limit"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn read_download_file_rejects_symlink_escape() {
+        // A symlink whose name is a clean relative path but whose target
+        // canonicalizes outside the working directory must be refused.
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        tokio::fs::write(outside.path().join("secret.txt"), b"top secret")
+            .await
+            .unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.txt"),
+            root.path().join("link.txt"),
+        )
+        .unwrap();
+
+        let resp = read_download_file(
+            root.path().to_str().unwrap(),
+            &download_request("link.txt", 1024),
+        )
+        .await;
+        assert!(!resp.success);
+        assert_eq!(
+            resp.error.as_deref(),
+            Some("path escapes working directory")
+        );
+    }
+}

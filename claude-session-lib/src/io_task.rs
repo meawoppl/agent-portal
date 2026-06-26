@@ -510,3 +510,58 @@ async fn read_stderr(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_limit_time_accepts_the_cli_time_formats() {
+        // The CLI renders reset times in a handful of am/pm shapes; each must
+        // parse so the continuation timer lands at the right hour.
+        // The CLI always emits a minute component ("resets 3:00pm"); these are
+        // the shapes parse_limit_time must handle.
+        let cases = [
+            ("3:00pm", NaiveTime::from_hms_opt(15, 0, 0)),
+            ("3:00 pm", NaiveTime::from_hms_opt(15, 0, 0)),
+            ("3:00 PM", NaiveTime::from_hms_opt(15, 0, 0)),
+            ("12:30am", NaiveTime::from_hms_opt(0, 30, 0)),
+            ("11:59pm", NaiveTime::from_hms_opt(23, 59, 0)),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(parse_limit_time(input), expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn parse_limit_time_rejects_garbage() {
+        assert!(parse_limit_time("").is_none());
+        assert!(parse_limit_time("noon").is_none());
+        assert!(parse_limit_time("25:00pm").is_none());
+    }
+
+    #[test]
+    fn parse_session_limit_reset_ignores_unrelated_text() {
+        assert!(parse_session_limit_reset("just a normal assistant reply").is_none());
+    }
+
+    #[test]
+    fn parse_session_limit_reset_returns_none_without_resets_clause() {
+        // Has the limit banner but no parseable "resets … (TZ)" clause.
+        let text = format!("{SESSION_LIMIT_TEXT}. Try again later.");
+        assert!(parse_session_limit_reset(&text).is_none());
+    }
+
+    #[test]
+    fn parse_session_limit_reset_yields_future_rfc3339() {
+        // A well-formed banner must produce a valid, future-dated UTC instant
+        // (the parser always rolls forward to the next occurrence of the time).
+        let text = format!("{SESSION_LIMIT_TEXT}. Your limit resets 3:00pm (America/New_York).");
+        let reset = parse_session_limit_reset(&text).expect("should parse a reset time");
+        let parsed = chrono::DateTime::parse_from_rfc3339(&reset).expect("valid rfc3339");
+        assert!(
+            parsed.with_timezone(&Utc) > Utc::now(),
+            "reset {reset} should be in the future"
+        );
+    }
+}
