@@ -363,6 +363,19 @@ impl<A: Agent> Session<A> {
     /// The content can be a JSON string value for plain text, or a more
     /// complex JSON structure if needed.
     pub async fn send_input(&mut self, content: serde_json::Value) -> Result<(), SessionError> {
+        self.send_input_with_display(content, None).await
+    }
+
+    /// Like [`send_input`](Self::send_input), but carries an optional typed
+    /// portal `display_event` to render in place of the agent's echo (see
+    /// [`IoCommand::Input::display_event`]). The proxy passes the inter-agent
+    /// `PortalContent::AgentMessage` envelope here so the Codex path (which
+    /// can't rely on echo-replacement) still renders the typed card.
+    pub async fn send_input_with_display(
+        &mut self,
+        content: serde_json::Value,
+        display_event: Option<serde_json::Value>,
+    ) -> Result<(), SessionError> {
         if let SessionState::Exited { code } = self.state {
             return Err(SessionError::AlreadyExited(code));
         }
@@ -378,6 +391,7 @@ impl<A: Agent> Session<A> {
                 .send(IoCommand::Input {
                     input,
                     delivered: Some(delivered_tx),
+                    display_event: display_event.map(Box::new),
                 })
                 .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
             delivered_rx

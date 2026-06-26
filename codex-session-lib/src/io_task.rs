@@ -25,7 +25,11 @@ use crate::handler::handle_codex_server_message;
 use crate::helpers::{extract_prompt_text, parse_request_id};
 
 type DeliveryAck = oneshot::Sender<Result<(), String>>;
-type QueuedPrompt = (String, Option<DeliveryAck>);
+/// Queued user prompt: (agent-facing prompt text, delivery ack, optional typed
+/// display event). The display event — when present — is an inter-agent
+/// `PortalContent::AgentMessage` envelope the synthetic echo emits verbatim so
+/// it renders as the provenance card instead of a raw user bubble (#inter-agent).
+type QueuedPrompt = (String, Option<DeliveryAck>, Option<Box<serde_json::Value>>);
 
 /// Background task for Codex sessions.
 pub(crate) async fn codex_io_task(
@@ -426,13 +430,16 @@ pub(crate) async fn codex_io_task(
                                 );
                             if turn_ended {
                                 turn_active = false;
-                                if let Some((prompt, delivered)) = queued_prompts.pop_front() {
+                                if let Some((prompt, delivered, display_event)) =
+                                    queued_prompts.pop_front()
+                                {
                                     turn_tracker
                                         .start(Instant::now(), chrono::Utc::now());
                                     turn_active = start_codex_turn(
                                         &mut client,
                                         &thread_id,
                                         prompt,
+                                        display_event,
                                         delivered,
                                         &event_tx,
                                     )
@@ -541,14 +548,18 @@ pub(crate) async fn codex_io_task(
                                 tracing::error!("Failed to send Codex approval: {}", e);
                             }
                         }
-                        IoCommand::Input { input, delivered } => {
+                        IoCommand::Input {
+                            input,
+                            delivered,
+                            display_event,
+                        } => {
                             let prompt = extract_prompt_text(&input);
                             if !prompt.is_empty() {
                                 tracing::info!(
                                     "Queued Codex input received during active turn ({} pending)",
                                     queued_prompts.len() + 1
                                 );
-                                queued_prompts.push_back((prompt, delivered));
+                                queued_prompts.push_back((prompt, delivered, display_event));
                             } else if let Some(delivered) = delivered {
                                 let _ = delivered.send(Ok(()));
                             }
@@ -560,7 +571,11 @@ pub(crate) async fn codex_io_task(
         } else {
             // No active turn: wait for user input.
             match command_rx.recv().await {
-                Some(IoCommand::Input { input, delivered }) => {
+                Some(IoCommand::Input {
+                    input,
+                    delivered,
+                    display_event,
+                }) => {
                     let prompt = extract_prompt_text(&input);
                     if prompt.is_empty() {
                         if let Some(delivered) = delivered {
@@ -569,9 +584,15 @@ pub(crate) async fn codex_io_task(
                         continue;
                     }
                     turn_tracker.start(Instant::now(), chrono::Utc::now());
-                    turn_active =
-                        start_codex_turn(&mut client, &thread_id, prompt, delivered, &event_tx)
-                            .await;
+                    turn_active = start_codex_turn(
+                        &mut client,
+                        &thread_id,
+                        prompt,
+                        display_event,
+                        delivered,
+                        &event_tx,
+                    )
+                    .await;
                 }
                 Some(IoCommand::PermissionResponse(_)) => continue,
                 Some(IoCommand::CodexApproval { .. }) => {
@@ -590,19 +611,40 @@ async fn start_codex_turn(
     client: &mut CodexAsyncClient,
     thread_id: &str,
     prompt: String,
+    display_event: Option<Box<serde_json::Value>>,
     delivered: Option<DeliveryAck>,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) -> bool {
     // Codex's app-server protocol doesn't echo user input, so the frontend's
-    // optimistic-send pending entry would never clear. Synthesize an echo here
-    // in a shape that matches both the ClaudeOutput::User parse and the
-    // frontend's content-based pending-match. Skip <system-reminder> wrappers
-    // (portal reminder injection) because those shouldn't appear in transcript.
+    // optimistic-send pending entry would never clear. Synthesize a transcript
+    // entry here. Skip <system-reminder> wrappers (portal reminder injection)
+    // which shouldn't appear in transcript. The agent always receives `prompt`
+    // (the agent-facing text); only the *display* differs.
     if !prompt.starts_with("<system-reminder>") {
-        let echo = UserEchoEvent::new(prompt);
-        let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&echo)));
-        return start_codex_turn_request(client, thread_id, echo.content, delivered, event_tx)
-            .await;
+        match display_event {
+            // Inter-agent message: emit the typed PortalContent::AgentMessage
+            // event verbatim so it renders as the provenance card (matching the
+            // claude echo-replacement path), not a raw "You" bubble.
+            Some(event) => {
+                let _ = event_tx.send(IoEvent::RawOutput(*event));
+                return start_codex_turn_request(client, thread_id, prompt, delivered, event_tx)
+                    .await;
+            }
+            // Plain user input: synthesize a user echo in a shape that matches
+            // ClaudeOutput::User parse + the frontend's content-based pending-match.
+            None => {
+                let echo = UserEchoEvent::new(prompt);
+                let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&echo)));
+                return start_codex_turn_request(
+                    client,
+                    thread_id,
+                    echo.content,
+                    delivered,
+                    event_tx,
+                )
+                .await;
+            }
+        }
     }
 
     start_codex_turn_request(client, thread_id, prompt, delivered, event_tx).await
