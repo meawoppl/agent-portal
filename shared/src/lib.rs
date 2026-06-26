@@ -390,6 +390,33 @@ impl PortalMessage {
         }])
     }
 
+    /// Build an explicit inter-agent message event. The proxy converts this
+    /// envelope to agent-facing text before delivery, while the frontend
+    /// renders the typed event directly.
+    pub fn agent_message(from_agent_type: String, from_session_id: String, text: String) -> Self {
+        Self::with_content(vec![PortalContent::AgentMessage {
+            from_agent_type,
+            from_session_id,
+            text,
+        }])
+    }
+
+    /// Text form to send to the agent for portal event envelopes that have an
+    /// agent-facing representation.
+    pub fn agent_facing_text(&self) -> Option<String> {
+        let [PortalContent::AgentMessage {
+            from_agent_type,
+            from_session_id,
+            text,
+        }] = self.content.as_slice()
+        else {
+            return None;
+        };
+        Some(format!(
+            "[message from {from_agent_type} {from_session_id}]\n{text}"
+        ))
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_default()
     }
@@ -430,6 +457,14 @@ pub enum PortalContent {
         status: String,
         source_message: String,
     },
+    /// Typed event for an inter-agent message. This replaces UI parsing of
+    /// the agent-facing `[message from ...]` text prefix for new messages.
+    #[serde(rename = "agent_message")]
+    AgentMessage {
+        from_agent_type: String,
+        from_session_id: String,
+        text: String,
+    },
 }
 
 impl std::fmt::Debug for PortalContent {
@@ -466,6 +501,16 @@ impl std::fmt::Debug for PortalContent {
                 .field("reset_at", reset_at)
                 .field("status", status)
                 .field("source_message", source_message)
+                .finish(),
+            Self::AgentMessage {
+                from_agent_type,
+                from_session_id,
+                text,
+            } => f
+                .debug_struct("AgentMessage")
+                .field("from_agent_type", from_agent_type)
+                .field("from_session_id", from_session_id)
+                .field("text", text)
                 .finish(),
         }
     }
@@ -570,5 +615,25 @@ mod tests {
         }]);
         assert_eq!(custom.message_type, PortalMessage::MESSAGE_TYPE);
         assert_eq!(custom.to_json()["type"], "portal");
+    }
+
+    #[test]
+    fn portal_agent_message_serializes_and_has_agent_facing_text() {
+        let msg = PortalMessage::agent_message(
+            "codex".to_string(),
+            "12345678-0000-0000-0000-000000000000".to_string(),
+            "hello from another agent".to_string(),
+        );
+        let json = msg.to_json();
+        assert_eq!(json["type"], "portal");
+        assert_eq!(json["content"][0]["type"], "agent_message");
+        assert_eq!(json["content"][0]["from_agent_type"], "codex");
+        assert_eq!(json["content"][0]["text"], "hello from another agent");
+        assert_eq!(
+            msg.agent_facing_text().as_deref(),
+            Some(
+                "[message from codex 12345678-0000-0000-0000-000000000000]\nhello from another agent"
+            )
+        );
     }
 }

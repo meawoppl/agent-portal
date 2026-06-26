@@ -18,7 +18,7 @@ use super::git_metadata::{
     check_and_send_branch_update, claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
 };
 use super::image_uploader::upload_image;
-use super::{format_duration, truncate, SharedWsWrite};
+use super::{format_duration, truncate, PendingInputDisplayEvents, SharedWsWrite};
 
 /// Images at or above this raw-byte size get sent via the chunked upload
 /// stream (`/ws/session/upload`) instead of inlined as base64 on the main
@@ -41,6 +41,7 @@ pub fn spawn_output_forwarder(
     output_buffer: std::sync::Arc<tokio::sync::Mutex<PendingOutputBuffer>>,
     max_image_mb: u32,
     agent_type: AgentType,
+    pending_input_display_events: PendingInputDisplayEvents,
 ) -> tokio::task::JoinHandle<()> {
     let max_bytes = max_image_mb as usize * 1024 * 1024;
     tokio::spawn(async move {
@@ -76,9 +77,16 @@ pub fn spawn_output_forwarder(
             // (raw bytes for large images, base64 strings for small ones).
             let image_items = extract_image_work_items(&output, &mut image_read_map, max_bytes);
 
-            // Serialize and buffer with sequence number
-            let content = serde_json::to_value(&output)
-                .unwrap_or(serde_json::Value::String(format!("{:?}", output)));
+            // Serialize and buffer with sequence number. Typed portal inputs
+            // sent via `agent-portal message` are delivered to the agent as
+            // readable text, but their echoed user message should render as
+            // the original event envelope rather than a string-prefix parse.
+            let content = replacement_input_display_event(&output, &pending_input_display_events)
+                .await
+                .unwrap_or_else(|| {
+                    serde_json::to_value(&output)
+                        .unwrap_or(serde_json::Value::String(format!("{:?}", output)))
+                });
 
             // Add to buffer and get sequence number
             let seq = {
@@ -185,6 +193,33 @@ enum ImageWorkItem {
     },
     /// Image exceeded the hard cap; this is a textual rejection notice.
     TooLarge(shared::PortalMessage),
+}
+
+async fn replacement_input_display_event(
+    output: &ClaudeOutput,
+    pending_input_display_events: &PendingInputDisplayEvents,
+) -> Option<serde_json::Value> {
+    let echoed_text = user_text_echo(output)?;
+    let mut pending = pending_input_display_events.lock().await;
+    let pos = pending
+        .iter()
+        .position(|event| event.echoed_text == echoed_text)?;
+    pending.remove(pos).map(|event| event.content)
+}
+
+fn user_text_echo(output: &ClaudeOutput) -> Option<String> {
+    let ClaudeOutput::User(user) = output else {
+        return None;
+    };
+    let mut text_blocks = user.message.content.iter().filter_map(|block| match block {
+        ContentBlock::Text(text) => Some(text.text.clone()),
+        _ => None,
+    });
+    let text = text_blocks.next()?;
+    if text_blocks.next().is_some() {
+        return None;
+    }
+    Some(text)
 }
 
 /// Return the MIME type for a supported image extension, or None.

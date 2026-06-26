@@ -126,12 +126,12 @@ pub async fn send_agent_message(
         .first(&mut conn)
         .map_err(|_| AppError::NotFound("session"))?;
 
-    // Attribute the message so the recipient knows where it came from. An
-    // agent sender supplies its own session id (`from`); we tag the bumper with
-    // that session's agent type (claude/codex) so the UI can render
-    // "Message from Codex (<short>)". The human web page sends no `from`, so
-    // fall back to the sending user's display name.
-    let bumper = match req.from.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    // Attribute the message so the recipient knows where it came from. Agent
+    // senders get an explicit portal event payload; the proxy converts it to
+    // agent-facing text, and the frontend renders the typed event directly.
+    // The human web page sends no `from`, so fall back to a plain text portal
+    // message with the sender display name in the prompt text.
+    let content = match req.from.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(from) => {
             let sender_agent = from
                 .parse::<Uuid>()
@@ -144,14 +144,19 @@ pub async fn send_agent_message(
                         .ok()
                 })
                 .unwrap_or_else(|| "agent".to_string());
-            format!("[message from {sender_agent} {from}]")
+            shared::PortalMessage::agent_message(
+                sender_agent,
+                from.to_string(),
+                message.to_string(),
+            )
+            .to_json()
         }
-        None => format!(
-            "[portal message from {}]",
-            user_display_name(&mut conn, user_id)
-        ),
+        None => serde_json::Value::String(format!(
+            "[portal message from {}]\n{}",
+            user_display_name(&mut conn, user_id),
+            message
+        )),
     };
-    let content = serde_json::Value::String(format!("{bumper}\n{message}"));
 
     // Seq bump + best-effort persist + live delivery, shared with the web
     // input path (see SessionManager::enqueue_input). DB write faults are
