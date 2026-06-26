@@ -323,6 +323,7 @@ fn handle_web_register(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_web_input(
     session_manager: &SessionManager,
     db_pool: &crate::db::DbPool,
