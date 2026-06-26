@@ -406,6 +406,25 @@
     opacity: 0.85;
 }
 
+/* Inline two-step confirm for the launcher update/restart action (replaces a
+   browser confirm() popup, which is awkward on mobile). Wraps when narrow. */
+.launcher-confirm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+.launcher-confirm-prompt {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+.launcher-confirm-actions .confirm-button,
+.launcher-confirm-actions .cancel-button {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+}
+
 /* Token Created Success */
 .token-created-success {
     text-align: center;
