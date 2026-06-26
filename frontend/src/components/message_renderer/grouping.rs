@@ -1,15 +1,12 @@
-use serde_json::Value;
-
 use crate::components::agent_frame::{AgentFrame, AgentFrameKind, AgentFrameRegistry};
 
 use super::renderers::assistant_label;
-use super::types::{user_meta_from_json, ClaudeMessage};
+use super::types::{ClaudeMessage, RenderedMessage};
 
-/// Extract the raw `_created_at` ISO string from a message JSON, for use with
-/// the live-updating TimeAgo component (which parses it itself).
-pub(super) fn extract_raw_iso(json: &str) -> Option<String> {
-    let val: Value = serde_json::from_str(json).ok()?;
-    val.get("_created_at")?.as_str().map(|s| s.to_string())
+/// Extract the raw created-at ISO string from the typed message sidecar, for
+/// use with the live-updating TimeAgo component.
+pub(super) fn extract_raw_iso(message: &RenderedMessage) -> Option<String> {
+    message.raw_iso().map(str::to_string)
 }
 
 /// Category for a run of consecutive related messages — drives both the
@@ -57,13 +54,13 @@ pub enum MessageGroup {
     /// Kept as a distinct variant (rather than a one-element `Grouped`) so
     /// the most common case avoids the group-wrapper render path and keeps
     /// its Yew key stable independent of category.
-    Single(String),
+    Single(RenderedMessage),
     /// One or more consecutive messages with the same display identity.
     IdentityGroup {
         category: GroupCategory,
         label: String,
         badge_class: String,
-        messages: Vec<String>,
+        messages: Vec<RenderedMessage>,
     },
 }
 
@@ -78,11 +75,11 @@ impl MessageGroup {
     /// `index` is used only as a fallback when no timestamp is present.
     pub fn key(&self, index: usize) -> yew::virtual_dom::Key {
         let (prefix, first) = match self {
-            MessageGroup::Single(json) => ("s", json.as_str()),
+            MessageGroup::Single(message) => ("s", message),
             MessageGroup::IdentityGroup {
                 category, messages, ..
             } => match messages.first() {
-                Some(j) => (category.key_prefix(), j.as_str()),
+                Some(j) => (category.key_prefix(), j),
                 None => {
                     return yew::virtual_dom::Key::from(format!(
                         "{}{}",
@@ -104,6 +101,53 @@ pub(super) struct MessageIdentity {
     pub(super) category: GroupCategory,
     label: String,
     badge_class: String,
+}
+
+fn source_identity(
+    source: &shared::MessageSource,
+    current_user_id: Option<&str>,
+) -> MessageIdentity {
+    match source {
+        shared::MessageSource::Human { account_id, name } => {
+            let account_id = account_id.to_string();
+            let label = if current_user_id == Some(account_id.as_str()) {
+                "You".to_string()
+            } else {
+                name.clone()
+            };
+            MessageIdentity {
+                category: GroupCategory::User,
+                label,
+                badge_class: "user".to_string(),
+            }
+        }
+        shared::MessageSource::Agent {
+            session_id,
+            agent_type,
+        } => {
+            let short = session_id
+                .to_string()
+                .split('-')
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let label = match agent_type.to_ascii_lowercase().as_str() {
+                "claude" => format!("Message from Claude ({short})"),
+                "codex" => format!("Message from Codex ({short})"),
+                _ => format!("Message from agent ({short})"),
+            };
+            MessageIdentity {
+                category: GroupCategory::User,
+                label,
+                badge_class: "other-agent".to_string(),
+            }
+        }
+        shared::MessageSource::Portal => MessageIdentity {
+            category: GroupCategory::Portal,
+            label: "Portal".to_string(),
+            badge_class: "portal".to_string(),
+        },
+    }
 }
 
 /// True iff the parsed `UserMessage` carries only tool-result content blocks
@@ -168,10 +212,15 @@ fn user_is_plain_text(msg: &shared::UserMessage) -> bool {
 ///   5. **Codex** runs last — Codex events parse via a different enum and
 ///      only the messages that don't match any Claude shape get here.
 pub(super) fn classify(
-    json: &str,
+    message: &RenderedMessage,
     agent_type: shared::AgentType,
     current_user_id: Option<&str>,
 ) -> Option<MessageIdentity> {
+    let json = message.content.as_str();
+    if let Some(source) = message.source() {
+        return Some(source_identity(source, current_user_id));
+    }
+
     let assistant_identity_label = if agent_type == shared::AgentType::Codex {
         "Codex"
     } else {
@@ -195,30 +244,17 @@ pub(super) fn classify(
                 });
             }
             if user_is_plain_text(&msg) {
-                let meta = user_meta_from_json(json);
-                let label = match &meta.sender {
-                    Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
-                        sender.name.clone()
-                    }
-                    _ => "You".to_string(),
-                };
                 return Some(MessageIdentity {
                     category: GroupCategory::User,
-                    label,
+                    label: "You".to_string(),
                     badge_class: "user".to_string(),
                 });
             }
         }
-        AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
-            let label = match &msg.sender {
-                Some(sender) if current_user_id != Some(sender.user_id.as_str()) => {
-                    sender.name.clone()
-                }
-                _ => "You".to_string(),
-            };
+        AgentFrame::Claude(ClaudeMessage::OptimisticUser(_)) => {
             return Some(MessageIdentity {
                 category: GroupCategory::User,
-                label,
+                label: "You".to_string(),
                 badge_class: "user".to_string(),
             });
         }
@@ -264,24 +300,24 @@ pub(super) fn classify(
 /// (no typed fields). TODO(SDK): push a typed `thinking_tokens` system variant
 /// upstream to `rust-code-agent-sdks` so this reads a field instead of poking
 /// `data`.
-pub(super) fn thinking_tokens_estimate(messages: &[String]) -> i64 {
+pub(super) fn thinking_tokens_estimate(messages: &[RenderedMessage]) -> i64 {
     messages
         .iter()
-        .filter_map(
-            |json| match AgentFrameRegistry::parse(json, shared::AgentType::Claude) {
+        .filter_map(|message| {
+            match AgentFrameRegistry::parse(&message.content, shared::AgentType::Claude) {
                 AgentFrame::Claude(ClaudeMessage::System(msg)) => {
                     msg.data.get("estimated_tokens").and_then(|v| v.as_i64())
                 }
                 _ => None,
-            },
-        )
+            }
+        })
         .max()
         .unwrap_or(0)
 }
 
 fn group_label(
     identity: &MessageIdentity,
-    messages: &[String],
+    messages: &[RenderedMessage],
     agent_type: shared::AgentType,
 ) -> String {
     if identity.category != GroupCategory::Assistant || identity.label == "Codex" {
@@ -290,10 +326,12 @@ fn group_label(
 
     messages
         .iter()
-        .filter_map(|json| match AgentFrameRegistry::parse(json, agent_type) {
-            AgentFrame::Claude(message) => Some(message),
-            _ => None,
-        })
+        .filter_map(
+            |message| match AgentFrameRegistry::parse(&message.content, agent_type) {
+                AgentFrame::Claude(message) => Some(message),
+                _ => None,
+            },
+        )
         .find_map(|msg| match msg {
             ClaudeMessage::Assistant(msg) => Some(assistant_label(&msg.message.model)),
             _ => None,
@@ -310,9 +348,9 @@ fn group_label(
 /// pair-by-ordering join is the agreed PR 2 strategy — `user_message_id`
 /// stays `None` on the proxy-emit side until a future PR wires up the
 /// per-turn linkage, so a key-based join would fail on every row today.
-pub fn is_turn_terminator(json: &str) -> bool {
+pub fn is_turn_terminator(message: &RenderedMessage) -> bool {
     matches!(
-        AgentFrameRegistry::parse(json, shared::AgentType::Codex).kind(),
+        AgentFrameRegistry::parse(&message.content, shared::AgentType::Codex).kind(),
         AgentFrameKind::ClaudeResult
             | AgentFrameKind::CodexTurnCompleted
             | AgentFrameKind::CodexTurnFailed
@@ -373,16 +411,16 @@ pub fn thinking_chip_starts(groups: &[MessageGroup]) -> Vec<i64> {
 /// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
 /// `MessageGroup::Single`.
 pub fn group_messages(
-    messages: &[String],
+    messages: &[RenderedMessage],
     agent_type: shared::AgentType,
     current_user_id: Option<&str>,
 ) -> Vec<MessageGroup> {
     let mut groups = Vec::new();
-    let mut current: Option<(MessageIdentity, Vec<String>)> = None;
+    let mut current: Option<(MessageIdentity, Vec<RenderedMessage>)> = None;
 
     fn flush(
         out: &mut Vec<MessageGroup>,
-        slot: &mut Option<(MessageIdentity, Vec<String>)>,
+        slot: &mut Option<(MessageIdentity, Vec<RenderedMessage>)>,
         agent_type: shared::AgentType,
     ) {
         if let Some((identity, messages)) = slot.take() {
@@ -396,7 +434,7 @@ pub fn group_messages(
         }
     }
 
-    for json in messages {
+    for message in messages {
         // Cumulative `turn/diff/updated` events are dropped entirely — Codex
         // re-sends the whole-turn diff on every edit tick, so they pile up
         // O(ticks) redundant cards (each the size of the full turn) on top of
@@ -404,22 +442,24 @@ pub fn group_messages(
         // rather than in `classify` keeps the surrounding Codex events in one
         // run instead of fragmenting the group around each dropped diff.
         if matches!(
-            AgentFrameRegistry::parse(json, agent_type).kind(),
+            AgentFrameRegistry::parse(&message.content, agent_type).kind(),
             AgentFrameKind::CodexTurnDiffUpdated
         ) {
             continue;
         }
-        match classify(json, agent_type, current_user_id) {
+        match classify(message, agent_type, current_user_id) {
             Some(identity) => match current.as_mut() {
-                Some((cur_identity, msgs)) if *cur_identity == identity => msgs.push(json.clone()),
+                Some((cur_identity, msgs)) if *cur_identity == identity => {
+                    msgs.push(message.clone())
+                }
                 _ => {
                     flush(&mut groups, &mut current, agent_type);
-                    current = Some((identity, vec![json.clone()]));
+                    current = Some((identity, vec![message.clone()]));
                 }
             },
             None => {
                 flush(&mut groups, &mut current, agent_type);
-                groups.push(MessageGroup::Single(json.clone()));
+                groups.push(MessageGroup::Single(message.clone()));
             }
         }
     }
@@ -439,7 +479,10 @@ pub fn group_messages(
 /// Events that don't carry an `item_id` (turn-level events, deltas, errors)
 /// always pass through — they're standalone signals, not lifecycle stages of
 /// a per-item card.
-pub(super) fn visible_group_indices(category: GroupCategory, messages: &[String]) -> Vec<usize> {
+pub(super) fn visible_group_indices(
+    category: GroupCategory,
+    messages: &[RenderedMessage],
+) -> Vec<usize> {
     if !matches!(category, GroupCategory::Codex) {
         return (0..messages.len()).collect();
     }
@@ -448,7 +491,10 @@ pub(super) fn visible_group_indices(category: GroupCategory, messages: &[String]
     // Parse each message's item_id once, then resolve the last index per id
     // from the cached vector — parsing twice per message doubled the JSON
     // work on the hot render path (#967).
-    let ids: Vec<Option<String>> = messages.iter().map(|j| codex_event_item_id(j)).collect();
+    let ids: Vec<Option<String>> = messages
+        .iter()
+        .map(|message| codex_event_item_id(&message.content))
+        .collect();
     let mut last_idx: HashMap<&str, usize> = HashMap::new();
     for (i, id) in ids.iter().enumerate() {
         if let Some(id) = id {

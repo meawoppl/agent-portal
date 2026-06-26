@@ -6,7 +6,7 @@ mod system;
 mod tools;
 
 use super::shorten_model_name;
-use super::types::{OptimisticUserMessage, UserMessageMeta};
+use super::types::OptimisticUserMessage;
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
@@ -22,7 +22,10 @@ pub(crate) use assistant::assistant_label;
 pub use assistant::{
     render_assistant_message, render_assistant_message_content, render_content_blocks,
 };
-pub use portal::{render_portal_message, render_portal_message_content};
+pub(crate) use portal::{
+    portal_text, render_agent_message_body, render_agent_message_from_source,
+    render_portal_message, render_portal_message_content,
+};
 pub use system::render_system_message;
 
 /// Convert single newlines to markdown hard breaks (trailing two spaces)
@@ -57,28 +60,27 @@ fn user_message_text_and_tool_results(msg: &shared::UserMessage) -> (String, boo
 
 pub fn render_optimistic_user_message(
     msg: &OptimisticUserMessage,
+    meta: Option<&shared::PortalMeta>,
     current_user_id: Option<&str>,
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
-    if let Some(event) = portal::agent_message_event_from_text(&msg.content) {
-        return portal::render_agent_message_event(&event, timestamp, session_id);
-    }
-
-    let label = match &msg.sender {
-        Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
-        _ => "You".to_string(),
+    let label = human_label(meta, current_user_id);
+    let delivery = meta.and_then(|m| m.delivery.as_ref());
+    let pending_class = if delivery.is_some_and(shared::DeliveryMeta::pending) {
+        " pending"
+    } else {
+        ""
     };
-    let pending_class = if msg.pending { " pending" } else { "" };
 
     html! {
         <div class={format!("claude-message user-message{}", pending_class)}>
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge user">{ &label }</span>
-                if msg.pending {
+                if delivery.is_some_and(shared::DeliveryMeta::pending) {
                     <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
                 }
-                { render_delivery_progress(msg.client_msg_id.is_some(), msg.delivery_stage, msg.delivery_message.as_deref()) }
+                { render_delivery_progress(delivery) }
                 <CopyButton text={msg.content.clone()} title="Copy message" />
             </div>
             <div class="message-body">{ render_optimistic_user_message_content(msg, session_id) }</div>
@@ -88,16 +90,18 @@ pub fn render_optimistic_user_message(
 
 pub fn render_user_message(
     msg: &shared::UserMessage,
-    meta: &UserMessageMeta,
+    meta: Option<&shared::PortalMeta>,
     current_user_id: Option<&str>,
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
-    let label = match &meta.sender {
-        Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
-        _ => "You".to_string(),
+    let label = human_label(meta, current_user_id);
+    let delivery = meta.and_then(|m| m.delivery.as_ref());
+    let pending_class = if delivery.is_some_and(shared::DeliveryMeta::pending) {
+        " pending"
+    } else {
+        ""
     };
-    let pending_class = if meta.pending { " pending" } else { "" };
     let (text_content, has_tool_results) = user_message_text_and_tool_results(msg);
 
     if has_tool_results {
@@ -106,17 +110,15 @@ pub fn render_user_message(
                 <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
             </div>
         }
-    } else if let Some(event) = portal::agent_message_event_from_text(&text_content) {
-        portal::render_agent_message_event(&event, timestamp, session_id)
     } else if !text_content.is_empty() {
         html! {
             <div class={format!("claude-message user-message{}", pending_class)}>
                 <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                     <span class="message-type-badge user">{ &label }</span>
-                    if meta.pending {
+                    if delivery.is_some_and(shared::DeliveryMeta::pending) {
                         <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
                     }
-                    { render_delivery_progress(meta.client_msg_id.is_some(), meta.delivery_stage, meta.delivery_message.as_deref()) }
+                    { render_delivery_progress(delivery) }
                     <CopyButton text={text_content.clone()} title="Copy message" />
                 </div>
                 <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
@@ -131,10 +133,6 @@ pub fn render_optimistic_user_message_content(
     msg: &OptimisticUserMessage,
     session_id: Uuid,
 ) -> Html {
-    if let Some(event) = portal::agent_message_event_from_text(&msg.content) {
-        return portal::render_agent_message_body(&event.text, session_id);
-    }
-
     html! {
         <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&msg.content), session_id) }</div>
     }
@@ -153,8 +151,6 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
         render_content_blocks(&msg.message.content, session_id)
     } else if text_content.is_empty() {
         html! {}
-    } else if let Some(event) = portal::agent_message_event_from_text(&text_content) {
-        portal::render_agent_message_body(&event.text, session_id)
     } else {
         html! {
             <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
@@ -162,14 +158,12 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
     }
 }
 
-fn render_delivery_progress(
-    tracked: bool,
-    stage: Option<shared::InputDeliveryStage>,
-    message: Option<&str>,
-) -> Html {
-    if !tracked && stage.is_none() {
+fn render_delivery_progress(delivery: Option<&shared::DeliveryMeta>) -> Html {
+    let Some(delivery) = delivery else {
         return html! {};
     };
+    let stage = delivery.stage;
+    let message = delivery.message.as_deref();
 
     let active_index = match stage {
         None => 0,
@@ -218,6 +212,17 @@ fn render_delivery_progress(
                 }) }
             </span>
         </span>
+    }
+}
+
+fn human_label(meta: Option<&shared::PortalMeta>, current_user_id: Option<&str>) -> String {
+    match meta.and_then(|m| m.source.as_ref()) {
+        Some(shared::MessageSource::Human { account_id, name })
+            if current_user_id != Some(account_id.to_string().as_str()) =>
+        {
+            name.clone()
+        }
+        _ => "You".to_string(),
     }
 }
 

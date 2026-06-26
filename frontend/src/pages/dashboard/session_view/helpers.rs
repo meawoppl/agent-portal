@@ -9,6 +9,7 @@
 //! was extracted from.
 
 use crate::components::message_renderer::types::ClaudeMessage;
+use crate::components::message_renderer::RenderedMessage;
 
 /// Cross-agent activity classification used by the session-rail sparkline and
 /// the pending-send reconciler. The same enum bridges Claude wire shapes
@@ -286,85 +287,6 @@ fn is_sed_print_read(command: &str) -> bool {
     command.contains('p')
 }
 
-/// Inject `_created_at` (and optionally `_sender`) metadata into a wire-JSON
-/// message string, returning a new JSON string. Used by both the REST
-/// `LoadHistory` path (where the row carries `user_id` / `sender_name`
-/// columns to fold into `_sender` for user messages) and the live
-/// `WsEvent::Output` path (where only `_created_at` matters; `role_user` is
-/// false so the `_sender` branch is skipped).
-///
-/// Returns the original `content` unchanged when the JSON parse fails — the
-/// caller still pushes the raw string so a malformed wire frame doesn't
-/// silently disappear from the message list.
-pub(super) fn inject_message_metadata(
-    content: &str,
-    created_at: &str,
-    role_user: bool,
-    user_id: Option<&str>,
-    sender_name: Option<&str>,
-    origin: Option<&shared::MessageOrigin>,
-) -> String {
-    let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) else {
-        return content.to_string();
-    };
-    let Some(obj) = val.as_object_mut() else {
-        return content.to_string();
-    };
-    if role_user && (user_id.is_some() || sender_name.is_some()) {
-        #[derive(serde::Serialize)]
-        struct SenderMeta<'a> {
-            user_id: &'a str,
-            name: &'a str,
-        }
-        obj.insert(
-            "_sender".to_string(),
-            serde_json::to_value(SenderMeta {
-                user_id: user_id.unwrap_or_default(),
-                name: sender_name.unwrap_or_default(),
-            })
-            .unwrap_or(serde_json::Value::Null),
-        );
-    }
-    obj.insert(
-        "_created_at".to_string(),
-        serde_json::Value::String(created_at.to_string()),
-    );
-    if let Some(origin) = origin {
-        obj.insert(
-            "_origin".to_string(),
-            serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
-        );
-    }
-    val.to_string()
-}
-
-/// Inject `_created_at` into a wire-JSON message string only when the key is
-/// absent, returning a new JSON string. Used by the live
-/// `handle_received_output` path: `websocket.rs` already folds the
-/// server-assigned `created_at` into `WsEvent::Output` content, and that
-/// authoritative timestamp must not be clobbered by the browser-clock
-/// fallback (#981). Frames that arrive without one (error envelopes, a
-/// pre-#784 backend) still get the `Date::now()` fallback for tooltips.
-///
-/// Returns the original `content` unchanged when the JSON parse fails or the
-/// value isn't an object — same contract as [`inject_message_metadata`].
-pub(super) fn inject_created_at_if_absent(content: &str, created_at: &str) -> String {
-    let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) else {
-        return content.to_string();
-    };
-    let Some(obj) = val.as_object_mut() else {
-        return content.to_string();
-    };
-    if obj.contains_key("_created_at") {
-        return content.to_string();
-    }
-    obj.insert(
-        "_created_at".to_string(),
-        serde_json::Value::String(created_at.to_string()),
-    );
-    val.to_string()
-}
-
 /// Drain pending optimistic-send entries when the server confirms our input.
 ///
 /// - [`ActivityTag::User`] echo: match by content (via [`extract_user_text`])
@@ -376,7 +298,7 @@ pub(super) fn inject_created_at_if_absent(content: &str, created_at: &str) -> St
 ///   the input was received and clears *all* pending entries.
 /// - Any other tag: no-op.
 pub(super) fn reconcile_pending_sends(
-    pending_sends: &mut Vec<String>,
+    pending_sends: &mut Vec<RenderedMessage>,
     tag: ActivityTag,
     output: &str,
 ) {
@@ -394,7 +316,7 @@ pub(super) fn reconcile_pending_sends(
                     if pending_has_client_msg_id(pending) {
                         return false;
                     }
-                    ClaudeMessage::parse(pending)
+                    ClaudeMessage::parse(&pending.content)
                         .ok()
                         .as_ref()
                         .and_then(extract_user_text)
@@ -406,14 +328,14 @@ pub(super) fn reconcile_pending_sends(
             }
         }
         ActivityTag::Assistant | ActivityTag::Result => {
-            pending_sends.retain(|pending| pending_has_client_msg_id(pending));
+            pending_sends.retain(pending_has_client_msg_id);
         }
         _ => {}
     }
 }
 
 pub(super) fn update_pending_send_delivery(
-    pending_sends: &mut Vec<String>,
+    pending_sends: &mut Vec<RenderedMessage>,
     client_msg_id: uuid::Uuid,
     stage: shared::InputDeliveryStage,
     message: Option<&str>,
@@ -430,51 +352,48 @@ pub(super) fn update_pending_send_delivery(
         return true;
     }
 
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&pending_sends[pos]) else {
+    let Some(meta) = pending_sends[pos].meta.as_mut() else {
         return false;
     };
-    let Some(obj) = value.as_object_mut() else {
+    let Some(delivery) = meta.delivery.as_mut() else {
         return false;
     };
 
-    obj.insert(
-        "_delivery_stage".to_string(),
-        serde_json::to_value(stage).unwrap_or(serde_json::Value::Null),
-    );
-    match message {
-        Some(message) => {
-            obj.insert(
-                "_delivery_message".to_string(),
-                serde_json::Value::String(message.to_string()),
-            );
-        }
-        None => {
-            obj.remove("_delivery_message");
-        }
-    }
-    if stage == shared::InputDeliveryStage::Failed {
-        obj.insert("_pending".to_string(), serde_json::Value::Bool(false));
-    }
-
-    pending_sends[pos] = value.to_string();
+    delivery.stage = Some(stage);
+    delivery.message = message.map(ToOwned::to_owned);
     true
 }
 
-fn pending_has_client_msg_id(pending: &str) -> bool {
+fn pending_has_client_msg_id(pending: &RenderedMessage) -> bool {
     pending_client_msg_id(pending).is_some()
 }
 
-fn pending_client_msg_id(pending: &str) -> Option<uuid::Uuid> {
-    let value = serde_json::from_str::<serde_json::Value>(pending).ok()?;
-    value
-        .get("_client_msg_id")
-        .and_then(|v| v.as_str())
-        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+fn pending_client_msg_id(pending: &RenderedMessage) -> Option<uuid::Uuid> {
+    pending.delivery().map(|delivery| delivery.client_msg_id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pending(content: &str) -> RenderedMessage {
+        RenderedMessage::new(format!(r#"{{"type":"user","content":"{content}"}}"#), None)
+    }
+
+    fn tracked_pending(content: &str, id: uuid::Uuid) -> RenderedMessage {
+        RenderedMessage::new(
+            format!(r#"{{"type":"user","content":"{content}"}}"#),
+            Some(shared::PortalMeta {
+                created_at: None,
+                source: None,
+                delivery: Some(shared::DeliveryMeta {
+                    client_msg_id: id,
+                    stage: None,
+                    message: None,
+                }),
+            }),
+        )
+    }
 
     // --- autoscroll_transition ---
 
@@ -661,144 +580,11 @@ mod tests {
         assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
     }
 
-    // --- inject_message_metadata ---
-
-    #[test]
-    fn inject_message_metadata_adds_created_at_for_non_user_role() {
-        let out = inject_message_metadata(
-            r#"{"type":"assistant","content":"hi"}"#,
-            "2026-05-18T12:00:00Z",
-            false,
-            None,
-            None,
-            None,
-        );
-        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["_created_at"], "2026-05-18T12:00:00Z");
-        // Non-user role should never get _sender injected.
-        assert!(v.get("_sender").is_none());
-    }
-
-    #[test]
-    fn inject_message_metadata_adds_origin_when_present() {
-        let from_session_id =
-            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("uuid");
-        let origin = shared::MessageOrigin::InterAgent {
-            from_session_id,
-            from_agent_type: "claude".to_string(),
-        };
-        let out = inject_message_metadata(
-            r#"{"type":"portal","content":[{"type":"text","text":"hello"}]}"#,
-            "2026-05-18T12:00:00Z",
-            false,
-            None,
-            None,
-            Some(&origin),
-        );
-        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["_origin"]["kind"], "inter_agent");
-        assert_eq!(
-            v["_origin"]["from_session_id"],
-            "11111111-1111-1111-1111-111111111111"
-        );
-        assert_eq!(v["_origin"]["from_agent_type"], "claude");
-    }
-
-    #[test]
-    fn inject_message_metadata_adds_sender_for_user_role_with_attribution() {
-        let out = inject_message_metadata(
-            r#"{"type":"user","content":"hi"}"#,
-            "2026-05-18T12:00:00Z",
-            true,
-            Some("uid-1"),
-            Some("Alice"),
-            None,
-        );
-        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["_created_at"], "2026-05-18T12:00:00Z");
-        assert_eq!(v["_sender"]["user_id"], "uid-1");
-        assert_eq!(v["_sender"]["name"], "Alice");
-    }
-
-    #[test]
-    fn inject_message_metadata_skips_sender_for_user_role_without_attribution() {
-        let out = inject_message_metadata(
-            r#"{"type":"user","content":"hi"}"#,
-            "2026-05-18T12:00:00Z",
-            true,
-            None,
-            None,
-            None,
-        );
-        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["_created_at"], "2026-05-18T12:00:00Z");
-        // User role with no attribution → no _sender either.
-        assert!(v.get("_sender").is_none());
-    }
-
-    #[test]
-    fn inject_message_metadata_returns_input_unchanged_for_invalid_json() {
-        // Malformed wire frame: the caller still pushes the raw string so
-        // the message doesn't silently disappear from the list.
-        let out = inject_message_metadata("not-json", "ts", false, None, None, None);
-        assert_eq!(out, "not-json");
-    }
-
-    #[test]
-    fn inject_message_metadata_returns_input_unchanged_for_non_object_json() {
-        // Valid JSON but not an object (e.g. a top-level string) — no
-        // _created_at slot to inject into, return as-is so callers don't
-        // re-serialize it into a quoted-string blob.
-        let out = inject_message_metadata("\"hello\"", "ts", false, None, None, None);
-        assert_eq!(out, "\"hello\"");
-    }
-
-    // --- inject_created_at_if_absent ---
-
-    #[test]
-    fn inject_created_at_if_absent_preserves_existing_server_timestamp() {
-        // The live path: websocket.rs already folded the server `created_at`
-        // into the frame — the browser-clock fallback must not clobber it
-        // (#981).
-        let server_ts = "2026-05-18T12:00:00Z";
-        let input = format!(r#"{{"type":"assistant","content":"hi","_created_at":"{server_ts}"}}"#);
-        let out = inject_created_at_if_absent(&input, "2026-05-18T12:34:56Z");
-        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(
-            v["_created_at"], server_ts,
-            "server timestamp must survive the component-side injection"
-        );
-    }
-
-    #[test]
-    fn inject_created_at_if_absent_adds_timestamp_when_missing() {
-        // Frames with no server timestamp (error envelopes, pre-#784
-        // backends) still get the browser-clock fallback for tooltips.
-        let out = inject_created_at_if_absent(
-            r#"{"type":"assistant","content":"hi"}"#,
-            "2026-05-18T12:34:56Z",
-        );
-        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["_created_at"], "2026-05-18T12:34:56Z");
-    }
-
-    #[test]
-    fn inject_created_at_if_absent_returns_input_unchanged_for_invalid_json() {
-        let out = inject_created_at_if_absent("not-json", "ts");
-        assert_eq!(out, "not-json");
-    }
-
-    #[test]
-    fn inject_created_at_if_absent_returns_input_unchanged_for_non_object_json() {
-        let out = inject_created_at_if_absent("\"hello\"", "ts");
-        assert_eq!(out, "\"hello\"");
-    }
-
     // --- reconcile_pending_sends ---
 
     #[test]
     fn reconcile_pending_sends_noop_when_empty() {
-        let mut pending: Vec<String> = vec![];
+        let mut pending: Vec<RenderedMessage> = vec![];
         reconcile_pending_sends(
             &mut pending,
             ActivityTag::User,
@@ -809,17 +595,14 @@ mod tests {
 
     #[test]
     fn reconcile_pending_sends_user_echo_removes_first_matching_entry() {
-        let mut pending = vec![
-            r#"{"type":"user","content":"hello"}"#.to_string(),
-            r#"{"type":"user","content":"world"}"#.to_string(),
-        ];
+        let mut pending = vec![pending("hello"), pending("world")];
         reconcile_pending_sends(
             &mut pending,
             ActivityTag::User,
             r#"{"type":"user","content":"hello"}"#,
         );
         assert_eq!(pending.len(), 1);
-        assert!(pending[0].contains("world"));
+        assert!(pending[0].content.contains("world"));
     }
 
     #[test]
@@ -827,7 +610,7 @@ mod tests {
         // A user echo for a message we didn't optimistically send must NOT
         // consume an unrelated pending entry — otherwise a multi-tab scenario
         // would drop legitimate pending sends.
-        let mut pending = vec![r#"{"type":"user","content":"hello"}"#.to_string()];
+        let mut pending = vec![pending("hello")];
         reconcile_pending_sends(
             &mut pending,
             ActivityTag::User,
@@ -842,10 +625,7 @@ mod tests {
         // so the assistant response is the only signal we get that input
         // was received. Clear legacy entries; id-tracked entries wait for
         // InputProgress::AgentAccepted.
-        let mut pending = vec![
-            r#"{"type":"user","content":"a"}"#.to_string(),
-            r#"{"type":"user","content":"b"}"#.to_string(),
-        ];
+        let mut pending = vec![pending("a"), pending("b")];
         reconcile_pending_sends(
             &mut pending,
             ActivityTag::Assistant,
@@ -857,10 +637,7 @@ mod tests {
     #[test]
     fn reconcile_pending_sends_preserves_id_tracked_rows() {
         let id = uuid::Uuid::new_v4();
-        let mut pending = vec![
-            format!(r#"{{"type":"user","content":"hello","_client_msg_id":"{id}"}}"#),
-            r#"{"type":"user","content":"legacy"}"#.to_string(),
-        ];
+        let mut pending = vec![tracked_pending("hello", id), pending("legacy")];
 
         reconcile_pending_sends(
             &mut pending,
@@ -875,15 +652,13 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[]}}"#,
         );
         assert_eq!(pending.len(), 1, "assistant clears only legacy rows");
-        assert!(pending[0].contains(&id.to_string()));
+        assert_eq!(pending[0].delivery().map(|d| d.client_msg_id), Some(id));
     }
 
     #[test]
     fn update_pending_send_delivery_updates_stage() {
         let id = uuid::Uuid::new_v4();
-        let mut pending = vec![format!(
-            r#"{{"type":"user","content":"hello","_pending":true,"_client_msg_id":"{id}"}}"#
-        )];
+        let mut pending = vec![tracked_pending("hello", id)];
 
         assert!(update_pending_send_delivery(
             &mut pending,
@@ -891,17 +666,18 @@ mod tests {
             shared::InputDeliveryStage::ServerReceived,
             None,
         ));
-        let value: serde_json::Value = serde_json::from_str(&pending[0]).unwrap();
-        assert_eq!(value["_delivery_stage"], "server_received");
-        assert_eq!(value["_pending"], true);
+        let delivery = pending[0].delivery().expect("delivery");
+        assert_eq!(
+            delivery.stage,
+            Some(shared::InputDeliveryStage::ServerReceived)
+        );
+        assert!(delivery.pending());
     }
 
     #[test]
     fn update_pending_send_delivery_failed_marks_not_pending() {
         let id = uuid::Uuid::new_v4();
-        let mut pending = vec![format!(
-            r#"{{"type":"user","content":"hello","_pending":true,"_client_msg_id":"{id}"}}"#
-        )];
+        let mut pending = vec![tracked_pending("hello", id)];
 
         assert!(update_pending_send_delivery(
             &mut pending,
@@ -909,18 +685,16 @@ mod tests {
             shared::InputDeliveryStage::Failed,
             Some("permission denied"),
         ));
-        let value: serde_json::Value = serde_json::from_str(&pending[0]).unwrap();
-        assert_eq!(value["_delivery_stage"], "failed");
-        assert_eq!(value["_delivery_message"], "permission denied");
-        assert_eq!(value["_pending"], false);
+        let delivery = pending[0].delivery().expect("delivery");
+        assert_eq!(delivery.stage, Some(shared::InputDeliveryStage::Failed));
+        assert_eq!(delivery.message.as_deref(), Some("permission denied"));
+        assert!(!delivery.pending());
     }
 
     #[test]
     fn update_pending_send_delivery_agent_accepted_removes_row() {
         let id = uuid::Uuid::new_v4();
-        let mut pending = vec![format!(
-            r#"{{"type":"user","content":"hello","_pending":true,"_client_msg_id":"{id}"}}"#
-        )];
+        let mut pending = vec![tracked_pending("hello", id)];
 
         assert!(update_pending_send_delivery(
             &mut pending,
@@ -933,7 +707,7 @@ mod tests {
 
     #[test]
     fn reconcile_pending_sends_result_clears_all() {
-        let mut pending = vec![r#"{"type":"user","content":"a"}"#.to_string()];
+        let mut pending = vec![pending("a")];
         reconcile_pending_sends(
             &mut pending,
             ActivityTag::Result,
@@ -944,7 +718,7 @@ mod tests {
 
     #[test]
     fn reconcile_pending_sends_ignores_other_tags() {
-        let mut pending = vec![r#"{"type":"user","content":"a"}"#.to_string()];
+        let mut pending = vec![pending("a")];
         reconcile_pending_sends(&mut pending, ActivityTag::System, r#"{"type":"system"}"#);
         assert_eq!(pending.len(), 1);
     }

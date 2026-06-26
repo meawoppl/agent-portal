@@ -8,14 +8,14 @@
 //! `helpers.rs`; task-event derivation lives alongside its consumer in
 //! `tasks_panel.rs`.
 
-use crate::components::message_renderer::MessageRenderer;
+use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroupRenderer,
 };
 use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
 use shared::api::{ErrorMessage, TurnMetricsResponse};
-use shared::{ClientToServer, SendMode, SessionInfo, TurnMetrics};
+use shared::{ClientToServer, DeliveryMeta, PortalMeta, SendMode, SessionInfo, TurnMetrics};
 use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
@@ -25,8 +25,7 @@ use web_sys::Element;
 use yew::prelude::*;
 
 use super::helpers::{
-    autoscroll_transition, classify_output_msg_type, inject_created_at_if_absent,
-    inject_message_metadata, is_claude_awaiting, reconcile_pending_sends,
+    autoscroll_transition, classify_output_msg_type, is_claude_awaiting, reconcile_pending_sends,
     update_pending_send_delivery, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
@@ -66,34 +65,41 @@ pub struct SessionViewProps {
     pub interrupt_signal: u32,
 }
 
-fn optimistic_user_json(content: &str, created_at: &str, client_msg_id: &Uuid) -> String {
+fn optimistic_user_message(
+    content: &str,
+    created_at: &str,
+    client_msg_id: Uuid,
+) -> RenderedMessage {
     #[derive(serde::Serialize)]
     struct OptimisticUserMessage<'a> {
         #[serde(rename = "type")]
         message_type: &'static str,
         content: &'a str,
-        #[serde(rename = "_pending")]
-        pending: bool,
-        #[serde(rename = "_created_at")]
-        created_at: &'a str,
-        #[serde(rename = "_client_msg_id")]
-        client_msg_id: &'a Uuid,
     }
 
-    serde_json::to_string(&OptimisticUserMessage {
+    let content = serde_json::to_string(&OptimisticUserMessage {
         message_type: "user",
         content,
-        pending: true,
-        created_at,
-        client_msg_id,
     })
-    .unwrap_or_default()
+    .unwrap_or_default();
+    RenderedMessage::new(
+        content,
+        Some(PortalMeta {
+            created_at: Some(created_at.to_string()),
+            source: None,
+            delivery: Some(DeliveryMeta {
+                client_msg_id,
+                stage: None,
+                message: None,
+            }),
+        }),
+    )
 }
 
 /// Messages for the SessionView component
 pub enum SessionViewMsg {
     LoadHistory(Vec<MessageData>, Option<String>),
-    ReceivedOutput(String),
+    ReceivedOutput(RenderedMessage),
     WebSocketConnected(WsSender),
     WebSocketError(String),
     AttemptReconnect,
@@ -160,7 +166,7 @@ pub enum SessionViewMsg {
 
 /// SessionView - Main terminal view for a single session
 pub struct SessionView {
-    messages: Vec<String>,
+    messages: Vec<RenderedMessage>,
     ws_connected: bool,
     ws_sender: Option<WsSender>,
     messages_ref: NodeRef,
@@ -196,7 +202,7 @@ pub struct SessionView {
     /// component holds zero textarea / upload / send-mode state itself.
     input_bar_dispatcher: Option<Callback<InputBarInbound>>,
     /// Messages sent but not yet confirmed by the server echo
-    pending_sends: Vec<String>,
+    pending_sends: Vec<RenderedMessage>,
     /// Per-turn performance metrics, sorted by `started_at ASC` (PR 2 of N).
     /// Hydrated by `LoadTurnMetrics` on initial REST load and topped up by
     /// `TurnMetricsReceived` on every live WS frame. Joined to terminator
@@ -383,11 +389,11 @@ impl Component for SessionView {
                         .iter()
                         .rev()
                         .find_map(|msg| {
-                            crate::components::codex_renderer::is_codex_terminal_event(msg)
+                            crate::components::codex_renderer::is_codex_terminal_event(&msg.content)
                         })
                         .unwrap_or(false)
                 } else {
-                    is_claude_awaiting(self.messages.iter())
+                    is_claude_awaiting(self.messages.iter().map(|m| &m.content))
                 };
                 let is_awaiting = is_result_awaiting || self.has_pending_permission;
                 let session_id = ctx.props().session.id;
@@ -528,8 +534,8 @@ impl Component for SessionView {
                                 html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                             }).collect::<Html>()
                         }
-                        { for self.pending_sends.iter().enumerate().map(|(i, json)| {
-                            html! { <MessageRenderer key={format!("p{}", i)} json={json.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                        { for self.pending_sends.iter().enumerate().map(|(i, message)| {
+                            html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                         })}
                     </div>
                     if !is_tailing {
@@ -564,7 +570,7 @@ impl SessionView {
                 ctx.link().send_message(SessionViewMsg::WebSocketError(err));
                 false
             }
-            WsEvent::Output(content, created_at) => {
+            WsEvent::Output(message) => {
                 // Update the reconnect-replay watermark from the
                 // server-assigned `created_at` (closes #784). Falling back to
                 // `Date.now()` here — the prior behavior — could miss
@@ -575,11 +581,11 @@ impl SessionView {
                 // a timestamp (pre-#784 server or an error envelope), keep
                 // the prior watermark — a future timestamped message will
                 // heal it.
-                if let Some(ts) = created_at {
+                if let Some(ts) = message.meta.as_ref().and_then(|m| m.created_at.clone()) {
                     self.last_message_timestamp = Some(ts);
                 }
                 ctx.link()
-                    .send_message(SessionViewMsg::ReceivedOutput(content));
+                    .send_message(SessionViewMsg::ReceivedOutput(message));
                 ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 false
             }
@@ -638,8 +644,7 @@ impl SessionView {
     /// Hydrate the message buffer + task panel from a REST history batch.
     /// Each message is classified once via [`classify_output_msg_type`],
     /// task events are forwarded to the panel via [`derive_task_events`],
-    /// and metadata (`_sender` for user messages, `_created_at` for every
-    /// row) is folded into the JSON via [`inject_message_metadata`].
+    /// and portal metadata stays in the typed sidecar carried by the API.
     fn handle_load_history(
         &mut self,
         ctx: &Context<Self>,
@@ -665,16 +670,7 @@ impl SessionView {
         }
         self.messages = messages
             .into_iter()
-            .map(|m| {
-                inject_message_metadata(
-                    &m.content,
-                    &m.created_at,
-                    m.role == "user",
-                    m.user_id.as_deref(),
-                    m.sender_name.as_deref(),
-                    m.origin.as_ref(),
-                )
-            })
+            .map(|m| RenderedMessage::new(m.content, m.meta))
             .collect();
         self.last_message_timestamp = last_timestamp;
         ctx.link().send_message(SessionViewMsg::CheckAwaiting);
@@ -695,7 +691,7 @@ impl SessionView {
             .unwrap_or_default();
         let client_msg_id = Uuid::new_v4();
         self.pending_sends
-            .push(optimistic_user_json(&input, &now_iso, &client_msg_id));
+            .push(optimistic_user_message(&input, &now_iso, client_msg_id));
 
         if let Some(ref sender) = self.ws_sender {
             let msg = ClientToServer::AgentInput {
@@ -726,7 +722,7 @@ impl SessionView {
                         .as_string()
                         .unwrap_or_default();
                     self.pending_sends
-                        .push(optimistic_user_json(text, &now_iso, &client_msg_id));
+                        .push(optimistic_user_message(text, &now_iso, client_msg_id));
                     changed = true;
                 }
                 (
@@ -742,9 +738,9 @@ impl SessionView {
         }
     }
 
-    fn handle_received_output(&mut self, ctx: &Context<Self>, output: String) -> bool {
-        let tag = classify_output_msg_type(&output);
-        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output) {
+    fn handle_received_output(&mut self, ctx: &Context<Self>, output: RenderedMessage) -> bool {
+        let tag = classify_output_msg_type(&output.content);
+        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
             // Live task events: the `created_at` field isn't part of the
             // live wire envelope, so the panel falls back to `Date.now()`
             // — see `derive_task_events` for the two paths.
@@ -756,21 +752,7 @@ impl SessionView {
         ctx.props()
             .on_activity
             .emit((ctx.props().session.id, tag, js_sys::Date::now()));
-        // Inject _created_at for tooltip display only when the frame doesn't
-        // already carry one: `websocket.rs` folds the server-assigned
-        // `created_at` into the content before emitting `WsEvent::Output`,
-        // and that authoritative timestamp must win over the browser clock
-        // (#981). Frames without one (error envelopes, pre-#784 backends)
-        // fall back to `Date::now()`; the reconnect-replay watermark is set
-        // separately from the server `created_at` in `WsEvent::Output`
-        // (closes #784).
-        let now_iso = js_sys::Date::new_0()
-            .to_iso_string()
-            .as_string()
-            .unwrap_or_default();
-        let output = inject_created_at_if_absent(&output, &now_iso);
-
-        reconcile_pending_sends(&mut self.pending_sends, tag, &output);
+        reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
 
         push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
         true
@@ -799,8 +781,10 @@ impl SessionView {
             }));
         } else {
             let error_msg = ErrorMessage::new(format!("Connection lost: {}", err));
-            self.messages
-                .push(serde_json::to_string(&error_msg).unwrap_or_default());
+            self.messages.push(RenderedMessage::new(
+                serde_json::to_string(&error_msg).unwrap_or_default(),
+                None,
+            ));
         }
         true
     }

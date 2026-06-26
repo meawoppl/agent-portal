@@ -38,7 +38,7 @@ pub struct MessageGroupRendererProps {
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     match &props.group {
         MessageGroup::Single(json) => {
-            html! { <super::MessageRenderer json={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} continuation_statuses={props.continuation_statuses.clone()} on_schedule_continuation={props.on_schedule_continuation.clone()} /> }
+            html! { <super::MessageRenderer message={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} continuation_statuses={props.continuation_statuses.clone()} on_schedule_continuation={props.on_schedule_continuation.clone()} /> }
         }
         MessageGroup::IdentityGroup {
             category,
@@ -48,7 +48,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         } => {
             let ts = messages
                 .first()
-                .and_then(|json| extract_raw_iso(json))
+                .and_then(extract_raw_iso)
                 .and_then(|iso| local_timestamp(&iso));
 
             // A run of `thinking_tokens` markers collapses to a single compact
@@ -77,7 +77,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 };
             }
 
-            let last_iso = messages.last().and_then(|json| extract_raw_iso(json));
+            let last_iso = messages.last().and_then(extract_raw_iso);
             let wrapper_class = match category {
                 GroupCategory::User => "user-message",
                 GroupCategory::Portal => "portal-message",
@@ -99,11 +99,11 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                     </div>
                     <div class="message-body grouped-message-body">
                         { for visible.iter().map(|&i| {
-                            let json = &messages[i];
-                            let key = extract_raw_iso(json)
+                            let message = &messages[i];
+                            let key = extract_raw_iso(message)
                                 .map(|iso| format!("m-{}", iso))
                                 .unwrap_or_else(|| format!("m{}", i));
-                            html! { <div {key} class="grouped-message-part">{ dispatch::render_identity_group_part(json, props.agent_type, props.session_id, &props.continuation_statuses, props.on_schedule_continuation.clone()) }</div> }
+                            html! { <div {key} class="grouped-message-part">{ dispatch::render_identity_group_part(message, props.agent_type, props.session_id, &props.continuation_statuses, props.on_schedule_continuation.clone()) }</div> }
                         })}
                     </div>
                     if let Some(iso) = last_iso {
