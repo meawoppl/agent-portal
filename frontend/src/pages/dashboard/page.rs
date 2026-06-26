@@ -1,6 +1,9 @@
 //! Dashboard page - Main session management interface
 
-use super::page_state::{active_session_ids, DashboardSessionAction, DashboardSessionState};
+use super::page_state::{
+    active_session_ids, DashboardSessionAction, DashboardSessionState, DashboardUiAction,
+    DashboardUiState,
+};
 use super::session_order;
 use super::session_rail::{ActivityRef, SessionRail};
 use super::session_view::SessionView;
@@ -94,19 +97,18 @@ pub fn dashboard_page() -> Html {
     let spend_initialized = use_state(|| false);
 
     // UI state
-    let show_launch_dialog = use_state(|| false);
-    let show_admin = use_state(|| false);
-    let show_settings = use_state(|| false);
+    let ui_state = use_reducer_eq(|| {
+        DashboardUiState::new(
+            load_inactive_hidden(),
+            load_show_cost(),
+            load_rail_position(),
+        )
+    });
     // Focus is tracked by `session_id` (the source of truth), not by array
     // index — see `session_order` / issue #1094. The display index is derived
     // from this each render, so a reordered poll never bounces focus onto a
     // different session.
     let session_state = use_reducer_eq(|| DashboardSessionState::new(load_hidden_sessions()));
-    let inactive_hidden = use_state(load_inactive_hidden);
-    let show_cost = use_state(load_show_cost);
-    let rail_position = use_state(load_rail_position);
-    let pending_leave = use_state(|| None::<Uuid>);
-    let pending_delete = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
     let current_user_id = use_state(|| None::<Uuid>);
     let app_title = use_state(|| "Agent Portal".to_string());
@@ -305,7 +307,7 @@ pub fn dashboard_page() -> Html {
         focused_index,
         hidden_sessions: effective_hidden_sessions.clone(),
         connected_sessions: session_state.connected_sessions.clone(),
-        inactive_hidden: *inactive_hidden,
+        inactive_hidden: ui_state.inactive_hidden,
         on_select: on_select_session.clone(),
         on_activate,
         on_interrupt,
@@ -313,29 +315,28 @@ pub fn dashboard_page() -> Html {
 
     // Modal open callbacks
     let go_to_admin = {
-        let show_admin = show_admin.clone();
-        Callback::from(move |_| show_admin.set(true))
+        let ui_state = ui_state.clone();
+        Callback::from(move |_| ui_state.dispatch(DashboardUiAction::ShowAdmin))
     };
 
     let go_to_settings = {
-        let show_settings = show_settings.clone();
-        Callback::from(move |_| show_settings.set(true))
+        let ui_state = ui_state.clone();
+        Callback::from(move |_| ui_state.dispatch(DashboardUiAction::ShowSettings))
     };
 
     let close_admin = {
-        let show_admin = show_admin.clone();
-        Callback::from(move |_: ()| show_admin.set(false))
+        let ui_state = ui_state.clone();
+        Callback::from(move |_: ()| ui_state.dispatch(DashboardUiAction::CloseAdmin))
     };
 
     let close_settings = {
-        let show_settings = show_settings.clone();
-        let rail_position = rail_position.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |_: ()| {
             // The Appearance panel may have changed this; re-sync from
             // localStorage so the dashboard picks up the new value when
             // the user navigates back.
-            rail_position.set(load_rail_position());
-            show_settings.set(false);
+            ui_state.dispatch(DashboardUiAction::SetRailPosition(load_rail_position()));
+            ui_state.dispatch(DashboardUiAction::CloseSettings);
         })
     };
 
@@ -343,27 +344,27 @@ pub fn dashboard_page() -> Html {
 
     // Leave session callbacks
     let on_leave = {
-        let pending_leave = pending_leave.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |session_id: Uuid| {
-            pending_leave.set(Some(session_id));
+            ui_state.dispatch(DashboardUiAction::RequestLeave(session_id));
         })
     };
 
     let on_cancel_leave = {
-        let pending_leave = pending_leave.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |_| {
-            pending_leave.set(None);
+            ui_state.dispatch(DashboardUiAction::ClearPendingLeave);
         })
     };
 
     let on_confirm_leave = {
-        let pending_leave = pending_leave.clone();
+        let ui_state = ui_state.clone();
         let refresh = sessions_hook.refresh.clone();
         let current_user_id = current_user_id.clone();
         Callback::from(move |_| {
-            if let Some(session_id) = *pending_leave {
+            if let Some(session_id) = ui_state.pending_leave {
                 let refresh = refresh.clone();
-                let pending_leave = pending_leave.clone();
+                let ui_state = ui_state.clone();
                 let user_id = *current_user_id;
                 spawn_local(async move {
                     if let Some(user_id) = user_id {
@@ -388,33 +389,33 @@ pub fn dashboard_page() -> Html {
                     } else {
                         log::error!("Failed to get current user ID for leave");
                     }
-                    pending_leave.set(None);
+                    ui_state.dispatch(DashboardUiAction::ClearPendingLeave);
                 });
             }
         })
     };
 
     let on_delete = {
-        let pending_delete = pending_delete.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |session_id: Uuid| {
-            pending_delete.set(Some(session_id));
+            ui_state.dispatch(DashboardUiAction::RequestDelete(session_id));
         })
     };
 
     let on_cancel_delete = {
-        let pending_delete = pending_delete.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |_| {
-            pending_delete.set(None);
+            ui_state.dispatch(DashboardUiAction::ClearPendingDelete);
         })
     };
 
     let on_confirm_delete = {
-        let pending_delete = pending_delete.clone();
+        let ui_state = ui_state.clone();
         let refresh = sessions_hook.refresh.clone();
         Callback::from(move |_| {
-            if let Some(session_id) = *pending_delete {
+            if let Some(session_id) = ui_state.pending_delete {
                 let refresh = refresh.clone();
-                let pending_delete = pending_delete.clone();
+                let ui_state = ui_state.clone();
                 spawn_local(async move {
                     let api_endpoint = utils::api_url(&format!("/api/sessions/{}", session_id));
                     match Request::delete(&api_endpoint).send().await {
@@ -428,23 +429,23 @@ pub fn dashboard_page() -> Html {
                             log::error!("Failed to delete session: {:?}", e);
                         }
                     }
-                    pending_delete.set(None);
+                    ui_state.dispatch(DashboardUiAction::ClearPendingDelete);
                 });
             }
         })
     };
 
     let toggle_launch_dialog = {
-        let show_launch_dialog = show_launch_dialog.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |_: MouseEvent| {
-            show_launch_dialog.set(!*show_launch_dialog);
+            ui_state.dispatch(DashboardUiAction::ToggleLaunchDialog);
         })
     };
 
     let on_launch_close = {
-        let show_launch_dialog = show_launch_dialog.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |_| {
-            show_launch_dialog.set(false);
+            ui_state.dispatch(DashboardUiAction::CloseLaunchDialog);
         })
     };
 
@@ -561,20 +562,20 @@ pub fn dashboard_page() -> Html {
     };
 
     let on_toggle_inactive_hidden = {
-        let inactive_hidden = inactive_hidden.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |_: MouseEvent| {
-            let new_val = !*inactive_hidden;
+            let new_val = !ui_state.inactive_hidden;
             save_inactive_hidden(new_val);
-            inactive_hidden.set(new_val);
+            ui_state.dispatch(DashboardUiAction::SetInactiveHidden(new_val));
         })
     };
 
     let on_toggle_show_cost = {
-        let show_cost = show_cost.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |_: MouseEvent| {
-            let new_val = !*show_cost;
+            let new_val = !ui_state.show_cost;
             save_show_cost(new_val);
-            show_cost.set(new_val);
+            ui_state.dispatch(DashboardUiAction::SetShowCost(new_val));
         })
     };
 
@@ -703,7 +704,7 @@ pub fn dashboard_page() -> Html {
                             );
                             html! {
                                 <>
-                                    if *show_cost {
+                                    if ui_state.show_cost {
                                         <span class={spend_class} title="Total spend across all sessions">
                                             { utils::format_dollars(total_user_spend) }
                                         </span>
@@ -711,9 +712,9 @@ pub fn dashboard_page() -> Html {
                                     <button
                                         class="cost-toggle-btn"
                                         onclick={on_toggle_show_cost.clone()}
-                                        title={if *show_cost { "Hide cost" } else { "Show cost" }}
+                                        title={if ui_state.show_cost { "Hide cost" } else { "Show cost" }}
                                     >
-                                        { if *show_cost { "$" } else { "$?" } }
+                                        { if ui_state.show_cost { "$" } else { "$?" } }
                                     </button>
                                 </>
                             }
@@ -733,11 +734,11 @@ pub fn dashboard_page() -> Html {
                         }
                     }
                     <button
-                        class={classes!("new-session-button", if *show_launch_dialog { "active" } else { "" })}
+                        class={classes!("new-session-button", if ui_state.show_launch_dialog { "active" } else { "" })}
                         onclick={toggle_launch_dialog.clone()}
-                        title={if *show_launch_dialog { "Close" } else { "Launch a session or install agent-portal" }}
+                        title={if ui_state.show_launch_dialog { "Close" } else { "Launch a session or install agent-portal" }}
                     >
-                        { if *show_launch_dialog { "Close" } else { "+ Launch Session" } }
+                        { if ui_state.show_launch_dialog { "Close" } else { "+ Launch Session" } }
                     </button>
                     {
                         if *is_admin {
@@ -760,7 +761,7 @@ pub fn dashboard_page() -> Html {
             </header>
 
             // Launch session dialog
-            if *show_launch_dialog {
+            if ui_state.show_launch_dialog {
                 <LaunchDialog on_close={on_launch_close.clone()} on_launched={on_launch_success.clone()} />
             }
 
@@ -791,14 +792,14 @@ pub fn dashboard_page() -> Html {
                 </div>
             } else {
                 <>
-                    <div class={classes!("dashboard-body", rail_position.body_class())}>
+                    <div class={classes!("dashboard-body", ui_state.rail_position.body_class())}>
                     // Session Rail
                     <SessionRail
                         sessions={active_sessions.clone()}
                         focused_index={focused_index}
                         awaiting_sessions={session_state.awaiting_sessions.clone()}
                         hidden_sessions={effective_hidden_sessions.clone()}
-                        inactive_hidden={*inactive_hidden}
+                        inactive_hidden={ui_state.inactive_hidden}
                         connected_sessions={session_state.connected_sessions.clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
@@ -895,7 +896,7 @@ pub fn dashboard_page() -> Html {
 
             // Delete confirmation modal
             {
-                if let Some(session_id) = *pending_delete {
+                if let Some(session_id) = ui_state.pending_delete {
                     let session_name = sessions.iter()
                         .find(|s| s.id == session_id)
                         .map(|s| utils::extract_folder(&s.working_directory))
@@ -918,14 +919,14 @@ pub fn dashboard_page() -> Html {
             }
 
             // Admin modal — full-page overlay preserves dashboard state
-            if *show_admin {
+            if ui_state.show_admin {
                 <div class="full-page-modal">
                     <AdminPage on_close={close_admin.clone()} current_user_id={*current_user_id} />
                 </div>
             }
 
             // Settings modal — full-page overlay preserves dashboard state
-            if *show_settings {
+            if ui_state.show_settings {
                 <div class="full-page-modal">
                     <SettingsPage on_close={close_settings.clone()} />
                 </div>
@@ -933,7 +934,7 @@ pub fn dashboard_page() -> Html {
 
             // Leave confirmation modal
             {
-                if let Some(session_id) = *pending_leave {
+                if let Some(session_id) = ui_state.pending_leave {
                     let session_name = sessions.iter()
                         .find(|s| s.id == session_id)
                         .map(|s| utils::extract_folder(&s.working_directory))
