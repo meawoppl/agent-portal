@@ -391,6 +391,9 @@ pub(super) fn reconcile_pending_sends(
                 .and_then(extract_user_text);
             if let Some(ref echo) = echo_text {
                 if let Some(pos) = pending_sends.iter().position(|pending| {
+                    if pending_has_client_msg_id(pending) {
+                        return false;
+                    }
                     ClaudeMessage::parse(pending)
                         .ok()
                         .as_ref()
@@ -403,10 +406,70 @@ pub(super) fn reconcile_pending_sends(
             }
         }
         ActivityTag::Assistant | ActivityTag::Result => {
-            pending_sends.clear();
+            pending_sends.retain(|pending| pending_has_client_msg_id(pending));
         }
         _ => {}
     }
+}
+
+pub(super) fn update_pending_send_delivery(
+    pending_sends: &mut Vec<String>,
+    client_msg_id: uuid::Uuid,
+    stage: shared::InputDeliveryStage,
+    message: Option<&str>,
+) -> bool {
+    let Some(pos) = pending_sends
+        .iter()
+        .position(|pending| pending_client_msg_id(pending) == Some(client_msg_id))
+    else {
+        return false;
+    };
+
+    if stage == shared::InputDeliveryStage::AgentAccepted {
+        pending_sends.remove(pos);
+        return true;
+    }
+
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&pending_sends[pos]) else {
+        return false;
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return false;
+    };
+
+    obj.insert(
+        "_delivery_stage".to_string(),
+        serde_json::to_value(stage).unwrap_or(serde_json::Value::Null),
+    );
+    match message {
+        Some(message) => {
+            obj.insert(
+                "_delivery_message".to_string(),
+                serde_json::Value::String(message.to_string()),
+            );
+        }
+        None => {
+            obj.remove("_delivery_message");
+        }
+    }
+    if stage == shared::InputDeliveryStage::Failed {
+        obj.insert("_pending".to_string(), serde_json::Value::Bool(false));
+    }
+
+    pending_sends[pos] = value.to_string();
+    true
+}
+
+fn pending_has_client_msg_id(pending: &str) -> bool {
+    pending_client_msg_id(pending).is_some()
+}
+
+fn pending_client_msg_id(pending: &str) -> Option<uuid::Uuid> {
+    let value = serde_json::from_str::<serde_json::Value>(pending).ok()?;
+    value
+        .get("_client_msg_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
 }
 
 #[cfg(test)]
@@ -777,7 +840,8 @@ mod tests {
     fn reconcile_pending_sends_assistant_clears_all() {
         // Slash commands (/cost, /clear, /status) don't echo as "user",
         // so the assistant response is the only signal we get that input
-        // was received. Clear everything.
+        // was received. Clear legacy entries; id-tracked entries wait for
+        // InputProgress::AgentAccepted.
         let mut pending = vec![
             r#"{"type":"user","content":"a"}"#.to_string(),
             r#"{"type":"user","content":"b"}"#.to_string(),
@@ -787,6 +851,83 @@ mod tests {
             ActivityTag::Assistant,
             r#"{"type":"assistant","message":{"content":[]}}"#,
         );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn reconcile_pending_sends_preserves_id_tracked_rows() {
+        let id = uuid::Uuid::new_v4();
+        let mut pending = vec![
+            format!(r#"{{"type":"user","content":"hello","_client_msg_id":"{id}"}}"#),
+            r#"{"type":"user","content":"legacy"}"#.to_string(),
+        ];
+
+        reconcile_pending_sends(
+            &mut pending,
+            ActivityTag::User,
+            r#"{"type":"user","content":"hello"}"#,
+        );
+        assert_eq!(pending.len(), 2, "user echo must not clear id-tracked row");
+
+        reconcile_pending_sends(
+            &mut pending,
+            ActivityTag::Assistant,
+            r#"{"type":"assistant","message":{"content":[]}}"#,
+        );
+        assert_eq!(pending.len(), 1, "assistant clears only legacy rows");
+        assert!(pending[0].contains(&id.to_string()));
+    }
+
+    #[test]
+    fn update_pending_send_delivery_updates_stage() {
+        let id = uuid::Uuid::new_v4();
+        let mut pending = vec![format!(
+            r#"{{"type":"user","content":"hello","_pending":true,"_client_msg_id":"{id}"}}"#
+        )];
+
+        assert!(update_pending_send_delivery(
+            &mut pending,
+            id,
+            shared::InputDeliveryStage::ServerReceived,
+            None,
+        ));
+        let value: serde_json::Value = serde_json::from_str(&pending[0]).unwrap();
+        assert_eq!(value["_delivery_stage"], "server_received");
+        assert_eq!(value["_pending"], true);
+    }
+
+    #[test]
+    fn update_pending_send_delivery_failed_marks_not_pending() {
+        let id = uuid::Uuid::new_v4();
+        let mut pending = vec![format!(
+            r#"{{"type":"user","content":"hello","_pending":true,"_client_msg_id":"{id}"}}"#
+        )];
+
+        assert!(update_pending_send_delivery(
+            &mut pending,
+            id,
+            shared::InputDeliveryStage::Failed,
+            Some("permission denied"),
+        ));
+        let value: serde_json::Value = serde_json::from_str(&pending[0]).unwrap();
+        assert_eq!(value["_delivery_stage"], "failed");
+        assert_eq!(value["_delivery_message"], "permission denied");
+        assert_eq!(value["_pending"], false);
+    }
+
+    #[test]
+    fn update_pending_send_delivery_agent_accepted_removes_row() {
+        let id = uuid::Uuid::new_v4();
+        let mut pending = vec![format!(
+            r#"{{"type":"user","content":"hello","_pending":true,"_client_msg_id":"{id}"}}"#
+        )];
+
+        assert!(update_pending_send_delivery(
+            &mut pending,
+            id,
+            shared::InputDeliveryStage::AgentAccepted,
+            None,
+        ));
         assert!(pending.is_empty());
     }
 

@@ -3,7 +3,9 @@
 use crate::utils;
 use futures_util::StreamExt;
 use shared::api::ErrorMessage;
-use shared::{ClientEndpoint, ClientToServer, ServerToClient, TurnMetrics, WsEndpoint};
+use shared::{
+    ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics, WsEndpoint,
+};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
@@ -40,6 +42,11 @@ pub enum WsEvent {
     /// Boxed to keep `WsEvent` compact — `TurnMetrics` is the largest variant
     /// payload by a wide margin (~22 fields).
     TurnMetrics(Box<TurnMetrics>),
+    InputProgress {
+        client_msg_id: Uuid,
+        stage: InputDeliveryStage,
+        message: Option<String>,
+    },
 }
 
 /// Connect to WebSocket and start receiving messages.
@@ -223,6 +230,17 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         // an explicit branch or land in `unhandled` below.
         ServerToClient::TurnMetrics(metrics) => {
             on_event.emit(WsEvent::TurnMetrics(metrics));
+        }
+        ServerToClient::InputProgress {
+            client_msg_id,
+            stage,
+            message,
+        } => {
+            on_event.emit(WsEvent::InputProgress {
+                client_msg_id,
+                stage,
+                message,
+            });
         }
         ServerToClient::ContinuationStatus {
             continuation_id,
@@ -544,6 +562,7 @@ mod tests {
             WsEvent::BranchChanged(_, _, _, _) => "BranchChanged",
             WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",
+            WsEvent::InputProgress { .. } => "InputProgress",
         }
     }
 }

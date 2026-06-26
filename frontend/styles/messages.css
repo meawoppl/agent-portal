@@ -1059,6 +1059,45 @@
     animation: pending-pulse 1.5s ease-in-out infinite;
 }
 
+.input-delivery-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    line-height: 1;
+}
+
+.input-delivery-progress.failed {
+    color: var(--error);
+}
+
+.input-delivery-label {
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.input-delivery-steps {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.18rem;
+}
+
+.input-delivery-step {
+    width: 0.34rem;
+    height: 0.34rem;
+    border-radius: 999px;
+    background: rgba(192, 202, 245, 0.22);
+}
+
+.input-delivery-step.active {
+    background: var(--accent);
+}
+
+.input-delivery-step.failed {
+    background: var(--error);
+}
+
 @keyframes pending-pulse {
     0%, 100% { opacity: 0.3; }
     50% { opacity: 1; }
