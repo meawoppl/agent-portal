@@ -427,6 +427,7 @@ pub async fn complete_device_flow(
 
 #[cfg(test)]
 mod tests {
+    use super::state::{generate_device_code_with, generate_user_code_with};
     use super::*;
 
     #[test]
@@ -464,11 +465,17 @@ mod tests {
 
     #[test]
     fn test_user_code_uniqueness() {
+        use rand::{rngs::StdRng, SeedableRng};
+
+        // Drive generation from a fixed-seed RNG so this is deterministic: the
+        // 1000-code run either always passes or always fails for a given seed,
+        // making a collision a real, reproducible regression rather than a
+        // birthday-paradox dice roll on `thread_rng()` (see #1133).
+        let mut rng = StdRng::seed_from_u64(0xC0DE_1133);
         let mut codes = std::collections::HashSet::new();
 
-        // Generate 1000 codes and verify no collisions
         for _ in 0..1000 {
-            let code = generate_user_code();
+            let code = generate_user_code_with(&mut rng);
             assert!(
                 codes.insert(code.clone()),
                 "User code collision detected: {}",
@@ -505,11 +512,16 @@ mod tests {
 
     #[test]
     fn test_device_code_uniqueness() {
+        use rand::{rngs::StdRng, SeedableRng};
+
+        // Deterministic, like the user-code uniqueness test (#1133). The 32-char
+        // device-code space makes collisions astronomically unlikely regardless,
+        // but seeding keeps the test reproducible rather than chance-based.
+        let mut rng = StdRng::seed_from_u64(0xDEAD_1133);
         let mut codes = std::collections::HashSet::new();
 
-        // Generate 1000 codes and verify no collisions
         for _ in 0..1000 {
-            let code = generate_device_code();
+            let code = generate_device_code_with(&mut rng);
             assert!(
                 codes.insert(code.clone()),
                 "Device code collision detected: {}",
