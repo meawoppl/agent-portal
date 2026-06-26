@@ -81,12 +81,9 @@ pub fn render_optimistic_user_message(
     }
 }
 
-/// Parse the `[message from agent <session-id>]\n<body>` bumper that
-/// `agent-portal message` prepends to inter-agent messages. Returns
-/// `(sender_session_id, body)` when it matches.
-/// Parse the inter-agent bumper `[message from <agent_type> <session-id>]\n<body>`
-/// (older messages use the literal `agent` in place of the type). Returns
-/// `(agent_type, sender_session_id, body)`.
+/// Legacy fallback for inter-agent messages stored before the portal
+/// `agent_message` event existed. New messages render from typed
+/// `PortalContent::AgentMessage` instead of this text prefix.
 fn parse_other_agent_message(text: &str) -> Option<(String, String, String)> {
     let rest = text.strip_prefix("[message from ")?;
     let close = rest.find(']')?;
@@ -154,9 +151,8 @@ pub fn render_user_message(
     let pending_class = if meta.pending { " pending" } else { "" };
     let (text_content, has_tool_results) = user_message_text_and_tool_results(msg);
 
-    // Messages injected by `agent-portal message` arrive (echoed by the agent)
-    // as a user message prefixed with the `[message from agent <id>]` bumper.
-    // Render those as their own "other-agent" type rather than the user's own.
+    // Legacy rows from before the typed `PortalContent::AgentMessage` event
+    // still replay as user text with a source bumper.
     if !has_tool_results {
         if let Some((agent_type, sender, body)) = parse_other_agent_message(&text_content) {
             return render_other_agent_message(&agent_type, &sender, &body, timestamp, session_id);

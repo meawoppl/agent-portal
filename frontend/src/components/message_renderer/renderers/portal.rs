@@ -13,11 +13,27 @@ pub fn render_portal_message(
     continuation_statuses: &HashMap<Uuid, String>,
     on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
+    if let [shared::PortalContent::AgentMessage {
+        from_agent_type,
+        from_session_id,
+        text,
+    }] = msg.content.as_slice()
+    {
+        return render_agent_message_event(
+            from_agent_type,
+            from_session_id,
+            text,
+            timestamp,
+            session_id,
+        );
+    }
+
     let copy_text: String = msg
         .content
         .iter()
         .filter_map(|c| match c {
             shared::PortalContent::Text { text } => Some(text.clone()),
+            shared::PortalContent::AgentMessage { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -95,6 +111,57 @@ fn render_portal_content(
             source_message,
             on_schedule_continuation,
         ),
+        shared::PortalContent::AgentMessage {
+            from_agent_type,
+            from_session_id,
+            text,
+        } => render_agent_message_body(from_agent_type, from_session_id, text, session_id),
+    }
+}
+
+fn agent_label(agent_type: &str) -> &'static str {
+    match agent_type.to_ascii_lowercase().as_str() {
+        "claude" => "Claude",
+        "codex" => "Codex",
+        _ => "agent",
+    }
+}
+
+fn render_agent_message_event(
+    from_agent_type: &str,
+    from_session_id: &str,
+    text: &str,
+    timestamp: Option<&str>,
+    session_id: Uuid,
+) -> Html {
+    let short = from_session_id.split('-').next().unwrap_or(from_session_id);
+    let label = agent_label(from_agent_type);
+    html! {
+        <div class="claude-message user-message other-agent-message agent-message-event">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
+                <span class="message-type-badge other-agent"
+                    title={format!("Message from {label} session {from_session_id}")}>
+                    { format!("Message from {label} ({short})") }
+                </span>
+                <CopyButton text={text.to_string()} title="Copy message" />
+            </div>
+            <div class="message-body">
+                { render_agent_message_body(from_agent_type, from_session_id, text, session_id) }
+            </div>
+        </div>
+    }
+}
+
+fn render_agent_message_body(
+    _from_agent_type: &str,
+    _from_session_id: &str,
+    text: &str,
+    session_id: Uuid,
+) -> Html {
+    html! {
+        <div class="user-text">
+            { render_markdown_for_session(&text.replace('\n', "  \n"), session_id) }
+        </div>
     }
 }
 

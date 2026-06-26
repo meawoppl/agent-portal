@@ -49,11 +49,21 @@ pub fn classify_portal_input(
     send_mode: Option<SendMode>,
     ack: Option<super::PortalInputAck>,
 ) -> RoutedPortalInput {
-    let text = match content {
-        serde_json::Value::String(s) => s,
-        other => other.to_string(),
+    let (text, display_event) = match content {
+        serde_json::Value::String(s) => (s, None),
+        other => match serde_json::from_value::<shared::PortalMessage>(other.clone())
+            .ok()
+            .and_then(|msg| msg.agent_facing_text())
+        {
+            Some(text) => (text, Some(other)),
+            None => (other.to_string(), None),
+        },
     };
-    let input = super::PortalInput { text, ack };
+    let input = super::PortalInput {
+        text,
+        display_event,
+        ack,
+    };
     if send_mode == Some(SendMode::Wiggum) {
         RoutedPortalInput::Wiggum(input)
     } else {
@@ -333,4 +343,42 @@ async fn handle_ws_message(
     }
 
     WsMessageResult::Continue
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_agent_message_portal_input_keeps_display_event() {
+        let content = shared::PortalMessage::agent_message(
+            "codex".to_string(),
+            "12345678-0000-0000-0000-000000000000".to_string(),
+            "hello".to_string(),
+        )
+        .to_json();
+
+        let RoutedPortalInput::Input(input) = classify_portal_input(content.clone(), None, None)
+        else {
+            panic!("expected normal input");
+        };
+
+        assert_eq!(
+            input.text,
+            "[message from codex 12345678-0000-0000-0000-000000000000]\nhello"
+        );
+        assert_eq!(input.display_event, Some(content));
+    }
+
+    #[test]
+    fn classify_plain_string_input_has_no_display_event() {
+        let RoutedPortalInput::Input(input) =
+            classify_portal_input(serde_json::Value::String("hello".to_string()), None, None)
+        else {
+            panic!("expected normal input");
+        };
+
+        assert_eq!(input.text, "hello");
+        assert!(input.display_event.is_none());
+    }
 }

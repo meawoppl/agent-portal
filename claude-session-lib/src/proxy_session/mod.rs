@@ -12,6 +12,7 @@ pub(crate) use portal_reminder::inject_portal_reminder;
 pub use wiggum::wiggum_prompt;
 pub use ws_reader::{classify_portal_input, RoutedPortalInput};
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -211,6 +212,9 @@ pub struct PermissionResponseData {
 /// Portal-originated user input plus optional backend ack metadata.
 pub struct PortalInput {
     pub text: String,
+    /// Optional typed portal event that should replace the agent's echoed user
+    /// text in the transcript.
+    pub display_event: Option<serde_json::Value>,
     pub ack: Option<PortalInputAck>,
 }
 
@@ -218,6 +222,13 @@ pub struct PortalInputAck {
     pub session_id: Uuid,
     pub seq: i64,
 }
+
+pub(crate) struct PendingInputDisplayEvent {
+    pub echoed_text: String,
+    pub content: serde_json::Value,
+}
+
+pub(crate) type PendingInputDisplayEvents = Arc<Mutex<VecDeque<PendingInputDisplayEvent>>>;
 
 /// Signal for graceful server shutdown with recommended reconnect delay
 pub struct GracefulShutdown {
@@ -349,6 +360,9 @@ struct ConnectionState {
     /// [`CodexThreadIdSink`] doc. Cloned out of `ProxySessionConfig` so
     /// the per-connection state doesn't need to carry a config reference.
     codex_thread_id_sink: Option<CodexThreadIdSink>,
+    /// Typed portal events waiting to replace the corresponding echoed user
+    /// message from the agent process.
+    pending_input_display_events: PendingInputDisplayEvents,
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
@@ -754,6 +768,9 @@ async fn run_message_loop<A: Agent>(
     // Shared state for tracking git branch, PR URL, and repo URL updates
     let git_metadata = GitMetadataState::new(config.git_branch.clone());
 
+    let pending_input_display_events: PendingInputDisplayEvents =
+        Arc::new(Mutex::new(VecDeque::new()));
+
     // Spawn output forwarder task with buffer
     let output_task = spawn_output_forwarder(
         output_rx,
@@ -766,6 +783,7 @@ async fn run_message_loop<A: Agent>(
         session.output_buffer.clone(),
         max_image_mb,
         config.agent_type,
+        pending_input_display_events.clone(),
     );
 
     // Spawn WebSocket reader task
@@ -808,6 +826,7 @@ async fn run_message_loop<A: Agent>(
         git_metadata,
         git_refresh: GitRefreshTrigger::default(),
         codex_thread_id_sink: config.codex_thread_id_sink.clone(),
+        pending_input_display_events,
     };
 
     // On the very first connection of this session, inject the portal
@@ -910,6 +929,14 @@ async fn run_main_loop<A: Agent>(
                 .await;
 
                 debug!("sending to claude process: {}", truncate(&input.text, 100));
+
+                if let Some(display_event) = input.display_event.clone() {
+                    let mut pending = state.pending_input_display_events.lock().await;
+                    pending.push_back(PendingInputDisplayEvent {
+                        echoed_text: input.text.clone(),
+                        content: display_event,
+                    });
+                }
 
                 if let Err(e) = claude_session
                     .send_input(serde_json::Value::String(input.text))

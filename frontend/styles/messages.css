@@ -137,6 +137,28 @@
     background: rgba(187, 154, 247, 0.04);
 }
 
+.agent-message-event {
+    animation: agent-message-arrive 360ms ease-out;
+}
+
+@keyframes agent-message-arrive {
+    from {
+        background: rgba(187, 154, 247, 0.16);
+        transform: translateY(4px);
+    }
+
+    to {
+        background: rgba(187, 154, 247, 0.04);
+        transform: translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-message-event {
+        animation: none;
+    }
+}
+
 .portal-message {
     border-left: 3px solid #7dcfff;
 }
