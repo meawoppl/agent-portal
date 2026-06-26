@@ -19,7 +19,7 @@ pub(super) fn retain_newest_items<T>(items: &mut Vec<T>, max_len: usize) {
 
 /// Append one live message and apply the same retention rule as history
 /// hydration and replay batches.
-pub(super) fn push_message_with_limit(messages: &mut Vec<String>, message: String, max_len: usize) {
+pub(super) fn push_message_with_limit<T>(messages: &mut Vec<T>, message: T, max_len: usize) {
     messages.push(message);
     retain_newest_items(messages, max_len);
 }

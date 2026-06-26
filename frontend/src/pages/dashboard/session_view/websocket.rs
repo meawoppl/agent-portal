@@ -4,11 +4,14 @@ use crate::utils;
 use futures_util::StreamExt;
 use shared::api::ErrorMessage;
 use shared::{
-    ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics, WsEndpoint,
+    ClientEndpoint, ClientToServer, InputDeliveryStage, PortalMeta, ServerToClient, TurnMetrics,
+    WsEndpoint,
 };
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
+
+use crate::components::message_renderer::RenderedMessage;
 
 use super::types::{PendingPermission, WsSender};
 
@@ -21,12 +24,12 @@ pub enum WsEvent {
     /// pre-#784 wire shape and the rare error-envelope paths that don't go
     /// through a DB insert). The frontend uses it as the reconnect-replay
     /// watermark rather than `Date.now()` (closes #784).
-    Output(String, Option<String>),
+    Output(RenderedMessage),
     /// History replay batch. Second field is the server-assigned `created_at`
     /// of the latest message in the batch (`None` if the batch is empty or
     /// the backend is pre-#784). Used to set the reconnect watermark on
     /// initial load.
-    HistoryBatch(Vec<String>, Option<String>),
+    HistoryBatch(Vec<RenderedMessage>, Option<String>),
     Permission(PendingPermission),
     BranchChanged(
         Option<String>,
@@ -134,70 +137,42 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     match msg {
         ServerToClient::AgentOutput {
             content,
-            sender_user_id,
-            sender_name,
+            sender_user_id: _,
+            sender_name: _,
             // agent_type is plumbed through the wire (per-message tag) and
             // available here for future multi-agent UI work — see #723.
             // The frontend renders off the session-level agent_type; both
             // the live and historical-read paths stay agent-agnostic.
             agent_type: _,
             created_at,
-            origin,
-            // Typed portal sidecar — consumed in slice 3 (frontend read-from-meta);
-            // ignored here so slice 1 stays a no-op contract change.
-            meta: _,
+            origin: _,
+            meta,
         } => {
-            // Inject _sender into content for the renderer if sender info is
-            // present. Also fold `created_at` into the content as
-            // `_created_at` so per-message renderers (TimeAgo footers, etc.)
-            // see the same shape the historical-read path produces — and so
-            // future replayers downstream of `Output` can read it without
-            // changing the event signature again.
-            let mut content_val = content;
-            let needs_sender = sender_user_id.is_some() || sender_name.is_some();
-            if needs_sender || created_at.is_some() || origin.is_some() {
-                if let Some(obj) = content_val.as_object_mut() {
-                    if needs_sender {
-                        #[derive(serde::Serialize)]
-                        struct SenderMeta<'a> {
-                            user_id: &'a str,
-                            name: &'a str,
-                        }
-                        obj.insert(
-                            "_sender".to_string(),
-                            serde_json::to_value(SenderMeta {
-                                user_id: sender_user_id.as_deref().unwrap_or_default(),
-                                name: sender_name.as_deref().unwrap_or_default(),
-                            })
-                            .unwrap_or(serde_json::Value::Null),
-                        );
-                    }
-                    if let Some(ref ts) = created_at {
-                        obj.insert(
-                            "_created_at".to_string(),
-                            serde_json::Value::String(ts.clone()),
-                        );
-                    }
-                    if let Some(origin) = origin {
-                        obj.insert(
-                            "_origin".to_string(),
-                            serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
-                        );
-                    }
-                }
-            }
-            let output = content_val.to_string();
-            on_event.emit(WsEvent::Output(output, created_at));
+            let meta = meta.or_else(|| {
+                created_at.map(|created_at| PortalMeta {
+                    created_at: Some(created_at),
+                    source: None,
+                    delivery: None,
+                })
+            });
+            on_event.emit(WsEvent::Output(RenderedMessage::new(
+                content.to_string(),
+                meta,
+            )));
         }
         ServerToClient::HistoryBatch {
             messages,
-            // Index-aligned typed sidecar — zipped in slice 3 (frontend
-            // read-from-meta); ignored here so slice 1 stays a no-op.
-            message_meta: _,
+            message_meta,
             last_created_at,
         } => {
-            let strings: Vec<String> = messages.into_iter().map(|v| v.to_string()).collect();
-            on_event.emit(WsEvent::HistoryBatch(strings, last_created_at));
+            let rendered: Vec<RenderedMessage> = messages
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    RenderedMessage::new(v.to_string(), message_meta.get(i).cloned().flatten())
+                })
+                .collect();
+            on_event.emit(WsEvent::HistoryBatch(rendered, last_created_at));
         }
         ServerToClient::PermissionRequest {
             request_id,
@@ -217,7 +192,7 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             let error_json = serde_json::to_string(&error_msg).unwrap_or_default();
             // Error envelopes don't go through the DB so they have no
             // server-assigned `created_at` — leave the watermark unchanged.
-            on_event.emit(WsEvent::Output(error_json, None));
+            on_event.emit(WsEvent::Output(RenderedMessage::new(error_json, None)));
         }
         ServerToClient::SessionUpdate {
             session_id: _,
@@ -416,10 +391,10 @@ mod tests {
     }
 
     /// A `ServerToClient::ClaudeOutput` carrying a `created_at` must be
-    /// translated into a `WsEvent::Output(_, Some(ts))` with the exact
-    /// server-assigned timestamp string. This is the value the component
-    /// pipes into `last_message_timestamp` (#784); if it ever falls back
-    /// to `Date.now()` here the silent-data-loss regression returns.
+    /// translated into a `WsEvent::Output` whose `PortalMeta.created_at`
+    /// carries the exact server-assigned timestamp string. This is the value
+    /// the component pipes into `last_message_timestamp` (#784); if it ever
+    /// falls back to `Date.now()` here the silent-data-loss regression returns.
     #[test]
     fn claude_output_with_created_at_emits_server_timestamp() {
         let (cb, sink) = capture();
@@ -439,31 +414,28 @@ mod tests {
         let events = sink.borrow();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            WsEvent::Output(content, ts) => {
+            WsEvent::Output(message) => {
                 assert_eq!(
-                    ts.as_deref(),
+                    message.meta.as_ref().and_then(|m| m.created_at.as_deref()),
                     Some(server_ts.as_str()),
                     "watermark must be the server's created_at, never Date.now()"
                 );
-                // _created_at must also be folded into the content JSON
-                // so per-message renderers see the same shape the
-                // historical-read path produces.
-                let parsed: serde_json::Value = serde_json::from_str(content).unwrap();
+                let parsed: serde_json::Value = serde_json::from_str(&message.content).unwrap();
                 assert_eq!(
-                    parsed.get("_created_at").and_then(|v| v.as_str()),
-                    Some(server_ts.as_str()),
+                    parsed.get("_created_at"),
+                    None,
+                    "content must not receive flattened portal metadata"
                 );
             }
             other => panic!("expected Output, got {:?}", debug_event(other)),
         }
     }
 
-    /// Inter-agent attribution is carried on the live `AgentOutput.origin`
-    /// field, then injected as `_origin` into the JSON consumed by the portal
-    /// renderer. If this translation is dropped, a properly normalized
-    /// inter-agent message renders as a generic PORTAL card.
+    /// Inter-agent attribution is carried on the live `AgentOutput.meta`
+    /// sidecar. It must stay out of the raw content JSON so renderers read a
+    /// typed source instead of `_origin` conventions.
     #[test]
-    fn agent_output_with_origin_injects_origin_metadata() {
+    fn agent_output_with_meta_keeps_origin_in_sidecar() {
         let (cb, sink) = capture();
         let from_session_id =
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("uuid");
@@ -476,11 +448,15 @@ mod tests {
             sender_name: None,
             agent_type: shared::AgentType::Codex,
             created_at: None,
-            origin: Some(shared::MessageOrigin::InterAgent {
-                from_session_id,
-                from_agent_type: "codex".to_string(),
+            origin: None,
+            meta: Some(shared::PortalMeta {
+                created_at: None,
+                source: Some(shared::MessageSource::Agent {
+                    session_id: from_session_id,
+                    agent_type: "codex".to_string(),
+                }),
+                delivery: None,
             }),
-            meta: None,
         };
 
         handle_proxy_message(msg, &cb);
@@ -488,14 +464,16 @@ mod tests {
         let events = sink.borrow();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            WsEvent::Output(content, _) => {
-                let parsed: serde_json::Value = serde_json::from_str(content).unwrap();
-                assert_eq!(parsed["_origin"]["kind"], "inter_agent");
+            WsEvent::Output(message) => {
+                assert!(message.content.contains("hello from peer"));
+                assert!(!message.content.contains("_origin"));
                 assert_eq!(
-                    parsed["_origin"]["from_session_id"],
-                    "11111111-1111-1111-1111-111111111111"
+                    message.meta.as_ref().and_then(|m| m.source.as_ref()),
+                    Some(&shared::MessageSource::Agent {
+                        session_id: from_session_id,
+                        agent_type: "codex".to_string(),
+                    })
                 );
-                assert_eq!(parsed["_origin"]["from_agent_type"], "codex");
             }
             other => panic!("expected Output, got {:?}", debug_event(other)),
         }
@@ -525,7 +503,7 @@ mod tests {
         let events = sink.borrow();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            WsEvent::Output(_, ts) => assert!(ts.is_none()),
+            WsEvent::Output(message) => assert!(message.meta.is_none()),
             other => panic!("expected Output, got {:?}", debug_event(other)),
         }
     }
@@ -540,8 +518,12 @@ mod tests {
         let (cb, sink) = capture();
         let ts = "2026-05-18T00:00:00.000000".to_string();
         let msg = ServerToClient::HistoryBatch {
-            messages: vec![serde_json::json!({"_created_at": ts.clone()})],
-            message_meta: Vec::new(),
+            messages: vec![serde_json::json!({"type": "assistant"})],
+            message_meta: vec![Some(shared::PortalMeta {
+                created_at: Some(ts.clone()),
+                source: None,
+                delivery: None,
+            })],
             last_created_at: Some(ts.clone()),
         };
 
@@ -553,6 +535,10 @@ mod tests {
             WsEvent::HistoryBatch(batch, last) => {
                 assert_eq!(batch.len(), 1);
                 assert_eq!(last.as_deref(), Some(ts.as_str()));
+                assert_eq!(
+                    batch[0].meta.as_ref().and_then(|m| m.created_at.as_deref()),
+                    Some(ts.as_str())
+                );
             }
             other => panic!("expected HistoryBatch, got {:?}", debug_event(other)),
         }
@@ -598,7 +584,7 @@ mod tests {
         let events = sink.borrow();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            WsEvent::Output(_, ts) => assert!(ts.is_none()),
+            WsEvent::Output(message) => assert!(message.meta.is_none()),
             other => panic!("expected Output, got {:?}", debug_event(other)),
         }
     }
@@ -609,7 +595,7 @@ mod tests {
         match ev {
             WsEvent::Connected(_) => "Connected",
             WsEvent::Error(_) => "Error",
-            WsEvent::Output(_, _) => "Output",
+            WsEvent::Output(_) => "Output",
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",
             WsEvent::BranchChanged(_, _, _, _) => "BranchChanged",

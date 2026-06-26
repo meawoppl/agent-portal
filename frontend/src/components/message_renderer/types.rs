@@ -7,6 +7,30 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderedMessage {
+    pub content: String,
+    pub meta: Option<shared::PortalMeta>,
+}
+
+impl RenderedMessage {
+    pub fn new(content: String, meta: Option<shared::PortalMeta>) -> Self {
+        Self { content, meta }
+    }
+
+    pub fn raw_iso(&self) -> Option<&str> {
+        self.meta.as_ref()?.created_at.as_deref()
+    }
+
+    pub fn delivery(&self) -> Option<&shared::DeliveryMeta> {
+        self.meta.as_ref()?.delivery.as_ref()
+    }
+
+    pub fn source(&self) -> Option<&shared::MessageSource> {
+        self.meta.as_ref()?.source.as_ref()
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub enum ClaudeMessage {
     System(shared::SystemMessage),
@@ -24,47 +48,11 @@ pub enum ClaudeMessage {
 pub struct PortalMessage {
     #[serde(default)]
     pub content: Vec<shared::PortalContent>,
-    #[serde(default, rename = "_origin")]
-    pub origin: Option<shared::MessageOrigin>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessageSender {
-    pub user_id: String,
-    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OptimisticUserMessage {
     pub content: String,
-    #[serde(default, rename = "_client_msg_id")]
-    pub client_msg_id: Option<uuid::Uuid>,
-    #[serde(default, rename = "_sender")]
-    pub sender: Option<MessageSender>,
-    #[serde(default, rename = "_pending")]
-    pub pending: bool,
-    #[serde(default, rename = "_delivery_stage")]
-    pub delivery_stage: Option<shared::InputDeliveryStage>,
-    #[serde(default, rename = "_delivery_message")]
-    pub delivery_message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UserMessageMeta {
-    #[serde(default, rename = "_client_msg_id")]
-    pub client_msg_id: Option<uuid::Uuid>,
-    #[serde(default, rename = "_sender")]
-    pub sender: Option<MessageSender>,
-    #[serde(default, rename = "_pending")]
-    pub pending: bool,
-    #[serde(default, rename = "_delivery_stage")]
-    pub delivery_stage: Option<shared::InputDeliveryStage>,
-    #[serde(default, rename = "_delivery_message")]
-    pub delivery_message: Option<String>,
-}
-
-pub fn user_meta_from_json(json: &str) -> UserMessageMeta {
-    serde_json::from_str(json).unwrap_or_default()
 }
 
 impl ClaudeMessage {

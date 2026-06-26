@@ -4,6 +4,7 @@ mod grouping;
 mod renderers;
 pub mod turn_metrics_footer;
 pub mod types;
+pub use types::RenderedMessage;
 
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -35,7 +36,7 @@ pub(super) fn local_timestamp(iso: &str) -> Option<String> {
 
 #[derive(Properties, PartialEq)]
 pub struct MessageRendererProps {
-    pub json: String,
+    pub message: RenderedMessage,
     pub session_id: Uuid,
     #[prop_or_default]
     pub agent_type: shared::AgentType,
@@ -59,10 +60,10 @@ pub struct MessageRendererProps {
 
 #[function_component(MessageRenderer)]
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
-    let raw_iso = extract_raw_iso(&props.json);
+    let raw_iso = extract_raw_iso(&props.message);
     let ts = raw_iso.as_deref().and_then(local_timestamp);
     dispatch::render_frame(FrameRenderContext {
-        json: &props.json,
+        message: &props.message,
         agent_type: props.agent_type,
         session_id: props.session_id,
         timestamp: ts.as_deref(),
@@ -137,20 +138,28 @@ pub(crate) fn shorten_model_name(model: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn rendered(json: impl Into<String>) -> RenderedMessage {
+        RenderedMessage::new(json.into(), None)
+    }
+
+    fn rendered_vec(messages: &[String]) -> Vec<RenderedMessage> {
+        messages.iter().cloned().map(rendered).collect()
+    }
+
     fn classify_category(json: &str) -> Option<GroupCategory> {
-        classify(json, shared::AgentType::Claude, None).map(|identity| identity.category)
+        classify(&rendered(json), shared::AgentType::Claude, None).map(|identity| identity.category)
     }
 
     fn classify_codex_category(json: &str) -> Option<GroupCategory> {
-        classify(json, shared::AgentType::Codex, None).map(|identity| identity.category)
+        classify(&rendered(json), shared::AgentType::Codex, None).map(|identity| identity.category)
     }
 
     fn group_for_tests(messages: &[String]) -> Vec<MessageGroup> {
-        group_messages(messages, shared::AgentType::Claude, None)
+        group_messages(&rendered_vec(messages), shared::AgentType::Claude, None)
     }
 
     fn group_for_codex_tests(messages: &[String]) -> Vec<MessageGroup> {
-        group_messages(messages, shared::AgentType::Codex, None)
+        group_messages(&rendered_vec(messages), shared::AgentType::Codex, None)
     }
 
     /// A `system`/`thinking_tokens` marker — the bodyless per-reasoning-step
@@ -397,21 +406,27 @@ mod tests {
         .to_string()
     }
 
-    fn plain_user_text_from_sender(text: &str, user_id: &str, name: &str) -> String {
-        serde_json::json!({
+    fn plain_user_text_from_sender(text: &str, user_id: Uuid, name: &str) -> RenderedMessage {
+        let content = serde_json::json!({
             "type": "user",
             "message": {
                 "role": "user",
                 "content": [{"type": "text", "text": text}]
             },
-            "_sender": {
-                "user_id": user_id,
-                "name": name,
-            },
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
-        .to_string()
+        .to_string();
+        RenderedMessage::new(
+            content,
+            Some(shared::PortalMeta {
+                created_at: Some("2026-05-17T10:00:00.000Z".to_string()),
+                source: Some(shared::MessageSource::Human {
+                    account_id: user_id,
+                    name: name.to_string(),
+                }),
+                delivery: None,
+            }),
+        )
     }
 
     fn codex_item_started_agent_message(text: &str) -> String {
@@ -486,14 +501,17 @@ mod tests {
 
     #[test]
     fn user_grouping_splits_by_sender_identity() {
+        let user_a = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let user_b = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
         let messages = vec![
-            plain_user_text_from_sender("first from me", "user_a", "Matt"),
-            plain_user_text_from_sender("second from me", "user_a", "Matt"),
-            plain_user_text_from_sender("from someone else", "user_b", "Alex"),
-            plain_user_text_from_sender("back to me", "user_a", "Matt"),
+            plain_user_text_from_sender("first from me", user_a, "Matt"),
+            plain_user_text_from_sender("second from me", user_a, "Matt"),
+            plain_user_text_from_sender("from someone else", user_b, "Alex"),
+            plain_user_text_from_sender("back to me", user_a, "Matt"),
         ];
 
-        let groups = group_messages(&messages, shared::AgentType::Claude, Some("user_a"));
+        let current_user_id = user_a.to_string();
+        let groups = group_messages(&messages, shared::AgentType::Claude, Some(&current_user_id));
         assert_eq!(groups.len(), 3);
 
         let labels: Vec<_> = groups
@@ -555,18 +573,18 @@ mod tests {
 
         for json in [claude_result, codex_completed, codex_failed] {
             assert!(
-                group_is_turn_terminator(&MessageGroup::Single(json)),
+                group_is_turn_terminator(&MessageGroup::Single(rendered(json))),
                 "single terminator frame should be recognized"
             );
         }
-        assert!(!group_is_turn_terminator(&MessageGroup::Single(
+        assert!(!group_is_turn_terminator(&MessageGroup::Single(rendered(
             plain_user_text("hello")
-        )));
+        ))));
         assert!(!group_is_turn_terminator(&MessageGroup::IdentityGroup {
             category: GroupCategory::User,
             label: "You".to_string(),
             badge_class: "user".to_string(),
-            messages: vec![plain_user_text("hello")],
+            messages: vec![rendered(plain_user_text("hello"))],
         }));
     }
 
@@ -606,7 +624,10 @@ mod tests {
             thinking_tokens_message(150),
             thinking_tokens_message(250),
         ];
-        assert_eq!(grouping::thinking_tokens_estimate(&messages), 250);
+        assert_eq!(
+            grouping::thinking_tokens_estimate(&rendered_vec(&messages)),
+            250
+        );
         // No markers / unparseable input yields 0 (chip hides).
         assert_eq!(grouping::thinking_tokens_estimate(&[]), 0);
     }
@@ -812,7 +833,7 @@ mod tests {
         ];
 
         for (label, json, expected) in cases {
-            let got = classify(&json, shared::AgentType::Codex, None).map(|i| i.category);
+            let got = classify(&rendered(json), shared::AgentType::Codex, None).map(|i| i.category);
             assert_eq!(
                 got, expected,
                 "{label}: classifier returned {got:?}, expected {expected:?}"
@@ -831,7 +852,7 @@ mod tests {
             codex_command_event("item.started", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
-        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
         assert_eq!(
             visible,
             vec![1],
@@ -850,7 +871,7 @@ mod tests {
             codex_command_event("item.updated", "cmd_1", "in_progress"),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
-        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
         assert_eq!(visible, vec![2]);
     }
 
@@ -864,7 +885,7 @@ mod tests {
             codex_command_event("item.started", "cmd_b", "in_progress"),
             codex_command_event("item.completed", "cmd_b", "completed"),
         ];
-        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
         // Indices 1 (cmd_a completed) and 3 (cmd_b completed) remain.
         assert_eq!(visible, vec![1, 3]);
     }
@@ -885,7 +906,7 @@ mod tests {
             turn_completed.clone(),
             codex_command_event("item.completed", "cmd_1", "completed"),
         ];
-        let visible = visible_group_indices(GroupCategory::Codex, &messages);
+        let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
         // turn.completed (index 1) is kept; the started (index 0) drops in
         // favor of the completed (index 2).
         assert_eq!(visible, vec![1, 2]);
@@ -906,7 +927,7 @@ mod tests {
             GroupCategory::Portal,
             GroupCategory::User,
         ] {
-            let visible = visible_group_indices(cat, &messages);
+            let visible = visible_group_indices(cat, &rendered_vec(&messages));
             assert_eq!(
                 visible,
                 vec![0, 1],
@@ -934,7 +955,8 @@ mod tests {
             "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
-        let visible = visible_group_indices(GroupCategory::Codex, &[no_id_a, no_id_b]);
+        let visible =
+            visible_group_indices(GroupCategory::Codex, &rendered_vec(&[no_id_a, no_id_b]));
         assert_eq!(visible, vec![0, 1]);
     }
 

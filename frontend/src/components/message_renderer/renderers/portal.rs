@@ -113,6 +113,21 @@ fn agent_label(agent_type: &str) -> &'static str {
     }
 }
 
+pub(crate) fn render_agent_message_from_source(
+    from_session_id: &Uuid,
+    from_agent_type: &str,
+    text: &str,
+    timestamp: Option<&str>,
+    session_id: Uuid,
+) -> Html {
+    let event = AgentMessageEvent {
+        from_agent_type: from_agent_type.to_string(),
+        from_session_id: from_session_id.to_string(),
+        text: text.to_string(),
+    };
+    render_agent_message_event_card(&event, timestamp, session_id)
+}
+
 fn render_agent_message_event_card(
     event: &AgentMessageEvent,
     timestamp: Option<&str>,
@@ -148,7 +163,7 @@ pub(crate) fn render_agent_message_body(text: &str, session_id: Uuid) -> Html {
     }
 }
 
-fn portal_text(msg: &PortalMessage) -> String {
+pub(crate) fn portal_text(msg: &PortalMessage) -> String {
     msg.content
         .iter()
         .filter_map(|content| match content {
@@ -167,22 +182,6 @@ pub(crate) struct AgentMessageEvent {
 }
 
 pub(crate) fn agent_message_event(msg: &PortalMessage) -> Option<AgentMessageEvent> {
-    if let Some(shared::MessageOrigin::InterAgent {
-        from_session_id,
-        from_agent_type,
-    }) = &msg.origin
-    {
-        return Some(AgentMessageEvent {
-            from_agent_type: from_agent_type.clone(),
-            from_session_id: from_session_id.to_string(),
-            text: portal_text(msg),
-        });
-    }
-
-    // Defensive mixed-version fallback: a stale proxy can echo the typed
-    // portal event before a new backend has normalized it into record-level
-    // provenance. This stays typed and does not revive body-text prefix
-    // parsing.
     let [shared::PortalContent::AgentMessage {
         from_agent_type,
         from_session_id,
@@ -197,11 +196,6 @@ pub(crate) fn agent_message_event(msg: &PortalMessage) -> Option<AgentMessageEve
         from_session_id: from_session_id.clone(),
         text: text.clone(),
     })
-}
-
-pub(crate) fn agent_message_event_from_text(text: &str) -> Option<AgentMessageEvent> {
-    let msg = serde_json::from_str::<PortalMessage>(text).ok()?;
-    agent_message_event(&msg)
 }
 
 pub(crate) fn render_agent_message_event(
@@ -343,34 +337,9 @@ mod tests {
     }
 
     #[test]
-    fn agent_message_event_prefers_record_origin() {
-        let from_session_id =
-            Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("uuid");
-        let msg = PortalMessage {
-            content: vec![shared::PortalContent::Text {
-                text: "hello from metadata".to_string(),
-            }],
-            origin: Some(shared::MessageOrigin::InterAgent {
-                from_session_id,
-                from_agent_type: "codex".to_string(),
-            }),
-        };
-
-        let event = agent_message_event(&msg).expect("event");
-
-        assert_eq!(event.from_agent_type, "codex");
-        assert_eq!(
-            event.from_session_id,
-            "22222222-2222-2222-2222-222222222222"
-        );
-        assert_eq!(event.text, "hello from metadata");
-    }
-
-    #[test]
-    fn agent_message_event_falls_back_to_typed_portal_event() {
+    fn agent_message_event_reads_typed_portal_event_content() {
         let msg = PortalMessage {
             content: agent_message_content(),
-            origin: None,
         };
 
         let event = agent_message_event(&msg).expect("event");
@@ -381,22 +350,6 @@ mod tests {
             "11111111-1111-1111-1111-111111111111"
         );
         assert_eq!(event.text, "hello from stale proxy");
-    }
-
-    #[test]
-    fn agent_message_event_parses_typed_portal_event_from_user_text() {
-        let msg = shared::PortalMessage::with_content(agent_message_content());
-        let text = serde_json::to_string(&msg).expect("portal json");
-
-        let event = agent_message_event_from_text(&text).expect("event");
-
-        assert_eq!(event.from_agent_type, "claude");
-        assert_eq!(
-            event.from_session_id,
-            "11111111-1111-1111-1111-111111111111"
-        );
-        assert_eq!(event.text, "hello from stale proxy");
-        assert!(agent_message_event_from_text("[message from claude 1111]\nbody").is_none());
     }
 
     #[test]
@@ -405,7 +358,6 @@ mod tests {
             content: vec![shared::PortalContent::Text {
                 text: "[message from claude 1111]\nbody".to_string(),
             }],
-            origin: None,
         };
 
         assert!(agent_message_event(&msg).is_none());
