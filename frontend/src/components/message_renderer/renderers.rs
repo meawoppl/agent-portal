@@ -61,6 +61,10 @@ pub fn render_optimistic_user_message(
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
+    if let Some(event) = portal::agent_message_event_from_text(&msg.content) {
+        return portal::render_agent_message_event(&event, timestamp, session_id);
+    }
+
     let label = match &msg.sender {
         Some(sender) if current_user_id != Some(sender.user_id.as_str()) => sender.name.clone(),
         _ => "You".to_string(),
@@ -101,6 +105,8 @@ pub fn render_user_message(
                 <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
             </div>
         }
+    } else if let Some(event) = portal::agent_message_event_from_text(&text_content) {
+        portal::render_agent_message_event(&event, timestamp, session_id)
     } else if !text_content.is_empty() {
         html! {
             <div class={format!("claude-message user-message{}", pending_class)}>
@@ -123,6 +129,10 @@ pub fn render_optimistic_user_message_content(
     msg: &OptimisticUserMessage,
     session_id: Uuid,
 ) -> Html {
+    if let Some(event) = portal::agent_message_event_from_text(&msg.content) {
+        return portal::render_agent_message_body(&event.text, session_id);
+    }
+
     html! {
         <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&msg.content), session_id) }</div>
     }
@@ -141,6 +151,8 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
         render_content_blocks(&msg.message.content, session_id)
     } else if text_content.is_empty() {
         html! {}
+    } else if let Some(event) = portal::agent_message_event_from_text(&text_content) {
+        portal::render_agent_message_body(&event.text, session_id)
     } else {
         html! {
             <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>

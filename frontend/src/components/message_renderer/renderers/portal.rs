@@ -113,7 +113,7 @@ fn agent_label(agent_type: &str) -> &'static str {
     }
 }
 
-fn render_agent_message_event(
+fn render_agent_message_event_card(
     event: &AgentMessageEvent,
     timestamp: Option<&str>,
     session_id: Uuid,
@@ -140,7 +140,7 @@ fn render_agent_message_event(
     }
 }
 
-fn render_agent_message_body(text: &str, session_id: Uuid) -> Html {
+pub(crate) fn render_agent_message_body(text: &str, session_id: Uuid) -> Html {
     html! {
         <div class="user-text">
             { render_markdown_for_session(&text.replace('\n', "  \n"), session_id) }
@@ -160,13 +160,13 @@ fn portal_text(msg: &PortalMessage) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AgentMessageEvent {
-    from_agent_type: String,
-    from_session_id: String,
-    text: String,
+pub(crate) struct AgentMessageEvent {
+    pub(crate) from_agent_type: String,
+    pub(crate) from_session_id: String,
+    pub(crate) text: String,
 }
 
-fn agent_message_event(msg: &PortalMessage) -> Option<AgentMessageEvent> {
+pub(crate) fn agent_message_event(msg: &PortalMessage) -> Option<AgentMessageEvent> {
     if let Some(shared::MessageOrigin::InterAgent {
         from_session_id,
         from_agent_type,
@@ -197,6 +197,19 @@ fn agent_message_event(msg: &PortalMessage) -> Option<AgentMessageEvent> {
         from_session_id: from_session_id.clone(),
         text: text.clone(),
     })
+}
+
+pub(crate) fn agent_message_event_from_text(text: &str) -> Option<AgentMessageEvent> {
+    let msg = serde_json::from_str::<PortalMessage>(text).ok()?;
+    agent_message_event(&msg)
+}
+
+pub(crate) fn render_agent_message_event(
+    event: &AgentMessageEvent,
+    timestamp: Option<&str>,
+    session_id: Uuid,
+) -> Html {
+    render_agent_message_event_card(event, timestamp, session_id)
 }
 
 fn render_continuation_prompt(
@@ -368,6 +381,22 @@ mod tests {
             "11111111-1111-1111-1111-111111111111"
         );
         assert_eq!(event.text, "hello from stale proxy");
+    }
+
+    #[test]
+    fn agent_message_event_parses_typed_portal_event_from_user_text() {
+        let msg = shared::PortalMessage::with_content(agent_message_content());
+        let text = serde_json::to_string(&msg).expect("portal json");
+
+        let event = agent_message_event_from_text(&text).expect("event");
+
+        assert_eq!(event.from_agent_type, "claude");
+        assert_eq!(
+            event.from_session_id,
+            "11111111-1111-1111-1111-111111111111"
+        );
+        assert_eq!(event.text, "hello from stale proxy");
+        assert!(agent_message_event_from_text("[message from claude 1111]\nbody").is_none());
     }
 
     #[test]
