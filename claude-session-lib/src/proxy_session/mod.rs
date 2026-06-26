@@ -965,16 +965,29 @@ async fn run_main_loop<A: Agent>(
 
                 debug!("sending to claude process: {}", truncate(&input.text, 100));
 
-                if let Some(display_event) = input.display_event.clone() {
-                    let mut pending = state.pending_input_display_events.lock().await;
-                    pending.push_back(PendingInputDisplayEvent {
-                        echoed_text: input.text.clone(),
-                        content: display_event,
-                    });
+                // Two mechanisms deliver the typed display event, exactly one
+                // per agent — never both:
+                //  - Claude echoes its input, so we stash the event here for the
+                //    output_forwarder to swap in on the matching ClaudeOutput::User.
+                //  - Codex doesn't echo, so its io-task emits the event itself
+                //    (handed in via send_input_with_display below).
+                // Gate the stash on Claude: pushing for Codex would leak the
+                // VecDeque entry forever, since nothing consumes it there (#1124).
+                if state.agent_type == shared::AgentType::Claude {
+                    if let Some(display_event) = input.display_event.clone() {
+                        let mut pending = state.pending_input_display_events.lock().await;
+                        pending.push_back(PendingInputDisplayEvent {
+                            echoed_text: input.text.clone(),
+                            content: display_event,
+                        });
+                    }
                 }
 
                 if let Err(e) = claude_session
-                    .send_input(serde_json::Value::String(input.text))
+                    .send_input_with_display(
+                        serde_json::Value::String(input.text),
+                        input.display_event,
+                    )
                     .await
                 {
                     error!("Failed to send to Claude: {}", e);

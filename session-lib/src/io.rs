@@ -21,6 +21,14 @@ pub enum IoCommand {
     Input {
         input: ClaudeInput,
         delivered: Option<oneshot::Sender<Result<(), String>>>,
+        /// Optional typed portal event to display in place of the agent's echo
+        /// of this input (e.g. an inter-agent `PortalContent::AgentMessage`).
+        /// Claude relies on the proxy's echo-replacement and ignores this;
+        /// Codex — which doesn't echo — emits this verbatim as its synthetic
+        /// echo so inter-agent messages render as the typed card with
+        /// provenance instead of a raw `[message from …]` / JSON user bubble.
+        /// Boxed to keep this variant from dominating `IoCommand`'s size.
+        display_event: Option<Box<serde_json::Value>>,
     },
     /// Permission response for Claude's `can_use_tool` control flow.
     PermissionResponse(ControlResponse),

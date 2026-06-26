@@ -78,7 +78,14 @@ pub(crate) async fn claude_io_task(
             // Handle incoming commands (input to send to Claude).
             Some(cmd) = command_rx.recv() => {
                 let result = match cmd {
-                    IoCommand::Input { input, delivered } => {
+                    // `display_event` is for agents that don't echo (Codex);
+                    // claude echoes its input and the proxy swaps the typed
+                    // event in via output_forwarder, so it's ignored here.
+                    IoCommand::Input {
+                        input,
+                        delivered,
+                        display_event: _,
+                    } => {
                         // Each fresh user input gets its own retry budget.
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
@@ -329,6 +336,7 @@ pub(crate) async fn claude_io_task(
                                     IoCommand::Input {
                                         input: new_input,
                                         delivered,
+                                        display_event: _,
                                     } => {
                                         // User typed something while we were waiting
                                         // — honor that, abandon the retry, and reset
