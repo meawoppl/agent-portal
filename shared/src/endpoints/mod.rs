@@ -104,6 +104,86 @@ mod tests {
     }
 
     #[test]
+    fn portal_meta_round_trips_and_omits_empty_fields() {
+        use crate::endpoints::client::{DeliveryMeta, MessageSource, PortalMeta};
+        use crate::InputDeliveryStage;
+
+        // Default (all-none) serializes to `{}` — no stray keys on the wire.
+        assert_eq!(serde_json::to_string(&PortalMeta::default()).unwrap(), "{}");
+
+        let meta = PortalMeta {
+            created_at: Some("2026-06-26T12:00:00.000000".to_string()),
+            source: Some(MessageSource::Agent {
+                session_id: Uuid::nil(),
+                agent_type: "codex".to_string(),
+            }),
+            delivery: Some(DeliveryMeta {
+                client_msg_id: Uuid::nil(),
+                stage: Some(InputDeliveryStage::ProxyReceived),
+                message: None,
+            }),
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let back: PortalMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, meta);
+    }
+
+    #[test]
+    fn message_source_is_a_tagged_sum() {
+        use crate::endpoints::client::MessageSource;
+        let human = MessageSource::Human {
+            account_id: Uuid::nil(),
+            name: "Matt".to_string(),
+        };
+        let json = serde_json::to_string(&human).unwrap();
+        assert!(json.contains(r#""kind":"human""#));
+        assert_eq!(
+            serde_json::to_string(&MessageSource::Portal).unwrap(),
+            r#"{"kind":"portal"}"#
+        );
+        let back: MessageSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, human);
+    }
+
+    #[test]
+    fn delivery_meta_pending_is_derived_from_stage() {
+        use crate::endpoints::client::DeliveryMeta;
+        use crate::InputDeliveryStage;
+
+        let d = |stage| DeliveryMeta {
+            client_msg_id: Uuid::nil(),
+            stage,
+            message: None,
+        };
+        assert!(d(None).pending()); // submitted, no ack yet
+        assert!(d(Some(InputDeliveryStage::ServerReceived)).pending());
+        assert!(d(Some(InputDeliveryStage::ProxyReceived)).pending());
+        assert!(!d(Some(InputDeliveryStage::AgentAccepted)).pending());
+        assert!(!d(Some(InputDeliveryStage::Failed)).pending());
+    }
+
+    #[test]
+    fn agent_output_meta_is_back_compatible() {
+        use crate::endpoints::client::ServerToClient;
+
+        // An old-backend frame without `meta`/`message_meta` still parses.
+        // (The variant serializes with the legacy `ClaudeOutput` tag.)
+        let legacy = r#"{"type":"ClaudeOutput","content":{"type":"portal"}}"#;
+        let parsed: ServerToClient = serde_json::from_str(legacy).unwrap();
+        match parsed {
+            ServerToClient::AgentOutput { meta, .. } => assert!(meta.is_none()),
+            _ => panic!("Wrong variant"),
+        }
+
+        let legacy_history = r#"{"type":"HistoryBatch","messages":[{"type":"portal"}]}"#;
+        let parsed: ServerToClient = serde_json::from_str(legacy_history).unwrap();
+        match parsed {
+            ServerToClient::HistoryBatch { message_meta, .. } => assert!(message_meta.is_empty()),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
     fn client_to_server_claude_input_roundtrip() {
         let id = uuid::Uuid::from_u128(7);
         let msg = ClientToServer::AgentInput {
@@ -180,6 +260,7 @@ mod tests {
             agent_type: AgentType::Codex,
             created_at: Some("2026-05-18T12:34:56.789012".to_string()),
             origin: None,
+            meta: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
@@ -220,6 +301,7 @@ mod tests {
             ServerToClient::HistoryBatch {
                 messages,
                 last_created_at,
+                ..
             } => {
                 assert!(messages.is_empty());
                 assert!(last_created_at.is_none());
@@ -236,6 +318,7 @@ mod tests {
     fn history_batch_roundtrip_with_last_created_at() {
         let msg = ServerToClient::HistoryBatch {
             messages: vec![serde_json::json!({"_created_at": "2026-05-18T00:00:00.000000"})],
+            message_meta: Vec::new(),
             last_created_at: Some("2026-05-18T00:00:00.000000".to_string()),
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -244,6 +327,7 @@ mod tests {
             ServerToClient::HistoryBatch {
                 messages,
                 last_created_at,
+                ..
             } => {
                 assert_eq!(messages.len(), 1);
                 assert_eq!(

@@ -146,6 +146,9 @@ pub(super) fn replay_history(
 
     let _ = tx.send(ServerToClient::HistoryBatch {
         messages,
+        // Populated in slice 2 (backend meta population); empty keeps slice 1
+        // a pure additive contract change (see docs/PORTAL_META_SIDECAR.md).
+        message_meta: Vec::new(),
         last_created_at,
     });
 }
@@ -364,6 +367,7 @@ mod replay_tests {
             shared::ServerToClient::HistoryBatch {
                 messages,
                 last_created_at,
+                ..
             } => (messages, last_created_at),
             other => panic!("expected HistoryBatch, got {:?}", other),
         };
@@ -425,6 +429,7 @@ mod replay_tests {
             shared::ServerToClient::HistoryBatch {
                 messages,
                 last_created_at,
+                ..
             } => (messages, last_created_at),
             other => panic!("expected HistoryBatch, got {:?}", other),
         };

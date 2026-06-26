@@ -118,6 +118,7 @@ pub fn handle_session_limit_reached(
                 agent_type: session.agent_type.parse().unwrap_or_default(),
                 created_at: row_created_at,
                 origin: None,
+                meta: None,
             },
         );
     }
@@ -287,6 +288,7 @@ fn update_terminal_status(
                             agent_type: session.agent_type.parse().unwrap_or_default(),
                             created_at: row_created_at,
                             origin: None,
+                            meta: None,
                         },
                     );
                 }

@@ -430,6 +430,7 @@ fn handle_web_input(
                     agent_type,
                     created_at: row_created_at,
                     origin: None,
+                    meta: None,
                 },
             );
         }
