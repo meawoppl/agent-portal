@@ -78,6 +78,8 @@ pub struct MessageWithSender {
     pub message: Message,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sender_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<shared::MessageOrigin>,
 }
 
 /// Create a new message for a session
@@ -99,6 +101,9 @@ pub async fn create_message(
         content: req.content,
         user_id: current_user_id,
         agent_type: session.agent_type.clone(),
+        provenance_kind: None,
+        provenance_session_id: None,
+        provenance_agent_type: None,
     };
 
     let message: Message = diesel::insert_into(messages::table)
@@ -209,9 +214,11 @@ pub async fn list_messages(
             } else {
                 None
             };
+            let origin = msg.origin();
             MessageWithSender {
                 message: msg,
                 sender_name,
+                origin,
             }
         })
         .collect();

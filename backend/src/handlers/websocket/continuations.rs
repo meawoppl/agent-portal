@@ -117,6 +117,7 @@ pub fn handle_session_limit_reached(
                 sender_name: None,
                 agent_type: session.agent_type.parse().unwrap_or_default(),
                 created_at: row_created_at,
+                origin: None,
             },
         );
     }
@@ -285,6 +286,7 @@ fn update_terminal_status(
                             sender_name: None,
                             agent_type: session.agent_type.parse().unwrap_or_default(),
                             created_at: row_created_at,
+                            origin: None,
                         },
                     );
                 }
@@ -352,6 +354,9 @@ fn insert_portal_message(
         content: serde_json::to_string(&portal.to_json()).unwrap_or_default(),
         user_id: session.user_id,
         agent_type: session.agent_type.clone(),
+        provenance_kind: None,
+        provenance_session_id: None,
+        provenance_agent_type: None,
     };
     match diesel::insert_into(messages::table)
         .values(&new_message)

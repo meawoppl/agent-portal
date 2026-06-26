@@ -127,6 +127,7 @@ mod tests {
             sender_name: None,
             agent_type: AgentType::Codex,
             created_at: Some("2026-05-18T12:34:56.789012".to_string()),
+            origin: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();

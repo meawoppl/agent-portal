@@ -47,6 +47,9 @@ pub struct MessageData {
     /// Display name of the sender (looked up from users table)
     #[serde(default)]
     pub sender_name: Option<String>,
+    /// Typed provenance for records produced by another agent session.
+    #[serde(default)]
+    pub origin: Option<shared::MessageOrigin>,
 }
 
 /// Response from the messages API endpoint — the shared envelope

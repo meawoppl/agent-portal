@@ -26,6 +26,11 @@ diesel::table! {
         user_id -> Uuid,
         #[max_length = 16]
         agent_type -> Varchar,
+        #[max_length = 32]
+        provenance_kind -> Nullable<Varchar>,
+        provenance_session_id -> Nullable<Uuid>,
+        #[max_length = 16]
+        provenance_agent_type -> Nullable<Varchar>,
     }
 }
 

@@ -24,6 +24,8 @@ pub enum ClaudeMessage {
 pub struct PortalMessage {
     #[serde(default)]
     pub content: Vec<shared::PortalContent>,
+    #[serde(default, rename = "_origin")]
+    pub origin: Option<shared::MessageOrigin>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

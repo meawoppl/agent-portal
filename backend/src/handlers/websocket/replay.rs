@@ -133,6 +133,12 @@ pub(super) fn replay_history(
                     "_created_at".to_string(),
                     serde_json::Value::String(created_at_str),
                 );
+                if let Some(origin) = msg.origin() {
+                    obj.insert(
+                        "_origin".to_string(),
+                        serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
+                    );
+                }
             }
             val
         })
