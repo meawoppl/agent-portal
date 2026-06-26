@@ -13,18 +13,8 @@ pub fn render_portal_message(
     continuation_statuses: &HashMap<Uuid, String>,
     on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
-    if let Some(shared::MessageOrigin::InterAgent {
-        from_session_id,
-        from_agent_type,
-    }) = &msg.origin
-    {
-        return render_agent_message_event(
-            msg,
-            from_agent_type,
-            from_session_id,
-            timestamp,
-            session_id,
-        );
+    if let Some(event) = agent_message_event(msg) {
+        return render_agent_message_event(&event, timestamp, session_id);
     }
 
     let copy_text: String = msg
@@ -124,30 +114,27 @@ fn agent_label(agent_type: &str) -> &'static str {
 }
 
 fn render_agent_message_event(
-    msg: &PortalMessage,
-    from_agent_type: &str,
-    from_session_id: &Uuid,
+    event: &AgentMessageEvent,
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
-    let from_session_id = from_session_id.to_string();
-    let text = portal_text(msg);
-    let short = from_session_id
+    let short = event
+        .from_session_id
         .split('-')
         .next()
-        .unwrap_or(&from_session_id);
-    let label = agent_label(from_agent_type);
+        .unwrap_or(&event.from_session_id);
+    let label = agent_label(&event.from_agent_type);
     html! {
         <div class="claude-message user-message other-agent-message agent-message-event">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge other-agent"
-                    title={format!("Message from {label} session {from_session_id}")}>
+                    title={format!("Message from {label} session {}", event.from_session_id)}>
                     { format!("Message from {label} ({short})") }
                 </span>
-                <CopyButton text={text.to_string()} title="Copy message" />
+                <CopyButton text={event.text.clone()} title="Copy message" />
             </div>
             <div class="message-body">
-                { render_agent_message_body(&text, session_id) }
+                { render_agent_message_body(&event.text, session_id) }
             </div>
         </div>
     }
@@ -170,6 +157,46 @@ fn portal_text(msg: &PortalMessage) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AgentMessageEvent {
+    from_agent_type: String,
+    from_session_id: String,
+    text: String,
+}
+
+fn agent_message_event(msg: &PortalMessage) -> Option<AgentMessageEvent> {
+    if let Some(shared::MessageOrigin::InterAgent {
+        from_session_id,
+        from_agent_type,
+    }) = &msg.origin
+    {
+        return Some(AgentMessageEvent {
+            from_agent_type: from_agent_type.clone(),
+            from_session_id: from_session_id.to_string(),
+            text: portal_text(msg),
+        });
+    }
+
+    // Defensive mixed-version fallback: a stale proxy can echo the typed
+    // portal event before a new backend has normalized it into record-level
+    // provenance. This stays typed and does not revive body-text prefix
+    // parsing.
+    let [shared::PortalContent::AgentMessage {
+        from_agent_type,
+        from_session_id,
+        text,
+    }] = msg.content.as_slice()
+    else {
+        return None;
+    };
+
+    Some(AgentMessageEvent {
+        from_agent_type: from_agent_type.clone(),
+        from_session_id: from_session_id.clone(),
+        text: text.clone(),
+    })
 }
 
 fn render_continuation_prompt(
@@ -287,5 +314,71 @@ fn render_portal_image_header(file_path: Option<&str>, file_size: Option<u64>) -
                 }
             }
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent_message_content() -> Vec<shared::PortalContent> {
+        vec![shared::PortalContent::AgentMessage {
+            from_agent_type: "claude".to_string(),
+            from_session_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            text: "hello from stale proxy".to_string(),
+        }]
+    }
+
+    #[test]
+    fn agent_message_event_prefers_record_origin() {
+        let from_session_id =
+            Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("uuid");
+        let msg = PortalMessage {
+            content: vec![shared::PortalContent::Text {
+                text: "hello from metadata".to_string(),
+            }],
+            origin: Some(shared::MessageOrigin::InterAgent {
+                from_session_id,
+                from_agent_type: "codex".to_string(),
+            }),
+        };
+
+        let event = agent_message_event(&msg).expect("event");
+
+        assert_eq!(event.from_agent_type, "codex");
+        assert_eq!(
+            event.from_session_id,
+            "22222222-2222-2222-2222-222222222222"
+        );
+        assert_eq!(event.text, "hello from metadata");
+    }
+
+    #[test]
+    fn agent_message_event_falls_back_to_typed_portal_event() {
+        let msg = PortalMessage {
+            content: agent_message_content(),
+            origin: None,
+        };
+
+        let event = agent_message_event(&msg).expect("event");
+
+        assert_eq!(event.from_agent_type, "claude");
+        assert_eq!(
+            event.from_session_id,
+            "11111111-1111-1111-1111-111111111111"
+        );
+        assert_eq!(event.text, "hello from stale proxy");
+    }
+
+    #[test]
+    fn agent_message_event_ignores_plain_portal_text() {
+        let msg = PortalMessage {
+            content: vec![shared::PortalContent::Text {
+                text: "[message from claude 1111]\nbody".to_string(),
+            }],
+            origin: None,
+        };
+
+        assert!(agent_message_event(&msg).is_none());
     }
 }
