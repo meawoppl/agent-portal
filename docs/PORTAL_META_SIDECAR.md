@@ -183,9 +183,9 @@ wrapper once no old bundles remain, or keep the parallel form if simpler.
 - **Stop mutating content.** `normalize_output_content` keeps deriving
   provenance for the columns but **leaves `content` as the raw
   `AgentMessage`** (no rewrite to `Text`). Display text is derived frontend-side
-  from the typed `PortalContent::AgentMessage` + `meta.origin`.
+  from the typed `PortalContent::AgentMessage` + `meta.source`.
   - ⚠️ Migration nuance: existing rows were already rewritten to `Text` with
-    provenance in columns — those still render correctly via `meta.origin`, so
+    provenance in columns — those still render correctly via `meta.source`, so
     no backfill needed. New rows keep the richer raw form.
 - During transition, **also** keep the `_`-injection (`replay.rs`) and the
   deprecated flat fields on `AgentOutput`, so an un-updated frontend bundle
@@ -195,8 +195,8 @@ wrapper once no old bundles remain, or keep the parallel form if simpler.
 
 - A single typed `RenderedMessage { content, meta }` (or thread `meta` next to
   the content string the message buffer already holds).
-- Renderer reads `meta.origin` / `meta.sender` / `meta.delivery_*` directly.
-  `agent_message_event` prefers `meta.origin`, then the existing typed-content
+- Renderer reads `meta.source` / `meta.delivery` directly.
+  `agent_message_event` prefers `meta.source` (the `Agent` variant), then the existing typed-content
   fallback (stale-proxy raw `AgentMessage`), and **drops all `_`-key reads**.
 - Delete `inject_message_metadata` and the `_`-injection in `websocket.rs`
   once reading from `meta`.
@@ -219,7 +219,7 @@ wrapper once no old bundles remain, or keep the parallel form if simpler.
 
 | # | Slice | Owner | Depends on |
 |---|-------|-------|-----------|
-| 1 | `shared`: add `PortalMeta`, `MessageSender`, `HistoryEntry`; add `meta` to `AgentOutput` (additive, defaults) | Claude | — |
+| 1 | `shared`: add `PortalMeta` + `MessageSource` + `DeliveryMeta`; add `meta` to `AgentOutput` and index-aligned `message_meta` to `HistoryBatch` (additive, defaults) | Claude | — |
 | 2 | Backend: `Message::portal_meta()`; populate `meta` on live + HTTP + WS-replay paths (keep flat fields + `_`-injection) | Claude | 1 |
 | 3 | Frontend: read from `meta` when present, fall back to `_`-keys; render unchanged | Codex | 1 |
 | 4 | Backend: stop rewriting `content` in `normalize_output_content` (keep columns) | Claude | 3 deployed |
@@ -236,11 +236,12 @@ contract. Land/agree it first; both sides build against it.
 - `shared`: round-trip `PortalMeta` (all-none default, full); `AgentOutput`
   with/without `meta` deserializes (old + new wire).
 - Backend: `Message::portal_meta()` maps each column combo; inter-agent row →
-  `meta.origin = InterAgent`; non-UUID `provenance_session_id` → `None` (not a
-  panic). `normalize` leaves content raw (slice 4).
-- Frontend (Codex): `AgentOutput { meta.origin: InterAgent }` renders the
+  `meta.source = Agent`; user row → `Human`; portal row → `Portal`; non-UUID
+  `provenance_session_id` → `None` (not a panic). `normalize` leaves content raw
+  (slice 4).
+- Frontend (Codex): `AgentOutput { meta.source: Agent }` renders the
   "Message from Codex" card; `meta` absent + legacy `_origin` still works
-  (transition); optimistic delivery stages drive off `meta`.
+  (transition); optimistic delivery stages drive off `meta.delivery`.
 
 ## 7. Rollout & back-compat invariants
 
