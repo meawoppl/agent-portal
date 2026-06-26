@@ -141,6 +141,7 @@ fn handle_web_client_message(
                 content,
                 send_mode,
                 user_id,
+                client_msg_id,
             );
             false
         }
@@ -330,6 +331,7 @@ fn handle_web_input(
     content: serde_json::Value,
     send_mode: Option<SendMode>,
     user_id: Uuid,
+    client_msg_id: Option<Uuid>,
 ) {
     let Some(ref key) = session_key else {
         warn!("Web client tried to send ClaudeInput but no session_key set (not registered?)");
@@ -434,7 +436,8 @@ fn handle_web_input(
 
     // Seq bump + best-effort persist + live delivery, shared with the
     // agent-messaging send path (see SessionManager::enqueue_input).
-    let outcome = session_manager.enqueue_input(db_pool, key, session_id, content, send_mode);
+    let outcome =
+        session_manager.enqueue_input(db_pool, key, session_id, content, send_mode, client_msg_id);
     if !outcome.delivered {
         warn!(
             "Failed to send to session '{}', session not found in SessionManager (input queued)",

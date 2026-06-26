@@ -58,6 +58,9 @@ pub fn replay_pending_inputs_from_db(
             seq: input.seq_num,
             content,
             send_mode: input.send_mode.as_deref().and_then(parse_send_mode),
+            // Replayed inputs aren't delivery-tracked (the original browser
+            // row is long gone); UI falls back to content reconciliation.
+            client_msg_id: None,
         };
 
         if sender.send(msg).is_ok() {

@@ -89,6 +89,7 @@ mod tests {
             seq: 5,
             content: serde_json::json!({"text": "hello"}),
             send_mode: Some(SendMode::Wiggum),
+            client_msg_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"SequencedInput""#));
