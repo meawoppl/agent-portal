@@ -33,6 +33,13 @@ pub enum IoCommand {
 
 /// Events emitted from the per-agent I/O task back up to `Session<A>`.
 pub enum IoEvent {
+    /// The agent OS process has been spawned; carries its pid (when the
+    /// platform exposes one). `Session` records it so `stop()` can signal the
+    /// agent's process group directly rather than relying on `kill_on_drop`,
+    /// which the SDK's detached-task ownership of the child defeats (#927).
+    AgentStarted {
+        pid: Option<u32>,
+    },
     /// Typed output from a claude-protocol session.
     Output(Box<ClaudeOutput>),
     /// Raw JSON output from a non-claude agent (e.g. Codex JSONL).

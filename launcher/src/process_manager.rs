@@ -366,7 +366,11 @@ async fn run_session_task(
             } => r,
             _ = cancel.cancelled() => {
                 info!("Session {} cancelled by stop request", config.session_id);
-                let _ = session.stop().await;
+                // Surface stop errors: `stop()` now group-kills the agent
+                // process (#927), so a failure here means a possible orphan.
+                if let Err(e) = session.stop().await {
+                    warn!("Session {} stop failed on cancel: {}", config.session_id, e);
+                }
                 return TaskOutcome {
                     exit_code: Some(0),
                     reason: SessionExitReason::Stopped,
@@ -374,7 +378,9 @@ async fn run_session_task(
             }
         };
 
-        let _ = session.stop().await;
+        if let Err(e) = session.stop().await {
+            warn!("Session {} stop failed: {}", config.session_id, e);
+        }
 
         let alive = started.elapsed();
         match result {

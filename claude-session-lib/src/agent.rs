@@ -24,7 +24,7 @@ impl Agent for ClaudeAgent {
         // surfaced via the event channel — see the `Err(e) =>` branch below.
         let handle = tokio::spawn(async move {
             let session_id = config.session_id;
-            let client = match spawn_claude(&config).await {
+            let (client, pid) = match spawn_claude(&config).await {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = event_tx.send(IoEvent::Error(e));
@@ -32,6 +32,9 @@ impl Agent for ClaudeAgent {
                     return;
                 }
             };
+            // Surface the OS pid so `Session::stop` can group-kill the agent
+            // tree instead of relying on `kill_on_drop` (#927).
+            let _ = event_tx.send(IoEvent::AgentStarted { pid });
             claude_io_task(session_id, client, command_rx, event_tx).await;
         });
         Ok(handle)
