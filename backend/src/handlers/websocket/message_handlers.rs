@@ -333,6 +333,10 @@ pub fn handle_claude_output(
                 agent_type,
                 created_at: row_created_at,
                 origin,
+                // Populated in slice 2 (backend meta population); None keeps
+                // slice 1 a pure additive contract change (see
+                // docs/PORTAL_META_SIDECAR.md).
+                meta: None,
             },
         );
     }

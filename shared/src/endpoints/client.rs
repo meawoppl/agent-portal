@@ -29,6 +29,86 @@ pub enum InputDeliveryStage {
     Failed,
 }
 
+/// Who produced a message. A single sum type — exactly one of human / agent /
+/// portal — rather than independent `sender` + `origin` optionals that could
+/// (illegally) both be set or disagree. `None` on [`PortalMeta`] means "this
+/// session's own agent output" (the common assistant-message case), which
+/// needs no attribution chip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MessageSource {
+    /// A human user via the web client. Drives the per-message sender label on
+    /// multi-member sessions.
+    Human { account_id: Uuid, name: String },
+    /// Another agent session (inter-agent message) — drives the
+    /// "Message from Codex (…)" card. Subsumes the old `MessageOrigin::InterAgent`.
+    Agent {
+        session_id: Uuid,
+        agent_type: String,
+    },
+    /// The portal itself: continuation prompts, reminders, system notices.
+    Portal,
+}
+
+/// Portal-side presentation/provenance metadata for a rendered message.
+///
+/// Carried as a typed **sibling** of the raw agent `content`, never merged into
+/// it. This is the structured replacement for the historical `_origin` /
+/// `_sender` / `_created_at` / `_delivery_*` keys that were flattened into the
+/// agent JSON blob on every delivery path and read back by string key — a
+/// convention with no compile-time enforcement that silently dropped
+/// attribution when any one injection site drifted (see
+/// `docs/PORTAL_META_SIDECAR.md`). Every field is optional + `serde(default)`
+/// so old↔new wire parses in both directions during the transition.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortalMeta {
+    /// Server-assigned persisted-row timestamp (ISO-8601 µs); the frontend's
+    /// reconnect-replay watermark. `Option` because optimistic (pre-persist)
+    /// rows and non-DB broadcast paths have no server timestamp yet — a
+    /// client-clock sentinel would reintroduce the #784 skew bug.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// Who produced the message. `Option` (= this session's own agent output)
+    /// rather than per-source flags — the sum type makes "human XOR agent XOR
+    /// portal" structural. Folds the old `sender` + `origin` into one field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<MessageSource>,
+    /// Optimistic-send delivery tracking. `Option` because only browser-sent,
+    /// tracked inputs have it; once present the id + stage are guaranteed (see
+    /// [`DeliveryMeta`]). Frontend-owned — the backend leaves this `None` (it
+    /// does not persist per-message delivery state).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<DeliveryMeta>,
+}
+
+/// Frontend-owned optimistic-send delivery state for a tracked input. Grouped
+/// so the invariant "a tracked send always has a `client_msg_id`" is
+/// structural rather than four independently-`Option` fields that could drift
+/// into nonsensical combinations (a stage with no id, etc.).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryMeta {
+    /// Browser-assigned id correlating this row with its delivery stages.
+    pub client_msg_id: Uuid,
+    /// Latest stage reached. `None` ⇒ submitted locally, awaiting the first
+    /// server ack (`ServerReceived`). Non-`None` once stages start arriving.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<InputDeliveryStage>,
+    /// Failure detail (only when `stage == Some(Failed)`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl DeliveryMeta {
+    /// Whether the optimistic row should still render as "pending" — derived
+    /// from the stage rather than stored, so it can never disagree with it.
+    pub fn pending(&self) -> bool {
+        !matches!(
+            self.stage,
+            Some(InputDeliveryStage::AgentAccepted) | Some(InputDeliveryStage::Failed)
+        )
+    }
+}
+
 pub struct ClientEndpoint;
 
 impl WsEndpoint for ClientEndpoint {
@@ -114,6 +194,15 @@ pub enum ServerToClient {
         created_at: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<MessageOrigin>,
+        /// Typed portal sidecar (attribution, sender, timestamp, delivery
+        /// stage). Carried alongside the raw `content`; the frontend renders
+        /// from this rather than from `_`-keys flattened into `content`. During
+        /// the transition the backend ALSO mirrors these values into the
+        /// deprecated flat fields above and the `_`-injection so an
+        /// un-updated frontend bundle keeps working; both are removed once the
+        /// frontend reads `meta` in production (see `docs/PORTAL_META_SIDECAR.md`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        meta: Option<PortalMeta>,
     },
 
     /// Batch of historical messages for replay.
@@ -127,6 +216,16 @@ pub enum ServerToClient {
     /// out of the last entry. Both default to absent on older backends.
     HistoryBatch {
         messages: Vec<serde_json::Value>,
+        /// Typed portal sidecar, **index-aligned** with `messages` (entry `i`
+        /// is the meta for `messages[i]`; `None` when a message has no portal
+        /// metadata). Kept as a parallel vector — rather than wrapping each
+        /// entry — so `messages` stays byte-compatible for cached old frontend
+        /// bundles, which simply ignore this field. New frontends zip the two.
+        /// `#[serde(default)]` ⇒ empty/absent on older backends. The `_`-keys
+        /// remain injected into `messages` during the transition; both are
+        /// removed in slice 5 (see `docs/PORTAL_META_SIDECAR.md`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        message_meta: Vec<Option<PortalMeta>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_created_at: Option<String>,
     },

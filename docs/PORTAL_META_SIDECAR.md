@@ -60,40 +60,75 @@ field becomes a **compile error**, not a silent render gap.
 ### 3.1 Shared types (`shared/src/endpoints/` or `shared/src/lib.rs`)
 
 ```rust
+/// Who produced a message — a single sum type (human XOR agent XOR portal)
+/// replacing the independent `sender` + `origin` optionals. `None` on
+/// PortalMeta = this session's own agent output (no attribution chip needed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MessageSource {
+    Human { account_id: Uuid, name: String },
+    Agent { session_id: Uuid, agent_type: String },  // subsumes MessageOrigin::InterAgent
+    Portal,                                           // continuations, reminders, system notices
+}
+
 /// Portal-side presentation/provenance metadata for a rendered message.
 /// Carried alongside the raw agent `content`, never merged into it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PortalMeta {
     /// Server-assigned persisted-row timestamp (ISO-8601 µs); reconnect watermark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
-    /// Human sender attribution (user-role messages).
+    /// Who produced the message (folds old sender + origin into one sum type).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sender: Option<MessageSender>,
-    /// Inter-agent provenance (the "Message from Codex (…)" card).
+    pub source: Option<MessageSource>,
+    /// Optimistic-send delivery tracking (frontend-owned; backend leaves None).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<MessageOrigin>,
-    /// Browser-assigned delivery-tracking id (optimistic row correlation).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_msg_id: Option<Uuid>,
-    /// Live delivery stage for an optimistic send.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delivery_stage: Option<InputDeliveryStage>,
-    /// Failure detail (only when stage == Failed).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delivery_message: Option<String>,
-    /// True while an optimistic send hasn't reached AgentAccepted.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub pending: bool,
+    pub delivery: Option<DeliveryMeta>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MessageSender { pub user_id: String, pub name: String }
+/// Grouped so "a tracked send always has a client_msg_id" is structural, not
+/// four independently-Option fields that could drift into nonsense.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryMeta {
+    pub client_msg_id: Uuid,                       // non-optional: tracked ⇒ has id
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<InputDeliveryStage>,         // None = submitted, awaiting first ack
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,                   // Failed-only detail
+}
+// pending() is DERIVED from stage, not stored — can never disagree with it.
 ```
 
-`MessageOrigin`, `InputDeliveryStage` already exist in `shared`.
-`MessageSender` is promoted from the frontend (currently
-`message_renderer::types::MessageSender`) into `shared`.
+**On tightness (reviewed per Matt's two notes):**
+
+- **`Option`-ness:** `created_at` and `source` stay `Option` — each is genuinely
+  absent for most messages, and a non-optional sentinel (client-clock timestamp,
+  a "no source" marker) would reintroduce exactly the is-this-real ambiguity
+  this refactor removes. The delivery cluster (was
+  `client_msg_id`/`delivery_stage`/`delivery_message`/`pending`) groups under one
+  `Option<DeliveryMeta>`: cuts top-level optionality, makes `client_msg_id`
+  non-optional inside, and **derives `pending` from the stage** (drops the bool).
+- **`MessageSource` sum type:** replaces two independent optionals
+  (`sender` human + `origin` inter-agent) — which could illegally both be set —
+  with one tagged enum. Backend maps existing columns → source:
+  `role=user` ⇒ `Human{user_id,name}`; `provenance_kind=inter_agent` ⇒
+  `Agent{session_id,agent_type}`; portal-generated rows ⇒ `Portal`. No DB
+  migration; `MessageOrigin` stays until slice 5 removes the deprecated path.
+
+`MessageOrigin`, `InputDeliveryStage` already exist in `shared`. `MessageSource`
+is new and supersedes both the frontend's `message_renderer::types::MessageSender`
+and `MessageOrigin` (the latter kept until slice 5).
+
+**Field ownership (important — `PortalMeta` is not "persisted delivery state"):**
+
+| Field | Set by | Notes |
+|-------|--------|-------|
+| `created_at`, `source` | **backend** | derived from `messages` columns (`created_at`; `role`/`user_id`/`provenance_*` → `source`); the durable, server-authoritative part |
+| `delivery` | **frontend** (local, for optimistic rows) | UI render state; the backend does **not** persist per-message delivery state. Live stage transitions arrive via `ServerToClient::InputProgress` and the frontend folds them into the matching optimistic row's `DeliveryMeta`. |
+
+So the *same* struct serves both wire-from-backend (attribution/timestamp) and
+local frontend optimistic state, but the backend only ever populates
+`created_at` + `source`. One render model, without implying the DB tracks delivery.
 
 ### 3.2 Wire envelope changes (`shared/src/endpoints/client.rs`)
 
@@ -113,22 +148,26 @@ ServerToClient::AgentOutput {
 }
 ```
 
-`HistoryBatch` is the harder one: today each entry is a bare
-`serde_json::Value` (raw content with `_`-keys baked in). Replace with a typed
-pair so history matches the live path:
+`HistoryBatch` needs care: today each entry is a bare `serde_json::Value` (raw
+content with `_`-keys baked in). **Replacing `messages` with a wrapper type is
+NOT additive** — a cached old frontend expects raw content values and would
+render the `{content, meta}` wrapper as the message body (the exact rollout
+failure §1/§7 warn about). Instead, **keep `messages` byte-compatible and add a
+parallel, index-aligned sidecar vector** (Codex's call, accepted):
 
 ```rust
-#[derive(Serialize, Deserialize)]
-pub struct HistoryEntry {
-    pub content: serde_json::Value,      // RAW
+HistoryBatch {
+    messages: Vec<serde_json::Value>,            // UNCHANGED (raw, still _-injected during transition)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    message_meta: Vec<Option<PortalMeta>>,       // index-aligned with messages; None per entry w/o meta
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<PortalMeta>,
+    last_created_at: Option<String>,
 }
-HistoryBatch { messages: Vec<HistoryEntry>, last_created_at: Option<String> }
 ```
 
-Back-compat: keep accepting the old `Vec<Value>` shape during transition via an
-untagged enum or a transitional second field — see §5 slicing.
+New frontends zip `messages` with `message_meta`; old frontends ignore the
+extra field and keep working. Slice 5 may collapse this into a `HistoryEntry`
+wrapper once no old bundles remain, or keep the parallel form if simpler.
 
 ### 3.3 Backend (`Claude`)
 
@@ -136,7 +175,11 @@ untagged enum or a transitional second field — see §5 slicing.
   existing typed columns → `PortalMeta` (supersedes `Message::origin()`; keep
   `origin()` as a thin shim until callers migrate).
 - Populate `meta` on all three emit paths from columns:
-  `message_handlers.rs` (live), `replay.rs` (WS history), `messages.rs` (HTTP).
+  `message_handlers.rs` (live `AgentOutput.meta`), `replay.rs` (WS history
+  `message_meta`), `messages.rs` (HTTP). For HTTP, add `meta: Option<PortalMeta>`
+  to the `MessageWithSender` response row **while keeping the existing top-level
+  `origin`/`sender_name` fields** during transition, so the frontend uses one
+  sidecar model across live WS, WS replay, and REST history.
 - **Stop mutating content.** `normalize_output_content` keeps deriving
   provenance for the columns but **leaves `content` as the raw
   `AgentMessage`** (no rewrite to `Text`). Display text is derived frontend-side
@@ -159,6 +202,11 @@ untagged enum or a transitional second field — see §5 slicing.
   once reading from `meta`.
 - `message_renderer::types::PortalMessage` loses its `_origin` field; origin
   comes from `meta`.
+- **Grouping simplification (Matt's note):** message grouping
+  (`message_renderer/grouping.rs`) can match on the typed `meta.source` variant
+  — group consecutive same-`source` runs, break on a `source` change — instead
+  of sniffing `_origin`/role/`_sender` out of the content blob. Fold this into
+  slice 3.
 
 ## 4. Non-goals / explicitly out of scope
 

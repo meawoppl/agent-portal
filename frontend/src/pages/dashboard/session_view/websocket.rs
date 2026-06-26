@@ -143,6 +143,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             agent_type: _,
             created_at,
             origin,
+            // Typed portal sidecar — consumed in slice 3 (frontend read-from-meta);
+            // ignored here so slice 1 stays a no-op contract change.
+            meta: _,
         } => {
             // Inject _sender into content for the renderer if sender info is
             // present. Also fold `created_at` into the content as
@@ -188,6 +191,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         }
         ServerToClient::HistoryBatch {
             messages,
+            // Index-aligned typed sidecar — zipped in slice 3 (frontend
+            // read-from-meta); ignored here so slice 1 stays a no-op.
+            message_meta: _,
             last_created_at,
         } => {
             let strings: Vec<String> = messages.into_iter().map(|v| v.to_string()).collect();
@@ -425,6 +431,7 @@ mod tests {
             agent_type: shared::AgentType::Claude,
             created_at: Some(server_ts.clone()),
             origin: None,
+            meta: None,
         };
 
         handle_proxy_message(msg, &cb);
@@ -473,6 +480,7 @@ mod tests {
                 from_session_id,
                 from_agent_type: "codex".to_string(),
             }),
+            meta: None,
         };
 
         handle_proxy_message(msg, &cb);
@@ -509,6 +517,7 @@ mod tests {
             agent_type: shared::AgentType::Claude,
             created_at: None,
             origin: None,
+            meta: None,
         };
 
         handle_proxy_message(msg, &cb);
@@ -532,6 +541,7 @@ mod tests {
         let ts = "2026-05-18T00:00:00.000000".to_string();
         let msg = ServerToClient::HistoryBatch {
             messages: vec![serde_json::json!({"_created_at": ts.clone()})],
+            message_meta: Vec::new(),
             last_created_at: Some(ts.clone()),
         };
 
@@ -556,6 +566,7 @@ mod tests {
         let (cb, sink) = capture();
         let msg = ServerToClient::HistoryBatch {
             messages: vec![],
+            message_meta: Vec::new(),
             last_created_at: None,
         };
 
