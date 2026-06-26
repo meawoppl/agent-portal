@@ -255,12 +255,11 @@ mod tests {
     fn server_to_client_output_roundtrip() {
         let msg = ServerToClient::AgentOutput {
             content: serde_json::json!({"type": "assistant", "text": "hello"}),
-            sender_user_id: None,
-            sender_name: None,
             agent_type: AgentType::Codex,
-            created_at: Some("2026-05-18T12:34:56.789012".to_string()),
-            origin: None,
-            meta: None,
+            meta: Some(crate::PortalMeta {
+                created_at: Some("2026-05-18T12:34:56.789012".to_string()),
+                ..Default::default()
+            }),
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
@@ -268,28 +267,29 @@ mod tests {
             ServerToClient::AgentOutput {
                 content,
                 agent_type,
-                created_at,
-                ..
+                meta,
             } => {
                 assert_eq!(content["text"], "hello");
                 assert_eq!(agent_type, AgentType::Codex);
-                assert_eq!(created_at.as_deref(), Some("2026-05-18T12:34:56.789012"));
+                assert_eq!(
+                    meta.and_then(|m| m.created_at).as_deref(),
+                    Some("2026-05-18T12:34:56.789012")
+                );
             }
             _ => panic!("Wrong variant"),
         }
     }
 
-    /// Pre-#784 wire JSON for `ServerToClient::ClaudeOutput` (no `created_at`)
-    /// must still parse. The frontend's reconnect watermark just stays at the
-    /// last value it had (or `None` if it never received a timestamped
-    /// message) — same backward-compat slack we extend for `agent_type`.
+    /// Pre-#784 wire JSON for `ServerToClient::ClaudeOutput` (no `meta`) must
+    /// still parse — `meta` defaults to `None` and the frontend keeps its prior
+    /// reconnect watermark. Same backward-compat slack we extend for `agent_type`.
     #[test]
-    fn wire_compat_pre_784_omits_created_at() {
+    fn wire_compat_pre_784_omits_meta() {
         let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
         let parsed: ServerToClient = serde_json::from_str(json).unwrap();
         match parsed {
-            ServerToClient::AgentOutput { created_at, .. } => {
-                assert!(created_at.is_none());
+            ServerToClient::AgentOutput { meta, .. } => {
+                assert!(meta.is_none());
             }
             _ => panic!("Wrong variant"),
         }

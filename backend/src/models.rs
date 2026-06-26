@@ -105,22 +105,6 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn origin(&self) -> Option<shared::MessageOrigin> {
-        match (
-            self.provenance_kind.as_deref(),
-            self.provenance_session_id,
-            self.provenance_agent_type.as_deref(),
-        ) {
-            (Some("inter_agent"), Some(from_session_id), Some(from_agent_type)) => {
-                Some(shared::MessageOrigin::InterAgent {
-                    from_session_id,
-                    from_agent_type: from_agent_type.to_string(),
-                })
-            }
-            _ => None,
-        }
-    }
-
     /// Who produced this message, mapped from the durable columns to the typed
     /// [`shared::MessageSource`] (portal-meta sidecar, see
     /// `docs/PORTAL_META_SIDECAR.md`). Inter-agent provenance wins (it is itself

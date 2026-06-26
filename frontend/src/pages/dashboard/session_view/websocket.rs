@@ -4,8 +4,7 @@ use crate::utils;
 use futures_util::StreamExt;
 use shared::api::ErrorMessage;
 use shared::{
-    ClientEndpoint, ClientToServer, InputDeliveryStage, PortalMeta, ServerToClient, TurnMetrics,
-    WsEndpoint,
+    ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics, WsEndpoint,
 };
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -137,24 +136,13 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     match msg {
         ServerToClient::AgentOutput {
             content,
-            sender_user_id: _,
-            sender_name: _,
-            // agent_type is plumbed through the wire (per-message tag) and
-            // available here for future multi-agent UI work — see #723.
-            // The frontend renders off the session-level agent_type; both
-            // the live and historical-read paths stay agent-agnostic.
+            // agent_type is plumbed through the wire (per-message tag) for
+            // future multi-agent UI work (#723); the frontend renders off the
+            // session-level agent_type. All attribution/timestamp/delivery now
+            // rides in the typed `meta` sidecar (see docs/PORTAL_META_SIDECAR.md).
             agent_type: _,
-            created_at,
-            origin: _,
             meta,
         } => {
-            let meta = meta.or_else(|| {
-                created_at.map(|created_at| PortalMeta {
-                    created_at: Some(created_at),
-                    source: None,
-                    delivery: None,
-                })
-            });
             on_event.emit(WsEvent::Output(RenderedMessage::new(
                 content.to_string(),
                 meta,
@@ -401,12 +389,12 @@ mod tests {
         let server_ts = "2026-05-18T12:34:56.789012".to_string();
         let msg = ServerToClient::AgentOutput {
             content: serde_json::json!({"type": "assistant", "text": "hi"}),
-            sender_user_id: None,
-            sender_name: None,
             agent_type: shared::AgentType::Claude,
-            created_at: Some(server_ts.clone()),
-            origin: None,
-            meta: None,
+            meta: Some(shared::PortalMeta {
+                created_at: Some(server_ts.clone()),
+                source: None,
+                delivery: None,
+            }),
         };
 
         handle_proxy_message(msg, &cb);
@@ -444,11 +432,7 @@ mod tests {
                 "type": "portal",
                 "content": [{"type": "text", "text": "hello from peer"}],
             }),
-            sender_user_id: None,
-            sender_name: None,
             agent_type: shared::AgentType::Codex,
-            created_at: None,
-            origin: None,
             meta: Some(shared::PortalMeta {
                 created_at: None,
                 source: Some(shared::MessageSource::Agent {
@@ -490,11 +474,7 @@ mod tests {
         let (cb, sink) = capture();
         let msg = ServerToClient::AgentOutput {
             content: serde_json::json!({"type": "assistant"}),
-            sender_user_id: None,
-            sender_name: None,
             agent_type: shared::AgentType::Claude,
-            created_at: None,
-            origin: None,
             meta: None,
         };
 

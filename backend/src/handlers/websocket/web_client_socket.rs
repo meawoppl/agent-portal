@@ -388,10 +388,9 @@ fn handle_web_input(
                 .and_then(|s| s.agent_type.parse::<shared::AgentType>().ok())
                 .unwrap_or_default();
 
-            // Insert first so the broadcast carries the server-assigned
+            // Insert first so the broadcast's `meta` carries the server-assigned
             // `created_at` (closes #784 — same fix as handle_claude_output).
-            let mut row_created_at: Option<String> = None;
-            // Typed portal sidecar for the broadcast (source = Portal), so a
+            // Typed portal sidecar for the broadcast (source = Portal), so the
             // meta-only frontend gets created_at + source (#portal-meta).
             let mut broadcast_meta: Option<shared::PortalMeta> = None;
             if let (Some(session), Ok(mut conn)) = (session.as_ref(), db_pool.get()) {
@@ -411,7 +410,6 @@ fn handle_web_input(
                     .get_result::<crate::models::Message>(&mut conn)
                 {
                     Ok(inserted) => {
-                        row_created_at = Some(inserted.created_at_iso());
                         broadcast_meta = Some(inserted.portal_meta(None));
                     }
                     Err(e) => {
@@ -424,11 +422,7 @@ fn handle_web_input(
                 key,
                 ServerToClient::AgentOutput {
                     content: portal.to_json(),
-                    sender_user_id: None,
-                    sender_name: None,
                     agent_type,
-                    created_at: row_created_at,
-                    origin: None,
                     meta: broadcast_meta,
                 },
             );
