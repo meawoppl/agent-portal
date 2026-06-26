@@ -535,6 +535,7 @@ fn handle_launcher_message(
                         seq: next_seq,
                         content: content_value,
                         send_mode: None,
+                        client_msg_id: None,
                     },
                 );
             }

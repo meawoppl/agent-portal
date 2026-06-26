@@ -216,6 +216,10 @@ pub struct PortalInput {
     /// text in the transcript.
     pub display_event: Option<serde_json::Value>,
     pub ack: Option<PortalInputAck>,
+    /// Browser-assigned delivery-tracking id (#939). When present, the main
+    /// loop emits `InputProgressAck` at `ProxyReceived` (dequeue) and
+    /// `AgentAccepted` (after the agent accepts the input).
+    pub client_msg_id: Option<Uuid>,
 }
 
 pub struct PortalInputAck {
@@ -855,6 +859,28 @@ async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> 
     rx.await.ok()
 }
 
+/// Emit an `InputProgressAck` delivery-stage signal for a tracked input, if it
+/// carried a `client_msg_id` (#939). The backend relays it to web clients.
+async fn emit_input_progress(
+    ws_write: &SharedWsWrite,
+    session_id: Uuid,
+    client_msg_id: Option<Uuid>,
+    stage: shared::InputDeliveryStage,
+) {
+    let Some(client_msg_id) = client_msg_id else {
+        return;
+    };
+    let msg = ProxyToServer::InputProgressAck {
+        session_id,
+        client_msg_id,
+        stage,
+    };
+    let mut ws = ws_write.lock().await;
+    if let Err(e) = ws.send(msg).await {
+        error!("Failed to send InputProgressAck: {}", e);
+    }
+}
+
 /// Send an `InputAck` for a portal input, if it carried ack metadata.
 pub async fn ack_portal_input(ws_write: &SharedWsWrite, ack: Option<PortalInputAck>) {
     let Some(ack) = ack else {
@@ -965,6 +991,16 @@ async fn run_main_loop<A: Agent>(
 
                 debug!("sending to claude process: {}", truncate(&input.text, 100));
 
+                // Delivery stage: the proxy has the input and is about to hand
+                // it to the agent (#939).
+                emit_input_progress(
+                    &state.ws_write,
+                    state.session_id,
+                    input.client_msg_id,
+                    shared::InputDeliveryStage::ProxyReceived,
+                )
+                .await;
+
                 // Two mechanisms deliver the typed display event, exactly one
                 // per agent — never both:
                 //  - Claude echoes its input, so we stash the event here for the
@@ -991,8 +1027,24 @@ async fn run_main_loop<A: Agent>(
                     .await
                 {
                     error!("Failed to send to Claude: {}", e);
+                    emit_input_progress(
+                        &state.ws_write,
+                        state.session_id,
+                        input.client_msg_id,
+                        shared::InputDeliveryStage::Failed,
+                    )
+                    .await;
                     return ConnectionResult::ClaudeExited;
                 }
+                // Delivery stage: the input is now in the agent's stream — the
+                // optimistic row clears here (#939).
+                emit_input_progress(
+                    &state.ws_write,
+                    state.session_id,
+                    input.client_msg_id,
+                    shared::InputDeliveryStage::AgentAccepted,
+                )
+                .await;
                 ack_portal_input(&state.ws_write, input.ack).await;
             }
 
@@ -1009,6 +1061,13 @@ async fn run_main_loop<A: Agent>(
                     &state.git_metadata,
                 )
                 .await;
+                emit_input_progress(
+                    &state.ws_write,
+                    state.session_id,
+                    wiggum_input.client_msg_id,
+                    shared::InputDeliveryStage::ProxyReceived,
+                )
+                .await;
                 let prompt = wiggum_prompt(&wiggum_input.text);
                 state.wiggum_state = Some(WiggumState {
                     original_prompt: wiggum_input.text,
@@ -1018,8 +1077,22 @@ async fn run_main_loop<A: Agent>(
                 });
                 if let Err(e) = claude_session.send_input(serde_json::Value::String(prompt)).await {
                     error!("Failed to send wiggum prompt to Claude: {}", e);
+                    emit_input_progress(
+                        &state.ws_write,
+                        state.session_id,
+                        wiggum_input.client_msg_id,
+                        shared::InputDeliveryStage::Failed,
+                    )
+                    .await;
                     return ConnectionResult::ClaudeExited;
                 }
+                emit_input_progress(
+                    &state.ws_write,
+                    state.session_id,
+                    wiggum_input.client_msg_id,
+                    shared::InputDeliveryStage::AgentAccepted,
+                )
+                .await;
                 ack_portal_input(&state.ws_write, wiggum_input.ack).await;
             }
 

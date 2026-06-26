@@ -44,6 +44,10 @@ impl SessionManager {
         session_id: Uuid,
         content: serde_json::Value,
         send_mode: Option<SendMode>,
+        // Browser-assigned delivery-tracking id (#939); forwarded to the proxy
+        // on `SequencedInput` so it can echo per-stage `InputProgressAck`s.
+        // `None` for non-browser inputs (inter-agent, replay).
+        client_msg_id: Option<Uuid>,
     ) -> EnqueueOutcome {
         use crate::schema::{pending_inputs, sessions};
 
@@ -96,6 +100,7 @@ impl SessionManager {
                     seq,
                     content,
                     send_mode,
+                    client_msg_id,
                 },
             )
         } else {

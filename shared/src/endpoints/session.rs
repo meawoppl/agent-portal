@@ -97,6 +97,17 @@ pub enum ProxyToServer {
     /// Acknowledge receipt of input messages
     InputAck { session_id: Uuid, ack_seq: i64 },
 
+    /// Delivery-progress signal for a client-correlated input (#939). Emitted
+    /// by the proxy at `ProxyReceived` (on `SequencedInput` receipt) and
+    /// `AgentAccepted` (once the input is in the agent's stream). The backend
+    /// relays it to web clients as `ServerToClient::InputProgress`. Distinct
+    /// from `InputAck`, which drives seq dedup + `pending_inputs` deletion.
+    InputProgressAck {
+        session_id: Uuid,
+        client_msg_id: Uuid,
+        stage: crate::InputDeliveryStage,
+    },
+
     /// Session status update
     SessionStatus { status: SessionStatus },
 
@@ -152,6 +163,11 @@ pub enum ServerToProxy {
         content: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
+        /// Browser-assigned correlation id for delivery tracking (#939); the
+        /// proxy echoes it on `InputProgressAck`. `None` for legacy/replayed
+        /// inputs (those still rely on content reconciliation in the UI).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_msg_id: Option<Uuid>,
     },
 
     /// User's permission decision
