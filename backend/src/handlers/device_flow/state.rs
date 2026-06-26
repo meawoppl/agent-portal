@@ -37,7 +37,14 @@ pub struct VerifyQuery {
 }
 
 pub(super) fn generate_user_code() -> String {
-    let chars: String = rand::thread_rng()
+    generate_user_code_with(&mut rand::thread_rng())
+}
+
+/// Generate a user code from a caller-supplied RNG. Split out from
+/// [`generate_user_code`] so tests can drive it with a seeded RNG and stay
+/// deterministic (see #1133).
+pub(super) fn generate_user_code_with<R: Rng>(rng: &mut R) -> String {
+    let chars: String = rng
         .sample_iter(&Alphanumeric)
         .take(6)
         .map(|c| c as char)
@@ -49,8 +56,12 @@ pub(super) fn generate_user_code() -> String {
 }
 
 pub(super) fn generate_device_code() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
+    generate_device_code_with(&mut rand::thread_rng())
+}
+
+/// Generate a device code from a caller-supplied RNG (see [`generate_user_code_with`]).
+pub(super) fn generate_device_code_with<R: Rng>(rng: &mut R) -> String {
+    rng.sample_iter(&Alphanumeric)
         .take(32)
         .map(|c| c as char)
         .collect()
