@@ -584,6 +584,53 @@ mod tests {
     }
 
     #[test]
+    fn agent_message_round_trips_to_agent_facing_text() {
+        // This is the exact envelope→text conversion behind the inter-agent
+        // raw-JSON render bug (#1123/#1124): a single AgentMessage content
+        // becomes the bracketed "[message from …]" prefix the agent reads.
+        let msg = PortalMessage::agent_message(
+            "codex".to_string(),
+            "12345678-0000-0000-0000-000000000000".to_string(),
+            "hello there".to_string(),
+        );
+        assert_eq!(
+            msg.agent_facing_text().as_deref(),
+            Some("[message from codex 12345678-0000-0000-0000-000000000000]\nhello there")
+        );
+    }
+
+    #[test]
+    fn non_agent_message_has_no_agent_facing_text() {
+        // Plain text / image / reminder envelopes have no agent-facing form;
+        // returning None keeps them on the normal display path.
+        assert!(PortalMessage::text("just text".to_string())
+            .agent_facing_text()
+            .is_none());
+        assert!(
+            PortalMessage::reminder("title".to_string(), "body".to_string())
+                .agent_facing_text()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn multi_content_message_has_no_agent_facing_text() {
+        // The match requires *exactly one* AgentMessage content; a mixed or
+        // multi-block envelope must not be mistaken for an inter-agent message.
+        let msg = PortalMessage::with_content(vec![
+            PortalContent::AgentMessage {
+                from_agent_type: "codex".to_string(),
+                from_session_id: "id".to_string(),
+                text: "a".to_string(),
+            },
+            PortalContent::Text {
+                text: "trailing".to_string(),
+            },
+        ]);
+        assert!(msg.agent_facing_text().is_none());
+    }
+
+    #[test]
     fn message_role_as_str_matches_serde_encoding() {
         let roles = [
             MessageRole::System,

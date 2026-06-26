@@ -582,4 +582,42 @@ mod tests {
         assert_eq!(normalized.content["content"][0]["type"], "text");
         assert_eq!(normalized.content["content"][0]["text"], "hello from peer");
     }
+
+    /// Anything that isn't a single, well-formed AgentMessage must pass through
+    /// untouched — no origin, no provenance, content byte-identical. A bug here
+    /// would either drop a normal message's body or fabricate bogus inter-agent
+    /// provenance on it.
+    fn assert_passthrough(content: serde_json::Value) {
+        let normalized = normalize_output_content(content.clone());
+        assert_eq!(normalized.content, content);
+        assert!(normalized.origin.is_none());
+        assert!(normalized.provenance_kind.is_none());
+        assert!(normalized.provenance_session_id.is_none());
+        assert!(normalized.provenance_agent_type.is_none());
+    }
+
+    #[test]
+    fn normalize_passthrough_for_non_portal_json() {
+        assert_passthrough(serde_json::json!({"type": "assistant", "text": "hi"}));
+        assert_passthrough(serde_json::json!("a bare string"));
+    }
+
+    #[test]
+    fn normalize_passthrough_for_non_agent_message_portal() {
+        assert_passthrough(PortalMessage::text("just text".to_string()).to_json());
+    }
+
+    #[test]
+    fn normalize_passthrough_when_session_id_is_not_a_uuid() {
+        // A malformed from_session_id must NOT be promoted to inter-agent
+        // provenance — fall back to passthrough rather than corrupting origin.
+        assert_passthrough(
+            PortalMessage::agent_message(
+                "codex".to_string(),
+                "not-a-uuid".to_string(),
+                "hello".to_string(),
+            )
+            .to_json(),
+        );
+    }
 }
