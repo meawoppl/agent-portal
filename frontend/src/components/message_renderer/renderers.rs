@@ -78,6 +78,7 @@ pub fn render_optimistic_user_message(
                 if msg.pending {
                     <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
                 }
+                { render_delivery_progress(msg.client_msg_id.is_some(), msg.delivery_stage, msg.delivery_message.as_deref()) }
                 <CopyButton text={msg.content.clone()} title="Copy message" />
             </div>
             <div class="message-body">{ render_optimistic_user_message_content(msg, session_id) }</div>
@@ -115,6 +116,7 @@ pub fn render_user_message(
                     if meta.pending {
                         <span class="pending-indicator" title="Sending...">{ "\u{2022}" }</span>
                     }
+                    { render_delivery_progress(meta.client_msg_id.is_some(), meta.delivery_stage, meta.delivery_message.as_deref()) }
                     <CopyButton text={text_content.clone()} title="Copy message" />
                 </div>
                 <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
@@ -157,6 +159,65 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
         html! {
             <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
         }
+    }
+}
+
+fn render_delivery_progress(
+    tracked: bool,
+    stage: Option<shared::InputDeliveryStage>,
+    message: Option<&str>,
+) -> Html {
+    if !tracked && stage.is_none() {
+        return html! {};
+    };
+
+    let active_index = match stage {
+        None => 0,
+        Some(shared::InputDeliveryStage::ServerReceived) => 1,
+        Some(shared::InputDeliveryStage::ProxyReceived) => 2,
+        Some(shared::InputDeliveryStage::AgentAccepted) => 3,
+        Some(shared::InputDeliveryStage::Failed) => 0,
+    };
+    let failed = stage == Some(shared::InputDeliveryStage::Failed);
+    let title = match (stage, message) {
+        (None, _) => "Sent from browser",
+        (Some(shared::InputDeliveryStage::ServerReceived), _) => "Received by server",
+        (Some(shared::InputDeliveryStage::ProxyReceived), _) => "At local proxy",
+        (Some(shared::InputDeliveryStage::AgentAccepted), _) => "In agent stream",
+        (Some(shared::InputDeliveryStage::Failed), Some(msg)) => msg,
+        (Some(shared::InputDeliveryStage::Failed), None) => "Delivery failed",
+    };
+    let label = match stage {
+        None => "sent",
+        Some(shared::InputDeliveryStage::ServerReceived) => "server",
+        Some(shared::InputDeliveryStage::ProxyReceived) => "proxy",
+        Some(shared::InputDeliveryStage::AgentAccepted) => "stream",
+        Some(shared::InputDeliveryStage::Failed) => "failed",
+    };
+    let steps = ["sent", "server", "proxy", "stream"];
+
+    html! {
+        <span
+            class={classes!("input-delivery-progress", failed.then_some("failed"))}
+            title={title.to_string()}
+            aria-label={format!("Input delivery: {label}")}
+        >
+            <span class="input-delivery-label">{ label }</span>
+            <span class="input-delivery-steps" aria-hidden="true">
+                { for steps.iter().enumerate().map(|(idx, step)| {
+                    html! {
+                        <span
+                            class={classes!(
+                                "input-delivery-step",
+                                (!failed && idx <= active_index).then_some("active"),
+                                (failed && idx == 0).then_some("failed"),
+                            )}
+                            title={*step}
+                        />
+                    }
+                }) }
+            </span>
+        </span>
     }
 }
 

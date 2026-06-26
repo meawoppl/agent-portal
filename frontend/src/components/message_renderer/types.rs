@@ -37,18 +37,30 @@ pub struct MessageSender {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OptimisticUserMessage {
     pub content: String,
+    #[serde(default, rename = "_client_msg_id")]
+    pub client_msg_id: Option<uuid::Uuid>,
     #[serde(default, rename = "_sender")]
     pub sender: Option<MessageSender>,
     #[serde(default, rename = "_pending")]
     pub pending: bool,
+    #[serde(default, rename = "_delivery_stage")]
+    pub delivery_stage: Option<shared::InputDeliveryStage>,
+    #[serde(default, rename = "_delivery_message")]
+    pub delivery_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UserMessageMeta {
+    #[serde(default, rename = "_client_msg_id")]
+    pub client_msg_id: Option<uuid::Uuid>,
     #[serde(default, rename = "_sender")]
     pub sender: Option<MessageSender>,
     #[serde(default, rename = "_pending")]
     pub pending: bool,
+    #[serde(default, rename = "_delivery_stage")]
+    pub delivery_stage: Option<shared::InputDeliveryStage>,
+    #[serde(default, rename = "_delivery_message")]
+    pub delivery_message: Option<String>,
 }
 
 pub fn user_meta_from_json(json: &str) -> UserMessageMeta {

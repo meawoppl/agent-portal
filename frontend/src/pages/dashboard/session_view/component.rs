@@ -26,7 +26,8 @@ use yew::prelude::*;
 
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, inject_created_at_if_absent,
-    inject_message_metadata, is_claude_awaiting, reconcile_pending_sends, ActivityTag,
+    inject_message_metadata, is_claude_awaiting, reconcile_pending_sends,
+    update_pending_send_delivery, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::permission_handler::{
@@ -63,6 +64,30 @@ pub struct SessionViewProps {
     pub current_user_id: Option<String>,
     #[prop_or(0)]
     pub interrupt_signal: u32,
+}
+
+fn optimistic_user_json(content: &str, created_at: &str, client_msg_id: &Uuid) -> String {
+    #[derive(serde::Serialize)]
+    struct OptimisticUserMessage<'a> {
+        #[serde(rename = "type")]
+        message_type: &'static str,
+        content: &'a str,
+        #[serde(rename = "_pending")]
+        pending: bool,
+        #[serde(rename = "_created_at")]
+        created_at: &'a str,
+        #[serde(rename = "_client_msg_id")]
+        client_msg_id: &'a Uuid,
+    }
+
+    serde_json::to_string(&OptimisticUserMessage {
+        message_type: "user",
+        content,
+        pending: true,
+        created_at,
+        client_msg_id,
+    })
+    .unwrap_or_default()
 }
 
 /// Messages for the SessionView component
@@ -391,10 +416,11 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::SendFrame(frame) => {
+                let (frame, changed) = self.prepare_outbound_frame(frame);
                 if let Some(ref sender) = self.ws_sender {
                     send_message(sender, frame);
                 }
-                false
+                changed
             }
             SessionViewMsg::MessageSent => {
                 let session_id = ctx.props().session.id;
@@ -588,6 +614,16 @@ impl SessionView {
                     .send_message(SessionViewMsg::TurnMetricsReceived(metrics));
                 false
             }
+            WsEvent::InputProgress {
+                client_msg_id,
+                stage,
+                message,
+            } => update_pending_send_delivery(
+                &mut self.pending_sends,
+                client_msg_id,
+                stage,
+                message.as_deref(),
+            ),
             WsEvent::ContinuationStatus {
                 continuation_id,
                 status,
@@ -657,27 +693,9 @@ impl SessionView {
             .to_iso_string()
             .as_string()
             .unwrap_or_default();
-        // Local-only stub for the message list while the wire round-trips.
-        // Typed so the wire shape lives in source — the consumer renderer
-        // still parses `pending_sends` as JSON (cleanup tracked separately).
-        #[derive(serde::Serialize)]
-        struct OptimisticUserMessage<'a> {
-            #[serde(rename = "type")]
-            message_type: &'static str,
-            content: &'a str,
-            #[serde(rename = "_pending")]
-            pending: bool,
-            #[serde(rename = "_created_at")]
-            created_at: &'a str,
-        }
-        let optimistic_msg = serde_json::to_string(&OptimisticUserMessage {
-            message_type: "user",
-            content: &input,
-            pending: true,
-            created_at: &now_iso,
-        })
-        .unwrap_or_default();
-        self.pending_sends.push(optimistic_msg);
+        let client_msg_id = Uuid::new_v4();
+        self.pending_sends
+            .push(optimistic_user_json(&input, &now_iso, &client_msg_id));
 
         if let Some(ref sender) = self.ws_sender {
             let msg = ClientToServer::AgentInput {
@@ -687,12 +705,40 @@ impl SessionView {
                 } else {
                     Some(send_mode)
                 },
-                // TODO(delivery-progress): assign a real id + consume
-                // ServerToClient::InputProgress to drive the staged pending UI
-                // (Codex's slice). None keeps the legacy reconciliation path.
-                client_msg_id: None,
+                client_msg_id: Some(client_msg_id),
             };
             send_message(sender, msg);
+        }
+    }
+
+    fn prepare_outbound_frame(&mut self, frame: ClientToServer) -> (ClientToServer, bool) {
+        match frame {
+            ClientToServer::AgentInput {
+                content,
+                send_mode,
+                client_msg_id: _,
+            } => {
+                let client_msg_id = Uuid::new_v4();
+                let mut changed = false;
+                if let Some(text) = content.as_str() {
+                    let now_iso = js_sys::Date::new_0()
+                        .to_iso_string()
+                        .as_string()
+                        .unwrap_or_default();
+                    self.pending_sends
+                        .push(optimistic_user_json(text, &now_iso, &client_msg_id));
+                    changed = true;
+                }
+                (
+                    ClientToServer::AgentInput {
+                        content,
+                        send_mode,
+                        client_msg_id: Some(client_msg_id),
+                    },
+                    changed,
+                )
+            }
+            other => (other, false),
         }
     }
 
