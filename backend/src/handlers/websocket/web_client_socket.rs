@@ -99,18 +99,39 @@ fn handle_web_client_message(
             session_key,
             verified_session_id,
         ),
-        ClientToServer::AgentInput { content, send_mode } => {
+        ClientToServer::AgentInput {
+            content,
+            send_mode,
+            client_msg_id,
+        } => {
             // Gate on editor/owner role — re-queried on each input so role
             // revocations take effect immediately for already-connected viewers.
             // See `session_access::is_session_mutator` for the layered rules.
             if let Some(session_id) = *verified_session_id {
                 if !is_session_mutator(app_state, session_id, user_id) {
+                    if let Some(id) = client_msg_id {
+                        let _ = tx.send(ServerToClient::InputProgress {
+                            client_msg_id: id,
+                            stage: shared::InputDeliveryStage::Failed,
+                            message: Some("permission denied".to_string()),
+                        });
+                    }
                     let _ = tx.send(ServerToClient::Error {
                         message: "You don't have permission to send input to this session"
                             .to_string(),
                     });
                     return false;
                 }
+            }
+            // First delivery stage: the backend accepted the input frame. Later
+            // stages (ProxyReceived / AgentAccepted) come from the proxy ack
+            // path — a follow-up slice threads client_msg_id through there.
+            if let Some(id) = client_msg_id {
+                let _ = tx.send(ServerToClient::InputProgress {
+                    client_msg_id: id,
+                    stage: shared::InputDeliveryStage::ServerReceived,
+                    message: None,
+                });
             }
             handle_web_input(
                 session_manager,

@@ -104,18 +104,69 @@ mod tests {
 
     #[test]
     fn client_to_server_claude_input_roundtrip() {
+        let id = uuid::Uuid::from_u128(7);
         let msg = ClientToServer::AgentInput {
             content: serde_json::json!({"text": "hi"}),
             send_mode: None,
+            client_msg_id: Some(id),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"ClaudeInput""#));
         let parsed: ClientToServer = serde_json::from_str(&json).unwrap();
         match parsed {
-            ClientToServer::AgentInput { send_mode, .. } => {
+            ClientToServer::AgentInput {
+                send_mode,
+                client_msg_id,
+                ..
+            } => {
                 assert!(send_mode.is_none());
+                assert_eq!(client_msg_id, Some(id));
             }
             _ => panic!("Wrong variant"),
+        }
+    }
+
+    /// Older clients omit `client_msg_id`; the field must default to `None`.
+    #[test]
+    fn client_input_without_client_msg_id_defaults_none() {
+        let json = r#"{"type":"ClaudeInput","content":{"text":"hi"}}"#;
+        let parsed: ClientToServer = serde_json::from_str(json).unwrap();
+        match parsed {
+            ClientToServer::AgentInput { client_msg_id, .. } => {
+                assert_eq!(client_msg_id, None);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn input_progress_roundtrips_with_stage() {
+        use crate::InputDeliveryStage;
+        let id = uuid::Uuid::from_u128(42);
+        for (stage, tag) in [
+            (InputDeliveryStage::ServerReceived, "server_received"),
+            (InputDeliveryStage::ProxyReceived, "proxy_received"),
+            (InputDeliveryStage::AgentAccepted, "agent_accepted"),
+            (InputDeliveryStage::Failed, "failed"),
+        ] {
+            let msg = ServerToClient::InputProgress {
+                client_msg_id: id,
+                stage,
+                message: None,
+            };
+            let json = serde_json::to_string(&msg).unwrap();
+            assert!(json.contains(&format!(r#""stage":"{tag}""#)), "{json}");
+            match serde_json::from_str::<ServerToClient>(&json).unwrap() {
+                ServerToClient::InputProgress {
+                    client_msg_id,
+                    stage: parsed_stage,
+                    ..
+                } => {
+                    assert_eq!(client_msg_id, id);
+                    assert_eq!(parsed_stage, stage);
+                }
+                _ => panic!("Wrong variant"),
+            }
         }
     }
 

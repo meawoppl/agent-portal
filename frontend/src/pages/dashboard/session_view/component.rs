@@ -687,6 +687,10 @@ impl SessionView {
                 } else {
                     Some(send_mode)
                 },
+                // TODO(delivery-progress): assign a real id + consume
+                // ServerToClient::InputProgress to drive the staged pending UI
+                // (Codex's slice). None keeps the legacy reconciliation path.
+                client_msg_id: None,
             };
             send_message(sender, msg);
         }

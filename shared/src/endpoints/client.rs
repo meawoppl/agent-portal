@@ -10,6 +10,25 @@ use crate::{
     TurnMetrics,
 };
 
+/// Stages a user input passes through end to end, named by **transport fact**
+/// (not implied model semantics) so the UI never claims "the model has it"
+/// before it does. The frontend may relabel for display (e.g. `ProxyReceived`
+/// → "At local proxy", `AgentAccepted` → "In agent stream"). Carried on
+/// [`ServerToClient::InputProgress`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputDeliveryStage {
+    /// Backend accepted the WebSocket input frame.
+    ServerReceived,
+    /// Proxy/launcher received the sequenced input from the backend.
+    ProxyReceived,
+    /// Delivered into the agent's stream (stdin write for Claude / turn start
+    /// for Codex). The optimistic "pending" row clears at this stage.
+    AgentAccepted,
+    /// Delivery failed; `InputProgress.message` carries the reason.
+    Failed,
+}
+
 pub struct ClientEndpoint;
 
 impl WsEndpoint for ClientEndpoint {
@@ -25,12 +44,19 @@ pub enum ClientToServer {
     /// Register to receive updates for a session
     Register(RegisterFields),
 
-    /// User sends input to Claude
+    /// User sends input to the agent.
     #[serde(rename = "ClaudeInput")]
     AgentInput {
         content: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
+        /// Browser-assigned correlation id for delivery tracking. The backend
+        /// echoes it on every `ServerToClient::InputProgress` so the frontend
+        /// can advance the matching optimistic row through its delivery stages.
+        /// `None` from older clients (and the legacy content-reconciliation
+        /// path still covers those).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_msg_id: Option<Uuid>,
     },
 
     /// User's permission decision
@@ -103,6 +129,19 @@ pub enum ServerToClient {
         messages: Vec<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_created_at: Option<String>,
+    },
+
+    /// Delivery-progress update for a previously-sent `AgentInput`, keyed by
+    /// its browser-assigned `client_msg_id`. The frontend advances the matching
+    /// optimistic row through its stages and keeps it "pending"-styled until
+    /// `AgentAccepted` (the message is in the agent's stream). See
+    /// [`InputDeliveryStage`].
+    InputProgress {
+        client_msg_id: Uuid,
+        stage: InputDeliveryStage,
+        /// Populated for `Failed` (the delivery error), absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
 
     /// Permission request from Claude (tool wants to execute)

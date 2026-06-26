@@ -584,6 +584,9 @@ impl InputBar {
             on_send_frame.emit(ClientToServer::AgentInput {
                 content: serde_json::Value::String(combined),
                 send_mode: None,
+                // TODO(delivery-progress): real id + InputProgress consumption
+                // lands in the staged-UI slice (Codex).
+                client_msg_id: None,
             });
 
             link.send_message(InputBarMsg::FileUploaded(
