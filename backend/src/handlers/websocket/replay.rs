@@ -85,70 +85,71 @@ pub(super) fn replay_history(
         .last()
         .map(|msg| msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
 
-    let messages: Vec<serde_json::Value> = history
-        .into_iter()
-        .map(|msg| {
-            let created_at_str = msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
-            // Fallback when the DB row content isn't valid JSON: wrap the raw
-            // string in a typed envelope so the frontend's `ClaudeMessage`
-            // dispatch still finds a `type` and `content`.
-            #[derive(serde::Serialize)]
-            struct FallbackMessageContent<'a> {
-                #[serde(rename = "type")]
-                message_type: &'a str,
-                content: &'a str,
-            }
-            let mut val =
-                serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
-                    serde_json::to_value(FallbackMessageContent {
-                        message_type: &msg.role,
-                        content: &msg.content,
-                    })
-                    .unwrap_or(serde_json::Value::Null)
-                });
-            if let Some(obj) = val.as_object_mut() {
-                // Reconstruct _sender for user messages from DB user_id
-                if msg.role == "user" {
-                    if let Some(name) = user_names.get(&msg.user_id) {
-                        #[derive(serde::Serialize)]
-                        struct SenderMeta<'a> {
-                            user_id: String,
-                            name: &'a str,
+    let (messages, message_meta): (Vec<serde_json::Value>, Vec<Option<shared::PortalMeta>>) =
+        history
+            .into_iter()
+            .map(|msg| {
+                // Typed sidecar, index-aligned with the message it accompanies.
+                let meta = Some(msg.portal_meta(user_names.get(&msg.user_id).cloned()));
+                let created_at_str = msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+                // Fallback when the DB row content isn't valid JSON: wrap the raw
+                // string in a typed envelope so the frontend's `ClaudeMessage`
+                // dispatch still finds a `type` and `content`.
+                #[derive(serde::Serialize)]
+                struct FallbackMessageContent<'a> {
+                    #[serde(rename = "type")]
+                    message_type: &'a str,
+                    content: &'a str,
+                }
+                let mut val = serde_json::from_str::<serde_json::Value>(&msg.content)
+                    .unwrap_or_else(|_| {
+                        serde_json::to_value(FallbackMessageContent {
+                            message_type: &msg.role,
+                            content: &msg.content,
+                        })
+                        .unwrap_or(serde_json::Value::Null)
+                    });
+                if let Some(obj) = val.as_object_mut() {
+                    // Reconstruct _sender for user messages from DB user_id
+                    if msg.role == "user" {
+                        if let Some(name) = user_names.get(&msg.user_id) {
+                            #[derive(serde::Serialize)]
+                            struct SenderMeta<'a> {
+                                user_id: String,
+                                name: &'a str,
+                            }
+                            obj.insert(
+                                "_sender".to_string(),
+                                serde_json::to_value(SenderMeta {
+                                    user_id: msg.user_id.to_string(),
+                                    name,
+                                })
+                                .unwrap_or(serde_json::Value::Null),
+                            );
                         }
+                    }
+                    // Inject _created_at so renderers (and the watermark
+                    // recovery path on reload) see the server-assigned row
+                    // timestamp. Matches the REST list-messages path which
+                    // surfaces `created_at` on every `MessageWithSender`.
+                    obj.insert(
+                        "_created_at".to_string(),
+                        serde_json::Value::String(created_at_str),
+                    );
+                    if let Some(origin) = msg.origin() {
                         obj.insert(
-                            "_sender".to_string(),
-                            serde_json::to_value(SenderMeta {
-                                user_id: msg.user_id.to_string(),
-                                name,
-                            })
-                            .unwrap_or(serde_json::Value::Null),
+                            "_origin".to_string(),
+                            serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
                         );
                     }
                 }
-                // Inject _created_at so renderers (and the watermark
-                // recovery path on reload) see the server-assigned row
-                // timestamp. Matches the REST list-messages path which
-                // surfaces `created_at` on every `MessageWithSender`.
-                obj.insert(
-                    "_created_at".to_string(),
-                    serde_json::Value::String(created_at_str),
-                );
-                if let Some(origin) = msg.origin() {
-                    obj.insert(
-                        "_origin".to_string(),
-                        serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
-                    );
-                }
-            }
-            val
-        })
-        .collect();
+                (val, meta)
+            })
+            .unzip();
 
     let _ = tx.send(ServerToClient::HistoryBatch {
         messages,
-        // Populated in slice 2 (backend meta population); empty keeps slice 1
-        // a pure additive contract change (see docs/PORTAL_META_SIDECAR.md).
-        message_meta: Vec::new(),
+        message_meta,
         last_created_at,
     });
 }
