@@ -302,6 +302,7 @@ pub(super) fn inject_message_metadata(
     role_user: bool,
     user_id: Option<&str>,
     sender_name: Option<&str>,
+    origin: Option<&shared::MessageOrigin>,
 ) -> String {
     let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) else {
         return content.to_string();
@@ -328,6 +329,12 @@ pub(super) fn inject_message_metadata(
         "_created_at".to_string(),
         serde_json::Value::String(created_at.to_string()),
     );
+    if let Some(origin) = origin {
+        obj.insert(
+            "_origin".to_string(),
+            serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
+        );
+    }
     val.to_string()
 }
 
@@ -601,11 +608,37 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["_created_at"], "2026-05-18T12:00:00Z");
         // Non-user role should never get _sender injected.
         assert!(v.get("_sender").is_none());
+    }
+
+    #[test]
+    fn inject_message_metadata_adds_origin_when_present() {
+        let from_session_id =
+            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("uuid");
+        let origin = shared::MessageOrigin::InterAgent {
+            from_session_id,
+            from_agent_type: "claude".to_string(),
+        };
+        let out = inject_message_metadata(
+            r#"{"type":"portal","content":[{"type":"text","text":"hello"}]}"#,
+            "2026-05-18T12:00:00Z",
+            false,
+            None,
+            None,
+            Some(&origin),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["_origin"]["kind"], "inter_agent");
+        assert_eq!(
+            v["_origin"]["from_session_id"],
+            "11111111-1111-1111-1111-111111111111"
+        );
+        assert_eq!(v["_origin"]["from_agent_type"], "claude");
     }
 
     #[test]
@@ -616,6 +649,7 @@ mod tests {
             true,
             Some("uid-1"),
             Some("Alice"),
+            None,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["_created_at"], "2026-05-18T12:00:00Z");
@@ -631,6 +665,7 @@ mod tests {
             true,
             None,
             None,
+            None,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["_created_at"], "2026-05-18T12:00:00Z");
@@ -642,7 +677,7 @@ mod tests {
     fn inject_message_metadata_returns_input_unchanged_for_invalid_json() {
         // Malformed wire frame: the caller still pushes the raw string so
         // the message doesn't silently disappear from the list.
-        let out = inject_message_metadata("not-json", "ts", false, None, None);
+        let out = inject_message_metadata("not-json", "ts", false, None, None, None);
         assert_eq!(out, "not-json");
     }
 
@@ -651,7 +686,7 @@ mod tests {
         // Valid JSON but not an object (e.g. a top-level string) — no
         // _created_at slot to inject into, return as-is so callers don't
         // re-serialize it into a quoted-string blob.
-        let out = inject_message_metadata("\"hello\"", "ts", false, None, None);
+        let out = inject_message_metadata("\"hello\"", "ts", false, None, None, None);
         assert_eq!(out, "\"hello\"");
     }
 

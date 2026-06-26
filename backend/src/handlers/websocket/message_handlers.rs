@@ -2,7 +2,9 @@ use super::{ProxySender, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
 use serde::Deserialize;
-use shared::{AgentType, SendMode, ServerToClient, ServerToProxy};
+use shared::{
+    AgentType, MessageOrigin, PortalContent, PortalMessage, SendMode, ServerToClient, ServerToProxy,
+};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -214,6 +216,9 @@ pub fn handle_claude_output(
         Some(uid) => extract_portal_images(content, image_store, uid, db_session_id),
         None => content,
     };
+    let normalized = normalize_output_content(content);
+    let content = normalized.content;
+    let origin = normalized.origin.clone();
 
     // Insert the message FIRST and recover the server-assigned `created_at`
     // so the live broadcast carries the same timestamp the historical-read
@@ -250,6 +255,9 @@ pub fn handle_claude_output(
                 content: content.to_string(),
                 user_id: actual_user_id,
                 agent_type: agent_type.as_str().to_string(),
+                provenance_kind: normalized.provenance_kind.clone(),
+                provenance_session_id: normalized.provenance_session_id,
+                provenance_agent_type: normalized.provenance_agent_type.clone(),
             };
 
             match diesel::insert_into(messages::table)
@@ -321,8 +329,54 @@ pub fn handle_claude_output(
                 sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
                 agent_type,
                 created_at: row_created_at,
+                origin,
             },
         );
+    }
+}
+
+struct NormalizedOutputContent {
+    content: serde_json::Value,
+    origin: Option<MessageOrigin>,
+    provenance_kind: Option<String>,
+    provenance_session_id: Option<Uuid>,
+    provenance_agent_type: Option<String>,
+}
+
+fn normalize_output_content(content: serde_json::Value) -> NormalizedOutputContent {
+    let base = NormalizedOutputContent {
+        content,
+        origin: None,
+        provenance_kind: None,
+        provenance_session_id: None,
+        provenance_agent_type: None,
+    };
+
+    let Ok(portal) = serde_json::from_value::<PortalMessage>(base.content.clone()) else {
+        return base;
+    };
+    let [PortalContent::AgentMessage {
+        from_agent_type,
+        from_session_id,
+        text,
+    }] = portal.content.as_slice()
+    else {
+        return base;
+    };
+    let Ok(from_session_id) = from_session_id.parse::<Uuid>() else {
+        return base;
+    };
+
+    let origin = MessageOrigin::InterAgent {
+        from_session_id,
+        from_agent_type: from_agent_type.clone(),
+    };
+    NormalizedOutputContent {
+        content: PortalMessage::text(text.clone()).to_json(),
+        origin: Some(origin),
+        provenance_kind: Some("inter_agent".to_string()),
+        provenance_session_id: Some(from_session_id),
+        provenance_agent_type: Some(from_agent_type.clone()),
     }
 }
 
@@ -497,5 +551,32 @@ mod tests {
             .as_task_notification()
             .expect("task_notification struct parse");
         assert_eq!(notif.usage.expect("usage present").total_tokens, 68694);
+    }
+
+    #[test]
+    fn normalize_output_content_moves_agent_message_attribution_to_origin() {
+        let sender = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let content = PortalMessage::agent_message(
+            "claude".to_string(),
+            sender.to_string(),
+            "hello from peer".to_string(),
+        )
+        .to_json();
+
+        let normalized = normalize_output_content(content);
+
+        assert_eq!(normalized.provenance_kind.as_deref(), Some("inter_agent"));
+        assert_eq!(normalized.provenance_session_id, Some(sender));
+        assert_eq!(normalized.provenance_agent_type.as_deref(), Some("claude"));
+        assert_eq!(
+            normalized.origin,
+            Some(MessageOrigin::InterAgent {
+                from_session_id: sender,
+                from_agent_type: "claude".to_string()
+            })
+        );
+        assert_eq!(normalized.content["type"], "portal");
+        assert_eq!(normalized.content["content"][0]["type"], "text");
+        assert_eq!(normalized.content["content"][0]["text"], "hello from peer");
     }
 }

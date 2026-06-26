@@ -13,16 +13,15 @@ pub fn render_portal_message(
     continuation_statuses: &HashMap<Uuid, String>,
     on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
-    if let [shared::PortalContent::AgentMessage {
-        from_agent_type,
+    if let Some(shared::MessageOrigin::InterAgent {
         from_session_id,
-        text,
-    }] = msg.content.as_slice()
+        from_agent_type,
+    }) = &msg.origin
     {
         return render_agent_message_event(
+            msg,
             from_agent_type,
             from_session_id,
-            text,
             timestamp,
             session_id,
         );
@@ -33,7 +32,6 @@ pub fn render_portal_message(
         .iter()
         .filter_map(|c| match c {
             shared::PortalContent::Text { text } => Some(text.clone()),
-            shared::PortalContent::AgentMessage { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -111,11 +109,9 @@ fn render_portal_content(
             source_message,
             on_schedule_continuation,
         ),
-        shared::PortalContent::AgentMessage {
-            from_agent_type,
-            from_session_id,
-            text,
-        } => render_agent_message_body(from_agent_type, from_session_id, text, session_id),
+        shared::PortalContent::AgentMessage { text, .. } => {
+            render_markdown_for_session(text, session_id)
+        }
     }
 }
 
@@ -128,13 +124,18 @@ fn agent_label(agent_type: &str) -> &'static str {
 }
 
 fn render_agent_message_event(
+    msg: &PortalMessage,
     from_agent_type: &str,
-    from_session_id: &str,
-    text: &str,
+    from_session_id: &Uuid,
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
-    let short = from_session_id.split('-').next().unwrap_or(from_session_id);
+    let from_session_id = from_session_id.to_string();
+    let text = portal_text(msg);
+    let short = from_session_id
+        .split('-')
+        .next()
+        .unwrap_or(&from_session_id);
     let label = agent_label(from_agent_type);
     html! {
         <div class="claude-message user-message other-agent-message agent-message-event">
@@ -146,23 +147,29 @@ fn render_agent_message_event(
                 <CopyButton text={text.to_string()} title="Copy message" />
             </div>
             <div class="message-body">
-                { render_agent_message_body(from_agent_type, from_session_id, text, session_id) }
+                { render_agent_message_body(&text, session_id) }
             </div>
         </div>
     }
 }
 
-fn render_agent_message_body(
-    _from_agent_type: &str,
-    _from_session_id: &str,
-    text: &str,
-    session_id: Uuid,
-) -> Html {
+fn render_agent_message_body(text: &str, session_id: Uuid) -> Html {
     html! {
         <div class="user-text">
             { render_markdown_for_session(&text.replace('\n', "  \n"), session_id) }
         </div>
     }
+}
+
+fn portal_text(msg: &PortalMessage) -> String {
+    msg.content
+        .iter()
+        .filter_map(|content| match content {
+            shared::PortalContent::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn render_continuation_prompt(

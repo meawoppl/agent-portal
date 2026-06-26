@@ -5,7 +5,10 @@ use ws_bridge::WsEndpoint;
 use super::types::{
     FileUploadChunkFields, FileUploadStartFields, PermissionResponseFields, RegisterFields,
 };
-use crate::{AgentType, PermissionSuggestion, SendMode, SessionCost, SessionStatus, TurnMetrics};
+use crate::{
+    AgentType, MessageOrigin, PermissionSuggestion, SendMode, SessionCost, SessionStatus,
+    TurnMetrics,
+};
 
 pub struct ClientEndpoint;
 
@@ -83,6 +86,8 @@ pub enum ServerToClient {
         /// with older backends.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         created_at: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<MessageOrigin>,
     },
 
     /// Batch of historical messages for replay.

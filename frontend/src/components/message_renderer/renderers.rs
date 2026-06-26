@@ -81,62 +81,6 @@ pub fn render_optimistic_user_message(
     }
 }
 
-/// Legacy fallback for inter-agent messages stored before the portal
-/// `agent_message` event existed. New messages render from typed
-/// `PortalContent::AgentMessage` instead of this text prefix.
-fn parse_other_agent_message(text: &str) -> Option<(String, String, String)> {
-    let rest = text.strip_prefix("[message from ")?;
-    let close = rest.find(']')?;
-    let (agent_type, sender) = rest[..close].trim().split_once(' ')?;
-    let sender = sender.trim();
-    if sender.is_empty() {
-        return None;
-    }
-    let body = rest[close + 1..]
-        .trim_start_matches(['\n', ' '])
-        .to_string();
-    Some((agent_type.trim().to_string(), sender.to_string(), body))
-}
-
-/// Friendly display name for a sender's agent type.
-fn agent_label(agent_type: &str) -> &'static str {
-    match agent_type.to_ascii_lowercase().as_str() {
-        "claude" => "Claude",
-        "codex" => "Codex",
-        _ => "agent",
-    }
-}
-
-/// Render an inter-agent message as its own type: a distinct badge + accent
-/// reading e.g. "Message from Codex (9466a628)" (full session id on hover), so
-/// it's clearly from another agent rather than the viewer's own input.
-fn render_other_agent_message(
-    agent_type: &str,
-    sender: &str,
-    body: &str,
-    timestamp: Option<&str>,
-    session_id: Uuid,
-) -> Html {
-    let short = sender.split('-').next().unwrap_or(sender);
-    let label = agent_label(agent_type);
-    html! {
-        <div class="claude-message user-message other-agent-message">
-            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge other-agent"
-                    title={format!("Message from {label} session {sender}")}>
-                    { format!("Message from {label} ({short})") }
-                </span>
-                <CopyButton text={body.to_string()} title="Copy message" />
-            </div>
-            <div class="message-body">
-                <div class="user-text">
-                    { render_markdown_for_session(&preserve_user_newlines(body), session_id) }
-                </div>
-            </div>
-        </div>
-    }
-}
-
 pub fn render_user_message(
     msg: &shared::UserMessage,
     meta: &UserMessageMeta,
@@ -150,14 +94,6 @@ pub fn render_user_message(
     };
     let pending_class = if meta.pending { " pending" } else { "" };
     let (text_content, has_tool_results) = user_message_text_and_tool_results(msg);
-
-    // Legacy rows from before the typed `PortalContent::AgentMessage` event
-    // still replay as user text with a source bumper.
-    if !has_tool_results {
-        if let Some((agent_type, sender, body)) = parse_other_agent_message(&text_content) {
-            return render_other_agent_message(&agent_type, &sender, &body, timestamp, session_id);
-        }
-    }
 
     if has_tool_results {
         html! {

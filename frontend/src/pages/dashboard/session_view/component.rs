@@ -636,6 +636,7 @@ impl SessionView {
                     m.role == "user",
                     m.user_id.as_deref(),
                     m.sender_name.as_deref(),
+                    m.origin.as_ref(),
                 )
             })
             .collect();

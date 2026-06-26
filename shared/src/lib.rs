@@ -285,6 +285,15 @@ pub enum MessageRole {
     Unknown,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MessageOrigin {
+    InterAgent {
+        from_session_id: Uuid,
+        from_agent_type: String,
+    },
+}
+
 impl MessageRole {
     pub fn as_str(&self) -> &'static str {
         match self {

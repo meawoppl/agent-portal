@@ -99,6 +99,27 @@ pub struct Message {
     pub created_at: NaiveDateTime,
     pub user_id: Uuid,
     pub agent_type: String,
+    pub provenance_kind: Option<String>,
+    pub provenance_session_id: Option<Uuid>,
+    pub provenance_agent_type: Option<String>,
+}
+
+impl Message {
+    pub fn origin(&self) -> Option<shared::MessageOrigin> {
+        match (
+            self.provenance_kind.as_deref(),
+            self.provenance_session_id,
+            self.provenance_agent_type.as_deref(),
+        ) {
+            (Some("inter_agent"), Some(from_session_id), Some(from_agent_type)) => {
+                Some(shared::MessageOrigin::InterAgent {
+                    from_session_id,
+                    from_agent_type: from_agent_type.to_string(),
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Insertable)]
@@ -109,6 +130,9 @@ pub struct NewMessage {
     pub content: String,
     pub user_id: Uuid,
     pub agent_type: String,
+    pub provenance_kind: Option<String>,
+    pub provenance_session_id: Option<Uuid>,
+    pub provenance_agent_type: Option<String>,
 }
 
 // ============================================================================

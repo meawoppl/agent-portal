@@ -135,6 +135,7 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             // the live and historical-read paths stay agent-agnostic.
             agent_type: _,
             created_at,
+            origin,
         } => {
             // Inject _sender into content for the renderer if sender info is
             // present. Also fold `created_at` into the content as
@@ -144,7 +145,7 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             // changing the event signature again.
             let mut content_val = content;
             let needs_sender = sender_user_id.is_some() || sender_name.is_some();
-            if needs_sender || created_at.is_some() {
+            if needs_sender || created_at.is_some() || origin.is_some() {
                 if let Some(obj) = content_val.as_object_mut() {
                     if needs_sender {
                         #[derive(serde::Serialize)]
@@ -165,6 +166,12 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
                         obj.insert(
                             "_created_at".to_string(),
                             serde_json::Value::String(ts.clone()),
+                        );
+                    }
+                    if let Some(origin) = origin {
+                        obj.insert(
+                            "_origin".to_string(),
+                            serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
                         );
                     }
                 }
@@ -397,6 +404,7 @@ mod tests {
             sender_name: None,
             agent_type: shared::AgentType::Claude,
             created_at: Some(server_ts.clone()),
+            origin: None,
         };
 
         handle_proxy_message(msg, &cb);
@@ -438,6 +446,7 @@ mod tests {
             sender_name: None,
             agent_type: shared::AgentType::Claude,
             created_at: None,
+            origin: None,
         };
 
         handle_proxy_message(msg, &cb);
