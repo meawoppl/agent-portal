@@ -1,5 +1,6 @@
 //! Dashboard page - Main session management interface
 
+use super::page_state::{active_session_ids, DashboardSessionAction, DashboardSessionState};
 use super::session_order;
 use super::session_rail::{ActivityRef, SessionRail};
 use super::session_view::SessionView;
@@ -100,25 +101,19 @@ pub fn dashboard_page() -> Html {
     // index — see `session_order` / issue #1094. The display index is derived
     // from this each render, so a reordered poll never bounces focus onto a
     // different session.
-    let focused_id = use_state(|| None::<Uuid>);
-    let awaiting_sessions = use_state(HashSet::<Uuid>::new);
-    let hidden_sessions = use_state(load_hidden_sessions);
+    let session_state = use_reducer_eq(|| DashboardSessionState::new(load_hidden_sessions()));
     let inactive_hidden = use_state(load_inactive_hidden);
     let show_cost = use_state(load_show_cost);
     let rail_position = use_state(load_rail_position);
-    let connected_sessions = use_state(HashSet::<Uuid>::new);
     let pending_leave = use_state(|| None::<Uuid>);
     let pending_delete = use_state(|| None::<Uuid>);
     let is_admin = use_state(|| false);
     let current_user_id = use_state(|| None::<Uuid>);
     let app_title = use_state(|| "Agent Portal".to_string());
     let server_version = use_state(String::new);
-    let activated_sessions = use_state(HashSet::<Uuid>::new);
     // Activity buffer: mutations don't trigger page re-renders.
     // SessionRail reads this on its own 100 ms tick instead.
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
-    let initial_focus_set = use_state(|| false);
-    let sessions_at_launch = use_state(|| None::<HashSet<Uuid>>);
 
     // Detect spend tier changes and trigger timed animation
     {
@@ -203,7 +198,7 @@ pub fn dashboard_page() -> Html {
     // sessions: they remain available in the hidden rail section but do not
     // participate in focus, activation, waiting counts, or keyboard rotation.
     let effective_hidden_sessions: HashSet<Uuid> = {
-        let mut hidden = (*hidden_sessions).clone();
+        let mut hidden = session_state.hidden_sessions.clone();
         hidden.extend(active_sessions.iter().filter(|s| s.paused).map(|s| s.id));
         hidden
     };
@@ -215,7 +210,7 @@ pub fn dashboard_page() -> Html {
     // this derived index.
     let focused_index: usize = session_order::resolve_focus_index(
         &active_sessions,
-        *focused_id,
+        session_state.focused_id,
         &effective_hidden_sessions,
     );
 
@@ -223,34 +218,35 @@ pub fn dashboard_page() -> Html {
     {
         let active_sessions = active_sessions.clone();
         let effective_hidden_sessions = effective_hidden_sessions.clone();
-        let focused_id = focused_id.clone();
-        let initial_focus_set = initial_focus_set.clone();
-        let activated_sessions = activated_sessions.clone();
+        let session_state = session_state.clone();
 
         use_effect_with(
-            (active_sessions.len(), loading),
-            move |(session_count, is_loading)| {
-                if !*initial_focus_set && !*is_loading && *session_count > 0 {
+            (
+                active_sessions.clone(),
+                effective_hidden_sessions.clone(),
+                loading,
+            ),
+            move |(sessions, hidden_sessions, is_loading)| {
+                if !*is_loading && !sessions.is_empty() {
                     // Focus the first non-hidden session by id (falls through to
                     // the first session if all are hidden).
-                    let first_focus = active_sessions
+                    let first_focus = sessions
                         .iter()
-                        .find(|s| !effective_hidden_sessions.contains(&s.id))
-                        .or_else(|| active_sessions.first())
+                        .find(|s| !hidden_sessions.contains(&s.id))
+                        .or_else(|| sessions.first())
                         .map(|s| s.id);
 
-                    focused_id.set(first_focus);
-
                     // Activate all non-hidden sessions so they load in background
-                    let mut activated = (*activated_sessions).clone();
-                    for s in &active_sessions {
-                        if !effective_hidden_sessions.contains(&s.id) {
-                            activated.insert(s.id);
-                        }
-                    }
-                    activated_sessions.set(activated);
+                    let activate_ids = sessions
+                        .iter()
+                        .filter(|s| !hidden_sessions.contains(&s.id))
+                        .map(|s| s.id)
+                        .collect();
 
-                    initial_focus_set.set(true);
+                    session_state.dispatch(DashboardSessionAction::InitializeFocus {
+                        focus_id: first_focus,
+                        activate_ids,
+                    });
                 }
                 || ()
             },
@@ -259,29 +255,19 @@ pub fn dashboard_page() -> Html {
 
     // Auto-focus newly launched session when it appears in the session list
     {
-        let sessions_at_launch = sessions_at_launch.clone();
-        let active_sessions = active_sessions.clone();
-        let focused_id = focused_id.clone();
-        let activated_sessions = activated_sessions.clone();
+        let session_state = session_state.clone();
 
-        use_effect_with(active_sessions.clone(), move |sessions| {
-            if let Some(ref snapshot) = *sessions_at_launch {
-                if let Some(session) = sessions.iter().find(|s| !snapshot.contains(&s.id)) {
-                    focused_id.set(Some(session.id));
-                    let mut activated = (*activated_sessions).clone();
-                    activated.insert(session.id);
-                    activated_sessions.set(activated);
-                    sessions_at_launch.set(None);
-                }
-            }
+        use_effect_with(active_session_ids(&active_sessions), move |session_ids| {
+            session_state.dispatch(DashboardSessionAction::FocusNewlyLaunched(
+                session_ids.clone(),
+            ));
             || ()
         });
     }
 
     // Session selection callback
     let on_select_session = {
-        let focused_id = focused_id.clone();
-        let activated_sessions = activated_sessions.clone();
+        let session_state = session_state.clone();
         let active_sessions = active_sessions.clone();
         // The rail / keyboard nav emit a display index valid against the order
         // that produced the current render; translate it to the session id so
@@ -290,21 +276,16 @@ pub fn dashboard_page() -> Html {
             crate::audio::ensure_audio_context();
             crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
             if let Some(session) = active_sessions.get(index) {
-                focused_id.set(Some(session.id));
-                let mut activated = (*activated_sessions).clone();
-                activated.insert(session.id);
-                activated_sessions.set(activated);
+                session_state.dispatch(DashboardSessionAction::FocusAndActivate(session.id));
             }
         })
     };
 
     // Activation callback for keyboard nav
     let on_activate = {
-        let activated_sessions = activated_sessions.clone();
+        let session_state = session_state.clone();
         Callback::from(move |session_id: Uuid| {
-            let mut activated = (*activated_sessions).clone();
-            activated.insert(session_id);
-            activated_sessions.set(activated);
+            session_state.dispatch(DashboardSessionAction::Activate(session_id));
         })
     };
 
@@ -323,7 +304,7 @@ pub fn dashboard_page() -> Html {
         sessions: active_sessions.clone(),
         focused_index,
         hidden_sessions: effective_hidden_sessions.clone(),
-        connected_sessions: (*connected_sessions).clone(),
+        connected_sessions: session_state.connected_sessions.clone(),
         inactive_hidden: *inactive_hidden,
         on_select: on_select_session.clone(),
         on_activate,
@@ -468,43 +449,40 @@ pub fn dashboard_page() -> Html {
     };
 
     let on_launch_success = {
-        let sessions_at_launch = sessions_at_launch.clone();
+        let session_state = session_state.clone();
         let active_sessions = active_sessions.clone();
         Callback::from(move |_| {
-            let snapshot: HashSet<Uuid> = active_sessions.iter().map(|s| s.id).collect();
-            sessions_at_launch.set(Some(snapshot));
+            session_state.dispatch(DashboardSessionAction::StoreLaunchSnapshot(
+                active_session_ids(&active_sessions),
+            ));
         })
     };
 
     // Session state callbacks
     let on_awaiting_change = {
-        let awaiting_sessions = awaiting_sessions.clone();
+        let session_state = session_state.clone();
         Callback::from(move |(session_id, is_awaiting): (Uuid, bool)| {
-            let currently_awaiting = awaiting_sessions.contains(&session_id);
+            let currently_awaiting = session_state.awaiting_sessions.contains(&session_id);
             if currently_awaiting == is_awaiting {
                 return;
             }
-            let mut set = (*awaiting_sessions).clone();
             if is_awaiting {
-                set.insert(session_id);
                 crate::audio::play_sound(crate::audio::SoundEvent::AwaitingInput);
-            } else {
-                set.remove(&session_id);
             }
-            awaiting_sessions.set(set);
+            session_state.dispatch(DashboardSessionAction::SetAwaiting {
+                session_id,
+                awaiting: is_awaiting,
+            });
         })
     };
 
     let on_connected_change = {
-        let connected_sessions = connected_sessions.clone();
+        let session_state = session_state.clone();
         Callback::from(move |(session_id, connected): (Uuid, bool)| {
-            let mut set = (*connected_sessions).clone();
-            if connected {
-                set.insert(session_id);
-            } else {
-                set.remove(&session_id);
-            }
-            connected_sessions.set(set);
+            session_state.dispatch(DashboardSessionAction::SetConnected {
+                session_id,
+                connected,
+            });
         })
     };
 
@@ -529,23 +507,26 @@ pub fn dashboard_page() -> Html {
 
     let on_toggle_pause = {
         let refresh = sessions_hook.refresh.clone();
-        let hidden_sessions = hidden_sessions.clone();
+        let session_state = session_state.clone();
         Callback::from(move |(session_id, pause): (Uuid, bool)| {
             let refresh = refresh.clone();
-            let hidden_sessions = hidden_sessions.clone();
+            let session_state = session_state.clone();
             spawn_local(async move {
                 let action = if pause { "pause" } else { "resume" };
                 let url = utils::api_url(&format!("/api/sessions/{}/{}", session_id, action));
                 match Request::post(&url).send().await {
                     Ok(resp) if resp.status() == 202 => {
-                        let mut set = (*hidden_sessions).clone();
+                        let mut set = session_state.hidden_sessions.clone();
                         if pause {
                             set.insert(session_id);
                         } else {
                             set.remove(&session_id);
                         }
                         save_hidden_sessions(&set);
-                        hidden_sessions.set(set);
+                        session_state.dispatch(DashboardSessionAction::SetHidden {
+                            session_id,
+                            hidden: pause,
+                        });
                         refresh.emit(());
                     }
                     Ok(resp) => {
@@ -565,16 +546,17 @@ pub fn dashboard_page() -> Html {
     };
 
     let on_toggle_hidden = {
-        let hidden_sessions = hidden_sessions.clone();
+        let session_state = session_state.clone();
         Callback::from(move |session_id: Uuid| {
-            let mut set = (*hidden_sessions).clone();
-            if set.contains(&session_id) {
-                set.remove(&session_id);
-            } else {
+            let hidden = !session_state.hidden_sessions.contains(&session_id);
+            let mut set = session_state.hidden_sessions.clone();
+            if hidden {
                 set.insert(session_id);
+            } else {
+                set.remove(&session_id);
             }
             save_hidden_sessions(&set);
-            hidden_sessions.set(set);
+            session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
         })
     };
 
@@ -597,11 +579,9 @@ pub fn dashboard_page() -> Html {
     };
 
     let on_message_sent = {
-        let awaiting_sessions = awaiting_sessions.clone();
+        let session_state = session_state.clone();
         Callback::from(move |current_session_id: Uuid| {
-            let mut set = (*awaiting_sessions).clone();
-            set.remove(&current_session_id);
-            awaiting_sessions.set(set);
+            session_state.dispatch(DashboardSessionAction::MessageSent(current_session_id));
         })
     };
 
@@ -642,7 +622,8 @@ pub fn dashboard_page() -> Html {
     };
 
     // Computed values
-    let waiting_count = awaiting_sessions
+    let waiting_count = session_state
+        .awaiting_sessions
         .iter()
         .filter(|id| !effective_hidden_sessions.contains(id))
         .count();
@@ -815,10 +796,10 @@ pub fn dashboard_page() -> Html {
                     <SessionRail
                         sessions={active_sessions.clone()}
                         focused_index={focused_index}
-                        awaiting_sessions={(*awaiting_sessions).clone()}
+                        awaiting_sessions={session_state.awaiting_sessions.clone()}
                         hidden_sessions={effective_hidden_sessions.clone()}
                         inactive_hidden={*inactive_hidden}
-                        connected_sessions={(*connected_sessions).clone()}
+                        connected_sessions={session_state.connected_sessions.clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
                         server_version={(*server_version).clone()}
@@ -836,7 +817,7 @@ pub fn dashboard_page() -> Html {
                         {
                             active_sessions.iter().enumerate().map(|(index, session)| {
                                 let is_focused = index == focused_index;
-                                let is_activated = activated_sessions.contains(&session.id);
+                                let is_activated = session_state.activated_sessions.contains(&session.id);
                                 if is_activated {
                                     html! {
                                         <div
