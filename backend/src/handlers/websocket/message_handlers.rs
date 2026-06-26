@@ -225,6 +225,12 @@ pub fn handle_claude_output(
     // silently dropping the message (the frontend keeps its prior
     // watermark and a future message will heal it).
     let mut row_created_at: Option<String> = None;
+    // Provenance-derived origin + the (possibly body-stripped) content for the
+    // live broadcast. Set inside the persist block so the live frame matches
+    // what the replay path will later derive from the row's `provenance_*`
+    // columns. `None` (no DB insert) → broadcast the original content, no origin.
+    let mut broadcast_origin: Option<shared::MessageOrigin> = None;
+    let mut broadcast_content: Option<serde_json::Value> = None;
     if let (Some(session_id), Ok(mut conn)) = (db_session_id, db_pool.get()) {
         use crate::schema::{messages, sessions};
 
@@ -244,12 +250,51 @@ pub fn handle_claude_output(
                 .map(|(id, _)| *id)
                 .unwrap_or(owner_user_id);
 
+            // Normalize an inter-agent message (the transitional #1115
+            // `PortalContent::AgentMessage` envelope arriving from the proxy)
+            // into typed `provenance_*` columns + body-only content, so the
+            // row carries origin as metadata and the frontend renders from
+            // `MessageOrigin` rather than parsing the content envelope.
+            let inter_agent = serde_json::from_value::<shared::PortalMessage>(content.clone())
+                .ok()
+                .and_then(|m| {
+                    m.as_agent_message().map(|(agent, sid, body)| {
+                        (agent.to_string(), sid.to_string(), body.to_string())
+                    })
+                });
+            let (stored_content, prov_kind, prov_session, prov_agent) = match &inter_agent {
+                Some((from_agent_type, from_session_id, body)) => (
+                    body.clone(),
+                    Some("inter_agent".to_string()),
+                    Uuid::parse_str(from_session_id).ok(),
+                    Some(from_agent_type.clone()),
+                ),
+                None => (content.to_string(), None, None, None),
+            };
+
+            // Derive the wire origin from the same provenance + role, and send
+            // body-only content for inter-agent messages so the live frame and
+            // the replayed row render identically (frontend reads origin +
+            // plain body, never the envelope).
+            broadcast_origin = Some(shared::MessageOrigin::from_provenance(
+                prov_kind.as_deref(),
+                prov_session.map(|id| id.to_string()),
+                prov_agent.clone(),
+                &role.to_string(),
+            ));
+            if let Some((_, _, body)) = &inter_agent {
+                broadcast_content = Some(serde_json::Value::String(body.clone()));
+            }
+
             let new_message = crate::models::NewMessage {
                 session_id,
                 role: role.to_string(),
-                content: content.to_string(),
+                content: stored_content,
                 user_id: actual_user_id,
                 agent_type: agent_type.as_str().to_string(),
+                provenance_kind: prov_kind,
+                provenance_session_id: prov_session,
+                provenance_agent_type: prov_agent,
             };
 
             match diesel::insert_into(messages::table)
@@ -316,11 +361,12 @@ pub fn handle_claude_output(
         session_manager.broadcast_to_web_clients(
             key,
             ServerToClient::AgentOutput {
-                content,
+                content: broadcast_content.unwrap_or(content),
                 sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
                 sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
                 agent_type,
                 created_at: row_created_at,
+                origin: broadcast_origin,
             },
         );
     }

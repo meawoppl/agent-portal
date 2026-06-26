@@ -83,6 +83,12 @@ pub enum ServerToClient {
         /// with older backends.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         created_at: Option<String>,
+        /// Message provenance derived backend-side from the `messages`
+        /// `provenance_*` columns + `role`. `None` on older/mixed-version
+        /// frames; the frontend prefers this when present and falls back to
+        /// legacy content detection only when absent. See [`MessageOrigin`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<crate::MessageOrigin>,
     },
 
     /// Batch of historical messages for replay.

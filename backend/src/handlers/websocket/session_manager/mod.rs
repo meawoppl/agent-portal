@@ -135,6 +135,7 @@ pub(super) mod test_support {
             sender_name: None,
             agent_type: shared::AgentType::Claude,
             created_at: None,
+            origin: None,
         }
     }
 }

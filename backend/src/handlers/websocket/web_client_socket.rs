@@ -375,6 +375,9 @@ fn handle_web_input(
                     content: serde_json::to_string(&portal.to_json()).unwrap_or_default(),
                     user_id,
                     agent_type: session.agent_type.clone(),
+                    provenance_kind: None,
+                    provenance_session_id: None,
+                    provenance_agent_type: None,
                 };
                 match diesel::insert_into(messages::table)
                     .values(&new_message)
@@ -402,6 +405,7 @@ fn handle_web_input(
                     sender_name: None,
                     agent_type,
                     created_at: row_created_at,
+                    origin: None,
                 },
             );
         }

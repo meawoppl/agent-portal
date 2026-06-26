@@ -133,6 +133,19 @@ pub(super) fn replay_history(
                     "_created_at".to_string(),
                     serde_json::Value::String(created_at_str),
                 );
+                // Inject _origin (derived from the row's provenance columns +
+                // role) so the frontend renders inter-agent (and other) origins
+                // from metadata, matching the live `AgentOutput.origin` field.
+                let origin = shared::MessageOrigin::from_provenance(
+                    msg.provenance_kind.as_deref(),
+                    msg.provenance_session_id.map(|id| id.to_string()),
+                    msg.provenance_agent_type.clone(),
+                    &msg.role,
+                );
+                obj.insert(
+                    "_origin".to_string(),
+                    serde_json::to_value(origin).unwrap_or(serde_json::Value::Null),
+                );
             }
             val
         })

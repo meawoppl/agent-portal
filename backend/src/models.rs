@@ -99,6 +99,12 @@ pub struct Message {
     pub created_at: NaiveDateTime,
     pub user_id: Uuid,
     pub agent_type: String,
+    /// Typed message provenance (see `MessageOrigin`). `provenance_kind`
+    /// `"inter_agent"` + the two attribution columns mark an inter-agent
+    /// message; all NULL means derive origin from `role`.
+    pub provenance_kind: Option<String>,
+    pub provenance_session_id: Option<Uuid>,
+    pub provenance_agent_type: Option<String>,
 }
 
 #[derive(Debug, Insertable)]
@@ -109,6 +115,12 @@ pub struct NewMessage {
     pub content: String,
     pub user_id: Uuid,
     pub agent_type: String,
+    #[diesel(column_name = provenance_kind)]
+    pub provenance_kind: Option<String>,
+    #[diesel(column_name = provenance_session_id)]
+    pub provenance_session_id: Option<Uuid>,
+    #[diesel(column_name = provenance_agent_type)]
+    pub provenance_agent_type: Option<String>,
 }
 
 // ============================================================================

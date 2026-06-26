@@ -328,6 +328,61 @@ pub struct PortalMessage {
     pub content: Vec<PortalContent>,
 }
 
+/// Provenance of a persisted message, derived **backend-side** from the typed
+/// `messages.provenance_*` columns (+ `role`) and carried on the wire so the
+/// frontend branches on record metadata instead of parsing message content.
+///
+/// Wire shape is `{ "kind": "...", ... }`. Carried as `Option<MessageOrigin>`
+/// (`#[serde(default)]`) on live + history frames so older/mixed-version frames
+/// deserialize to `None` and the frontend can fall back to legacy detection
+/// only for those.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MessageOrigin {
+    /// Ordinary agent/protocol message with no special provenance.
+    Normal,
+    /// Local human user input.
+    UserInput,
+    /// A portal-generated event (reminders, continuation prompts, etc.).
+    PortalEvent,
+    /// Output produced by this session's own agent.
+    AgentOutput,
+    /// A message delivered from another agent session via `agent-portal
+    /// message`. Carries the sender's attribution for rendering.
+    InterAgent {
+        from_session_id: String,
+        from_agent_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display_name: Option<String>,
+    },
+}
+
+impl MessageOrigin {
+    /// Derive the origin from the persisted `provenance_*` columns and `role`.
+    /// `provenance_kind == "inter_agent"` (with attribution columns) yields
+    /// [`MessageOrigin::InterAgent`]; otherwise the origin falls out of `role`.
+    pub fn from_provenance(
+        provenance_kind: Option<&str>,
+        provenance_session_id: Option<String>,
+        provenance_agent_type: Option<String>,
+        role: &str,
+    ) -> Self {
+        match provenance_kind {
+            Some("inter_agent") => MessageOrigin::InterAgent {
+                from_session_id: provenance_session_id.unwrap_or_default(),
+                from_agent_type: provenance_agent_type.unwrap_or_default(),
+                display_name: None,
+            },
+            _ => match role {
+                "user" => MessageOrigin::UserInput,
+                "assistant" => MessageOrigin::AgentOutput,
+                "portal" => MessageOrigin::PortalEvent,
+                _ => MessageOrigin::Normal,
+            },
+        }
+    }
+}
+
 impl PortalMessage {
     /// The invariant `"type"` tag value for portal messages.
     pub const MESSAGE_TYPE: &'static str = "portal";
@@ -342,6 +397,23 @@ impl PortalMessage {
 
     pub fn text(text: String) -> Self {
         Self::with_content(vec![PortalContent::Text { text }])
+    }
+
+    /// If this is a sole `AgentMessage` envelope (the #1115 transitional
+    /// transport from proxy → backend), return its `(from_agent_type,
+    /// from_session_id, body_text)`. The backend uses this at persist time to
+    /// normalize the inter-agent message into typed `provenance_*` columns +
+    /// a body-only `content`, so the frontend renders from `MessageOrigin`.
+    pub fn as_agent_message(&self) -> Option<(&str, &str, &str)> {
+        let [PortalContent::AgentMessage {
+            from_agent_type,
+            from_session_id,
+            text,
+        }] = self.content.as_slice()
+        else {
+            return None;
+        };
+        Some((from_agent_type, from_session_id, text))
     }
 
     pub fn image(media_type: String, data: String) -> Self {

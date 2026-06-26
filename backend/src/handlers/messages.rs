@@ -99,6 +99,9 @@ pub async fn create_message(
         content: req.content,
         user_id: current_user_id,
         agent_type: session.agent_type.clone(),
+        provenance_kind: None,
+        provenance_session_id: None,
+        provenance_agent_type: None,
     };
 
     let message: Message = diesel::insert_into(messages::table)

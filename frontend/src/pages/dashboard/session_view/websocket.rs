@@ -135,6 +135,11 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             // the live and historical-read paths stay agent-agnostic.
             agent_type: _,
             created_at,
+            // Typed message provenance (live path). Available for the frontend
+            // to branch inter-agent rendering off metadata instead of parsing
+            // content; wired up in the 2.12.30 frontend PR (Codex). Mirrors the
+            // `_origin` key injected on the history/replay path.
+            origin: _,
         } => {
             // Inject _sender into content for the renderer if sender info is
             // present. Also fold `created_at` into the content as
@@ -397,6 +402,7 @@ mod tests {
             sender_name: None,
             agent_type: shared::AgentType::Claude,
             created_at: Some(server_ts.clone()),
+            origin: None,
         };
 
         handle_proxy_message(msg, &cb);
@@ -438,6 +444,7 @@ mod tests {
             sender_name: None,
             agent_type: shared::AgentType::Claude,
             created_at: None,
+            origin: None,
         };
 
         handle_proxy_message(msg, &cb);
