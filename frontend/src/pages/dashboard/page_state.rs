@@ -10,6 +10,8 @@ use std::rc::Rc;
 use uuid::Uuid;
 use yew::Reducible;
 
+use super::types::RailPosition;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct DashboardSessionState {
     pub focused_id: Option<Uuid>,
@@ -149,6 +151,102 @@ fn set_membership(set: &mut HashSet<Uuid>, id: Uuid, present: bool) -> bool {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DashboardUiState {
+    pub show_launch_dialog: bool,
+    pub show_admin: bool,
+    pub show_settings: bool,
+    pub inactive_hidden: bool,
+    pub show_cost: bool,
+    pub rail_position: RailPosition,
+    pub pending_leave: Option<Uuid>,
+    pub pending_delete: Option<Uuid>,
+}
+
+impl DashboardUiState {
+    pub fn new(inactive_hidden: bool, show_cost: bool, rail_position: RailPosition) -> Self {
+        Self {
+            show_launch_dialog: false,
+            show_admin: false,
+            show_settings: false,
+            inactive_hidden,
+            show_cost,
+            rail_position,
+            pending_leave: None,
+            pending_delete: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum DashboardUiAction {
+    ToggleLaunchDialog,
+    CloseLaunchDialog,
+    ShowAdmin,
+    CloseAdmin,
+    ShowSettings,
+    CloseSettings,
+    SetInactiveHidden(bool),
+    SetShowCost(bool),
+    SetRailPosition(RailPosition),
+    RequestLeave(Uuid),
+    ClearPendingLeave,
+    RequestDelete(Uuid),
+    ClearPendingDelete,
+}
+
+impl Reducible for DashboardUiState {
+    type Action = DashboardUiAction;
+
+    fn reduce(self: Rc<Self>, action: Self::Action) -> Rc<Self> {
+        let mut state = (*self).clone();
+
+        match action {
+            DashboardUiAction::ToggleLaunchDialog => {
+                state.show_launch_dialog = !state.show_launch_dialog;
+            }
+            DashboardUiAction::CloseLaunchDialog => {
+                state.show_launch_dialog = false;
+            }
+            DashboardUiAction::ShowAdmin => {
+                state.show_admin = true;
+            }
+            DashboardUiAction::CloseAdmin => {
+                state.show_admin = false;
+            }
+            DashboardUiAction::ShowSettings => {
+                state.show_settings = true;
+            }
+            DashboardUiAction::CloseSettings => {
+                state.show_settings = false;
+            }
+            DashboardUiAction::SetInactiveHidden(hidden) => {
+                state.inactive_hidden = hidden;
+            }
+            DashboardUiAction::SetShowCost(show) => {
+                state.show_cost = show;
+            }
+            DashboardUiAction::SetRailPosition(position) => {
+                state.rail_position = position;
+            }
+            DashboardUiAction::RequestLeave(session_id) => {
+                state.pending_leave = Some(session_id);
+            }
+            DashboardUiAction::ClearPendingLeave => {
+                state.pending_leave = None;
+            }
+            DashboardUiAction::RequestDelete(session_id) => {
+                state.pending_delete = Some(session_id);
+            }
+            DashboardUiAction::ClearPendingDelete => {
+                state.pending_delete = None;
+            }
+        }
+
+        Rc::new(state)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +340,57 @@ mod tests {
 
         let state = state.reduce(DashboardSessionAction::MessageSent(id(1)));
         assert!(!state.awaiting_sessions.contains(&id(1)));
+    }
+
+    fn reduce_ui(state: DashboardUiState, action: DashboardUiAction) -> Rc<DashboardUiState> {
+        Rc::new(state).reduce(action)
+    }
+
+    #[test]
+    fn ui_reducer_controls_modal_visibility() {
+        let state = DashboardUiState::new(false, false, RailPosition::Top);
+        let state = reduce_ui(state, DashboardUiAction::ToggleLaunchDialog);
+        assert!(state.show_launch_dialog);
+
+        let state = state.reduce(DashboardUiAction::CloseLaunchDialog);
+        assert!(!state.show_launch_dialog);
+
+        let state = state.reduce(DashboardUiAction::ShowAdmin);
+        assert!(state.show_admin);
+        let state = state.reduce(DashboardUiAction::CloseAdmin);
+        assert!(!state.show_admin);
+
+        let state = state.reduce(DashboardUiAction::ShowSettings);
+        assert!(state.show_settings);
+        let state = state.reduce(DashboardUiAction::CloseSettings);
+        assert!(!state.show_settings);
+    }
+
+    #[test]
+    fn ui_reducer_tracks_preferences() {
+        let state = DashboardUiState::new(false, false, RailPosition::Top);
+        let state = reduce_ui(state, DashboardUiAction::SetInactiveHidden(true));
+        let state = state.reduce(DashboardUiAction::SetShowCost(true));
+        let state = state.reduce(DashboardUiAction::SetRailPosition(RailPosition::Left));
+
+        assert!(state.inactive_hidden);
+        assert!(state.show_cost);
+        assert_eq!(state.rail_position, RailPosition::Left);
+    }
+
+    #[test]
+    fn ui_reducer_tracks_pending_confirmations() {
+        let state = DashboardUiState::new(false, false, RailPosition::Top);
+        let state = reduce_ui(state, DashboardUiAction::RequestLeave(id(1)));
+        let state = state.reduce(DashboardUiAction::RequestDelete(id(2)));
+
+        assert_eq!(state.pending_leave, Some(id(1)));
+        assert_eq!(state.pending_delete, Some(id(2)));
+
+        let state = state.reduce(DashboardUiAction::ClearPendingLeave);
+        let state = state.reduce(DashboardUiAction::ClearPendingDelete);
+
+        assert_eq!(state.pending_leave, None);
+        assert_eq!(state.pending_delete, None);
     }
 }
