@@ -120,6 +120,49 @@ impl Message {
             _ => None,
         }
     }
+
+    /// Who produced this message, mapped from the durable columns to the typed
+    /// [`shared::MessageSource`] (portal-meta sidecar, see
+    /// `docs/PORTAL_META_SIDECAR.md`). Inter-agent provenance wins (it is itself
+    /// a `portal`-role row); otherwise the role decides. `sender_name` is the
+    /// resolved display name for user-role messages. Returns `None` for the
+    /// session's own agent output (assistant/system/result/error).
+    pub fn message_source(&self, sender_name: Option<String>) -> Option<shared::MessageSource> {
+        if let (Some("inter_agent"), Some(session_id), Some(agent_type)) = (
+            self.provenance_kind.as_deref(),
+            self.provenance_session_id,
+            self.provenance_agent_type.as_deref(),
+        ) {
+            return Some(shared::MessageSource::Agent {
+                session_id,
+                agent_type: agent_type.to_string(),
+            });
+        }
+        match self.role.as_str() {
+            "user" => Some(shared::MessageSource::Human {
+                account_id: self.user_id,
+                name: sender_name.unwrap_or_default(),
+            }),
+            "portal" => Some(shared::MessageSource::Portal),
+            _ => None,
+        }
+    }
+
+    /// ISO-8601 microsecond timestamp matching the wire format the frontend's
+    /// reconnect watermark + `replay_history` parser expect.
+    pub fn created_at_iso(&self) -> String {
+        self.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()
+    }
+
+    /// Build the typed [`shared::PortalMeta`] sidecar for this row. The backend
+    /// only ever populates `created_at` + `source`; `delivery` is frontend-owned.
+    pub fn portal_meta(&self, sender_name: Option<String>) -> shared::PortalMeta {
+        shared::PortalMeta {
+            created_at: Some(self.created_at_iso()),
+            source: self.message_source(sender_name),
+            delivery: None,
+        }
+    }
 }
 
 #[derive(Debug, Insertable)]
@@ -463,4 +506,62 @@ pub struct NewTurnMetric {
     pub tool_call_count: i32,
     pub stream_restarts: i32,
     pub total_cost_usd: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(role: &str, provenance_kind: Option<&str>) -> Message {
+        Message {
+            id: Uuid::nil(),
+            session_id: Uuid::nil(),
+            role: role.to_string(),
+            content: "{}".to_string(),
+            created_at: NaiveDateTime::default(),
+            user_id: Uuid::from_u128(7),
+            agent_type: "claude".to_string(),
+            provenance_kind: provenance_kind.map(str::to_string),
+            provenance_session_id: provenance_kind.map(|_| Uuid::from_u128(9)),
+            provenance_agent_type: provenance_kind.map(|_| "codex".to_string()),
+        }
+    }
+
+    #[test]
+    fn message_source_maps_columns_to_typed_source() {
+        use shared::MessageSource;
+
+        // Inter-agent provenance wins, even though the row is portal-role.
+        assert_eq!(
+            msg("portal", Some("inter_agent")).message_source(None),
+            Some(MessageSource::Agent {
+                session_id: Uuid::from_u128(9),
+                agent_type: "codex".to_string(),
+            })
+        );
+        // User row → Human, carrying the resolved display name.
+        assert_eq!(
+            msg("user", None).message_source(Some("Matt".to_string())),
+            Some(MessageSource::Human {
+                account_id: Uuid::from_u128(7),
+                name: "Matt".to_string(),
+            })
+        );
+        // Plain portal row (no provenance) → Portal.
+        assert_eq!(
+            msg("portal", None).message_source(None),
+            Some(MessageSource::Portal)
+        );
+        // The session's own agent output carries no source.
+        assert!(msg("assistant", None).message_source(None).is_none());
+    }
+
+    #[test]
+    fn portal_meta_carries_created_at_and_source_only() {
+        let meta = msg("user", None).portal_meta(Some("Matt".to_string()));
+        assert!(meta.created_at.is_some());
+        assert!(meta.source.is_some());
+        // Delivery is frontend-owned — the backend never sets it.
+        assert!(meta.delivery.is_none());
+    }
 }

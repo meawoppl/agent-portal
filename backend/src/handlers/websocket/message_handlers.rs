@@ -233,6 +233,9 @@ pub fn handle_claude_output(
     // silently dropping the message (the frontend keeps its prior
     // watermark and a future message will heal it).
     let mut row_created_at: Option<String> = None;
+    // Typed portal sidecar for the live broadcast, derived from the persisted
+    // row's columns (#portal-meta). `None` when the insert didn't run/failed.
+    let mut broadcast_meta: Option<shared::PortalMeta> = None;
     if let (Some(session_id), Ok(mut conn)) = (db_session_id, db_pool.get()) {
         use crate::schema::{messages, sessions};
 
@@ -271,12 +274,9 @@ pub fn handle_claude_output(
                     // Format matches `replay_history`'s parser
                     // (`%Y-%m-%dT%H:%M:%S%.f`) and the frontend's
                     // `last_message_timestamp` watermark shape.
-                    row_created_at = Some(
-                        inserted
-                            .created_at
-                            .format("%Y-%m-%dT%H:%M:%S%.6f")
-                            .to_string(),
-                    );
+                    row_created_at = Some(inserted.created_at_iso());
+                    broadcast_meta =
+                        Some(inserted.portal_meta(sender_info.as_ref().map(|(_, n)| n.clone())));
                 }
                 Err(e) => {
                     error!("Failed to store message: {}", e);
@@ -333,10 +333,7 @@ pub fn handle_claude_output(
                 agent_type,
                 created_at: row_created_at,
                 origin,
-                // Populated in slice 2 (backend meta population); None keeps
-                // slice 1 a pure additive contract change (see
-                // docs/PORTAL_META_SIDECAR.md).
-                meta: None,
+                meta: broadcast_meta,
             },
         );
     }
