@@ -106,7 +106,9 @@ pub fn handle_session_limit_reached(
         continuation.status.clone(),
         continuation.source_message.clone().unwrap_or_default(),
     );
-    let row_created_at = insert_portal_message(&mut conn, &session, &portal);
+    let inserted = insert_portal_message(&mut conn, &session, &portal);
+    let row_created_at = inserted.as_ref().map(|m| m.created_at_iso());
+    let meta = inserted.map(|m| m.portal_meta(None));
 
     if let Some(key) = session_key {
         session_manager.broadcast_to_web_clients(
@@ -118,7 +120,7 @@ pub fn handle_session_limit_reached(
                 agent_type: session.agent_type.parse().unwrap_or_default(),
                 created_at: row_created_at,
                 origin: None,
-                meta: None,
+                meta,
             },
         );
     }
@@ -278,7 +280,9 @@ fn update_terminal_status(
                         "Continuation was not sent because the local Claude process was no longer running when the session limit reset."
                             .to_string(),
                     );
-                    let row_created_at = insert_portal_message(&mut conn, &session, &portal);
+                    let inserted = insert_portal_message(&mut conn, &session, &portal);
+                    let row_created_at = inserted.as_ref().map(|m| m.created_at_iso());
+                    let meta = inserted.map(|m| m.portal_meta(None));
                     app_state.session_manager.broadcast_to_web_clients(
                         &session_id.to_string(),
                         ServerToClient::AgentOutput {
@@ -288,7 +292,7 @@ fn update_terminal_status(
                             agent_type: session.agent_type.parse().unwrap_or_default(),
                             created_at: row_created_at,
                             origin: None,
-                            meta: None,
+                            meta,
                         },
                     );
                 }
@@ -344,11 +348,14 @@ pub fn load_scheduled_continuations(
         .collect()
 }
 
+/// Insert a portal-role message and return the persisted row, so callers can
+/// derive both the server `created_at` and the typed `PortalMeta` sidecar
+/// (`source = Portal`) for the live broadcast (#portal-meta).
 fn insert_portal_message(
     conn: &mut diesel::PgConnection,
     session: &Session,
     portal: &PortalMessage,
-) -> Option<String> {
+) -> Option<crate::models::Message> {
     use crate::schema::messages;
     let new_message = NewMessage {
         session_id: session.id,
@@ -364,12 +371,7 @@ fn insert_portal_message(
         .values(&new_message)
         .get_result::<crate::models::Message>(conn)
     {
-        Ok(inserted) => Some(
-            inserted
-                .created_at
-                .format("%Y-%m-%dT%H:%M:%S%.6f")
-                .to_string(),
-        ),
+        Ok(inserted) => Some(inserted),
         Err(e) => {
             error!("Failed to store continuation portal message: {}", e);
             None

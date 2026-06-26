@@ -391,6 +391,9 @@ fn handle_web_input(
             // Insert first so the broadcast carries the server-assigned
             // `created_at` (closes #784 — same fix as handle_claude_output).
             let mut row_created_at: Option<String> = None;
+            // Typed portal sidecar for the broadcast (source = Portal), so a
+            // meta-only frontend gets created_at + source (#portal-meta).
+            let mut broadcast_meta: Option<shared::PortalMeta> = None;
             if let (Some(session), Ok(mut conn)) = (session.as_ref(), db_pool.get()) {
                 use crate::schema::messages;
                 let new_message = crate::models::NewMessage {
@@ -408,12 +411,8 @@ fn handle_web_input(
                     .get_result::<crate::models::Message>(&mut conn)
                 {
                     Ok(inserted) => {
-                        row_created_at = Some(
-                            inserted
-                                .created_at
-                                .format("%Y-%m-%dT%H:%M:%S%.6f")
-                                .to_string(),
-                        );
+                        row_created_at = Some(inserted.created_at_iso());
+                        broadcast_meta = Some(inserted.portal_meta(None));
                     }
                     Err(e) => {
                         error!("Failed to store portal message: {}", e);
@@ -430,7 +429,7 @@ fn handle_web_input(
                     agent_type,
                     created_at: row_created_at,
                     origin: None,
-                    meta: None,
+                    meta: broadcast_meta,
                 },
             );
         }
