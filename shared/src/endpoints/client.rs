@@ -5,10 +5,7 @@ use ws_bridge::WsEndpoint;
 use super::types::{
     FileUploadChunkFields, FileUploadStartFields, PermissionResponseFields, RegisterFields,
 };
-use crate::{
-    AgentType, MessageOrigin, PermissionSuggestion, SendMode, SessionCost, SessionStatus,
-    TurnMetrics,
-};
+use crate::{AgentType, PermissionSuggestion, SendMode, SessionCost, SessionStatus, TurnMetrics};
 
 /// Stages a user input passes through end to end, named by **transport fact**
 /// (not implied model semantics) so the UI never claims "the model has it"
@@ -41,7 +38,7 @@ pub enum MessageSource {
     /// multi-member sessions.
     Human { account_id: Uuid, name: String },
     /// Another agent session (inter-agent message) — drives the
-    /// "Message from Codex (…)" card. Subsumes the old `MessageOrigin::InterAgent`.
+    /// "Message from Codex (…)" card.
     Agent {
         session_id: Uuid,
         agent_type: String,
@@ -160,14 +157,11 @@ pub enum ClientToServer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerToClient {
-    /// Output from Claude Code
+    /// Output from Claude Code.
     #[serde(rename = "ClaudeOutput")]
     AgentOutput {
+        /// Raw agent JSON, untouched — all portal metadata rides in `meta`.
         content: serde_json::Value,
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        sender_user_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        sender_name: Option<String>,
         /// Which agent's wire format the `content` JSON came from.
         ///
         /// Mirrors the per-message `agent_type` tag on the proxy → backend
@@ -179,28 +173,12 @@ pub enum ServerToClient {
         /// (and any hand-rolled JSON) parseable; new code MUST set it.
         #[serde(default)]
         agent_type: AgentType,
-        /// Server-assigned `created_at` of the persisted `messages` row, in
-        /// the ISO-8601 microsecond format the backend's `replay_history`
-        /// parser accepts (`%Y-%m-%dT%H:%M:%S%.f`). Sourced from the DB row
-        /// (via `RETURNING created_at` on the insert) so the frontend can
-        /// remember the **server's** watermark for reconnect replay rather
-        /// than `Date.now()` (closes #784 — silent data-loss on reconnect
-        /// when client/server clocks were skewed). `Option<_>` + `#[serde(
-        /// default, skip_serializing_if = "Option::is_none")]` for the rare
-        /// broadcast paths that don't go through a DB insert (e.g. error
-        /// envelopes injected from in-memory state) and for wire compat
-        /// with older backends.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        created_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        origin: Option<MessageOrigin>,
-        /// Typed portal sidecar (attribution, sender, timestamp, delivery
-        /// stage). Carried alongside the raw `content`; the frontend renders
-        /// from this rather than from `_`-keys flattened into `content`. During
-        /// the transition the backend ALSO mirrors these values into the
-        /// deprecated flat fields above and the `_`-injection so an
-        /// un-updated frontend bundle keeps working; both are removed once the
-        /// frontend reads `meta` in production (see `docs/PORTAL_META_SIDECAR.md`).
+        /// Typed portal sidecar: attribution (`source`), server `created_at`
+        /// (the reconnect-replay watermark, closes #784), and frontend-owned
+        /// delivery state. Replaces the former flat `sender_*` / `created_at` /
+        /// `origin` fields and the `_`-key injection (see
+        /// `docs/PORTAL_META_SIDECAR.md`). `Option`/`default` keeps the rare
+        /// no-DB broadcast paths and old-wire frames parseable.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         meta: Option<PortalMeta>,
     },

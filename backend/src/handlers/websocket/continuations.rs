@@ -106,20 +106,14 @@ pub fn handle_session_limit_reached(
         continuation.status.clone(),
         continuation.source_message.clone().unwrap_or_default(),
     );
-    let inserted = insert_portal_message(&mut conn, &session, &portal);
-    let row_created_at = inserted.as_ref().map(|m| m.created_at_iso());
-    let meta = inserted.map(|m| m.portal_meta(None));
+    let meta = insert_portal_message(&mut conn, &session, &portal).map(|m| m.portal_meta(None));
 
     if let Some(key) = session_key {
         session_manager.broadcast_to_web_clients(
             key,
             ServerToClient::AgentOutput {
                 content: portal.to_json(),
-                sender_user_id: None,
-                sender_name: None,
                 agent_type: session.agent_type.parse().unwrap_or_default(),
-                created_at: row_created_at,
-                origin: None,
                 meta,
             },
         );
@@ -280,18 +274,13 @@ fn update_terminal_status(
                         "Continuation was not sent because the local Claude process was no longer running when the session limit reset."
                             .to_string(),
                     );
-                    let inserted = insert_portal_message(&mut conn, &session, &portal);
-                    let row_created_at = inserted.as_ref().map(|m| m.created_at_iso());
-                    let meta = inserted.map(|m| m.portal_meta(None));
+                    let meta = insert_portal_message(&mut conn, &session, &portal)
+                        .map(|m| m.portal_meta(None));
                     app_state.session_manager.broadcast_to_web_clients(
                         &session_id.to_string(),
                         ServerToClient::AgentOutput {
                             content: portal.to_json(),
-                            sender_user_id: None,
-                            sender_name: None,
                             agent_type: session.agent_type.parse().unwrap_or_default(),
-                            created_at: row_created_at,
-                            origin: None,
                             meta,
                         },
                     );

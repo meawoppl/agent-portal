@@ -1,8 +1,8 @@
 # Portal metadata sidecar — design & plan
 
-**Status:** proposed (Claude + Codex co-design)
+**Status:** ✅ implemented — all slices landed; zero `_`-keys remain in production. Claude + Codex co-design.
 **Owners:** backend/shared → Claude · frontend → Codex
-**Tracking versions:** TBD per slice (coordinate to avoid parallel-PR collisions)
+**Shipped:** #1131 (contract) · #1132 (backend populate) · #1135 (frontend meta-only) · cleanup (this PR: strip `_`-injection + flat fields + `MessageOrigin`).
 
 ## 1. Problem
 
@@ -222,8 +222,7 @@ wrapper once no old bundles remain, or keep the parallel form if simpler.
 | 1 | `shared`: add `PortalMeta` + `MessageSource` + `DeliveryMeta`; add `meta` to `AgentOutput` and index-aligned `message_meta` to `HistoryBatch` (additive, defaults) | Claude | — |
 | 2 | Backend: `Message::portal_meta()`; populate `meta` on live + HTTP + WS-replay paths (keep flat fields + `_`-injection) | Claude | 1 |
 | 3 | Frontend: read from `meta` when present, fall back to `_`-keys; render unchanged | Codex | 1 |
-| 4 | Backend: stop rewriting `content` in `normalize_output_content` (keep columns) | Claude | 3 deployed |
-| 5 | Remove `_`-injection + deprecated flat fields once all clients read `meta` | Codex + Claude | 3, 4 |
+| 4+5 | ✅ Remove backend `_`-injection (`replay.rs`), the deprecated flat `AgentOutput`/`MessageWithSender` fields, `NormalizedOutputContent.origin`, `Message::origin()`, and the `MessageOrigin` type. `normalize_output_content` still moves inter-agent attribution to the provenance columns (frontend renders from `meta.source`); the content rewrite-to-text is retained (a no-op for the typed render path). | Claude | 3 merged |
 
 Slices 1–3 are the bulk and can run in parallel after slice 1's shape lands.
 Slices 4–5 are cleanup, gated on the frontend cutover being live.

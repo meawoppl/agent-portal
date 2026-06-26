@@ -2,9 +2,7 @@ use super::{ProxySender, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
 use serde::Deserialize;
-use shared::{
-    AgentType, MessageOrigin, PortalContent, PortalMessage, SendMode, ServerToClient, ServerToProxy,
-};
+use shared::{AgentType, PortalContent, PortalMessage, SendMode, ServerToClient, ServerToProxy};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -221,18 +219,13 @@ pub fn handle_claude_output(
     };
     let normalized = normalize_output_content(content);
     let content = normalized.content;
-    let origin = normalized.origin.clone();
 
-    // Insert the message FIRST and recover the server-assigned `created_at`
-    // so the live broadcast carries the same timestamp the historical-read
-    // path would surface (closes #784 — silent data-loss on reconnect when
-    // the frontend used `Date.now()` as the replay watermark). Doing the
-    // insert before the broadcast is the only way to make the persisted
-    // row's `created_at` available to the wire frame; if the insert fails
-    // we fall back to broadcasting without a timestamp rather than
-    // silently dropping the message (the frontend keeps its prior
-    // watermark and a future message will heal it).
-    let mut row_created_at: Option<String> = None;
+    // Insert the message FIRST so the live broadcast's `meta` carries the
+    // server-assigned `created_at` the historical-read path would surface
+    // (closes #784 — silent data-loss on reconnect when the frontend used
+    // `Date.now()` as the replay watermark). If the insert fails we broadcast
+    // without `meta` rather than dropping the message (the frontend keeps its
+    // prior watermark and a future message heals it).
     // Typed portal sidecar for the live broadcast, derived from the persisted
     // row's columns (#portal-meta). `None` when the insert didn't run/failed.
     let mut broadcast_meta: Option<shared::PortalMeta> = None;
@@ -271,10 +264,8 @@ pub fn handle_claude_output(
                 .get_result::<crate::models::Message>(&mut conn)
             {
                 Ok(inserted) => {
-                    // Format matches `replay_history`'s parser
-                    // (`%Y-%m-%dT%H:%M:%S%.f`) and the frontend's
-                    // `last_message_timestamp` watermark shape.
-                    row_created_at = Some(inserted.created_at_iso());
+                    // `meta.created_at` becomes the frontend's reconnect
+                    // watermark (matches `replay_history`'s `%Y-%m-%dT%H:%M:%S%.f`).
                     broadcast_meta =
                         Some(inserted.portal_meta(sender_info.as_ref().map(|(_, n)| n.clone())));
                 }
@@ -319,20 +310,15 @@ pub fn handle_claude_output(
         }
     }
 
-    // Broadcast output to all web clients with sender metadata + server
-    // timestamp alongside content. The `created_at` here is the same
-    // timestamp the message landed in the DB with; the frontend uses it
-    // as the watermark for reconnect replay (closes #784).
+    // Broadcast raw output to all web clients. Sender/attribution and the
+    // server `created_at` watermark (closes #784) ride in `meta`; the frontend
+    // renders entirely from it (see docs/PORTAL_META_SIDECAR.md).
     if let Some(ref key) = session_key {
         session_manager.broadcast_to_web_clients(
             key,
             ServerToClient::AgentOutput {
                 content,
-                sender_user_id: sender_info.as_ref().map(|(id, _)| id.to_string()),
-                sender_name: sender_info.as_ref().map(|(_, name)| name.clone()),
                 agent_type,
-                created_at: row_created_at,
-                origin,
                 meta: broadcast_meta,
             },
         );
@@ -341,7 +327,6 @@ pub fn handle_claude_output(
 
 struct NormalizedOutputContent {
     content: serde_json::Value,
-    origin: Option<MessageOrigin>,
     provenance_kind: Option<String>,
     provenance_session_id: Option<Uuid>,
     provenance_agent_type: Option<String>,
@@ -350,7 +335,6 @@ struct NormalizedOutputContent {
 fn normalize_output_content(content: serde_json::Value) -> NormalizedOutputContent {
     let base = NormalizedOutputContent {
         content,
-        origin: None,
         provenance_kind: None,
         provenance_session_id: None,
         provenance_agent_type: None,
@@ -371,13 +355,11 @@ fn normalize_output_content(content: serde_json::Value) -> NormalizedOutputConte
         return base;
     };
 
-    let origin = MessageOrigin::InterAgent {
-        from_session_id,
-        from_agent_type: from_agent_type.clone(),
-    };
+    // Move the inter-agent attribution into the provenance columns; the
+    // frontend renders the "Message from …" card from the typed `meta.source`
+    // derived from these (see docs/PORTAL_META_SIDECAR.md).
     NormalizedOutputContent {
         content: PortalMessage::text(text.clone()).to_json(),
-        origin: Some(origin),
         provenance_kind: Some("inter_agent".to_string()),
         provenance_session_id: Some(from_session_id),
         provenance_agent_type: Some(from_agent_type.clone()),
@@ -572,26 +554,18 @@ mod tests {
         assert_eq!(normalized.provenance_kind.as_deref(), Some("inter_agent"));
         assert_eq!(normalized.provenance_session_id, Some(sender));
         assert_eq!(normalized.provenance_agent_type.as_deref(), Some("claude"));
-        assert_eq!(
-            normalized.origin,
-            Some(MessageOrigin::InterAgent {
-                from_session_id: sender,
-                from_agent_type: "claude".to_string()
-            })
-        );
         assert_eq!(normalized.content["type"], "portal");
         assert_eq!(normalized.content["content"][0]["type"], "text");
         assert_eq!(normalized.content["content"][0]["text"], "hello from peer");
     }
 
     /// Anything that isn't a single, well-formed AgentMessage must pass through
-    /// untouched — no origin, no provenance, content byte-identical. A bug here
-    /// would either drop a normal message's body or fabricate bogus inter-agent
+    /// untouched — no provenance, content byte-identical. A bug here would
+    /// either drop a normal message's body or fabricate bogus inter-agent
     /// provenance on it.
     fn assert_passthrough(content: serde_json::Value) {
         let normalized = normalize_output_content(content.clone());
         assert_eq!(normalized.content, content);
-        assert!(normalized.origin.is_none());
         assert!(normalized.provenance_kind.is_none());
         assert!(normalized.provenance_session_id.is_none());
         assert!(normalized.provenance_agent_type.is_none());

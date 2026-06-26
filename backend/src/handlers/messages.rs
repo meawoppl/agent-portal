@@ -78,11 +78,8 @@ pub struct MessageWithSender {
     pub message: Message,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sender_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub origin: Option<shared::MessageOrigin>,
-    /// Typed portal sidecar (`created_at` + `source`); the frontend renders from
-    /// this. `origin`/`sender_name` above stay during the transition (see
-    /// docs/PORTAL_META_SIDECAR.md).
+    /// Typed portal sidecar (`created_at` + `source`); the frontend renders
+    /// entirely from this (see docs/PORTAL_META_SIDECAR.md).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<shared::PortalMeta>,
 }
@@ -219,12 +216,10 @@ pub async fn list_messages(
             } else {
                 None
             };
-            let origin = msg.origin();
             let meta = Some(msg.portal_meta(sender_name.clone()));
             MessageWithSender {
                 message: msg,
                 sender_name,
-                origin,
                 meta,
             }
         })
