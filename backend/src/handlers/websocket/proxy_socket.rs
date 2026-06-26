@@ -274,10 +274,20 @@ fn handle_proxy_message(
             handle_input_ack(*db_session_id, db_pool, ack_session_id, ack_seq);
         }
         ProxyToServer::InputProgressAck {
+            session_id: ack_session_id,
             client_msg_id,
             stage,
-            ..
         } => {
+            let Some(current_session_id) = *db_session_id else {
+                return ControlFlow::Continue(());
+            };
+            if ack_session_id != current_session_id {
+                warn!(
+                    "InputProgressAck session_id mismatch: {} != {}",
+                    ack_session_id, current_session_id,
+                );
+                return ControlFlow::Continue(());
+            }
             // Relay the proxy's per-stage delivery signal to the session's web
             // clients (#939); each frontend advances the matching optimistic
             // row by client_msg_id. Failure detail isn't carried on this hop.

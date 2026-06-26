@@ -1061,6 +1061,13 @@ async fn run_main_loop<A: Agent>(
                     &state.git_metadata,
                 )
                 .await;
+                emit_input_progress(
+                    &state.ws_write,
+                    state.session_id,
+                    wiggum_input.client_msg_id,
+                    shared::InputDeliveryStage::ProxyReceived,
+                )
+                .await;
                 let prompt = wiggum_prompt(&wiggum_input.text);
                 state.wiggum_state = Some(WiggumState {
                     original_prompt: wiggum_input.text,
@@ -1070,8 +1077,22 @@ async fn run_main_loop<A: Agent>(
                 });
                 if let Err(e) = claude_session.send_input(serde_json::Value::String(prompt)).await {
                     error!("Failed to send wiggum prompt to Claude: {}", e);
+                    emit_input_progress(
+                        &state.ws_write,
+                        state.session_id,
+                        wiggum_input.client_msg_id,
+                        shared::InputDeliveryStage::Failed,
+                    )
+                    .await;
                     return ConnectionResult::ClaudeExited;
                 }
+                emit_input_progress(
+                    &state.ws_write,
+                    state.session_id,
+                    wiggum_input.client_msg_id,
+                    shared::InputDeliveryStage::AgentAccepted,
+                )
+                .await;
                 ack_portal_input(&state.ws_write, wiggum_input.ack).await;
             }
 
