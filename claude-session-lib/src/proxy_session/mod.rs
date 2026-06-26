@@ -895,8 +895,43 @@ async fn run_main_loop<A: Agent>(
                     );
                     return ConnectionResult::Disconnected(state.connection_start.elapsed());
                 }
-                let mut ws = state.ws_write.lock().await;
-                let _ = ws.send(ProxyToServer::Heartbeat).await;
+                // Bound the heartbeat lock+send. On a half-dead socket (e.g.
+                // after a backend restart) the send can block forever; that
+                // starves this `select!` so the disconnect / graceful-shutdown
+                // arms never fire and the data plane reconnects never — the
+                // session is "shown but not connected" until the launcher is
+                // restarted (#926). Timing out the lock acquisition *and* the
+                // send makes this heartbeat a true watchdog: even if another
+                // ws_write send is wedged holding the lock, this fires and
+                // returns `Disconnected`, letting `run_connection_loop`'s
+                // reconnect/backoff recover the connection.
+                let send = async {
+                    let mut ws = state.ws_write.lock().await;
+                    ws.send(ProxyToServer::Heartbeat).await
+                };
+                match tokio::time::timeout(
+                    session_lib::heartbeat::HEARTBEAT_TIMEOUT,
+                    send,
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        warn!("Heartbeat send failed ({e}), forcing reconnect");
+                        return ConnectionResult::Disconnected(
+                            state.connection_start.elapsed(),
+                        );
+                    }
+                    Err(_) => {
+                        warn!(
+                            "Heartbeat send blocked >{}s (dead socket), forcing reconnect",
+                            session_lib::heartbeat::HEARTBEAT_TIMEOUT.as_secs()
+                        );
+                        return ConnectionResult::Disconnected(
+                            state.connection_start.elapsed(),
+                        );
+                    }
+                }
             }
 
             Some(()) = recv_option(&mut state.session_terminated_rx) => {
