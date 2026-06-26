@@ -451,6 +451,48 @@ mod tests {
         }
     }
 
+    /// Inter-agent attribution is carried on the live `AgentOutput.origin`
+    /// field, then injected as `_origin` into the JSON consumed by the portal
+    /// renderer. If this translation is dropped, a properly normalized
+    /// inter-agent message renders as a generic PORTAL card.
+    #[test]
+    fn agent_output_with_origin_injects_origin_metadata() {
+        let (cb, sink) = capture();
+        let from_session_id =
+            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("uuid");
+        let msg = ServerToClient::AgentOutput {
+            content: serde_json::json!({
+                "type": "portal",
+                "content": [{"type": "text", "text": "hello from peer"}],
+            }),
+            sender_user_id: None,
+            sender_name: None,
+            agent_type: shared::AgentType::Codex,
+            created_at: None,
+            origin: Some(shared::MessageOrigin::InterAgent {
+                from_session_id,
+                from_agent_type: "codex".to_string(),
+            }),
+        };
+
+        handle_proxy_message(msg, &cb);
+
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WsEvent::Output(content, _) => {
+                let parsed: serde_json::Value = serde_json::from_str(content).unwrap();
+                assert_eq!(parsed["_origin"]["kind"], "inter_agent");
+                assert_eq!(
+                    parsed["_origin"]["from_session_id"],
+                    "11111111-1111-1111-1111-111111111111"
+                );
+                assert_eq!(parsed["_origin"]["from_agent_type"], "codex");
+            }
+            other => panic!("expected Output, got {:?}", debug_event(other)),
+        }
+    }
+
     /// Backward-compat: a pre-#784 backend doesn't send `created_at`. The
     /// `WsEvent::Output` watermark is then `None`, and the component is
     /// expected to keep its prior watermark (never falling back to
