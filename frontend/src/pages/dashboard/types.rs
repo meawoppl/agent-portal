@@ -2,6 +2,7 @@
 
 use crate::utils::{storage_get, storage_set};
 use serde::Deserialize;
+use shared::ToolInput;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -209,32 +210,26 @@ pub fn calculate_backoff(attempt: u32) -> u32 {
 /// `input` is a `serde_json::Value` because the cross-agent
 /// `ServerToClient::PermissionRequest` wire envelope carries both
 /// claude-side tool inputs (whose typed shape lives in `claude-codes`)
-/// and codex-side typed `CodexPermissionInput` envelopes. The codex
-/// arms try to parse the value into the typed envelope first so the
-/// proxy → frontend contract is enforced by serde, falling back to the
-/// historical JSON-poke arms only if the parse fails (e.g. an in-flight
-/// frame from a proxy older than the rollout).
+/// and codex-side typed `CodexPermissionInput` envelopes. Both sides
+/// parse into typed SDK/shared shapes so field-name changes break at
+/// compile time instead of silently falling through display code.
 pub fn format_permission_input(tool_name: &str, input: &serde_json::Value) -> String {
     // Codex-side: try to round-trip the typed envelope first. Closes #731.
     if let Ok(codex_input) = serde_json::from_value::<shared::CodexPermissionInput>(input.clone()) {
         return format_codex_permission_input(&codex_input);
     }
 
-    // Claude-side tool inputs (Bash/Read/Edit/Write) follow the
-    // `claude-codes::tool_inputs::ToolInput` shape, which is a different
-    // IPC envelope than `CodexPermissionInput`. Keep the existing
-    // JSON-poke arms; typing this side is a separate refactor (#735/#736).
-    match tool_name {
-        "Bash" => input
-            .get("command")
-            .and_then(|v| v.as_str())
-            .map(|s| format!("$ {}", s))
-            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
-        "Read" | "Edit" | "Write" => input
-            .get("file_path")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default()),
+    format_claude_permission_input(tool_name, input)
+}
+
+/// Render a Claude-side permission tool input from the SDK's named,
+/// typed `ToolInput` parser.
+fn format_claude_permission_input(tool_name: &str, input: &serde_json::Value) -> String {
+    match ToolInput::from_named_input(tool_name, input.clone()) {
+        ToolInput::Bash(bash) => format!("$ {}", bash.command),
+        ToolInput::Read(read) => read.file_path,
+        ToolInput::Edit(edit) => edit.file_path,
+        ToolInput::Write(write) => write.file_path,
         _ => serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input)),
     }
 }
@@ -297,5 +292,56 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
             // typed pretty-print.
             serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_permission_input;
+
+    #[test]
+    fn format_claude_bash_permission_uses_typed_tool_input() {
+        let input = serde_json::json!({ "command": "cargo test -p frontend" });
+        assert_eq!(
+            format_permission_input("Bash", &input),
+            "$ cargo test -p frontend"
+        );
+    }
+
+    #[test]
+    fn format_claude_file_permissions_use_typed_tool_input() {
+        let read = serde_json::json!({ "file_path": "/tmp/a.txt" });
+        let edit = serde_json::json!({
+            "file_path": "/tmp/b.txt",
+            "old_string": "old",
+            "new_string": "new"
+        });
+        let write = serde_json::json!({
+            "file_path": "/tmp/c.txt",
+            "content": "body"
+        });
+
+        assert_eq!(format_permission_input("Read", &read), "/tmp/a.txt");
+        assert_eq!(format_permission_input("Edit", &edit), "/tmp/b.txt");
+        assert_eq!(format_permission_input("Write", &write), "/tmp/c.txt");
+    }
+
+    #[test]
+    fn format_claude_permission_falls_back_for_malformed_named_input() {
+        let input = serde_json::json!({ "cmd": "not the Bash field" });
+        assert_eq!(
+            format_permission_input("Bash", &input),
+            serde_json::to_string_pretty(&input).unwrap()
+        );
+    }
+
+    #[test]
+    fn format_codex_permission_still_uses_typed_envelope_first() {
+        let input = serde_json::json!({
+            "tool": "bash",
+            "command": "ls",
+            "cwd": "/tmp"
+        });
+        assert_eq!(format_permission_input("Bash", &input), "$ ls");
     }
 }
