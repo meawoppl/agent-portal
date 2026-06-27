@@ -6,7 +6,7 @@ mod task;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use shared::ReadInput;
+use shared::{ReadInput, ToolInput};
 use yew::prelude::*;
 
 use self::bash::render_bash_tool;
@@ -16,36 +16,26 @@ use self::interactive::{
     render_askuserquestion_tool, render_exitplanmode_tool, render_todowrite_tool,
 };
 use self::search::{
-    render_glob_tool, render_grep_tool, render_webfetch_tool, render_websearch_tool,
+    render_glob_tool, render_grep_tool, render_toolsearch_tool, render_webfetch_tool,
+    render_websearch_tool,
 };
 use self::task::render_task_tool;
 use super::expandable::ExpandableText;
 
 /// Decode a tool-use `input` JSON object directly into the typed struct `T`.
 ///
-/// The caller dispatches by tool *name* (see [`render_tool_use`]), so we trust
-/// that and deserialize straight into the named `*Input` struct. We deliberately
-/// do NOT route through the untagged `claude_codes::ToolInput` enum: its variants
-/// are matched by field shape in declaration order, so a tool whose input is a
-/// subset of an earlier variant gets misclassified. Concretely, a bare WebSearch
-/// `{"query": "…"}` matches `ToolSearch` (declared first; its only other field,
-/// `max_results`, is optional) and never reaches the `WebSearch` variant — which
-/// is why the WebSearch card was rendering its `"?"` fallback. Deserializing by
-/// name sidesteps the ordering hazard entirely.
-///
-/// Returns `None` when the JSON doesn't match `T`; callers fall back to a
-/// generic/default renderer.
-///
-/// TODO(SDK #146): the upstream ambiguity (`WebSearch` and `ToolSearch` are both
-/// `{query}` under the untagged enum) is tracked in
-/// meawoppl/rust-code-agent-sdks#146 — a name-aware `ToolInput::from_named_input`
-/// is proposed there. Once it lands, callers can route through it instead.
+/// Callers that have the surrounding tool name should prefer
+/// [`ToolInput::from_named_input`], which lets the SDK resolve ambiguous tool
+/// shapes such as `WebSearch` vs. `ToolSearch`. This helper remains for cards
+/// that already dispatch by a concrete tool name and only need a specific input
+/// struct.
 pub fn extract_tool_input<T: DeserializeOwned>(input: &Value) -> Option<T> {
     serde_json::from_value::<T>(input.clone()).ok()
 }
 
 /// Render a tool use block with special handling for various tools
 pub fn render_tool_use(name: &str, input: &Value) -> Html {
+    let named_input = ToolInput::from_named_input(name, input.clone());
     match name {
         "Edit" => render_edit_tool(input),
         "Write" => render_write_tool(input),
@@ -58,7 +48,16 @@ pub fn render_tool_use(name: &str, input: &Value) -> Html {
         "Grep" => render_grep_tool(input),
         "Task" => render_task_tool(input),
         "WebFetch" => render_webfetch_tool(input),
-        "WebSearch" => render_websearch_tool(input),
+        "WebSearch" => match &named_input {
+            ToolInput::WebSearch(web_search) => render_websearch_tool(Some(web_search)),
+            _ => render_websearch_tool(None),
+        },
+        "ToolSearch" => match &named_input {
+            ToolInput::ToolSearch(tool_search) => {
+                render_toolsearch_tool(&tool_search.query, tool_search.max_results)
+            }
+            _ => render_generic_tool(name, input),
+        },
         _ => render_generic_tool(name, input),
     }
 }
@@ -143,18 +142,25 @@ fn render_generic_args(input: &Value) -> Html {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_tool_input;
-    use shared::{GlobInput, GrepInput, WebSearchInput};
+    use super::{extract_tool_input, render_tool_use};
+    use shared::{GlobInput, GrepInput, ToolInput, WebSearchInput};
 
     /// Regression: a bare `{"query": …}` WebSearch input used to misclassify as
     /// `ToolSearch` in the untagged `ToolInput` enum (declared first, sharing the
-    /// `query` field) and lose the query — the card rendered `"?"`. Deserializing
-    /// by name must recover it.
+    /// `query` field) and lose the query. The SDK's name-aware parser must
+    /// recover it.
     #[test]
-    fn websearch_bare_query_extracts() {
+    fn websearch_bare_query_uses_sdk_name_aware_parser() {
         let input = serde_json::json!({ "query": "rust async traits" });
-        let ws: WebSearchInput = extract_tool_input(&input).expect("WebSearch should parse");
-        assert_eq!(ws.query, "rust async traits");
+        let parsed = ToolInput::from_named_input("WebSearch", input);
+        assert!(matches!(parsed, ToolInput::WebSearch(ref ws) if ws.query == "rust async traits"));
+    }
+
+    #[test]
+    fn toolsearch_bare_query_uses_sdk_name_aware_parser() {
+        let input = serde_json::json!({ "query": "select:Read,Edit" });
+        let parsed = ToolInput::from_named_input("ToolSearch", input);
+        assert!(matches!(parsed, ToolInput::ToolSearch(ref ts) if ts.query == "select:Read,Edit"));
     }
 
     /// A WebSearch with domain filters parsed fine even before the fix (the
@@ -169,6 +175,12 @@ mod tests {
             ws.allowed_domains.as_deref(),
             Some(&["docs.rs".to_string()][..])
         );
+    }
+
+    #[test]
+    fn websearch_renderer_accepts_bare_query() {
+        let input = serde_json::json!({ "query": "rust async traits" });
+        let _ = render_tool_use("WebSearch", &input);
     }
 
     /// Glob and Grep share the `pattern` field; by-name dispatch must still land

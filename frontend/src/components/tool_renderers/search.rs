@@ -117,15 +117,32 @@ pub fn render_webfetch_tool(input: &Value) -> Html {
     }
 }
 
-pub fn render_websearch_tool(input: &Value) -> Html {
-    let typed = extract_tool_input::<WebSearchInput>(input);
-    let query = typed.as_ref().map(|ws| ws.query.as_str()).unwrap_or("?");
-
+pub fn render_websearch_tool(input: Option<&WebSearchInput>) -> Html {
+    let query = input.map(|ws| ws.query.as_str()).unwrap_or("?");
     html! {
         <div class="tool-use websearch-tool">
             <div class="tool-use-header">
                 <span class="tool-icon">{ "🔍" }</span>
                 <span class="tool-name">{ "WebSearch" }</span>
+            </div>
+            <div class="websearch-query">{ format!("\"{}\"", query) }</div>
+        </div>
+    }
+}
+
+pub fn render_toolsearch_tool(query: &str, max_results: Option<u32>) -> Html {
+    html! {
+        <div class="tool-use websearch-tool">
+            <div class="tool-use-header">
+                <span class="tool-icon">{ "🧰" }</span>
+                <span class="tool-name">{ "ToolSearch" }</span>
+                {
+                    if let Some(max_results) = max_results {
+                        html! { <span class="tool-meta">{ format!("max {}", max_results) }</span> }
+                    } else {
+                        html! {}
+                    }
+                }
             </div>
             <div class="websearch-query">{ format!("\"{}\"", query) }</div>
         </div>
