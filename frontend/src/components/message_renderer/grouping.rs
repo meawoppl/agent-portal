@@ -269,9 +269,7 @@ pub(super) fn classify(
         // The Claude CLI emits a bodyless `system`/`thinking_tokens` marker per
         // reasoning step; a long turn produces a wall of them. Fold a run into
         // one `Thinking` group so the renderer can show a single counted chip.
-        AgentFrame::Claude(ClaudeMessage::System(msg))
-            if msg.subtype.as_str() == "thinking_tokens" =>
-        {
+        AgentFrame::Claude(ClaudeMessage::System(msg)) if msg.is_thinking_tokens() => {
             return Some(MessageIdentity {
                 category: GroupCategory::Thinking,
                 label: "thinking".to_string(),
@@ -296,19 +294,16 @@ pub(super) fn classify(
 /// estimate so far (`50` → `150` → `250` …), so the maximum (last) value is the
 /// total for the run; returns `0` when none parse.
 ///
-/// `estimated_tokens` lives in the flattened `SystemMessage.data` because
-/// claude-codes 2.1.141 models `thinking_tokens` as `SystemSubtype::Unknown`
-/// (no typed fields). TODO(SDK): push a typed `thinking_tokens` system variant
-/// upstream to `rust-code-agent-sdks` so this reads a field instead of poking
-/// `data`.
+/// Reads through `claude-codes`' typed `ThinkingTokensMessage` accessor so the
+/// portal follows the SDK's schema instead of poking at flattened JSON fields.
 pub(super) fn thinking_tokens_estimate(messages: &[RenderedMessage]) -> i64 {
     messages
         .iter()
         .filter_map(|message| {
             match AgentFrameRegistry::parse(&message.content, shared::AgentType::Claude) {
-                AgentFrame::Claude(ClaudeMessage::System(msg)) => {
-                    msg.data.get("estimated_tokens").and_then(|v| v.as_i64())
-                }
+                AgentFrame::Claude(ClaudeMessage::System(msg)) => msg
+                    .as_thinking_tokens()
+                    .map(|tokens| tokens.estimated_tokens.min(i64::MAX as u64) as i64),
                 _ => None,
             }
         })
