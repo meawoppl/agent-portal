@@ -154,6 +154,7 @@ mod tests {
             "inputTokens": 3817,
             "outputTokens": 14,
             "costUSD": 0.06,
+            "futureField": 99,
         });
         let parsed: ModelUsageEntry = serde_json::from_value(json).unwrap();
         assert_eq!(parsed.input_tokens, 3817);
@@ -163,6 +164,7 @@ mod tests {
         assert_eq!(parsed.cache_read_input_tokens, 0);
         assert_eq!(parsed.cache_creation_input_tokens, 0);
         assert_eq!(parsed.web_search_requests, 0);
+        assert_eq!(parsed.extra["futureField"], 99);
     }
 
     /// The full `modelUsage` map: a `BTreeMap<String, ModelUsageEntry>` keyed
