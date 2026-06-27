@@ -310,14 +310,14 @@ mod tests {
         }
     }
 
-    /// New-shape `HistoryBatch` carries the latest server-assigned timestamp
-    /// alongside the messages so the frontend can update the reconnect
-    /// watermark without re-parsing `_created_at` out of the last entry
-    /// (closes #784).
+    /// `HistoryBatch` carries the latest server-assigned timestamp in
+    /// `last_created_at` so the frontend sets its reconnect watermark directly
+    /// (closes #784). `messages` is raw content; attribution rides in
+    /// `message_meta` (no `_`-key injection).
     #[test]
     fn history_batch_roundtrip_with_last_created_at() {
         let msg = ServerToClient::HistoryBatch {
-            messages: vec![serde_json::json!({"_created_at": "2026-05-18T00:00:00.000000"})],
+            messages: vec![serde_json::json!({"type": "assistant", "text": "hi"})],
             message_meta: Vec::new(),
             last_created_at: Some("2026-05-18T00:00:00.000000".to_string()),
         };
