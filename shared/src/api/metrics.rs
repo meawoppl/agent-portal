@@ -5,45 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-/// Per-model usage / cost breakdown carried by Claude's `ResultMessage.modelUsage`
-/// field. Keyed by model name (e.g. `"claude-opus-4-7[1m]"`) in the parent map.
-///
-/// Wire shape from claude-codes' own `test_result_with_new_fields`:
-/// ```json
-/// "modelUsage": {
-///     "claude-opus-4-7[1m]": {
-///         "inputTokens": 3817,
-///         "outputTokens": 14,
-///         "costUSD": 0.06
-///     }
-/// }
-/// ```
-///
-/// TODO(SDK #140): `claude-codes::ResultMessage.model_usage` is currently
-/// `Option<serde_json::Value>` upstream. This local typed mirror exists so the
-/// frontend can iterate the per-model breakdown without poking JSON field
-/// names. When the SDK adopts a typed `BTreeMap<String, ModelUsageEntry>`
-/// itself, callers can `serde_json::from_value::<ModelUsage>(value)` directly
-/// against the upstream type instead, and this struct can be deleted.
-///
-/// All fields default so partial / older frames still parse.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelUsageEntry {
-    #[serde(default)]
-    pub input_tokens: u64,
-    #[serde(default)]
-    pub output_tokens: u64,
-    #[serde(default)]
-    pub cache_read_input_tokens: u64,
-    #[serde(default)]
-    pub cache_creation_input_tokens: u64,
-    /// Wire name is `costUSD`, not `costUsd`.
-    #[serde(default, rename = "costUSD")]
-    pub cost_usd: f64,
-    #[serde(default)]
-    pub web_search_requests: u32,
-}
+/// Per-model usage / cost breakdown carried by Claude's
+/// `ResultMessage.modelUsage` field.
+pub use claude_codes::io::ModelUsageEntry;
 
 /// Convenience alias for the full `modelUsage` map. The map key is the model
 /// name string as emitted by claude (e.g. `"claude-opus-4-7[1m]"`).
