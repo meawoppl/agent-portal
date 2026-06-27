@@ -41,13 +41,9 @@ pub struct MessageData {
     pub content: String,
     /// ISO 8601 timestamp when message was created
     pub created_at: String,
-    /// User ID of who sent this message (for user-role messages)
-    #[serde(default)]
-    pub user_id: Option<String>,
-    /// Display name of the sender (looked up from users table)
-    #[serde(default)]
-    pub sender_name: Option<String>,
-    /// Typed portal sidecar for attribution, timestamp, and delivery state.
+    /// Typed portal sidecar for attribution (incl. the human sender name via
+    /// `meta.source`), timestamp, and delivery state. The former top-level
+    /// `user_id`/`sender_name` were redundant with this and have been removed.
     #[serde(default)]
     pub meta: Option<shared::PortalMeta>,
 }

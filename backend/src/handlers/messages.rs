@@ -76,10 +76,10 @@ pub struct MessageResponse {
 pub struct MessageWithSender {
     #[serde(flatten)]
     pub message: Message,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sender_name: Option<String>,
     /// Typed portal sidecar (`created_at` + `source`); the frontend renders
-    /// entirely from this (see docs/PORTAL_META_SIDECAR.md).
+    /// attribution (incl. the human sender's name) entirely from this. The
+    /// former top-level `sender_name`/`origin` fields were redundant with
+    /// `meta.source` and have been removed (see docs/PORTAL_META_SIDECAR.md).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<shared::PortalMeta>,
 }
@@ -216,12 +216,8 @@ pub async fn list_messages(
             } else {
                 None
             };
-            let meta = Some(msg.portal_meta(sender_name.clone()));
-            MessageWithSender {
-                message: msg,
-                sender_name,
-                meta,
-            }
+            let meta = Some(msg.portal_meta(sender_name));
+            MessageWithSender { message: msg, meta }
         })
         .collect();
 
