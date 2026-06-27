@@ -1,5 +1,8 @@
 use super::markdown::render_markdown_for_session;
-use codex_codes::io::items::{FileUpdateChange, ThreadItem};
+use codex_codes::{
+    io::items::{FileUpdateChange, ThreadItem},
+    protocol::ThreadItem as AppServerThreadItem,
+};
 use shared::fmt::format_duration;
 use uuid::Uuid;
 use yew::prelude::*;
@@ -113,8 +116,6 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
         return html! {};
     };
     match item {
-        CodexItem::ContextCompaction(_) => render_context_compaction_item(completed),
-        CodexItem::CollabAgentToolCall(it) => render_collab_agent_tool_call(it, completed),
         CodexItem::Thread(item) => match item {
             ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed, session_id),
             ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
@@ -130,6 +131,27 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
             // here to avoid duplication.
             ThreadItem::UserMessage(_) => html! {},
         },
+        CodexItem::AppServer(AppServerThreadItem::ContextCompaction { .. }) => {
+            render_context_compaction_item(completed)
+        }
+        CodexItem::AppServer(AppServerThreadItem::CollabAgentToolCall {
+            agents_states,
+            model,
+            prompt,
+            reasoning_effort,
+            status,
+            tool,
+            ..
+        }) => render_collab_agent_tool_call(
+            tool,
+            model.as_deref(),
+            reasoning_effort.as_ref(),
+            status,
+            prompt.as_deref(),
+            agents_states,
+            completed,
+        ),
+        CodexItem::AppServer(_) => html! {},
     }
 }
 
@@ -622,9 +644,9 @@ mod tests {
     }
 
     /// #930 regression target — Codex emits compaction as an item lifecycle
-    /// event whose item type is not in codex-codes yet. It should parse as a
-    /// typed local item and render via the compaction card, not fall through
-    /// to the raw JSON renderer.
+    /// event whose item type is now typed in codex-codes' app-server model. It
+    /// should parse through the SDK item and render via the compaction card,
+    /// not fall through to the raw JSON renderer.
     #[test]
     fn event_item_started_context_compaction_no_longer_renders_raw() {
         let json = r#"{
@@ -638,12 +660,12 @@ mod tests {
 
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         let CodexEvent::ItemStarted {
-            item: Some(CodexItem::ContextCompaction(item)),
+            item: Some(CodexItem::AppServer(AppServerThreadItem::ContextCompaction { ref id })),
         } = event
         else {
             panic!("expected ItemStarted{{ContextCompaction}}, got {:?}", event);
         };
-        assert_eq!(item.id, "9edb35c0-6b6b-407f-84e3-d03a03050a2a");
+        assert_eq!(id, "9edb35c0-6b6b-407f-84e3-d03a03050a2a");
         assert_eq!(
             codex_event_item_id(json).as_deref(),
             Some("9edb35c0-6b6b-407f-84e3-d03a03050a2a")
@@ -651,10 +673,9 @@ mod tests {
     }
 
     /// agent-portal#1049 — Codex emits multi-agent `collabAgentToolCall`
-    /// items (e.g. `spawnAgent`) that codex-codes does not model as a
-    /// `ThreadItem` variant. They must parse into the local
-    /// `CodexItem::CollabAgentToolCall` mirror and render through the spawn-agent
-    /// card, not fall through to the raw JSON renderer.
+    /// items (e.g. `spawnAgent`). They must parse through codex-codes'
+    /// app-server `ThreadItem` variant and render through the spawn-agent card,
+    /// not fall through to the raw JSON renderer.
     #[test]
     fn event_item_completed_collab_agent_tool_call() {
         let json = r#"{
@@ -676,7 +697,18 @@ mod tests {
         }"#;
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         let CodexEvent::ItemCompleted {
-            item: Some(CodexItem::CollabAgentToolCall(item)),
+            item:
+                Some(CodexItem::AppServer(AppServerThreadItem::CollabAgentToolCall {
+                    agents_states,
+                    id,
+                    model,
+                    prompt,
+                    reasoning_effort,
+                    receiver_thread_ids,
+                    sender_thread_id,
+                    status,
+                    tool,
+                })),
         } = event
         else {
             panic!(
@@ -684,25 +716,25 @@ mod tests {
                 event
             );
         };
-        assert_eq!(item.id, "call_i1HC5jbTllWgsrMnJjqmRU05");
-        assert_eq!(item.tool.as_deref(), Some("spawnAgent"));
-        assert_eq!(item.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(item.reasoning_effort.as_deref(), Some("medium"));
-        assert_eq!(item.status.as_deref(), Some("completed"));
+        assert_eq!(id, "call_i1HC5jbTllWgsrMnJjqmRU05");
+        assert_eq!(tool, serde_json::Value::String("spawnAgent".to_string()));
+        assert_eq!(model.as_deref(), Some("gpt-5.5"));
         assert_eq!(
-            item.sender_thread_id.as_deref(),
-            Some("019ed195-44b1-77e0-a234-10307ce08eac")
+            reasoning_effort.as_ref().map(|effort| effort.0.as_str()),
+            Some("medium")
         );
+        assert_eq!(status, serde_json::Value::String("completed".to_string()));
+        assert_eq!(sender_thread_id, "019ed195-44b1-77e0-a234-10307ce08eac");
         assert_eq!(
-            item.receiver_thread_ids,
+            receiver_thread_ids,
             vec!["019ed247-768f-7603-8c71-911fd841766e".to_string()]
         );
-        assert_eq!(item.agents_states.len(), 1);
-        assert_eq!(
-            item.agents_states["019ed247-768f-7603-8c71-911fd841766e"].status,
-            "pendingInit"
-        );
-        assert!(item.prompt.as_deref().unwrap().contains("main branch"));
+        assert_eq!(agents_states.len(), 1);
+        assert!(matches!(
+            agents_states["019ed247-768f-7603-8c71-911fd841766e"].status,
+            codex_codes::protocol::CollabAgentStatus::PendingInit
+        ));
+        assert!(prompt.as_deref().unwrap().contains("main branch"));
 
         assert_eq!(
             codex_event_item_id(json).as_deref(),

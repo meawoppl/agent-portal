@@ -1,4 +1,3 @@
-use super::events::CollabAgentToolCallItem;
 use super::item_card_classes;
 use crate::components::diff::{DiffCard, DiffSource};
 use crate::components::expandable::ExpandableText;
@@ -6,6 +5,9 @@ use codex_codes::io::items::{
     CommandExecutionItem, CommandExecutionStatus, FileChangeItem, FileUpdateChange,
     McpToolCallItem, McpToolCallStatus, PatchApplyStatus, PatchChangeKind, TodoItem,
 };
+use codex_codes::protocol::{CollabAgentState, ReasoningEffort};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use yew::prelude::*;
 
 /// Wraps a per-variant body in the standard tool-style card chrome:
@@ -242,32 +244,41 @@ pub(super) fn render_todo_list(items: &[TodoItem], completed: bool) -> Html {
     tool_card("\u{2611}", "Todo List".into(), None, body, completed)
 }
 
-pub(super) fn render_collab_agent_tool_call(it: &CollabAgentToolCallItem, completed: bool) -> Html {
+pub(super) fn render_collab_agent_tool_call(
+    tool: &Value,
+    model: Option<&str>,
+    reasoning_effort: Option<&ReasoningEffort>,
+    status: &Value,
+    prompt: Option<&str>,
+    agents_states: &BTreeMap<String, CollabAgentState>,
+    completed: bool,
+) -> Html {
     // Card title: "Spawn Agent" for the common spawnAgent tool, otherwise
     // surface the raw tool name so unrecognized collaboration tools still read.
-    let name = match it.tool.as_deref() {
+    let tool_name = value_label(tool);
+    let name = match tool_name.as_deref() {
         Some("spawnAgent") | None => "Spawn Agent".to_string(),
         Some(other) => format!("Agent: {}", other),
     };
 
     // Status line mirrors render_command_execution's composition: the item
     // status plus model + reasoning-effort meta when present.
-    let mut status_text = it
-        .status
-        .clone()
-        .unwrap_or_else(|| "running...".to_string());
+    let mut status_text = value_label(status).unwrap_or_else(|| "running...".to_string());
     let mut meta_bits: Vec<String> = Vec::new();
-    if let Some(model) = it.model.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(model) = model.filter(|s| !s.is_empty()) {
         meta_bits.push(model.to_string());
     }
-    if let Some(effort) = it.reasoning_effort.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(effort) = reasoning_effort
+        .map(|effort| effort.0.as_str())
+        .filter(|s| !s.is_empty())
+    {
         meta_bits.push(format!("effort: {}", effort));
     }
     if !meta_bits.is_empty() {
         status_text = format!("{} \u{00b7} {}", status_text, meta_bits.join(" \u{00b7} "));
     }
 
-    let prompt = it.prompt.as_deref().unwrap_or("");
+    let prompt = prompt.unwrap_or("");
 
     let body = html! {
         <>
@@ -286,15 +297,19 @@ pub(super) fn render_collab_agent_tool_call(it: &CollabAgentToolCallItem, comple
                 }
             }
             {
-                if !it.agents_states.is_empty() {
+                if !agents_states.is_empty() {
                     html! {
                         <div class="codex-todo-list">
-                            { for it.agents_states.iter().map(|(thread_id, state)| {
+                            { for agents_states.iter().map(|(thread_id, state)| {
+                                let state_label = serde_json::to_value(&state.status)
+                                    .ok()
+                                    .and_then(|value| value_label(&value))
+                                    .unwrap_or_else(|| format!("{:?}", state.status));
                                 html! {
                                     <div class="codex-todo">
                                         <span class="codex-todo-marker">{ "\u{1F916}" }</span>
                                         <span class="codex-todo-text">
-                                            { format!("{} \u{2014} {}", thread_id, state.status) }
+                                            { format!("{} \u{2014} {}", thread_id, state_label) }
                                         </span>
                                     </div>
                                 }
@@ -315,4 +330,12 @@ pub(super) fn render_collab_agent_tool_call(it: &CollabAgentToolCallItem, comple
         body,
         completed,
     )
+}
+
+fn value_label(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) if !value.is_empty() => Some(value.clone()),
+        Value::Null => None,
+        value => Some(value.to_string()),
+    }
 }
