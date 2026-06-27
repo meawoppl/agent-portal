@@ -149,16 +149,12 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             )));
         }
         ServerToClient::HistoryBatch {
-            messages,
-            message_meta,
+            entries,
             last_created_at,
         } => {
-            let rendered: Vec<RenderedMessage> = messages
+            let rendered: Vec<RenderedMessage> = entries
                 .into_iter()
-                .enumerate()
-                .map(|(i, v)| {
-                    RenderedMessage::new(v.to_string(), message_meta.get(i).cloned().flatten())
-                })
+                .map(|entry| RenderedMessage::new(entry.content.to_string(), entry.meta))
                 .collect();
             on_event.emit(WsEvent::HistoryBatch(rendered, last_created_at));
         }
@@ -498,12 +494,14 @@ mod tests {
         let (cb, sink) = capture();
         let ts = "2026-05-18T00:00:00.000000".to_string();
         let msg = ServerToClient::HistoryBatch {
-            messages: vec![serde_json::json!({"type": "assistant"})],
-            message_meta: vec![Some(shared::PortalMeta {
-                created_at: Some(ts.clone()),
-                source: None,
-                delivery: None,
-            })],
+            entries: vec![shared::HistoryEntry {
+                content: serde_json::json!({"type": "assistant"}),
+                meta: Some(shared::PortalMeta {
+                    created_at: Some(ts.clone()),
+                    source: None,
+                    delivery: None,
+                }),
+            }],
             last_created_at: Some(ts.clone()),
         };
 
@@ -531,8 +529,7 @@ mod tests {
     fn history_batch_without_last_created_at_emits_none() {
         let (cb, sink) = capture();
         let msg = ServerToClient::HistoryBatch {
-            messages: vec![],
-            message_meta: Vec::new(),
+            entries: vec![],
             last_created_at: None,
         };
 
