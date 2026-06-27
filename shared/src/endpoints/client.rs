@@ -106,6 +106,21 @@ impl DeliveryMeta {
     }
 }
 
+/// One historical message in a [`ServerToClient::HistoryBatch`]: the **raw**
+/// agent `content` plus its typed [`PortalMeta`] sidecar. Replaces the former
+/// parallel `messages` + `message_meta` vectors — index-aligned vectors can
+/// silently drift, whereas a wrapper makes "content carries its meta"
+/// structural (see #1139 / `docs/PORTAL_META_SIDECAR.md`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    /// Raw stored content JSON (no portal metadata mixed in).
+    pub content: serde_json::Value,
+    /// Typed portal sidecar (attribution/timestamp); `None` when the row has no
+    /// portal metadata (e.g. the session's own agent output).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<PortalMeta>,
+}
+
 pub struct ClientEndpoint;
 
 impl WsEndpoint for ClientEndpoint {
@@ -192,15 +207,14 @@ pub enum ServerToClient {
     /// directly as its reconnect-replay watermark. Both `message_meta` and
     /// `last_created_at` default to absent for wire-compat with older backends.
     HistoryBatch {
-        messages: Vec<serde_json::Value>,
-        /// Typed portal sidecar, **index-aligned** with `messages` (entry `i`
-        /// is the meta for `messages[i]`; `None` when a message has no portal
-        /// metadata). A parallel vector rather than a `{content, meta}` wrapper
-        /// so `messages` stays a plain list of raw content; the frontend zips
-        /// the two. `#[serde(default)]` ⇒ empty/absent on older backends.
-        /// (Collapsing this into a typed `HistoryEntry` is tracked in #1139.)
+        /// Each entry is the raw content + its typed [`PortalMeta`] sidecar.
+        /// (Replaced the former parallel `messages`/`message_meta` vectors — see
+        /// [`HistoryEntry`]. A protocol bump, gated on the frontend reading the
+        /// new shape; old cached bundles need a refresh.) `#[serde(default)]` so
+        /// a pre-bump frame (which carried `messages`) degrades to an empty
+        /// batch rather than failing the whole frame to parse.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        message_meta: Vec<Option<PortalMeta>>,
+        entries: Vec<HistoryEntry>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_created_at: Option<String>,
     },

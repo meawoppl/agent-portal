@@ -85,38 +85,36 @@ pub(super) fn replay_history(
         .last()
         .map(|msg| msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
 
-    let (messages, message_meta): (Vec<serde_json::Value>, Vec<Option<shared::PortalMeta>>) =
-        history
-            .into_iter()
-            .map(|msg| {
-                // Typed sidecar, index-aligned with the message. All
-                // attribution/timestamp rides here — `content` stays raw (no
-                // more `_`-key injection; see docs/PORTAL_META_SIDECAR.md).
-                let meta = Some(msg.portal_meta(user_names.get(&msg.user_id).cloned()));
-                // Fallback when the DB row content isn't valid JSON: wrap the raw
-                // string in a typed envelope so the frontend's `ClaudeMessage`
-                // dispatch still finds a `type` and `content`.
-                #[derive(serde::Serialize)]
-                struct FallbackMessageContent<'a> {
-                    #[serde(rename = "type")]
-                    message_type: &'a str,
-                    content: &'a str,
-                }
-                let val =
-                    serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
-                        serde_json::to_value(FallbackMessageContent {
-                            message_type: &msg.role,
-                            content: &msg.content,
-                        })
-                        .unwrap_or(serde_json::Value::Null)
-                    });
-                (val, meta)
-            })
-            .unzip();
+    let entries: Vec<shared::HistoryEntry> = history
+        .into_iter()
+        .map(|msg| {
+            // Typed sidecar travels with its content. All attribution/timestamp
+            // rides here — `content` stays raw (no `_`-key injection; see
+            // docs/PORTAL_META_SIDECAR.md).
+            let meta = Some(msg.portal_meta(user_names.get(&msg.user_id).cloned()));
+            // Fallback when the DB row content isn't valid JSON: wrap the raw
+            // string in a typed envelope so the frontend's `ClaudeMessage`
+            // dispatch still finds a `type` and `content`.
+            #[derive(serde::Serialize)]
+            struct FallbackMessageContent<'a> {
+                #[serde(rename = "type")]
+                message_type: &'a str,
+                content: &'a str,
+            }
+            let content =
+                serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
+                    serde_json::to_value(FallbackMessageContent {
+                        message_type: &msg.role,
+                        content: &msg.content,
+                    })
+                    .unwrap_or(serde_json::Value::Null)
+                });
+            shared::HistoryEntry { content, meta }
+        })
+        .collect();
 
     let _ = tx.send(ServerToClient::HistoryBatch {
-        messages,
-        message_meta,
+        entries,
         last_created_at,
     });
 }
@@ -331,12 +329,11 @@ mod replay_tests {
         }
         let batch = got.expect("replay_history must send exactly one HistoryBatch");
 
-        let (messages, message_meta, last_created_at) = match batch {
+        let (entries, last_created_at) = match batch {
             shared::ServerToClient::HistoryBatch {
-                messages,
-                message_meta,
+                entries,
                 last_created_at,
-            } => (messages, message_meta, last_created_at),
+            } => (entries, last_created_at),
             other => panic!("expected HistoryBatch, got {:?}", other),
         };
 
@@ -351,19 +348,19 @@ mod replay_tests {
         cleanup(&mut conn, session.id, &[user.id]);
 
         assert_eq!(
-            messages.len(),
+            entries.len(),
             1,
-            "expected only the newest row to be replayed; got {} messages: {:?}",
-            messages.len(),
-            messages
+            "expected only the newest row to be replayed; got {} entries",
+            entries.len(),
         );
         assert_eq!(last_created_at.as_deref(), Some(expected_last.as_str()));
-        // Attribution/timestamp now ride in the typed sidecar, index-aligned
-        // with `messages` — content stays raw (no `_created_at` injection).
-        let meta_ts = message_meta[0]
+        // Attribution/timestamp ride in each entry's typed sidecar — content
+        // stays raw (no `_created_at` injection).
+        let meta_ts = entries[0]
+            .meta
             .as_ref()
             .and_then(|m| m.created_at.as_deref())
-            .expect("each replayed message must carry meta.created_at");
+            .expect("each replayed entry must carry meta.created_at");
         assert_eq!(meta_ts, expected_last);
     }
 
@@ -395,19 +392,18 @@ mod replay_tests {
         }
         let batch = batch.expect("replay_history must send HistoryBatch");
 
-        let (messages, last_created_at) = match batch {
+        let (entries, last_created_at) = match batch {
             shared::ServerToClient::HistoryBatch {
-                messages,
+                entries,
                 last_created_at,
-                ..
-            } => (messages, last_created_at),
+            } => (entries, last_created_at),
             other => panic!("expected HistoryBatch, got {:?}", other),
         };
 
         let mut conn = pool.get().expect("conn");
         cleanup(&mut conn, session.id, &[user.id]);
 
-        assert_eq!(messages.len(), 3, "expected all rows to be replayed");
+        assert_eq!(entries.len(), 3, "expected all rows to be replayed");
         let expected_last = stamps[2].format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
         assert_eq!(last_created_at.as_deref(), Some(expected_last.as_str()));
     }

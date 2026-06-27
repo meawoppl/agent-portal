@@ -175,10 +175,13 @@ mod tests {
             _ => panic!("Wrong variant"),
         }
 
+        // A pre-#1139 HistoryBatch (carried `messages`, not `entries`) degrades
+        // to an empty batch rather than failing the whole frame (`entries` is
+        // serde(default)). The frontend recovers on the next batch / refresh.
         let legacy_history = r#"{"type":"HistoryBatch","messages":[{"type":"portal"}]}"#;
         let parsed: ServerToClient = serde_json::from_str(legacy_history).unwrap();
         match parsed {
-            ServerToClient::HistoryBatch { message_meta, .. } => assert!(message_meta.is_empty()),
+            ServerToClient::HistoryBatch { entries, .. } => assert!(entries.is_empty()),
             _ => panic!("Wrong variant"),
         }
     }
@@ -294,16 +297,15 @@ mod tests {
             _ => panic!("Wrong variant"),
         }
 
-        // Pre-#784 HistoryBatch without `last_created_at` must also parse.
-        let json = r#"{"type":"HistoryBatch","messages":[]}"#;
+        // Empty HistoryBatch without `last_created_at` must also parse.
+        let json = r#"{"type":"HistoryBatch"}"#;
         let parsed: ServerToClient = serde_json::from_str(json).unwrap();
         match parsed {
             ServerToClient::HistoryBatch {
-                messages,
+                entries,
                 last_created_at,
-                ..
             } => {
-                assert!(messages.is_empty());
+                assert!(entries.is_empty());
                 assert!(last_created_at.is_none());
             }
             _ => panic!("Wrong variant"),
@@ -312,24 +314,25 @@ mod tests {
 
     /// `HistoryBatch` carries the latest server-assigned timestamp in
     /// `last_created_at` so the frontend sets its reconnect watermark directly
-    /// (closes #784). `messages` is raw content; attribution rides in
-    /// `message_meta` (no `_`-key injection).
+    /// (closes #784). Each `entry` is raw content + its typed `meta` sidecar.
     #[test]
     fn history_batch_roundtrip_with_last_created_at() {
         let msg = ServerToClient::HistoryBatch {
-            messages: vec![serde_json::json!({"type": "assistant", "text": "hi"})],
-            message_meta: Vec::new(),
+            entries: vec![crate::endpoints::client::HistoryEntry {
+                content: serde_json::json!({"type": "assistant", "text": "hi"}),
+                meta: None,
+            }],
             last_created_at: Some("2026-05-18T00:00:00.000000".to_string()),
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
         match parsed {
             ServerToClient::HistoryBatch {
-                messages,
+                entries,
                 last_created_at,
-                ..
             } => {
-                assert_eq!(messages.len(), 1);
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].content["text"], "hi");
                 assert_eq!(
                     last_created_at.as_deref(),
                     Some("2026-05-18T00:00:00.000000")
