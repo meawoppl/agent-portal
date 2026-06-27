@@ -521,9 +521,34 @@ impl Component for SessionView {
         // Seed each thinking chip's odometer with the prior burst's max in
         // its turn so tool-call splits don't re-race the count from 0.
         let thinking_starts = thinking_chip_starts(&groups);
+        let launcher_version = ctx
+            .props()
+            .session
+            .launcher_version
+            .as_deref()
+            .filter(|version| !version.is_empty());
+        let status_class = if ctx.props().session.status.as_str() == "active" {
+            "status connected"
+        } else {
+            "status disconnected"
+        };
 
         html! {
             <div class="session-view">
+                <div class="session-view-header">
+                    <span class="session-name">{ &ctx.props().session.session_name }</span>
+                    <span class="session-hostname">{ &ctx.props().session.hostname }</span>
+                    <span class="session-path">{ &ctx.props().session.working_directory }</span>
+                    if let Some(version) = launcher_version {
+                        <span
+                            class="session-launcher-version"
+                            title="Launcher version"
+                        >
+                            { format!("launcher v{}", version) }
+                        </span>
+                    }
+                    <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
+                </div>
                 <div class="session-view-scroll-area">
                     <div class="session-view-messages" ref={self.messages_ref.clone()}>
                         {

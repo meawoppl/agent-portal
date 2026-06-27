@@ -96,6 +96,7 @@ mod tests {
             my_role: "owner".to_string(),
             hostname: host.to_string(),
             launcher_id: None,
+            launcher_version: None,
             pr_url: None,
             repo_url: None,
             open_prs: Vec::new(),
