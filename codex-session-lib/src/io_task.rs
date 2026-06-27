@@ -135,8 +135,7 @@ pub(crate) async fn codex_io_task(
             {
                 Ok(resp) => {
                     tracing::info!("Codex thread resumed: {}", prior);
-                    let model =
-                        non_empty_string(resp.model).or_else(|| configured_model_fallback.clone());
+                    let model = started_thread_model(resp.model, &configured_model_fallback);
                     resumed_thread = Some((prior.clone(), model));
                 }
                 Err(e) => {
@@ -171,8 +170,7 @@ pub(crate) async fn codex_io_task(
             let thread_params = empty_thread_start_params();
             match client.thread_start(&thread_params).await {
                 Ok(resp) => {
-                    let model =
-                        non_empty_string(resp.model).or_else(|| configured_model_fallback.clone());
+                    let model = started_thread_model(resp.model, &configured_model_fallback);
                     if model.is_none() {
                         tracing::warn!(
                             "Codex thread {} started without a detectable model; turn metrics will warn until model metadata is available",
@@ -732,6 +730,18 @@ fn non_empty_string(value: String) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+/// Resolve the model a freshly resumed/started thread reports, falling back to
+/// the configured model when the server didn't surface one. Shared by the
+/// `thread_resume` and `thread_start` arms so the fallback policy stays in one
+/// place. (The per-turn current→thread→configured resolution is a distinct
+/// precedence and intentionally not folded in here.)
+fn started_thread_model(
+    resp_model: String,
+    configured_fallback: &Option<String>,
+) -> Option<String> {
+    non_empty_string(resp_model).or_else(|| configured_fallback.clone())
 }
 
 #[derive(Debug, Clone)]

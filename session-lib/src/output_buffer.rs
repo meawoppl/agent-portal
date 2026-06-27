@@ -39,9 +39,6 @@ struct BufferState {
 
 /// Pending output buffer with persistence and acknowledgment tracking
 pub struct PendingOutputBuffer {
-    /// Session ID (kept for logging/debugging)
-    #[allow(dead_code)]
-    session_id: Uuid,
     /// Path to persistence file
     persist_path: PathBuf,
     /// In-memory buffer state
@@ -106,7 +103,6 @@ impl PendingOutputBuffer {
         };
 
         Ok(Self {
-            session_id,
             persist_path,
             state,
             dirty: false,
@@ -248,7 +244,6 @@ mod tests {
     fn test_push_and_acknowledge() {
         let session_id = Uuid::new_v4();
         let mut buffer = PendingOutputBuffer {
-            session_id,
             persist_path: PathBuf::from("/tmp/test_buffer.json"),
             state: BufferState {
                 session_id,
@@ -282,7 +277,6 @@ mod tests {
     fn test_duplicate_acknowledge() {
         let session_id = Uuid::new_v4();
         let mut buffer = PendingOutputBuffer {
-            session_id,
             persist_path: PathBuf::from("/tmp/test_buffer2.json"),
             state: BufferState {
                 session_id,
@@ -318,7 +312,6 @@ mod tests {
     fn test_overflow_protection() {
         let session_id = Uuid::new_v4();
         let mut buffer = PendingOutputBuffer {
-            session_id,
             persist_path: PathBuf::from("/tmp/test_buffer3.json"),
             state: BufferState {
                 session_id,
