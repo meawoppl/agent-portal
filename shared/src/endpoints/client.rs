@@ -55,8 +55,8 @@ pub enum MessageSource {
 /// agent JSON blob on every delivery path and read back by string key — a
 /// convention with no compile-time enforcement that silently dropped
 /// attribution when any one injection site drifted (see
-/// `docs/PORTAL_META_SIDECAR.md`). Every field is optional + `serde(default)`
-/// so old↔new wire parses in both directions during the transition.
+/// `docs/PORTAL_META_SIDECAR.md`). The `_`-key injection has been fully removed;
+/// every field is optional + `serde(default)` for wire-compat across versions.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortalMeta {
     /// Server-assigned persisted-row timestamp (ISO-8601 µs); the frontend's
@@ -185,23 +185,20 @@ pub enum ServerToClient {
 
     /// Batch of historical messages for replay.
     ///
-    /// Each entry in `messages` is the raw stored content JSON with `_sender`
-    /// (for user-role messages) and `_created_at` (the server-assigned row
-    /// timestamp) injected by the backend's `replay_history`. The separate
-    /// `last_created_at` is the timestamp of the latest message in this batch
-    /// (or `None` for an empty batch); the frontend uses it directly as its
-    /// reconnect-replay watermark without having to re-parse `_created_at`
-    /// out of the last entry. Both default to absent on older backends.
+    /// Each entry in `messages` is the **raw** stored content JSON (no portal
+    /// metadata mixed in). All attribution/timestamp rides in the index-aligned
+    /// `message_meta`. `last_created_at` is the timestamp of the latest message
+    /// in this batch (or `None` for an empty batch); the frontend uses it
+    /// directly as its reconnect-replay watermark. Both `message_meta` and
+    /// `last_created_at` default to absent for wire-compat with older backends.
     HistoryBatch {
         messages: Vec<serde_json::Value>,
         /// Typed portal sidecar, **index-aligned** with `messages` (entry `i`
         /// is the meta for `messages[i]`; `None` when a message has no portal
-        /// metadata). Kept as a parallel vector — rather than wrapping each
-        /// entry — so `messages` stays byte-compatible for cached old frontend
-        /// bundles, which simply ignore this field. New frontends zip the two.
-        /// `#[serde(default)]` ⇒ empty/absent on older backends. The `_`-keys
-        /// remain injected into `messages` during the transition; both are
-        /// removed in slice 5 (see `docs/PORTAL_META_SIDECAR.md`).
+        /// metadata). A parallel vector rather than a `{content, meta}` wrapper
+        /// so `messages` stays a plain list of raw content; the frontend zips
+        /// the two. `#[serde(default)]` ⇒ empty/absent on older backends.
+        /// (Collapsing this into a typed `HistoryEntry` is tracked in #1139.)
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         message_meta: Vec<Option<PortalMeta>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
