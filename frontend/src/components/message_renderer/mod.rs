@@ -172,6 +172,7 @@ mod tests {
             "estimated_tokens": estimated_tokens,
             "estimated_tokens_delta": estimated_tokens,
             "session_id": "01890000-0000-7000-8000-000000000001",
+            "uuid": format!("01890000-0000-7000-8000-{estimated_tokens:012}"),
         })
         .to_string()
     }
