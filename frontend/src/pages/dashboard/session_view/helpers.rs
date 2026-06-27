@@ -622,8 +622,8 @@ mod tests {
     #[test]
     fn reconcile_pending_sends_assistant_clears_all() {
         // Slash commands (/cost, /clear, /status) don't echo as "user",
-        // so the assistant response is the only signal we get that input
-        // was received. Clear legacy entries; id-tracked entries wait for
+        // so the assistant response is the only signal we get for
+        // pre-InputProgress pending rows. Id-tracked rows wait for
         // InputProgress::AgentAccepted.
         let mut pending = vec![pending("a"), pending("b")];
         reconcile_pending_sends(

@@ -584,8 +584,9 @@ impl InputBar {
             on_send_frame.emit(ClientToServer::AgentInput {
                 content: serde_json::Value::String(combined),
                 send_mode: None,
-                // TODO(delivery-progress): real id + InputProgress consumption
-                // lands in the staged-UI slice (Codex).
+                // `SessionView::prepare_outbound_frame` assigns the
+                // browser-side correlation id and optimistic row for every
+                // AgentInput frame, including file-upload summaries.
                 client_msg_id: None,
             });
 

@@ -19,7 +19,7 @@ pub use grouping::{group_is_turn_terminator, group_messages, thinking_chip_start
 #[cfg(test)]
 use grouping::{visible_group_indices, GroupCategory, MessageGroup};
 
-/// Format an already-extracted `_created_at` ISO string as local time.
+/// Format an already-extracted `PortalMeta.created_at` ISO string as local time.
 /// Takes the `extract_raw_iso` result rather than the raw JSON so the
 /// message string is parsed once per render, not once per consumer.
 pub(super) fn local_timestamp(iso: &str) -> Option<String> {
@@ -172,7 +172,6 @@ mod tests {
             "estimated_tokens": estimated_tokens,
             "estimated_tokens_delta": estimated_tokens,
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()
     }
@@ -180,8 +179,7 @@ mod tests {
     /// Realistic Claude wire shape for a user message containing a single
     /// `tool_result` content block (the kind Read / Bash / Edit etc. produce).
     /// Matches `claude-codes` 2.1.x `ClaudeOutput::User(UserMessage)`
-    /// serialization with the backend's wire envelope additions
-    /// (`_created_at` etc.).
+    /// serialization with portal metadata carried out-of-band in `PortalMeta`.
     fn read_tool_result_user_message(tool_use_id: &str) -> String {
         serde_json::json!({
             "type": "user",
@@ -194,7 +192,6 @@ mod tests {
                 }]
             },
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()
     }
@@ -215,7 +212,6 @@ mod tests {
                 }]
             },
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()
     }
@@ -284,7 +280,6 @@ mod tests {
                 }]
             },
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         assert_eq!(
@@ -301,7 +296,6 @@ mod tests {
         serde_json::json!({
             "type": "portal",
             "content": [{"type": "text", "text": text}],
-            "_created_at": "2026-05-18T05:00:00.000Z",
         })
         .to_string()
     }
@@ -381,7 +375,6 @@ mod tests {
                 "content": [{"type": "text", "text": "hello agent"}]
             },
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         assert_eq!(
@@ -401,7 +394,6 @@ mod tests {
                 "content": [{"type": "text", "text": text}]
             },
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()
     }
@@ -437,7 +429,6 @@ mod tests {
                 "id": "item_abc",
                 "text": text,
             },
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()
     }
@@ -459,7 +450,6 @@ mod tests {
                 "command": "echo hello",
                 "status": status,
             },
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()
     }
@@ -555,19 +545,16 @@ mod tests {
             "num_turns": 1,
             "session_id": "01890000-0000-7000-8000-000000000001",
             "total_cost_usd": 0.0,
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         let codex_completed = serde_json::json!({
             "type": "turn.completed",
             "usage": {"input_tokens": 1, "output_tokens": 2},
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         let codex_failed = serde_json::json!({
             "type": "turn.failed",
             "error": {"message": "nope"},
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
 
@@ -647,7 +634,6 @@ mod tests {
             "num_turns": 1,
             "session_id": "01890000-0000-7000-8000-000000000001",
             "total_cost_usd": 0.0,
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         let messages = vec![
@@ -791,7 +777,6 @@ mod tests {
                     "type": "system",
                     "subtype": "init",
                     "session_id": "01890000-0000-7000-8000-000000000001",
-                    "_created_at": "2026-05-17T10:00:00.000Z",
                 })
                 .to_string(),
                 None,
@@ -812,7 +797,6 @@ mod tests {
                     "num_turns": 1,
                     "session_id": "01890000-0000-7000-8000-000000000001",
                     "total_cost_usd": 0.0,
-                    "_created_at": "2026-05-17T10:00:00.000Z",
                 })
                 .to_string(),
                 None,
@@ -824,7 +808,6 @@ mod tests {
                 serde_json::json!({
                     "type": "error",
                     "message": "oops",
-                    "_created_at": "2026-05-17T10:00:00.000Z",
                 })
                 .to_string(),
                 Some(GroupCategory::Codex),
@@ -898,7 +881,6 @@ mod tests {
         let turn_completed = serde_json::json!({
             "type": "turn.completed",
             "usage": {"input_tokens": 1, "output_tokens": 2},
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         let messages = vec![
@@ -946,13 +928,11 @@ mod tests {
         let no_id_a = serde_json::json!({
             "type": "item.started",
             "item": {"type": "agent_message", "text": "first"},
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         let no_id_b = serde_json::json!({
             "type": "item.completed",
             "item": {"type": "agent_message", "text": "second"},
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string();
         let visible =
@@ -971,7 +951,6 @@ mod tests {
                 "content": [{"type": "text", "text": "hello"}],
             },
             "session_id": "01890000-0000-7000-8000-000000000001",
-            "_created_at": "2026-05-17T10:00:00.000Z",
         })
         .to_string()];
 
