@@ -20,68 +20,15 @@ pub struct SoundSettingsResponse {
 // views over the same JSON bytes.
 //
 // Where a subtype is already fully covered upstream by `claude-codes`, the
-// renderer uses the SDK type directly (`TaskNotificationMessage`,
-// `TaskStartedMessage`). The remaining structs below cover gaps not yet
-// represented in `claude-codes`:
+// renderer uses the SDK type directly (`CompactBoundaryMessage`,
+// `TaskNotificationMessage`, `TaskStartedMessage`). The remaining structs below
+// cover gaps not yet represented in `claude-codes`:
 //
-// - `CompactionExtra` — `summary`, `leaf_message_count`/`message_count`,
-//   `duration_ms`, `content`, `text`. Filed upstream as
-//   `rust-code-agent-sdks#141`; the SDK's `CompactBoundaryMessage` currently
-//   only exposes `compact_metadata { pre_tokens, trigger }`. Once upstream
-//   lands these, this struct can be deleted and the renderer can switch to
-//   `SystemMessage::as_compact_boundary()`.
 // - `InitExtra` — `fast_mode_state`. The SDK's `InitMessage::fast_mode_state`
 //   is already typed `Option<String>`; we keep a narrow local mirror because
 //   `InitMessage` has many required fields and a single-field shape is
 //   friendlier to partial frames the renderer encounters in practice.
 // =============================================================================
-
-/// Typed view of the `compact_boundary` subtype's `SystemMessage.extra`.
-///
-/// All fields are optional with `#[serde(default)]` so any wire shape that
-/// omits them still deserializes (yielding `None`). Read priority for the
-/// summary text is `summary` → `content` → `text` to match the historical
-/// renderer fallback chain.
-//
-// TODO(SDK rust-code-agent-sdks#141): drop this struct once
-// `claude_codes::CompactBoundaryMessage` exposes these fields directly and
-// switch `render_compaction_completed` to `SystemMessage::as_compact_boundary`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CompactionExtra {
-    #[serde(default)]
-    pub summary: Option<String>,
-    /// Primary "messages summarized" count. CLI variants spell this
-    /// `leaf_message_count` (preferred) or `message_count` (legacy).
-    #[serde(default)]
-    pub leaf_message_count: Option<u32>,
-    #[serde(default)]
-    pub message_count: Option<u32>,
-    #[serde(default)]
-    pub duration_ms: Option<u64>,
-    /// Legacy aliases for the summary text — older CLI builds emitted under
-    /// `content` or `text` instead of `summary`.
-    #[serde(default)]
-    pub content: Option<String>,
-    #[serde(default)]
-    pub text: Option<String>,
-}
-
-impl CompactionExtra {
-    /// First-non-empty summary text, mirroring the historical renderer fallback
-    /// chain `summary` → `content` → `text`.
-    pub fn summary_text(&self) -> Option<&str> {
-        self.summary
-            .as_deref()
-            .or(self.content.as_deref())
-            .or(self.text.as_deref())
-    }
-
-    /// First-set message count, preferring `leaf_message_count` over the
-    /// legacy `message_count` spelling.
-    pub fn message_count(&self) -> Option<u32> {
-        self.leaf_message_count.or(self.message_count)
-    }
-}
 
 /// Typed view of the `init` subtype's `SystemMessage.extra` for fields the
 /// renderer needs that aren't already top-level on the local lenient

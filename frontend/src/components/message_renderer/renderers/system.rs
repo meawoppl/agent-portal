@@ -111,35 +111,10 @@ fn render_compaction_beginning() -> Html {
 }
 
 fn render_compaction_completed(msg: &shared::SystemMessage) -> Html {
-    // Typed dispatch over `extra` (closes #752). The SDK's
-    // `CompactBoundaryMessage` currently only exposes
-    // `compact_metadata { pre_tokens, trigger }` - not the `summary` /
-    // `leaf_message_count` / `duration_ms` fields the renderer needs.
-    // TODO(SDK rust-code-agent-sdks#141): drop the local `CompactionExtra`
-    // mirror once upstream adds these fields to `CompactBoundaryMessage`,
-    // and switch to `SystemMessage::as_compact_boundary()` here.
-    let compact_extra: shared::CompactionExtra = msg
-        .data
-        .as_object()
-        .and_then(|_| serde_json::from_value(msg.data.clone()).ok())
-        .unwrap_or_default();
-
-    let summary_text = msg
-        .data
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .or_else(|| compact_extra.summary_text());
-    let leaf_count = msg
-        .data
-        .get("leaf_message_count")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u32)
-        .or_else(|| compact_extra.message_count());
-    let duration = msg
-        .data
-        .get("duration_ms")
-        .and_then(|v| v.as_u64())
-        .or(compact_extra.duration_ms);
+    let compact = msg.as_compact_boundary();
+    let summary_text = compact.as_ref().and_then(|c| c.summary.as_deref());
+    let leaf_count = compact.as_ref().and_then(|c| c.leaf_message_count);
+    let duration = compact.as_ref().and_then(|c| c.duration_ms);
 
     html! {
         <div class="claude-message compaction-message">
