@@ -71,7 +71,8 @@ impl MessageGroup {
     /// or removed, causing Yew to throw away the group component and reset
     /// internal state of every expandable/collapsible inside it (bash
     /// command toggle, `ExpandableText`, image viewer, etc.). Using the
-    /// first message's `_created_at` keeps the key stable across reorderings.
+    /// first message's `PortalMeta.created_at` keeps the key stable across
+    /// reorderings.
     /// `index` is used only as a fallback when no timestamp is present.
     pub fn key(&self, index: usize) -> yew::virtual_dom::Key {
         let (prefix, first) = match self {
