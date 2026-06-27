@@ -14,6 +14,10 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[derive(Parser, Debug)]
 #[command(name = "agent-portal")]
 #[command(about = "Persistent daemon that launches claude-portal sessions as in-process tasks")]
+#[command(
+    after_help = "Source & issues: https://github.com/meawoppl/agent-portal\n  \
+                  Report bugs / file issues: https://github.com/meawoppl/agent-portal/issues"
+)]
 struct Args {
     /// Backend WebSocket URL (default: wss://txcl.io in release, ws://localhost:3000 in debug)
     #[arg(long)]

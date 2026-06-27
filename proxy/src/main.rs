@@ -50,7 +50,9 @@ the backend URL and authentication tokens per working directory."
   # Pass arguments through to claude CLI\n  \
   claude-portal --model sonnet -- \"explain this code\"\n\n  \
   # Re-authenticate if token expired\n  \
-  claude-portal --reauth")]
+  claude-portal --reauth\n\n\
+  Source & issues: https://github.com/meawoppl/agent-portal\n  \
+  Report bugs / file issues: https://github.com/meawoppl/agent-portal/issues")]
 struct Args {
     /// Initialize proxy with a setup token from the web interface.
     ///

@@ -23,6 +23,10 @@ pub use crate::config::GoogleOAuthClient;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "agent-portal-backend")]
 #[command(about = "Agent Portal backend server")]
+#[command(
+    after_help = "Source & issues: https://github.com/meawoppl/agent-portal\n  \
+                  Report bugs / file issues: https://github.com/meawoppl/agent-portal/issues"
+)]
 struct Args {
     /// Enable development mode (bypasses OAuth, creates test user)
     #[arg(long)]
