@@ -25,9 +25,9 @@ pub mod timezone;
 // API client types and trait
 pub mod api;
 pub use api::{
-    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, CompactionExtra, InitExtra,
-    ModelUsage, ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse,
-    SoundSettingsResponse, TaskNotificationExtra, TurnMetrics, TurnMetricsResponse,
+    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, InitExtra, ModelUsage,
+    ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse,
+    TaskNotificationExtra, TurnMetrics, TurnMetricsResponse,
 };
 
 /// Default backend URL based on build profile.
@@ -682,5 +682,30 @@ mod tests {
                 "[message from codex 12345678-0000-0000-0000-000000000000]\nhello from another agent"
             )
         );
+    }
+
+    #[test]
+    fn compact_boundary_uses_sdk_summary_stats_aliases() {
+        let json = serde_json::json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "session_id": "session-1",
+            "compact_metadata": { "pre_tokens": 2000, "trigger": "auto" },
+            "content": "summarized earlier context",
+            "message_count": 7,
+            "duration_ms": 1234
+        });
+        let output: ClaudeOutput = serde_json::from_value(json).unwrap();
+        let ClaudeOutput::System(system) = output else {
+            panic!("expected system output");
+        };
+
+        let compact = system.as_compact_boundary().expect("compact boundary");
+        assert_eq!(
+            compact.summary.as_deref(),
+            Some("summarized earlier context")
+        );
+        assert_eq!(compact.leaf_message_count, Some(7));
+        assert_eq!(compact.duration_ms, Some(1234));
     }
 }
