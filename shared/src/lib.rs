@@ -244,6 +244,13 @@ pub struct SessionInfo {
     /// Launcher ID if this session was started by a launcher
     #[serde(default)]
     pub launcher_id: Option<Uuid>,
+    /// Version of the connected launcher that owns this session, when known.
+    ///
+    /// This is a live connection property, not persisted session state, so it
+    /// is absent when the launcher is disconnected or the session did not
+    /// originate from a launcher.
+    #[serde(default)]
+    pub launcher_version: Option<String>,
     /// GitHub PR URL for the current branch
     #[serde(default)]
     pub pr_url: Option<String>,

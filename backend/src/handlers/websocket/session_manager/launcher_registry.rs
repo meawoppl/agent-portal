@@ -90,6 +90,14 @@ impl SessionManager {
             .collect()
     }
 
+    pub fn launcher_version(&self, launcher_id: Option<Uuid>) -> Option<String> {
+        launcher_id.and_then(|id| {
+            self.launchers
+                .get(&id)
+                .map(|launcher| launcher.version.clone())
+        })
+    }
+
     pub fn send_to_launcher(&self, launcher_id: &Uuid, msg: ServerToLauncher) -> bool {
         if let Some(launcher) = self.launchers.get(launcher_id) {
             launcher.sender.send(msg).is_ok()
@@ -190,6 +198,23 @@ mod tests {
             .try_register_launcher(Uuid::new_v4(), make_launcher_connection(user_b, "host1"))
             .is_ok());
         assert_eq!(mgr.launchers.len(), 2);
+    }
+
+    #[test]
+    fn launcher_version_returns_connected_launcher_version() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let launcher_id = Uuid::new_v4();
+
+        mgr.try_register_launcher(launcher_id, make_launcher_connection(user_id, "host1"))
+            .expect("register launcher");
+
+        assert_eq!(
+            mgr.launcher_version(Some(launcher_id)),
+            Some("test".to_string())
+        );
+        assert_eq!(mgr.launcher_version(Some(Uuid::new_v4())), None);
+        assert_eq!(mgr.launcher_version(None), None);
     }
 
     #[test]

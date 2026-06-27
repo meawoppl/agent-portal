@@ -34,6 +34,8 @@ pub struct SessionWithRole {
     #[serde(flatten)]
     pub session: Session,
     pub my_role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launcher_version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,6 +62,9 @@ pub async fn list_sessions(
     let sessions_with_role = results
         .into_iter()
         .map(|(session, role)| SessionWithRole {
+            launcher_version: app_state
+                .session_manager
+                .launcher_version(session.launcher_id),
             session,
             my_role: role,
         })

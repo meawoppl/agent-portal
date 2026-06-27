@@ -140,6 +140,11 @@
         display: none;
     }
 
+    .session-view-header .session-launcher-version {
+        font-size: 0.7rem;
+        padding: 0.15rem 0.35rem;
+    }
+
     .session-view-header .status {
         font-size: 0.7rem;
         padding: 0.2rem 0.5rem;
