@@ -1,4 +1,7 @@
-use codex_codes::io::items::{FileUpdateChange, ThreadItem};
+use codex_codes::{
+    io::items::{FileUpdateChange, ThreadItem},
+    protocol::ThreadItem as AppServerThreadItem,
+};
 use serde::{Deserialize, Serialize};
 
 // Local outer-`CodexEvent` enum is the project-specific wire shape: a hybrid
@@ -93,69 +96,12 @@ pub enum CodexEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum CodexItem {
-    // TODO(SDK #930): move this variant to codex-codes once the generated
-    // ThreadItem model includes `contextCompaction`.
-    ContextCompaction(ContextCompactionItem),
-    // TODO(SDK): codex-codes has no collabAgentToolCall ThreadItem variant; local mirror — see agent-portal#1049
-    CollabAgentToolCall(CollabAgentToolCallItem),
+    /// Exec-level item wrapper used by the stable codex renderer paths.
     Thread(ThreadItem),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextCompactionItem {
-    pub id: String,
-    #[serde(rename = "type")]
-    item_type: ContextCompactionItemType,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum ContextCompactionItemType {
-    #[serde(rename = "contextCompaction", alias = "context_compaction")]
-    ContextCompaction,
-}
-
-/// Local mirror of Codex's `collabAgentToolCall` item (multi-agent
-/// collaboration: `spawnAgent` and friends). codex-codes does not model this
-/// as a `ThreadItem` variant yet, so it would otherwise fall through to the
-/// raw-JSON renderer. See agent-portal#1049.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CollabAgentToolCallItem {
-    pub id: String,
-    /// Discriminant gate for the untagged `CodexItem` enum — without a typed
-    /// `type` field this struct (all-optional otherwise) would shadow every
-    /// upstream `ThreadItem` carrying an `id`.
-    #[serde(rename = "type")]
-    item_type: CollabAgentToolCallItemType,
-    /// The collaboration tool invoked, e.g. `"spawnAgent"`.
-    #[serde(default)]
-    pub tool: Option<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default, rename = "reasoningEffort", alias = "reasoning_effort")]
-    pub reasoning_effort: Option<String>,
-    #[serde(default)]
-    pub status: Option<String>,
-    #[serde(default, rename = "senderThreadId", alias = "sender_thread_id")]
-    pub sender_thread_id: Option<String>,
-    #[serde(default, rename = "receiverThreadIds", alias = "receiver_thread_ids")]
-    pub receiver_thread_ids: Vec<String>,
-    /// Child-agent thread id → its current state.
-    #[serde(default, rename = "agentsStates", alias = "agents_states")]
-    pub agents_states: std::collections::BTreeMap<String, AgentState>,
-    #[serde(default)]
-    pub prompt: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum CollabAgentToolCallItemType {
-    #[serde(rename = "collabAgentToolCall", alias = "collab_agent_tool_call")]
-    CollabAgentToolCall,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentState {
-    #[serde(default)]
-    pub status: String,
+    /// App-server item wrapper for item variants that the exec-level helper
+    /// model intentionally does not expose yet, such as `contextCompaction`
+    /// and `collabAgentToolCall`.
+    AppServer(AppServerThreadItem),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -335,11 +281,12 @@ pub fn thread_item_id(item: &ThreadItem) -> &str {
     }
 }
 
-pub fn codex_item_id(item: &CodexItem) -> &str {
+pub fn codex_item_id(item: &CodexItem) -> Option<&str> {
     match item {
-        CodexItem::ContextCompaction(it) => &it.id,
-        CodexItem::CollabAgentToolCall(it) => &it.id,
-        CodexItem::Thread(it) => thread_item_id(it),
+        CodexItem::Thread(it) => Some(thread_item_id(it)),
+        CodexItem::AppServer(AppServerThreadItem::ContextCompaction { id }) => Some(id),
+        CodexItem::AppServer(AppServerThreadItem::CollabAgentToolCall { id, .. }) => Some(id),
+        CodexItem::AppServer(_) => None,
     }
 }
 
@@ -353,7 +300,7 @@ pub fn codex_event_item_id(json: &str) -> Option<String> {
     match event {
         CodexEvent::ItemStarted { item }
         | CodexEvent::ItemUpdated { item }
-        | CodexEvent::ItemCompleted { item } => Some(codex_item_id(&item?).to_string()),
+        | CodexEvent::ItemCompleted { item } => codex_item_id(&item?).map(str::to_string),
         // Per-file patch updates (`item/fileChange/patchUpdated`) are cumulative
         // too — Codex re-sends the full file patch on every tick. Surfacing
         // their `item_id` here lets the group dedup keep only the final patch,

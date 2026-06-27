@@ -227,14 +227,17 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
 fn classify_codex_event(output: &str) -> Option<ActivityTag> {
     use crate::components::codex_renderer::{CodexEvent, CodexItem};
     use codex_codes::io::items::ThreadItem;
+    use codex_codes::protocol::ThreadItem as AppServerThreadItem;
     let event: CodexEvent = serde_json::from_str(output).ok()?;
     match event {
         CodexEvent::ItemStarted { item: Some(item) }
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
-            CodexItem::ContextCompaction(_) | CodexItem::CollabAgentToolCall(_) => {
-                Some(ActivityTag::Assistant)
-            }
+            CodexItem::AppServer(
+                AppServerThreadItem::ContextCompaction { .. }
+                | AppServerThreadItem::CollabAgentToolCall { .. },
+            ) => Some(ActivityTag::Assistant),
+            CodexItem::AppServer(_) => None,
             CodexItem::Thread(ThreadItem::Error(_)) => Some(ActivityTag::Error),
             CodexItem::Thread(ThreadItem::CommandExecution(ref it))
                 if command_execution_reads_file(&it.command) =>
