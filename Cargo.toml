@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.12.63"
+version = "2.12.64"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -66,7 +66,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Claude Code integration
-claude-codes = { version = "2.1.158", default-features = false, features = ["types"] }
+claude-codes = { version = "2.1.159", default-features = false, features = ["types"] }
 
 # Codex CLI integration
 codex-codes = { version = "0.142.0", default-features = false, features = ["types"] }

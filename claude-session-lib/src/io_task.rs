@@ -72,6 +72,10 @@ pub(crate) async fn claude_io_task(
     // know either on its own.
     let mut current_model: Option<String> = None;
     let mut current_service_tier: Option<String> = None;
+    // Per-turn subagent (`Task`) token rollup: summed from each Task result's
+    // typed `SubagentResult.total_tokens` (claude-codes 2.1.159, #169), reset
+    // at every turn start so it matches the turn the metrics row represents.
+    let mut current_turn_subagent_tokens: i64 = 0;
 
     loop {
         tokio::select! {
@@ -90,6 +94,7 @@ pub(crate) async fn claude_io_task(
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
                         pending_session_limit = None;
+                        current_turn_subagent_tokens = 0;
                         // Begin per-turn metrics capture. Wall-clock UTC is
                         // chrono::Utc::now(); the monotonic instant is the
                         // anchor for TTFT / total / gap durations.
@@ -181,6 +186,16 @@ pub(crate) async fn claude_io_task(
                                 current_turn_was_rate_limited = false;
                                 pending_session_limit = None;
                             }
+                            ClaudeOutput::User(user) => {
+                                // A `Task` tool's result is echoed as a user
+                                // message carrying a typed `SubagentResult` in
+                                // `tool_use_result`. Sum its `total_tokens` into
+                                // the per-turn rollup (claude-codes 2.1.159, #169).
+                                if let Some(sub) = user.subagent_result() {
+                                    current_turn_subagent_tokens +=
+                                        sub.total_tokens.unwrap_or(0) as i64;
+                                }
+                            }
                             _ => {}
                         }
 
@@ -213,19 +228,12 @@ pub(crate) async fn claude_io_task(
                                     .map(|u| u.cache_read_input_tokens as i64)
                                     .unwrap_or(0),
                                 thinking_tokens: 0,
-                                // The Claude binary tracks subagent (`Task` /
-                                // sidechain) tokens and surfaces them as a
-                                // distinct `<subagent_tokens>` line in its
-                                // result `<usage>` envelope, but the
-                                // stream-json `usage` shape the proxy receives
-                                // exposes no subagent field (claude-codes
-                                // `UsageInfo` carries only input/output/cache/
-                                // service_tier). So we can't attribute
-                                // subagent tokens on the Claude path yet.
-                                // TODO(SDK #169): once claude-codes exposes
-                                // the result `<usage>` subagent rollup,
-                                // populate this instead of reporting 0.
-                                subagent_tokens: 0,
+                                // Subagent (`Task`) tokens summed across this
+                                // turn's Task results via the typed
+                                // `SubagentResult.total_tokens` (claude-codes
+                                // 2.1.159, #169) — the `<subagent_tokens>` line
+                                // the CLI renders in its terminal `<usage>`.
+                                subagent_tokens: current_turn_subagent_tokens,
                                 stop_reason: r.stop_reason.clone(),
                                 is_error: r.is_error,
                                 total_cost_usd: Some(r.total_cost_usd),
@@ -323,6 +331,7 @@ pub(crate) async fn claude_io_task(
                                 // turn from a metrics standpoint, but tag
                                 // the new turn with a stream-restart count
                                 // so the dashboard can spot retried turns.
+                                current_turn_subagent_tokens = 0;
                                 turn_tracker.start(Instant::now(), chrono::Utc::now());
                                 turn_tracker.record_stream_restart();
                                 if let Err(e) = client.send(&input).await {
@@ -343,6 +352,7 @@ pub(crate) async fn claude_io_task(
                                         // the budget for the new prompt.
                                         rate_limit_attempts = 0;
                                         pending_session_limit = None;
+                                        current_turn_subagent_tokens = 0;
                                         turn_tracker.start(Instant::now(), chrono::Utc::now());
                                         let r = client.send(&new_input).await;
                                         last_input = Some(new_input);
@@ -514,6 +524,31 @@ async fn read_stderr(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins the wiring this module relies on: a `Task` tool's result is a
+    /// `ClaudeOutput::User` whose `tool_use_result` parses to a typed
+    /// `SubagentResult`, exposing the `total_tokens` we sum into the per-turn
+    /// subagent rollup (claude-codes 2.1.159, #169). If the SDK reshapes this,
+    /// the per-turn `subagent_tokens` would silently fall back to 0 — so lock it.
+    #[test]
+    fn subagent_result_total_tokens_is_readable_from_task_result_user_frame() {
+        let frame = serde_json::json!({
+            "type": "user",
+            "session_id": "00000000-0000-0000-0000-000000000000",
+            "message": { "role": "user", "content": [] },
+            "tool_use_result": {
+                "status": "completed",
+                "agentType": "general-purpose",
+                "totalTokens": 12345
+            }
+        });
+        let output: ClaudeOutput = serde_json::from_value(frame).expect("parses as ClaudeOutput");
+        let ClaudeOutput::User(user) = output else {
+            panic!("expected a user frame");
+        };
+        let sub = user.subagent_result().expect("typed SubagentResult");
+        assert_eq!(sub.total_tokens, Some(12345));
+    }
 
     #[test]
     fn parse_limit_time_accepts_the_cli_time_formats() {
