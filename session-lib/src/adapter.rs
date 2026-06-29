@@ -65,7 +65,11 @@ pub struct PermissionDecision {
 /// The adapter owns all concrete-protocol knowledge. `Session` only ever sees
 /// neutral [`AgentOutput`] / [`PermissionDecision`] and opaque
 /// [`TransportPayload`]s.
-pub trait AgentAdapter: Send + 'static {
+// `Sync` so `Session<A>`, which stores `Box<dyn AgentAdapter>`, stays `Sync`
+// for consumers that share a session across threads (the launcher holds
+// sessions in shared state). Adapters are stateless today; any future stateful
+// adapter must use interior mutability that is itself `Sync`.
+pub trait AgentAdapter: Send + Sync + 'static {
     /// Parse + classify one unit of agent stdout into 0..n neutral decisions.
     ///
     /// `&mut self` so future stateful adapters (e.g. codex, which threads a

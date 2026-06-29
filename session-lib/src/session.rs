@@ -12,7 +12,7 @@ use claude_codes::ClaudeInput;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::adapter::{AgentAdapter, AgentOutput, ClaudeAdapter};
+use crate::adapter::{AgentAdapter, AgentOutput};
 use crate::agent::Agent;
 use crate::buffer::OutputBuffer;
 use crate::error::SessionError;
@@ -55,6 +55,10 @@ pub struct Session<A: Agent> {
     /// `kill_on_drop` doesn't fire when the SDK keeps the child alive in
     /// detached tasks (#927).
     agent_pid: Option<u32>,
+    /// Per-agent protocol adapter, supplied by `A::adapter()`. `next_event`
+    /// drives it to classify each `IoEvent::Output` unit. `None` for agents
+    /// that pre-classify their output (Codex today); see [`Agent::adapter`].
+    adapter: Option<Box<dyn AgentAdapter>>,
     _agent: PhantomData<A>,
 }
 
@@ -141,6 +145,7 @@ impl<A: Agent> Session<A> {
             event_rx: Some(event_rx),
             io_task: Some(handle),
             agent_pid: None,
+            adapter: A::adapter(),
             _agent: PhantomData,
         })
     }
@@ -182,6 +187,7 @@ impl<A: Agent> Session<A> {
             event_rx,
             io_task,
             agent_pid: None,
+            adapter: A::adapter(),
             _agent: PhantomData,
         })
     }
@@ -237,12 +243,20 @@ impl<A: Agent> Session<A> {
                     let output_value = serde_json::to_value(&output).unwrap_or_default();
                     self.buffer.push(output_value.clone());
 
-                    // Delegate protocol classification to the agent adapter. Claude
-                    // is 1:1 (one raw unit → one decision) but handle the Vec
-                    // generally so the loop matches the trait contract.
-                    let mut adapter = ClaudeAdapter;
+                    // Delegate protocol classification to the agent's adapter
+                    // (`A::adapter()`). Claude is 1:1 (one raw unit → one
+                    // decision) but handle the Vec generally so the loop matches
+                    // the trait contract. Collect first so the `&mut adapter`
+                    // borrow ends before the loop mutates other `self` fields.
+                    let decisions = match self.adapter.as_mut() {
+                        Some(adapter) => adapter.classify(output_value),
+                        // Agents without an adapter (Codex today) never emit
+                        // `IoEvent::Output` — they pre-classify upstream. Forward
+                        // any stray unit verbatim so output is never dropped.
+                        None => vec![AgentOutput::Visible(output_value)],
+                    };
                     let mut visible = false;
-                    for decision in adapter.classify(output_value) {
+                    for decision in decisions {
                         match decision {
                             AgentOutput::NotFound => {
                                 self.state = SessionState::Exited { code: 1 };
