@@ -257,7 +257,7 @@ fn classify_request(request_id: String, request: ServerRequest) -> Vec<AgentOutp
 }
 
 /// Build a neutral `PermissionRequest` from a typed Codex permission input,
-/// matching what `session.rs`'s `CodexPermissionRequest` arm produces today:
+/// matching what `Session`'s neutral `PermissionRequest` handling expects:
 /// `tool_name` from the typed variant, `input` re-serialized to JSON, no
 /// suggestions (codex carries none).
 fn permission(request_id: String, input: CodexPermissionInput) -> Vec<AgentOutput> {

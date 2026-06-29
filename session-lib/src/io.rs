@@ -5,7 +5,7 @@
 //! `agent.rs` for the dispatch trait.
 
 use claude_codes::io::PermissionSuggestion;
-use shared::{CodexPermissionInput, TurnMetrics};
+use shared::TurnMetrics;
 use tokio::sync::oneshot;
 
 use crate::adapter::{AgentOutput, PermissionDecision};
@@ -60,25 +60,11 @@ pub enum IoEvent {
     /// (`Visible` → `RawOutput`, `PermissionRequest` → `PermissionRequest`,
     /// `NotFound` → `SessionNotFound`, `Noop` → skip).
     Classified(AgentOutput),
-    /// Raw JSON output forwarded directly (e.g. Codex JSONL frames the codex
-    /// I/O task emits outside the classifier, and portal-reminder messages).
-    /// Bypasses classification and is forwarded verbatim to the
-    /// backend/frontend.
+    /// Raw JSON output forwarded directly — portal-reminder messages and the
+    /// codex decode-failure / turn-failed frames the I/O task emits outside the
+    /// classifier. Bypasses classification and is forwarded verbatim. (Normal
+    /// agent output now flows through [`IoEvent::Classified`] for both backends.)
     RawOutput(serde_json::Value),
-    /// Permission request from Codex's app-server approval flow.
-    ///
-    /// Claude permission requests come up the typed `Output` channel
-    /// (`ClaudeOutput::ControlRequest`) and `Session::next_event` handles
-    /// the extraction.
-    ///
-    /// The `tool_name` discriminant lives on the `CodexPermissionInput`
-    /// variant — call `input.tool_name()` if a stringly-typed key is
-    /// needed (e.g. for the `SessionEvent::PermissionRequest` envelope
-    /// which still carries one for the cross-agent claude path).
-    CodexPermissionRequest {
-        request_id: String,
-        input: CodexPermissionInput,
-    },
     /// A completed-turn performance metrics payload, ready for the proxy to
     /// ship to the backend as `ProxyToServer::TurnMetricsReport`. Emitted
     /// once per finalize by the agent-specific I/O task.
