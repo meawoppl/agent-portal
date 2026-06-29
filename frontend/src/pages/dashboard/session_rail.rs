@@ -16,8 +16,10 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
+mod menu;
 mod pill;
 mod sparkline;
+use menu::SessionRailMenu;
 use pill::SessionPill;
 pub use sparkline::ActivityRef;
 
@@ -103,27 +105,6 @@ fn version_staleness(client: &str, server: &str) -> VersionStaleness {
     }
 }
 
-/// Build a dropdown click handler that runs `action` and then closes the menu.
-fn close_then(
-    menu_session: UseStateHandle<Option<Uuid>>,
-    action: impl Fn() + 'static,
-) -> Callback<MouseEvent> {
-    Callback::from(move |_: MouseEvent| {
-        action();
-        menu_session.set(None);
-    })
-}
-
-/// Render one dropdown menu option button with the shared pill-menu shell.
-fn menu_option(extra: Classes, label: &str, hint: &str, onclick: Callback<MouseEvent>) -> Html {
-    html! {
-        <button type="button" class={classes!("pill-menu-option", extra)} {onclick}>
-            { label }
-            <span class="option-hint">{ hint }</span>
-        </button>
-    }
-}
-
 fn sorted_prs(prs: &[PrRef]) -> Vec<PrRef> {
     let mut prs = prs.to_vec();
     prs.sort_by_key(|p| p.number);
@@ -137,66 +118,6 @@ fn repo_pr_menu_hint(repo_url: Option<&str>, pr_count: usize) -> &'static str {
         (true, _) => "Repository + PRs",
         (false, 1) => "1 PR",
         (false, _) => "PRs",
-    }
-}
-
-fn repo_pr_submenu(session: &SessionInfo) -> Html {
-    let prs = sorted_prs(&session.open_prs);
-    if session.repo_url.is_none() && prs.is_empty() {
-        return html! {
-            <span class="pill-menu-option disabled">
-                { "No Repository Detected" }
-            </span>
-        };
-    }
-
-    let repo_link = if let Some(ref url) = session.repo_url {
-        let href = url.clone();
-        html! {
-            <a class="pill-menu-option pr-link" href={href} target="_blank"
-               onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                { "Open Repository" }
-                <span class="option-hint">{ "GitHub" }</span>
-            </a>
-        }
-    } else {
-        html! {}
-    };
-
-    let pr_rows = prs
-        .iter()
-        .map(|pr| {
-            let href = pr.url.clone();
-            let branch = pr.branch.clone();
-            html! {
-                <a class="pill-menu-option pr-link" href={href} target="_blank"
-                   title={branch.clone()}
-                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                    { format!("Open PR #{}", pr.number) }
-                    <span class="option-hint">{ branch }</span>
-                </a>
-            }
-        })
-        .collect::<Html>();
-
-    html! {
-        <div class="pill-menu-submenu">
-            <button
-                type="button"
-                class="pill-menu-option repo-submenu-trigger"
-                aria-haspopup="true"
-                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
-            >
-                { "Repo / PRs" }
-                <span class="option-hint">
-                    { repo_pr_menu_hint(session.repo_url.as_deref(), prs.len()) }
-                </span>
-            </button>
-            <div class="pill-submenu-panel" role="menu">
-                { repo_link }
-                { pr_rows }
-            </div>
-        </div>
     }
 }
 
@@ -357,244 +278,40 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         });
     }
 
-    // Find the session whose menu is open
-    let open_session: Option<&SessionInfo> =
-        (*menu_session).and_then(|id| props.sessions.iter().find(|s| s.id == id));
+    let open_session: Option<SessionInfo> = (*menu_session)
+        .and_then(|id| props.sessions.iter().find(|s| s.id == id))
+        .cloned();
+    let open_session_id = open_session.as_ref().map(|session| session.id);
+    let is_menu_session_hidden = open_session_id
+        .map(|id| props.hidden_sessions.contains(&id))
+        .unwrap_or(false);
+    let is_menu_session_connected = open_session_id
+        .map(|id| props.connected_sessions.contains(&id))
+        .unwrap_or(false);
 
-    // Build dropdown class + style + content (always rendered, toggled by .open class)
-    let is_menu_open = open_session.is_some();
-    let dropdown_class = if is_menu_open {
-        "pill-dropdown open"
-    } else {
-        "pill-dropdown"
+    let close_menu = {
+        let menu_session = menu_session.clone();
+        Callback::from(move |()| menu_session.set(None))
     };
 
-    let (left, top) = *menu_pos;
-    let dropdown_style = if is_menu_open {
-        format!("left: {}px; top: {}px;", left, top)
-    } else {
-        String::new()
+    let set_stop_confirm = {
+        let stop_confirm = stop_confirm.clone();
+        Callback::from(move |value| stop_confirm.set(value))
     };
 
-    let dropdown_content = if let Some(session) = open_session {
-        let is_hidden = props.hidden_sessions.contains(&session.id);
-        let is_connected = props.connected_sessions.contains(&session.id);
-        let is_paused = session.paused;
-        let session_id = session.id;
+    let set_copied_id = {
+        let copied_id = copied_id.clone();
+        Callback::from(move |value| copied_id.set(value))
+    };
 
-        let on_stop = {
-            let on_stop = props.on_stop.clone();
-            let menu_session = menu_session.clone();
-            let stop_confirm = stop_confirm.clone();
-            Callback::from(move |_: MouseEvent| {
-                if *stop_confirm {
-                    on_stop.emit(session_id);
-                    stop_confirm.set(false);
-                    menu_session.set(None);
-                } else {
-                    stop_confirm.set(true);
-                }
-            })
-        };
-        let confirming_stop = *stop_confirm;
+    let on_share = {
+        let share_session_id = share_session_id.clone();
+        Callback::from(move |session_id| share_session_id.set(Some(session_id)))
+    };
 
-        // Opens the schedule dialog; used by both the schedule option and the
-        // blocked-stop option.
-        let open_schedule = close_then(menu_session.clone(), {
-            let schedule_session = schedule_session.clone();
-            let session = session.clone();
-            move || schedule_session.set(Some(session.clone()))
-        });
-
-        let on_hide = close_then(menu_session.clone(), {
-            let on_toggle_hidden = props.on_toggle_hidden.clone();
-            move || on_toggle_hidden.emit(session_id)
-        });
-
-        let on_toggle_pause = close_then(menu_session.clone(), {
-            let on_toggle_pause = props.on_toggle_pause.clone();
-            move || on_toggle_pause.emit((session_id, !is_paused))
-        });
-
-        let on_leave = close_then(menu_session.clone(), {
-            let on_leave = props.on_leave.clone();
-            move || on_leave.emit(session_id)
-        });
-
-        let on_delete = close_then(menu_session.clone(), {
-            let on_delete = props.on_delete.clone();
-            move || on_delete.emit(session_id)
-        });
-
-        let hide_label = if is_hidden {
-            "Show Session"
-        } else {
-            "Hide Session"
-        };
-        let hide_hint = if is_hidden {
-            "Show in rotation"
-        } else {
-            "Hide from rotation"
-        };
-
-        let hide_option = if is_paused {
-            html! {
-                <span class="pill-menu-option disabled">
-                    { "Hidden While Paused" }
-                    <span class="option-hint">{ "Resume to show in rotation" }</span>
-                </span>
-            }
-        } else {
-            menu_option(
-                classes!("hide", is_hidden.then_some("active")),
-                hide_label,
-                hide_hint,
-                on_hide,
-            )
-        };
-
-        let pause_option = if session.my_role != "viewer" {
-            let (pause_label, pause_hint) = if is_paused {
-                ("Resume Session", "Restart from saved session")
-            } else {
-                ("Pause Session", "Stop and suppress auto-resume")
-            };
-            menu_option(
-                classes!("pause", is_paused.then_some("active")),
-                pause_label,
-                pause_hint,
-                on_toggle_pause,
-            )
-        } else {
-            html! {}
-        };
-
-        let stop_option =
-            if is_paused || (is_connected && session.status == shared::SessionStatus::Active) {
-                if *stop_has_tasks {
-                    // Block stop — open schedule dialog so user can delete tasks first
-                    menu_option(
-                        classes!("stop", "blocked"),
-                        "Delete Scheduled Tasks First",
-                        "Opens task manager",
-                        open_schedule.clone(),
-                    )
-                } else {
-                    let (stop_label, stop_hint) = if confirming_stop {
-                        let hint = if is_paused {
-                            "This will remove the saved launcher entry"
-                        } else {
-                            "This will terminate the process"
-                        };
-                        ("Click again to confirm", hint)
-                    } else if is_paused {
-                        ("Stop Session", "Remove saved launcher entry")
-                    } else {
-                        ("Stop Session", "Terminate process")
-                    };
-                    menu_option(
-                        classes!("stop", confirming_stop.then_some("confirming")),
-                        stop_label,
-                        stop_hint,
-                        on_stop,
-                    )
-                }
-            } else {
-                html! {}
-            };
-
-        let on_copy_id = {
-            let copied_id = copied_id.clone();
-            Callback::from(move |_: MouseEvent| {
-                let window = web_sys::window().expect("no window");
-                let clipboard = window.navigator().clipboard();
-                let id_str = session_id.to_string();
-                let copied_id = copied_id.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    let _ =
-                        wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&id_str)).await;
-                    copied_id.set(true);
-                    let copied_id = copied_id.clone();
-                    gloo::timers::callback::Timeout::new(1_500, move || {
-                        copied_id.set(false);
-                    })
-                    .forget();
-                });
-            })
-        };
-        let copy_label = if *copied_id { "Copied!" } else { "Session ID" };
-        let short_id = &session.id.to_string()[..8];
-
-        let leave_option = if session.my_role != "owner" {
-            menu_option(
-                classes!("leave"),
-                "Leave Session",
-                "Remove from your list",
-                on_leave,
-            )
-        } else {
-            html! {}
-        };
-
-        let repo_option = repo_pr_submenu(session);
-
-        let share_option = if session.my_role == "owner" {
-            let on_share = close_then(menu_session.clone(), {
-                let share_session_id = share_session_id.clone();
-                move || share_session_id.set(Some(session_id))
-            });
-            menu_option(
-                classes!("share"),
-                "Share Session",
-                "Manage access",
-                on_share,
-            )
-        } else {
-            html! {}
-        };
-
-        let delete_option = if session.my_role == "owner" {
-            menu_option(
-                classes!("stop"),
-                "Delete Session",
-                "Remove history and metadata",
-                on_delete,
-            )
-        } else {
-            html! {}
-        };
-
-        let schedule_option = if session.my_role == "owner" {
-            menu_option(
-                classes!("schedule"),
-                "Schedule Task",
-                "Cron jobs",
-                open_schedule,
-            )
-        } else {
-            html! {}
-        };
-
-        html! {
-            <>
-                { menu_option(
-                    classes!("copy-id", (*copied_id).then_some("copied")),
-                    copy_label,
-                    short_id,
-                    on_copy_id,
-                ) }
-                { share_option }
-                { schedule_option }
-                { repo_option }
-                { pause_option }
-                { hide_option }
-                { leave_option }
-                { stop_option }
-                { delete_option }
-            </>
-        }
-    } else {
-        html! {}
+    let on_schedule = {
+        let schedule_session = schedule_session.clone();
+        Callback::from(move |session| schedule_session.set(Some(session)))
     };
 
     let on_toggle_pill_menu = {
@@ -725,11 +442,25 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     }
                 }
             </div>
-            <div class={dropdown_class} style={dropdown_style}
-                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
-            >
-                { dropdown_content }
-            </div>
+            <SessionRailMenu
+                session={open_session}
+                position={*menu_pos}
+                is_hidden={is_menu_session_hidden}
+                is_connected={is_menu_session_connected}
+                stop_has_tasks={*stop_has_tasks}
+                confirming_stop={*stop_confirm}
+                copied_id={*copied_id}
+                on_close={close_menu}
+                on_set_stop_confirm={set_stop_confirm}
+                on_set_copied_id={set_copied_id}
+                on_stop={props.on_stop.clone()}
+                on_toggle_hidden={props.on_toggle_hidden.clone()}
+                on_toggle_pause={props.on_toggle_pause.clone()}
+                on_leave={props.on_leave.clone()}
+                on_delete={props.on_delete.clone()}
+                on_share={on_share}
+                on_schedule={on_schedule}
+            />
             {
                 if let Some(session_id) = *share_session_id {
                     let share_session_id = share_session_id.clone();
