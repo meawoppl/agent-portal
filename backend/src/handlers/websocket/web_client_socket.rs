@@ -362,9 +362,7 @@ fn handle_web_input(
                     .ok()
             })
             .unwrap_or_else(|| "Unknown".to_string());
-        session_manager
-            .last_input_sender
-            .insert(session_id, (user_id, display_name));
+        session_manager.set_last_input_sender(session_id, user_id, display_name);
     }
 
     // For slash commands, broadcast a portal message so the user sees feedback

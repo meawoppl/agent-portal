@@ -503,10 +503,11 @@ fn handle_launcher_message(
             let content_value = serde_json::Value::String(content);
 
             // Set sender attribution to "Scheduler"
-            app_state
-                .session_manager
-                .last_input_sender
-                .insert(session_id, (user_id, "Scheduler".to_string()));
+            app_state.session_manager.set_last_input_sender(
+                session_id,
+                user_id,
+                "Scheduler".to_string(),
+            );
 
             // Sequence and send (same pipeline as web client input)
             use crate::schema::{pending_inputs, sessions};

@@ -107,11 +107,7 @@ pub fn handle_claude_output(
 ) {
     // Deduplicate sequenced messages before broadcasting
     if let (Some(session_id), Some(seq_num)) = (db_session_id, seq) {
-        let last_ack = session_manager
-            .last_ack_seq
-            .get(&session_id)
-            .map(|v| *v)
-            .unwrap_or(0);
+        let last_ack = session_manager.last_ack_seq(session_id);
 
         if seq_num <= last_ack {
             info!(
@@ -132,12 +128,7 @@ pub fn handle_claude_output(
         .and_then(|t| t.as_str())
         .unwrap_or("assistant");
     let sender_info = if role_str == "user" {
-        db_session_id.and_then(|sid| {
-            session_manager
-                .last_input_sender
-                .remove(&sid)
-                .map(|(_, v)| v)
-        })
+        db_session_id.and_then(|sid| session_manager.take_last_input_sender(sid))
     } else {
         None
     };
@@ -169,11 +160,7 @@ pub fn handle_claude_output(
                             // fires once per task, so summing is exact.
                             if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref())
                             {
-                                session_manager
-                                    .subagent_tokens
-                                    .entry(sid)
-                                    .and_modify(|v| *v += usage.total_tokens as i64)
-                                    .or_insert(usage.total_tokens as i64);
+                                session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
                             }
                         }
                         None => warn!(
@@ -275,11 +262,7 @@ pub fn handle_claude_output(
             }
 
             if role == shared::MessageRole::Result {
-                let subagent_tokens = session_manager
-                    .subagent_tokens
-                    .get(&session_id)
-                    .map(|v| *v)
-                    .unwrap_or(0);
+                let subagent_tokens = session_manager.subagent_tokens(session_id);
                 store_result_metadata(&mut conn, session_id, &content, subagent_tokens);
             }
 
@@ -293,15 +276,7 @@ pub fn handle_claude_output(
 
         // Update last_ack tracker and send acknowledgment
         if let Some(seq_num) = seq {
-            session_manager
-                .last_ack_seq
-                .entry(session_id)
-                .and_modify(|v| {
-                    if seq_num > *v {
-                        *v = seq_num;
-                    }
-                })
-                .or_insert(seq_num);
+            session_manager.record_ack_seq(session_id, seq_num);
 
             let _ = tx.send(ServerToProxy::OutputAck {
                 session_id,
