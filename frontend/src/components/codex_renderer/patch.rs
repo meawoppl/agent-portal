@@ -1,4 +1,4 @@
-use super::tools::tool_card;
+use super::tool_card::tool_card;
 use crate::components::diff::{DiffCard, DiffSource};
 use codex_codes::io::items::{FileChangeItem, FileUpdateChange, PatchApplyStatus, PatchChangeKind};
 use yew::prelude::*;
