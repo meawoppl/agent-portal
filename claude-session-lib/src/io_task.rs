@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn control_response_deny_uses_reason_with_default() {
-        let explicit = serde_json::to_value(&claude_control_response(
+        let explicit = serde_json::to_value(claude_control_response(
             "req-3",
             PermissionDecision {
                 allow: false,
@@ -649,7 +649,7 @@ mod tests {
         );
 
         // Default reason mirrors the old respond_permission "User denied".
-        let defaulted = serde_json::to_value(&claude_control_response(
+        let defaulted = serde_json::to_value(claude_control_response(
             "req-4",
             PermissionDecision {
                 allow: false,
