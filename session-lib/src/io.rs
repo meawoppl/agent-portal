@@ -4,7 +4,6 @@
 //! per-agent I/O tasks just ignore the variants they don't handle. See
 //! `agent.rs` for the dispatch trait.
 
-use claude_codes::io::PermissionSuggestion;
 use shared::TurnMetrics;
 use tokio::sync::oneshot;
 
@@ -103,11 +102,15 @@ pub enum SessionEvent {
     RawOutput(serde_json::Value),
 
     /// The agent is requesting permission for a tool.
+    ///
+    /// `permission_suggestions` are opaque wire JSON (the classifier serialized
+    /// the agent's typed suggestions); the proxy edge re-parses them into its
+    /// typed wire form. Keeps `Session` free of concrete protocol types.
     PermissionRequest {
         request_id: String,
         tool_name: String,
         input: serde_json::Value,
-        permission_suggestions: Vec<PermissionSuggestion>,
+        permission_suggestions: Vec<serde_json::Value>,
     },
 
     /// Session not found locally (e.g., when resuming an expired session).
