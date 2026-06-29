@@ -1,8 +1,9 @@
 //! Background task for Claude sessions.
 //!
-//! Owns the [`ClaudeAsyncClient`] exclusively, draining stdout into
-//! [`IoEvent`]s and writing [`IoCommand::Input`] / `PermissionResponse`
-//! back to claude's stdin. Also implements the upstream-429 rate-limit
+//! Owns the [`ClaudeAsyncClient`] exclusively, draining stdout into neutral
+//! [`IoEvent::Classified`] decisions and translating [`IoCommand::UserInput`] /
+//! [`IoCommand::Permission`] into claude's wire form on stdin. Also implements
+//! the upstream-429 rate-limit
 //! turn-retry state machine (see the `RATE_LIMIT_TEXT_PREFIX` comment
 //! below).
 
@@ -10,15 +11,42 @@ use std::time::{Duration, Instant};
 
 use chrono::{NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
-use claude_codes::io::ContentBlock;
+use claude_codes::io::{ContentBlock, ControlResponse, PermissionResult};
 use claude_codes::{AsyncClient as ClaudeAsyncClient, ClaudeInput, ClaudeOutput};
 use rand::Rng;
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
-use session_lib::{AgentOutputClassifier, ClaudeAdapter, TurnOutcome, TurnTracker};
+use session_lib::{
+    AgentOutputClassifier, ClaudeAdapter, PermissionDecision, TurnOutcome, TurnTracker,
+};
 use shared::PortalMessage;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+/// Build a Claude `ControlResponse` from a neutral [`PermissionDecision`].
+///
+/// Mirrors the allow/deny/remember mapping the generic `Session` used to do
+/// inline; it now lives at the Claude edge since the I/O task owns the typed
+/// client (#1165 item 2, phase A slice 2). `decision.remember` is opaque JSON
+/// (serialized `claude_codes::Permission`s) — the Value-based allow handles it.
+fn claude_control_response(request_id: &str, decision: PermissionDecision) -> ControlResponse {
+    if decision.allow {
+        let input_value = decision
+            .modified_input
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        if decision.remember.is_empty() {
+            ControlResponse::from_result(request_id, PermissionResult::allow(input_value))
+        } else {
+            ControlResponse::from_result(
+                request_id,
+                PermissionResult::allow_with_permissions(input_value, decision.remember),
+            )
+        }
+    } else {
+        let reason = decision.reason.unwrap_or_else(|| "User denied".to_string());
+        ControlResponse::from_result(request_id, PermissionResult::deny(reason))
+    }
+}
 
 const SESSION_LIMIT_TEXT: &str = "You've hit your session limit";
 const SESSION_LIMIT_CONTINUE_PROMPT: &str =
@@ -85,11 +113,13 @@ pub(crate) async fn claude_io_task(
                     // `display_event` is for agents that don't echo (Codex);
                     // claude echoes its input and the proxy swaps the typed
                     // event in via output_forwarder, so it's ignored here.
-                    IoCommand::Input {
-                        input,
+                    IoCommand::UserInput {
+                        text,
                         delivered,
                         display_event: _,
                     } => {
+                        // Build Claude's wire form from the neutral text.
+                        let input = ClaudeInput::user_message(text, session_id);
                         // Each fresh user input gets its own retry budget.
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
@@ -106,10 +136,13 @@ pub(crate) async fn claude_io_task(
                         }
                         r
                     }
-                    IoCommand::PermissionResponse(response) => {
+                    IoCommand::Permission {
+                        request_id,
+                        decision,
+                    } => {
+                        let response = claude_control_response(&request_id, decision);
                         client.send_control_response(response).await
                     }
-                    IoCommand::CodexApproval { .. } => continue,
                 };
                 if let Err(e) = result {
                     let _ = event_tx.send(IoEvent::Error(SessionError::Agent(e.to_string())));
@@ -355,14 +388,15 @@ pub(crate) async fn claude_io_task(
                             }
                             Some(cmd) = command_rx.recv() => {
                                 match cmd {
-                                    IoCommand::Input {
-                                        input: new_input,
+                                    IoCommand::UserInput {
+                                        text,
                                         delivered,
                                         display_event: _,
                                     } => {
                                         // User typed something while we were waiting
                                         // — honor that, abandon the retry, and reset
                                         // the budget for the new prompt.
+                                        let new_input = ClaudeInput::user_message(text, session_id);
                                         rate_limit_attempts = 0;
                                         pending_session_limit = None;
                                         current_turn_subagent_tokens = 0;
@@ -379,7 +413,12 @@ pub(crate) async fn claude_io_task(
                                             ));
                                         }
                                     }
-                                    IoCommand::PermissionResponse(response) => {
+                                    IoCommand::Permission {
+                                        request_id,
+                                        decision,
+                                    } => {
+                                        let response =
+                                            claude_control_response(&request_id, decision);
                                         if let Err(e) =
                                             client.send_control_response(response).await
                                         {
@@ -388,7 +427,6 @@ pub(crate) async fn claude_io_task(
                                             ));
                                         }
                                     }
-                                    IoCommand::CodexApproval { .. } => {}
                                 }
                             }
                         }
@@ -537,6 +575,93 @@ async fn read_stderr(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- claude_control_response: neutral PermissionDecision → ControlResponse.
+    // Ported from the deleted `ClaudeAdapter::permission_response` tests; this is
+    // permission hot-path code so the characterization net moves with the logic.
+
+    #[test]
+    fn control_response_allow_uses_empty_input_by_default() {
+        let resp = claude_control_response(
+            "req-1",
+            PermissionDecision {
+                allow: true,
+                ..Default::default()
+            },
+        );
+        let v = serde_json::to_value(&resp).unwrap();
+        let inner = &v["response"];
+        assert_eq!(inner["subtype"], serde_json::json!("success"));
+        assert_eq!(inner["request_id"], serde_json::json!("req-1"));
+        assert_eq!(inner["response"]["behavior"], serde_json::json!("allow"));
+        // input defaults to an empty object.
+        assert_eq!(inner["response"]["updatedInput"], serde_json::json!({}));
+        assert!(inner["response"].get("updatedPermissions").is_none());
+    }
+
+    #[test]
+    fn control_response_allow_with_modified_input_and_remember() {
+        let perm =
+            serde_json::to_value(claude_codes::Permission::allow_tool("Bash", "npm test")).unwrap();
+        let resp = claude_control_response(
+            "req-2",
+            PermissionDecision {
+                allow: true,
+                modified_input: Some(serde_json::json!({"command": "npm test"})),
+                remember: vec![perm],
+                reason: None,
+            },
+        );
+        let result = &serde_json::to_value(&resp).unwrap()["response"]["response"];
+        assert_eq!(result["behavior"], serde_json::json!("allow"));
+        assert_eq!(
+            result["updatedInput"],
+            serde_json::json!({"command": "npm test"})
+        );
+        assert_eq!(
+            result["updatedPermissions"][0]["type"],
+            serde_json::json!("addRules")
+        );
+        assert_eq!(
+            result["updatedPermissions"][0]["rules"][0]["toolName"],
+            serde_json::json!("Bash")
+        );
+    }
+
+    #[test]
+    fn control_response_deny_uses_reason_with_default() {
+        let explicit = serde_json::to_value(claude_control_response(
+            "req-3",
+            PermissionDecision {
+                allow: false,
+                reason: Some("nope".to_string()),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            explicit["response"]["response"]["behavior"],
+            serde_json::json!("deny")
+        );
+        assert_eq!(
+            explicit["response"]["response"]["message"],
+            serde_json::json!("nope")
+        );
+
+        // Default reason mirrors the old respond_permission "User denied".
+        let defaulted = serde_json::to_value(claude_control_response(
+            "req-4",
+            PermissionDecision {
+                allow: false,
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            defaulted["response"]["response"]["message"],
+            serde_json::json!("User denied")
+        );
+    }
 
     /// Pins the wiring this module relies on: a `Task` tool's result is a
     /// `ClaudeOutput::User` whose `tool_use_result` parses to a typed

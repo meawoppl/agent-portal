@@ -1,39 +1,33 @@
 //! Agent-neutral protocol boundary (refactor #1165 item 2).
 //!
-//! Two traits split the per-agent protocol surface so the generic `Session<A>`
-//! core never touches `claude_codes` / `codex_codes` types:
+//! The generic `Session<A>` core never touches `claude_codes` / `codex_codes`
+//! protocol types. The one trait here, [`AgentOutputClassifier`], parses a unit
+//! of agent output into neutral [`AgentOutput`] decisions. It runs **inside each
+//! per-agent I/O task** (Claude's `claude_io_task` via [`ClaudeAdapter`]; Codex's
+//! via `CodexClassifier`), which then emits `IoEvent::Classified(AgentOutput)`;
+//! `Session` only maps those neutral decisions to `SessionEvent`s.
 //!
-//! - [`AgentOutputClassifier`] — parses one unit of agent output into neutral
-//!   [`AgentOutput`] decisions. This runs **inside each per-agent I/O task**
-//!   (Claude's `claude_io_task` via [`ClaudeAdapter`]; Codex's via
-//!   `CodexClassifier`), which then emits `IoEvent::Classified(AgentOutput)`.
-//!   `Session` only maps those neutral decisions to `SessionEvent`s.
-//! - [`AgentAdapter`] — the Claude stdin/permission *input* side
-//!   (`user_input` / `permission_response` / `interrupt` producing a
-//!   [`TransportPayload`]). This is Claude-transport-shaped and does not fit
-//!   Codex's async RPC input model; neutralizing the input side is phase-A
-//!   slice 2 (see `docs/design/agent-runtime.md`). [`ClaudeAdapter`] implements
-//!   both traits.
+//! The **input** side (turning neutral [`crate::io::IoCommand`]s into the
+//! agent's wire form) is NOT a trait — there is no agent-neutral input
+//! abstraction. Each I/O task serializes input directly against its typed
+//! client (Claude: `ClaudeInput` / `ControlResponse` to stdin; Codex:
+//! `turn_start` / `respond` RPC). Phase-A slice 2 removed the old
+//! Claude-transport-shaped `AgentAdapter` input trait, which couldn't fit
+//! Codex's async RPC model. A future `AgentRuntime` may unify it.
 //!
 //! See `docs/design/session-adapter.md` and `docs/design/agent-runtime.md`.
 
-use uuid::Uuid;
-
-/// One unit of agent stdout, as opaque wire JSON. The adapter parses it.
+/// One unit of agent stdout, as opaque wire JSON. The classifier parses it.
 pub type RawUnit = serde_json::Value;
 
-/// Opaque payload the I/O task writes to the agent. The adapter produces it;
-/// `Session` never inspects it.
-pub type TransportPayload = serde_json::Value;
-
-/// A neutral decision produced by the adapter from one unit of agent output.
+/// A neutral decision produced by the classifier from one unit of agent output.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentOutput {
     /// User-visible output to forward/persist verbatim (opaque wire JSON).
     Visible(serde_json::Value),
     /// A permission/control request awaiting a response.
     PermissionRequest {
-        /// Neutral correlation id for the later [`AgentAdapter::permission_response`].
+        /// Neutral correlation id, echoed back in [`crate::io::IoCommand::Permission`].
         request_id: String,
         /// Stringly-typed tool name (the same key the claude path carries
         /// verbatim from `ToolUseRequest`).
@@ -66,8 +60,8 @@ pub struct PermissionDecision {
 }
 
 /// Output-classification boundary: parse one unit of agent output into neutral
-/// [`AgentOutput`] decisions. This is the *only* part of the adapter that fits
-/// every backend — both Claude and Codex can honestly map their output here.
+/// [`AgentOutput`] decisions — the part of the protocol surface every backend
+/// can honestly implement (both Claude and Codex map their output here).
 ///
 /// Generic over the input unit via [`Raw`](AgentOutputClassifier::Raw) because
 /// the backends' output units differ: Claude's I/O task yields opaque stdout
@@ -77,19 +71,17 @@ pub struct PermissionDecision {
 /// a single `Raw = Value` would lock Codex out; the associated type lets each
 /// backend classify its native unit while sharing the neutral [`AgentOutput`].
 ///
-/// It is split out from [`AgentAdapter`] (which pins `Raw = serde_json::Value`)
-/// because the rest of `AgentAdapter` — `user_input`/`permission_response`
-/// returning a sync `TransportPayload` for the I/O task to write — is
-/// Claude-transport-shaped and does *not* fit Codex, whose input/permission
-/// flow is an async `turn_start`/`respond` RPC owned by `codex_io_task`. A
-/// backend that only classifies output (Codex) implements this trait alone;
-/// full unification of the input side is a separate `AgentRuntime` design (see
-/// `docs/design/session-adapter.md`).
+/// The input side (turning neutral commands into wire form) is deliberately
+/// NOT part of this trait: it lives in each I/O task against its typed client,
+/// because the agents' input models diverge (Claude writes to stdin
+/// synchronously; Codex issues async `turn_start`/`respond` RPCs). See the
+/// module docs.
 ///
-/// `Sync` so `Session<A>`, which stores `Box<dyn AgentAdapter>`, stays `Sync`
-/// for consumers that share a session across threads (the launcher holds
-/// sessions in shared state). Adapters are stateless today; any future stateful
-/// adapter must use interior mutability that is itself `Sync`.
+/// `Send + Sync + 'static` so a boxed classifier can be held across threads if
+/// needed and `Session<A>` stays `Sync` for consumers that share a session (the
+/// launcher holds sessions in shared state). Classifiers are stateless today;
+/// any future stateful classifier must use interior mutability that is itself
+/// `Sync`.
 pub trait AgentOutputClassifier: Send + Sync + 'static {
     /// The native output unit this classifier parses (Claude: `serde_json::Value`
     /// stdout JSON; Codex: `codex_codes::ServerMessage`).
@@ -103,29 +95,12 @@ pub trait AgentOutputClassifier: Send + Sync + 'static {
     fn classify(&mut self, raw: Self::Raw) -> Vec<AgentOutput>;
 }
 
-/// Per-agent protocol parse/serialize boundary for the generic `Session<A>`,
-/// for backends whose input side fits the sync stdin-payload model (Claude).
+/// Claude-protocol output classifier. Stateless; a unit struct.
 ///
-/// Pins `Raw = serde_json::Value` so `Session`'s `dyn AgentAdapter` can call
-/// `classify` with the stdout JSON it already serializes.
-pub trait AgentAdapter: AgentOutputClassifier<Raw = RawUnit> {
-    /// Build the transport payload for plain user text.
-    fn user_input(&self, text: &str, session_id: Uuid) -> TransportPayload;
-
-    /// Build the transport payload responding to a prior `PermissionRequest`.
-    fn permission_response(
-        &self,
-        request_id: &str,
-        decision: PermissionDecision,
-    ) -> TransportPayload;
-
-    /// Optional control inputs (interrupt, etc.).
-    fn interrupt(&self) -> Option<TransportPayload> {
-        None
-    }
-}
-
-/// Claude-protocol adapter. Stateless for now; a unit struct.
+/// The input side (building `ClaudeInput` / `ControlResponse` from neutral
+/// commands) lives in `claude_io_task`, which owns the typed client — there is
+/// no agent-neutral input trait (phase A slice 2 removed the old
+/// `AgentAdapter`; see `docs/design/agent-runtime.md`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClaudeAdapter;
 
@@ -184,51 +159,6 @@ impl AgentOutputClassifier for ClaudeAdapter {
             // is user-visible.
             _ => vec![AgentOutput::Visible(raw)],
         }
-    }
-}
-
-impl AgentAdapter for ClaudeAdapter {
-    fn user_input(&self, text: &str, session_id: Uuid) -> TransportPayload {
-        let input = claude_codes::ClaudeInput::user_message(text, session_id);
-        serde_json::to_value(&input).unwrap_or(serde_json::Value::Null)
-    }
-
-    fn permission_response(
-        &self,
-        request_id: &str,
-        decision: PermissionDecision,
-    ) -> TransportPayload {
-        use claude_codes::io::{ControlResponse, PermissionResult};
-
-        // Mirrors `session.rs::respond_permission` (claude path):
-        // - input defaults to an empty object when not modified,
-        // - non-empty remembered permissions use the typed-permissions allow,
-        // - deny carries the reason, defaulting to "User denied".
-        let ctrl_response = if decision.allow {
-            let input_value = decision
-                .modified_input
-                .unwrap_or(serde_json::Value::Object(Default::default()));
-            if decision.remember.is_empty() {
-                ControlResponse::from_result(request_id, PermissionResult::allow(input_value))
-            } else {
-                ControlResponse::from_result(
-                    request_id,
-                    PermissionResult::allow_with_permissions(input_value, decision.remember),
-                )
-            }
-        } else {
-            let reason = decision.reason.unwrap_or_else(|| "User denied".to_string());
-            ControlResponse::from_result(request_id, PermissionResult::deny(reason))
-        };
-
-        serde_json::to_value(&ctrl_response).unwrap_or(serde_json::Value::Null)
-    }
-
-    fn interrupt(&self) -> Option<TransportPayload> {
-        Some(
-            serde_json::to_value(claude_codes::ClaudeInput::interrupt())
-                .unwrap_or(serde_json::Value::Null),
-        )
     }
 }
 
@@ -408,105 +338,5 @@ mod tests {
             adapter.classify(scalar.clone()),
             vec![AgentOutput::Visible(scalar)]
         );
-    }
-
-    // --- input / permission serialization tests ----------------------------
-
-    #[test]
-    fn user_input_builds_claude_user_message() {
-        let adapter = ClaudeAdapter;
-        let session_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
-        let payload = adapter.user_input("Hello, Claude!", session_id);
-        assert_eq!(payload["type"], json!("user"));
-        assert_eq!(payload["message"]["role"], json!("user"));
-        assert_eq!(
-            payload["message"]["content"][0]["text"],
-            json!("Hello, Claude!")
-        );
-        assert_eq!(
-            payload["session_id"],
-            json!("550e8400-e29b-41d4-a716-446655440000")
-        );
-    }
-
-    #[test]
-    fn permission_response_allow_uses_empty_input_by_default() {
-        let adapter = ClaudeAdapter;
-        let payload = adapter.permission_response(
-            "req-1",
-            PermissionDecision {
-                allow: true,
-                ..Default::default()
-            },
-        );
-        let inner = &payload["response"];
-        assert_eq!(inner["subtype"], json!("success"));
-        assert_eq!(inner["request_id"], json!("req-1"));
-        assert_eq!(inner["response"]["behavior"], json!("allow"));
-        // input defaults to an empty object (mirrors respond_permission).
-        assert_eq!(inner["response"]["updatedInput"], json!({}));
-        assert!(inner["response"].get("updatedPermissions").is_none());
-    }
-
-    #[test]
-    fn permission_response_allow_with_modified_input_and_remember() {
-        let adapter = ClaudeAdapter;
-        let perm =
-            serde_json::to_value(claude_codes::Permission::allow_tool("Bash", "npm test")).unwrap();
-        let payload = adapter.permission_response(
-            "req-2",
-            PermissionDecision {
-                allow: true,
-                modified_input: Some(json!({"command": "npm test"})),
-                remember: vec![perm],
-                reason: None,
-            },
-        );
-        let result = &payload["response"]["response"];
-        assert_eq!(result["behavior"], json!("allow"));
-        assert_eq!(result["updatedInput"], json!({"command": "npm test"}));
-        assert_eq!(result["updatedPermissions"][0]["type"], json!("addRules"));
-        assert_eq!(
-            result["updatedPermissions"][0]["rules"][0]["toolName"],
-            json!("Bash")
-        );
-    }
-
-    #[test]
-    fn permission_response_deny_uses_reason_with_default() {
-        let adapter = ClaudeAdapter;
-
-        // Explicit reason.
-        let payload = adapter.permission_response(
-            "req-3",
-            PermissionDecision {
-                allow: false,
-                reason: Some("nope".to_string()),
-                ..Default::default()
-            },
-        );
-        let result = &payload["response"]["response"];
-        assert_eq!(result["behavior"], json!("deny"));
-        assert_eq!(result["message"], json!("nope"));
-
-        // Default reason mirrors respond_permission's "User denied".
-        let payload = adapter.permission_response(
-            "req-4",
-            PermissionDecision {
-                allow: false,
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            payload["response"]["response"]["message"],
-            json!("User denied")
-        );
-    }
-
-    #[test]
-    fn interrupt_builds_interrupt_payload() {
-        let adapter = ClaudeAdapter;
-        let payload = adapter.interrupt().expect("claude supports interrupt");
-        assert_eq!(payload["subtype"], json!("interrupt"));
     }
 }

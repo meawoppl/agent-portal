@@ -15,14 +15,26 @@ use codex_codes::{
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
 use session_lib::snapshot::SessionConfig;
-use session_lib::{TurnOutcome, TurnTracker};
+use session_lib::{PermissionDecision, TurnOutcome, TurnTracker};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::events::{
     to_raw_output, CodexUsageEvent, ThreadStartedEvent, TurnFailedEvent, UserEchoEvent,
 };
 use crate::handler::handle_codex_server_message;
-use crate::helpers::{extract_prompt_text, parse_request_id};
+use crate::helpers::parse_request_id;
+
+/// Map a neutral [`PermissionDecision`] to Codex's approval JSON
+/// (`{"decision": "accept" | "decline"}`). Codex approval is a coarse
+/// allow/deny, so the decision's `modified_input` / `remember` are unused.
+fn codex_approval_result(decision: &PermissionDecision) -> serde_json::Value {
+    #[derive(serde::Serialize)]
+    struct CodexApprovalResult<'a> {
+        decision: &'a str,
+    }
+    let decision = if decision.allow { "accept" } else { "decline" };
+    serde_json::to_value(CodexApprovalResult { decision }).unwrap_or(serde_json::Value::Null)
+}
 
 type DeliveryAck = oneshot::Sender<Result<(), String>>;
 /// Queued user prompt: (agent-facing prompt text, delivery ack, optional typed
@@ -540,42 +552,43 @@ pub(crate) async fn codex_io_task(
                 }
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
-                        IoCommand::CodexApproval { request_id, result } => {
+                        IoCommand::Permission {
+                            request_id,
+                            decision,
+                        } => {
                             let rid = parse_request_id(&request_id);
+                            let result = codex_approval_result(&decision);
                             if let Err(e) = client.respond(rid, &result).await {
                                 tracing::error!("Failed to send Codex approval: {}", e);
                             }
                         }
-                        IoCommand::Input {
-                            input,
+                        IoCommand::UserInput {
+                            text,
                             delivered,
                             display_event,
                         } => {
-                            let prompt = extract_prompt_text(&input);
-                            if !prompt.is_empty() {
+                            if !text.is_empty() {
                                 tracing::info!(
                                     "Queued Codex input received during active turn ({} pending)",
                                     queued_prompts.len() + 1
                                 );
-                                queued_prompts.push_back((prompt, delivered, display_event));
+                                queued_prompts.push_back((text, delivered, display_event));
                             } else if let Some(delivered) = delivered {
                                 let _ = delivered.send(Ok(()));
                             }
                         }
-                        IoCommand::PermissionResponse(_) => {}
                     }
                 }
             }
         } else {
             // No active turn: wait for user input.
             match command_rx.recv().await {
-                Some(IoCommand::Input {
-                    input,
+                Some(IoCommand::UserInput {
+                    text,
                     delivered,
                     display_event,
                 }) => {
-                    let prompt = extract_prompt_text(&input);
-                    if prompt.is_empty() {
+                    if text.is_empty() {
                         if let Some(delivered) = delivered {
                             let _ = delivered.send(Ok(()));
                         }
@@ -585,15 +598,14 @@ pub(crate) async fn codex_io_task(
                     turn_active = start_codex_turn(
                         &mut client,
                         &thread_id,
-                        prompt,
+                        text,
                         display_event,
                         delivered,
                         &event_tx,
                     )
                     .await;
                 }
-                Some(IoCommand::PermissionResponse(_)) => continue,
-                Some(IoCommand::CodexApproval { .. }) => {
+                Some(IoCommand::Permission { .. }) => {
                     tracing::warn!("Codex approval response with no active turn");
                 }
                 None => {
@@ -848,6 +860,25 @@ mod tests {
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Neutral `PermissionDecision` → Codex approval JSON. Ported from the
+    /// deleted `respond_permission` codex branch — approval is a coarse
+    /// accept/decline, so only `allow` matters.
+    #[test]
+    fn codex_approval_result_maps_allow_to_accept_decline() {
+        let accept = codex_approval_result(&PermissionDecision {
+            allow: true,
+            ..Default::default()
+        });
+        assert_eq!(accept["decision"], serde_json::json!("accept"));
+
+        let decline = codex_approval_result(&PermissionDecision {
+            allow: false,
+            reason: Some("nope".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(decline["decision"], serde_json::json!("decline"));
     }
 
     #[test]
