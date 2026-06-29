@@ -220,6 +220,15 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
             input,
             permission_suggestions,
         }) => {
+            // `Session` hands these as opaque wire JSON (it's protocol-neutral);
+            // re-parse into the typed `ProxyToServer` wire form at the proxy
+            // edge. Unparseable entries are dropped rather than failing the
+            // request (claude emits well-formed suggestions; codex emits none).
+            let permission_suggestions: Vec<claude_codes::io::PermissionSuggestion> =
+                permission_suggestions
+                    .into_iter()
+                    .filter_map(|s| serde_json::from_value(s).ok())
+                    .collect();
             // Send permission request directly to WebSocket
             let msg = ProxyToServer::PermissionRequest {
                 request_id,

@@ -7,7 +7,6 @@
 use std::marker::PhantomData;
 
 use chrono::Utc;
-use claude_codes::io::PermissionSuggestion;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -246,12 +245,9 @@ impl<A: Agent> Session<A> {
                             input,
                             suggestions,
                         } => {
-                            // Recover the typed suggestions from the classifier's
-                            // opaque JSON round-trip (it serialized them).
-                            let permission_suggestions: Vec<PermissionSuggestion> = suggestions
-                                .into_iter()
-                                .filter_map(|s| serde_json::from_value(s).ok())
-                                .collect();
+                            // `suggestions` is already opaque wire JSON; forward
+                            // it as-is. The proxy edge re-parses into its typed
+                            // wire form, keeping `Session` protocol-neutral.
                             self.pending_permission = Some(PendingPermission {
                                 request_id: request_id.clone(),
                                 tool_name: tool_name.clone(),
@@ -263,7 +259,7 @@ impl<A: Agent> Session<A> {
                                 request_id,
                                 tool_name,
                                 input,
-                                permission_suggestions,
+                                permission_suggestions: suggestions,
                             });
                         }
                         // User-visible output: buffer the raw value and forward it
