@@ -5,10 +5,11 @@
 //! `agent.rs` for the dispatch trait.
 
 use claude_codes::io::{ControlResponse, PermissionSuggestion};
-use claude_codes::{ClaudeInput, ClaudeOutput};
+use claude_codes::ClaudeInput;
 use shared::{CodexPermissionInput, TurnMetrics};
 use tokio::sync::oneshot;
 
+use crate::adapter::AgentOutput;
 use crate::error::SessionError;
 
 /// Commands sent from `Session<A>` to the per-agent I/O task.
@@ -48,12 +49,18 @@ pub enum IoEvent {
     AgentStarted {
         pid: Option<u32>,
     },
-    /// Typed output from a claude-protocol session.
-    Output(Box<ClaudeOutput>),
-    /// Raw JSON output from a non-claude agent (e.g. Codex JSONL).
+    /// A neutral, already-classified output decision from the agent's I/O task.
     ///
-    /// Bypasses claude-specific processing (permission extraction,
-    /// `ControlResponse` filtering) and is forwarded directly to the
+    /// The per-agent I/O task runs its `AgentOutputClassifier` (Claude:
+    /// `ClaudeAdapter`; Codex: `CodexClassifier`) and emits the resulting
+    /// neutral [`AgentOutput`]s here, so `Session` never sees a concrete
+    /// protocol type. `Session::next_event` maps each to a `SessionEvent`
+    /// (`Visible` → `RawOutput`, `PermissionRequest` → `PermissionRequest`,
+    /// `NotFound` → `SessionNotFound`, `Noop` → skip).
+    Classified(AgentOutput),
+    /// Raw JSON output forwarded directly (e.g. Codex JSONL frames the codex
+    /// I/O task emits outside the classifier, and portal-reminder messages).
+    /// Bypasses classification and is forwarded verbatim to the
     /// backend/frontend.
     RawOutput(serde_json::Value),
     /// Permission request from Codex's app-server approval flow.
@@ -98,15 +105,13 @@ pub enum IoEvent {
 /// Events emitted by a `Session<A>` to its consumer.
 #[derive(Debug)]
 pub enum SessionEvent {
-    /// Claude produced output (excluding permission requests, which have
-    /// their own event).
-    Output(Box<ClaudeOutput>),
-
-    /// Raw JSON output from a non-Claude agent (e.g. Codex JSONL).
+    /// User-visible agent output, as the original raw wire JSON.
     ///
-    /// This bypasses Claude-specific processing (permission extraction,
-    /// ControlResponse filtering) and is forwarded directly to the
-    /// backend/frontend.
+    /// Both backends now arrive here: the per-agent I/O task classifies its
+    /// native output and `Session` forwards each `AgentOutput::Visible` value
+    /// verbatim. Agent-specific consumers (e.g. the Claude proxy
+    /// `output_forwarder`, which re-parses for image/git/echo handling) live at
+    /// the proxy edge, keyed on `agent_type` — `Session` stays neutral.
     RawOutput(serde_json::Value),
 
     /// The agent is requesting permission for a tool.
