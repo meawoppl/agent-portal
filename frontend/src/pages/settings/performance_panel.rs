@@ -17,9 +17,11 @@ use yew::prelude::*;
 use crate::components::charts::AxisScale;
 
 mod charts;
+mod controls;
 mod series;
 mod use_metrics;
 use charts::render_charts;
+use controls::{render_performance_controls, PerformanceControlsProps};
 use use_metrics::use_performance_metrics;
 
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
@@ -243,75 +245,15 @@ pub fn performance_panel() -> Html {
                 </p>
             </div>
 
-            <div class="performance-controls">
-                <div class="performance-window-group" role="radiogroup">
-                    <span class="performance-control-label">{ "Window:" }</span>
-                    { for TimeWindow::all().iter().copied().map(|w| {
-                        let is_active = *window == w;
-                        let on_window_change = on_window_change.clone();
-                        let on_click = Callback::from(move |_| on_window_change.emit(w));
-                        html! {
-                            <button
-                                class={classes!(
-                                    "performance-window-button",
-                                    is_active.then_some("active"),
-                                )}
-                                onclick={on_click}
-                            >
-                                { w.label() }
-                            </button>
-                        }
-                    }) }
-                </div>
-
-                <div class="performance-group-by">
-                    <label class="performance-control-label" for="performance-group-by-select">
-                        { "Group:" }
-                    </label>
-                    <select
-                        id="performance-group-by-select"
-                        onchange={on_group_change}
-                        value={group_by.key()}
-                    >
-                        <option
-                            value="__ALL__"
-                            selected={matches!(*group_by, GroupBy::All)}
-                        >
-                            { "All groups" }
-                        </option>
-                        { for pairs.iter().map(|pair| {
-                            let gb = GroupBy::Pair(pair.clone());
-                            let selected = matches!(&*group_by, GroupBy::Pair(p) if p == pair);
-                            html! {
-                                <option value={gb.key()} selected={selected}>
-                                    { pair_label(pair) }
-                                </option>
-                            }
-                        }) }
-                    </select>
-                </div>
-
-                <div class="performance-scale-group" role="radiogroup">
-                    <span class="performance-control-label">{ "Y scale:" }</span>
-                    { for AxisScale::all().iter().copied().map(|scale| {
-                        let is_active = *axis_scale == scale;
-                        let on_axis_scale_change = on_axis_scale_change.clone();
-                        let on_click = Callback::from(move |_| on_axis_scale_change.emit(scale));
-                        html! {
-                            <button
-                                type="button"
-                                class={classes!(
-                                    "performance-window-button",
-                                    is_active.then_some("active"),
-                                )}
-                                onclick={on_click}
-                            >
-                                { scale.label() }
-                            </button>
-                        }
-                    }) }
-                </div>
-            </div>
+            { render_performance_controls(PerformanceControlsProps {
+                window: *window,
+                group_by: &group_by,
+                axis_scale: *axis_scale,
+                pairs: &pairs,
+                on_window_change,
+                on_group_change,
+                on_axis_scale_change,
+            }) }
 
             { body }
         </section>
