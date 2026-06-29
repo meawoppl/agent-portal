@@ -21,3 +21,6 @@ claude-codes = { workspace = true }
 # Typed WebSocket endpoints (core traits only — WASM-safe, no features needed)
 ws-bridge = { workspace = true }
 base64 = "0.22"
+
+[lints]
+workspace = true

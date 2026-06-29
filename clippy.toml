@@ -1,0 +1,5 @@
+# Tests legitimately use unwrap/expect for brevity; the unwrap/expect-used
+# denials (see [workspace.lints.clippy] in Cargo.toml, #1165 item 8) apply to
+# production code only.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
