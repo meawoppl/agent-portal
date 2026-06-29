@@ -12,7 +12,6 @@ use serde::Deserialize;
 use shared::{FileDownloadRequestFields, ServerToProxy};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 const MAX_PULL_BYTES: u64 = 25 * 1024 * 1024;
@@ -36,11 +35,7 @@ pub async fn pull_session_file(
     verify_session_read_access(&app_state, session_id, current_user_id)?;
 
     let request_id = Uuid::new_v4();
-    let (tx, rx) = oneshot::channel();
-    app_state
-        .session_manager
-        .pending_file_downloads
-        .insert(request_id, tx);
+    let rx = app_state.session_manager.register_file_download(request_id);
 
     let sent = app_state.session_manager.send_to_connected_session(
         &session_id.to_string(),
@@ -52,10 +47,7 @@ pub async fn pull_session_file(
     );
 
     if !sent {
-        app_state
-            .session_manager
-            .pending_file_downloads
-            .remove(&request_id);
+        app_state.session_manager.cancel_file_download(request_id);
         return Err(AppError::ServiceUnavailable(
             "Session proxy is not connected",
         ));
@@ -65,10 +57,7 @@ pub async fn pull_session_file(
         Ok(Ok(response)) => response,
         Ok(Err(_)) => return Err(AppError::BadGateway("File download response was dropped")),
         Err(_) => {
-            app_state
-                .session_manager
-                .pending_file_downloads
-                .remove(&request_id);
+            app_state.session_manager.cancel_file_download(request_id);
             return Err(AppError::GatewayTimeout("File download timed out"));
         }
     };
