@@ -297,11 +297,7 @@ fn handle_launcher_message(
             pid,
             ref error,
         } => {
-            let desired_session_id = app_state
-                .session_manager
-                .pending_launch_sessions
-                .remove(&request_id)
-                .map(|(_, id)| id);
+            let desired_session_id = app_state.session_manager.take_launch_session(request_id);
             if success {
                 info!(
                     "Launch succeeded: request={}, session={:?}, pid={:?}",
@@ -770,8 +766,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         let request_id = Uuid::new_v4();
         app_state
             .session_manager
-            .pending_launch_sessions
-            .insert(request_id, session.id);
+            .register_launch_session(request_id, session.id);
 
         let claude_args =
             serde_json::from_value::<Vec<String>>(session.claude_args.clone()).unwrap_or_default();
@@ -806,10 +801,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             .session_manager
             .send_to_launcher(&launcher_id, launch_msg)
         {
-            app_state
-                .session_manager
-                .pending_launch_sessions
-                .remove(&request_id);
+            app_state.session_manager.cancel_launch_session(request_id);
             warn!(
                 "Failed to send desired session {} to launcher {}",
                 session.id, launcher_id
