@@ -10,9 +10,11 @@
 //! backed session.
 
 pub mod agent;
+mod classifier;
 mod events;
 mod handler;
 mod helpers;
 mod io_task;
 
 pub use agent::CodexAgent;
+pub use classifier::CodexClassifier;

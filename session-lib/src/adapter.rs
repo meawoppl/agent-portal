@@ -62,16 +62,23 @@ pub struct PermissionDecision {
 
 /// Output-classification boundary: parse one unit of agent output into neutral
 /// [`AgentOutput`] decisions. This is the *only* part of the adapter that fits
-/// every backend — both Claude (stdout JSON) and Codex (`ServerMessage`) can
-/// honestly map their output here.
+/// every backend — both Claude and Codex can honestly map their output here.
 ///
-/// It is split out from [`AgentAdapter`] (its supertrait) because the rest of
-/// `AgentAdapter` — `user_input`/`permission_response` returning a sync
-/// `TransportPayload` for the I/O task to write — is Claude-transport-shaped
-/// and does *not* fit Codex, whose input/permission flow is an async
-/// `turn_start`/`respond` RPC owned by `codex_io_task`. A backend that only
-/// classifies output (Codex) implements this trait alone; full unification of
-/// the input side is a separate `AgentRuntime` design (see
+/// Generic over the input unit via [`Raw`](AgentOutputClassifier::Raw) because
+/// the backends' output units differ: Claude's I/O task yields opaque stdout
+/// JSON (`serde_json::Value`), while Codex's yields a typed
+/// `codex_codes::ServerMessage` that is **not** `Deserialize` (the SDK parses
+/// it with custom logic), so it cannot be reconstructed from a `Value`. Pinning
+/// a single `Raw = Value` would lock Codex out; the associated type lets each
+/// backend classify its native unit while sharing the neutral [`AgentOutput`].
+///
+/// It is split out from [`AgentAdapter`] (which pins `Raw = serde_json::Value`)
+/// because the rest of `AgentAdapter` — `user_input`/`permission_response`
+/// returning a sync `TransportPayload` for the I/O task to write — is
+/// Claude-transport-shaped and does *not* fit Codex, whose input/permission
+/// flow is an async `turn_start`/`respond` RPC owned by `codex_io_task`. A
+/// backend that only classifies output (Codex) implements this trait alone;
+/// full unification of the input side is a separate `AgentRuntime` design (see
 /// `docs/design/session-adapter.md`).
 ///
 /// `Sync` so `Session<A>`, which stores `Box<dyn AgentAdapter>`, stays `Sync`
@@ -79,17 +86,24 @@ pub struct PermissionDecision {
 /// sessions in shared state). Adapters are stateless today; any future stateful
 /// adapter must use interior mutability that is itself `Sync`.
 pub trait AgentOutputClassifier: Send + Sync + 'static {
+    /// The native output unit this classifier parses (Claude: `serde_json::Value`
+    /// stdout JSON; Codex: `codex_codes::ServerMessage`).
+    type Raw;
+
     /// Parse + classify one unit of agent output into 0..n neutral decisions.
     ///
     /// `&mut self` so future stateful classifiers (e.g. codex, which threads a
     /// request-id ↔ tool map) can update internal state. Claude is stateless
-    /// and 1:1 (one `RawUnit` → exactly one `AgentOutput`).
-    fn classify(&mut self, raw: RawUnit) -> Vec<AgentOutput>;
+    /// and 1:1 (one unit → exactly one `AgentOutput`).
+    fn classify(&mut self, raw: Self::Raw) -> Vec<AgentOutput>;
 }
 
 /// Per-agent protocol parse/serialize boundary for the generic `Session<A>`,
 /// for backends whose input side fits the sync stdin-payload model (Claude).
-pub trait AgentAdapter: AgentOutputClassifier {
+///
+/// Pins `Raw = serde_json::Value` so `Session`'s `dyn AgentAdapter` can call
+/// `classify` with the stdout JSON it already serializes.
+pub trait AgentAdapter: AgentOutputClassifier<Raw = RawUnit> {
     /// Build the transport payload for plain user text.
     fn user_input(&self, text: &str, session_id: Uuid) -> TransportPayload;
 
@@ -111,6 +125,8 @@ pub trait AgentAdapter: AgentOutputClassifier {
 pub struct ClaudeAdapter;
 
 impl AgentOutputClassifier for ClaudeAdapter {
+    type Raw = RawUnit;
+
     fn classify(&mut self, raw: RawUnit) -> Vec<AgentOutput> {
         use claude_codes::io::ControlRequestPayload;
         use claude_codes::ClaudeOutput;
