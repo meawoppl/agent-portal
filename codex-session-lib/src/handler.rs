@@ -1,23 +1,26 @@
 //! Translate Codex app-server `ServerMessage` frames into [`IoEvent`]s.
 //!
-//! Dispatches on the typed `codex_codes::Notification` and
-//! `codex_codes::ServerRequest` enum variants instead of stringly-typed
-//! `method`-based matching (closes issue #723). Each `ServerRequest::*Approval`
-//! arm now builds a typed [`shared::CodexPermissionInput`] envelope directly
-//! off the SDK param struct (closes #725 / #731), so the field-name contract
-//! with the frontend's `format_permission_input` is enforced at compile time
-//! on both sides of the wire — the `serde_json::json!({…})` literals the
-//! 2.5.45 / PR #730 refactor still emitted are gone.
+//! The `ServerMessage` → neutral-output mapping now lives in
+//! [`CodexClassifier`](crate::classifier::CodexClassifier) (the single source
+//! of Codex output classification, #1165 item 2). This module is the thin
+//! adapter that drives the classifier from `codex_io_task` and translates its
+//! neutral [`AgentOutput`]s back into the [`IoEvent`]s the I/O task forwards
+//! (`Visible` → `RawOutput`, `PermissionRequest` → `CodexPermissionRequest`).
+//!
+//! It also owns the one carve-out the classifier deliberately skips:
+//! `TurnCompleted`. That frame carries token usage and drives per-turn metrics
+//! finalization — turn/token orchestration owned by `codex_io_task` — so the
+//! `turn.completed` event (with usage) is shaped here, and `turn_ended` is
+//! returned to the I/O task's turn-lifecycle loop.
 
-use codex_codes::{Notification, ServerMessage, ServerRequest};
+use codex_codes::{Notification, ServerMessage};
 use session_lib::io::IoEvent;
+use session_lib::{AgentOutput, AgentOutputClassifier};
 use shared::CodexPermissionInput;
 use tokio::sync::mpsc;
 
-use crate::events::{
-    to_raw_output, CodexUsageEvent, ErrorEvent, ItemEvent, PassthroughEvent, TurnCompletedEvent,
-};
-use crate::helpers::format_request_id;
+use crate::classifier::CodexClassifier;
+use crate::events::{to_raw_output, CodexUsageEvent, TurnCompletedEvent};
 
 /// Convert a Codex app-server ServerMessage into exec-format JSONL events.
 /// Returns (event_sent_ok, turn_ended).
@@ -26,207 +29,50 @@ pub(crate) fn handle_codex_server_message(
     event_tx: &mpsc::UnboundedSender<IoEvent>,
     latest_token_usage: Option<&CodexUsageEvent>,
 ) -> (bool, bool) {
-    match msg {
-        ServerMessage::Notification(notif) => {
-            handle_notification(notif, event_tx, latest_token_usage)
-        }
-        ServerMessage::Request { id, request } => {
-            handle_request(format_request_id(&id), request, event_tx)
+    // Turn completion stays here: it carries token usage + drives per-turn
+    // metrics, which is turn/token orchestration owned by the I/O task.
+    // `CodexClassifier` deliberately returns `Noop` for it.
+    if let ServerMessage::Notification(Notification::TurnCompleted(p)) = &msg {
+        let event = TurnCompletedEvent::new(
+            p.turn.id.clone(),
+            turn_status_label(&p.turn.status).to_string(),
+            p.turn.duration_ms,
+            latest_token_usage.cloned(),
+        );
+        let ok = event_tx
+            .send(IoEvent::RawOutput(to_raw_output(&event)))
+            .is_ok();
+        return (ok, true);
+    }
+
+    // Everything else: the classifier is the single mapping source. Translate
+    // its neutral decisions back into the I/O task's transport events.
+    let mut classifier = CodexClassifier;
+    let mut ok = true;
+    for output in classifier.classify(msg) {
+        let event = match output {
+            AgentOutput::Visible(value) => IoEvent::RawOutput(value),
+            AgentOutput::PermissionRequest {
+                request_id, input, ..
+            } => {
+                // Recover the typed Codex permission envelope the classifier
+                // serialized (`CodexPermissionInput` round-trips through its
+                // wire form). The I/O task / `Session` consume the typed event.
+                match serde_json::from_value::<CodexPermissionInput>(input) {
+                    Ok(input) => IoEvent::CodexPermissionRequest { request_id, input },
+                    Err(e) => {
+                        tracing::error!("Codex permission input round-trip failed: {}", e);
+                        continue;
+                    }
+                }
+            }
+            // Codex never produces `NotFound`; `Noop` is an internal skip.
+            AgentOutput::Noop | AgentOutput::NotFound => continue,
+        };
+        if event_tx.send(event).is_err() {
+            ok = false;
         }
     }
-}
-
-fn handle_notification(
-    notif: Notification,
-    event_tx: &mpsc::UnboundedSender<IoEvent>,
-    latest_token_usage: Option<&CodexUsageEvent>,
-) -> (bool, bool) {
-    match notif {
-        // Lifecycle — already handled elsewhere or intentionally silent.
-        Notification::ThreadStarted(_)
-        | Notification::ThreadStatusChanged(_)
-        | Notification::TurnStarted(_)
-        | Notification::ThreadTokenUsageUpdated(_) => (true, false),
-
-        Notification::TurnCompleted(p) => {
-            let event = TurnCompletedEvent::new(
-                p.turn.id,
-                turn_status_label(&p.turn.status).to_string(),
-                p.turn.duration_ms,
-                latest_token_usage.cloned(),
-            );
-            let ok = event_tx
-                .send(IoEvent::RawOutput(to_raw_output(&event)))
-                .is_ok();
-            (ok, true)
-        }
-
-        Notification::ItemStarted(p) => {
-            let item = serde_json::to_value(&p.item).unwrap_or(serde_json::Value::Null);
-            let event = ItemEvent::started(item);
-            let ok = event_tx
-                .send(IoEvent::RawOutput(to_raw_output(&event)))
-                .is_ok();
-            (ok, false)
-        }
-
-        Notification::ItemCompleted(p) => {
-            let item = serde_json::to_value(&p.item).unwrap_or(serde_json::Value::Null);
-            let event = ItemEvent::completed(item);
-            let ok = event_tx
-                .send(IoEvent::RawOutput(to_raw_output(&event)))
-                .is_ok();
-            (ok, false)
-        }
-
-        Notification::Error(p) => {
-            // Existing handler emitted `{"type": "error", "message": <string>}`.
-            // `ErrorNotification.error: TurnError` has its own `message` field.
-            let message = if p.error.message.is_empty() {
-                "Unknown error".to_string()
-            } else {
-                p.error.message.clone()
-            };
-            let event = ErrorEvent::new(message);
-            let ok = event_tx
-                .send(IoEvent::RawOutput(to_raw_output(&event)))
-                .is_ok();
-            (ok, false)
-        }
-
-        Notification::DeprecationNotice(p) => {
-            // Typed struct exposes `summary` (and optional `details`); the
-            // pre-refactor handler looked for `message`/`notice`, which never
-            // existed on the wire — so the user always saw "(no message)".
-            // With the typed field we get the real text.
-            let summary = if p.summary.is_empty() {
-                "(no message)".to_string()
-            } else {
-                p.summary.clone()
-            };
-            let event =
-                shared::PortalMessage::text(format!("**Codex deprecation notice**: {}", summary))
-                    .to_json();
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
-            (ok, false)
-        }
-
-        Notification::GuardianWarning(p) => {
-            let message = if p.message.is_empty() {
-                "(no message)".to_string()
-            } else {
-                p.message.clone()
-            };
-            let event =
-                shared::PortalMessage::text(format!("**Codex guardian warning**: {}", message))
-                    .to_json();
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
-            (ok, false)
-        }
-
-        // Streaming/plan/diff notifications — emit a typed event so the frontend
-        // can render them as a delta block. Frontend currently falls through to
-        // raw display for unknown types; that's tolerable until purpose-built
-        // renderers land.
-        Notification::PlanDelta(p) => emit_passthrough(event_tx, "item/plan/delta", &p),
-        Notification::TurnPlanUpdated(p) => emit_passthrough(event_tx, "turn/plan/updated", &p),
-        Notification::TurnDiffUpdated(p) => emit_passthrough(event_tx, "turn/diff/updated", &p),
-        Notification::ReasoningSummaryPartAdded(p) => {
-            emit_passthrough(event_tx, "item/reasoning/summaryPartAdded", &p)
-        }
-        Notification::ReasoningTextDelta(p) => {
-            emit_passthrough(event_tx, "item/reasoning/textDelta", &p)
-        }
-        Notification::FileChangePatchUpdated(p) => {
-            emit_passthrough(event_tx, "item/fileChange/patchUpdated", &p)
-        }
-        Notification::ContextCompacted(p) => emit_passthrough(event_tx, "thread/compacted", &p),
-
-        // Pure-status notifications — not user-facing. Logged via the typed
-        // `Notification::method()` accessor so the debug message stays accurate
-        // when the SDK adds variants.
-        other @ (Notification::McpServerOauthLoginCompleted(_)
-        | Notification::AccountLoginCompleted(_)
-        | Notification::AccountRateLimitsUpdated(_)
-        | Notification::McpServerStartupStatusUpdated(_)
-        | Notification::RemoteControlStatusChanged(_)) => {
-            tracing::debug!("Codex status notification: {}", other.method());
-            (true, false)
-        }
-
-        // Everything else: keep at debug. Includes delta notifications, realtime
-        // audio frames, hook/process events, etc. — adding purpose-built rendering
-        // for each is out of scope here.
-        other @ (Notification::AgentMessageDelta(_)
-        | Notification::CmdOutputDelta(_)
-        | Notification::FileChangeOutputDelta(_)
-        | Notification::ReasoningDelta(_)
-        | Notification::Warning(_)
-        | Notification::ThreadSettingsUpdated(_)
-        | Notification::TurnModerationMetadata(_)
-        | Notification::ThreadArchived(_)
-        | Notification::ThreadClosed(_)
-        | Notification::ThreadUnarchived(_)
-        | Notification::ThreadGoalCleared(_)
-        | Notification::ThreadNameUpdated(_)
-        | Notification::SkillsChanged(_)
-        | Notification::FsChanged(_)
-        | Notification::ConfigWarning(_)
-        | Notification::AccountUpdated(_)
-        | Notification::AppListUpdated(_)
-        | Notification::CommandExecOutputDelta(_)
-        | Notification::ExternalAgentConfigImportCompleted(_)
-        | Notification::ExternalAgentConfigImportProgress(_)
-        | Notification::ModelSafetyBufferingUpdated(_)
-        | Notification::ThreadDeleted(_)
-        | Notification::FuzzyFileSearchSessionCompleted(_)
-        | Notification::FuzzyFileSearchSessionUpdated(_)
-        | Notification::HookCompleted(_)
-        | Notification::HookStarted(_)
-        | Notification::ItemGuardianApprovalReviewCompleted(_)
-        | Notification::ItemGuardianApprovalReviewStarted(_)
-        | Notification::TerminalInteraction(_)
-        | Notification::McpToolCallProgress(_)
-        | Notification::ModelRerouted(_)
-        | Notification::ModelVerification(_)
-        | Notification::ProcessExited(_)
-        | Notification::ProcessOutputDelta(_)
-        | Notification::ServerRequestResolved(_)
-        | Notification::ThreadGoalUpdated(_)
-        | Notification::ThreadRealtimeClosed(_)
-        | Notification::ThreadRealtimeError(_)
-        | Notification::ThreadRealtimeItemAdded(_)
-        | Notification::ThreadRealtimeOutputAudioDelta(_)
-        | Notification::ThreadRealtimeSdp(_)
-        | Notification::ThreadRealtimeStarted(_)
-        | Notification::ThreadRealtimeTranscriptDelta(_)
-        | Notification::ThreadRealtimeTranscriptDone(_)
-        | Notification::WindowsWorldWritableWarning(_)
-        | Notification::WindowsSandboxSetupCompleted(_)) => {
-            tracing::debug!("Codex notification: {}", other.method());
-            (true, false)
-        }
-
-        Notification::Unknown { method, .. } => {
-            tracing::debug!("Codex notification: {}", method);
-            (true, false)
-        }
-    }
-}
-
-/// Helper: emit `{"type": method, "params": <serialized p>}` as a passthrough
-/// RawOutput event for streaming/delta notifications that don't yet have a
-/// purpose-built renderer.
-fn emit_passthrough<P: serde::Serialize>(
-    event_tx: &mpsc::UnboundedSender<IoEvent>,
-    method: &str,
-    p: &P,
-) -> (bool, bool) {
-    let params = serde_json::to_value(p).unwrap_or(serde_json::Value::Null);
-    let event = PassthroughEvent::new(method, params);
-    let ok = event_tx
-        .send(IoEvent::RawOutput(to_raw_output(&event)))
-        .is_ok();
     (ok, false)
 }
 
@@ -237,152 +83,6 @@ fn turn_status_label(status: &codex_codes::TurnStatus) -> &'static str {
         codex_codes::TurnStatus::Failed => "failed",
         codex_codes::TurnStatus::InProgress => "in_progress",
     }
-}
-
-fn handle_request(
-    request_id: String,
-    request: ServerRequest,
-    event_tx: &mpsc::UnboundedSender<IoEvent>,
-) -> (bool, bool) {
-    match request {
-        ServerRequest::CmdExecApproval(p) => {
-            // Older `item/commandExecution/requestApproval` form carries a
-            // single-string `command` (vs the 0.130+ argv-vector form on
-            // `execCommandApproval`); no `parsedCmd` here.
-            let input = CodexPermissionInput::Bash {
-                command: p.command.unwrap_or_else(|| "(unknown)".to_string()),
-                cwd: p.cwd.map(|c| c.0).unwrap_or_default(),
-                parsed_cmd: None,
-            };
-            send_permission(event_tx, request_id, input)
-        }
-
-        ServerRequest::FileChangeApproval(p) => {
-            // codex-codes 0.129.3 dropped the inline `changes` field — the
-            // actual diff is streamed earlier under the matching `itemId`.
-            // Carry `itemId` / `reason` / `grantRoot` so the frontend can
-            // render a pointer + reason instead of the 2.5.38 `{"changes":
-            // null}` regression (band-aided in PR #721).
-            let input = CodexPermissionInput::FileChange {
-                item_id: p.item_id,
-                reason: p.reason,
-                grant_root: p.grant_root,
-            };
-            send_permission(event_tx, request_id, input)
-        }
-
-        ServerRequest::ExecCommandApproval(p) => {
-            // Codex 0.130+ argv-vector form — join for display, keep the
-            // typed parsed_cmd along for future renderers.
-            let command = if p.command.is_empty() {
-                "(unknown)".to_string()
-            } else {
-                p.command.join(" ")
-            };
-            let parsed_cmd = if p.parsed_cmd.is_empty() {
-                None
-            } else {
-                Some(serde_json::to_value(&p.parsed_cmd).unwrap_or(serde_json::Value::Null))
-            };
-            let input = CodexPermissionInput::ExecCommand {
-                command,
-                cwd: p.cwd,
-                parsed_cmd,
-            };
-            send_permission(event_tx, request_id, input)
-        }
-
-        ServerRequest::ApplyPatchApproval(p) => {
-            let file_changes =
-                serde_json::to_value(&p.file_changes).unwrap_or(serde_json::Value::Null);
-            let input = CodexPermissionInput::ApplyPatch {
-                file_changes,
-                grant_root: p.grant_root,
-                reason: p.reason,
-            };
-            send_permission(event_tx, request_id, input)
-        }
-
-        ServerRequest::PermissionsRequestApproval(p) => {
-            let permissions = serde_json::to_value(&p.permissions).ok();
-            let input = CodexPermissionInput::Permissions {
-                cwd: Some(p.cwd.0),
-                permissions,
-                reason: p.reason,
-            };
-            send_permission(event_tx, request_id, input)
-        }
-
-        ServerRequest::ToolRequestUserInput(p) => {
-            let questions = serde_json::to_value(&p.questions).unwrap_or(serde_json::Value::Null);
-            let input = CodexPermissionInput::AskUserQuestion { questions };
-            send_permission(event_tx, request_id, input)
-        }
-
-        ServerRequest::McpServerElicitationRequest(_p) => {
-            // Pre-refactor handler hard-defaulted `serverName` to `"(unknown)"`
-            // because the field never existed on the wire. The typed
-            // `McpServerElicitationRequestParams` enum (Form/Url variants)
-            // doesn't expose a server name either; preserve the existing
-            // default so `format_permission_input`'s "MCP server `(unknown)`
-            // is asking …" rendering is unchanged. TODO(SDK): if upstream
-            // adds a server identifier to the typed params, surface it here
-            // and widen `CodexPermissionInput::McpElicitation` to match.
-            let input = CodexPermissionInput::McpElicitation {
-                server_name: "(unknown)".to_string(),
-            };
-            send_permission(event_tx, request_id, input)
-        }
-
-        // Internal / system requests (codex 0.130+) — surface a portal message so
-        // the user sees what was requested, but don't block on user approval. We
-        // can't auto-respond meaningfully (we have no auth token, no attestation
-        // signer); codex will retry or move on.
-        ServerRequest::ItemToolCall(p) => {
-            let tool = if p.tool.is_empty() {
-                "(unknown)"
-            } else {
-                &p.tool
-            };
-            let msg = format!("**Codex tool call**: `{}`", tool);
-            let event = shared::PortalMessage::text(msg).to_json();
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
-            (ok, false)
-        }
-        ServerRequest::ChatgptAuthTokensRefresh(_p) => {
-            let event = shared::PortalMessage::text(
-                "**Codex requested ChatGPT auth token refresh** (not handled — the agent may pause)."
-                    .to_string(),
-            )
-            .to_json();
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
-            (ok, false)
-        }
-        ServerRequest::AttestationGenerate(_p) => {
-            let event = shared::PortalMessage::text(
-                "**Codex requested attestation generation** (not handled).".to_string(),
-            )
-            .to_json();
-            let ok = event_tx.send(IoEvent::RawOutput(event)).is_ok();
-            (ok, false)
-        }
-
-        ServerRequest::Unknown { method, .. } => {
-            tracing::warn!("Unknown Codex request: {}", method);
-            (true, false)
-        }
-    }
-}
-
-fn send_permission(
-    event_tx: &mpsc::UnboundedSender<IoEvent>,
-    request_id: String,
-    input: CodexPermissionInput,
-) -> (bool, bool) {
-    let ok = event_tx
-        .send(IoEvent::CodexPermissionRequest { request_id, input })
-        .is_ok();
-    (ok, false)
 }
 
 #[cfg(test)]
