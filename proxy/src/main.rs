@@ -1,3 +1,7 @@
+// Ratchet for the workspace unwrap/expect deny (#1165 item 8): this crate
+// still has production unwrap/expect; remove this allow as it is cleaned.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod auth;
 mod commands;
 mod config;

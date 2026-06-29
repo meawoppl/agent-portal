@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.12.67"
+version = "2.12.68"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -101,3 +101,15 @@ lto = true
 codegen-units = 1
 opt-level = "z"
 strip = true
+
+# Panic/error policy (#1165 item 8). `unwrap`/`expect` in production code hide
+# error context and, in background tasks, die silently. We deny them
+# workspace-wide and ratchet existing usage down per crate: crates that still
+# have unwraps carry a crate-root `#![allow(clippy::unwrap_used, expect_used)]`
+# (removed as each is cleaned); already-clean crates (portal-auth,
+# portal-update) are enforced today. Tests are exempt via clippy.toml
+# (allow-unwrap-in-tests / allow-expect-in-tests). Each member crate opts in
+# with `[lints] workspace = true`.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

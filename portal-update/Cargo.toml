@@ -13,3 +13,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { workspace = true }
 sha2 = "0.10"
 tracing = { workspace = true }
+
+[lints]
+workspace = true

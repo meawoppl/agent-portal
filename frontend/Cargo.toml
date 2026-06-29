@@ -81,3 +81,6 @@ js-sys = "0.3.83"
 pulldown-cmark = { version = "0.13.0", default-features = false }
 ws-bridge = { workspace = true, features = ["yew-client"] }
 base64 = "0.22"
+
+[lints]
+workspace = true

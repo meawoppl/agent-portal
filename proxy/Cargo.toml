@@ -77,3 +77,6 @@ base64 = "0.22"
 # Unix system calls (for lock file process checking)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[lints]
+workspace = true
