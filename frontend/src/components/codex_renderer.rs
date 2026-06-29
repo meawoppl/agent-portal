@@ -1,12 +1,10 @@
-use codex_codes::{
-    io::items::{FileUpdateChange, ThreadItem},
-    protocol::ThreadItem as AppServerThreadItem,
-};
+use codex_codes::{io::items::ThreadItem, protocol::ThreadItem as AppServerThreadItem};
 use uuid::Uuid;
 use yew::prelude::*;
 
 mod events;
 mod messages;
+mod patch;
 mod tools;
 mod turns;
 #[cfg(test)]
@@ -18,9 +16,10 @@ use events::{ContextCompactedParams, TurnPlanStep};
 use messages::{
     render_agent_message, render_agent_message_content, render_error_block, render_reasoning,
 };
+use patch::{render_file_change, render_file_change_patch};
 use tools::{
-    render_collab_agent_tool_call, render_command_execution, render_diff_card, render_file_change,
-    render_mcp_tool_call, render_todo_list, render_web_search,
+    render_collab_agent_tool_call, render_command_execution, render_mcp_tool_call,
+    render_todo_list, render_web_search,
 };
 use turns::{render_turn_completed, render_turn_failed};
 
@@ -158,25 +157,6 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
             completed,
         ),
         CodexItem::AppServer(_) => html! {},
-    }
-}
-
-fn render_file_change_patch(changes: Option<&[FileUpdateChange]>) -> Html {
-    let changes = changes.unwrap_or(&[]);
-    let cards: Vec<Html> = changes
-        .iter()
-        .filter(|c| !c.diff.trim().is_empty())
-        .map(render_diff_card)
-        .collect();
-    if cards.is_empty() {
-        return html! {};
-    }
-    html! {
-        <div class="claude-message assistant-message">
-            <div class="message-body">
-                { for cards.into_iter() }
-            </div>
-        </div>
     }
 }
 
