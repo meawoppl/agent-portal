@@ -2,6 +2,7 @@
 
 mod git_metadata;
 mod image_uploader;
+mod input_delivery;
 mod output_forwarder;
 mod portal_reminder;
 mod wiggum;
@@ -862,7 +863,7 @@ async fn recv_option(rx: &mut tokio::sync::oneshot::Receiver<()>) -> Option<()> 
 
 /// Emit an `InputProgressAck` delivery-stage signal for a tracked input, if it
 /// carried a `client_msg_id` (#939). The backend relays it to web clients.
-async fn emit_input_progress(
+pub(super) async fn emit_input_progress(
     ws_write: &SharedWsWrite,
     session_id: Uuid,
     client_msg_id: Option<Uuid>,
@@ -982,71 +983,20 @@ async fn run_main_loop<A: Agent>(
             }
 
             Some(input) = input_rx.recv() => {
-                check_and_send_branch_update_if_branch_changed(
+                if let Some(result) = input_delivery::handle_input(
                     &state.ws_write,
                     state.session_id,
                     &state.working_directory,
                     &state.git_metadata,
+                    state.agent_type,
+                    &state.pending_input_display_events,
+                    claude_session,
+                    input,
                 )
-                .await;
-
-                debug!("sending to claude process: {}", truncate(&input.text, 100));
-
-                // Delivery stage: the proxy has the input and is about to hand
-                // it to the agent (#939).
-                emit_input_progress(
-                    &state.ws_write,
-                    state.session_id,
-                    input.client_msg_id,
-                    shared::InputDeliveryStage::ProxyReceived,
-                )
-                .await;
-
-                // Two mechanisms deliver the typed display event, exactly one
-                // per agent — never both:
-                //  - Claude echoes its input, so we stash the event here for the
-                //    output_forwarder to swap in on the matching ClaudeOutput::User.
-                //  - Codex doesn't echo, so its io-task emits the event itself
-                //    (handed in via send_input_with_display below).
-                // Gate the stash on Claude: pushing for Codex would leak the
-                // VecDeque entry forever, since nothing consumes it there (#1124).
-                if state.agent_type == shared::AgentType::Claude {
-                    if let Some(display_event) = input.display_event.clone() {
-                        let mut pending = state.pending_input_display_events.lock().await;
-                        pending.push_back(PendingInputDisplayEvent {
-                            echoed_text: input.text.clone(),
-                            content: display_event,
-                        });
-                    }
-                }
-
-                if let Err(e) = claude_session
-                    .send_input_with_display(
-                        serde_json::Value::String(input.text),
-                        input.display_event,
-                    )
-                    .await
+                .await
                 {
-                    error!("Failed to send to Claude: {}", e);
-                    emit_input_progress(
-                        &state.ws_write,
-                        state.session_id,
-                        input.client_msg_id,
-                        shared::InputDeliveryStage::Failed,
-                    )
-                    .await;
-                    return ConnectionResult::ClaudeExited;
+                    return result;
                 }
-                // Delivery stage: the input is now in the agent's stream — the
-                // optimistic row clears here (#939).
-                emit_input_progress(
-                    &state.ws_write,
-                    state.session_id,
-                    input.client_msg_id,
-                    shared::InputDeliveryStage::AgentAccepted,
-                )
-                .await;
-                ack_portal_input(&state.ws_write, input.ack).await;
             }
 
             // Wiggum mode activation — set state and send prompt atomically
