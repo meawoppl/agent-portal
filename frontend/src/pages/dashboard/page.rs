@@ -1,6 +1,7 @@
 //! Dashboard page - Main session management interface
 
 use super::page_bootstrap::use_dashboard_bootstrap;
+use super::page_focus::use_dashboard_focus;
 use super::page_spend::use_spend_badge_animation;
 use super::page_state::{
     active_session_ids, DashboardSessionAction, DashboardSessionState, DashboardUiAction,
@@ -106,112 +107,23 @@ pub fn dashboard_page() -> Html {
         hidden
     };
 
-    // Derive the focused display index from the focused session id against the
-    // current sorted order. Falls back to the first non-hidden session when the
-    // focused id is absent (nothing focused yet, or the focused session was
-    // deleted / left). The rail, keyboard nav, and focus render all consume
-    // this derived index.
-    let focused_index: usize = session_order::resolve_focus_index(
-        &active_sessions,
-        session_state.focused_id,
-        &effective_hidden_sessions,
+    let focus = use_dashboard_focus(
+        active_sessions.clone(),
+        effective_hidden_sessions.clone(),
+        loading,
+        session_state.clone(),
     );
-
-    // On initial load, focus first non-hidden session and activate all non-hidden sessions
-    {
-        let active_sessions = active_sessions.clone();
-        let effective_hidden_sessions = effective_hidden_sessions.clone();
-        let session_state = session_state.clone();
-
-        use_effect_with(
-            (
-                active_sessions.clone(),
-                effective_hidden_sessions.clone(),
-                loading,
-            ),
-            move |(sessions, hidden_sessions, is_loading)| {
-                if !*is_loading && !sessions.is_empty() {
-                    // Focus the first non-hidden session by id (falls through to
-                    // the first session if all are hidden).
-                    let first_focus = sessions
-                        .iter()
-                        .find(|s| !hidden_sessions.contains(&s.id))
-                        .or_else(|| sessions.first())
-                        .map(|s| s.id);
-
-                    // Activate all non-hidden sessions so they load in background
-                    let activate_ids = sessions
-                        .iter()
-                        .filter(|s| !hidden_sessions.contains(&s.id))
-                        .map(|s| s.id)
-                        .collect();
-
-                    session_state.dispatch(DashboardSessionAction::InitializeFocus {
-                        focus_id: first_focus,
-                        activate_ids,
-                    });
-                }
-                || ()
-            },
-        );
-    }
-
-    // Auto-focus newly launched session when it appears in the session list
-    {
-        let session_state = session_state.clone();
-
-        use_effect_with(active_session_ids(&active_sessions), move |session_ids| {
-            session_state.dispatch(DashboardSessionAction::FocusNewlyLaunched(
-                session_ids.clone(),
-            ));
-            || ()
-        });
-    }
-
-    // Session selection callback
-    let on_select_session = {
-        let session_state = session_state.clone();
-        let active_sessions = active_sessions.clone();
-        // The rail / keyboard nav emit a display index valid against the order
-        // that produced the current render; translate it to the session id so
-        // focus stays attached to that session across later reorders.
-        Callback::from(move |index: usize| {
-            crate::audio::ensure_audio_context();
-            crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
-            if let Some(session) = active_sessions.get(index) {
-                session_state.dispatch(DashboardSessionAction::FocusAndActivate(session.id));
-            }
-        })
-    };
-
-    // Activation callback for keyboard nav
-    let on_activate = {
-        let session_state = session_state.clone();
-        Callback::from(move |session_id: Uuid| {
-            session_state.dispatch(DashboardSessionAction::Activate(session_id));
-        })
-    };
-
-    // Interrupt signal counter — incremented by triple-Escape, passed to focused SessionView
-    let interrupt_signal = use_state(|| 0u32);
-
-    let on_interrupt = {
-        let interrupt_signal = interrupt_signal.clone();
-        Callback::from(move |()| {
-            interrupt_signal.set(*interrupt_signal + 1);
-        })
-    };
 
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
-        focused_index,
+        focused_index: focus.focused_index,
         hidden_sessions: effective_hidden_sessions.clone(),
         connected_sessions: session_state.connected_sessions.clone(),
         inactive_hidden: ui_state.inactive_hidden,
-        on_select: on_select_session.clone(),
-        on_activate,
-        on_interrupt,
+        on_select: focus.on_select_session.clone(),
+        on_activate: focus.on_activate.clone(),
+        on_interrupt: focus.on_interrupt.clone(),
     });
 
     // Modal open callbacks
@@ -692,7 +604,7 @@ pub fn dashboard_page() -> Html {
                     // Session Rail
                     <SessionRail
                         sessions={active_sessions.clone()}
-                        focused_index={focused_index}
+                        focused_index={focus.focused_index}
                         awaiting_sessions={session_state.awaiting_sessions.clone()}
                         hidden_sessions={effective_hidden_sessions.clone()}
                         inactive_hidden={ui_state.inactive_hidden}
@@ -700,7 +612,7 @@ pub fn dashboard_page() -> Html {
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
                         server_version={server_version.clone()}
-                        on_select={on_select_session.clone()}
+                        on_select={focus.on_select_session.clone()}
                         on_leave={on_leave.clone()}
                         on_delete={on_delete.clone()}
                         on_toggle_hidden={on_toggle_hidden.clone()}
@@ -713,7 +625,7 @@ pub fn dashboard_page() -> Html {
                     <div class={classes!("session-views-container", if keyboard_nav.nav_mode { Some("nav-mode") } else { None })}>
                         {
                             active_sessions.iter().enumerate().map(|(index, session)| {
-                                let is_focused = index == focused_index;
+                                let is_focused = index == focus.focused_index;
                                 let is_activated = session_state.activated_sessions.contains(&session.id);
                                 if is_activated {
                                     html! {
@@ -730,7 +642,7 @@ pub fn dashboard_page() -> Html {
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
                                                 current_user_id={current_user_id.map(|id| id.to_string())}
-                                                interrupt_signal={*interrupt_signal}
+                                                interrupt_signal={focus.interrupt_signal}
                                             />
                                         </div>
                                     }
