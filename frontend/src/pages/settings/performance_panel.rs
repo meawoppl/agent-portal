@@ -13,14 +13,15 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use shared::api::{MetricBucket, MetricBucketsResponse};
-use wasm_bindgen_futures::spawn_local;
+use shared::api::MetricBucket;
 use yew::prelude::*;
 
 use crate::components::charts::{
     AxisScale, BucketKind, LinePlot, LineSeries, StackedArea, StackedSeries,
 };
-use crate::utils::{self, FetchError, On401};
+
+mod use_metrics;
+use use_metrics::use_performance_metrics;
 
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
 /// currently reports no model or tier; keeping the agent in the key lets the
@@ -187,49 +188,9 @@ pub fn performance_panel() -> Html {
     let window = use_state(|| TimeWindow::Days30);
     let group_by = use_state(|| GroupBy::All);
     let axis_scale = use_state(|| AxisScale::Linear);
-    let buckets = use_state(Vec::<MetricBucket>::new);
-    let loading = use_state(|| true);
-    let error_msg = use_state(|| None::<String>);
+    let metrics = use_performance_metrics(*window);
 
-    // Refetch when the window selection changes.
-    {
-        let buckets = buckets.clone();
-        let loading = loading.clone();
-        let error_msg = error_msg.clone();
-        let window_val = *window;
-        use_effect_with(window_val, move |&window_val| {
-            loading.set(true);
-            error_msg.set(None);
-            let buckets = buckets.clone();
-            let loading = loading.clone();
-            let error_msg = error_msg.clone();
-            spawn_local(async move {
-                let path = format!(
-                    "/api/metrics/turns?bucket={}&window={}",
-                    bucket_param(window_val),
-                    window_val.label()
-                );
-                match utils::fetch_json::<MetricBucketsResponse>(&path, On401::Ignore).await {
-                    Ok(data) => {
-                        buckets.set(data.buckets);
-                    }
-                    Err(FetchError::Decode(e)) => {
-                        error_msg.set(Some(format!("Failed to parse response: {e}")));
-                    }
-                    Err(FetchError::Status(code)) => {
-                        error_msg.set(Some(format!("Request failed: HTTP {code}")));
-                    }
-                    Err(FetchError::Network(e)) => {
-                        error_msg.set(Some(format!("Network error: {e}")));
-                    }
-                }
-                loading.set(false);
-            });
-            || ()
-        });
-    }
-
-    let pairs = distinct_pairs(&buckets);
+    let pairs = distinct_pairs(&metrics.buckets);
 
     let on_window_change = {
         let window = window.clone();
@@ -255,22 +216,22 @@ pub fn performance_panel() -> Html {
         })
     };
 
-    let body = if *loading {
+    let body = if metrics.loading {
         html! {
             <div class="chart-empty">{ "Loading…" }</div>
         }
-    } else if let Some(msg) = (*error_msg).clone() {
+    } else if let Some(msg) = metrics.error_msg.clone() {
         html! {
             <div class="chart-empty">{ msg }</div>
         }
-    } else if buckets.is_empty() {
+    } else if metrics.buckets.is_empty() {
         html! {
             <div class="chart-empty">
                 { "No per-turn metrics in the selected window. Start a session to populate the dashboard." }
             </div>
         }
     } else {
-        render_charts(&buckets, &group_by, &pairs, *window, *axis_scale)
+        render_charts(&metrics.buckets, &group_by, &pairs, *window, *axis_scale)
     };
 
     html! {
