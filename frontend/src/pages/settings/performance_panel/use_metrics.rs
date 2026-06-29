@@ -4,7 +4,7 @@ use shared::api::{MetricBucket, MetricBucketsResponse};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-use super::{bucket_param, TimeWindow};
+use super::model::{bucket_param, TimeWindow};
 use crate::utils::{self, FetchError, On401};
 
 pub(super) struct PerformanceMetrics {

@@ -5,8 +5,8 @@ use yew::prelude::*;
 use crate::components::charts::AxisScale;
 
 use super::charts::render_charts;
+use super::model::{GroupBy, GroupKey, TimeWindow};
 use super::use_metrics::PerformanceMetrics;
-use super::{GroupBy, GroupKey, TimeWindow};
 
 pub(super) fn render_performance_body(
     metrics: &PerformanceMetrics,

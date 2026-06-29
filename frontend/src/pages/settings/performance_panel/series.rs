@@ -7,7 +7,7 @@ use shared::api::MetricBucket;
 
 use crate::components::charts::{LineSeries, StackedSeries};
 
-use super::{bucket_group_key, bucket_index, pair_color, pair_label, GroupKey};
+use super::model::{bucket_group_key, bucket_index, pair_color, pair_label, GroupKey};
 
 /// Build paired p50 (solid) / p95 (dashed) line series per active pair,
 /// like the existing [`build_cache_hit_series`]. `p50` / `p95` extract the
