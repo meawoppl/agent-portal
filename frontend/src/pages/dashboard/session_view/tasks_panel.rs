@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! `TasksPanel` — sub-component owning sub-agent / background-task UI state.
 //!
 //! Pulled out of `SessionView` so the parent component no longer carries the

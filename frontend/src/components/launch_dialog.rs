@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
 use crate::components::ProxyTokenSetup;
 use crate::hooks::use_escape;

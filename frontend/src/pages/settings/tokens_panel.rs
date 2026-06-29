@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use crate::components::{ConfirmModal, ConfirmModalStyle};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;

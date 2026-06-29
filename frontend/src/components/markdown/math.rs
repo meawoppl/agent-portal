@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use pulldown_cmark::Event;
 
 pub(super) const MATH_OPEN: char = '\u{E000}';

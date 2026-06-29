@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Agent Messaging page: list your sessions and send a message into one. The
 //! message is delivered to that session's agent as an input turn. Backed by
 //! `GET /api/agent/sessions` and `POST /api/agent/sessions/{id}/message`.

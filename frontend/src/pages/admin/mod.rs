@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Admin dashboard page
 //!
 //! Restricted to users with is_admin=true. Provides system overview,

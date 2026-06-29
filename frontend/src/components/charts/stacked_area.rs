@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Hand-rolled stacked-area chart, used by the Performance page's stop-reason
 //! mix plot.
 //!
