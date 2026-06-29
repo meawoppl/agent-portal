@@ -4,21 +4,20 @@
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
 use crate::components::{ScheduleDialog, ShareDialog};
-use crate::utils::{self, On401};
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
-use shared::api::ScheduledTaskListResponse;
 use shared::{PrRef, SessionInfo};
 use std::collections::HashSet;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
+mod hooks;
 mod menu;
 mod pill;
 mod sparkline;
+use hooks::use_scheduled_task_blocker;
 use menu::SessionRailMenu;
 use pill::SessionPill;
 pub use sparkline::ActivityRef;
@@ -155,39 +154,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let copied_id = use_state(|| false);
     let share_session_id = use_state(|| None::<Uuid>);
     let schedule_session = use_state(|| None::<SessionInfo>);
-    let stop_has_tasks = use_state(|| false);
-
-    // Fetch scheduled task status when dropdown opens for a session
-    {
-        let stop_has_tasks = stop_has_tasks.clone();
-        let menu_id = *menu_session;
-        let sessions = props.sessions.clone();
-        use_effect_with(menu_id, move |menu_id| {
-            if let Some(sid) = menu_id {
-                if let Some(session) = sessions.iter().find(|s| s.id == *sid) {
-                    let wd = session.working_directory.clone();
-                    let stop_has_tasks = stop_has_tasks.clone();
-                    spawn_local(async move {
-                        if let Ok(data) = utils::fetch_json::<ScheduledTaskListResponse>(
-                            "/api/scheduled-tasks",
-                            On401::Ignore,
-                        )
-                        .await
-                        {
-                            let has = data
-                                .tasks
-                                .iter()
-                                .any(|t| t.fields.working_directory == wd && t.enabled);
-                            stop_has_tasks.set(has);
-                        }
-                    });
-                }
-            } else {
-                stop_has_tasks.set(false);
-            }
-            || ()
-        });
-    }
+    let stop_has_tasks = use_scheduled_task_blocker(*menu_session, props.sessions.clone());
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -447,7 +414,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 position={*menu_pos}
                 is_hidden={is_menu_session_hidden}
                 is_connected={is_menu_session_connected}
-                stop_has_tasks={*stop_has_tasks}
+                stop_has_tasks={stop_has_tasks}
                 confirming_stop={*stop_confirm}
                 copied_id={*copied_id}
                 on_close={close_menu}
