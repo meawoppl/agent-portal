@@ -19,8 +19,8 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
     let launcher_id = l.launcher_id;
 
     // Inline two-step confirm instead of a browser `confirm()` popup, which
-    // doesn't render well on mobile. First click arms the confirmation; the
-    // row then shows explicit Confirm / Cancel buttons (normal DOM elements).
+    // doesn't render well on mobile. Keep the action slots stable so the
+    // primary click target doesn't move between the armed/unarmed states.
     let confirming = use_state(|| false);
 
     // A restart in progress takes precedence over the confirm state.
@@ -41,31 +41,35 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
         })
     };
 
-    let actions = if props.update_in_progress {
-        html! {
-            <button class="update-button stage-3" disabled=true>
-                { "Restarting..." }
-            </button>
-        }
+    let primary_label = if props.update_in_progress {
+        "Restarting..."
     } else if *confirming {
-        html! {
-            <div class="launcher-confirm-actions">
-                <span class="launcher-confirm-prompt">{ "Update & restart?" }</span>
-                <button class="confirm-button" onclick={confirm}>{ "Confirm" }</button>
-                <button class="cancel-button" onclick={cancel}>{ "Cancel" }</button>
-            </div>
-        }
+        "Confirm Restart"
     } else {
-        html! {
-            <button
-                class="update-button stage-0"
-                onclick={arm}
-                title="Pull the latest agent-portal release and restart this launcher"
-            >
-                { "Update & Restart" }
-            </button>
-        }
+        "Update & Restart"
     };
+    let primary_title = if *confirming {
+        "Confirm launcher update and restart"
+    } else {
+        "Pull the latest agent-portal release and restart this launcher"
+    };
+    let primary_class = classes!(
+        "update-button",
+        "launcher-update-primary",
+        if props.update_in_progress {
+            "stage-3"
+        } else if *confirming {
+            "confirming"
+        } else {
+            "stage-0"
+        }
+    );
+    let primary_onclick = if *confirming { confirm } else { arm };
+    let cancel_class = classes!(
+        "cancel-button",
+        "launcher-update-secondary",
+        (!*confirming || props.update_in_progress).then_some("is-placeholder")
+    );
 
     html! {
         <tr class="token-row">
@@ -73,7 +77,27 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
             <td>{ &l.hostname }</td>
             <td>{ format!("v{}", &l.version) }</td>
             <td>{ l.running_sessions }</td>
-            <td class="token-actions">{ actions }</td>
+            <td class="token-actions">
+                <div class="launcher-update-actions">
+                    <button
+                        class={primary_class}
+                        onclick={primary_onclick}
+                        title={primary_title}
+                        disabled={props.update_in_progress}
+                    >
+                        { primary_label }
+                    </button>
+                    <button
+                        class={cancel_class}
+                        onclick={cancel}
+                        disabled={!*confirming || props.update_in_progress}
+                        aria-hidden={(!*confirming || props.update_in_progress).to_string()}
+                        tabindex={if *confirming && !props.update_in_progress { "0" } else { "-1" }}
+                    >
+                        { "Cancel" }
+                    </button>
+                </div>
+            </td>
         </tr>
     }
 }
