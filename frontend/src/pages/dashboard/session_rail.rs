@@ -16,8 +16,9 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
+mod pill;
 mod sparkline;
-use sparkline::render_activity_sparkline;
+use pill::SessionPill;
 pub use sparkline::ActivityRef;
 
 #[cfg(test)]
@@ -596,204 +597,31 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         html! {}
     };
 
-    // Helper to render a single session pill
-    let render_pill = |index: usize,
-                       session: &SessionInfo,
-                       display_number: Option<usize>|
-     -> Html {
-        let is_focused = index == props.focused_index;
-        let is_awaiting = props.awaiting_sessions.contains(&session.id);
-        let is_hidden = props.hidden_sessions.contains(&session.id);
-        let is_connected = props.connected_sessions.contains(&session.id);
-
-        let on_click = {
-            let on_select = props.on_select.clone();
-            Callback::from(move |_| on_select.emit(index))
-        };
-
-        let on_toggle_menu = {
-            let menu_session = menu_session.clone();
-            let menu_pos = menu_pos.clone();
-            let stop_confirm = stop_confirm.clone();
-            let copied_id = copied_id.clone();
-            let session_id = session.id;
-            Callback::from(move |e: MouseEvent| {
-                e.stop_propagation();
-                stop_confirm.set(false);
-                copied_id.set(false);
-                if *menu_session == Some(session_id) {
-                    menu_session.set(None);
-                    return;
-                }
-                if let Some(el) = e.target_dyn_into::<HtmlElement>() {
-                    let rect = el.get_bounding_client_rect();
-                    let vw = web_sys::window()
-                        .and_then(|w| w.inner_width().ok())
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(800.0) as i32;
-                    let menu_width = 160; // min-width from CSS
-                    let left = (rect.left() as i32).min(vw - menu_width - 8);
-                    menu_pos.set((left, rect.bottom() as i32 + 4));
-                }
-                menu_session.set(Some(session_id));
-            })
-        };
-
-        let in_nav_mode = props.nav_mode;
-        let is_status_disconnected = session.status.as_str() != "active";
-        let pill_class = classes!(
-            "session-pill",
-            if is_focused { Some("focused") } else { None },
-            if is_awaiting { Some("awaiting") } else { None },
-            if is_hidden { Some("hidden") } else { None },
-            if in_nav_mode { Some("nav-mode") } else { None },
-            if is_status_disconnected {
-                Some("status-disconnected")
-            } else {
-                None
-            },
-        );
-
-        let hostname = &session.hostname;
-        let folder = utils::extract_folder(&session.working_directory);
-
-        let connection_class = if is_connected {
-            "pill-status connected"
-        } else {
-            "pill-status disconnected"
-        };
-
-        let number_annotation = if in_nav_mode {
-            display_number
-                .filter(|&n| n < 9)
-                .map(|n| format!("{}", n + 1))
-        } else {
-            None
-        };
-
-        // Build version badge (rendered inline with hostname).
-        let version_badge = if let Some(ref cv) = session.client_version {
-            if !props.server_version.is_empty() {
-                let staleness = version_staleness(cv, &props.server_version);
-                let (badge_class, tooltip) = match staleness {
-                    VersionStaleness::Current => {
-                        ("version-current", format!("v{} — up to date", cv))
-                    }
-                    VersionStaleness::PatchBehind => (
-                        "version-patch",
-                        format!(
-                            "v{} → v{} (patch update available)",
-                            cv, props.server_version
-                        ),
-                    ),
-                    VersionStaleness::MinorBehind => (
-                        "version-minor",
-                        format!(
-                            "v{} → v{} (minor update available)",
-                            cv, props.server_version
-                        ),
-                    ),
-                    VersionStaleness::MajorBehind => (
-                        "version-major",
-                        format!(
-                            "v{} → v{} (major update available)",
-                            cv, props.server_version
-                        ),
-                    ),
-                };
-                html! {
-                    <span class={classes!("pill-version-badge", badge_class)}
-                        title={tooltip}>
-                        { format!("v{}", cv) }
-                    </span>
-                }
-            } else {
-                html! {}
+    let on_toggle_pill_menu = {
+        let menu_session = menu_session.clone();
+        let menu_pos = menu_pos.clone();
+        let stop_confirm = stop_confirm.clone();
+        let copied_id = copied_id.clone();
+        Callback::from(move |(session_id, e): (Uuid, MouseEvent)| {
+            e.stop_propagation();
+            stop_confirm.set(false);
+            copied_id.set(false);
+            if *menu_session == Some(session_id) {
+                menu_session.set(None);
+                return;
             }
-        } else {
-            html! {}
-        };
-
-        let sparkline =
-            render_activity_sparkline(&props.activity_timestamps, session.id, *render_time);
-
-        let watermark_class = match session.agent_type {
-            shared::AgentType::Claude => "pill-watermark claude",
-            shared::AgentType::Codex => "pill-watermark codex",
-        };
-
-        html! {
-            <div class={pill_class} onclick={on_click} key={session.id.to_string()} data-index={index.to_string()}>
-                <span class={watermark_class} aria-hidden="true" />
-                {
-                    if let Some(num) = &number_annotation {
-                        html! { <span class="pill-number">{ num }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                <span class={connection_class}>
-                    { if is_connected { "●" } else { "○" } }
-                </span>
-                <span class="pill-name" title={session.session_name.clone()}>
-                    <span class="pill-folder">{ folder }</span>
-                    <span class="pill-hostname-row">
-                        <span class="pill-hostname">{ hostname }</span>
-                        { version_badge }
-                    </span>
-                    { {
-                        // Show open PR numbers (each with its branch as a hover
-                        // tooltip); fall back to the branch name, then "No VCS".
-                        let prs = sorted_prs(&session.open_prs);
-                        if !prs.is_empty() {
-                            html! {
-                                <span class="pill-branch pill-prs">
-                                    { for prs.iter().map(|pr| html! {
-                                        <span class="pill-pr-num" title={pr.branch.clone()}>
-                                            { format!("#{}", pr.number) }
-                                        </span>
-                                    }) }
-                                </span>
-                            }
-                        } else if let Some(ref branch) = session.git_branch {
-                            html! { <span class="pill-branch" title={branch.clone()}>{ branch }</span> }
-                        } else {
-                            html! { <span class="pill-branch pill-no-vcs">{ "No VCS" }</span> }
-                        }
-                    } }
-                </span>
-                // Codex text badge removed — the agent-type watermark behind the
-                // pill (anthropic-mark.svg / openai-mark.png) carries this signal.
-                {
-                    if session.scheduled_task_id.is_some() {
-                        html! { <span class="pill-agent-badge cron">{ "Cron" }</span> }
-                    } else if session.paused {
-                        html! { <span class="pill-agent-badge paused">{ "Paused" }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    if is_hidden {
-                        html! { <span class="pill-hidden-badge">{ "ᴴ" }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                {
-                    if session.my_role != "owner" {
-                        let role_class = format!("pill-role-badge role-{}", session.my_role);
-                        html! { <span class={role_class}>{ &session.my_role }</span> }
-                    } else {
-                        html! {}
-                    }
-                }
-                <button type="button" class="pill-menu-toggle" onclick={on_toggle_menu}>
-                    { "▼" }
-                </button>
-                { sparkline }
-            </div>
-        }
+            if let Some(el) = e.target_dyn_into::<HtmlElement>() {
+                let rect = el.get_bounding_client_rect();
+                let vw = web_sys::window()
+                    .and_then(|w| w.inner_width().ok())
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(800.0) as i32;
+                let menu_width = 160; // min-width from CSS
+                let left = (rect.left() as i32).min(vw - menu_width - 8);
+                menu_pos.set((left, rect.bottom() as i32 + 4));
+            }
+            menu_session.set(Some(session_id));
+        })
     };
 
     // Split sessions into visible vs hidden.
@@ -827,7 +655,24 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         <div class="session-rail-container" onclick={on_container_click}>
             <div class="session-rail" ref={rail_ref} onwheel={on_wheel}>
                 { visible_indices.iter().enumerate().map(|(display_idx, (index, session))| {
-                    render_pill(*index, session, Some(display_idx))
+                    html! {
+                        <SessionPill
+                            key={session.id.to_string()}
+                            index={*index}
+                            display_number={Some(display_idx)}
+                            session={(*session).clone()}
+                            is_focused={*index == props.focused_index}
+                            is_awaiting={props.awaiting_sessions.contains(&session.id)}
+                            is_hidden={props.hidden_sessions.contains(&session.id)}
+                            is_connected={props.connected_sessions.contains(&session.id)}
+                            nav_mode={props.nav_mode}
+                            server_version={props.server_version.clone()}
+                            activity_timestamps={props.activity_timestamps.clone()}
+                            render_time={*render_time}
+                            on_select={props.on_select.clone()}
+                            on_toggle_menu={on_toggle_pill_menu.clone()}
+                        />
+                    }
                 }).collect::<Html>() }
 
                 {
@@ -856,7 +701,24 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 {
                     if !props.inactive_hidden {
                         hidden_indices.iter().enumerate().map(|(display_idx, (index, session))| {
-                            render_pill(*index, session, Some(visible_count + display_idx))
+                            html! {
+                                <SessionPill
+                                    key={session.id.to_string()}
+                                    index={*index}
+                                    display_number={Some(visible_count + display_idx)}
+                                    session={(*session).clone()}
+                                    is_focused={*index == props.focused_index}
+                                    is_awaiting={props.awaiting_sessions.contains(&session.id)}
+                                    is_hidden={props.hidden_sessions.contains(&session.id)}
+                                    is_connected={props.connected_sessions.contains(&session.id)}
+                                    nav_mode={props.nav_mode}
+                                    server_version={props.server_version.clone()}
+                                    activity_timestamps={props.activity_timestamps.clone()}
+                                    render_time={*render_time}
+                                    on_select={props.on_select.clone()}
+                                    on_toggle_menu={on_toggle_pill_menu.clone()}
+                                />
+                            }
                         }).collect::<Html>()
                     } else {
                         html! {}
