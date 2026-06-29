@@ -5,7 +5,8 @@ use yew::prelude::*;
 mod events;
 mod messages;
 mod patch;
-mod tools;
+mod tool_calls;
+mod tool_card;
 mod turns;
 #[cfg(test)]
 use events::thread_item_id;
@@ -17,7 +18,7 @@ use messages::{
     render_agent_message, render_agent_message_content, render_error_block, render_reasoning,
 };
 use patch::{render_file_change, render_file_change_patch};
-use tools::{
+use tool_calls::{
     render_collab_agent_tool_call, render_command_execution, render_mcp_tool_call,
     render_todo_list, render_web_search,
 };
