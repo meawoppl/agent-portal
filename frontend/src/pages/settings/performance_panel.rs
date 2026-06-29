@@ -16,11 +16,12 @@ use yew::prelude::*;
 
 use crate::components::charts::AxisScale;
 
+mod body;
 mod charts;
 mod controls;
 mod series;
 mod use_metrics;
-use charts::render_charts;
+use body::render_performance_body;
 use controls::{render_performance_controls, PerformanceControlsProps};
 use use_metrics::use_performance_metrics;
 
@@ -217,24 +218,6 @@ pub fn performance_panel() -> Html {
         })
     };
 
-    let body = if metrics.loading {
-        html! {
-            <div class="chart-empty">{ "Loading…" }</div>
-        }
-    } else if let Some(msg) = metrics.error_msg.clone() {
-        html! {
-            <div class="chart-empty">{ msg }</div>
-        }
-    } else if metrics.buckets.is_empty() {
-        html! {
-            <div class="chart-empty">
-                { "No per-turn metrics in the selected window. Start a session to populate the dashboard." }
-            </div>
-        }
-    } else {
-        render_charts(&metrics.buckets, &group_by, &pairs, *window, *axis_scale)
-    };
-
     html! {
         <section class="performance-panel">
             <div class="section-header">
@@ -255,7 +238,7 @@ pub fn performance_panel() -> Html {
                 on_axis_scale_change,
             }) }
 
-            { body }
+            { render_performance_body(&metrics, &group_by, &pairs, *window, *axis_scale) }
         </section>
     }
 }
