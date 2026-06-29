@@ -229,10 +229,7 @@ pub async fn list_directories(
     );
 
     if !sent {
-        app_state
-            .session_manager
-            .pending_dir_requests
-            .remove(&request_id);
+        app_state.session_manager.cancel_dir_request(request_id);
         error!("Failed to send ListDirectories to launcher {}", launcher_id);
         return Err(AppError::BadGateway(
             "Failed to send directory listing request",
@@ -262,10 +259,7 @@ pub async fn list_directories(
             "Directory listing response channel closed".to_string(),
         )),
         Err(_) => {
-            app_state
-                .session_manager
-                .pending_dir_requests
-                .remove(&request_id);
+            app_state.session_manager.cancel_dir_request(request_id);
             warn!("Directory listing timed out for launcher {}", launcher_id);
             Err(AppError::GatewayTimeout("Directory listing timed out"))
         }
@@ -348,10 +342,7 @@ pub async fn probe_agents(
         .send(ServerToLauncher::ProbeAgents { request_id })
         .is_err()
     {
-        app_state
-            .session_manager
-            .pending_probe_requests
-            .remove(&request_id);
+        app_state.session_manager.cancel_probe_request(request_id);
         warn!("Launcher {} disconnected while probing agents", launcher_id);
         return Err(AppError::BadGateway("Failed to send agent probe request"));
     }
@@ -367,10 +358,7 @@ pub async fn probe_agents(
             "Agent probe response channel closed".to_string(),
         )),
         Err(_) => {
-            app_state
-                .session_manager
-                .pending_probe_requests
-                .remove(&request_id);
+            app_state.session_manager.cancel_probe_request(request_id);
             warn!("Probe agents timed out for launcher {}", launcher_id);
             Err(AppError::GatewayTimeout("Agent probe timed out"))
         }

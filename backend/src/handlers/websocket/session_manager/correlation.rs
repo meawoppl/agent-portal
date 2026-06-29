@@ -21,6 +21,12 @@ impl SessionManager {
         }
     }
 
+    /// Drop a pending directory-listing request without resolving (send
+    /// failure or timeout).
+    pub fn cancel_dir_request(&self, request_id: Uuid) {
+        self.pending_dir_requests.remove(&request_id);
+    }
+
     pub fn register_probe_request(&self, request_id: Uuid) -> oneshot::Receiver<LauncherToServer> {
         let (tx, rx) = oneshot::channel();
         self.pending_probe_requests.insert(request_id, tx);
@@ -31,6 +37,12 @@ impl SessionManager {
         if let Some((_, tx)) = self.pending_probe_requests.remove(&request_id) {
             let _ = tx.send(msg);
         }
+    }
+
+    /// Drop a pending agent-probe request without resolving (send failure or
+    /// timeout).
+    pub fn cancel_probe_request(&self, request_id: Uuid) {
+        self.pending_probe_requests.remove(&request_id);
     }
 
     /// Register a pending file-download RPC; the returned receiver resolves when

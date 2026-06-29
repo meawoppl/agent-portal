@@ -49,8 +49,8 @@ pub struct SessionManager {
     /// user. Entries here are kept in lockstep with `launchers`: inserted by
     /// `try_register_launcher`, removed by `unregister_launcher`.
     launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
-    pub pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
-    pub pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
     pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
