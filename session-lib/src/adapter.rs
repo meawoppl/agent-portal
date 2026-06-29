@@ -60,23 +60,36 @@ pub struct PermissionDecision {
     pub reason: Option<String>,
 }
 
-/// Per-agent protocol parse/serialize boundary for the generic `Session<A>`.
+/// Output-classification boundary: parse one unit of agent output into neutral
+/// [`AgentOutput`] decisions. This is the *only* part of the adapter that fits
+/// every backend — both Claude (stdout JSON) and Codex (`ServerMessage`) can
+/// honestly map their output here.
 ///
-/// The adapter owns all concrete-protocol knowledge. `Session` only ever sees
-/// neutral [`AgentOutput`] / [`PermissionDecision`] and opaque
-/// [`TransportPayload`]s.
-// `Sync` so `Session<A>`, which stores `Box<dyn AgentAdapter>`, stays `Sync`
-// for consumers that share a session across threads (the launcher holds
-// sessions in shared state). Adapters are stateless today; any future stateful
-// adapter must use interior mutability that is itself `Sync`.
-pub trait AgentAdapter: Send + Sync + 'static {
-    /// Parse + classify one unit of agent stdout into 0..n neutral decisions.
+/// It is split out from [`AgentAdapter`] (its supertrait) because the rest of
+/// `AgentAdapter` — `user_input`/`permission_response` returning a sync
+/// `TransportPayload` for the I/O task to write — is Claude-transport-shaped
+/// and does *not* fit Codex, whose input/permission flow is an async
+/// `turn_start`/`respond` RPC owned by `codex_io_task`. A backend that only
+/// classifies output (Codex) implements this trait alone; full unification of
+/// the input side is a separate `AgentRuntime` design (see
+/// `docs/design/session-adapter.md`).
+///
+/// `Sync` so `Session<A>`, which stores `Box<dyn AgentAdapter>`, stays `Sync`
+/// for consumers that share a session across threads (the launcher holds
+/// sessions in shared state). Adapters are stateless today; any future stateful
+/// adapter must use interior mutability that is itself `Sync`.
+pub trait AgentOutputClassifier: Send + Sync + 'static {
+    /// Parse + classify one unit of agent output into 0..n neutral decisions.
     ///
-    /// `&mut self` so future stateful adapters (e.g. codex, which threads a
+    /// `&mut self` so future stateful classifiers (e.g. codex, which threads a
     /// request-id ↔ tool map) can update internal state. Claude is stateless
     /// and 1:1 (one `RawUnit` → exactly one `AgentOutput`).
     fn classify(&mut self, raw: RawUnit) -> Vec<AgentOutput>;
+}
 
+/// Per-agent protocol parse/serialize boundary for the generic `Session<A>`,
+/// for backends whose input side fits the sync stdin-payload model (Claude).
+pub trait AgentAdapter: AgentOutputClassifier {
     /// Build the transport payload for plain user text.
     fn user_input(&self, text: &str, session_id: Uuid) -> TransportPayload;
 
@@ -97,7 +110,7 @@ pub trait AgentAdapter: Send + Sync + 'static {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClaudeAdapter;
 
-impl AgentAdapter for ClaudeAdapter {
+impl AgentOutputClassifier for ClaudeAdapter {
     fn classify(&mut self, raw: RawUnit) -> Vec<AgentOutput> {
         use claude_codes::io::ControlRequestPayload;
         use claude_codes::ClaudeOutput;
@@ -151,7 +164,9 @@ impl AgentAdapter for ClaudeAdapter {
             _ => vec![AgentOutput::Visible(raw)],
         }
     }
+}
 
+impl AgentAdapter for ClaudeAdapter {
     fn user_input(&self, text: &str, session_id: Uuid) -> TransportPayload {
         let input = claude_codes::ClaudeInput::user_message(text, session_id);
         serde_json::to_value(&input).unwrap_or(serde_json::Value::Null)

@@ -32,7 +32,9 @@ pub mod session;
 pub mod snapshot;
 pub mod turn_tracker;
 
-pub use adapter::{AgentAdapter, AgentOutput, ClaudeAdapter, PermissionDecision};
+pub use adapter::{
+    AgentAdapter, AgentOutput, AgentOutputClassifier, ClaudeAdapter, PermissionDecision,
+};
 pub use agent::Agent;
 pub use buffer::{BufferedOutput, OutputBuffer};
 pub use error::SessionError;
