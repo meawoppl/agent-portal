@@ -1,6 +1,7 @@
 //! Dashboard page - Main session management interface
 
 use super::page_bootstrap::use_dashboard_bootstrap;
+use super::page_spend::use_spend_badge_animation;
 use super::page_state::{
     active_session_ids, DashboardSessionAction, DashboardSessionState, DashboardUiAction,
     DashboardUiState,
@@ -28,36 +29,6 @@ use yew::prelude::*;
 // =============================================================================
 // Dashboard Page - Main Orchestrating Component
 // =============================================================================
-
-/// Map total spend to its tier on the $1 / $10 / $100 / $1,000 / $10,000
-/// ladder (0 = below $1, 5 = at or above $10,000).
-fn spend_tier(spend: f64) -> u8 {
-    if spend >= 10000.0 {
-        5
-    } else if spend >= 1000.0 {
-        4
-    } else if spend >= 100.0 {
-        3
-    } else if spend >= 10.0 {
-        2
-    } else if spend >= 1.0 {
-        1
-    } else {
-        0
-    }
-}
-
-/// CSS class for the spend badge, derived from the spend tier.
-fn spend_tier_class(tier: u8) -> &'static str {
-    match tier {
-        5 => "spend-10000",
-        4 => "spend-1000",
-        3 => "spend-100",
-        2 => "spend-10",
-        1 => "spend-1",
-        _ => "",
-    }
-}
 
 #[function_component(DashboardPage)]
 pub fn dashboard_page() -> Html {
@@ -96,11 +67,6 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Track spend tier for timed animations
-    let prev_spend_tier = use_state(|| 0u8);
-    let spend_animating = use_state(|| false);
-    let spend_initialized = use_state(|| false);
-
     // UI state
     let ui_state = use_reducer_eq(|| {
         DashboardUiState::new(
@@ -117,40 +83,7 @@ pub fn dashboard_page() -> Html {
     // Activity buffer: mutations don't trigger page re-renders.
     // SessionRail reads this on its own 100 ms tick instead.
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
-
-    // Detect spend tier changes and trigger timed animation
-    {
-        let spend_animating = spend_animating.clone();
-        let prev_spend_tier = prev_spend_tier.clone();
-        let spend_initialized = spend_initialized.clone();
-        let current_tier = spend_tier(total_user_spend);
-        use_effect_with(current_tier, move |tier| {
-            let tier = *tier;
-            if !*spend_initialized {
-                // First tier value from page load — record it, don't animate
-                spend_initialized.set(true);
-                prev_spend_tier.set(tier);
-            } else if tier > *prev_spend_tier {
-                spend_animating.set(true);
-                let duration_ms = match tier {
-                    1 => 500,
-                    2 => 2000,
-                    3 => 5000,
-                    4 => 10000,
-                    _ => 20000,
-                };
-                let spend_animating = spend_animating.clone();
-                let handle = gloo::timers::callback::Timeout::new(duration_ms, move || {
-                    spend_animating.set(false);
-                });
-                prev_spend_tier.set(tier);
-                handle.forget();
-            } else if tier != *prev_spend_tier {
-                prev_spend_tier.set(tier);
-            }
-            || ()
-        });
-    }
+    let spend_animation = use_spend_badge_animation(total_user_spend);
 
     // Get DB-authoritative sessions in a total, deterministic display order
     // (see `session_order`). A disconnected, unpaused session is
@@ -660,11 +593,10 @@ pub fn dashboard_page() -> Html {
                     <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
                     {
                         if total_user_spend > 0.0 {
-                            let tier_class = spend_tier_class(spend_tier(total_user_spend));
                             let spend_class = classes!(
                                 "total-spend-badge",
-                                tier_class,
-                                if *spend_animating { Some("spend-animating") } else { None },
+                                spend_animation.tier_class,
+                                if spend_animation.animating { Some("spend-animating") } else { None },
                             );
                             html! {
                                 <>
