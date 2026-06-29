@@ -1,5 +1,6 @@
 //! Dashboard page - Main session management interface
 
+use super::page_bootstrap::use_dashboard_bootstrap;
 use super::page_state::{
     active_session_ids, DashboardSessionAction, DashboardSessionState, DashboardUiAction,
     DashboardUiState,
@@ -15,10 +16,9 @@ use crate::components::{ConfirmModal, ConfirmModalStyle, LaunchDialog, TurnMetri
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
-use crate::utils::{self, On401};
+use crate::utils;
 use gloo_net::http::Request;
-use shared::api::MeResponse;
-use shared::{AppConfig, SessionInfo};
+use shared::SessionInfo;
 use std::collections::HashSet;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -71,6 +71,11 @@ pub fn dashboard_page() -> Html {
     let total_user_spend = ws_hook.total_spend;
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
     let update_available = ws_hook.update_available.clone();
+    let bootstrap = use_dashboard_bootstrap();
+    let is_admin = bootstrap.is_admin;
+    let current_user_id = bootstrap.current_user_id;
+    let app_title = bootstrap.app_title;
+    let server_version = bootstrap.server_version;
 
     // Push-driven session refresh: the backend broadcasts
     // `ServerToClient::LaunchSessionResult` the moment the launcher's
@@ -109,10 +114,6 @@ pub fn dashboard_page() -> Html {
     // from this each render, so a reordered poll never bounces focus onto a
     // different session.
     let session_state = use_reducer_eq(|| DashboardSessionState::new(load_hidden_sessions()));
-    let is_admin = use_state(|| false);
-    let current_user_id = use_state(|| None::<Uuid>);
-    let app_title = use_state(|| "Agent Portal".to_string());
-    let server_version = use_state(String::new);
     // Activity buffer: mutations don't trigger page re-renders.
     // SessionRail reads this on its own 100 ms tick instead.
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
@@ -147,39 +148,6 @@ pub fn dashboard_page() -> Html {
             } else if tier != *prev_spend_tier {
                 prev_spend_tier.set(tier);
             }
-            || ()
-        });
-    }
-
-    // Fetch current user info (admin status, user_id)
-    {
-        let is_admin = is_admin.clone();
-        let current_user_id = current_user_id.clone();
-        use_effect_with((), move |_| {
-            spawn_local(async move {
-                if let Ok(me) = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await
-                {
-                    is_admin.set(me.is_admin);
-                    current_user_id.set(Some(me.id));
-                }
-            });
-            || ()
-        });
-    }
-
-    // Fetch app configuration (title, version, etc.)
-    {
-        let app_title = app_title.clone();
-        let server_version = server_version.clone();
-        use_effect_with((), move |_| {
-            spawn_local(async move {
-                if let Ok(config) =
-                    utils::fetch_json::<AppConfig>("/api/config", On401::Ignore).await
-                {
-                    app_title.set(config.app_title);
-                    server_version.set(config.server_version);
-                }
-            });
             || ()
         });
     }
@@ -360,12 +328,11 @@ pub fn dashboard_page() -> Html {
     let on_confirm_leave = {
         let ui_state = ui_state.clone();
         let refresh = sessions_hook.refresh.clone();
-        let current_user_id = current_user_id.clone();
         Callback::from(move |_| {
             if let Some(session_id) = ui_state.pending_leave {
                 let refresh = refresh.clone();
                 let ui_state = ui_state.clone();
-                let user_id = *current_user_id;
+                let user_id = current_user_id;
                 spawn_local(async move {
                     if let Some(user_id) = user_id {
                         let api_endpoint = utils::api_url(&format!(
@@ -632,22 +599,19 @@ pub fn dashboard_page() -> Html {
     // Update browser tab title
     {
         let app_title = app_title.clone();
-        use_effect_with(
-            (waiting_count, (*app_title).clone()),
-            move |(count, title)| {
-                if let Some(window) = web_sys::window() {
-                    if let Some(document) = window.document() {
-                        let new_title = if *count > 0 {
-                            format!("({}) {}", count, title)
-                        } else {
-                            title.clone()
-                        };
-                        document.set_title(&new_title);
-                    }
+        use_effect_with((waiting_count, app_title.clone()), move |(count, title)| {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    let new_title = if *count > 0 {
+                        format!("({}) {}", count, title)
+                    } else {
+                        title.clone()
+                    };
+                    document.set_title(&new_title);
                 }
-                || ()
-            },
-        );
+            }
+            || ()
+        });
     }
 
     html! {
@@ -691,7 +655,7 @@ pub fn dashboard_page() -> Html {
 
             // Header
             <header class="focus-flow-header">
-                <h1>{ (*app_title).clone() }</h1>
+                <h1>{ app_title.clone() }</h1>
                 <div class="header-actions">
                     <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
                     {
@@ -741,7 +705,7 @@ pub fn dashboard_page() -> Html {
                         { if ui_state.show_launch_dialog { "Close" } else { "+ Launch Session" } }
                     </button>
                     {
-                        if *is_admin {
+                        if is_admin {
                             html! {
                                 <button class="header-button" onclick={go_to_admin.clone()}>
                                     { "Admin" }
@@ -803,7 +767,7 @@ pub fn dashboard_page() -> Html {
                         connected_sessions={session_state.connected_sessions.clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
-                        server_version={(*server_version).clone()}
+                        server_version={server_version.clone()}
                         on_select={on_select_session.clone()}
                         on_leave={on_leave.clone()}
                         on_delete={on_delete.clone()}
@@ -886,8 +850,8 @@ pub fn dashboard_page() -> Html {
                             >
                                 { "\u{1f41b}" }
                             </a>
-                            if !(*server_version).is_empty() {
-                                <span class="server-version">{ format!("v{}", *server_version) }</span>
+                            if !server_version.is_empty() {
+                                <span class="server-version">{ format!("v{}", server_version) }</span>
                             }
                         </div>
                     </div>
@@ -921,7 +885,7 @@ pub fn dashboard_page() -> Html {
             // Admin modal — full-page overlay preserves dashboard state
             if ui_state.show_admin {
                 <div class="full-page-modal">
-                    <AdminPage on_close={close_admin.clone()} current_user_id={*current_user_id} />
+                    <AdminPage on_close={close_admin.clone()} current_user_id={current_user_id} />
                 </div>
             }
 

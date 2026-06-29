@@ -7,6 +7,7 @@
 //! - `PermissionDialog`: Permission prompt and AskUserQuestion dialogs
 
 mod page;
+mod page_bootstrap;
 mod page_state;
 mod permission_dialog;
 mod session_order;
