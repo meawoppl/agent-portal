@@ -1,3 +1,6 @@
+// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Cron expression to English description converter.
 //!
 //! Supports the standard 5-field UNIX cron format:

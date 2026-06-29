@@ -1,7 +1,3 @@
-// Ratchet for the workspace unwrap/expect deny (#1165 item 8): this crate
-// still has production unwrap/expect; remove this allow as it is cleaned.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 pub mod audio;
 mod components;
 mod hooks;
@@ -39,7 +35,9 @@ pub enum Route {
 /// Wrapper for /admin route — provides back-navigation on_close callback
 #[function_component(AdminRoute)]
 fn admin_route() -> Html {
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html! {};
+    };
     let on_close = Callback::from(move |_| navigator.push(&Route::Dashboard));
     html! { <AdminPage on_close={on_close} /> }
 }
@@ -47,7 +45,9 @@ fn admin_route() -> Html {
 /// Wrapper for /settings route — provides back-navigation on_close callback
 #[function_component(SettingsRoute)]
 fn settings_route() -> Html {
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html! {};
+    };
     let on_close = Callback::from(move |_| navigator.push(&Route::Dashboard));
     html! { <SettingsPage on_close={on_close} /> }
 }
