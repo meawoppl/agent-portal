@@ -6,14 +6,7 @@ use yew::prelude::*;
 pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html {
     let subtype = msg.subtype.as_str();
 
-    // Check if this is a compaction-related message via subtype or status field
-    let status_value = msg
-        .data
-        .get("status")
-        .and_then(|s| s.as_str())
-        .unwrap_or("");
-
-    if status_value == "compacting" {
+    if is_compaction_beginning(msg) {
         return render_compaction_beginning();
     }
 
@@ -58,6 +51,12 @@ pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str
             <span class="message-type-badge system">{ subtype }</span>
         </div>
     }
+}
+
+fn is_compaction_beginning(msg: &shared::SystemMessage) -> bool {
+    msg.as_status()
+        .and_then(|status| status.status)
+        .is_some_and(|status| status.as_str() == "compacting")
 }
 
 fn render_init_bar(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html {
@@ -255,5 +254,53 @@ fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>
                 } else { html! {} }
             }
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn system_message(json: serde_json::Value) -> shared::SystemMessage {
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn compaction_beginning_uses_typed_status_accessor() {
+        let msg = system_message(serde_json::json!({
+            "type": "system",
+            "subtype": "status",
+            "status": "compacting",
+            "session_id": "s-1"
+        }));
+
+        assert!(is_compaction_beginning(&msg));
+    }
+
+    #[test]
+    fn non_compacting_status_is_not_compaction_beginning() {
+        let msg = system_message(serde_json::json!({
+            "type": "system",
+            "subtype": "status",
+            "status": null,
+            "session_id": "s-1"
+        }));
+
+        assert!(!is_compaction_beginning(&msg));
+    }
+
+    #[test]
+    fn compact_boundary_is_not_compaction_beginning() {
+        let msg = system_message(serde_json::json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "summary": "trimmed",
+            "compact_metadata": {
+                "trigger": "auto",
+                "pre_tokens": 123
+            }
+        }));
+
+        assert!(!is_compaction_beginning(&msg));
     }
 }
