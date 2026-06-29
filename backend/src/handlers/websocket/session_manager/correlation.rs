@@ -64,4 +64,24 @@ impl SessionManager {
             false
         }
     }
+
+    /// Record the session a `LaunchSession` request is expected to produce, so
+    /// the launcher's result frame can be correlated back to it.
+    pub fn register_launch_session(&self, request_id: Uuid, session_id: Uuid) {
+        self.pending_launch_sessions.insert(request_id, session_id);
+    }
+
+    /// Drop a pending launch correlation without resolving (the launch frame
+    /// failed to send).
+    pub fn cancel_launch_session(&self, request_id: Uuid) {
+        self.pending_launch_sessions.remove(&request_id);
+    }
+
+    /// Resolve a launch request to its expected session id, consuming the
+    /// correlation entry. `None` if the request id was unknown/already taken.
+    pub fn take_launch_session(&self, request_id: Uuid) -> Option<Uuid> {
+        self.pending_launch_sessions
+            .remove(&request_id)
+            .map(|(_, id)| id)
+    }
 }

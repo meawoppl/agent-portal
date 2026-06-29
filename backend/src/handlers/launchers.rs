@@ -67,8 +67,7 @@ pub async fn launch_session(
     )?;
     app_state
         .session_manager
-        .pending_launch_sessions
-        .insert(request_id, session_id);
+        .register_launch_session(request_id, session_id);
 
     let launch_msg = ServerToLauncher::LaunchSession {
         request_id,
@@ -86,10 +85,7 @@ pub async fn launch_session(
         .session_manager
         .send_to_launcher(&launcher_id, launch_msg)
     {
-        app_state
-            .session_manager
-            .pending_launch_sessions
-            .remove(&request_id);
+        app_state.session_manager.cancel_launch_session(request_id);
         let mut conn = app_state.conn()?;
         use crate::schema::sessions;
         let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
