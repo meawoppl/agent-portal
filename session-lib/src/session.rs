@@ -7,12 +7,11 @@
 use std::marker::PhantomData;
 
 use chrono::Utc;
-use claude_codes::io::{ControlResponse, PermissionResult, PermissionSuggestion};
-use claude_codes::ClaudeInput;
+use claude_codes::io::PermissionSuggestion;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::adapter::AgentOutput;
+use crate::adapter::{AgentOutput, PermissionDecision};
 use crate::agent::Agent;
 use crate::buffer::OutputBuffer;
 use crate::error::SessionError;
@@ -358,7 +357,7 @@ impl<A: Agent> Session<A> {
 
     /// Like [`send_input`](Self::send_input), but carries an optional typed
     /// portal `display_event` to render in place of the agent's echo (see
-    /// [`IoCommand::Input::display_event`]). The proxy passes the inter-agent
+    /// [`IoCommand::UserInput::display_event`]). The proxy passes the inter-agent
     /// `PortalContent::AgentMessage` envelope here so the Codex path (which
     /// can't rely on echo-replacement) still renders the typed card.
     pub async fn send_input_with_display(
@@ -375,11 +374,10 @@ impl<A: Agent> Session<A> {
                 serde_json::Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            let input = ClaudeInput::user_message(text, self.id);
             let (delivered_tx, delivered_rx) = oneshot::channel();
             command_tx
-                .send(IoCommand::Input {
-                    input,
+                .send(IoCommand::UserInput {
+                    text,
                     delivered: Some(delivered_tx),
                     display_event: display_event.map(Box::new),
                 })
@@ -399,9 +397,9 @@ impl<A: Agent> Session<A> {
 
     /// Respond to a pending permission request.
     ///
-    /// Codex sessions route this through `IoCommand::CodexApproval`; Claude
-    /// sessions route it through `IoCommand::PermissionResponse`. The per-
-    /// agent I/O task ignores whichever variant doesn't apply.
+    /// Builds a neutral [`PermissionDecision`] and hands it to the I/O task via
+    /// [`IoCommand::Permission`]; the per-agent task serializes it into its own
+    /// protocol form (Claude `ControlResponse`, Codex `accept`/`decline`).
     pub async fn respond_permission(
         &mut self,
         request_id: &str,
@@ -418,53 +416,25 @@ impl<A: Agent> Session<A> {
         }
 
         if let Some(ref command_tx) = self.command_tx {
-            if self.config.agent_type == shared::AgentType::Codex {
-                // Codex approval flow: map allow/deny to accept/decline.
-                // Typed wrapper so the wire shape lives in source rather than
-                // in a `json!` literal.
-                #[derive(serde::Serialize)]
-                struct CodexApprovalResult<'a> {
-                    decision: &'a str,
-                }
-                let decision = if response.allow { "accept" } else { "decline" };
-                let result = serde_json::to_value(CodexApprovalResult { decision })
-                    .unwrap_or(serde_json::Value::Null);
-                command_tx
-                    .send(IoCommand::CodexApproval {
-                        request_id: request_id.to_string(),
-                        result,
-                    })
-                    .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
-            } else {
-                // Claude permission flow.
-                let input_value = response
-                    .input
-                    .unwrap_or(serde_json::Value::Object(Default::default()));
-
-                let ctrl_response = if response.allow {
-                    if response.permissions.is_empty() {
-                        ControlResponse::from_result(
-                            request_id,
-                            PermissionResult::allow(input_value),
-                        )
-                    } else {
-                        ControlResponse::from_result(
-                            request_id,
-                            PermissionResult::allow_with_typed_permissions(
-                                input_value,
-                                response.permissions,
-                            ),
-                        )
-                    }
-                } else {
-                    let reason = response.reason.unwrap_or_else(|| "User denied".to_string());
-                    ControlResponse::from_result(request_id, PermissionResult::deny(reason))
-                };
-
-                command_tx
-                    .send(IoCommand::PermissionResponse(ctrl_response))
-                    .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
-            }
+            // Map the consumer-facing response to the neutral decision. The
+            // `remember` permissions are serialized to opaque JSON here so the
+            // neutral form carries no `claude_codes` types.
+            let decision = PermissionDecision {
+                allow: response.allow,
+                modified_input: response.input,
+                remember: response
+                    .permissions
+                    .iter()
+                    .map(|p| serde_json::to_value(p).unwrap_or(serde_json::Value::Null))
+                    .collect(),
+                reason: response.reason,
+            };
+            command_tx
+                .send(IoCommand::Permission {
+                    request_id: request_id.to_string(),
+                    decision,
+                })
+                .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
         }
 
         self.pending_permission = None;

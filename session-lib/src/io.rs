@@ -4,23 +4,25 @@
 //! per-agent I/O tasks just ignore the variants they don't handle. See
 //! `agent.rs` for the dispatch trait.
 
-use claude_codes::io::{ControlResponse, PermissionSuggestion};
-use claude_codes::ClaudeInput;
+use claude_codes::io::PermissionSuggestion;
 use shared::{CodexPermissionInput, TurnMetrics};
 use tokio::sync::oneshot;
 
-use crate::adapter::AgentOutput;
+use crate::adapter::{AgentOutput, PermissionDecision};
 use crate::error::SessionError;
 
-/// Commands sent from `Session<A>` to the per-agent I/O task.
+/// Neutral commands sent from `Session<A>` to the per-agent I/O task.
 ///
-/// Per-agent tasks ignore variants they don't handle:
-/// - Claude io task ignores `CodexApproval`.
-/// - Codex io task ignores `PermissionResponse`.
+/// These carry no concrete-protocol types — each I/O task translates them into
+/// its own wire form (Claude: `ClaudeInput` / `ControlResponse` to stdin;
+/// Codex: `turn_start` / `respond` JSON-RPC). `Session` stays agent-neutral
+/// (#1165 item 2, phase A slice 2).
 pub enum IoCommand {
-    /// User input to forward to the agent.
-    Input {
-        input: ClaudeInput,
+    /// Plain user input to forward to the agent.
+    UserInput {
+        /// The user-facing text. The I/O task wraps it in its protocol's
+        /// user-message form.
+        text: String,
         delivered: Option<oneshot::Sender<Result<(), String>>>,
         /// Optional typed portal event to display in place of the agent's echo
         /// of this input (e.g. an inter-agent `PortalContent::AgentMessage`).
@@ -31,12 +33,12 @@ pub enum IoCommand {
         /// Boxed to keep this variant from dominating `IoCommand`'s size.
         display_event: Option<Box<serde_json::Value>>,
     },
-    /// Permission response for Claude's `can_use_tool` control flow.
-    PermissionResponse(ControlResponse),
-    /// Approval response for Codex's app-server JSON-RPC approval flow.
-    CodexApproval {
+    /// Response to a pending permission request. The I/O task serializes the
+    /// neutral decision into its protocol form (Claude `ControlResponse`,
+    /// Codex `accept`/`decline` approval).
+    Permission {
         request_id: String,
-        result: serde_json::Value,
+        decision: PermissionDecision,
     },
 }
 
