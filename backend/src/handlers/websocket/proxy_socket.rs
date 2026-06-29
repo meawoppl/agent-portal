@@ -322,15 +322,11 @@ fn handle_proxy_message(
             );
         }
         ProxyToServer::FileDownloadResponse(response) => {
-            if let Some((_, tx)) = session_manager
-                .pending_file_downloads
-                .remove(&response.request_id)
-            {
-                let _ = tx.send(response);
-            } else {
+            let request_id = response.request_id;
+            if !session_manager.complete_file_download(request_id, response) {
                 warn!(
                     "Received FileDownloadResponse for unknown request {}",
-                    response.request_id
+                    request_id
                 );
             }
         }

@@ -2,7 +2,7 @@
 //! oneshot for a request id, the launcher socket completes it when the
 //! matching response frame arrives.
 
-use shared::LauncherToServer;
+use shared::{FileDownloadResponseFields, LauncherToServer};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -30,6 +30,38 @@ impl SessionManager {
     pub fn complete_probe_request(&self, request_id: Uuid, msg: LauncherToServer) {
         if let Some((_, tx)) = self.pending_probe_requests.remove(&request_id) {
             let _ = tx.send(msg);
+        }
+    }
+
+    /// Register a pending file-download RPC; the returned receiver resolves when
+    /// the owning proxy replies (or is cancelled on send-failure/timeout).
+    pub fn register_file_download(
+        &self,
+        request_id: Uuid,
+    ) -> oneshot::Receiver<FileDownloadResponseFields> {
+        let (tx, rx) = oneshot::channel();
+        self.pending_file_downloads.insert(request_id, tx);
+        rx
+    }
+
+    /// Drop a pending file-download RPC without delivering (proxy not connected
+    /// or the wait timed out).
+    pub fn cancel_file_download(&self, request_id: Uuid) {
+        self.pending_file_downloads.remove(&request_id);
+    }
+
+    /// Deliver a proxy's file-download response to the waiting handler. Returns
+    /// `false` if no request was pending for `request_id` (already cancelled).
+    pub fn complete_file_download(
+        &self,
+        request_id: Uuid,
+        response: FileDownloadResponseFields,
+    ) -> bool {
+        if let Some((_, tx)) = self.pending_file_downloads.remove(&request_id) {
+            let _ = tx.send(response);
+            true
+        } else {
+            false
         }
     }
 }

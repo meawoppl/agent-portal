@@ -51,7 +51,7 @@ pub struct SessionManager {
     launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
     pub pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     pub pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
-    pub pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
+    pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
     pub pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
