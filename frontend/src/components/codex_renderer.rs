@@ -1,4 +1,3 @@
-use super::markdown::render_markdown_for_session;
 use codex_codes::{
     io::items::{FileUpdateChange, ThreadItem},
     protocol::ThreadItem as AppServerThreadItem,
@@ -7,6 +6,7 @@ use uuid::Uuid;
 use yew::prelude::*;
 
 mod events;
+mod messages;
 mod tools;
 mod turns;
 #[cfg(test)]
@@ -15,6 +15,9 @@ use events::thread_item_id;
 use events::CodexUsage;
 pub use events::{codex_event_item_id, is_codex_terminal_event, CodexEvent, CodexItem};
 use events::{ContextCompactedParams, TurnPlanStep};
+use messages::{
+    render_agent_message, render_agent_message_content, render_error_block, render_reasoning,
+};
 use tools::{
     render_collab_agent_tool_call, render_command_execution, render_diff_card, render_file_change,
     render_mcp_tool_call, render_todo_list, render_web_search,
@@ -155,60 +158,6 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
             completed,
         ),
         CodexItem::AppServer(_) => html! {},
-    }
-}
-
-fn render_agent_message(text: &str, completed: bool, session_id: Uuid) -> Html {
-    if text.is_empty() {
-        return html! {};
-    }
-    let class = item_card_classes(completed);
-    html! {
-        <div class={class}>
-            <div class="message-header">
-                <span class="message-type-badge assistant">{ "Codex" }</span>
-            </div>
-            <div class="message-body">{ render_agent_message_content(text, session_id) }</div>
-        </div>
-    }
-}
-
-fn render_agent_message_content(text: &str, session_id: Uuid) -> Html {
-    if text.is_empty() {
-        html! {}
-    } else {
-        html! { <div class="assistant-text">{ render_markdown_for_session(text, session_id) }</div> }
-    }
-}
-
-fn render_reasoning(text: &str, completed: bool) -> Html {
-    if text.is_empty() {
-        return html! {};
-    }
-    let class = item_card_classes(completed);
-    html! {
-        <div class={class}>
-            <div class="message-body">
-                <div class="thinking-block">
-                    <span class="thinking-label">{ "reasoning" }</span>
-                    <div class="thinking-content">{ text }</div>
-                </div>
-            </div>
-        </div>
-    }
-}
-
-fn render_error_block(message: Option<&str>) -> Html {
-    let message = message.unwrap_or("Unknown error");
-    html! {
-        <div class="claude-message error-message-display">
-            <div class="message-header">
-                <span class="message-type-badge result error">{ "Error" }</span>
-            </div>
-            <div class="message-body">
-                <div class="error-text">{ message }</div>
-            </div>
-        </div>
     }
 }
 
