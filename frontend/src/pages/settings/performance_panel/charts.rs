@@ -8,12 +8,12 @@ use yew::prelude::*;
 
 use crate::components::charts::{AxisScale, BucketKind, LinePlot, StackedArea};
 
+use super::model::{
+    bucket_group_key, bucket_param, distinct_bucket_starts, GroupBy, GroupKey, TimeWindow,
+};
 use super::series::{
     build_auxiliary_token_series, build_cache_hit_series, build_cost_per_token_series,
     build_p50_p95_series, build_stop_reason_series,
-};
-use super::{
-    bucket_group_key, bucket_param, distinct_bucket_starts, GroupBy, GroupKey, TimeWindow,
 };
 
 /// Render the performance charts from a non-empty `buckets` slice.

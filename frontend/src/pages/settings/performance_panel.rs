@@ -10,8 +10,6 @@
 //! A group-by dropdown filters to one `(agent_type, model, service_tier)`
 //! group, or "All" to render one line per group.
 
-use chrono::{DateTime, Utc};
-use shared::api::MetricBucket;
 use yew::prelude::*;
 
 use crate::components::charts::AxisScale;
@@ -19,171 +17,13 @@ use crate::components::charts::AxisScale;
 mod body;
 mod charts;
 mod controls;
+mod model;
 mod series;
 mod use_metrics;
 use body::render_performance_body;
 use controls::{render_performance_controls, PerformanceControlsProps};
+use model::{distinct_pairs, GroupBy, TimeWindow};
 use use_metrics::use_performance_metrics;
-
-/// (agent_type, model, service_tier) tuple used as the group-by key. Codex
-/// currently reports no model or tier; keeping the agent in the key lets the
-/// UI label that shape explicitly without colliding with missing Claude
-/// metadata.
-type GroupKey = (String, Option<String>, Option<String>);
-
-/// Pure helper: list the distinct (agent, model, tier) groups present in the
-/// bucket list.
-fn distinct_pairs(buckets: &[MetricBucket]) -> Vec<GroupKey> {
-    let mut seen: std::collections::BTreeSet<GroupKey> = std::collections::BTreeSet::new();
-    for b in buckets {
-        seen.insert(bucket_group_key(b));
-    }
-    seen.into_iter().collect()
-}
-
-fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
-    (
-        bucket.agent_type.clone(),
-        bucket.model.clone(),
-        bucket.service_tier.clone(),
-    )
-}
-
-/// Format an (agent, model, tier) group as a human-readable label for the
-/// dropdown and legend.
-///
-/// Deliberately not `turn_metrics_pill::format_model_tier_label`: this page
-/// shows the full model id (no vendor-prefix shortening), keeps the tier's
-/// original case, and adds codex / agent-without-model handling.
-fn pair_label(pair: &GroupKey) -> String {
-    let base = match (pair.0.as_str(), pair.1.as_deref()) {
-        ("codex", None) => "Codex".to_string(),
-        (_, Some(model)) => model.to_string(),
-        (agent, None) if !agent.is_empty() => format!("{agent} unknown"),
-        _ => "unknown".to_string(),
-    };
-    match pair.2.as_deref() {
-        Some(t) if !t.is_empty() && !t.eq_ignore_ascii_case("standard") => {
-            format!("{base} {t}")
-        }
-        _ => base,
-    }
-}
-
-/// Pick a stable color from the Tokyo-Night palette. We cycle through a
-/// fixed palette by pair-index so the same pair always gets the same color
-/// across re-renders.
-fn pair_color(idx: usize) -> &'static str {
-    const PALETTE: &[&str] = &[
-        "#7aa2f7", // accent blue
-        "#bb9af7", // purple
-        "#9ece6a", // green
-        "#e0af68", // yellow
-        "#f7768e", // red (used by max_tokens band)
-        "#7dcfff", // cyan
-        "#ff9e64", // orange
-    ];
-    PALETTE[idx % PALETTE.len()]
-}
-
-/// Build distinct bucket-start timestamps (the x-axis) preserving order.
-fn distinct_bucket_starts(buckets: &[MetricBucket]) -> Vec<DateTime<Utc>> {
-    let mut seen: std::collections::BTreeSet<DateTime<Utc>> = std::collections::BTreeSet::new();
-    for b in buckets {
-        seen.insert(b.bucket_start);
-    }
-    seen.into_iter().collect()
-}
-
-/// Index a bucket-start timestamp to its position in the x-axis, returning
-/// `None` if missing.
-fn bucket_index(buckets: &[DateTime<Utc>], ts: DateTime<Utc>) -> Option<usize> {
-    buckets.iter().position(|b| *b == ts)
-}
-
-/// Build the bucket-granularity query string for the selected window.
-/// Pick high-fidelity buckets for the selected window. The charts only render
-/// a handful of x-axis labels, so dense buckets preserve real per-turn shape
-/// without cluttering the axis.
-fn bucket_param(window: TimeWindow) -> &'static str {
-    match window {
-        TimeWindow::Hours1 => "1m",
-        TimeWindow::Hours6 => "1m",
-        TimeWindow::Days1 => "5m",
-        TimeWindow::Days7 | TimeWindow::Days30 | TimeWindow::Days90 => "hour",
-    }
-}
-
-/// Selectable time window for the radio group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TimeWindow {
-    Hours1,
-    Hours6,
-    Days1,
-    Days7,
-    Days30,
-    Days90,
-}
-
-impl TimeWindow {
-    /// Radio-button label, which doubles as the exact wire value sent to
-    /// `GET /api/metrics/turns?window=…` (the backend's window parser
-    /// accepts the same `Nh` / `Nd` suffix form).
-    fn label(self) -> &'static str {
-        match self {
-            Self::Hours1 => "1h",
-            Self::Hours6 => "6h",
-            Self::Days1 => "1d",
-            Self::Days7 => "7d",
-            Self::Days30 => "30d",
-            Self::Days90 => "90d",
-        }
-    }
-    fn all() -> &'static [TimeWindow] {
-        &[
-            TimeWindow::Hours1,
-            TimeWindow::Hours6,
-            TimeWindow::Days1,
-            TimeWindow::Days7,
-            TimeWindow::Days30,
-            TimeWindow::Days90,
-        ]
-    }
-}
-
-/// Group-by selection: either a specific (agent, model, tier) group or "All".
-#[derive(Debug, Clone, PartialEq)]
-enum GroupBy {
-    All,
-    Pair(GroupKey),
-}
-
-impl GroupBy {
-    /// Serialize to a stable string for the `<select>` `value` attribute.
-    fn key(&self) -> String {
-        match self {
-            Self::All => "__ALL__".to_string(),
-            Self::Pair((agent, m, t)) => format!(
-                "{}|{}|{}",
-                agent,
-                m.as_deref().unwrap_or(""),
-                t.as_deref().unwrap_or("")
-            ),
-        }
-    }
-    /// Inverse of [`key`]. Returns `GroupBy::All` for an unrecognized key.
-    fn from_key(key: &str, pairs: &[GroupKey]) -> Self {
-        if key == "__ALL__" {
-            return Self::All;
-        }
-        for p in pairs {
-            if Self::Pair(p.clone()).key() == key {
-                return Self::Pair(p.clone());
-            }
-        }
-        Self::All
-    }
-}
 
 #[function_component(PerformancePanel)]
 pub fn performance_panel() -> Html {
@@ -246,9 +86,13 @@ pub fn performance_panel() -> Html {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::{DateTime, TimeZone, Utc};
+    use shared::api::MetricBucket;
     use std::collections::BTreeMap;
 
+    use super::model::{
+        bucket_group_key, bucket_param, distinct_bucket_starts, pair_color, pair_label, GroupKey,
+    };
     use super::series::{
         build_auxiliary_token_series, build_cache_hit_series, build_cost_per_token_series,
         build_stop_reason_series,
