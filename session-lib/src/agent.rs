@@ -9,6 +9,7 @@
 
 use tokio::sync::mpsc;
 
+use crate::adapter::AgentAdapter;
 use crate::error::SessionError;
 use crate::io::{IoCommand, IoEvent};
 use crate::snapshot::SessionConfig;
@@ -27,4 +28,17 @@ pub trait Agent: Send + Sync + 'static {
         command_rx: mpsc::UnboundedReceiver<IoCommand>,
         event_tx: mpsc::UnboundedSender<IoEvent>,
     ) -> Result<tokio::task::JoinHandle<()>, SessionError>;
+
+    /// The protocol adapter that classifies this agent's stdout into neutral
+    /// [`AgentOutput`](crate::adapter::AgentOutput) decisions. `Session::next_event`
+    /// calls it on each `IoEvent::Output` unit instead of hardcoding a concrete
+    /// adapter (#1165 item 2).
+    ///
+    /// Defaults to `None`: an agent that doesn't yet route through the adapter
+    /// (the Codex path still pre-classifies into `IoEvent::RawOutput` /
+    /// `IoEvent::CodexPermissionRequest` and never emits `IoEvent::Output`)
+    /// opts out, and `Session` forwards any stray `Output` verbatim.
+    fn adapter() -> Option<Box<dyn AgentAdapter>> {
+        None
+    }
 }

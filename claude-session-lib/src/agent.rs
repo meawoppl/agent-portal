@@ -1,6 +1,7 @@
 //! `ClaudeAgent`: the [`session_lib::Agent`] implementation for the `claude`
 //! CLI. Construct `Session<ClaudeAgent>` to get a Claude-backed session.
 
+use session_lib::adapter::{AgentAdapter, ClaudeAdapter};
 use session_lib::agent::Agent;
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
@@ -38,5 +39,10 @@ impl Agent for ClaudeAgent {
             claude_io_task(session_id, client, command_rx, event_tx).await;
         });
         Ok(handle)
+    }
+
+    /// Claude classifies its stdout through the stateless [`ClaudeAdapter`].
+    fn adapter() -> Option<Box<dyn AgentAdapter>> {
+        Some(Box::new(ClaudeAdapter))
     }
 }
