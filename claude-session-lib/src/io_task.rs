@@ -15,7 +15,7 @@ use claude_codes::{AsyncClient as ClaudeAsyncClient, ClaudeInput, ClaudeOutput};
 use rand::Rng;
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
-use session_lib::{TurnOutcome, TurnTracker};
+use session_lib::{AgentOutputClassifier, ClaudeAdapter, TurnOutcome, TurnTracker};
 use shared::PortalMessage;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -264,8 +264,21 @@ pub(crate) async fn claude_io_task(
                             ClaudeOutput::Result(r) if r.is_error
                         ) && pending_session_limit.is_some();
 
-                        if event_tx.send(IoEvent::Output(Box::new(output))).is_err() {
-                            // Receiver dropped, session ended.
+                        // Classify the frame into neutral decisions here (the
+                        // boundary that keeps `Session` free of `ClaudeOutput`)
+                        // and forward each. `Session` buffers every `Visible`
+                        // value before emitting it, preserving ordering.
+                        let value = serde_json::to_value(&output).unwrap_or_default();
+                        let mut classifier = ClaudeAdapter;
+                        let mut send_failed = false;
+                        for decision in classifier.classify(value) {
+                            if event_tx.send(IoEvent::Classified(decision)).is_err() {
+                                // Receiver dropped, session ended.
+                                send_failed = true;
+                                break;
+                            }
+                        }
+                        if send_failed {
                             break;
                         }
 

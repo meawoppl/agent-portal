@@ -1,16 +1,21 @@
-//! Agent-neutral adapter boundary (refactor item #1, slice 2a — additive).
+//! Agent-neutral protocol boundary (refactor #1165 item 2).
 //!
-//! An [`AgentAdapter`] owns all protocol parse/serialize for one agent backend
-//! and exposes only **neutral decisions** to the generic `Session<A>` core.
-//! Concrete protocol enums (`claude_codes::*`, `codex_codes::*`) stay *inside*
-//! the adapter and never surface into `session.rs`.
+//! Two traits split the per-agent protocol surface so the generic `Session<A>`
+//! core never touches `claude_codes` / `codex_codes` types:
 //!
-//! This slice introduces the trait, the neutral types, and a [`ClaudeAdapter`]
-//! whose [`classify`](AgentAdapter::classify) is a pure function mirroring
-//! exactly what `session.rs::next_event` currently decides for `ClaudeOutput`.
-//! It is **not** yet wired into `session.rs`; that happens in a later slice.
+//! - [`AgentOutputClassifier`] — parses one unit of agent output into neutral
+//!   [`AgentOutput`] decisions. This runs **inside each per-agent I/O task**
+//!   (Claude's `claude_io_task` via [`ClaudeAdapter`]; Codex's via
+//!   `CodexClassifier`), which then emits `IoEvent::Classified(AgentOutput)`.
+//!   `Session` only maps those neutral decisions to `SessionEvent`s.
+//! - [`AgentAdapter`] — the Claude stdin/permission *input* side
+//!   (`user_input` / `permission_response` / `interrupt` producing a
+//!   [`TransportPayload`]). This is Claude-transport-shaped and does not fit
+//!   Codex's async RPC input model; neutralizing the input side is phase-A
+//!   slice 2 (see `docs/design/agent-runtime.md`). [`ClaudeAdapter`] implements
+//!   both traits.
 //!
-//! See `docs/design/session-adapter.md` for the full design.
+//! See `docs/design/session-adapter.md` and `docs/design/agent-runtime.md`.
 
 use uuid::Uuid;
 

@@ -31,7 +31,7 @@ const CHUNK_UPLOAD_THRESHOLD_BYTES: usize = 1024 * 1024;
 /// Forwards Claude outputs to WebSocket with sequence numbers for reliable delivery.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_output_forwarder(
-    mut output_rx: mpsc::UnboundedReceiver<ClaudeOutput>,
+    mut output_rx: mpsc::UnboundedReceiver<serde_json::Value>,
     ws_write: SharedWsWrite,
     session_id: Uuid,
     backend_url: String,
@@ -49,12 +49,17 @@ pub fn spawn_output_forwarder(
         // Track Read tool calls on image files: tool_use_id → file_path
         let mut image_read_map: HashMap<String, String> = HashMap::new();
 
-        while let Some(output) = output_rx.recv().await {
-            // Log detailed info about the message
-            log_claude_output(&output);
+        while let Some(value) = output_rx.recv().await {
+            // `Session` is now agent-neutral and forwards raw wire JSON. Re-parse
+            // it to `ClaudeOutput` here, ONCE, at the Claude proxy edge; all the
+            // typed side-effects (logging, git-signal, image extraction, echo
+            // replacement) hang off this `Option`. Malformed / non-Claude frames
+            // skip the typed work and are forwarded verbatim — never dropped or
+            // rewritten (#1165 item 2, slice 1).
+            let parsed = super::parse_visible_claude_output(&value);
 
-            // Check for branch/PR update from PREVIOUS git command (deferred so
-            // the command has finished executing before we query git/gh state)
+            // Branch/PR update from the PREVIOUS message's git command (deferred
+            // so the command has finished). Runs each frame regardless of parse.
             if git_refresh.should_check_before_message() {
                 check_and_send_branch_update(
                     &ws_write,
@@ -65,28 +70,35 @@ pub fn spawn_output_forwarder(
                 .await;
             }
 
-            // Check if THIS message is a git-related bash command (for next iteration)
-            if claude_output_has_git_signal(&output) {
-                git_refresh.mark_git_signal();
-            }
+            let (content, image_items) = if let Some(ref output) = parsed {
+                log_claude_output(output);
 
-            // Track Read tool calls on image files from assistant messages
-            track_image_reads(&output, &mut image_read_map);
+                // Is THIS message a git-related bash command (for next iteration)?
+                if claude_output_has_git_signal(output) {
+                    git_refresh.mark_git_signal();
+                }
 
-            // Collect any image work items from user-message tool results
-            // (raw bytes for large images, base64 strings for small ones).
-            let image_items = extract_image_work_items(&output, &mut image_read_map, max_bytes);
+                // Track Read tool calls on image files from assistant messages.
+                track_image_reads(output, &mut image_read_map);
 
-            // Serialize and buffer with sequence number. Typed portal inputs
-            // sent via `agent-portal message` are delivered to the agent as
-            // readable text, but their echoed user message should render as
-            // the original event envelope rather than a string-prefix parse.
-            let content = replacement_input_display_event(&output, &pending_input_display_events)
-                .await
-                .unwrap_or_else(|| {
-                    serde_json::to_value(&output)
-                        .unwrap_or(serde_json::Value::String(format!("{:?}", output)))
-                });
+                // Image work items from user-message tool results (raw bytes for
+                // large images, base64 for small ones).
+                let image_items = extract_image_work_items(output, &mut image_read_map, max_bytes);
+
+                // Echo-replacement swaps the rendered content for typed portal
+                // inputs (`agent-portal message`); otherwise persist + forward
+                // the EXACT raw value (invariant: exact raw Value is what gets
+                // persisted and sent).
+                let content =
+                    replacement_input_display_event(output, &pending_input_display_events)
+                        .await
+                        .unwrap_or_else(|| value.clone());
+
+                (content, image_items)
+            } else {
+                // Malformed / non-Claude frame: forward verbatim, no typed work.
+                (value.clone(), Vec::new())
+            };
 
             // Add to buffer and get sequence number
             let seq = {

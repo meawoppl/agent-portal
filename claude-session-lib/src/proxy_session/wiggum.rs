@@ -44,7 +44,7 @@ pub struct WiggumState {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
     event: Option<session_lib::SessionEvent>,
-    output_tx: &mpsc::UnboundedSender<ClaudeOutput>,
+    output_tx: &mpsc::UnboundedSender<serde_json::Value>,
     ws_write: &SharedWsWrite,
     connection_start: Instant,
     wiggum_state: &mut Option<WiggumState>,
@@ -55,9 +55,21 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
     use session_lib::SessionEvent;
 
     match event {
-        Some(SessionEvent::Output(ref output)) => {
+        Some(SessionEvent::RawOutput(ref value)) => {
+            // Claude visible output now arrives as neutral raw JSON. Re-parse to
+            // `ClaudeOutput` for the typed side-effects (wiggum DONE, compaction
+            // reminder, system-reminder echo drop); malformed/non-Claude frames
+            // skip those and are forwarded verbatim, never dropped.
+            let Some(output) = super::parse_visible_claude_output(value) else {
+                if output_tx.send(value.clone()).is_err() {
+                    error!("Failed to forward Claude output");
+                    return Some(ConnectionResult::Disconnected(connection_start.elapsed()));
+                }
+                return None;
+            };
+
             // Check for wiggum completion before forwarding
-            let should_continue_wiggum = if let ClaudeOutput::Result(ref result) = **output {
+            let should_continue_wiggum = if let ClaudeOutput::Result(ref result) = &output {
                 if let Some(ref state) = wiggum_state {
                     // Check if Claude responded with "DONE"
                     let is_done = check_wiggum_done(result);
@@ -79,7 +91,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
             // features reminder so the agent has it in the fresh context.
             // We check before forwarding so the reminder lands logically
             // after the compaction-completed notice in the user's transcript.
-            let is_compaction_boundary = match &**output {
+            let is_compaction_boundary = match &output {
                 ClaudeOutput::System(sys) => shared::is_compaction_boundary(sys),
                 _ => false,
             };
@@ -88,14 +100,14 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
             // <system-reminder> tags. Claude echoes that back as a User message
             // on its stdout — if we forward it, the wrapper text leaks into the
             // user's transcript as if they had typed it. Drop those echoes.
-            if is_system_reminder_echo(output) {
+            if is_system_reminder_echo(&output) {
                 debug!("Dropping system-reminder user echo from transcript");
                 // Skip forwarding and skip the rest of the handler.
                 return None;
             }
 
             // Forward the output
-            if output_tx.send(*output.clone()).is_err() {
+            if output_tx.send(value.clone()).is_err() {
                 error!("Failed to forward Claude output");
                 return Some(ConnectionResult::Disconnected(connection_start.elapsed()));
             }
@@ -162,7 +174,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                         }
                     }
                 }
-            } else if matches!(&**output, ClaudeOutput::Result(_)) && wiggum_state.is_some() {
+            } else if matches!(&output, ClaudeOutput::Result(_)) && wiggum_state.is_some() {
                 // Send final completion portal message
                 if let Some(ref mut state) = wiggum_state {
                     let loop_duration = state.loop_start.elapsed();
@@ -197,7 +209,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 *wiggum_state = None;
             }
 
-            if matches!(&**output, ClaudeOutput::Result(_)) && wiggum_state.is_none() {
+            if matches!(&output, ClaudeOutput::Result(_)) && wiggum_state.is_none() {
                 debug!("--- ready for input ---");
             }
             None
@@ -229,12 +241,6 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
         Some(SessionEvent::Exited { code }) => {
             info!("Claude session exited with code {}", code);
             Some(ConnectionResult::ClaudeExited)
-        }
-        Some(SessionEvent::RawOutput(_)) => {
-            // Handled in run_main_loop before calling this function
-            unreachable!(
-                "RawOutput should be handled before calling handle_session_event_with_wiggum"
-            );
         }
         Some(SessionEvent::TurnMetricsReady(_)) => {
             // Handled in run_main_loop before calling this function

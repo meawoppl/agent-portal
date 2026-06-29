@@ -326,8 +326,9 @@ struct ConnectionState {
     perm_rx: mpsc::UnboundedReceiver<PermissionResponseData>,
     /// Receiver for output acknowledgments from backend
     ack_rx: mpsc::UnboundedReceiver<u64>,
-    /// Sender for Claude outputs to the output forwarder
-    output_tx: mpsc::UnboundedSender<ClaudeOutput>,
+    /// Sender for Claude output (raw wire JSON) to the output forwarder, which
+    /// re-parses each frame to `ClaudeOutput` for its typed side-effects.
+    output_tx: mpsc::UnboundedSender<serde_json::Value>,
     /// WebSocket write handle for sending permission requests directly
     ws_write: SharedWsWrite,
     /// Receiver to detect WebSocket disconnection
@@ -736,7 +737,7 @@ async fn run_message_loop<A: Agent>(
     let (ws_write, ws_read) = conn.split();
 
     // Channel for Claude outputs
-    let (output_tx, output_rx) = mpsc::unbounded_channel::<ClaudeOutput>();
+    let (output_tx, output_rx) = mpsc::unbounded_channel::<serde_json::Value>();
 
     // Channel for permission responses from frontend
     let (perm_tx, perm_rx) = mpsc::unbounded_channel::<PermissionResponseData>();
@@ -1142,9 +1143,13 @@ async fn run_main_loop<A: Agent>(
             }
 
             event = claude_session.next_event() => {
-                // Handle raw output directly (Codex JSONL) — bypasses the
-                // ClaudeOutput-typed output forwarder
-                if let Some(SessionEvent::RawOutput(ref value)) = event {
+                // Both backends now deliver visible output as the neutral
+                // `SessionEvent::RawOutput(value)`. Route by agent at the proxy
+                // edge: Codex uses this simple inline path; Claude falls through
+                // to the wiggum/output-forwarder path, which re-parses the value
+                // to `ClaudeOutput` for its image/git/echo/wiggum side-effects.
+                if state.agent_type != shared::AgentType::Claude {
+                  if let Some(SessionEvent::RawOutput(ref value)) = event {
                     if state.git_refresh.should_check_before_message() {
                         check_and_send_branch_update(
                             &state.ws_write,
@@ -1177,6 +1182,7 @@ async fn run_main_loop<A: Agent>(
                         inject_portal_reminder(claude_session).await;
                     }
                     continue;
+                  }
                 }
 
                 // Per-turn metrics: forward as a typed `TurnMetricsReport`
@@ -1244,6 +1250,16 @@ async fn run_main_loop<A: Agent>(
             }
         }
     }
+}
+
+/// Re-parse a neutral `Visible` output value back to the typed `ClaudeOutput`
+/// at the Claude proxy edge. `Session` is now agent-neutral (it forwards raw
+/// `Value`s); the Claude-specific consumers — the `output_forwarder`'s
+/// image/git/echo handling and `wiggum`'s DONE detection — re-parse here.
+/// Returns `None` for malformed/non-Claude frames, which callers forward
+/// verbatim rather than drop (#1165 item 2, slice 1).
+pub(super) fn parse_visible_claude_output(value: &serde_json::Value) -> Option<ClaudeOutput> {
+    serde_json::from_value(value.clone()).ok()
 }
 
 fn is_codex_compaction_event(value: &serde_json::Value) -> bool {
@@ -1476,6 +1492,32 @@ pub(crate) use shared::fmt::{format_duration, truncate_str as truncate};
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    /// The Claude proxy-edge re-parse gate (#1165 item 2, slice 1). Valid Claude
+    /// frames parse to `Some`, so the typed side-effects (echo replacement,
+    /// wiggum DONE, image/git handling) run; malformed / non-Claude frames yield
+    /// `None`, so the caller forwards the original raw value verbatim — never
+    /// dropping or rewriting it, and never panicking.
+    #[test]
+    fn parse_visible_claude_output_gates_typed_side_effects() {
+        use serde_json::json;
+
+        // Valid Claude Result → Some (wiggum DONE detection can fire).
+        let result = json!({
+            "type": "result", "subtype": "success", "is_error": false,
+            "duration_ms": 1, "duration_api_ms": 1, "num_turns": 1,
+            "result": "DONE", "session_id": "s", "total_cost_usd": 0.0
+        });
+        assert!(matches!(
+            parse_visible_claude_output(&result),
+            Some(ClaudeOutput::Result(_))
+        ));
+
+        // Malformed / non-Claude frames → None (forward raw, no panic).
+        let garbage = json!({"totally": "unknown", "shape": [1, 2, 3]});
+        assert!(parse_visible_claude_output(&garbage).is_none());
+        assert!(parse_visible_claude_output(&json!(42)).is_none());
+    }
 
     #[test]
     fn backoff_doubles_then_saturates_at_max() {
