@@ -26,6 +26,7 @@ mod input_queue;
 mod launcher_registry;
 mod pending_queue;
 mod proxy_lifecycle;
+mod session_tracking;
 
 pub use launcher_registry::LauncherConnection;
 use pending_queue::PendingMessage;
@@ -39,9 +40,9 @@ pub struct SessionManager {
     pub sessions: Arc<DashMap<SessionId, ProxySender>>,
     pub web_clients: Arc<DashMap<SessionId, Vec<WebClientSender>>>,
     pub user_clients: Arc<DashMap<Uuid, Vec<WebClientSender>>>,
-    pub last_ack_seq: Arc<DashMap<Uuid, u64>>,
+    last_ack_seq: Arc<DashMap<Uuid, u64>>,
     pending_messages: Arc<DashMap<SessionId, VecDeque<PendingMessage>>>,
-    pub pending_truncations: Arc<DashSet<Uuid>>,
+    pending_truncations: Arc<DashSet<Uuid>>,
     pub launchers: Arc<DashMap<Uuid, LauncherConnection>>,
     /// Dedup index: `(user_id, hostname)` → `launcher_id`. Used to atomically
     /// reject a second launcher connection from the same host for the same
@@ -53,7 +54,7 @@ pub struct SessionManager {
     pub pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
     pub pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
-    pub last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
+    last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
     /// Running lifetime total of sub-agent (Task tool) tokens per session.
     /// Claude's `result.usage` reports only the parent conversation; sub-agents
     /// run as separate API conversations whose tokens arrive on `task_notification`
@@ -61,7 +62,7 @@ pub struct SessionManager {
     /// completion). We sum each completed task's total here and fold it into the
     /// session's `output_tokens` at result time so session totals (and the admin
     /// spend dashboard) don't under-count sub-agent usage.
-    pub subagent_tokens: Arc<DashMap<Uuid, i64>>,
+    subagent_tokens: Arc<DashMap<Uuid, i64>>,
     /// Monotonic counter for connection generations (prevents stale cleanup)
     gen_counter: Arc<AtomicU64>,
     /// Current connection generation per session
@@ -166,23 +167,43 @@ mod tests {
         let mgr = SessionManager::new();
         let session_id = Uuid::new_v4();
 
-        assert!(mgr.last_ack_seq.get(&session_id).is_none());
+        assert_eq!(mgr.last_ack_seq(session_id), 0);
 
-        mgr.last_ack_seq.insert(session_id, 5);
-        assert_eq!(*mgr.last_ack_seq.get(&session_id).unwrap(), 5);
+        mgr.record_ack_seq(session_id, 5);
+        assert_eq!(mgr.last_ack_seq(session_id), 5);
 
-        mgr.last_ack_seq.entry(session_id).and_modify(|v| {
-            if 10 > *v {
-                *v = 10;
-            }
-        });
-        assert_eq!(*mgr.last_ack_seq.get(&session_id).unwrap(), 10);
+        mgr.record_ack_seq(session_id, 10);
+        assert_eq!(mgr.last_ack_seq(session_id), 10);
 
-        mgr.last_ack_seq.entry(session_id).and_modify(|v| {
-            if 3 > *v {
-                *v = 3;
-            }
-        });
-        assert_eq!(*mgr.last_ack_seq.get(&session_id).unwrap(), 10);
+        // Older sequence must not regress the watermark.
+        mgr.record_ack_seq(session_id, 3);
+        assert_eq!(mgr.last_ack_seq(session_id), 10);
+    }
+
+    #[test]
+    fn last_input_sender_take_is_once() {
+        let mgr = SessionManager::new();
+        let session_id = Uuid::new_v4();
+        let user = Uuid::new_v4();
+
+        assert!(mgr.take_last_input_sender(session_id).is_none());
+        mgr.set_last_input_sender(session_id, user, "Matt".to_string());
+        assert_eq!(
+            mgr.take_last_input_sender(session_id),
+            Some((user, "Matt".to_string()))
+        );
+        // Consumed — a second take is empty.
+        assert!(mgr.take_last_input_sender(session_id).is_none());
+    }
+
+    #[test]
+    fn subagent_tokens_accumulate() {
+        let mgr = SessionManager::new();
+        let session_id = Uuid::new_v4();
+
+        assert_eq!(mgr.subagent_tokens(session_id), 0);
+        mgr.add_subagent_tokens(session_id, 100);
+        mgr.add_subagent_tokens(session_id, 50);
+        assert_eq!(mgr.subagent_tokens(session_id), 150);
     }
 }
