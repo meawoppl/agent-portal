@@ -218,7 +218,10 @@ pub(super) fn classify(
     current_user_id: Option<&str>,
 ) -> Option<MessageIdentity> {
     let json = message.content.as_str();
-    if let Some(source) = message.source() {
+    let source = message.source();
+    if let Some(source @ (shared::MessageSource::Agent { .. } | shared::MessageSource::Portal)) =
+        source
+    {
         return Some(source_identity(source, current_user_id));
     }
 
@@ -245,19 +248,25 @@ pub(super) fn classify(
                 });
             }
             if user_is_plain_text(&msg) {
-                return Some(MessageIdentity {
-                    category: GroupCategory::User,
-                    label: "You".to_string(),
-                    badge_class: "user".to_string(),
-                });
+                return Some(source.map_or_else(
+                    || MessageIdentity {
+                        category: GroupCategory::User,
+                        label: "You".to_string(),
+                        badge_class: "user".to_string(),
+                    },
+                    |source| source_identity(source, current_user_id),
+                ));
             }
         }
         AgentFrame::Claude(ClaudeMessage::OptimisticUser(_)) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::User,
-                label: "You".to_string(),
-                badge_class: "user".to_string(),
-            });
+            return Some(source.map_or_else(
+                || MessageIdentity {
+                    category: GroupCategory::User,
+                    label: "You".to_string(),
+                    badge_class: "user".to_string(),
+                },
+                |source| source_identity(source, current_user_id),
+            ));
         }
         AgentFrame::Claude(ClaudeMessage::Portal(_)) => {
             return Some(MessageIdentity {
@@ -284,6 +293,10 @@ pub(super) fn classify(
             });
         }
         _ => {}
+    }
+
+    if let Some(source) = source {
+        return Some(source_identity(source, current_user_id));
     }
 
     None
