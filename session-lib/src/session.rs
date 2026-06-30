@@ -334,34 +334,51 @@ impl<A: Agent> Session<A> {
         content: serde_json::Value,
         display_event: Option<serde_json::Value>,
     ) -> Result<(), SessionError> {
+        let delivered_rx = self.enqueue_input_with_display(content, display_event)?;
+        delivered_rx
+            .await
+            .map_err(|_| {
+                SessionError::CommunicationError(
+                    "I/O task closed before accepting input".to_string(),
+                )
+            })?
+            .map_err(SessionError::Agent)
+    }
+
+    /// Queue user input to the agent and return a receiver that resolves when
+    /// the agent has accepted it into its stream.
+    ///
+    /// This lets proxy connection loops keep processing output, reconnects, and
+    /// heartbeats while Codex queues input behind an active turn. Callers that
+    /// need the old blocking behavior can await the returned receiver; see
+    /// [`send_input_with_display`](Self::send_input_with_display).
+    pub fn enqueue_input_with_display(
+        &mut self,
+        content: serde_json::Value,
+        display_event: Option<serde_json::Value>,
+    ) -> Result<oneshot::Receiver<Result<(), String>>, SessionError> {
         if let SessionState::Exited { code } = self.state {
             return Err(SessionError::AlreadyExited(code));
         }
 
-        if let Some(ref command_tx) = self.command_tx {
-            let text = match &content {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            let (delivered_tx, delivered_rx) = oneshot::channel();
-            command_tx
-                .send(IoCommand::UserInput {
-                    text,
-                    delivered: Some(delivered_tx),
-                    display_event: display_event.map(Box::new),
-                })
-                .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
-            delivered_rx
-                .await
-                .map_err(|_| {
-                    SessionError::CommunicationError(
-                        "I/O task closed before accepting input".to_string(),
-                    )
-                })?
-                .map_err(SessionError::Agent)?;
-        }
+        let command_tx = self
+            .command_tx
+            .as_ref()
+            .ok_or_else(|| SessionError::CommunicationError("I/O task closed".to_string()))?;
+        let text = match &content {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        let (delivered_tx, delivered_rx) = oneshot::channel();
+        command_tx
+            .send(IoCommand::UserInput {
+                text,
+                delivered: Some(delivered_tx),
+                display_event: display_event.map(Box::new),
+            })
+            .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
 
-        Ok(())
+        Ok(delivered_rx)
     }
 
     /// Respond to a pending permission request.
@@ -492,12 +509,14 @@ impl<A: Agent> Session<A> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     // `STARTED` flips once the mock io-task is actually running (so we don't
     // abort it before it begins); `GUARD_DROPPED` flips when it's dropped, which
     // proves `stop` aborted it.
     static STARTED: AtomicBool = AtomicBool::new(false);
     static GUARD_DROPPED: AtomicBool = AtomicBool::new(false);
+    static COMMAND_RECEIVED: AtomicBool = AtomicBool::new(false);
 
     struct DropFlag;
     impl Drop for DropFlag {
@@ -519,6 +538,26 @@ mod tests {
                 let _guard = DropFlag;
                 STARTED.store(true, Ordering::SeqCst);
                 std::future::pending::<()>().await;
+            }))
+        }
+    }
+
+    /// An agent that accepts the command from the session channel but never
+    /// resolves the per-input delivery signal, matching a Codex prompt queued
+    /// behind an active turn.
+    struct HangingDeliveryAgent;
+    impl Agent for HangingDeliveryAgent {
+        fn spawn_io_task(
+            _config: SessionConfig,
+            mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
+            _event_tx: mpsc::UnboundedSender<IoEvent>,
+        ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+            Ok(tokio::spawn(async move {
+                if let Some(IoCommand::UserInput { delivered, .. }) = command_rx.recv().await {
+                    let _delivered = delivered;
+                    COMMAND_RECEIVED.store(true, Ordering::SeqCst);
+                    std::future::pending::<()>().await;
+                }
             }))
         }
     }
@@ -546,5 +585,30 @@ mod tests {
             GUARD_DROPPED.load(Ordering::SeqCst),
             "stop() should abort the io task and reap it"
         );
+    }
+
+    #[tokio::test]
+    async fn enqueue_input_returns_before_delivery_ack() {
+        COMMAND_RECEIVED.store(false, Ordering::SeqCst);
+        let mut session = Session::<HangingDeliveryAgent>::new(SessionConfig::default())
+            .await
+            .unwrap();
+
+        let delivered = session
+            .enqueue_input_with_display(serde_json::Value::String("queued".to_string()), None)
+            .unwrap();
+
+        while !COMMAND_RECEIVED.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), delivered)
+                .await
+                .is_err(),
+            "enqueue should return without waiting for the agent delivery ack"
+        );
+
+        session.stop().await.unwrap();
     }
 }

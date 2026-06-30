@@ -4,8 +4,10 @@
 //! dispatch. Hands a [`PortalInput`] to the agent: refreshes git metadata,
 //! emits the [`InputDeliveryStage`](shared::InputDeliveryStage) progress
 //! events (#939), stashes the typed display-event echo for Claude's
-//! `output_forwarder` to swap in (#1124), and acks the portal input.
+//! `output_forwarder` to swap in (#1124), and schedules the final
+//! `AgentAccepted`/input ack without blocking the connection loop.
 
+use tokio::sync::oneshot;
 use tracing::{debug, error};
 use uuid::Uuid;
 
@@ -15,7 +17,7 @@ use session_lib::session::Session;
 use super::git_metadata::{check_and_send_branch_update_if_branch_changed, GitMetadataState};
 use super::{
     ack_portal_input, emit_input_progress, truncate, ConnectionResult, PendingInputDisplayEvent,
-    PendingInputDisplayEvents, PortalInput, SharedWsWrite,
+    PendingInputDisplayEvents, PortalInput, PortalInputAck, SharedWsWrite,
 };
 
 /// Deliver one user input to the agent. Returns `Some(ConnectionResult)` to end
@@ -39,7 +41,7 @@ pub(super) async fn handle_input<A: Agent>(
     )
     .await;
 
-    debug!("sending to claude process: {}", truncate(&input.text, 100));
+    debug!("sending to agent process: {}", truncate(&input.text, 100));
 
     // Delivery stage: the proxy has the input and is about to hand it to the
     // agent (#939).
@@ -69,29 +71,73 @@ pub(super) async fn handle_input<A: Agent>(
         }
     }
 
-    if let Err(e) = claude_session
-        .send_input_with_display(serde_json::Value::String(input.text), input.display_event)
-        .await
+    let delivered = match claude_session
+        .enqueue_input_with_display(serde_json::Value::String(input.text), input.display_event)
     {
-        error!("Failed to send to Claude: {}", e);
-        emit_input_progress(
-            ws_write,
-            session_id,
-            input.client_msg_id,
-            shared::InputDeliveryStage::Failed,
-        )
-        .await;
-        return Some(ConnectionResult::ClaudeExited);
-    }
-    // Delivery stage: the input is now in the agent's stream — the optimistic
-    // row clears here (#939).
-    emit_input_progress(
-        ws_write,
+        Ok(delivered) => delivered,
+        Err(e) => {
+            error!("Failed to send to Claude: {}", e);
+            emit_input_progress(
+                ws_write,
+                session_id,
+                input.client_msg_id,
+                shared::InputDeliveryStage::Failed,
+            )
+            .await;
+            return Some(ConnectionResult::ClaudeExited);
+        }
+    };
+    spawn_delivery_completion(
+        ws_write.clone(),
         session_id,
         input.client_msg_id,
-        shared::InputDeliveryStage::AgentAccepted,
-    )
-    .await;
-    ack_portal_input(ws_write, input.ack).await;
+        input.ack,
+        delivered,
+    );
     None
+}
+
+fn spawn_delivery_completion(
+    ws_write: SharedWsWrite,
+    session_id: Uuid,
+    client_msg_id: Option<Uuid>,
+    ack: Option<PortalInputAck>,
+    delivered: oneshot::Receiver<Result<(), String>>,
+) {
+    tokio::spawn(async move {
+        match delivered.await {
+            Ok(Ok(())) => {
+                // Delivery stage: the input is now in the agent's stream — the
+                // optimistic row clears here (#939).
+                emit_input_progress(
+                    &ws_write,
+                    session_id,
+                    client_msg_id,
+                    shared::InputDeliveryStage::AgentAccepted,
+                )
+                .await;
+                ack_portal_input(&ws_write, ack).await;
+            }
+            Ok(Err(message)) => {
+                error!("Agent rejected input: {}", message);
+                emit_input_progress(
+                    &ws_write,
+                    session_id,
+                    client_msg_id,
+                    shared::InputDeliveryStage::Failed,
+                )
+                .await;
+            }
+            Err(_) => {
+                error!("I/O task closed before accepting input");
+                emit_input_progress(
+                    &ws_write,
+                    session_id,
+                    client_msg_id,
+                    shared::InputDeliveryStage::Failed,
+                )
+                .await;
+            }
+        }
+    });
 }
