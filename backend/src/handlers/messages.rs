@@ -349,8 +349,17 @@ mod db_tests {
         user_id: uuid::Uuid,
         count: usize,
     ) -> Vec<chrono::NaiveDateTime> {
+        use chrono::Timelike;
         use diesel::sql_query;
-        let base = Utc::now().naive_utc();
+        // Postgres `timestamp` stores microsecond precision, but
+        // `Utc::now()` carries sub-microsecond nanoseconds that the DB drops on
+        // insert. Truncate the base to µs so the stamps we return match the
+        // values read back — otherwise exact `created_at` equality assertions
+        // compare an ns-precision in-memory value against a µs-precision DB one.
+        let now = Utc::now().naive_utc();
+        let base = now
+            .with_nanosecond(now.nanosecond() / 1_000 * 1_000)
+            .unwrap_or(now);
         let mut stamps = Vec::with_capacity(count);
         for i in 0..count {
             // Microsecond-step keeps the order strict and avoids fractional
