@@ -83,3 +83,7 @@ memory-serve = "2.1"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+ws-bridge = { workspace = true, features = ["native-client"] }
+uuid = { workspace = true }
