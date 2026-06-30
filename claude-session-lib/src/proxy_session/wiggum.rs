@@ -316,24 +316,34 @@ fn check_wiggum_done(result: &claude_codes::io::ResultMessage) -> bool {
         return true;
     }
 
-    // The result message has a `result` field which contains Claude's final text response
+    // The result message has a `result` field which contains Claude's final
+    // text response. Wiggum only stops when the agent follows the prompt and
+    // responds with DONE as the whole answer. Phrases like "not done" or
+    // "done with step 1" are progress updates and must keep looping.
     if let Some(ref result_text) = result.result {
-        let text_upper: String = result_text.to_uppercase();
-        // Check if the result is exactly "DONE" or contains it prominently
-        // Being strict: must be "DONE" alone or "DONE" with minimal surrounding text
-        let trimmed = text_upper.trim();
-        if trimmed == "DONE" || trimmed.starts_with("DONE.") || trimmed.starts_with("DONE!") {
+        let trimmed = result_text.trim();
+        if is_standalone_done(trimmed) {
             info!("Wiggum complete: Claude responded with DONE");
-            return true;
-        }
-        // Also check if DONE appears as the main content
-        if trimmed.len() < 50 && trimmed.contains("DONE") {
-            info!("Wiggum complete: Claude responded with short message containing DONE");
             return true;
         }
     }
 
     false // Continue the loop
+}
+
+fn is_standalone_done(text: &str) -> bool {
+    let text = text.trim();
+    if text.len() < "DONE".len() {
+        return false;
+    }
+
+    let (head, tail) = text.split_at("DONE".len());
+    if !head.eq_ignore_ascii_case("DONE") {
+        return false;
+    }
+
+    tail.chars()
+        .all(|c| matches!(c, '.' | '!' | '?' | ':' | ';') || c.is_whitespace())
 }
 
 /// Build the portal message text for a wiggum loop iteration
@@ -368,4 +378,78 @@ fn format_wiggum_status(state: &WiggumState) -> String {
     }
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claude_codes::io::{ResultMessage, ResultSubtype};
+
+    fn result_message(result: &str) -> ResultMessage {
+        ResultMessage {
+            subtype: ResultSubtype::Success,
+            is_error: false,
+            duration_ms: 0,
+            duration_api_ms: 0,
+            ttft_ms: None,
+            ttft_stream_ms: None,
+            time_to_request_ms: None,
+            num_turns: 1,
+            result: Some(result.to_string()),
+            session_id: "test-session".to_string(),
+            total_cost_usd: 0.0,
+            usage: None,
+            permission_denials: Vec::new(),
+            errors: Vec::new(),
+            uuid: None,
+            api_error_status: None,
+            stop_reason: None,
+            terminal_reason: None,
+            fast_mode_state: None,
+            model_usage: None,
+        }
+    }
+
+    fn error_result() -> ResultMessage {
+        ResultMessage {
+            is_error: true,
+            result: Some("failed".to_string()),
+            ..result_message("failed")
+        }
+    }
+
+    #[test]
+    fn wiggum_done_accepts_standalone_done_only() {
+        for text in [
+            "DONE", "done", " DONE ", "DONE.", "done.", "DONE!", "DONE?", "DONE:",
+        ] {
+            assert!(
+                check_wiggum_done(&result_message(text)),
+                "{text:?} should complete wiggum"
+            );
+        }
+    }
+
+    #[test]
+    fn wiggum_done_rejects_progress_phrases_containing_done() {
+        for text in [
+            "not done",
+            "Not done yet.",
+            "done with step 1",
+            "DONE with setup",
+            "almost DONE",
+            "DONE - continuing",
+            "Done, next I will test",
+        ] {
+            assert!(
+                !check_wiggum_done(&result_message(text)),
+                "{text:?} should keep wiggum running"
+            );
+        }
+    }
+
+    #[test]
+    fn wiggum_done_still_stops_on_error_result() {
+        assert!(check_wiggum_done(&error_result()));
+    }
 }
