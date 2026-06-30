@@ -22,6 +22,27 @@ use menu::SessionRailMenu;
 use pill::SessionPill;
 pub use sparkline::ActivityRef;
 
+const PILL_MENU_MIN_WIDTH_PX: i32 = 160;
+const PILL_MENU_ESTIMATED_HEIGHT_PX: i32 = 420;
+const PILL_MENU_VIEWPORT_MARGIN_PX: i32 = 8;
+const PILL_MENU_TOGGLE_GAP_PX: i32 = 4;
+
+fn clamped_pill_menu_position(
+    anchor_left: i32,
+    anchor_bottom: i32,
+    viewport_width: i32,
+    viewport_height: i32,
+) -> (i32, i32) {
+    let left = anchor_left
+        .min(viewport_width - PILL_MENU_MIN_WIDTH_PX - PILL_MENU_VIEWPORT_MARGIN_PX)
+        .max(PILL_MENU_VIEWPORT_MARGIN_PX);
+    let preferred_top = anchor_bottom + PILL_MENU_TOGGLE_GAP_PX;
+    let top = preferred_top
+        .min(viewport_height - PILL_MENU_ESTIMATED_HEIGHT_PX - PILL_MENU_VIEWPORT_MARGIN_PX)
+        .max(PILL_MENU_VIEWPORT_MARGIN_PX);
+    (left, top)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,6 +83,29 @@ mod tests {
         );
         assert_eq!(repo_pr_menu_hint(None, 1), "1 PR");
         assert_eq!(repo_pr_menu_hint(None, 4), "PRs");
+    }
+
+    #[test]
+    fn pill_menu_position_keeps_menu_inside_right_edge() {
+        let (left, top) = clamped_pill_menu_position(760, 100, 800, 900);
+
+        assert_eq!(left, 632);
+        assert_eq!(top, 104);
+    }
+
+    #[test]
+    fn pill_menu_position_opens_upward_near_bottom_edge() {
+        let (left, top) = clamped_pill_menu_position(80, 860, 1000, 900);
+
+        assert_eq!(left, 80);
+        assert_eq!(top, 472);
+    }
+
+    #[test]
+    fn pill_menu_position_keeps_minimum_viewport_margin() {
+        let (left, top) = clamped_pill_menu_position(-20, -10, 300, 300);
+
+        assert_eq!((left, top), (8, 8));
     }
 }
 
@@ -307,13 +351,27 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
             }
             if let Some(el) = e.target_dyn_into::<HtmlElement>() {
                 let rect = el.get_bounding_client_rect();
-                let vw = web_sys::window()
-                    .and_then(|w| w.inner_width().ok())
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(800.0) as i32;
-                let menu_width = 160; // min-width from CSS
-                let left = (rect.left() as i32).min(vw - menu_width - 8);
-                menu_pos.set((left, rect.bottom() as i32 + 4));
+                let (viewport_width, viewport_height) = web_sys::window()
+                    .map(|window| {
+                        let width = window
+                            .inner_width()
+                            .ok()
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(800.0) as i32;
+                        let height = window
+                            .inner_height()
+                            .ok()
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(600.0) as i32;
+                        (width, height)
+                    })
+                    .unwrap_or((800, 600));
+                menu_pos.set(clamped_pill_menu_position(
+                    rect.left() as i32,
+                    rect.bottom() as i32,
+                    viewport_width,
+                    viewport_height,
+                ));
             }
             menu_session.set(Some(session_id));
         })
