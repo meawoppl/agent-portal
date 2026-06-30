@@ -4,6 +4,7 @@ mod git_metadata;
 mod image_uploader;
 mod input_delivery;
 mod output_forwarder;
+mod permission_bridge;
 mod portal_reminder;
 mod wiggum;
 mod ws_reader;
@@ -908,9 +909,6 @@ async fn run_main_loop<A: Agent>(
     input_rx: &mut mpsc::UnboundedReceiver<PortalInput>,
     state: &mut ConnectionState,
 ) -> ConnectionResult {
-    use crate::Permission;
-    use session_lib::io::PermissionResponse as LibPermissionResponse;
-
     let mut heartbeat_interval = tokio::time::interval(session_lib::heartbeat::HEARTBEAT_INTERVAL);
 
     loop {
@@ -1056,30 +1054,7 @@ async fn run_main_loop<A: Agent>(
             }
 
             Some(perm_response) = state.perm_rx.recv() => {
-                debug!("sending permission response to claude: {:?}", perm_response);
-
-                // Build the library's PermissionResponse
-                let lib_response = if perm_response.allow {
-                    let input = perm_response.input.unwrap_or(serde_json::Value::Object(Default::default()));
-                    let permissions: Vec<Permission> = perm_response
-                        .permissions
-                        .iter()
-                        .map(Permission::from_suggestion)
-                        .collect();
-
-                    if permissions.is_empty() {
-                        LibPermissionResponse::allow_with_input(input)
-                    } else {
-                        LibPermissionResponse::allow_with_input_and_remember(input, permissions)
-                    }
-                } else {
-                    let reason = perm_response.reason.unwrap_or_else(|| "User denied".to_string());
-                    LibPermissionResponse::deny_with_reason(reason)
-                };
-
-                if let Err(e) = claude_session.respond_permission(&perm_response.request_id, lib_response).await {
-                    warn!("Permission response failed (stale request?): {}", e);
-                }
+                permission_bridge::handle_permission_response(claude_session, perm_response).await;
             }
 
             Some(ack_seq) = state.ack_rx.recv() => {
