@@ -195,52 +195,32 @@ jobs:
         include:
           - job-name: Build Proxy (Linux x86_64)
             runner: ubuntu-latest
-            package: claude-portal
-            binary: claude-portal
-            cache-key: proxy-linux
-            artifact: proxy-linux-x86_64
-          - job-name: Build Proxy (Linux aarch64)
+            cache-key: binaries-linux
+            proxy-binary: claude-portal
+            proxy-artifact: proxy-linux-x86_64
+            launcher-binary: agent-portal
+            launcher-artifact: launcher-linux-x86_64
+          - job-name: Build Binaries (Linux aarch64)
             runner: ubuntu-24.04-arm
-            package: claude-portal
-            binary: claude-portal
-            cache-key: proxy-linux-aarch64
-            artifact: proxy-linux-aarch64
-          - job-name: Build Proxy (macOS ARM64)
+            cache-key: binaries-linux-aarch64
+            proxy-binary: claude-portal
+            proxy-artifact: proxy-linux-aarch64
+            launcher-binary: agent-portal
+            launcher-artifact: launcher-linux-aarch64
+          - job-name: Build Binaries (macOS ARM64)
             runner: macos-14
-            package: claude-portal
-            binary: claude-portal
-            cache-key: proxy-macos-arm64
-            artifact: proxy-darwin-aarch64
-          - job-name: Build Proxy (Windows x86_64)
+            cache-key: binaries-macos-arm64
+            proxy-binary: claude-portal
+            proxy-artifact: proxy-darwin-aarch64
+            launcher-binary: agent-portal
+            launcher-artifact: launcher-darwin-aarch64
+          - job-name: Build Binaries (Windows x86_64)
             runner: windows-latest
-            package: claude-portal
-            binary: claude-portal.exe
-            cache-key: proxy-windows
-            artifact: proxy-windows-x86_64
-          - job-name: Build Launcher (Linux x86_64)
-            runner: ubuntu-latest
-            package: agent-portal
-            binary: agent-portal
-            cache-key: launcher-linux
-            artifact: launcher-linux-x86_64
-          - job-name: Build Launcher (Linux aarch64)
-            runner: ubuntu-24.04-arm
-            package: agent-portal
-            binary: agent-portal
-            cache-key: launcher-linux-aarch64
-            artifact: launcher-linux-aarch64
-          - job-name: Build Launcher (macOS ARM64)
-            runner: macos-14
-            package: agent-portal
-            binary: agent-portal
-            cache-key: launcher-macos-arm64
-            artifact: launcher-darwin-aarch64
-          - job-name: Build Launcher (Windows x86_64)
-            runner: windows-latest
-            package: agent-portal
-            binary: agent-portal.exe
-            cache-key: launcher-windows
-            artifact: launcher-windows-x86_64
+            cache-key: binaries-windows
+            proxy-binary: claude-portal.exe
+            proxy-artifact: proxy-windows-x86_64
+            launcher-binary: agent-portal.exe
+            launcher-artifact: launcher-windows-x86_64
     steps:
       - uses: actions/checkout@v4
 
@@ -249,16 +229,24 @@ jobs:
         with:
           cache-key: ${{ matrix.cache-key }}
 
-      - name: Build ${{ matrix.package }}
+      - name: Build binaries
         shell: bash
-        run: cargo build -p ${{ matrix.package }} --release
+        run: cargo build -p claude-portal -p agent-portal --release
 
       - name: Ad-hoc code sign
         if: runner.os == 'macOS'
-        run: codesign -s - target/release/${{ matrix.binary }}
+        run: |
+          codesign -s - target/release/${{ matrix.proxy-binary }}
+          codesign -s - target/release/${{ matrix.launcher-binary }}
 
-      - name: Upload artifact
+      - name: Upload proxy artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: target/release/${{ matrix.binary }}
+          name: ${{ matrix.proxy-artifact }}
+          path: target/release/${{ matrix.proxy-binary }}
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.launcher-artifact }}
+          path: target/release/${{ matrix.launcher-binary }}
