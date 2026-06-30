@@ -17,12 +17,13 @@ pub type DbConnection = PooledConnection<ConnectionManager<PgConnection>>;
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
 pub fn create_pool() -> Result<DbPool> {
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url = env::var("DATABASE_URL")
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set (PostgreSQL connection string)"))?;
 
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     let pool = r2d2::Pool::builder()
         .build(manager)
-        .expect("Failed to create pool");
+        .map_err(|e| anyhow::anyhow!("Failed to create database connection pool: {e}"))?;
 
     Ok(pool)
 }

@@ -124,7 +124,7 @@ pub async fn run() -> anyhow::Result<()> {
     background::spawn_stale_session_cleanup(pool.clone(), session_manager.clone());
 
     // Parse remaining configuration from environment variables
-    let config = config::ServerConfig::from_env(args.dev_mode);
+    let config = config::ServerConfig::from_env(args.dev_mode)?;
 
     // Create app state
     let app_state = Arc::new(AppState {

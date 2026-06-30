@@ -32,7 +32,7 @@ async fn spawn_test_app() -> SocketAddr {
     backend::db::run_migrations_logged(&pool).expect("run migrations");
     backend::db::seed_dev_user(&pool).expect("seed dev user");
 
-    let config = ServerConfig::from_env(true);
+    let config = ServerConfig::from_env(true).expect("parse server config");
     let oauth = backend::config::build_google_oauth_client(true).expect("oauth client");
 
     let state = Arc::new(AppState {
