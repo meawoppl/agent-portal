@@ -422,6 +422,20 @@ mod tests {
         )
     }
 
+    fn tool_result_from_sender(tool_use_id: &str, user_id: Uuid, name: &str) -> RenderedMessage {
+        RenderedMessage::new(
+            read_tool_result_user_message(tool_use_id),
+            Some(shared::PortalMeta {
+                created_at: Some("2026-05-17T10:00:00.000Z".to_string()),
+                source: Some(shared::MessageSource::Human {
+                    account_id: user_id,
+                    name: name.to_string(),
+                }),
+                delivery: None,
+            }),
+        )
+    }
+
     fn codex_item_started_agent_message(text: &str) -> String {
         serde_json::json!({
             "type": "item.started",
@@ -469,6 +483,47 @@ mod tests {
     fn tool_result_user_envelope_stays_in_assistant_group() {
         let msg = read_tool_result_user_message("toolu_01");
         assert_eq!(classify_category(&msg), Some(GroupCategory::Assistant));
+    }
+
+    #[test]
+    fn tool_result_user_envelope_with_human_source_stays_in_assistant_group() {
+        let user_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let msg = tool_result_from_sender("toolu_01", user_id, "Matt");
+
+        assert_eq!(
+            classify(&msg, shared::AgentType::Claude, Some(&user_id.to_string()))
+                .map(|identity| identity.category),
+            Some(GroupCategory::Assistant)
+        );
+    }
+
+    #[test]
+    fn tool_result_user_envelope_with_human_source_renders_in_assistant_group() {
+        let user_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let messages = vec![
+            rendered(assistant_with_tool_use("toolu_01", "Read")),
+            tool_result_from_sender("toolu_01", user_id, "Matt"),
+        ];
+
+        let groups = group_messages(
+            &messages,
+            shared::AgentType::Claude,
+            Some(&user_id.to_string()),
+        );
+
+        assert_eq!(groups.len(), 1);
+        match &groups[0] {
+            MessageGroup::IdentityGroup {
+                category: GroupCategory::Assistant,
+                label,
+                messages,
+                ..
+            } => {
+                assert!(label.starts_with("Claude"));
+                assert_eq!(messages.len(), 2);
+            }
+            other => panic!("expected Assistant identity group, got {:?}", other),
+        }
     }
 
     #[test]
