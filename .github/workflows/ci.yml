@@ -156,9 +156,8 @@ jobs:
     # backend unit tests that need a real Postgres (messages/replay pagination,
     # session-access). Kept separate from `Tests` so the main lane stays
     # DB-free. The harness step runs first because it self-migrates the fresh
-    # Postgres; the `--lib` step then runs the DB-backed unit tests against the
-    # migrated schema (cargo runs lib tests before integration tests within a
-    # single invocation, so they must be split to get migration ordering right).
+    # Postgres; then run only the DB-gated lib test modules instead of the full
+    # backend lib suite, which already runs in the main `Tests` job.
     services:
       postgres:
         image: postgres:16-alpine
@@ -193,7 +192,10 @@ jobs:
       - name: Run DB-backed backend unit tests
         env:
           DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
-        run: cargo test -p backend --lib
+        run: |
+          cargo test -p backend --lib handlers::messages::db_tests
+          cargo test -p backend --lib handlers::session_access::db_tests
+          cargo test -p backend --lib handlers::websocket::replay::replay_tests
 
   build-binaries:
     name: ${{ matrix.job-name }}
