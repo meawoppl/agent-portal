@@ -111,9 +111,31 @@ pub fn nice_y_axis(min: f64, max: f64) -> (f64, f64, f64) {
 /// maps positive values by base-10 decades. That keeps sparse zero buckets
 /// visible without pretending that `log(0)` exists.
 pub fn y_axis_for_values(values: &[f64], scale: AxisScale) -> YAxis {
+    y_axis_impl(values, scale, false)
+}
+
+/// Like [`y_axis_for_values`], but the linear lower/upper bounds exclude
+/// *far-out* outliers (Tukey fence, k = 3) so a single absurd value can't blow
+/// the axis up and flatten every real series into a baseline line.
+///
+/// Used by the line charts, whose rate metrics (throughput tok/s, cost/token)
+/// can spike to garbage when a turn's denominator is near zero. The clipped
+/// outliers clamp to the axis edge in [`value_frac`], so they stay visible as a
+/// pegged point rather than dragging the whole scale. With no outliers (or
+/// fewer than 4 points) this is identical to [`y_axis_for_values`].
+pub fn y_axis_for_values_robust(values: &[f64], scale: AxisScale) -> YAxis {
+    y_axis_impl(values, scale, true)
+}
+
+fn y_axis_impl(values: &[f64], scale: AxisScale, robust: bool) -> YAxis {
     match scale {
         AxisScale::Linear => {
-            let (min_v, max_v) = finite_min_max(values).unwrap_or((0.0, 1.0));
+            let bounds = if robust {
+                robust_min_max(values)
+            } else {
+                finite_min_max(values)
+            };
+            let (min_v, max_v) = bounds.unwrap_or((0.0, 1.0));
             let (min, max, step) = nice_y_axis(min_v, max_v);
             YAxis::Linear { min, max, step }
         }
@@ -149,6 +171,53 @@ fn finite_min_max(values: &[f64]) -> Option<(f64, f64)> {
                 None => (v, v),
             })
         })
+}
+
+/// Linear-interpolated percentile of an ascending-sorted slice. `p` in `[0, 1]`.
+fn percentile_sorted(sorted: &[f64], p: f64) -> f64 {
+    match sorted {
+        [] => 0.0,
+        [only] => *only,
+        _ => {
+            let rank = p * (sorted.len() as f64 - 1.0);
+            let lo = rank.floor() as usize;
+            let hi = rank.ceil() as usize;
+            let frac = rank - lo as f64;
+            sorted[lo] + (sorted[hi] - sorted[lo]) * frac
+        }
+    }
+}
+
+/// `(min, max)` of `values` with *far-out* outliers excluded via a Tukey fence
+/// (k = 3 × IQR). This is the robustness behind [`y_axis_for_values_robust`].
+///
+/// Returns exactly the same `(min, max)` as [`finite_min_max`] when there are
+/// fewer than 4 finite values (IQR is unreliable), when the data has no spread
+/// (IQR == 0), or when nothing falls outside the fence. Only genuinely absurd
+/// points (e.g. a 1.5M tok/s throughput from a near-zero-duration turn next to
+/// real ~50 tok/s data) are dropped from the bound.
+fn robust_min_max(values: &[f64]) -> Option<(f64, f64)> {
+    let mut finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    if finite.len() < 4 {
+        return finite_min_max(values);
+    }
+    finite.sort_by(f64::total_cmp);
+    let q1 = percentile_sorted(&finite, 0.25);
+    let q3 = percentile_sorted(&finite, 0.75);
+    let iqr = q3 - q1;
+    if iqr <= 0.0 {
+        return finite_min_max(values);
+    }
+    let lo_fence = q1 - 3.0 * iqr;
+    let hi_fence = q3 + 3.0 * iqr;
+    // `finite` is sorted ascending: first within the lower fence is the robust
+    // min; last within the upper fence is the robust max.
+    let lo = finite.iter().copied().find(|v| *v >= lo_fence);
+    let hi = finite.iter().rev().copied().find(|v| *v <= hi_fence);
+    match (lo, hi) {
+        (Some(lo), Some(hi)) if hi >= lo => Some((lo, hi)),
+        _ => finite_min_max(values),
+    }
 }
 
 /// Round `raw` up to the nearest "nice" value (1, 2, or 5 times a power of ten).
@@ -564,6 +633,49 @@ mod tests {
     fn log_y_axis_without_positive_values_falls_back_to_linear() {
         let axis = y_axis_for_values(&[0.0, 0.0], AxisScale::Log);
         assert!(matches!(axis, YAxis::Linear { .. }));
+    }
+
+    #[test]
+    fn robust_axis_caps_at_bulk_and_ignores_far_out_outlier() {
+        // Real throughput ~40-55 tok/s with one garbage 1.5M spike (the bug in
+        // the screenshot). The exact-max axis would run to 1.5M and flatten
+        // every real point; the robust axis must hug the ~40-55 bulk.
+        let mut vals = vec![40.0, 45.0, 48.0, 50.0, 52.0, 55.0, 47.0, 49.0];
+        vals.push(1_500_000.0);
+        let YAxis::Linear { max, .. } = y_axis_for_values_robust(&vals, AxisScale::Linear) else {
+            panic!("expected linear axis");
+        };
+        assert!(
+            max < 100.0,
+            "robust axis max should hug the ~55 bulk, got {max}"
+        );
+        // The non-robust axis, by contrast, is dragged to the outlier.
+        let YAxis::Linear { max: raw_max, .. } = y_axis_for_values(&vals, AxisScale::Linear) else {
+            panic!("expected linear axis");
+        };
+        assert!(raw_max >= 1_500_000.0, "exact axis includes the outlier");
+    }
+
+    #[test]
+    fn robust_axis_no_outliers_matches_exact_bounds() {
+        // Without outliers, robust and exact axes must be identical (no
+        // surprise clipping of normal variation).
+        let vals = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
+        assert_eq!(
+            y_axis_for_values_robust(&vals, AxisScale::Linear),
+            y_axis_for_values(&vals, AxisScale::Linear),
+        );
+    }
+
+    #[test]
+    fn robust_axis_small_sample_keeps_exact_bounds() {
+        // Fewer than 4 points: IQR is unreliable, so fall back to exact bounds
+        // even if one value looks extreme.
+        let vals = [5.0, 7.0, 900.0];
+        assert_eq!(
+            y_axis_for_values_robust(&vals, AxisScale::Linear),
+            y_axis_for_values(&vals, AxisScale::Linear),
+        );
     }
 
     #[test]
