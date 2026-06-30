@@ -196,6 +196,17 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         let rail_ref = rail_ref.clone();
         Callback::from(move |e: WheelEvent| {
             if let Some(rail) = rail_ref.cast::<HtmlElement>() {
+                // This handler maps the wheel onto the rail's HORIZONTAL scroll,
+                // so a plain vertical scroll-wheel drives the top/bottom rail.
+                // The left/right rail scrolls *vertically* (`overflow-y: auto`)
+                // and has no horizontal overflow — there we must NOT intercept,
+                // or `prevent_default` kills the native vertical scroll while we
+                // only nudge `scroll_left` (a no-op), leaving the pills unscroll-
+                // able. The component doesn't know its orientation, so gate on
+                // the axis that actually overflows.
+                if rail.scroll_width() <= rail.client_width() {
+                    return; // vertical rail (or nothing to scroll) — let native scroll run
+                }
                 let dx = e.delta_x();
                 let dy = e.delta_y();
                 // Use whichever axis has the larger delta — this lets both
