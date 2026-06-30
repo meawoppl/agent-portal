@@ -16,8 +16,8 @@ use session_lib::session::Session;
 
 use super::git_metadata::{check_and_send_branch_update_if_branch_changed, GitMetadataState};
 use super::{
-    ack_portal_input, emit_input_progress, format_duration, truncate, ConnectionResult, PortalInput,
-    SharedWsWrite,
+    ack_portal_input, emit_input_progress, format_duration, truncate, ConnectionResult,
+    PortalInput, SharedWsWrite,
 };
 
 /// Maximum iterations for wiggum mode before auto-stopping
