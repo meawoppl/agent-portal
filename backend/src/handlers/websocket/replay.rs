@@ -187,8 +187,15 @@ mod replay_tests {
         user_id: uuid::Uuid,
         count: usize,
     ) -> Vec<chrono::NaiveDateTime> {
+        use chrono::Timelike;
         use diesel::sql_query;
-        let base = Utc::now().naive_utc();
+        // Truncate to µs so the returned stamps match the DB read-back —
+        // Postgres `timestamp` drops the sub-µs nanoseconds in `Utc::now()`,
+        // which otherwise breaks exact `created_at` equality assertions.
+        let now = Utc::now().naive_utc();
+        let base = now
+            .with_nanosecond(now.nanosecond() / 1_000 * 1_000)
+            .unwrap_or(now);
         let mut stamps = Vec::with_capacity(count);
         for i in 0..count {
             let ts = base + chrono::Duration::microseconds((i as i64 + 1) * 1000);
