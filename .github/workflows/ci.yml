@@ -152,9 +152,13 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
-    # Dedicated job for DB-backed integration tests (#1209 item 1). Kept
-    # separate from `Tests` so only the harness — which self-migrates a fresh
-    # Postgres — runs against a DB; the main test lane stays DB-free.
+    # Dedicated job for DB-backed tests (#1209 item 1): the E2E harness plus the
+    # backend unit tests that need a real Postgres (messages/replay pagination,
+    # session-access). Kept separate from `Tests` so the main lane stays
+    # DB-free. The harness step runs first because it self-migrates the fresh
+    # Postgres; the `--lib` step then runs the DB-backed unit tests against the
+    # migrated schema (cargo runs lib tests before integration tests within a
+    # single invocation, so they must be split to get migration ordering right).
     services:
       postgres:
         image: postgres:16-alpine
@@ -181,10 +185,15 @@ jobs:
           cache-key: "e2e"
           protoc: "true"
 
-      - name: Run E2E harness
+      - name: Run E2E harness (migrates the fresh Postgres)
         env:
           DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
         run: cargo test -p backend --test harness
+
+      - name: Run DB-backed backend unit tests
+        env:
+          DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
+        run: cargo test -p backend --lib
 
   build-binaries:
     name: ${{ matrix.job-name }}
