@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 use yew::prelude::*;
 
 use super::scale::{
-    series_points_with_axis, time_axis_ticks, y_axis_for_values, y_axis_tick_labels, AxisScale,
-    BucketKind,
+    series_points_with_axis, time_axis_ticks, y_axis_for_values_robust, y_axis_tick_labels,
+    AxisScale, BucketKind,
 };
 use super::{
     chart_empty, chart_frame, render_gridlines, render_legend, render_x_labels, PAD_L, PAD_T,
@@ -72,7 +72,7 @@ pub fn line_plot(props: &LinePlotProps) -> Html {
     if all_y.is_empty() {
         return chart_empty(&props.title);
     }
-    let y_axis = y_axis_for_values(&all_y, props.axis_scale);
+    let y_axis = y_axis_for_values_robust(&all_y, props.axis_scale);
 
     let x_ticks = time_axis_ticks(&props.buckets, props.bucket_kind, 6);
     let y_ticks = y_axis_tick_labels(&y_axis);
