@@ -423,19 +423,29 @@ impl PortalMessage {
         else {
             return None;
         };
+        let reply_session_id = short_reply_session_id(from_session_id);
         Some(format!(
             "[message from {from_agent_type} {from_session_id}]\n{text}\n\n\
 <system-reminder>\n\
 This message came from another agent. Reply to that agent, not the user.\n\
 Sender session id: {from_session_id}\n\
 Reply with:\n\
-agent-portal message send {from_session_id} \"your reply\"\n\
+agent-portal message send {reply_session_id} \"your reply\"\n\
 </system-reminder>"
         ))
     }
 
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_default()
+    }
+}
+
+fn short_reply_session_id(session_id: &str) -> String {
+    let compact = session_id.replace('-', "");
+    if compact.len() >= 8 && compact.chars().all(|c| c.is_ascii_hexdigit()) {
+        compact.chars().take(8).collect()
+    } else {
+        session_id.to_string()
     }
 }
 
@@ -605,9 +615,7 @@ mod tests {
         assert!(text
             .starts_with("[message from codex 12345678-0000-0000-0000-000000000000]\nhello there"));
         assert!(text.contains("Reply to that agent, not the user."));
-        assert!(text.contains(
-            "agent-portal message send 12345678-0000-0000-0000-000000000000 \"your reply\""
-        ));
+        assert!(text.contains("agent-portal message send 12345678 \"your reply\""));
     }
 
     #[test]
@@ -700,9 +708,7 @@ mod tests {
         assert!(text.starts_with(
             "[message from codex 12345678-0000-0000-0000-000000000000]\nhello from another agent"
         ));
-        assert!(text.contains(
-            "agent-portal message send 12345678-0000-0000-0000-000000000000 \"your reply\""
-        ));
+        assert!(text.contains("agent-portal message send 12345678 \"your reply\""));
     }
 
     #[test]

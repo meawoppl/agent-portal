@@ -372,9 +372,9 @@ mod tests {
         assert!(input
             .text
             .starts_with("[message from codex 12345678-0000-0000-0000-000000000000]\nhello"));
-        assert!(input.text.contains(
-            "agent-portal message send 12345678-0000-0000-0000-000000000000 \"your reply\""
-        ));
+        assert!(input
+            .text
+            .contains("agent-portal message send 12345678 \"your reply\""));
         assert_eq!(input.display_event, Some(content));
     }
 
