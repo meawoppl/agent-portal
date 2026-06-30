@@ -9,7 +9,7 @@ use serde::Deserialize;
 use shared::api::MeResponse;
 use std::sync::Arc;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     errors::AppError,
@@ -23,9 +23,20 @@ mod oauth;
 
 /// Regular web login - redirects to Google OAuth
 pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+    info!(
+        target: "auth_audit",
+        event = "web_login_start",
+        oauth_configured = app_state.oauth_basic_client.is_some(),
+    );
     let client = match &app_state.oauth_basic_client {
         Some(c) => c,
-        None => return Redirect::temporary(routes::AUTH_DEV_LOGIN).into_response(),
+        None => {
+            info!(
+                target: "auth_audit",
+                event = "web_login_dev_redirect",
+            );
+            return Redirect::temporary(routes::AUTH_DEV_LOGIN).into_response();
+        }
     };
 
     oauth::regular_authorization_redirect(client, &cookies, &app_state).into_response()
@@ -43,6 +54,12 @@ pub async fn device_login(
     cookies: Cookies,
     Query(query): Query<DeviceLoginQuery>,
 ) -> Result<impl IntoResponse, AppError> {
+    info!(
+        target: "auth_audit",
+        event = "device_login_start",
+        user_code = %query.device_user_code,
+        oauth_configured = app_state.oauth_basic_client.is_some(),
+    );
     // In dev mode, auto-login and redirect to device approval page
     if app_state.oauth_basic_client.is_none() {
         let mut conn = app_state.conn()?;
@@ -51,10 +68,26 @@ pub async fn device_login(
 
         if user.disabled {
             info!("Banned user {} attempted dev device login", user.email);
+            warn!(
+                target: "auth_audit",
+                event = "device_login_denied",
+                reason = "disabled_user",
+                user_id = %user.id,
+                user_email = %user.email,
+                user_code = %query.device_user_code,
+            );
             return Ok(Redirect::temporary(routes::BANNED).into_response());
         }
 
         info!("Dev mode: auto-logged in for device flow");
+        info!(
+            target: "auth_audit",
+            event = "device_login_success",
+            mode = "dev",
+            user_id = %user.id,
+            user_email = %user.email,
+            user_code = %query.device_user_code,
+        );
 
         add_session_cookie(&cookies, &app_state, &user);
 
@@ -88,6 +121,22 @@ pub async fn callback(
     cookies: Cookies,
     Query(query): Query<AuthCallbackQuery>,
 ) -> Result<impl IntoResponse, AppError> {
+    let callback_kind = if query
+        .state
+        .as_deref()
+        .is_some_and(|state| state.starts_with("device:"))
+    {
+        "device"
+    } else {
+        "web"
+    };
+    info!(
+        target: "auth_audit",
+        event = "oauth_callback_start",
+        flow = callback_kind,
+        state_present = query.state.is_some(),
+    );
+
     let client = app_state
         .oauth_basic_client
         .as_ref()
@@ -97,8 +146,15 @@ pub async fn callback(
         .build()
         .map_err(|e| AppError::Internal(format!("Failed to build OAuth HTTP client: {e}")))?;
 
-    let device_state =
-        oauth::validate_callback_state(&cookies, &app_state, query.state.as_deref())?;
+    let device_state = oauth::validate_callback_state(&cookies, &app_state, query.state.as_deref())
+        .inspect_err(|_| {
+            warn!(
+                target: "auth_audit",
+                event = "oauth_callback_denied",
+                flow = callback_kind,
+                reason = "invalid_state",
+            );
+        })?;
 
     // Exchange code for token
     let token: oauth2::StandardTokenResponse<
@@ -108,7 +164,15 @@ pub async fn callback(
         .exchange_code(AuthorizationCode::new(query.code))
         .request_async(&http_client)
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to exchange OAuth code: {e}")))?;
+        .map_err(|e| {
+            warn!(
+                target: "auth_audit",
+                event = "oauth_callback_failed",
+                flow = callback_kind,
+                stage = "token_exchange",
+            );
+            AppError::Internal(format!("Failed to exchange OAuth code: {e}"))
+        })?;
 
     // Fetch user info from Google
     let client = reqwest::Client::new();
@@ -117,15 +181,38 @@ pub async fn callback(
         .bearer_auth(token.access_token().secret())
         .send()
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to fetch Google user info: {e}")))?
+        .map_err(|e| {
+            warn!(
+                target: "auth_audit",
+                event = "oauth_callback_failed",
+                flow = callback_kind,
+                stage = "userinfo_fetch",
+            );
+            AppError::Internal(format!("Failed to fetch Google user info: {e}"))
+        })?
         .json()
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to parse Google user info: {e}")))?;
+        .map_err(|e| {
+            warn!(
+                target: "auth_audit",
+                event = "oauth_callback_failed",
+                flow = callback_kind,
+                stage = "userinfo_parse",
+            );
+            AppError::Internal(format!("Failed to parse Google user info: {e}"))
+        })?;
 
     info!("User authenticated: {}", user_info.email);
 
     // Check email access control
     if let Err(redirect) = check_email_allowed(&app_state, &user_info.email) {
+        warn!(
+            target: "auth_audit",
+            event = "oauth_callback_denied",
+            flow = callback_kind,
+            reason = "email_not_allowed",
+            user_email = %user_info.email,
+        );
         return Ok(redirect);
     }
 
@@ -161,6 +248,14 @@ pub async fn callback(
     if user.disabled {
         let reason = user.ban_reason.as_deref().unwrap_or("No reason provided");
         info!("Banned user {} attempted login", user.email);
+        warn!(
+            target: "auth_audit",
+            event = "oauth_callback_denied",
+            flow = callback_kind,
+            reason = "disabled_user",
+            user_id = %user.id,
+            user_email = %user.email,
+        );
         return Ok(banned_redirect(reason));
     }
 
@@ -172,10 +267,25 @@ pub async fn callback(
             "OAuth complete for device flow, redirecting to approval page for user: {}",
             user.email
         );
+        info!(
+            target: "auth_audit",
+            event = "oauth_callback_success",
+            flow = "device",
+            user_id = %user.id,
+            user_email = %user.email,
+            user_code = %device_state.user_code,
+        );
         return Ok(device_approval_redirect(&device_state.user_code));
     }
 
     add_session_cookie(&cookies, &app_state, &user);
+    info!(
+        target: "auth_audit",
+        event = "oauth_callback_success",
+        flow = "web",
+        user_id = %user.id,
+        user_email = %user.email,
+    );
 
     Ok(Redirect::temporary(routes::DASHBOARD))
 }
@@ -217,12 +327,25 @@ pub async fn dev_login(
     if user.disabled {
         let reason = user.ban_reason.as_deref().unwrap_or("No reason provided");
         info!("Banned user {} attempted dev login", user.email);
+        warn!(
+            target: "auth_audit",
+            event = "dev_login_denied",
+            reason = "disabled_user",
+            user_id = %user.id,
+            user_email = %user.email,
+        );
         return Ok(banned_redirect(reason));
     }
 
     info!(
         "Dev mode: auto-logged in as {}",
         crate::auth::DEV_USER_EMAIL
+    );
+    info!(
+        target: "auth_audit",
+        event = "dev_login_success",
+        user_id = %user.id,
+        user_email = %user.email,
     );
 
     add_session_cookie(&cookies, &app_state, &user);

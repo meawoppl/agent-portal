@@ -11,7 +11,7 @@ use shared::api::{
 use shared::DevicePollResponse;
 use std::sync::Arc;
 use tower_cookies::Cookies;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -38,12 +38,15 @@ pub async fn device_code(
     State(app_state): State<Arc<AppState>>,
     body: Option<Json<DeviceCodeRequest>>,
 ) -> Result<Json<DeviceCodeResponse>, DeviceFlowApiError> {
+    info!(target: "auth_audit", event = "device_code_request");
     let store = app_state
         .device_flow_store
         .as_ref()
         .ok_or_else(DeviceFlowApiError::service_unavailable)?;
 
     let req = body.map(|b| b.0).unwrap_or_default();
+    let hostname = req.hostname;
+    let working_directory = req.working_directory;
     let device_code = generate_device_code();
     let user_code = generate_user_code();
 
@@ -57,14 +60,21 @@ pub async fn device_code(
         access_token: None,
         expires_at,
         status: DeviceFlowStatus::Pending,
-        hostname: req.hostname,
-        working_directory: req.working_directory,
+        hostname: hostname.clone(),
+        working_directory: working_directory.clone(),
     };
 
     let mut store_lock = store.write().await;
     store_lock.insert(device_code.clone(), state);
 
     let verification_uri = format!("{}/api/auth/device", app_state.public_url);
+    info!(
+        target: "auth_audit",
+        event = "device_code_created",
+        user_code = %user_code,
+        hostname = ?hostname,
+        working_directory = ?working_directory,
+    );
 
     Ok(Json(DeviceCodeResponse {
         device_code,
@@ -80,15 +90,21 @@ pub async fn device_poll(
     State(app_state): State<Arc<AppState>>,
     Json(req): Json<DeviceFlowPollRequest>,
 ) -> Result<Json<DevicePollResponse>, DeviceFlowApiError> {
+    info!(target: "auth_audit", event = "device_poll_request");
     let store = app_state
         .device_flow_store
         .as_ref()
         .ok_or_else(DeviceFlowApiError::service_unavailable)?;
     let mut store_lock = store.write().await;
 
-    let state = store_lock
-        .get_mut(&req.device_code)
-        .ok_or_else(|| DeviceFlowApiError::not_found("Device code not found or expired"))?;
+    let state = store_lock.get_mut(&req.device_code).ok_or_else(|| {
+        warn!(
+            target: "auth_audit",
+            event = "device_poll_denied",
+            reason = "not_found",
+        );
+        DeviceFlowApiError::not_found("Device code not found or expired")
+    })?;
 
     // Check expiration
     if std::time::SystemTime::now() > state.expires_at {
@@ -96,7 +112,14 @@ pub async fn device_poll(
     }
 
     match &state.status {
-        DeviceFlowStatus::Pending => Ok(Json(DevicePollResponse::Pending)),
+        DeviceFlowStatus::Pending => {
+            info!(
+                target: "auth_audit",
+                event = "device_poll_pending",
+                user_code = %state.user_code,
+            );
+            Ok(Json(DevicePollResponse::Pending))
+        }
         DeviceFlowStatus::Complete => {
             let user_id = state
                 .user_id
@@ -118,14 +141,36 @@ pub async fn device_poll(
                 .first::<crate::models::User>(&mut conn)
                 .map_err(|_| DeviceFlowApiError::internal_error("User not found"))?;
 
+            info!(
+                target: "auth_audit",
+                event = "device_poll_complete",
+                user_code = %state.user_code,
+                user_id = %user_id,
+                user_email = %user.email,
+            );
             Ok(Json(DevicePollResponse::Complete {
                 access_token,
                 user_id: user_id.to_string(),
                 user_email: user.email,
             }))
         }
-        DeviceFlowStatus::Expired => Ok(Json(DevicePollResponse::Expired)),
-        DeviceFlowStatus::Denied => Ok(Json(DevicePollResponse::Denied)),
+        DeviceFlowStatus::Expired => {
+            info!(
+                target: "auth_audit",
+                event = "device_poll_expired",
+                user_code = %state.user_code,
+            );
+            Ok(Json(DevicePollResponse::Expired))
+        }
+        DeviceFlowStatus::Denied => {
+            info!(
+                target: "auth_audit",
+                event = "device_poll_denied",
+                user_code = %state.user_code,
+                reason = "user_denied",
+            );
+            Ok(Json(DevicePollResponse::Denied))
+        }
     }
 }
 
@@ -201,8 +246,20 @@ pub async fn device_approve(
     cookies: Cookies,
     Json(req): Json<ApproveRequest>,
 ) -> Result<Json<DeviceFlowActionResponse>, DeviceFlowApiError> {
-    let user_id = auth::extract_user_id(&app_state, &cookies)
-        .map_err(|e| auth_error_to_device_flow(e, "approve"))?;
+    info!(
+        target: "auth_audit",
+        event = "device_approve_request",
+        user_code = %req.user_code,
+    );
+    let user_id = auth::extract_user_id(&app_state, &cookies).map_err(|e| {
+        warn!(
+            target: "auth_audit",
+            event = "device_approve_denied",
+            user_code = %req.user_code,
+            reason = "unauthorized",
+        );
+        auth_error_to_device_flow(e, "approve")
+    })?;
 
     let store = app_state
         .device_flow_store
@@ -212,11 +269,26 @@ pub async fn device_approve(
     // Complete the device flow
     complete_device_flow(&app_state, store, &req.user_code, user_id)
         .await
-        .map_err(|_| DeviceFlowApiError::not_found("Device code not found or already used"))?;
+        .map_err(|_| {
+            warn!(
+                target: "auth_audit",
+                event = "device_approve_denied",
+                user_code = %req.user_code,
+                user_id = %user_id,
+                reason = "not_found_or_used",
+            );
+            DeviceFlowApiError::not_found("Device code not found or already used")
+        })?;
 
     info!(
         "Device flow approved for user_code: {}, user: {}",
         req.user_code, user_id
+    );
+    info!(
+        target: "auth_audit",
+        event = "device_approve_success",
+        user_code = %req.user_code,
+        user_id = %user_id,
     );
 
     Ok(Json(DeviceFlowActionResponse {
@@ -231,8 +303,20 @@ pub async fn device_deny(
     cookies: Cookies,
     Json(req): Json<ApproveRequest>,
 ) -> Result<Json<DeviceFlowActionResponse>, DeviceFlowApiError> {
-    auth::extract_user_id(&app_state, &cookies)
-        .map_err(|e| auth_error_to_device_flow(e, "deny"))?;
+    info!(
+        target: "auth_audit",
+        event = "device_deny_request",
+        user_code = %req.user_code,
+    );
+    let user_id = auth::extract_user_id(&app_state, &cookies).map_err(|e| {
+        warn!(
+            target: "auth_audit",
+            event = "device_deny_denied",
+            user_code = %req.user_code,
+            reason = "unauthorized",
+        );
+        auth_error_to_device_flow(e, "deny")
+    })?;
 
     let store = app_state
         .device_flow_store
@@ -247,6 +331,19 @@ pub async fn device_deny(
     {
         state.status = DeviceFlowStatus::Denied;
         info!("Device flow denied for user_code: {}", req.user_code);
+        info!(
+            target: "auth_audit",
+            event = "device_deny_success",
+            user_code = %req.user_code,
+            user_id = %user_id,
+        );
+    } else {
+        warn!(
+            target: "auth_audit",
+            event = "device_deny_missing",
+            user_code = %req.user_code,
+            user_id = %user_id,
+        );
     }
 
     Ok(Json(DeviceFlowActionResponse {
@@ -417,6 +514,13 @@ pub async fn complete_device_flow(
         info!(
             "Device flow completed for user_code: {}, user: {}",
             user_code, issued.user_email
+        );
+        info!(
+            target: "auth_audit",
+            event = "device_token_issued",
+            user_code = %user_code,
+            user_id = %user_id,
+            user_email = %issued.user_email,
         );
         Ok(())
     } else {

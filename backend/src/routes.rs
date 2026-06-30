@@ -64,6 +64,29 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .layer(rate_limit(6, 10))
         .with_state(app_state.clone());
 
+    // Rate-limited browser auth routes. These endpoints either initiate OAuth
+    // or consume OAuth callback codes, so keep them separate from ordinary
+    // authenticated API traffic.
+    let auth_login_routes = Router::new()
+        .route(AUTH_GOOGLE, get(handlers::auth::login))
+        .route(AUTH_GOOGLE_CALLBACK, get(handlers::auth::callback))
+        .route(AUTH_DEV_LOGIN, get(handlers::auth::dev_login))
+        .route(AUTH_DEVICE_LOGIN, get(handlers::auth::device_login))
+        .layer(rate_limit(2, 20))
+        .with_state(app_state.clone());
+
+    // Rate-limited device approval actions. The verify page remains unthrottled
+    // enough for normal browser refreshes, while mutating approve/deny submits
+    // get explicit abuse protection.
+    let auth_device_action_routes = Router::new()
+        .route(
+            AUTH_DEVICE_APPROVE,
+            post(handlers::device_flow::device_approve),
+        )
+        .route(AUTH_DEVICE_DENY, post(handlers::device_flow::device_deny))
+        .layer(rate_limit(2, 20))
+        .with_state(app_state.clone());
+
     // Rate-limited download routes
     let download_routes = Router::new()
         .route(
@@ -184,21 +207,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(handlers::sound_settings::get_sound_settings)
                 .put(handlers::sound_settings::save_sound_settings),
         )
-        // Auth routes (under /api/auth)
-        .route(AUTH_GOOGLE, get(handlers::auth::login))
-        .route(AUTH_GOOGLE_CALLBACK, get(handlers::auth::callback))
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_LOGOUT, get(handlers::auth::logout))
-        .route(AUTH_DEV_LOGIN, get(handlers::auth::dev_login))
-        // Device-specific login endpoint (separate from regular web login)
-        .route(AUTH_DEVICE_LOGIN, get(handlers::auth::device_login))
-        // Non-rate-limited device flow endpoints (verify page, approve, deny are user-facing)
+        // Non-rate-limited device flow verify page (form + browser refreshes)
         .route(AUTH_DEVICE, get(handlers::device_flow::device_verify_page))
-        .route(
-            AUTH_DEVICE_APPROVE,
-            post(handlers::device_flow::device_approve),
-        )
-        .route(AUTH_DEVICE_DENY, post(handlers::device_flow::device_deny))
         // WebSocket routes (paths from ws-bridge endpoint definitions)
         .route(
             shared::SessionEndpoint::PATH,
@@ -247,6 +259,8 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .with_state(app_state)
         // Merge rate-limited route groups
         .merge(auth_device_routes)
+        .merge(auth_login_routes)
+        .merge(auth_device_action_routes)
         .merge(download_routes)
         // Serve embedded frontend assets with SPA fallback
         .merge(
