@@ -33,8 +33,8 @@ use uuid::Uuid;
 pub use git_metadata::{get_git_branch, get_repo_url};
 
 use git_metadata::{
-    check_and_send_branch_update, check_and_send_branch_update_if_branch_changed,
-    codex_output_has_git_signal, get_open_prs, get_pr_url, GitMetadataState, GitRefreshTrigger,
+    check_and_send_branch_update, codex_output_has_git_signal, get_open_prs, get_pr_url,
+    GitMetadataState, GitRefreshTrigger,
 };
 use output_forwarder::spawn_output_forwarder;
 use wiggum::{handle_session_event_with_wiggum, WiggumState};
@@ -965,50 +965,19 @@ async fn run_main_loop<A: Agent>(
 
             // Wiggum mode activation — set state and send prompt atomically
             Some(wiggum_input) = state.wiggum_rx.recv() => {
-                info!(
-                    "Wiggum mode activated with prompt: {}",
-                    truncate(&wiggum_input.text, 60)
-                );
-                check_and_send_branch_update_if_branch_changed(
+                if let Some(result) = wiggum::handle_wiggum_activation(
                     &state.ws_write,
                     state.session_id,
                     &state.working_directory,
                     &state.git_metadata,
+                    &mut state.wiggum_state,
+                    claude_session,
+                    wiggum_input,
                 )
-                .await;
-                emit_input_progress(
-                    &state.ws_write,
-                    state.session_id,
-                    wiggum_input.client_msg_id,
-                    shared::InputDeliveryStage::ProxyReceived,
-                )
-                .await;
-                let prompt = wiggum_prompt(&wiggum_input.text);
-                state.wiggum_state = Some(WiggumState {
-                    original_prompt: wiggum_input.text,
-                    iteration: 1,
-                    loop_start: Instant::now(),
-                    loop_durations: Vec::new(),
-                });
-                if let Err(e) = claude_session.send_input(serde_json::Value::String(prompt)).await {
-                    error!("Failed to send wiggum prompt to Claude: {}", e);
-                    emit_input_progress(
-                        &state.ws_write,
-                        state.session_id,
-                        wiggum_input.client_msg_id,
-                        shared::InputDeliveryStage::Failed,
-                    )
-                    .await;
-                    return ConnectionResult::ClaudeExited;
+                .await
+                {
+                    return result;
                 }
-                emit_input_progress(
-                    &state.ws_write,
-                    state.session_id,
-                    wiggum_input.client_msg_id,
-                    shared::InputDeliveryStage::AgentAccepted,
-                )
-                .await;
-                ack_portal_input(&state.ws_write, wiggum_input.ack).await;
             }
 
             Some(upload_event) = state.file_upload_rx.recv() => {

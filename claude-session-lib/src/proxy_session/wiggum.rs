@@ -8,12 +8,17 @@ use claude_codes::ClaudeOutput;
 use shared::{AgentType, ProxyToServer};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use session_lib::agent::Agent;
 use session_lib::output_buffer::PendingOutputBuffer;
 use session_lib::session::Session;
 
-use super::{format_duration, ConnectionResult, SharedWsWrite};
+use super::git_metadata::{check_and_send_branch_update_if_branch_changed, GitMetadataState};
+use super::{
+    ack_portal_input, emit_input_progress, format_duration, truncate, ConnectionResult,
+    PortalInput, SharedWsWrite,
+};
 
 /// Maximum iterations for wiggum mode before auto-stopping
 const WIGGUM_MAX_ITERATIONS: u32 = 50;
@@ -38,6 +43,74 @@ pub struct WiggumState {
     pub loop_start: Instant,
     /// Durations of the last N loop iterations (most recent last)
     pub loop_durations: Vec<Duration>,
+}
+
+/// Wiggum-activation arm of the proxy connection loop (#1165 item 3).
+///
+/// Extracted from the `run_main_loop` `select!` so the god-loop reads as thin
+/// dispatch (parallels [`input_delivery::handle_input`](super::input_delivery)).
+/// Sets [`WiggumState`] atomically with sending the first iteration's prompt,
+/// emitting the [`InputDeliveryStage`](shared::InputDeliveryStage) progress
+/// events (#939) along the way. Returns `Some(ConnectionResult)` to end the
+/// connection (agent exited), or `None` to continue the loop.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn handle_wiggum_activation<A: Agent>(
+    ws_write: &SharedWsWrite,
+    session_id: Uuid,
+    working_directory: &str,
+    git_metadata: &GitMetadataState,
+    wiggum_state: &mut Option<WiggumState>,
+    claude_session: &mut Session<A>,
+    wiggum_input: PortalInput,
+) -> Option<ConnectionResult> {
+    info!(
+        "Wiggum mode activated with prompt: {}",
+        truncate(&wiggum_input.text, 60)
+    );
+    check_and_send_branch_update_if_branch_changed(
+        ws_write,
+        session_id,
+        working_directory,
+        git_metadata,
+    )
+    .await;
+    emit_input_progress(
+        ws_write,
+        session_id,
+        wiggum_input.client_msg_id,
+        shared::InputDeliveryStage::ProxyReceived,
+    )
+    .await;
+    let prompt = wiggum_prompt(&wiggum_input.text);
+    *wiggum_state = Some(WiggumState {
+        original_prompt: wiggum_input.text,
+        iteration: 1,
+        loop_start: Instant::now(),
+        loop_durations: Vec::new(),
+    });
+    if let Err(e) = claude_session
+        .send_input(serde_json::Value::String(prompt))
+        .await
+    {
+        error!("Failed to send wiggum prompt to Claude: {}", e);
+        emit_input_progress(
+            ws_write,
+            session_id,
+            wiggum_input.client_msg_id,
+            shared::InputDeliveryStage::Failed,
+        )
+        .await;
+        return Some(ConnectionResult::ClaudeExited);
+    }
+    emit_input_progress(
+        ws_write,
+        session_id,
+        wiggum_input.client_msg_id,
+        shared::InputDeliveryStage::AgentAccepted,
+    )
+    .await;
+    ack_portal_input(ws_write, wiggum_input.ack).await;
+    None
 }
 
 /// Handle a session event from session-lib, with wiggum loop support
