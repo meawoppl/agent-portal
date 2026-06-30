@@ -23,6 +23,10 @@ inputs:
     description: Install trunk via cargo
     required: false
     default: "false"
+  trunk-version:
+    description: Trunk version to install when trunk is enabled
+    required: false
+    default: "0.21.14"
 
 runs:
   using: composite
@@ -64,7 +68,22 @@ runs:
       with:
         shared-key: ${{ inputs.cache-key }}
 
+    - name: Cache trunk binary
+      if: inputs.trunk == 'true'
+      id: cache-trunk
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/trunk
+          ~/.cache/trunk
+        key: ${{ runner.os }}-trunk-${{ inputs.trunk-version }}
+
     - name: Install trunk
+      if: inputs.trunk == 'true' && steps.cache-trunk.outputs.cache-hit != 'true'
+      shell: bash
+      run: cargo install trunk --locked --version "${{ inputs.trunk-version }}"
+
+    - name: Verify trunk
       if: inputs.trunk == 'true'
       shell: bash
-      run: cargo install trunk --locked
+      run: trunk --version
