@@ -149,6 +149,43 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    # Dedicated job for DB-backed integration tests (#1209 item 1). Kept
+    # separate from `Tests` so only the harness — which self-migrates a fresh
+    # Postgres — runs against a DB; the main test lane stays DB-free.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: claude_portal
+          POSTGRES_USER: claude_portal
+          POSTGRES_PASSWORD: dev_password_change_in_production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U claude_portal"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stub frontend dist
+        run: mkdir -p frontend/dist
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: "e2e"
+          protoc: "true"
+
+      - name: Run E2E harness
+        env:
+          DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
+        run: cargo test -p backend --test harness
+
   build-binaries:
     name: ${{ matrix.job-name }}
     runs-on: ${{ matrix.runner }}
