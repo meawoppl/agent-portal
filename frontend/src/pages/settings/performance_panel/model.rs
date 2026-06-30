@@ -80,15 +80,22 @@ pub(super) fn bucket_index(buckets: &[DateTime<Utc>], ts: DateTime<Utc>) -> Opti
 }
 
 /// Build the bucket-granularity query string for the selected window.
-/// Pick high-fidelity buckets for the selected window. The charts only render
-/// a handful of x-axis labels, so dense buckets preserve real per-turn shape
-/// without cluttering the axis.
+///
+/// Bucket width is chosen so each bucket holds *enough turns* for its
+/// percentile/rate aggregates to be stable — the dashboard is for spotting
+/// trends, not per-minute shape. The old very-fine widths (1m over 6h = 360
+/// buckets, hourly over 90d = 2160) put 1-2 turns in most buckets, so each
+/// "p50/p95" was effectively a single turn's value and the lines were pure
+/// spike noise. These coarser widths trade temporal resolution for readable
+/// trends; the moving average in `series.rs` smooths whatever remains.
 pub(super) fn bucket_param(window: TimeWindow) -> &'static str {
     match window {
-        TimeWindow::Hours1 => "1m",
-        TimeWindow::Hours6 => "1m",
-        TimeWindow::Days1 => "5m",
-        TimeWindow::Days7 | TimeWindow::Days30 | TimeWindow::Days90 => "hour",
+        TimeWindow::Hours1 => "5m",  // 12 buckets
+        TimeWindow::Hours6 => "15m", // 24 buckets
+        TimeWindow::Days1 => "15m",  // 96 buckets
+        TimeWindow::Days7 => "hour", // 168 buckets
+        TimeWindow::Days30 => "day", // 30 buckets
+        TimeWindow::Days90 => "day", // 90 buckets
     }
 }
 
