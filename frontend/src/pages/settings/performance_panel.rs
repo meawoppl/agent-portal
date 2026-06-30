@@ -372,12 +372,15 @@ mod tests {
     /// itself is already subsampled to a few readable labels.
     #[test]
     fn bucket_param_dispatches_on_window_length() {
-        assert_eq!(bucket_param(TimeWindow::Hours1), "1m");
-        assert_eq!(bucket_param(TimeWindow::Hours6), "1m");
-        assert_eq!(bucket_param(TimeWindow::Days1), "5m");
+        // Widths are picked so each bucket holds enough turns for stable
+        // percentiles/rates (trend-readable, not per-minute spiky) — see
+        // `bucket_param`'s doc.
+        assert_eq!(bucket_param(TimeWindow::Hours1), "5m");
+        assert_eq!(bucket_param(TimeWindow::Hours6), "15m");
+        assert_eq!(bucket_param(TimeWindow::Days1), "15m");
         assert_eq!(bucket_param(TimeWindow::Days7), "hour");
-        assert_eq!(bucket_param(TimeWindow::Days30), "hour");
-        assert_eq!(bucket_param(TimeWindow::Days90), "hour");
+        assert_eq!(bucket_param(TimeWindow::Days30), "day");
+        assert_eq!(bucket_param(TimeWindow::Days90), "day");
     }
 
     #[test]

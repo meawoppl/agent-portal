@@ -30,6 +30,8 @@ pub(super) fn build_p50_p95_series(
             p50_vals.push(row.and_then(|r| p50(r)));
             p95_vals.push(row.and_then(|r| p95(r)));
         }
+        let p50_vals = smoothed(&p50_vals);
+        let p95_vals = smoothed(&p95_vals);
         if p50_vals.iter().any(Option::is_some) {
             out.push(LineSeries {
                 label: format!("{label} p50"),
@@ -145,6 +147,7 @@ pub(super) fn build_cache_hit_series(
             });
             vals.push(v);
         }
+        let vals = smoothed(&vals);
         if vals.iter().any(Option::is_some) {
             out.push(LineSeries {
                 label,
@@ -180,6 +183,7 @@ pub(super) fn build_cost_per_token_series(
             });
             vals.push(v);
         }
+        let vals = smoothed(&vals);
         if vals.iter().any(Option::is_some) {
             out.push(LineSeries {
                 label,
@@ -211,6 +215,8 @@ pub(super) fn build_auxiliary_token_series(
             thinking_vals.push(row.and_then(|r| positive_i64(r.thinking_tokens_sum)));
             subagent_vals.push(row.and_then(|r| positive_i64(r.subagent_tokens_sum)));
         }
+        let thinking_vals = smoothed(&thinking_vals);
+        let subagent_vals = smoothed(&subagent_vals);
         if thinking_vals.iter().any(Option::is_some) {
             out.push(LineSeries {
                 label: format!("{label} thinking"),
@@ -233,4 +239,53 @@ pub(super) fn build_auxiliary_token_series(
 
 fn positive_i64(value: i64) -> Option<f64> {
     (value > 0).then_some(value as f64)
+}
+
+/// Half-window for the trend moving average: each present point is averaged
+/// with up to this many present neighbors on each side (a 3-point window).
+/// Gentle on purpose — coarser buckets already do most of the de-noising; this
+/// just smooths the residual per-bucket jitter so trends read cleanly.
+const SMOOTH_HALF_WINDOW: usize = 1;
+
+/// Centered moving-average smoothing for a per-bucket line series (#1209 item 4).
+///
+/// Gaps are preserved: a `None` slot (the group had no turns in that bucket)
+/// stays `None` — we never invent data across a gap. A present point is
+/// replaced by the mean of the present values within `±SMOOTH_HALF_WINDOW`
+/// indices, so an isolated slow/fast turn no longer reads as a full spike.
+fn smoothed(values: &[Option<f64>]) -> Vec<Option<f64>> {
+    (0..values.len())
+        .map(|i| {
+            values[i]?; // keep gaps as gaps — don't smooth across missing buckets
+            let lo = i.saturating_sub(SMOOTH_HALF_WINDOW);
+            let hi = (i + SMOOTH_HALF_WINDOW + 1).min(values.len());
+            let present: Vec<f64> = values[lo..hi].iter().filter_map(|v| *v).collect();
+            (!present.is_empty()).then(|| present.iter().sum::<f64>() / present.len() as f64)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::smoothed;
+
+    #[test]
+    fn smoothing_averages_present_neighbors_and_preserves_gaps() {
+        // A spike at index 2 (10.0) is pulled down toward its neighbors;
+        // the `None` gap at index 4 stays a gap.
+        let input = vec![Some(0.0), Some(0.0), Some(10.0), Some(0.0), None, Some(6.0)];
+        let out = smoothed(&input);
+
+        assert_eq!(out[0], Some(0.0)); // (0+0)/2
+        assert!((out[2].unwrap() - (10.0 / 3.0)).abs() < 1e-9); // (0+10+0)/3 — spike flattened
+        assert_eq!(out[4], None, "missing bucket must stay missing");
+        // index 5: neighbor 4 is None, so only the present value 6.0 averages.
+        assert_eq!(out[5], Some(6.0));
+    }
+
+    #[test]
+    fn smoothing_all_none_stays_all_none() {
+        let input = vec![None, None, None];
+        assert_eq!(smoothed(&input), vec![None, None, None]);
+    }
 }
