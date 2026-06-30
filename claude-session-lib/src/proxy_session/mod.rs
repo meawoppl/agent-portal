@@ -7,6 +7,7 @@ mod input_delivery;
 mod output_forwarder;
 mod permission_bridge;
 mod portal_reminder;
+mod session_event;
 mod wiggum;
 mod ws_reader;
 
@@ -24,7 +25,6 @@ use claude_codes::ClaudeOutput;
 use session_lib::agent::Agent;
 use session_lib::output_buffer::PendingOutputBuffer;
 use session_lib::session::Session;
-use session_lib::SessionEvent;
 use shared::{ProxyToServer, ServerToProxy, SessionEndpoint};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
@@ -32,12 +32,9 @@ use uuid::Uuid;
 
 pub use git_metadata::{get_git_branch, get_repo_url};
 
-use git_metadata::{
-    check_and_send_branch_update, codex_output_has_git_signal, get_open_prs, get_pr_url,
-    GitMetadataState, GitRefreshTrigger,
-};
+use git_metadata::{get_open_prs, get_pr_url, GitMetadataState, GitRefreshTrigger};
 use output_forwarder::spawn_output_forwarder;
-use wiggum::{handle_session_event_with_wiggum, WiggumState};
+use wiggum::WiggumState;
 use ws_reader::{
     spawn_ws_reader, FileDownloadEvent, FileReceiveState, FileUploadEvent, WsReaderChannels,
 };
@@ -1003,109 +1000,10 @@ async fn run_main_loop<A: Agent>(
             }
 
             event = claude_session.next_event() => {
-                // Both backends now deliver visible output as the neutral
-                // `SessionEvent::RawOutput(value)`. Route by agent at the proxy
-                // edge: Codex uses this simple inline path; Claude falls through
-                // to the wiggum/output-forwarder path, which re-parses the value
-                // to `ClaudeOutput` for its image/git/echo/wiggum side-effects.
-                if state.agent_type != shared::AgentType::Claude {
-                  if let Some(SessionEvent::RawOutput(ref value)) = event {
-                    if state.git_refresh.should_check_before_message() {
-                        check_and_send_branch_update(
-                            &state.ws_write,
-                            state.session_id,
-                            &state.working_directory,
-                            &state.git_metadata,
-                        )
-                        .await;
-                    }
-                    if codex_output_has_git_signal(value) {
-                        state.git_refresh.mark_git_signal();
-                    }
-
-                    let is_codex_compaction = is_codex_compaction_event(value);
-                    let seq = {
-                        let mut buf = state.output_buffer.lock().await;
-                        buf.push(value.clone())
-                    };
-                    let msg = ProxyToServer::SequencedOutput {
-                        seq,
-                        content: value.clone(),
-                        agent_type: state.agent_type,
-                    };
-                    let mut ws = state.ws_write.lock().await;
-                    if ws.send(msg).await.is_err() {
-                        error!("Failed to send raw output");
-                        return ConnectionResult::Disconnected(state.connection_start.elapsed());
-                    }
-                    if is_codex_compaction {
-                        inject_portal_reminder(claude_session).await;
-                    }
-                    continue;
-                  }
-                }
-
-                // Per-turn metrics: forward as a typed `TurnMetricsReport`
-                // envelope. Doesn't go through the output buffer because
-                // it's not part of the message-replay path — a missed
-                // metrics row is acceptable (next turn replaces it on the
-                // dashboard) but we still want low-latency delivery.
-                if let Some(SessionEvent::TurnMetricsReady(metrics)) = event {
-                    let msg = ProxyToServer::TurnMetricsReport(metrics);
-                    let mut ws = state.ws_write.lock().await;
-                    if ws.send(msg).await.is_err() {
-                        error!("Failed to send turn metrics report");
-                        return ConnectionResult::Disconnected(state.connection_start.elapsed());
-                    }
-                    continue;
-                }
-
-                // Codex app-server thread id: hand it to the persistence
-                // sink (the proxy's ProxyConfig writer) so the next resume
-                // of this session can call `thread/resume` with it.
-                // Emitted once per spawn by codex-session-lib. No-op for
-                // claude sessions (claude doesn't emit it).
-                if let Some(SessionEvent::CodexThreadId(thread_id)) = event {
-                    if let Some(sink) = state.codex_thread_id_sink.as_ref() {
-                        sink(thread_id);
-                    }
-                    continue;
-                }
-
-                if let Some(SessionEvent::SessionLimitReached {
-                    session_id,
-                    reset_at,
-                    source_message,
-                    prompt,
-                }) = event
+                if let Some(result) =
+                    session_event::handle_next_event(state, claude_session, event).await
                 {
-                    let msg =
-                        ProxyToServer::SessionLimitReached(shared::SessionLimitContinuationFields {
-                            session_id,
-                            reset_at,
-                            source_message,
-                            prompt,
-                        });
-                    let mut ws = state.ws_write.lock().await;
-                    if ws.send(msg).await.is_err() {
-                        error!("Failed to send session-limit continuation candidate");
-                        return ConnectionResult::Disconnected(state.connection_start.elapsed());
-                    }
-                    continue;
-                }
-
-                match handle_session_event_with_wiggum(
-                    event,
-                    &state.output_tx,
-                    &state.ws_write,
-                    state.connection_start,
-                    &mut state.wiggum_state,
-                    &state.output_buffer,
-                    claude_session,
-                    state.agent_type,
-                ).await {
-                    Some(result) => return result,
-                    None => continue,
+                    return result;
                 }
             }
         }
