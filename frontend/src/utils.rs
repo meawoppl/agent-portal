@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use serde::de::DeserializeOwned;
 use web_sys::window;
 
@@ -65,7 +62,9 @@ pub async fn fetch_json<T: DeserializeOwned>(path: &str, on_401: On401) -> Resul
 
 /// Get the base HTTP URL (e.g., "http://localhost:3000" or "https://myapp.com")
 pub fn get_base_url() -> String {
-    let window = window().expect("no global window");
+    let Some(window) = window() else {
+        return "http://localhost:3000".to_string();
+    };
     let location = window.location();
 
     let protocol = location.protocol().unwrap_or_else(|_| "http:".to_string());
@@ -78,7 +77,9 @@ pub fn get_base_url() -> String {
 
 /// Get the WebSocket URL (e.g., "ws://localhost:3000" or "wss://myapp.com")
 pub fn get_ws_url() -> String {
-    let window = window().expect("no global window");
+    let Some(window) = window() else {
+        return "ws://localhost:3000".to_string();
+    };
     let location = window.location();
 
     let protocol = location.protocol().unwrap_or_else(|_| "http:".to_string());
@@ -103,14 +104,21 @@ pub fn ws_url(path: &str) -> String {
 /// Format a dollar amount with commas (e.g., 1234.56 -> "$1,234.56")
 pub fn format_dollars(amount: f64) -> String {
     let formatted = format!("{:.2}", amount);
-    let (integer, decimal) = formatted.split_once('.').unwrap();
-    let with_commas: String = integer
+    let Some((integer, decimal)) = formatted.split_once('.') else {
+        return format!("${formatted}");
+    };
+    let negative = integer.starts_with('-');
+    let digits = integer.strip_prefix('-').unwrap_or(integer);
+    let mut with_commas = digits
         .as_bytes()
         .rchunks(3)
         .rev()
-        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .map(|chunk| chunk.iter().map(|byte| *byte as char).collect::<String>())
         .collect::<Vec<_>>()
         .join(",");
+    if negative {
+        with_commas.insert(0, '-');
+    }
     format!("${}.{}", with_commas, decimal)
 }
 
@@ -212,6 +220,19 @@ mod tests {
     }
 
     // --- format_token_count ---
+
+    #[test]
+    fn format_dollars_adds_commas_and_keeps_two_decimals() {
+        assert_eq!(format_dollars(0.0), "$0.00");
+        assert_eq!(format_dollars(12.3), "$12.30");
+        assert_eq!(format_dollars(1_234.56), "$1,234.56");
+        assert_eq!(format_dollars(1_234_567.89), "$1,234,567.89");
+    }
+
+    #[test]
+    fn format_dollars_handles_negative_amounts() {
+        assert_eq!(format_dollars(-1_234.5), "$-1,234.50");
+    }
 
     #[test]
     fn format_token_count_magnitudes() {
