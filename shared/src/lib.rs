@@ -424,7 +424,13 @@ impl PortalMessage {
             return None;
         };
         Some(format!(
-            "[message from {from_agent_type} {from_session_id}]\n{text}"
+            "[message from {from_agent_type} {from_session_id}]\n{text}\n\n\
+<system-reminder>\n\
+This message came from another agent. Reply to that agent, not the user.\n\
+Sender session id: {from_session_id}\n\
+Reply with:\n\
+agent-portal message send {from_session_id} \"your reply\"\n\
+</system-reminder>"
         ))
     }
 
@@ -595,10 +601,13 @@ mod tests {
             "12345678-0000-0000-0000-000000000000".to_string(),
             "hello there".to_string(),
         );
-        assert_eq!(
-            msg.agent_facing_text().as_deref(),
-            Some("[message from codex 12345678-0000-0000-0000-000000000000]\nhello there")
-        );
+        let text = msg.agent_facing_text().expect("agent-facing text");
+        assert!(text
+            .starts_with("[message from codex 12345678-0000-0000-0000-000000000000]\nhello there"));
+        assert!(text.contains("Reply to that agent, not the user."));
+        assert!(text.contains(
+            "agent-portal message send 12345678-0000-0000-0000-000000000000 \"your reply\""
+        ));
     }
 
     #[test]
@@ -687,12 +696,13 @@ mod tests {
         assert_eq!(json["content"][0]["type"], "agent_message");
         assert_eq!(json["content"][0]["from_agent_type"], "codex");
         assert_eq!(json["content"][0]["text"], "hello from another agent");
-        assert_eq!(
-            msg.agent_facing_text().as_deref(),
-            Some(
-                "[message from codex 12345678-0000-0000-0000-000000000000]\nhello from another agent"
-            )
-        );
+        let text = msg.agent_facing_text().expect("agent-facing text");
+        assert!(text.starts_with(
+            "[message from codex 12345678-0000-0000-0000-000000000000]\nhello from another agent"
+        ));
+        assert!(text.contains(
+            "agent-portal message send 12345678-0000-0000-0000-000000000000 \"your reply\""
+        ));
     }
 
     #[test]
