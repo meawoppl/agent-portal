@@ -1,6 +1,7 @@
 //! Proxy session management and WebSocket connection handling.
 
 mod git_metadata;
+mod heartbeat_watchdog;
 mod image_uploader;
 mod input_delivery;
 mod output_forwarder;
@@ -914,49 +915,14 @@ async fn run_main_loop<A: Agent>(
     loop {
         tokio::select! {
             _ = heartbeat_interval.tick() => {
-                if state.heartbeat.is_expired() {
-                    warn!(
-                        "No heartbeat response in {}s, forcing reconnect",
-                        state.heartbeat.elapsed_secs()
-                    );
-                    return ConnectionResult::Disconnected(state.connection_start.elapsed());
-                }
-                // Bound the heartbeat lock+send. On a half-dead socket (e.g.
-                // after a backend restart) the send can block forever; that
-                // starves this `select!` so the disconnect / graceful-shutdown
-                // arms never fire and the data plane reconnects never — the
-                // session is "shown but not connected" until the launcher is
-                // restarted (#926). Timing out the lock acquisition *and* the
-                // send makes this heartbeat a true watchdog: even if another
-                // ws_write send is wedged holding the lock, this fires and
-                // returns `Disconnected`, letting `run_connection_loop`'s
-                // reconnect/backoff recover the connection.
-                let send = async {
-                    let mut ws = state.ws_write.lock().await;
-                    ws.send(ProxyToServer::Heartbeat).await
-                };
-                match tokio::time::timeout(
-                    session_lib::heartbeat::HEARTBEAT_TIMEOUT,
-                    send,
+                if let Some(result) = heartbeat_watchdog::tick(
+                    &state.heartbeat,
+                    &state.ws_write,
+                    state.connection_start,
                 )
                 .await
                 {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        warn!("Heartbeat send failed ({e}), forcing reconnect");
-                        return ConnectionResult::Disconnected(
-                            state.connection_start.elapsed(),
-                        );
-                    }
-                    Err(_) => {
-                        warn!(
-                            "Heartbeat send blocked >{}s (dead socket), forcing reconnect",
-                            session_lib::heartbeat::HEARTBEAT_TIMEOUT.as_secs()
-                        );
-                        return ConnectionResult::Disconnected(
-                            state.connection_start.elapsed(),
-                        );
-                    }
+                    return result;
                 }
             }
 
