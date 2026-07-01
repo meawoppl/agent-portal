@@ -16,6 +16,7 @@ mod component;
 pub(super) mod helpers;
 mod history;
 mod input_bar;
+mod outbox;
 mod permission_handler;
 mod state;
 mod tasks_panel;

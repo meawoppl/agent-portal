@@ -29,6 +29,7 @@ use super::helpers::{
     update_pending_send_delivery, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
+use super::outbox::Outbox;
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
 };
@@ -169,6 +170,9 @@ pub struct SessionView {
     messages: Vec<RenderedMessage>,
     ws_connected: bool,
     ws_sender: Option<WsSender>,
+    /// Unacked `AgentInput` frames, resent on reconnect so inputs typed while
+    /// the socket is down aren't silently dropped. See [`Outbox`].
+    outbox: Outbox,
     messages_ref: NodeRef,
     should_autoscroll: bool,
     #[allow(dead_code)]
@@ -272,6 +276,7 @@ impl Component for SessionView {
             messages: vec![],
             ws_connected: false,
             ws_sender: None,
+            outbox: Outbox::default(),
             messages_ref: NodeRef::default(),
             should_autoscroll: true,
             scroll_listener: None,
@@ -371,6 +376,10 @@ impl Component for SessionView {
                 self.ws_sender = Some(sender);
                 self.reconnect_attempt = 0;
                 self.reconnect_timer = None;
+                // Flush inputs typed while the socket was down. Only frames
+                // never handed to the transport are resent, so this can't
+                // duplicate anything the backend already received.
+                self.flush_outbox();
                 let session_id = ctx.props().session.id;
                 ctx.props().on_connected_change.emit((session_id, true));
                 true
@@ -421,13 +430,23 @@ impl Component for SessionView {
                 self.send_text_input(input, mode);
                 true
             }
-            SessionViewMsg::SendFrame(frame) => {
-                let (frame, changed) = self.prepare_outbound_frame(frame);
-                if let Some(ref sender) = self.ws_sender {
-                    send_message(sender, frame);
+            SessionViewMsg::SendFrame(frame) => match frame {
+                // User input goes through the outbox so it survives a
+                // reconnect; other frames (interrupts, permission responses)
+                // are transient and fire-and-forget.
+                ClientToServer::AgentInput {
+                    content, send_mode, ..
+                } => {
+                    self.dispatch_agent_input(content, send_mode);
+                    true
                 }
-                changed
-            }
+                other => {
+                    if let Some(ref sender) = self.ws_sender {
+                        send_message(sender, other);
+                    }
+                    false
+                }
+            },
             SessionViewMsg::MessageSent => {
                 let session_id = ctx.props().session.id;
                 ctx.props().on_message_sent.emit(session_id);
@@ -649,12 +668,23 @@ impl SessionView {
                 client_msg_id,
                 stage,
                 message,
-            } => update_pending_send_delivery(
-                &mut self.pending_sends,
-                client_msg_id,
-                stage,
-                message.as_deref(),
-            ),
+            } => {
+                // Terminal outcome — the backend has taken responsibility
+                // (accepted) or given up (failed); either way stop tracking it
+                // for resend so a later reconnect won't re-deliver.
+                if matches!(
+                    stage,
+                    shared::InputDeliveryStage::AgentAccepted | shared::InputDeliveryStage::Failed
+                ) {
+                    self.outbox.resolve(client_msg_id);
+                }
+                update_pending_send_delivery(
+                    &mut self.pending_sends,
+                    client_msg_id,
+                    stage,
+                    message.as_deref(),
+                )
+            }
             WsEvent::ContinuationStatus {
                 continuation_id,
                 status,
@@ -701,65 +731,71 @@ impl SessionView {
         ctx.link().send_message(SessionViewMsg::CheckAwaiting);
     }
 
-    /// Translate a plain-text submission from `InputBar` into the optimistic
-    /// local echo + the `ClientToServer::ClaudeInput` WS frame. The bar has
-    /// already trimmed and cleared its textarea, and already emitted
-    /// `MessageSent` (which we forward to `on_message_sent` separately);
-    /// we just package the wire frame and local echo.
+    /// Translate a plain-text submission from `InputBar` into an outbox-tracked
+    /// `AgentInput`. The bar has already trimmed and cleared its textarea and
+    /// emitted `MessageSent` separately; we just dispatch the input.
     fn send_text_input(&mut self, input: String, send_mode: SendMode) {
         if input.is_empty() {
             return;
         }
-        let now_iso = js_sys::Date::new_0()
-            .to_iso_string()
-            .as_string()
-            .unwrap_or_default();
-        let client_msg_id = Uuid::new_v4();
-        self.pending_sends
-            .push(optimistic_user_message(&input, &now_iso, client_msg_id));
+        let send_mode = (send_mode != SendMode::Normal).then_some(send_mode);
+        self.dispatch_agent_input(serde_json::Value::String(input), send_mode);
+    }
 
-        if let Some(ref sender) = self.ws_sender {
-            let msg = ClientToServer::AgentInput {
-                content: serde_json::Value::String(input),
-                send_mode: if send_mode == SendMode::Normal {
-                    None
-                } else {
-                    Some(send_mode)
-                },
-                client_msg_id: Some(client_msg_id),
-            };
-            send_message(sender, msg);
+    /// Optimistically echo an `AgentInput`, record it in the outbox (assigning a
+    /// fresh `client_msg_id`), and try to transmit. If the socket is down — or
+    /// the send fails — the entry stays queued and is flushed on the next
+    /// reconnect, so the input is never silently lost.
+    fn dispatch_agent_input(&mut self, content: serde_json::Value, send_mode: Option<SendMode>) {
+        let client_msg_id = Uuid::new_v4();
+        if let Some(text) = content.as_str() {
+            let now_iso = js_sys::Date::new_0()
+                .to_iso_string()
+                .as_string()
+                .unwrap_or_default();
+            self.pending_sends
+                .push(optimistic_user_message(text, &now_iso, client_msg_id));
+        }
+        let frame = ClientToServer::AgentInput {
+            content,
+            send_mode,
+            client_msg_id: Some(client_msg_id),
+        };
+        for dropped in self.outbox.record(client_msg_id, frame.clone()) {
+            // Evicted from a full outbox — surface as failed rather than leave
+            // it displaying as forever-pending.
+            update_pending_send_delivery(
+                &mut self.pending_sends,
+                dropped,
+                shared::InputDeliveryStage::Failed,
+                Some("send backlog full"),
+            );
+        }
+        self.transmit_input(client_msg_id, frame);
+    }
+
+    /// Hand a recorded frame to the transport, marking it transmitted on
+    /// success. A failure (no socket / closing channel) leaves it queued for
+    /// the reconnect flush.
+    fn transmit_input(&mut self, client_msg_id: Uuid, frame: ClientToServer) {
+        if let Some(sender) = self.ws_sender.clone() {
+            if send_message(&sender, frame) {
+                self.outbox.mark_transmitted(client_msg_id);
+            }
         }
     }
 
-    fn prepare_outbound_frame(&mut self, frame: ClientToServer) -> (ClientToServer, bool) {
-        match frame {
-            ClientToServer::AgentInput {
-                content,
-                send_mode,
-                client_msg_id: _,
-            } => {
-                let client_msg_id = Uuid::new_v4();
-                let mut changed = false;
-                if let Some(text) = content.as_str() {
-                    let now_iso = js_sys::Date::new_0()
-                        .to_iso_string()
-                        .as_string()
-                        .unwrap_or_default();
-                    self.pending_sends
-                        .push(optimistic_user_message(text, &now_iso, client_msg_id));
-                    changed = true;
-                }
-                (
-                    ClientToServer::AgentInput {
-                        content,
-                        send_mode,
-                        client_msg_id: Some(client_msg_id),
-                    },
-                    changed,
-                )
+    /// Resend every outbox frame not yet handed to the transport. Called on
+    /// reconnect. Dup-free: already-transmitted frames are skipped, so a frame
+    /// the backend already received is never sent twice.
+    fn flush_outbox(&mut self) {
+        let Some(sender) = self.ws_sender.clone() else {
+            return;
+        };
+        for (client_msg_id, frame) in self.outbox.untransmitted() {
+            if send_message(&sender, frame) {
+                self.outbox.mark_transmitted(client_msg_id);
             }
-            other => (other, false),
         }
     }
 
