@@ -228,17 +228,18 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     }
 }
 
-/// Send a message over WebSocket.
+/// Send a message over WebSocket. Returns whether the frame was accepted.
 ///
 /// Pushes onto an unbounded mpsc queue drained by a single owner task — see
 /// the `connect_websocket` drain loop. This means concurrent callers (e.g.
 /// the file-upload chunk loop in `component.rs`) can never race each other
 /// into a "sink temporarily missing, drop the message" hole (closes #783).
-/// A failure here only means the WebSocket task already exited (e.g. the
-/// connection closed); the caller doesn't have anywhere useful to surface
-/// that, so we swallow it to match the prior non-erroring signature.
-pub fn send_message(sender: &WsSender, msg: ClientToServer) {
-    let _ = sender.unbounded_send(msg);
+/// A `false` return means the WebSocket task already exited (the connection is
+/// closing); the input outbox uses this to keep the frame queued for resend on
+/// reconnect instead of dropping it. Callers with nowhere to surface it can
+/// ignore the result.
+pub fn send_message(sender: &WsSender, msg: ClientToServer) -> bool {
+    sender.unbounded_send(msg).is_ok()
 }
 
 #[cfg(test)]
