@@ -30,6 +30,7 @@ pub mod output_buffer;
 pub mod probe;
 pub mod session;
 pub mod snapshot;
+pub mod tunnel;
 pub mod turn_tracker;
 
 pub use adapter::{AgentOutput, AgentOutputClassifier, ClaudeAdapter, PermissionDecision};
