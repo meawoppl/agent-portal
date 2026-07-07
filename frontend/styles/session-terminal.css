@@ -89,6 +89,50 @@
     white-space: nowrap;
 }
 
+/* Port-forward chips (docs/PORT_FORWARDING.md) */
+.session-view-header .session-forwards {
+    display: inline-flex;
+    gap: 0.35rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.session-view-header .forward-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.78rem;
+    font-family: monospace;
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(125, 207, 255, 0.1);
+    white-space: nowrap;
+}
+
+.session-view-header .forward-chip a {
+    color: var(--text-teal, #7dcfff);
+    text-decoration: none;
+}
+
+.session-view-header .forward-chip a:hover {
+    text-decoration: underline;
+}
+
+.session-view-header .forward-chip-revoke {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    font-size: 0.95rem;
+}
+
+.session-view-header .forward-chip-revoke:hover {
+    color: var(--error);
+}
+
 .session-view-header .status {
     font-size: 0.8rem;
     padding: 0.25rem 0.75rem;

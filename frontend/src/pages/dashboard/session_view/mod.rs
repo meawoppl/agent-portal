@@ -13,6 +13,7 @@
 //! - `history.rs` - Command history management
 
 mod component;
+mod forward_chips;
 pub(super) mod helpers;
 mod history;
 mod input_bar;

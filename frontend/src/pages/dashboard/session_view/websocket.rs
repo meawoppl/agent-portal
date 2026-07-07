@@ -49,6 +49,9 @@ pub enum WsEvent {
         stage: InputDeliveryStage,
         message: Option<String>,
     },
+    /// The session's port-forward set changed; the view refetches
+    /// `GET /api/sessions/{id}/forwards` (docs/PORT_FORWARDING.md).
+    ForwardsChanged,
 }
 
 /// Connect to WebSocket and start receiving messages.
@@ -217,6 +220,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
                 continuation_id,
                 status,
             });
+        }
+        ServerToClient::ForwardsChanged { session_id: _ } => {
+            on_event.emit(WsEvent::ForwardsChanged);
         }
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
@@ -580,6 +586,7 @@ mod tests {
             WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",
             WsEvent::InputProgress { .. } => "InputProgress",
+            WsEvent::ForwardsChanged => "ForwardsChanged",
         }
     }
 }

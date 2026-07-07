@@ -24,6 +24,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::Element;
 use yew::prelude::*;
 
+use super::forward_chips::ForwardChips;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, is_claude_awaiting, reconcile_pending_sends,
     update_pending_send_delivery, ActivityTag,
@@ -218,6 +219,9 @@ pub struct SessionView {
     /// counter would buy nothing.
     turn_metrics: Vec<TurnMetrics>,
     continuation_statuses: HashMap<Uuid, String>,
+    /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
+    /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
+    forwards_refresh: u32,
 }
 
 impl Component for SessionView {
@@ -291,6 +295,7 @@ impl Component for SessionView {
             pending_sends: Vec::new(),
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
+            forwards_refresh: 0,
         }
     }
 
@@ -551,6 +556,13 @@ impl Component for SessionView {
         } else {
             "status disconnected"
         };
+        // Only the session owner may revoke a forward; the chip strip hides
+        // the revoke button for other members (the backend enforces this too).
+        let is_forward_owner = ctx
+            .props()
+            .current_user_id
+            .as_deref()
+            .is_some_and(|uid| uid == ctx.props().session.user_id.to_string());
 
         html! {
             <div class="session-view">
@@ -566,6 +578,11 @@ impl Component for SessionView {
                             { format!("launcher v{}", version) }
                         </span>
                     }
+                    <ForwardChips
+                        session_id={ctx.props().session.id}
+                        is_owner={is_forward_owner}
+                        refresh={self.forwards_refresh}
+                    />
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
                 </div>
                 <div class="session-view-scroll-area">
@@ -692,6 +709,12 @@ impl SessionView {
                 ctx.link()
                     .send_message(SessionViewMsg::ContinuationStatus(continuation_id, status));
                 false
+            }
+            WsEvent::ForwardsChanged => {
+                // Bump the counter the chip strip watches; it refetches the
+                // forward list (docs/PORT_FORWARDING.md).
+                self.forwards_refresh = self.forwards_refresh.wrapping_add(1);
+                true
             }
         }
     }
