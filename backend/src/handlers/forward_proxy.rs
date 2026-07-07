@@ -431,8 +431,10 @@ async fn proxy_request(
             return plain_status(StatusCode::BAD_GATEWAY, "upstream handshake failed");
         }
     };
+    // `with_upgrades` keeps the connection driver alive after a 101 so the
+    // upgraded byte stream (WebSocket) stays readable/writable.
     tokio::spawn(async move {
-        if let Err(e) = conn.await {
+        if let Err(e) = conn.with_upgrades().await {
             debug!("Tunnel HTTP connection ended: {}", e);
         }
     });
@@ -442,12 +444,21 @@ async fn proxy_request(
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    let upstream_req = match build_upstream_request(req, port) {
+
+    // A client `Connection: Upgrade` + `Upgrade: websocket` request is
+    // passed through verbatim: keep the upgrade headers, grab the browser's
+    // pending upgrade before consuming the request, and if the upstream
+    // agrees (101) splice the two upgraded byte streams together.
+    let is_upgrade = wants_upgrade(req.headers());
+    let mut req = req;
+    let browser_upgrade = is_upgrade.then(|| hyper::upgrade::on(&mut req));
+
+    let upstream_req = match build_upstream_request(req, port, is_upgrade) {
         Ok(r) => r,
         Err(msg) => return plain_status(StatusCode::BAD_REQUEST, msg),
     };
 
-    let upstream_resp = match sender.send_request(upstream_req).await {
+    let mut upstream_resp = match sender.send_request(upstream_req).await {
         Ok(resp) => resp,
         Err(e) => {
             warn!("Tunnel upstream request failed: {}", e);
@@ -455,13 +466,76 @@ async fn proxy_request(
         }
     };
 
-    build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
+    let upstream_is_101 = upstream_resp.status() == StatusCode::SWITCHING_PROTOCOLS;
+    match (browser_upgrade, upstream_is_101) {
+        (Some(browser_upgrade), true) => {
+            let upstream_upgrade = hyper::upgrade::on(&mut upstream_resp);
+            tokio::spawn(splice_upgraded(browser_upgrade, upstream_upgrade));
+            // Relay the 101 (with its Upgrade/Connection/Sec-WebSocket-Accept
+            // headers) so the browser completes its handshake.
+            build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
+        }
+        // Upstream returned 101 to a request the browser never asked to
+        // upgrade — there is no browser-side splice, so refuse rather than
+        // send a dangling protocol switch.
+        (None, true) => {
+            warn!("Upstream returned 101 to a non-upgrade request; refusing");
+            plain_status(
+                StatusCode::BAD_GATEWAY,
+                "unexpected upstream protocol switch",
+            )
+        }
+        // Normal response (browser wanted an upgrade or not; upstream said no).
+        (_, false) => {
+            build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
+        }
+    }
+}
+
+/// True for a WebSocket-style upgrade request: some `Connection` value
+/// contains the `upgrade` token and `Upgrade` is present. Inspects *all*
+/// `Connection` header lines — a client may split `keep-alive` and `Upgrade`
+/// into separate fields, equivalent to comma-joining them.
+fn wants_upgrade(headers: &HeaderMap) -> bool {
+    let connection_upgrade = headers
+        .get_all(header::CONNECTION)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .any(|t| t.trim().eq_ignore_ascii_case("upgrade"));
+    connection_upgrade && headers.contains_key(header::UPGRADE)
+}
+
+/// Copy bytes both ways between the browser's upgraded connection and the
+/// upstream's, until either side closes. Both futures must resolve before any
+/// bytes flow (the 101s have been sent on both ends).
+async fn splice_upgraded(browser: hyper::upgrade::OnUpgrade, upstream: hyper::upgrade::OnUpgrade) {
+    let (browser_io, upstream_io) = match tokio::try_join!(browser, upstream) {
+        Ok(pair) => pair,
+        Err(e) => {
+            debug!("Upgrade handshake did not complete: {}", e);
+            return;
+        }
+    };
+    let mut browser_io = hyper_util::rt::TokioIo::new(browser_io);
+    let mut upstream_io = hyper_util::rt::TokioIo::new(upstream_io);
+    if let Err(e) = tokio::io::copy_bidirectional(&mut browser_io, &mut upstream_io).await {
+        debug!("Upgraded stream copy ended: {}", e);
+    }
 }
 
 /// Rewrite the browser request for the loopback upstream: origin-form URI,
 /// hop-by-hop headers stripped, portal credentials removed, `Host` pinned to
 /// `localhost:{port}` (defuses dev-server host checks), `X-Forwarded-*` set.
-fn build_upstream_request(req: Request, port: u16) -> Result<hyper::Request<Body>, &'static str> {
+///
+/// When `is_upgrade`, the `Connection` and `Upgrade` headers are preserved
+/// (and other hop-by-hop headers still stripped) so a WebSocket handshake
+/// reaches the upstream intact.
+fn build_upstream_request(
+    req: Request,
+    port: u16,
+    is_upgrade: bool,
+) -> Result<hyper::Request<Body>, &'static str> {
     let (parts, body) = req.into_parts();
 
     let path_and_query = parts
@@ -476,7 +550,10 @@ fn build_upstream_request(req: Request, port: u16) -> Result<hyper::Request<Body
 
     for (name, value) in parts.headers.iter() {
         let lower = name.as_str();
-        if HOP_BY_HOP.contains(&lower)
+        // On an upgrade, `connection` and `upgrade` are the handshake and must
+        // pass through; the rest of the hop-by-hop set is still dropped.
+        let keep_for_upgrade = is_upgrade && (lower == "connection" || lower == "upgrade");
+        if (HOP_BY_HOP.contains(&lower) && !keep_for_upgrade)
             || lower == "host"
             || lower == "authorization"
             || lower == "cookie"
@@ -526,6 +603,10 @@ fn build_downstream_response(
     original_host: Option<String>,
 ) -> Response {
     let (parts, body) = resp.into_parts();
+    // On a 101 the browser needs the `Connection` + `Upgrade` handshake
+    // headers; keep exactly those two and still strip the rest of hop-by-hop.
+    // (`Sec-WebSocket-Accept` isn't hop-by-hop, so it passes normally.)
+    let is_upgrade = parts.status == StatusCode::SWITCHING_PROTOCOLS;
     let mut response = Response::builder().status(parts.status);
     let headers = match response.headers_mut() {
         Some(h) => h,
@@ -545,7 +626,8 @@ fn build_downstream_response(
 
     for (name, value) in parts.headers.iter() {
         let lower = name.as_str();
-        if HOP_BY_HOP.contains(&lower) {
+        let keep_for_upgrade = is_upgrade && (lower == "connection" || lower == "upgrade");
+        if HOP_BY_HOP.contains(&lower) && !keep_for_upgrade {
             continue;
         }
         if (lower == "location" || lower == "content-location") && origin.is_some() {
@@ -641,6 +723,34 @@ mod tests {
         assert_eq!(validate_next("no-slash"), "/");
         assert_eq!(validate_next("/a\r\nSet-Cookie: x"), "/");
         assert_eq!(validate_next(&format!("/{}", "a".repeat(3000))), "/");
+    }
+
+    #[test]
+    fn wants_upgrade_detects_websocket_handshake() {
+        let ws = |conn: &str, has_upgrade: bool| {
+            let mut h = HeaderMap::new();
+            h.insert(header::CONNECTION, HeaderValue::from_str(conn).unwrap());
+            if has_upgrade {
+                h.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+            }
+            wants_upgrade(&h)
+        };
+        // Real browser sends `Connection: Upgrade` (sometimes with keep-alive).
+        assert!(ws("Upgrade", true));
+        assert!(ws("keep-alive, Upgrade", true));
+        assert!(ws("upgrade", true)); // case-insensitive token
+                                      // Missing either half is not an upgrade.
+        assert!(!ws("Upgrade", false));
+        assert!(!ws("keep-alive", true));
+        assert!(!wants_upgrade(&HeaderMap::new()));
+
+        // Split into two separate Connection header lines (RFC-legal) — the
+        // upgrade token must still be found regardless of field order.
+        let mut split = HeaderMap::new();
+        split.append(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+        split.append(header::CONNECTION, HeaderValue::from_static("Upgrade"));
+        split.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+        assert!(wants_upgrade(&split));
     }
 
     #[test]
