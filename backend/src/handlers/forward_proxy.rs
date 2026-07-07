@@ -466,37 +466,50 @@ async fn proxy_request(
         }
     };
 
-    if let Some(browser_upgrade) = browser_upgrade {
-        if upstream_resp.status() == StatusCode::SWITCHING_PROTOCOLS {
+    let upstream_is_101 = upstream_resp.status() == StatusCode::SWITCHING_PROTOCOLS;
+    match (browser_upgrade, upstream_is_101) {
+        (Some(browser_upgrade), true) => {
             let upstream_upgrade = hyper::upgrade::on(&mut upstream_resp);
             tokio::spawn(splice_upgraded(browser_upgrade, upstream_upgrade));
             // Relay the 101 (with its Upgrade/Connection/Sec-WebSocket-Accept
             // headers) so the browser completes its handshake.
-            return build_downstream_response(app_state, upstream_resp, session_id, port, original_host);
+            build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
         }
-        // Upstream declined the upgrade (non-101) — relay whatever it said.
+        // Upstream returned 101 to a request the browser never asked to
+        // upgrade — there is no browser-side splice, so refuse rather than
+        // send a dangling protocol switch.
+        (None, true) => {
+            warn!("Upstream returned 101 to a non-upgrade request; refusing");
+            plain_status(
+                StatusCode::BAD_GATEWAY,
+                "unexpected upstream protocol switch",
+            )
+        }
+        // Normal response (browser wanted an upgrade or not; upstream said no).
+        (_, false) => {
+            build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
+        }
     }
-
-    build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
 }
 
-/// True for a WebSocket-style upgrade request: `Connection` contains
-/// `upgrade` (token-wise) and `Upgrade` is present.
+/// True for a WebSocket-style upgrade request: some `Connection` value
+/// contains the `upgrade` token and `Upgrade` is present. Inspects *all*
+/// `Connection` header lines — a client may split `keep-alive` and `Upgrade`
+/// into separate fields, equivalent to comma-joining them.
 fn wants_upgrade(headers: &HeaderMap) -> bool {
     let connection_upgrade = headers
-        .get(header::CONNECTION)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("upgrade")));
+        .get_all(header::CONNECTION)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .any(|t| t.trim().eq_ignore_ascii_case("upgrade"));
     connection_upgrade && headers.contains_key(header::UPGRADE)
 }
 
 /// Copy bytes both ways between the browser's upgraded connection and the
 /// upstream's, until either side closes. Both futures must resolve before any
 /// bytes flow (the 101s have been sent on both ends).
-async fn splice_upgraded(
-    browser: hyper::upgrade::OnUpgrade,
-    upstream: hyper::upgrade::OnUpgrade,
-) {
+async fn splice_upgraded(browser: hyper::upgrade::OnUpgrade, upstream: hyper::upgrade::OnUpgrade) {
     let (browser_io, upstream_io) = match tokio::try_join!(browser, upstream) {
         Ok(pair) => pair,
         Err(e) => {
@@ -590,8 +603,9 @@ fn build_downstream_response(
     original_host: Option<String>,
 ) -> Response {
     let (parts, body) = resp.into_parts();
-    // On a 101 the `Connection`/`Upgrade`/`Sec-WebSocket-Accept` headers are
-    // the handshake the browser needs — pass hop-by-hop through untouched.
+    // On a 101 the browser needs the `Connection` + `Upgrade` handshake
+    // headers; keep exactly those two and still strip the rest of hop-by-hop.
+    // (`Sec-WebSocket-Accept` isn't hop-by-hop, so it passes normally.)
     let is_upgrade = parts.status == StatusCode::SWITCHING_PROTOCOLS;
     let mut response = Response::builder().status(parts.status);
     let headers = match response.headers_mut() {
@@ -612,7 +626,8 @@ fn build_downstream_response(
 
     for (name, value) in parts.headers.iter() {
         let lower = name.as_str();
-        if HOP_BY_HOP.contains(&lower) && !is_upgrade {
+        let keep_for_upgrade = is_upgrade && (lower == "connection" || lower == "upgrade");
+        if HOP_BY_HOP.contains(&lower) && !keep_for_upgrade {
             continue;
         }
         if (lower == "location" || lower == "content-location") && origin.is_some() {
@@ -724,10 +739,18 @@ mod tests {
         assert!(ws("Upgrade", true));
         assert!(ws("keep-alive, Upgrade", true));
         assert!(ws("upgrade", true)); // case-insensitive token
-        // Missing either half is not an upgrade.
+                                      // Missing either half is not an upgrade.
         assert!(!ws("Upgrade", false));
         assert!(!ws("keep-alive", true));
         assert!(!wants_upgrade(&HeaderMap::new()));
+
+        // Split into two separate Connection header lines (RFC-legal) — the
+        // upgrade token must still be found regardless of field order.
+        let mut split = HeaderMap::new();
+        split.append(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+        split.append(header::CONNECTION, HeaderValue::from_static("Upgrade"));
+        split.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+        assert!(wants_upgrade(&split));
     }
 
     #[test]
