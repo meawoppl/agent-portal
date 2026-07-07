@@ -173,12 +173,20 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Command::Forward { target, port }) => {
             return match target.as_str() {
+                // `list` and a bare port take no second arg; only `close`
+                // consumes one. Reject a stray port rather than ignoring it.
+                "list" if port.is_some() => {
+                    Err(anyhow::anyhow!("usage: agent-portal forward list"))
+                }
                 "list" => forward::list().await,
                 "close" => match port {
                     Some(p) => forward::close(p).await,
                     None => Err(anyhow::anyhow!("usage: agent-portal forward close <port>")),
                 },
                 other => match other.parse::<u16>() {
+                    Ok(_) if port.is_some() => {
+                        Err(anyhow::anyhow!("usage: agent-portal forward <port>"))
+                    }
                     Ok(p) => forward::open(p).await,
                     Err(_) => Err(anyhow::anyhow!(
                         "expected a port number, `list`, or `close <port>`, got `{other}`"
