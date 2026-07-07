@@ -96,6 +96,7 @@ TunnelRefused(TunnelRefusedFields),  // { stream_id: Uuid, error: String }
 TunnelData(TunnelDataFields),
 TunnelWindow(TunnelWindowFields),
 TunnelClose(TunnelCloseFields),
+ForwardStatus(ForwardStatusFields), // { port: u16, listening: bool, error: Option<String> }
 ```
 
 Semantics:
@@ -104,25 +105,43 @@ Semantics:
   `TcpStream::connect(("127.0.0.1", port))`, replies `TunnelOpened` or
   `TunnelRefused`. The proxy never dials anything but loopback — hard-coded,
   not configurable.
-- `TunnelData`: raw bytes, base64 inside the existing JSON text frames. The
-  ~33% overhead is accepted for v1; binary WS frames are listed under future
-  work.
+- `TunnelData`: raw bytes, base64 inside the existing JSON text frames, at
+  most **16 KiB decoded per frame**. The ~33% base64 overhead is accepted for
+  v1; binary WS frames are listed under future work.
 - Flow control: each direction starts with a 256 KiB window per stream. A
   sender must not exceed its window; the receiver grants more via
-  `TunnelWindow` as it drains bytes to the underlying socket. This bounds
-  memory per stream and prevents head-of-line starvation of session traffic.
+  `TunnelWindow` as it drains bytes to the underlying socket.
+- **Writer capacity, not just credit.** The session WS writer is an unbounded
+  mpsc on both sides today, so stream credit alone does not bound memory or
+  protect session traffic. Tunnel senders are pull-based: read from the TCP
+  socket / HTTP body only while holding *both* stream credit *and* tunnel
+  writer budget (a bounded per-connection cap, 64 queued `TunnelData` frames
+  across all streams), never eagerly. Streams with data ready are serviced
+  round-robin. Non-tunnel session messages (agent output, permissions,
+  heartbeats) bypass the tunnel budget entirely — tunnel traffic can starve
+  itself, never the session.
 - `TunnelClose`: either side; half-close is not modeled — close tears down the
   stream. On session WS disconnect, both sides drop all live streams; the
   browser sees 502s and retries land after the proxy reconnects.
 - Limits: at most 64 concurrent streams per session (a browser opens ~6 per
-  origin; SSE and WS connections are long-lived, so leave headroom). Idle
-  streams (no bytes either direction) time out after 120 s — long-lived SSE/WS
-  connections survive because heartbeats count as traffic.
+  origin; SSE and WS connections are long-lived, so leave headroom). Plain
+  streams idle out (no bytes either direction) after 300 s; **upgraded
+  (WebSocket) streams are exempt** from the idle timeout — a quiet Jupyter
+  kernel socket must survive, and the stream cap plus session lifetime bound
+  the resource. Quiet SSE streams whose server sends no keepalive comments
+  will be dropped at the idle timeout; `EventSource` auto-reconnects, which is
+  acceptable.
 
 `ForwardOpen`/`ForwardClose` keep the proxy's allowed-port set in sync as
 defense-in-depth; the authoritative allowlist is the backend DB (below). After
 a proxy reconnect the backend replays `ForwardOpen` for every active forward
-right after `RegisterAck`.
+right after `RegisterAck`. The proxy answers every `ForwardOpen` with
+`ForwardStatus`: it records the port in its allowlist, then probe-dials
+`127.0.0.1:{port}` and reports `listening` (plus an `error` string on refusal)
+so the registration API and CLI can warn when nothing is serving yet. A
+missing `ForwardStatus` after a short wait means the proxy predates this
+protocol — the API reports that cleanly ("proxy too old for forwarding")
+rather than leaving the CLI hanging.
 
 ## Registration: DB, API, CLI
 
@@ -178,8 +197,9 @@ agent-portal forward close <port> # revoke
   reverse map). If no session identity is available, error with "run this from
   inside an agent session".
 - On success prints exactly one URL line so agents can trivially relay it.
-  A warning line is added if the backend reports nothing listening on the port
-  (the proxy attempts a probe dial on `ForwardOpen` and reports the result).
+  A warning line is added when the proxy's `ForwardStatus` reply reports
+  nothing listening on the port, or when no `ForwardStatus` arrives (proxy
+  too old / not connected).
 
 ## Auth: token handoff to the forward origin
 
@@ -189,13 +209,21 @@ The forward origin cannot see the portal cookie. Flow:
    `GET /api/sessions/{id}/forwards/{port}/open?next=/some/path` —
    authenticated by the normal portal cookie.
 2. Backend mints a JWT with the existing `jwt_secret`:
-   claims `{ aud: "forward", session_id, exp: now + 60 s }`. It is a
-   single-purpose bootstrap token, deliberately not bound to a port — read
-   access is per-session, so one cookie can serve all of a session's forwards.
+   claims `{ aud: "forward", session_id, port, exp: now + 60 s }`. Binding the
+   port costs nothing (the redirect targets exactly one origin, and the
+   host-only cookie is per-origin anyway) and prevents cross-forward reuse of
+   a leaked token URL.
 3. `302` → `{scheme}://{port}--{session}.{domain}/__portal/auth?token=…&next=/some/path`.
-4. The forward-origin router validates the token, sets a `portal_fwd` cookie
-   (HttpOnly, `SameSite=Lax`, `Secure` when the scheme is https, host-only —
-   so it is scoped to that one forward origin) containing a session-scoped JWT
+   `next` is validated before use — it must be an origin-relative path:
+   starts with a single `/` (reject `//` and `/\`), no scheme/authority, no
+   control characters, ≤ 2048 bytes; anything else is replaced with `/`.
+   Without this, `/__portal/auth?next=…` is an open redirect on the forward
+   origin. The same validation applies where the forward origin bounces an
+   unauthenticated navigation back to the portal `open` endpoint.
+4. The forward-origin router validates the token (including that the token's
+   `port` matches the origin's), sets a `portal_fwd` cookie (HttpOnly,
+   `SameSite=Lax`, `Secure` when the scheme is https, host-only — so it is
+   scoped to that one forward origin) containing a `{ session_id, port }` JWT
    with a longer TTL (8 h), then `302` → `next`.
 5. Every subsequent request on that origin — including WebSocket upgrades —
    authenticates via the `portal_fwd` cookie.
@@ -209,7 +237,10 @@ WS) get a plain `401` — redirecting API calls causes confusing failures.
 ## The forward-origin router
 
 An Axum middleware (or `Router::fallback`-level dispatch) inspects `Host`
-before the normal router:
+before the normal router. The authority is normalized first — lowercase,
+strip any `:port` suffix (dev requests arrive as
+`8080--….localhost:3000`), strip a trailing dot — and only then is the first
+DNS label matched against the strict regex:
 
 - Host matches `{port}--{session}.{forward domain}` →
   - `/__portal/auth` → the handoff handler above.
@@ -236,8 +267,17 @@ Request rewriting, in the backend before bytes hit the tunnel:
   (Vite's `allowedHosts`, Django's `ALLOWED_HOSTS`).
 - Set `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host`.
 
-Responses pass through unmodified apart from hop-by-hop headers. No HTML/URL
-rewriting, ever — origin isolation makes it unnecessary.
+Response rewriting is limited to headers:
+
+- Strip hop-by-hop headers.
+- Rewrite `Location` (and `Content-Location`) values whose authority is
+  `localhost:{port}`, `127.0.0.1:{port}`, or `[::1]:{port}` back to the
+  forward origin — apps that saw `Host: localhost:{port}` emit absolute
+  redirects there, which would otherwise send the browser off-origin.
+- `Set-Cookie` passes through untouched; a `Domain=localhost` attribute is
+  the app's own (mis)behavior and scoping it is not our job.
+
+No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
 
 ## Security model
 
@@ -301,8 +341,10 @@ protocol addition in M1 is a minor bump).
 
 ## Testing
 
-- Unit: host-label parsing (valid/hostile), header filtering, window
-  accounting (sender blocks at 0, resumes on grant), token claims/expiry.
+- Unit: host-authority normalization + label parsing (valid/hostile), header
+  filtering, `Location` rewrite, `next` validation (rejects `//`, absolute
+  URLs, control chars), window accounting (sender blocks at 0, resumes on
+  grant), token claims/expiry/port binding.
 - Integration (backend + in-process fake proxy): end-to-end GET, streamed
   body, 502 on refused dial, revocation mid-stream, auth bounce redirect
   loop, WS upgrade echo.
