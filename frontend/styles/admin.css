@@ -400,3 +400,59 @@
 .ban-confirm:hover {
     background: #ff6b8a !important;
 }
+
+/* Admin ▸ Subdomains */
+.admin-subdomains .section-header {
+    margin-bottom: 1rem;
+}
+
+.subdomain-create {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.subdomain-create select,
+.subdomain-input-group input {
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.subdomain-input-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.subdomain-input-group input {
+    width: 12rem;
+    font-family: monospace;
+}
+
+.subdomain-suffix {
+    color: var(--text-secondary);
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.subdomain-error {
+    color: var(--error);
+    font-size: 0.85rem;
+    margin: 0.25rem 0 0.75rem;
+}
+
+.subdomain-table a {
+    color: var(--text-teal, #7dcfff);
+    font-family: monospace;
+    text-decoration: none;
+}
+
+.subdomain-table a:hover {
+    text-decoration: underline;
+}

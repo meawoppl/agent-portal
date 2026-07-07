@@ -8,10 +8,12 @@
 
 mod overview_tab;
 mod sessions_tab;
+mod subdomains_tab;
 mod users_tab;
 
 use overview_tab::AdminOverviewTab;
 use sessions_tab::AdminSessionsTab;
+use subdomains_tab::AdminSubdomainsTab;
 use users_tab::AdminUsersTab;
 
 use crate::components::ConfirmModal;
@@ -38,6 +40,7 @@ enum AdminTab {
     Overview,
     Users,
     Sessions,
+    Subdomains,
 }
 
 // ============================================================================
@@ -423,6 +426,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let on_overview_tab = make_tab_handler(AdminTab::Overview);
     let on_users_tab = make_tab_handler(AdminTab::Users);
     let on_sessions_tab = make_tab_handler(AdminTab::Sessions);
+    let on_subdomains_tab = make_tab_handler(AdminTab::Subdomains);
 
     // Cancel confirmation
     let on_cancel_confirm = {
@@ -487,6 +491,12 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                 >
                                     { format!("Sessions ({})", sessions.len()) }
                                 </button>
+                                <button
+                                    class={classes!("tab-btn", if *active_tab == AdminTab::Subdomains { Some("active") } else { None })}
+                                    onclick={on_subdomains_tab}
+                                >
+                                    { "Subdomains" }
+                                </button>
                             </nav>
 
                             <div class="admin-content">
@@ -514,6 +524,9 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                                     on_delete={on_delete_session.clone()}
                                                 />
                                             }
+                                        }
+                                        AdminTab::Subdomains => {
+                                            html! { <AdminSubdomainsTab /> }
                                         }
                                     }
                                 }

@@ -132,11 +132,23 @@ pub(crate) fn ensure_subdomain_label(
 }
 
 /// Map a subdomain label back to its session (the reverse-proxy Host route).
+/// A label resolves via the admin custom-subdomain table first, then the auto
+/// `forward_subdomains` LUT — both route to the same session. The two
+/// namespaces can't collide (auto labels are always 8-hex; custom labels are
+/// rejected if 8-hex), so order only matters for the lookup, not correctness.
 pub(crate) fn session_for_label(
     conn: &mut crate::db::DbConnection,
     label: &str,
 ) -> Result<Uuid, AppError> {
-    use crate::schema::forward_subdomains as fs;
+    use crate::schema::{custom_subdomains as cs, forward_subdomains as fs};
+    if let Some(session_id) = cs::table
+        .filter(cs::label.eq(label))
+        .select(cs::session_id)
+        .first::<Uuid>(conn)
+        .optional()?
+    {
+        return Ok(session_id);
+    }
     fs::table
         .filter(fs::label.eq(label))
         .select(fs::session_id)

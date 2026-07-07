@@ -284,6 +284,20 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/admin/sessions/{id}",
             axum::routing::delete(handlers::admin::delete_session),
         )
+        // Admin custom subdomains (docs/PORT_FORWARDING.md)
+        .route(
+            "/api/admin/subdomains",
+            get(handlers::admin_subdomains::list_custom_subdomains)
+                .post(handlers::admin_subdomains::create_custom_subdomain),
+        )
+        .route(
+            "/api/admin/subdomains/{label}",
+            axum::routing::delete(handlers::admin_subdomains::delete_custom_subdomain),
+        )
+        .route(
+            "/api/admin/forwards",
+            get(handlers::admin_subdomains::list_admin_forwards),
+        )
         // Add single unified state
         .with_state(app_state)
         // Merge rate-limited route groups

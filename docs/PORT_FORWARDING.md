@@ -57,19 +57,43 @@ browser ──HTTP──▶ backend (Host-routed reverse proxy)
 {label}.{PORTAL_FORWARD_DOMAIN}
 ```
 
-- `label`: an 8-lowercase-hex subdomain (32 bits) allocated per session in the
-  `forward_subdomains` lookup table. It is derived from
-  `sha256(session_id)[..8]`, re-derived with an incrementing counter on the
-  (rare) collision, and stored so the same session always resolves to the same
-  label — stable across close/reopen and independent of which port is
-  forwarded. It does not encode the port or leak the raw session UUID.
-- Parsing is strict: `^[0-9a-f]{8}$` on the first DNS label (after
-  lowercasing / stripping any `:port` and trailing dot), and the remaining
-  labels must equal the configured forward domain exactly. Anything else falls
-  through to the normal router. The label is then resolved to a session via
-  the LUT; an unknown label is a 404.
-- Collisions are handled by the LUT + counter, so 32 bits stays unambiguous;
-  the table's `UNIQUE(label)` is the backstop.
+- `label`: either an auto 8-lowercase-hex label (32 bits) or an admin-assigned
+  custom label.
+  - **Auto**: allocated per session in the `forward_subdomains` LUT, derived
+    from `sha256(session_id)[..8]`, re-derived with an incrementing counter on
+    the (rare) collision, and stored so the same session always resolves to the
+    same label — stable across close/reopen and independent of which port is
+    forwarded. Doesn't encode the port or leak the raw session UUID.
+  - **Custom**: an admin can assign a human-readable alias in the
+    `custom_subdomains` table (Admin ▸ Subdomains), which routes to the same
+    session *alongside* the auto label. See "Admin custom subdomains" below.
+- Parsing accepts any single lowercase DNS label (`[a-z0-9-]`, 1–63 chars, no
+  leading/trailing hyphen, no dots) after lowercasing / stripping any `:port`
+  and trailing dot, with the remaining labels matching the forward domain
+  exactly. The label is resolved to a session via `custom_subdomains` then the
+  auto LUT; an unknown label is a 404. Non-label hosts fall through to the
+  normal router.
+- Auto-label collisions are handled by the LUT + counter (`UNIQUE(label)`
+  backstop); custom labels can't collide with the auto namespace because 8-hex
+  strings are rejected as custom labels.
+
+### Admin custom subdomains
+
+An admin can give a session's forward a friendly alias (e.g. `myapp` instead of
+`a3f9c2e1`) from **Admin ▸ Subdomains**. The custom URL routes alongside the
+auto URL (both work); the auto label stays the canonical one used by the chip,
+CLI, and open-handoff.
+
+- Storage: `custom_subdomains(label PK, session_id UNIQUE, created_by,
+  created_at)`, cascade-deleted with the session. One custom label per session.
+- Endpoints (all `require_admin`): `GET /api/admin/subdomains`,
+  `POST /api/admin/subdomains { session_id, label }`,
+  `DELETE /api/admin/subdomains/{label}`, and `GET /api/admin/forwards` (the
+  assignment picker — every session with an active forward).
+- **Deconfliction** is explicit: an invalid label is a `400` with the reason
+  (must be a lowercase DNS label, not an 8-hex string, not a reserved word);
+  a taken label or a session that already has one is a `409`. The admin UI
+  surfaces the message inline.
 
 ### Forward domain configuration
 
