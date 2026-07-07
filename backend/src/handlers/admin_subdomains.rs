@@ -22,12 +22,9 @@ use shared::api::{
 
 use crate::errors::AppError;
 use crate::handlers::admin::require_admin;
+use crate::handlers::forward_proxy::is_reserved_label;
 use crate::models::NewCustomSubdomain;
 use crate::AppState;
-
-/// Labels reserved from custom assignment (would shadow or confuse routing on
-/// the forward domain).
-const RESERVED_LABELS: &[&str] = &["www", "api", "admin", "portal", "app", "static", "assets"];
 
 /// Build the public URL for a subdomain label. Errors when forwarding is off.
 fn label_url(app_state: &AppState, label: &str) -> Result<String, AppError> {
@@ -67,7 +64,7 @@ fn validate_custom_label(label: &str) -> Result<(), &'static str> {
     if label.len() == 8 && label.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("subdomain looks like a generated label; choose a different name");
     }
-    if RESERVED_LABELS.contains(&label) {
+    if is_reserved_label(label) {
         return Err("that subdomain is reserved");
     }
     Ok(())

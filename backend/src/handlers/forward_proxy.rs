@@ -100,12 +100,26 @@ fn verify_token(app_state: &AppState, token: &str, aud: &str, session_id: Uuid) 
     }
 }
 
+/// Subdomain labels reserved from forwarding — they fall through the host gate
+/// to the normal router rather than being treated as (always-missing) forward
+/// hosts, and are refused as custom-subdomain assignments. Shared with
+/// `admin_subdomains` so the two boundaries can't drift.
+pub(crate) const RESERVED_LABELS: &[&str] =
+    &["www", "api", "admin", "portal", "app", "static", "assets"];
+
+/// True if `label` is reserved (case-insensitive is unnecessary — callers
+/// lowercase first).
+pub(crate) fn is_reserved_label(label: &str) -> bool {
+    RESERVED_LABELS.contains(&label)
+}
+
 /// Normalize an authority and extract the forward subdomain label: lowercase,
 /// strip `:port` and trailing dot, then require a single valid DNS label
-/// (`[a-z0-9-]`, 1–63 chars, no leading/trailing hyphen, no dots) and an exact
-/// domain match on the rest. Covers both auto 8-hex labels and admin custom
-/// labels; the label is resolved to a session via the LUTs downstream (unknown
-/// → 404).
+/// (`[a-z0-9-]`, 1–63 chars, no leading/trailing hyphen, no dots) that isn't a
+/// reserved word, and an exact domain match on the rest. Covers both auto
+/// 8-hex labels and admin custom labels; the label is resolved to a session
+/// via the LUTs downstream (unknown → 404). Reserved / malformed labels return
+/// `None` so the request falls through to the normal router.
 pub fn parse_forward_host(host: &str, forward_domain: &str) -> Option<String> {
     let host = normalize_authority(host);
     let domain = normalize_authority(forward_domain);
@@ -116,6 +130,7 @@ pub fn parse_forward_host(host: &str, forward_domain: &str) -> Option<String> {
         && label.len() <= 63
         && !label.starts_with('-')
         && !label.ends_with('-')
+        && !is_reserved_label(label)
         && label
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
@@ -720,6 +735,18 @@ mod tests {
             assert!(
                 parse_forward_host(&host, "localhost").is_none(),
                 "should reject {host}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_forward_host_falls_through_reserved_labels() {
+        // Reserved labels must not be treated as (always-missing) forward
+        // hosts; they return None so the normal router serves them.
+        for label in RESERVED_LABELS {
+            assert!(
+                parse_forward_host(&format!("{label}.localhost"), "localhost").is_none(),
+                "reserved label {label} should fall through"
             );
         }
     }
