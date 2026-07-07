@@ -64,8 +64,8 @@ fn to_forward_info(app_state: &AppState, row: &SessionForward) -> Result<Forward
 }
 
 /// Authorize `user_id` as a member of `session_id` and return the session.
-/// Read access — sufficient to *see* forwards, never to change them.
-fn member_session(
+/// Read access — sufficient to *see* and *use* forwards, never to change them.
+pub(crate) fn member_session(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
     user_id: Uuid,

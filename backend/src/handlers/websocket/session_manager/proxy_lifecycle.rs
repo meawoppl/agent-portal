@@ -60,6 +60,13 @@ impl SessionManager {
             .is_none_or(|current| *current == gen)
     }
 
+    /// The current connection generation for a session, if a proxy is
+    /// registered. Used to bind a tunnel stream to the exact connection it
+    /// was opened on.
+    pub fn current_connection_gen(&self, session_key: &str) -> Option<u64> {
+        self.connection_gen.get(session_key).map(|g| *g)
+    }
+
     /// Stop a directly-connected proxy by sending it a termination message.
     /// The proxy will disconnect without attempting to reconnect.
     /// Returns true if the session was found and the message was sent.

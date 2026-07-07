@@ -30,9 +30,12 @@ mod launcher_registry;
 mod pending_queue;
 mod proxy_lifecycle;
 mod session_tracking;
+mod tunnel_client;
 
 pub use launcher_registry::LauncherConnection;
 use pending_queue::PendingMessage;
+use tunnel_client::TunnelStreamMap;
+pub use tunnel_client::{TunnelError, TunnelIn};
 
 pub type SessionId = String;
 pub type ProxySender = mpsc::UnboundedSender<ServerToProxy>;
@@ -58,6 +61,9 @@ pub struct SessionManager {
     /// Pending `ForwardOpen` → `ForwardStatus` round-trips, keyed by
     /// `(session_id, port)` — the reply frame carries no request id.
     pending_forward_status: Arc<DashMap<(Uuid, u16), oneshot::Sender<ForwardStatusFields>>>,
+    /// Live backend tunnel streams (docs/PORT_FORWARDING.md), keyed by
+    /// stream id; the reverse proxy opens them, proxy sockets feed them.
+    tunnel_streams: TunnelStreamMap,
     pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
@@ -90,6 +96,7 @@ impl Default for SessionManager {
             pending_probe_requests: Arc::new(DashMap::new()),
             pending_file_downloads: Arc::new(DashMap::new()),
             pending_forward_status: Arc::new(DashMap::new()),
+            tunnel_streams: Arc::new(DashMap::new()),
             pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
             subagent_tokens: Arc::new(DashMap::new()),
