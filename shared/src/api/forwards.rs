@@ -5,6 +5,7 @@
 //! handlers, same shapes.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// The session's single active forward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,6 +16,33 @@ pub struct ForwardInfo {
     pub url: String,
     /// Registration time, RFC 3339.
     pub created_at: String,
+    /// When true, the URL serves without a portal login (owner opt-in).
+    #[serde(default)]
+    pub public: bool,
+}
+
+/// One of the caller's active forwards, for the Settings ▸ Forwarding tab.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserForwardInfo {
+    pub session_id: Uuid,
+    pub session_name: String,
+    pub port: u16,
+    /// Fully-formed public URL (`{scheme}://{label}.{domain}/`).
+    pub url: String,
+    pub public: bool,
+}
+
+/// Response for `GET /api/forwards` — the caller's active forwards.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserForwardsResponse {
+    #[serde(default)]
+    pub forwards: Vec<UserForwardInfo>,
+}
+
+/// Body for `PATCH /api/sessions/{id}/forwards/public`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetForwardPublicRequest {
+    pub public: bool,
 }
 
 /// Body for `POST …/forwards`.

@@ -397,6 +397,9 @@ pub struct SessionForward {
     pub session_id: Uuid,
     pub port: i32,
     pub created_at: NaiveDateTime,
+    /// When true the forward-origin serves without the token-handoff auth —
+    /// anyone with the URL reaches the service (owner opt-in).
+    pub public: bool,
 }
 
 #[derive(Debug, Insertable)]

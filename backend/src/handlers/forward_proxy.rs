@@ -221,9 +221,8 @@ pub async fn forward_host_gate(
 /// Everything served on a forward origin. Resolves the label to a session and
 /// its live port (both may 404) before auth + reverse proxy.
 async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Response {
-    // Resolve label → session and its currently-forwarded port up front. Both
-    // lookups are the revocation gate: an unknown label or a session with no
-    // active forward is a 404 (no leak of whether the label ever existed).
+    // Resolve label → session up front. An unknown label is a 404 (no leak of
+    // whether the label ever existed).
     let (session_id, port, session_key) = {
         let mut conn = match app_state.conn() {
             Ok(conn) => conn,
@@ -238,19 +237,35 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
             return handle_auth(&app_state, session_id, &req);
         }
 
-        // Cookie gate before the port lookup so an unauthenticated caller
-        // can't probe whether a forward is currently active.
-        let authed = cookie_value(req.headers(), FWD_COOKIE)
-            .map(|token| verify_token(&app_state, &token, AUD_COOKIE, session_id))
-            .unwrap_or(false);
-        if !authed {
-            return unauthenticated_response(&app_state, session_id, &req);
-        }
-
-        let port = match crate::handlers::forwards::active_forward_port(&mut conn, session_id) {
-            Ok(Some(port)) => port,
-            _ => return plain_status(StatusCode::NOT_FOUND, "this forward has been revoked"),
+        // Fail closed but distinctly: a DB error is a 503, not a silent "no
+        // forward" (which would masquerade as revocation/auth weirdness).
+        let forward = match crate::handlers::forwards::active_forward(&mut conn, session_id) {
+            Ok(forward) => forward,
+            Err(_) => return plain_status(StatusCode::SERVICE_UNAVAILABLE, "database unavailable"),
         };
+
+        // A *public* forward serves with no auth. Otherwise (private or
+        // absent) require the cookie — and gate BEFORE distinguishing
+        // private-from-absent, so an unauthenticated caller can't probe
+        // whether a private forward is active (they always get the same auth
+        // bounce; only authenticated callers see the revocation 404).
+        let port = if let Some((port, true)) = forward {
+            port
+        } else {
+            let authed = cookie_value(req.headers(), FWD_COOKIE)
+                .map(|token| verify_token(&app_state, &token, AUD_COOKIE, session_id))
+                .unwrap_or(false);
+            if !authed {
+                return unauthenticated_response(&app_state, session_id, &req);
+            }
+            match forward {
+                Some((port, _)) => port,
+                None => {
+                    return plain_status(StatusCode::NOT_FOUND, "this forward has been revoked")
+                }
+            }
+        };
+
         use crate::schema::sessions;
         let session_key = match sessions::table
             .find(session_id)

@@ -870,3 +870,64 @@
         rgba(255, 255, 255, 0.04) 8px
     );
 }
+
+/* Settings ▸ Forwarding */
+.forwarding-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.forwarding-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.forwarding-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.forwarding-name {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.forwarding-url {
+    color: var(--text-teal, #7dcfff);
+    font-family: monospace;
+    font-size: 0.85rem;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.forwarding-url:hover {
+    text-decoration: underline;
+}
+
+.forwarding-public {
+    flex-shrink: 0;
+}
+
+.forwarding-badge {
+    font-size: 0.78rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+}
+
+.forwarding-badge.is-public {
+    background: rgba(224, 175, 104, 0.18);
+    color: var(--warning, #e0af68);
+}

@@ -68,6 +68,7 @@ fn to_forward_info(
         port: row.port as u16,
         url: forward_url(app_state, label)?,
         created_at: DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc).to_rfc3339(),
+        public: row.public,
     })
 }
 
@@ -171,6 +172,21 @@ pub(crate) fn active_forward_port(
         .map(|p| p as u16))
 }
 
+/// The session's forwarded `(port, public)`, if a forward is active. The
+/// reverse proxy needs both: `public` decides whether to require auth.
+pub(crate) fn active_forward(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<Option<(u16, bool)>, AppError> {
+    use crate::schema::session_forwards as sf;
+    Ok(sf::table
+        .filter(sf::session_id.eq(session_id))
+        .select((sf::port, sf::public))
+        .first::<(i32, bool)>(conn)
+        .optional()?
+        .map(|(port, public)| (port as u16, public)))
+}
+
 /// Authorize `user_id` as a member of `session_id` and return the session.
 /// Read access — sufficient to *see* and *use* the forward, never to change it.
 pub(crate) fn member_session(
@@ -253,6 +269,18 @@ pub async fn create_forward(
             .do_update()
             .set(session_forwards::port.eq(req.port as i32))
             .execute(conn)?;
+        // A port change points the forward at a *different* local service, so
+        // any prior public opt-in must not transfer to it — reset to private.
+        // (The agent can move the port with the owner-resolved token; public
+        // exposure requires a fresh, explicit owner toggle.) Idempotent
+        // same-port re-registration keeps the flag.
+        if replaced_port.is_some() {
+            diesel::update(
+                session_forwards::table.filter(session_forwards::session_id.eq(session_id)),
+            )
+            .set(session_forwards::public.eq(false))
+            .execute(conn)?;
+        }
         let row: SessionForward = session_forwards::table
             .filter(session_forwards::session_id.eq(session_id))
             .select(SessionForward::as_select())
@@ -376,6 +404,92 @@ pub async fn delete_forward(
         ServerToClient::ForwardsChanged { session_id },
     );
     info!("Forward revoked: session {} port {}", session_id, port);
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/forwards — the caller's active forwards across the sessions they
+/// own, for the Settings ▸ Forwarding tab. Owner-scoped, since only the owner
+/// can toggle a forward public. Empty (not an error) when forwarding is
+/// disabled.
+pub async fn list_user_forwards(
+    State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<Json<shared::api::UserForwardsResponse>, AppError> {
+    let user_id = resolve_user(&app_state, &headers, &cookies)?;
+    let mut conn = app_state.conn()?;
+
+    if app_state.forward_domain.is_none() {
+        return Ok(Json(shared::api::UserForwardsResponse { forwards: vec![] }));
+    }
+
+    use crate::schema::{forward_subdomains, session_forwards, sessions};
+    let rows: Vec<(SessionForward, String, String)> = session_forwards::table
+        .inner_join(sessions::table.on(sessions::id.eq(session_forwards::session_id)))
+        .inner_join(
+            forward_subdomains::table
+                .on(forward_subdomains::session_id.eq(session_forwards::session_id)),
+        )
+        .filter(sessions::user_id.eq(user_id))
+        .select((
+            SessionForward::as_select(),
+            sessions::session_name,
+            forward_subdomains::label,
+        ))
+        .order(session_forwards::created_at.desc())
+        .load(&mut conn)?;
+
+    let forwards = rows
+        .into_iter()
+        .map(|(row, session_name, label)| {
+            Ok(shared::api::UserForwardInfo {
+                session_id: row.session_id,
+                session_name,
+                port: row.port as u16,
+                url: forward_url(&app_state, &label)?,
+                public: row.public,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    Ok(Json(shared::api::UserForwardsResponse { forwards }))
+}
+
+/// PATCH /api/sessions/{id}/forwards/public — set the forward's public flag
+/// (owner only). Public forwards serve without the token-handoff auth.
+pub async fn set_forward_public(
+    State(app_state): State<Arc<AppState>>,
+    Path(session_id): Path<Uuid>,
+    headers: HeaderMap,
+    cookies: Cookies,
+    Json(req): Json<shared::api::SetForwardPublicRequest>,
+) -> Result<StatusCode, AppError> {
+    let user_id = resolve_user(&app_state, &headers, &cookies)?;
+    let mut conn = app_state.conn()?;
+
+    // Serialize with create/delete via the same per-session row lock.
+    let session = conn.transaction::<_, AppError, _>(|conn| {
+        use crate::schema::session_forwards;
+        let session = lock_owned_session(conn, session_id, user_id)?;
+        let updated = diesel::update(
+            session_forwards::table.filter(session_forwards::session_id.eq(session_id)),
+        )
+        .set(session_forwards::public.eq(req.public))
+        .execute(conn)?;
+        if updated == 0 {
+            return Err(AppError::NotFound("forward"));
+        }
+        Ok(session)
+    })?;
+
+    app_state.session_manager.broadcast_to_web_clients(
+        &session.session_key,
+        ServerToClient::ForwardsChanged { session_id },
+    );
+    info!(
+        "Forward visibility: session {} public={}",
+        session_id, req.public
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }
