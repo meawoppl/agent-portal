@@ -4,6 +4,7 @@
 
 mod config;
 mod connection;
+mod forward;
 mod message;
 mod pastebin;
 mod path_policy;
@@ -70,6 +71,16 @@ enum Command {
     Message {
         #[command(subcommand)]
         action: MessageAction,
+    },
+    /// Expose a local HTTP port through the portal for the user's browser.
+    ///
+    /// `forward <port>` registers and prints the URL; `forward list` shows
+    /// active forwards; `forward close <port>` revokes one.
+    Forward {
+        /// A port number, or `list`, or `close`.
+        target: String,
+        /// The port, when `target` is `close`.
+        port: Option<u16>,
     },
 }
 
@@ -158,6 +169,21 @@ async fn main() -> anyhow::Result<()> {
                 MessageAction::Send { agent_id, message } => {
                     message::send(&agent_id, &message).await
                 }
+            };
+        }
+        Some(Command::Forward { target, port }) => {
+            return match target.as_str() {
+                "list" => forward::list().await,
+                "close" => match port {
+                    Some(p) => forward::close(p).await,
+                    None => Err(anyhow::anyhow!("usage: agent-portal forward close <port>")),
+                },
+                other => match other.parse::<u16>() {
+                    Ok(p) => forward::open(p).await,
+                    Err(_) => Err(anyhow::anyhow!(
+                        "expected a port number, `list`, or `close <port>`, got `{other}`"
+                    )),
+                },
             };
         }
         None => {}
