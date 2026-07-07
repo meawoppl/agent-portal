@@ -2,6 +2,7 @@
 
 mod device_flow;
 mod error;
+mod forwards;
 mod launch;
 mod metrics;
 mod permissions;
@@ -12,6 +13,7 @@ mod users;
 
 pub use device_flow::*;
 pub use error::*;
+pub use forwards::*;
 pub use launch::*;
 pub use metrics::*;
 pub use permissions::*;

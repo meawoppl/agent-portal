@@ -309,4 +309,10 @@ pub enum ServerToClient {
     /// Boxed to keep the rest of the enum compact — see
     /// `ProxyToServer::TurnMetricsReport` for the same rationale.
     TurnMetrics(Box<TurnMetrics>),
+
+    /// The session's port-forward set changed (agent registered or revoked a
+    /// forward, or a forward died with the session). Frontends refetch
+    /// `GET /api/sessions/{id}/forwards` — the frame carries no payload so
+    /// there is exactly one source of truth (docs/PORT_FORWARDING.md).
+    ForwardsChanged { session_id: Uuid },
 }

@@ -13,7 +13,10 @@
 //! block.
 
 use dashmap::{DashMap, DashSet};
-use shared::{FileDownloadResponseFields, LauncherToServer, ServerToClient, ServerToProxy};
+use shared::{
+    FileDownloadResponseFields, ForwardStatusFields, LauncherToServer, ServerToClient,
+    ServerToProxy,
+};
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -52,6 +55,9 @@ pub struct SessionManager {
     pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
     pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
+    /// Pending `ForwardOpen` → `ForwardStatus` round-trips, keyed by
+    /// `(session_id, port)` — the reply frame carries no request id.
+    pending_forward_status: Arc<DashMap<(Uuid, u16), oneshot::Sender<ForwardStatusFields>>>,
     pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
@@ -83,6 +89,7 @@ impl Default for SessionManager {
             pending_dir_requests: Arc::new(DashMap::new()),
             pending_probe_requests: Arc::new(DashMap::new()),
             pending_file_downloads: Arc::new(DashMap::new()),
+            pending_forward_status: Arc::new(DashMap::new()),
             pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
             subagent_tokens: Arc::new(DashMap::new()),

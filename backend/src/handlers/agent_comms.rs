@@ -27,7 +27,7 @@ use crate::AppState;
 
 /// Resolve the calling user from a `Bearer` proxy token if present, otherwise
 /// from the browser session cookie.
-fn resolve_user(
+pub(crate) fn resolve_user(
     app_state: &AppState,
     headers: &HeaderMap,
     cookies: &Cookies,

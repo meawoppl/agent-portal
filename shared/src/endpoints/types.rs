@@ -119,6 +119,67 @@ pub struct FileUploadChunkFields {
     pub data: String,
 }
 
+// ---- Port forwarding (docs/PORT_FORWARDING.md) ------------------------------
+
+/// Open a tunnel stream to `127.0.0.1:{port}` on the proxy host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelOpenFields {
+    pub stream_id: Uuid,
+    pub port: u16,
+}
+
+/// A chunk of stream bytes, base64-encoded, at most 16 KiB decoded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelDataFields {
+    pub stream_id: Uuid,
+    pub data_base64: String,
+}
+
+/// Grant the peer `add_bytes` more send credit on a stream (credit-based flow
+/// control; each direction starts with a 256 KiB window).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelWindowFields {
+    pub stream_id: Uuid,
+    pub add_bytes: u32,
+}
+
+/// Tear down a stream (no half-close). `reason` is diagnostic only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelCloseFields {
+    pub stream_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A stream the proxy successfully dialed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelStreamFields {
+    pub stream_id: Uuid,
+}
+
+/// The proxy could not (or refused to) dial a stream.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelRefusedFields {
+    pub stream_id: Uuid,
+    pub error: String,
+}
+
+/// Add/remove a port in the proxy's forward allowlist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardPortFields {
+    pub port: u16,
+}
+
+/// Proxy's reply to `ForwardOpen`: the allowlist was updated, and a probe dial
+/// to `127.0.0.1:{port}` reported whether anything is listening yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardStatusFields {
+    pub port: u16,
+    pub listening: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDownloadRequestFields {
     pub request_id: Uuid,

@@ -70,6 +70,9 @@ pub struct AppState {
     pub max_image_mb: u32,
     /// In-memory image store for serving images via HTTP instead of WebSocket
     pub image_store: handlers::images::ImageStore,
+    /// Authority under which per-forward subdomains are served
+    /// (docs/PORT_FORWARDING.md). `None` = forwarding disabled.
+    pub forward_domain: Option<String>,
 }
 
 impl AppState {
@@ -148,6 +151,7 @@ pub async fn run() -> anyhow::Result<()> {
             config.image_store_max_bytes,
             config.image_store_ttl,
         ),
+        forward_domain: config.forward_domain,
     });
 
     // Build our application with routes

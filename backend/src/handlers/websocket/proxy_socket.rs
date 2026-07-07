@@ -1,5 +1,7 @@
 use super::continuations::handle_session_limit_reached;
-use super::message_handlers::{handle_claude_output, replay_pending_inputs_from_db};
+use super::message_handlers::{
+    handle_claude_output, replay_forward_opens_from_db, replay_pending_inputs_from_db,
+};
 use super::permissions::handle_permission_request;
 use super::registration::{register_or_update_session, RegistrationParams};
 use super::turn_metrics::handle_turn_metrics_report;
@@ -188,6 +190,7 @@ fn handle_proxy_message(
             if result.success {
                 if let Some(session_id) = *db_session_id {
                     replay_pending_inputs_from_db(db_pool, session_id, tx);
+                    replay_forward_opens_from_db(db_pool, session_id, tx);
                 }
             } else {
                 // Auth bypass / wrong token / no token → tell the caller
@@ -331,6 +334,23 @@ fn handle_proxy_message(
             }
         }
         ProxyToServer::SessionStatus { .. } => {}
+        ProxyToServer::ForwardStatus(status) => {
+            if let Some(session_id) = *db_session_id {
+                // `false` = nothing waiting: the unsolicited reply to a
+                // reconnect-replayed `ForwardOpen`. Expected, not an error.
+                session_manager.complete_forward_status(session_id, status);
+            }
+        }
+        ProxyToServer::TunnelOpened(_)
+        | ProxyToServer::TunnelRefused(_)
+        | ProxyToServer::TunnelData(_)
+        | ProxyToServer::TunnelWindow(_)
+        | ProxyToServer::TunnelClose(_) => {
+            // The backend can't open tunnel streams yet (the forward-origin
+            // reverse proxy is the next PORT_FORWARDING.md milestone), so no
+            // proxy has a live stream to send frames for.
+            warn!("Tunnel frame received before backend tunnel support; dropped");
+        }
     }
     ControlFlow::Continue(())
 }

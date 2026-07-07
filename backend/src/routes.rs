@@ -142,6 +142,24 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/sessions/{id}/turn-metrics",
             get(handlers::turn_metrics::list_turn_metrics),
         )
+        // Port forwarding (docs/PORT_FORWARDING.md): same handlers mounted
+        // for browser (cookie) and CLI (Bearer token) path conventions.
+        .route(
+            "/api/sessions/{id}/forwards",
+            get(handlers::forwards::list_forwards).post(handlers::forwards::create_forward),
+        )
+        .route(
+            "/api/sessions/{id}/forwards/{port}",
+            axum::routing::delete(handlers::forwards::delete_forward),
+        )
+        .route(
+            "/api/agent/sessions/{id}/forwards",
+            get(handlers::forwards::list_forwards).post(handlers::forwards::create_forward),
+        )
+        .route(
+            "/api/agent/sessions/{id}/forwards/{port}",
+            axum::routing::delete(handlers::forwards::delete_forward),
+        )
         // Inter-agent messaging: list your sessions, post a message into one
         // (cookie or Bearer-token auth; same-user only).
         .route(

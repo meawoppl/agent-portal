@@ -153,6 +153,9 @@ pub struct ServerConfig {
     pub max_image_mb: u32,
     pub image_store_max_bytes: u64,
     pub image_store_ttl: std::time::Duration,
+    /// Authority (host, optionally `:port`) under which per-forward subdomains
+    /// are served (docs/PORT_FORWARDING.md). `None` = forwarding disabled.
+    pub forward_domain: Option<String>,
 }
 
 impl ServerConfig {
@@ -282,6 +285,25 @@ impl ServerConfig {
             image_store_ttl_secs
         );
 
+        // Port-forward subdomain authority (docs/PORT_FORWARDING.md). In dev
+        // mode default to `localhost:{port}` — browsers resolve `*.localhost`
+        // to loopback with no DNS setup. In production it must be set
+        // explicitly (needs wildcard DNS + TLS), so unset = disabled.
+        let forward_domain = match env::var("PORTAL_FORWARD_DOMAIN") {
+            Ok(v) => {
+                log_source("PORTAL_FORWARD_DOMAIN", true);
+                Some(v)
+            }
+            Err(_) => {
+                log_source("PORTAL_FORWARD_DOMAIN", false);
+                dev_mode.then(|| format!("localhost:{}", port))
+            }
+        };
+        match &forward_domain {
+            Some(domain) => tracing::info!("Port forwarding enabled on *.{}", domain),
+            None => tracing::info!("Port forwarding disabled (PORTAL_FORWARD_DOMAIN unset)"),
+        }
+
         // Fail fast: report every malformed variable at once rather than
         // silently using a default for each.
         if !errors.is_empty() {
@@ -308,6 +330,7 @@ impl ServerConfig {
             max_image_mb,
             image_store_max_bytes,
             image_store_ttl,
+            forward_domain,
         })
     }
 }

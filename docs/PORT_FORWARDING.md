@@ -179,8 +179,12 @@ no `serde_json::json!`).
 | `DELETE /api/sessions/{id}/forwards/{port}` | owner | Revoke. |
 | `GET /api/sessions/{id}/forwards/{port}/open?next=/…` | session read access | Mint handoff token, `302` to the forward origin (see Auth). |
 
-Access mirrors `files::pull_session_file`: read access (owner or
-`session_members`) is sufficient to *use* a forward; only the owner can revoke.
+Access: read access (owner or `session_members`) is sufficient to *use* a
+forward (open it in the browser) and to list them; **registering or revoking
+a forward is owner-only** on both route sets — it exposes/tears down a
+loopback port on the proxy host, a strictly tighter capability than reading
+the transcript. The CLI clears the owner gate because the launcher's bearer
+token resolves to the session owner.
 
 ### CLI (`launcher/src/forward.rs`, mirroring `launcher/src/message.rs`)
 
