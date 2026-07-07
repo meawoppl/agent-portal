@@ -428,6 +428,26 @@ pub struct NewForwardSubdomain {
     pub session_id: Uuid,
 }
 
+/// An admin-assigned custom subdomain label that routes to a session's forward
+/// alongside its auto label. One per session; cascade-deleted with the session.
+#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[diesel(table_name = crate::schema::custom_subdomains)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct CustomSubdomain {
+    pub label: String,
+    pub session_id: Uuid,
+    pub created_by: Option<Uuid>,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::custom_subdomains)]
+pub struct NewCustomSubdomain {
+    pub label: String,
+    pub session_id: Uuid,
+    pub created_by: Option<Uuid>,
+}
+
 // ============================================================================
 // Turn Metrics Models (per-turn performance metrics; PR 1 of N)
 // ============================================================================

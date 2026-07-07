@@ -45,6 +45,50 @@ pub struct SetForwardPublicRequest {
     pub public: bool,
 }
 
+/// An admin-assigned custom subdomain, for the Admin ▸ Subdomains tab.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomSubdomainInfo {
+    pub label: String,
+    pub session_id: Uuid,
+    pub session_name: String,
+    /// Fully-formed public URL (`{scheme}://{label}.{domain}/`).
+    pub url: String,
+    pub created_at: String,
+}
+
+/// Response for `GET /api/admin/subdomains`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomSubdomainsResponse {
+    #[serde(default)]
+    pub subdomains: Vec<CustomSubdomainInfo>,
+}
+
+/// Body for `POST /api/admin/subdomains`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateCustomSubdomainRequest {
+    pub session_id: Uuid,
+    pub label: String,
+}
+
+/// A session with an active forward, for the admin subdomain-assignment picker
+/// (`GET /api/admin/forwards`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdminForwardInfo {
+    pub session_id: Uuid,
+    pub session_name: String,
+    pub owner_email: String,
+    pub port: u16,
+    /// The forward's canonical auto-hash URL.
+    pub url: String,
+}
+
+/// Response for `GET /api/admin/forwards`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdminForwardsResponse {
+    #[serde(default)]
+    pub forwards: Vec<AdminForwardInfo>,
+}
+
 /// Body for `POST …/forwards`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateForwardRequest {

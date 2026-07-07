@@ -1,6 +1,15 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    custom_subdomains (label) {
+        label -> Text,
+        session_id -> Uuid,
+        created_by -> Nullable<Uuid>,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     deleted_session_costs (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -245,6 +254,8 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(custom_subdomains -> sessions (session_id));
+diesel::joinable!(custom_subdomains -> users (created_by));
 diesel::joinable!(deleted_session_costs -> users (user_id));
 diesel::joinable!(forward_subdomains -> sessions (session_id));
 diesel::joinable!(messages -> sessions (session_id));
@@ -264,6 +275,7 @@ diesel::joinable!(turn_metrics -> sessions (session_id));
 diesel::joinable!(turn_metrics -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    custom_subdomains,
     deleted_session_costs,
     forward_subdomains,
     messages,
