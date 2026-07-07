@@ -24,48 +24,59 @@ pub struct ForwardChipsProps {
 
 #[function_component(ForwardChips)]
 pub fn forward_chips(props: &ForwardChipsProps) -> Html {
-    let forwards = use_state(Vec::<ForwardInfo>::new);
+    // The forwards are tagged with the session they belong to. SessionView
+    // reuses this component instance across session switches, so an in-flight
+    // or already-loaded fetch for the previous session must never render: we
+    // only show `state` when its tagged id matches the current prop. This
+    // closes both stale paths — old chips carrying the new session's URLs, and
+    // an out-of-order fetch overwriting a newer session's chips — without a
+    // clear-then-refetch flicker on the `refresh` bump.
+    let state = use_state(|| (Uuid::nil(), Vec::<ForwardInfo>::new()));
 
     // Refetch on mount and whenever (session, refresh) changes.
     {
-        let forwards = forwards.clone();
+        let state = state.clone();
         let session_id = props.session_id;
         use_effect_with((session_id, props.refresh), move |_| {
             spawn_local(async move {
-                if let Ok(data) = fetch_json::<SessionForwardsResponse>(
+                let forwards = fetch_json::<SessionForwardsResponse>(
                     &format!("/api/sessions/{session_id}/forwards"),
                     On401::Ignore,
                 )
                 .await
-                {
-                    forwards.set(data.forwards);
-                }
+                .map(|data| data.forwards)
+                .unwrap_or_default();
+                // Tag with the session this fetch was for; a late arrival for
+                // an old session is ignored by the render guard below.
+                state.set((session_id, forwards));
             });
             || ()
         });
     }
 
+    // Ignore results tagged for a different (stale) session.
+    let forwards: &[ForwardInfo] = if state.0 == props.session_id {
+        &state.1
+    } else {
+        &[]
+    };
     if forwards.is_empty() {
         return Html::default();
     }
 
     let revoke = {
-        let forwards = forwards.clone();
+        let state = state.clone();
         let session_id = props.session_id;
         Callback::from(move |port: u16| {
-            let forwards = forwards.clone();
+            let state = state.clone();
             spawn_local(async move {
                 let url = api_url(&format!("/api/sessions/{session_id}/forwards/{port}"));
                 if Request::delete(&url).send().await.is_ok() {
-                    // Optimistic: drop it locally; the ForwardsChanged frame
-                    // will reconcile if the server disagrees.
-                    forwards.set(
-                        forwards
-                            .iter()
-                            .filter(|f| f.port != port)
-                            .cloned()
-                            .collect(),
-                    );
+                    // Optimistic: drop it locally (re-tagging with this
+                    // session); the ForwardsChanged frame reconciles if the
+                    // server disagrees.
+                    let remaining = state.1.iter().filter(|f| f.port != port).cloned().collect();
+                    state.set((session_id, remaining));
                 }
             });
         })
