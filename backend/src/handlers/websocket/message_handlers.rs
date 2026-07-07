@@ -6,6 +6,49 @@ use shared::{AgentType, PortalContent, PortalMessage, SendMode, ServerToClient, 
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+/// Re-sync a reconnected proxy's forward-port allowlist from the DB: one
+/// `ForwardOpen` per active `session_forwards` row (docs/PORT_FORWARDING.md).
+/// The proxy answers each with an unsolicited `ForwardStatus`, which the
+/// backend drops — nothing is waiting on a replayed open.
+pub fn replay_forward_opens_from_db(db_pool: &DbPool, session_id: Uuid, sender: &ProxySender) {
+    use crate::schema::session_forwards;
+
+    let mut conn = match db_pool.get() {
+        Ok(conn) => conn,
+        Err(e) => {
+            error!("Failed to get DB connection for forward replay: {}", e);
+            return;
+        }
+    };
+
+    let ports: Vec<i32> = match session_forwards::table
+        .filter(session_forwards::session_id.eq(session_id))
+        .select(session_forwards::port)
+        .order(session_forwards::port.asc())
+        .load(&mut conn)
+    {
+        Ok(ports) => ports,
+        Err(e) => {
+            error!("Failed to load forwards for session {}: {}", session_id, e);
+            return;
+        }
+    };
+
+    for port in &ports {
+        let _ = sender.send(ServerToProxy::ForwardOpen(shared::ForwardPortFields {
+            port: *port as u16,
+        }));
+    }
+    if !ports.is_empty() {
+        info!(
+            "Replayed {} forward(s) to session {}: {:?}",
+            ports.len(),
+            session_id,
+            ports
+        );
+    }
+}
+
 /// Replay pending inputs from the database to a reconnected proxy.
 /// Returns the number of inputs replayed.
 pub fn replay_pending_inputs_from_db(

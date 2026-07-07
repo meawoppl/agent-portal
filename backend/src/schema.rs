@@ -124,6 +124,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_forwards (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        port -> Int4,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     session_members (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -236,6 +245,7 @@ diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
 diesel::joinable!(session_continuations -> sessions (session_id));
 diesel::joinable!(session_continuations -> users (user_id));
+diesel::joinable!(session_forwards -> sessions (session_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
@@ -251,6 +261,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     proxy_auth_tokens,
     scheduled_tasks,
     session_continuations,
+    session_forwards,
     session_members,
     sessions,
     turn_metrics,

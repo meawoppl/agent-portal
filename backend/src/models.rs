@@ -383,13 +383,37 @@ pub struct NewSessionContinuation {
 }
 
 // ============================================================================
+// Port Forward Models (docs/PORT_FORWARDING.md)
+// ============================================================================
+
+/// One row in `session_forwards`: a port the session's agent declared with
+/// `agent-portal forward <port>`. The backend only tunnels declared ports;
+/// rows die with the session (`ON DELETE CASCADE`).
+#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[diesel(table_name = crate::schema::session_forwards)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct SessionForward {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub port: i32,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::session_forwards)]
+pub struct NewSessionForward {
+    pub session_id: Uuid,
+    pub port: i32,
+}
+
+// ============================================================================
 // Turn Metrics Models (per-turn performance metrics; PR 1 of N)
 // ============================================================================
 
 /// One row in `turn_metrics`. Persisted per user-input → terminator. See the
 /// `2026-05-27-184255_add_turn_metrics` migration for column semantics. The
 /// table is a durable per-user archive: it's outside the `MESSAGE_RETENTION_DAYS`
-/// sweep, and `2026-06-04-120000_decouple_turn_metrics_from_sessions` made
+/// sweep, and `2026-06-04-120001_decouple_turn_metrics_from_sessions` made
 /// `session_id` nullable with `ON DELETE SET NULL` (was `NOT NULL`/`CASCADE`) so
 /// a row survives its session's deletion. Ownership now lives on `user_id`.
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]

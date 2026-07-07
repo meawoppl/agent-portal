@@ -4,8 +4,9 @@ use ws_bridge::WsEndpoint;
 
 use super::types::{
     FileDownloadRequestFields, FileDownloadResponseFields, FileUploadChunkFields,
-    FileUploadStartFields, PermissionResponseFields, RegisterFields,
-    SessionLimitContinuationFields,
+    FileUploadStartFields, ForwardPortFields, ForwardStatusFields, PermissionResponseFields,
+    RegisterFields, SessionLimitContinuationFields, TunnelCloseFields, TunnelDataFields,
+    TunnelOpenFields, TunnelRefusedFields, TunnelStreamFields, TunnelWindowFields,
 };
 use crate::{AgentType, PermissionSuggestion, SendMode, SessionStatus, TurnMetrics};
 
@@ -130,6 +131,26 @@ pub enum ProxyToServer {
 
     /// Response to a backend-requested local file download.
     FileDownloadResponse(FileDownloadResponseFields),
+
+    /// Reply to `ForwardOpen`: allowlist updated + probe-dial result
+    /// (docs/PORT_FORWARDING.md).
+    ForwardStatus(ForwardStatusFields),
+
+    /// Tunnel stream successfully dialed on the proxy host.
+    TunnelOpened(TunnelStreamFields),
+
+    /// Tunnel stream could not be dialed (connection refused, port not in the
+    /// allowlist, stream cap reached, …).
+    TunnelRefused(TunnelRefusedFields),
+
+    /// Stream bytes, proxy-host service → browser direction.
+    TunnelData(TunnelDataFields),
+
+    /// Flow-control credit grant for a stream's backend→proxy direction.
+    TunnelWindow(TunnelWindowFields),
+
+    /// Stream teardown (either side may initiate; no half-close).
+    TunnelClose(TunnelCloseFields),
 }
 
 /// Messages the backend sends to the proxy.
@@ -196,4 +217,26 @@ pub enum ServerToProxy {
 
     /// Request that the proxy read a file relative to the session working directory.
     FileDownloadRequest(FileDownloadRequestFields),
+
+    /// Add a port to the proxy's forward allowlist (docs/PORT_FORWARDING.md).
+    /// The proxy replies with `ForwardStatus`. Replayed for every active
+    /// forward after each successful registration.
+    ForwardOpen(ForwardPortFields),
+
+    /// Remove a port from the proxy's forward allowlist and drop its live
+    /// streams.
+    ForwardClose(ForwardPortFields),
+
+    /// Open a tunnel stream to `127.0.0.1:{port}` on the proxy host. The
+    /// proxy replies `TunnelOpened` or `TunnelRefused`.
+    TunnelOpen(TunnelOpenFields),
+
+    /// Stream bytes, browser → proxy-host service direction.
+    TunnelData(TunnelDataFields),
+
+    /// Flow-control credit grant for a stream's proxy→backend direction.
+    TunnelWindow(TunnelWindowFields),
+
+    /// Stream teardown (either side may initiate; no half-close).
+    TunnelClose(TunnelCloseFields),
 }

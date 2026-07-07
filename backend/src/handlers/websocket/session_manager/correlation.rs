@@ -2,7 +2,7 @@
 //! oneshot for a request id, the launcher socket completes it when the
 //! matching response frame arrives.
 
-use shared::{FileDownloadResponseFields, LauncherToServer};
+use shared::{FileDownloadResponseFields, ForwardStatusFields, LauncherToServer};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -71,6 +71,41 @@ impl SessionManager {
     ) -> bool {
         if let Some((_, tx)) = self.pending_file_downloads.remove(&request_id) {
             let _ = tx.send(response);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Register a pending `ForwardOpen` → `ForwardStatus` round-trip for
+    /// `(session, port)`; the receiver resolves when the proxy replies. A
+    /// second registration for the same key replaces (and thereby cancels)
+    /// the first.
+    pub fn register_forward_status(
+        &self,
+        session_id: Uuid,
+        port: u16,
+    ) -> oneshot::Receiver<ForwardStatusFields> {
+        let (tx, rx) = oneshot::channel();
+        self.pending_forward_status.insert((session_id, port), tx);
+        rx
+    }
+
+    /// Drop a pending forward-status wait without resolving (send failure or
+    /// timeout).
+    pub fn cancel_forward_status(&self, session_id: Uuid, port: u16) {
+        self.pending_forward_status.remove(&(session_id, port));
+    }
+
+    /// Deliver a proxy's `ForwardStatus` to the waiting handler. Returns
+    /// `false` if nothing was waiting (replayed `ForwardOpen`s after a
+    /// reconnect get unsolicited replies — that's fine).
+    pub fn complete_forward_status(&self, session_id: Uuid, status: ForwardStatusFields) -> bool {
+        if let Some((_, tx)) = self
+            .pending_forward_status
+            .remove(&(session_id, status.port))
+        {
+            let _ = tx.send(status);
             true
         } else {
             false

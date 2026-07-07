@@ -53,6 +53,7 @@ async fn spawn_test_app() -> SocketAddr {
         session_max_age_days: config.session_max_age_days,
         max_image_mb: config.max_image_mb,
         image_store: ImageStore::new(config.image_store_max_bytes, config.image_store_ttl),
+        forward_domain: config.forward_domain,
     });
 
     let app = backend::routes::build_router(state);
