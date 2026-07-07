@@ -237,9 +237,12 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
             return handle_auth(&app_state, session_id, &req);
         }
 
-        let forward = crate::handlers::forwards::active_forward(&mut conn, session_id)
-            .ok()
-            .flatten();
+        // Fail closed but distinctly: a DB error is a 503, not a silent "no
+        // forward" (which would masquerade as revocation/auth weirdness).
+        let forward = match crate::handlers::forwards::active_forward(&mut conn, session_id) {
+            Ok(forward) => forward,
+            Err(_) => return plain_status(StatusCode::SERVICE_UNAVAILABLE, "database unavailable"),
+        };
 
         // A *public* forward serves with no auth. Otherwise (private or
         // absent) require the cookie — and gate BEFORE distinguishing

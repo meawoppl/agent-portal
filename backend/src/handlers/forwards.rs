@@ -269,6 +269,18 @@ pub async fn create_forward(
             .do_update()
             .set(session_forwards::port.eq(req.port as i32))
             .execute(conn)?;
+        // A port change points the forward at a *different* local service, so
+        // any prior public opt-in must not transfer to it — reset to private.
+        // (The agent can move the port with the owner-resolved token; public
+        // exposure requires a fresh, explicit owner toggle.) Idempotent
+        // same-port re-registration keeps the flag.
+        if replaced_port.is_some() {
+            diesel::update(
+                session_forwards::table.filter(session_forwards::session_id.eq(session_id)),
+            )
+            .set(session_forwards::public.eq(false))
+            .execute(conn)?;
+        }
         let row: SessionForward = session_forwards::table
             .filter(session_forwards::session_id.eq(session_id))
             .select(SessionForward::as_select())
