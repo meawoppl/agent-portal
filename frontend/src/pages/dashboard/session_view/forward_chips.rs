@@ -5,6 +5,9 @@
 //! opens the forward through the portal `/open` handoff endpoint in a new tab;
 //! the session owner also gets a revoke `×`.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gloo_net::http::Request;
 use shared::api::{ForwardInfo, SessionForwardsResponse};
 use uuid::Uuid;
@@ -24,13 +27,14 @@ pub struct ForwardChipsProps {
 
 #[function_component(ForwardChips)]
 pub fn forward_chips(props: &ForwardChipsProps) -> Html {
-    // The forwards are tagged with the session they belong to. SessionView
-    // reuses this component instance across session switches, so an in-flight
-    // or already-loaded fetch for the previous session must never render: we
-    // only show `state` when its tagged id matches the current prop. This
-    // closes both stale paths — old chips carrying the new session's URLs, and
-    // an out-of-order fetch overwriting a newer session's chips — without a
-    // clear-then-refetch flicker on the `refresh` bump.
+    // Forwards are tagged with the session they belong to (belt) and every
+    // fetch is guarded by a cancellation flag its effect trips on cleanup
+    // (suspenders). SessionView reuses this component instance across session
+    // switches, so both are needed: the tag stops a stale result from ever
+    // *rendering* under the new session's URLs, and the cancel flag stops a
+    // superseded fetch from *writing* at all — otherwise a late fetch for the
+    // old session could clobber the new session's already-loaded chips, which
+    // might never refetch and would vanish indefinitely.
     let state = use_state(|| (Uuid::nil(), Vec::<ForwardInfo>::new()));
 
     // Refetch on mount and whenever (session, refresh) changes.
@@ -38,6 +42,8 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
         let state = state.clone();
         let session_id = props.session_id;
         use_effect_with((session_id, props.refresh), move |_| {
+            let cancelled = Rc::new(Cell::new(false));
+            let guard = cancelled.clone();
             spawn_local(async move {
                 let forwards = fetch_json::<SessionForwardsResponse>(
                     &format!("/api/sessions/{session_id}/forwards"),
@@ -46,11 +52,14 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                 .await
                 .map(|data| data.forwards)
                 .unwrap_or_default();
-                // Tag with the session this fetch was for; a late arrival for
-                // an old session is ignored by the render guard below.
-                state.set((session_id, forwards));
+                // Superseded by a newer (session, refresh) — don't write.
+                if !guard.get() {
+                    state.set((session_id, forwards));
+                }
             });
-            || ()
+            // Cleanup runs before the next effect (deps changed) and on
+            // unmount, tripping the flag for this now-stale fetch.
+            move || cancelled.set(true)
         });
     }
 
