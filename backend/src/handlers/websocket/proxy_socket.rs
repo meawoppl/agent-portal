@@ -341,15 +341,20 @@ fn handle_proxy_message(
                 session_manager.complete_forward_status(session_id, status);
             }
         }
-        ProxyToServer::TunnelOpened(_)
-        | ProxyToServer::TunnelRefused(_)
-        | ProxyToServer::TunnelData(_)
-        | ProxyToServer::TunnelWindow(_)
-        | ProxyToServer::TunnelClose(_) => {
-            // The backend can't open tunnel streams yet (the forward-origin
-            // reverse proxy is the next PORT_FORWARDING.md milestone), so no
-            // proxy has a live stream to send frames for.
-            warn!("Tunnel frame received before backend tunnel support; dropped");
+        ProxyToServer::TunnelOpened(f) => {
+            session_manager.tunnel_in(f.stream_id, super::TunnelIn::Opened);
+        }
+        ProxyToServer::TunnelRefused(f) => {
+            session_manager.tunnel_in(f.stream_id, super::TunnelIn::Refused(f.error));
+        }
+        ProxyToServer::TunnelData(f) => {
+            session_manager.tunnel_data_in(&f);
+        }
+        ProxyToServer::TunnelWindow(f) => {
+            session_manager.tunnel_in(f.stream_id, super::TunnelIn::Window(f.add_bytes));
+        }
+        ProxyToServer::TunnelClose(f) => {
+            session_manager.tunnel_in(f.stream_id, super::TunnelIn::Close);
         }
     }
     ControlFlow::Continue(())

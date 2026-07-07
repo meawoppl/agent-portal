@@ -57,6 +57,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // The forward-host gate is the outermost layer; the main `app_state`
+    // binding is consumed by `.with_state` below.
+    let app_state_for_forward_gate = app_state.clone();
+
     // Rate-limited device flow auth routes
     let auth_device_routes = Router::new()
         .route(AUTH_DEVICE_CODE, post(handlers::device_flow::device_code))
@@ -151,6 +155,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route(
             "/api/sessions/{id}/forwards/{port}",
             axum::routing::delete(handlers::forwards::delete_forward),
+        )
+        .route(
+            "/api/sessions/{id}/forwards/{port}/open",
+            get(handlers::forward_proxy::open_forward),
         )
         .route(
             "/api/agent/sessions/{id}/forwards",
@@ -293,4 +301,11 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         // Add CORS and cookie management
         .layer(CookieManagerLayer::new())
         .layer(cors)
+        // Outermost: requests for `{port}--{session}.{forward domain}` hosts
+        // are reverse-proxied to the session's machine and never reach the
+        // routes above (docs/PORT_FORWARDING.md).
+        .layer(axum::middleware::from_fn_with_state(
+            app_state_for_forward_gate,
+            handlers::forward_proxy::forward_host_gate,
+        ))
 }

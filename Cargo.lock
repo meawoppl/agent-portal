@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -234,6 +234,8 @@ dependencies = [
  "futures-util",
  "governor",
  "hex",
+ "hyper",
+ "hyper-util",
  "jsonwebtoken",
  "memory-serve",
  "mini-moka",
@@ -242,6 +244,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sha2",
  "shared",
  "thiserror 2.0.18",
@@ -253,6 +256,7 @@ dependencies = [
  "tower_governor",
  "tracing",
  "tracing-subscriber",
+ "urlencoding",
  "uuid",
  "ws-bridge",
 ]
@@ -487,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -518,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -556,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -1096,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "base64",
  "chrono",
@@ -1859,9 +1863,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hyper"
-version = "1.9.0"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6299f016b246a94207e63da54dbe807655bf9e00044f73ded42c3ac5305fbcca"
+checksum = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2613,7 +2617,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "anyhow",
  "colored",
@@ -2628,7 +2632,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "anyhow",
  "hex",
@@ -3291,7 +3295,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -3356,7 +3360,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.13.1"
+version = "2.13.2"
 dependencies = [
  "base64",
  "chrono",
