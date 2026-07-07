@@ -53,6 +53,14 @@ pub enum TunnelIn {
 pub(super) struct BackendStreamEntry {
     inbox: mpsc::UnboundedSender<TunnelIn>,
     recv_credit: Arc<std::sync::atomic::AtomicI64>,
+    /// The connection this stream was opened on. Its relay task holds a clone
+    /// of that connection's `ProxySender`, so when the connection tears down
+    /// we must close the stream (dropping the clone) — otherwise the session
+    /// socket's `send_task` never sees its channel close and hangs. Keyed on
+    /// `gen` too so a reconnect can't reap streams opened on the new
+    /// connection.
+    session_key: String,
+    gen: u64,
 }
 
 /// Registry of live backend tunnel streams, keyed by stream id.
@@ -122,6 +130,25 @@ impl SessionManager {
         }
     }
 
+    /// Close every tunnel stream opened on the `(session_key, gen)`
+    /// connection: send `Close` to each relay so it drops its `ProxySender`
+    /// clone and exits, then drop the registry entry. Called when a session
+    /// socket tears down, so the socket's `send_task` can see its channel
+    /// close instead of hanging on a stalled relay's held sender.
+    pub fn close_tunnels_for_connection(&self, session_key: &str, gen: u64) {
+        let doomed: Vec<Uuid> = self
+            .tunnel_streams
+            .iter()
+            .filter(|e| e.value().session_key == session_key && e.value().gen == gen)
+            .map(|e| *e.key())
+            .collect();
+        for stream_id in doomed {
+            if let Some((_, entry)) = self.tunnel_streams.remove(&stream_id) {
+                let _ = entry.inbox.send(TunnelIn::Close);
+            }
+        }
+    }
+
     /// Open a tunnel stream to `127.0.0.1:{port}` on the proxy serving
     /// `session_key`. Returns the local end of the byte pipe on success.
     pub async fn open_tunnel(
@@ -129,9 +156,14 @@ impl SessionManager {
         session_key: &str,
         port: u16,
     ) -> Result<tokio::io::DuplexStream, TunnelError> {
-        let proxy_tx: ProxySender = match self.sessions.get(session_key) {
-            Some(entry) => entry.value().clone(),
-            None => return Err(TunnelError::NotConnected),
+        // Capture the sender and its connection generation together so the
+        // stream is reaped with the exact connection it rode on.
+        let (proxy_tx, gen): (ProxySender, u64) = match (
+            self.sessions.get(session_key),
+            self.current_connection_gen(session_key),
+        ) {
+            (Some(entry), Some(gen)) => (entry.value().clone(), gen),
+            _ => return Err(TunnelError::NotConnected),
         };
 
         let stream_id = Uuid::new_v4();
@@ -142,6 +174,8 @@ impl SessionManager {
             BackendStreamEntry {
                 inbox: relay_tx,
                 recv_credit: recv_credit.clone(),
+                session_key: session_key.to_string(),
+                gen,
             },
         );
 
@@ -228,7 +262,10 @@ impl CreditGate {
     }
 
     async fn grant(&self, n: u32) {
-        *self.avail.lock().await += n;
+        // Saturate rather than wrap on absurd `TunnelWindow` values (parity
+        // with the proxy-side gate).
+        let mut avail = self.avail.lock().await;
+        *avail = avail.saturating_add(n);
         self.notify.notify_waiters();
     }
 }
@@ -298,4 +335,50 @@ async fn run_relay(
         reason: None,
     }));
     debug!("Backend tunnel stream {} closed", stream_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handlers::websocket::SessionManager;
+
+    fn insert_stream(
+        mgr: &SessionManager,
+        key: &str,
+        gen: u64,
+    ) -> (Uuid, mpsc::UnboundedReceiver<TunnelIn>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let id = Uuid::new_v4();
+        mgr.tunnel_streams.insert(
+            id,
+            BackendStreamEntry {
+                inbox: tx,
+                recv_credit: Arc::new(std::sync::atomic::AtomicI64::new(INITIAL_WINDOW as i64)),
+                session_key: key.to_string(),
+                gen,
+            },
+        );
+        (id, rx)
+    }
+
+    #[test]
+    fn close_tunnels_scoped_to_connection_gen() {
+        let mgr = SessionManager::new();
+        // Two streams on the same session but different connection gens, plus
+        // one on a different session.
+        let (old_id, mut old_rx) = insert_stream(&mgr, "s1", 1);
+        let (new_id, mut new_rx) = insert_stream(&mgr, "s1", 2);
+        let (other_id, mut other_rx) = insert_stream(&mgr, "s2", 1);
+
+        // Closing gen 1 of s1 must only reap the old stream.
+        mgr.close_tunnels_for_connection("s1", 1);
+
+        assert!(!mgr.tunnel_streams.contains_key(&old_id));
+        assert!(mgr.tunnel_streams.contains_key(&new_id));
+        assert!(mgr.tunnel_streams.contains_key(&other_id));
+        assert!(matches!(old_rx.try_recv(), Ok(TunnelIn::Close)));
+        // The newer connection's stream and the other session are untouched.
+        assert!(new_rx.try_recv().is_err());
+        assert!(other_rx.try_recv().is_err());
+    }
 }

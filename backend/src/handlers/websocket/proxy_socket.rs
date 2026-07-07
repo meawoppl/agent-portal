@@ -72,6 +72,16 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
         .zip(connection_gen)
         .is_some_and(|(key, gen)| !session_manager.is_current_connection(key, gen));
 
+    // Close any port-forward tunnel streams opened on THIS connection before
+    // awaiting send_task below: their relay tasks each hold a clone of `tx`,
+    // so a stalled relay would otherwise keep the channel open and hang the
+    // await (docs/PORT_FORWARDING.md). Bound to this connection's gen so a
+    // concurrent reconnect's streams are untouched. Done regardless of
+    // staleness — these streams rode this connection's now-dead sender.
+    if let (Some(key), Some(gen)) = (session_key.as_ref(), connection_gen) {
+        session_manager.close_tunnels_for_connection(key, gen);
+    }
+
     if !is_stale {
         if let Some(session_id) = db_session_id {
             match db_pool.get() {

@@ -84,6 +84,10 @@ fn mint_token(app_state: &AppState, aud: &str, session_id: Uuid, port: u16, ttl:
 fn verify_token(app_state: &AppState, token: &str, aud: &str, session_id: Uuid, port: u16) -> bool {
     let mut validation = Validation::default();
     validation.set_audience(&[aud]);
+    // `set_audience` alone only checks `aud` *if present*. Require it (and
+    // `exp`) so a token minted for some other purpose with the same secret,
+    // but no `aud`, can't pass this auth boundary.
+    validation.set_required_spec_claims(&["exp", "aud"]);
     match decode::<ForwardClaims>(
         token,
         &DecodingKey::from_secret(app_state.jwt_secret.as_bytes()),
@@ -637,6 +641,38 @@ mod tests {
         assert_eq!(validate_next("no-slash"), "/");
         assert_eq!(validate_next("/a\r\nSet-Cookie: x"), "/");
         assert_eq!(validate_next(&format!("/{}", "a".repeat(3000))), "/");
+    }
+
+    #[test]
+    fn verify_token_requires_aud_claim() {
+        // A JWT signed with the same secret but carrying no `aud` (e.g. a
+        // token minted for some other purpose) must not authenticate a
+        // forward, even with a matching session_id + port + exp.
+        #[derive(serde::Serialize)]
+        struct NoAud {
+            session_id: Uuid,
+            port: u16,
+            exp: i64,
+        }
+        let secret = b"test-secret-value-at-least-32-bytes-long";
+        let sid = Uuid::new_v4();
+        let no_aud = encode(
+            &Header::default(),
+            &NoAud {
+                session_id: sid,
+                port: 8080,
+                exp: chrono::Utc::now().timestamp() + 60,
+            },
+            &EncodingKey::from_secret(secret),
+        )
+        .unwrap();
+
+        let mut validation = Validation::default();
+        validation.set_audience(&[AUD_HANDOFF]);
+        validation.set_required_spec_claims(&["exp", "aud"]);
+        let decoded =
+            decode::<ForwardClaims>(&no_aud, &DecodingKey::from_secret(secret), &validation);
+        assert!(decoded.is_err(), "token without aud must be rejected");
     }
 
     #[test]
