@@ -326,8 +326,16 @@ No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
   live tunnel streams, and invalidates future requests at the row check —
   outstanding cookies become harmless.
 - Everything a forwarded app serves is whatever the *agent* chose to run;
-  forwards are only reachable by users who already have read access to that
-  session's transcript, which is the same trust boundary.
+  by default forwards are only reachable by users who already have read access
+  to that session's transcript, which is the same trust boundary.
+- **Public forwards** are an owner opt-in (`session_forwards.public`, toggled
+  from Settings ▸ Forwarding). A public forward skips the token handoff and
+  serves the subdomain to anyone with the URL. The dispatch checks `public`
+  *before* the cookie gate, but for a private-or-absent forward it still runs
+  the cookie gate before distinguishing present-from-absent, so an
+  unauthenticated caller can't probe whether a private forward is active — it
+  always gets the same auth bounce. Only the session owner can flip the flag
+  (`PATCH /api/sessions/{id}/forwards/public`).
 
 ## Frontend
 
@@ -336,6 +344,10 @@ No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
   new tab; owners get a revoke `×`. A
   `ServerToClient::ForwardsChanged { session_id }` event triggers a refetch so
   the chip appears/updates the moment the agent registers or re-points.
+- **Settings ▸ Forwarding** lists the caller's active forwards across their
+  sessions (`GET /api/forwards`, owner-scoped) with a per-forward public/private
+  toggle (`PATCH …/forwards/public`), so the owner can opt a forward into
+  unauthenticated public access.
 - Bare forward URLs printed by the CLI already auto-link in transcripts; no
   new markdown scheme is needed (deliberate non-goal — `portal://port/…` would
   duplicate what the printed URL does).

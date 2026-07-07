@@ -137,6 +137,7 @@ diesel::table! {
         session_id -> Uuid,
         port -> Int4,
         created_at -> Timestamp,
+        public -> Bool,
     }
 }
 

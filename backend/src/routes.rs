@@ -160,6 +160,12 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(handlers::forward_proxy::open_forward),
         )
         .route(
+            "/api/sessions/{id}/forwards/public",
+            axum::routing::patch(handlers::forwards::set_forward_public),
+        )
+        // The caller's forwards across sessions, for Settings ▸ Forwarding.
+        .route("/api/forwards", get(handlers::forwards::list_user_forwards))
+        .route(
             "/api/agent/sessions/{id}/forwards",
             get(handlers::forwards::list_forwards)
                 .post(handlers::forwards::create_forward)

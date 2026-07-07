@@ -1,4 +1,5 @@
 mod appearance_panel;
+mod forwarding_panel;
 mod launchers_panel;
 mod performance_panel;
 mod sessions_panel;
@@ -7,6 +8,7 @@ mod tokens_panel;
 
 use crate::utils;
 use appearance_panel::AppearancePanel;
+use forwarding_panel::ForwardingPanel;
 use launchers_panel::LaunchersPanel;
 use performance_panel::PerformancePanel;
 use sessions_panel::SessionsPanel;
@@ -20,6 +22,7 @@ enum SettingsTab {
     Sessions,
     Tokens,
     Launchers,
+    Forwarding,
     Sounds,
     Performance,
     Appearance,
@@ -61,6 +64,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
     let on_launchers_tab = make_tab_handler(SettingsTab::Launchers);
+    let on_forwarding_tab = make_tab_handler(SettingsTab::Forwarding);
     let on_sounds_tab = make_tab_handler(SettingsTab::Sounds);
     let on_performance_tab = make_tab_handler(SettingsTab::Performance);
     let on_appearance_tab = make_tab_handler(SettingsTab::Appearance);
@@ -106,6 +110,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     { "Launchers" }
                 </button>
                 <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Forwarding).then_some("active"))}
+                    onclick={on_forwarding_tab}
+                >
+                    { "Forwarding" }
+                </button>
+                <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sounds).then_some("active"))}
                     onclick={on_sounds_tab}
                 >
@@ -131,6 +141,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Launchers {
                     <LaunchersPanel />
+                }
+                if *active_tab == SettingsTab::Forwarding {
+                    <ForwardingPanel />
                 }
                 if *active_tab == SettingsTab::Sounds {
                     <SoundsPanel />
