@@ -22,7 +22,7 @@ const SHORT_SESSION_ID_LEN: usize = 8;
 ///
 /// Returns `None` when none apply (e.g. a human shell), in which case the
 /// recipient falls back to user attribution.
-fn sender_session_id() -> Option<String> {
+pub(crate) fn sender_session_id() -> Option<String> {
     let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
 
     if let Some(id) = env("CLAUDE_CODE_SESSION_ID").or_else(|| env("PORTAL_SESSION_ID")) {
