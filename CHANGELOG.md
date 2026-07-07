@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.5
+
+- **Port forwarding milestone 3: session-header forward chips (docs/PORT_FORWARDING.md, #689).** The session view header now renders a chip per active forward (`:8080 ↗`), fetched from `GET /api/sessions/{id}/forwards` and refetched whenever a `ServerToClient::ForwardsChanged` frame arrives (new `WsEvent::ForwardsChanged` → a `forwards_refresh` tick prop the `ForwardChips` component watches), so chips appear/disappear live as the agent registers or revokes. Each chip links through the portal `/open` handoff endpoint in a new tab; the session owner also gets a revoke `×` (owner-gated in the UI to match the backend). Completes the user-facing surface and the whole #689 forwarding feature (spec → protocol → proxy tunnel → backend reverse proxy + WS upgrade → CLI → UI).
+
 ## 2.13.4
 
 - **Port forwarding milestone 2: WebSocket upgrade passthrough (docs/PORT_FORWARDING.md, #689).** The forward-origin reverse proxy now relays `Connection: Upgrade` requests end-to-end: the hyper client connection is driven with `.with_upgrades()`, upgrade requests keep their `Connection`/`Upgrade` headers (other hop-by-hop still stripped), and on a `101 Switching Protocols` the browser's and upstream's upgraded byte streams are spliced with `copy_bidirectional` — so WebSocket-dependent apps (Jupyter kernels, Vite HMR) work through a forward, riding the same raw tunnel as ordinary requests. Upgrade detection scans all `Connection` header values (split fields are RFC-legal); a stray upstream `101` to a non-upgrade request is refused rather than forwarded; the 101 response keeps `Connection`/`Upgrade` and passes `Sec-WebSocket-Accept` through normally. SSE already worked via the streaming-body path (no upgrade). Unit tests cover the handshake detection (incl. split `Connection` fields). (Idle-stream timeouts remain deferred; streams are still bounded by the per-connection cleanup from milestone 1c.)
