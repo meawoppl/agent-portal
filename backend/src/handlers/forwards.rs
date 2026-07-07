@@ -64,6 +64,7 @@ fn to_forward_info(app_state: &AppState, row: &SessionForward) -> Result<Forward
 }
 
 /// Authorize `user_id` as a member of `session_id` and return the session.
+/// Read access — sufficient to *see* forwards, never to change them.
 fn member_session(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
@@ -74,6 +75,26 @@ fn member_session(
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(sessions::id.eq(session_id))
         .filter(session_members::user_id.eq(user_id))
+        .select(Session::as_select())
+        .first(conn)
+        .map_err(|_| AppError::NotFound("session"))
+}
+
+/// Authorize `user_id` as the *owner* of `session_id` and return the session.
+/// Registering a forward exposes a loopback port on the proxy host and
+/// revoking one tears it down — both are owner-only, a strictly tighter gate
+/// than transcript read access (a viewer member must not be able to
+/// open/probe ports on the machine running the agent). The CLI path clears
+/// this too: the launcher's bearer token resolves to the session owner.
+fn owner_session(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> Result<Session, AppError> {
+    use crate::schema::sessions;
+    sessions::table
+        .filter(sessions::id.eq(session_id))
+        .filter(sessions::user_id.eq(user_id))
         .select(Session::as_select())
         .first(conn)
         .map_err(|_| AppError::NotFound("session"))
@@ -93,7 +114,7 @@ pub async fn create_forward(
     }
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
-    let session = member_session(&mut conn, session_id, user_id)?;
+    let session = owner_session(&mut conn, session_id, user_id)?;
     // Fail before touching state when forwarding is disabled.
     forward_url(&app_state, session_id, req.port)?;
 
@@ -193,15 +214,9 @@ pub async fn delete_forward(
 ) -> Result<StatusCode, AppError> {
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
+    let session = owner_session(&mut conn, session_id, user_id)?;
 
-    use crate::schema::{session_forwards, sessions};
-    let session: Session = sessions::table
-        .filter(sessions::id.eq(session_id))
-        .filter(sessions::user_id.eq(user_id))
-        .select(Session::as_select())
-        .first(&mut conn)
-        .map_err(|_| AppError::NotFound("session"))?;
-
+    use crate::schema::session_forwards;
     let deleted = diesel::delete(
         session_forwards::table
             .filter(session_forwards::session_id.eq(session_id))
