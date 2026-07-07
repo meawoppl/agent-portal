@@ -59,6 +59,14 @@ enum StreamMsg {
 struct StreamHandle {
     port: u16,
     inbox: mpsc::UnboundedSender<StreamMsg>,
+    /// Receive-side credit enforcement: how many downlink bytes the peer may
+    /// still send before it must wait for our `TunnelWindow` grants. The
+    /// reader decrements on arrival; the stream task re-increments as bytes
+    /// drain into the socket. Going negative is a protocol violation and
+    /// closes the stream — the inbox is unbounded, so this (not the channel)
+    /// is what bounds per-stream buffered downlink data to the 256 KiB
+    /// window even against a buggy or hostile peer.
+    recv_credit: Arc<std::sync::atomic::AtomicI64>,
 }
 
 /// Per-connection tunnel state. Create one per established session WS,
@@ -120,19 +128,47 @@ impl TunnelManager {
                 true
             }
             ServerToProxy::TunnelData(data) => {
-                let streams = self.streams.lock().await;
-                if let Some(handle) = streams.get(&data.stream_id) {
+                // Clone the handle out and drop the map lock before the
+                // decode — no byte work under the streams mutex.
+                let handle = {
+                    let streams = self.streams.lock().await;
+                    streams
+                        .get(&data.stream_id)
+                        .map(|h| (h.inbox.clone(), h.recv_credit.clone()))
+                };
+                // Unknown stream: a post-close race; drop silently.
+                if let Some((inbox, recv_credit)) = handle {
                     match base64::engine::general_purpose::STANDARD.decode(&data.data_base64) {
+                        Ok(bytes) if bytes.len() > MAX_CHUNK => {
+                            warn!(
+                                "Oversized TunnelData ({} bytes) for stream {}; closing",
+                                bytes.len(),
+                                data.stream_id
+                            );
+                            let _ = inbox.send(StreamMsg::Close);
+                        }
                         Ok(bytes) => {
-                            let _ = handle.inbox.send(StreamMsg::Data(bytes));
+                            // Enforce the peer's send window: data beyond the
+                            // credit we granted is a protocol violation, and
+                            // the unbounded inbox must not absorb it.
+                            let prev = recv_credit
+                                .fetch_sub(bytes.len() as i64, std::sync::atomic::Ordering::AcqRel);
+                            if prev < bytes.len() as i64 {
+                                warn!(
+                                    "TunnelData beyond granted window for stream {}; closing",
+                                    data.stream_id
+                                );
+                                let _ = inbox.send(StreamMsg::Close);
+                            } else {
+                                let _ = inbox.send(StreamMsg::Data(bytes));
+                            }
                         }
                         Err(_) => {
                             warn!("Undecodable TunnelData for stream {}", data.stream_id);
-                            let _ = handle.inbox.send(StreamMsg::Close);
+                            let _ = inbox.send(StreamMsg::Close);
                         }
                     }
                 }
-                // Unknown stream: a post-close race; drop silently.
                 true
             }
             ServerToProxy::TunnelWindow(win) => {
@@ -178,6 +214,7 @@ impl TunnelManager {
         }
         // Register the inbox before the dial so ordered frames can't miss it.
         let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
+        let recv_credit = Arc::new(std::sync::atomic::AtomicI64::new(INITIAL_WINDOW as i64));
         {
             let mut streams = self.streams.lock().await;
             if streams.len() >= MAX_STREAMS {
@@ -196,6 +233,7 @@ impl TunnelManager {
                 StreamHandle {
                     port: open.port,
                     inbox: inbox_tx,
+                    recv_credit: recv_credit.clone(),
                 },
             );
         }
@@ -230,7 +268,7 @@ impl TunnelManager {
             }))
             .await;
             debug!("Tunnel stream {} open to port {}", stream_id, port);
-            run_stream(mgr, stream_id, tcp, inbox_rx).await;
+            run_stream(mgr, stream_id, tcp, inbox_rx, recv_credit).await;
         });
     }
 
@@ -286,7 +324,10 @@ impl CreditGate {
     }
 
     async fn grant(&self, n: u32) {
-        *self.avail.lock().await += n;
+        // Saturate rather than wrap on absurd `TunnelWindow` values — the
+        // window can't meaningfully exceed u32 anyway.
+        let mut avail = self.avail.lock().await;
+        *avail = avail.saturating_add(n);
         self.notify.notify_waiters();
     }
 }
@@ -300,6 +341,7 @@ async fn run_stream(
     stream_id: Uuid,
     tcp: TcpStream,
     mut inbox: mpsc::UnboundedReceiver<StreamMsg>,
+    recv_credit: Arc<std::sync::atomic::AtomicI64>,
 ) {
     let (mut tcp_rd, mut tcp_wr) = tcp.into_split();
     let send_credit = Arc::new(CreditGate::new(INITIAL_WINDOW));
@@ -334,7 +376,8 @@ async fn run_stream(
                     break Some(format!("local write failed: {e}"));
                 }
                 // Grant-on-drain: the bytes are in the socket, refill the
-                // peer's window.
+                // peer's window (and our receive-credit enforcement book).
+                recv_credit.fetch_add(bytes.len() as i64, std::sync::atomic::Ordering::AcqRel);
                 mgr.send(ProxyToServer::TunnelWindow(TunnelWindowFields {
                     stream_id,
                     add_bytes: bytes.len() as u32,
@@ -393,5 +436,15 @@ mod tests {
         let gate = CreditGate::new(0);
         gate.grant(5).await;
         assert_eq!(gate.take(16).await, 5);
+    }
+
+    /// Absurd window grants saturate instead of wrapping to a tiny window.
+    #[tokio::test]
+    async fn credit_gate_grant_saturates() {
+        let gate = CreditGate::new(u32::MAX - 1);
+        gate.grant(u32::MAX).await;
+        assert_eq!(gate.take(4).await, 4);
+        gate.grant(u32::MAX).await; // still sane after saturation
+        assert_eq!(gate.take(4).await, 4);
     }
 }
