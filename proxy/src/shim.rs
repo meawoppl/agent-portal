@@ -496,10 +496,15 @@ async fn run_shim_connection(
     let (ws_write, ws_read) = conn.split();
     let ws_write: SharedWsWrite = Arc::new(Mutex::new(ws_write));
 
+    // Per-connection port-forward tunnel state (docs/PORT_FORWARDING.md);
+    // the backend replays `ForwardOpen`s after registration.
+    let tunnel = session_lib::tunnel::TunnelManager::new(ws_write.clone());
+
     // Single event channel for all WebSocket reader events
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<WsEvent>();
 
-    let reader_task = crate::session::spawn_ws_reader(ws_read, ws_write.clone(), event_tx);
+    let reader_task =
+        crate::session::spawn_ws_reader(ws_read, ws_write.clone(), event_tx, tunnel.clone());
 
     // Main select loop
     let result = loop {
@@ -640,6 +645,7 @@ async fn run_shim_connection(
     };
 
     reader_task.abort();
+    tunnel.shutdown().await;
     result
 }
 

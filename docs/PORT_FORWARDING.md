@@ -160,7 +160,7 @@ CREATE TABLE session_forwards (
 Rows are deleted with the session (cascade + the session reaper). Forward
 lifetime is strictly session lifetime — nothing outlives the session.
 
-### Agent-facing API (bearer token, same rails as `/api/agent/*`)
+### Agent-facing API (bearer token or session cookie, same rails as `/api/agent/*`)
 
 | Route | Effect |
 |---|---|
@@ -176,6 +176,7 @@ no `serde_json::json!`).
 | Route | Access | Effect |
 |---|---|---|
 | `GET /api/sessions/{id}/forwards` | session read access | List forwards for UI. |
+| `POST /api/sessions/{id}/forwards` | owner | Register (same handler as the agent route). |
 | `DELETE /api/sessions/{id}/forwards/{port}` | owner | Revoke. |
 | `GET /api/sessions/{id}/forwards/{port}/open?next=/…` | session read access | Mint handoff token, `302` to the forward origin (see Auth). |
 

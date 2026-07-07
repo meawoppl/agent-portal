@@ -145,6 +145,7 @@ pub(super) fn spawn_ws_reader(
     mut ws_read: WsRead,
     channels: WsReaderChannels,
     heartbeat: session_lib::heartbeat::HeartbeatTracker,
+    tunnel: std::sync::Arc<session_lib::tunnel::TunnelManager>,
 ) -> tokio::task::JoinHandle<()> {
     let WsReaderChannels {
         input_tx,
@@ -161,6 +162,12 @@ pub(super) fn spawn_ws_reader(
         while let Some(result) = ws_read.recv().await {
             match result {
                 Ok(msg) => {
+                    // Forward/tunnel frames are consumed by the tunnel
+                    // manager; `handle` never blocks on I/O (dials run in
+                    // spawned tasks), so the reader stays responsive.
+                    if tunnel.handle(&msg).await {
+                        continue;
+                    }
                     match handle_ws_message(
                         msg,
                         &input_tx,

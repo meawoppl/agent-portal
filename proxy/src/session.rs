@@ -46,11 +46,18 @@ pub fn spawn_ws_reader(
     mut ws_read: WsRead,
     ws_write: SharedWsWrite,
     event_tx: mpsc::UnboundedSender<WsEvent>,
+    tunnel: std::sync::Arc<session_lib::tunnel::TunnelManager>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(result) = ws_read.recv().await {
             match result {
                 Ok(msg) => {
+                    // Forward/tunnel frames (docs/PORT_FORWARDING.md) are
+                    // consumed by the tunnel manager; everything else flows
+                    // to the shim's event loop as before.
+                    if tunnel.handle(&msg).await {
+                        continue;
+                    }
                     if !handle_server_message(msg, &event_tx, &ws_write).await {
                         break;
                     }

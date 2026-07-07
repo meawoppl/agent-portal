@@ -764,6 +764,11 @@ async fn run_message_loop<A: Agent>(
     // Wrap ws_write for sharing
     let ws_write = std::sync::Arc::new(tokio::sync::Mutex::new(ws_write));
 
+    // Per-connection port-forward tunnel state (docs/PORT_FORWARDING.md).
+    // The backend replays `ForwardOpen`s after registration, so a fresh
+    // manager per connection starts with the correct allowlist.
+    let tunnel = session_lib::tunnel::TunnelManager::new(ws_write.clone());
+
     // Heartbeat tracker for dead connection detection
     let heartbeat = session_lib::heartbeat::HeartbeatTracker::new();
 
@@ -806,6 +811,7 @@ async fn run_message_loop<A: Agent>(
             file_download_tx,
         },
         heartbeat.clone(),
+        tunnel.clone(),
     );
 
     // Create connection state (per-connection channels and timing)
@@ -850,6 +856,7 @@ async fn run_message_loop<A: Agent>(
     // Clean up
     output_task.abort();
     reader_task.abort();
+    tunnel.shutdown().await;
 
     result
 }
