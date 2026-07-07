@@ -76,40 +76,37 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
     let revoke = {
         let state = state.clone();
         let session_id = props.session_id;
-        Callback::from(move |port: u16| {
+        Callback::from(move |_: ()| {
             let state = state.clone();
             spawn_local(async move {
-                let url = api_url(&format!("/api/sessions/{session_id}/forwards/{port}"));
+                // A session has one forward; DELETE takes no port.
+                let url = api_url(&format!("/api/sessions/{session_id}/forwards"));
                 if Request::delete(&url).send().await.is_ok() {
-                    // Optimistic: drop it locally (re-tagging with this
-                    // session); the ForwardsChanged frame reconciles if the
-                    // server disagrees.
-                    let remaining = state.1.iter().filter(|f| f.port != port).cloned().collect();
-                    state.set((session_id, remaining));
+                    // Optimistic: clear locally (keeping this session's tag);
+                    // the ForwardsChanged frame reconciles if the server
+                    // disagrees.
+                    state.set((session_id, Vec::new()));
                 }
             });
         })
     };
 
+    let open_url = utils::api_url(&format!("/api/sessions/{}/forwards/open", props.session_id));
+
     html! {
         <span class="session-forwards">
             { for forwards.iter().map(|f| {
-                let open_url = utils::api_url(&format!(
-                    "/api/sessions/{}/forwards/{}/open",
-                    props.session_id, f.port
-                ));
-                let port = f.port;
                 let on_revoke = revoke.clone();
                 html! {
-                    <span class="forward-chip" key={port} title={f.url.clone()}>
-                        <a href={open_url} target="_blank" rel="noopener noreferrer">
-                            { format!(":{port} ↗") }
+                    <span class="forward-chip" key={f.port} title={f.url.clone()}>
+                        <a href={open_url.clone()} target="_blank" rel="noopener noreferrer">
+                            { format!(":{} ↗", f.port) }
                         </a>
                         if props.is_owner {
                             <button
                                 class="forward-chip-revoke"
-                                title="Stop forwarding this port"
-                                onclick={Callback::from(move |_| on_revoke.emit(port))}
+                                title="Stop forwarding"
+                                onclick={Callback::from(move |_| on_revoke.emit(()))}
                             >{ "×" }</button>
                         }
                     </span>

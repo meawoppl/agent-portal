@@ -1,13 +1,14 @@
 //! Forward-origin router: Host-based dispatch, token-handoff auth, and the
 //! hyper-over-tunnel reverse proxy (docs/PORT_FORWARDING.md).
 //!
-//! Requests whose `Host` matches `{port}--{session}.{PORTAL_FORWARD_DOMAIN}`
-//! never reach the normal router: `forward_host_gate` (a middleware at the
-//! router root) sends them here. `/__portal/auth` exchanges a short-lived
-//! handoff JWT (minted on the portal origin by [`open_forward`]) for an
-//! 8-hour host-only cookie; everything else requires that cookie, checks the
-//! `session_forwards` row still exists (revocation), and is reverse-proxied
-//! through a tunnel stream to `127.0.0.1:{port}` on the proxy host.
+//! Requests whose `Host` matches `{label}.{PORTAL_FORWARD_DOMAIN}` never reach
+//! the normal router: `forward_host_gate` (a middleware at the router root)
+//! sends them here. The label is resolved to a session via the
+//! `forward_subdomains` LUT. `/__portal/auth` exchanges a short-lived handoff
+//! JWT (minted on the portal origin by [`open_forward`]) for an 8-hour
+//! host-only cookie; everything else requires that cookie, looks up the
+//! session's currently-forwarded port (revocation-aware), and is
+//! reverse-proxied through a tunnel stream to `127.0.0.1:{port}`.
 
 use std::sync::Arc;
 
@@ -58,17 +59,15 @@ const HOP_BY_HOP: &[&str] = &[
 struct ForwardClaims {
     aud: String,
     session_id: Uuid,
-    port: u16,
     exp: i64,
     iat: i64,
 }
 
-fn mint_token(app_state: &AppState, aud: &str, session_id: Uuid, port: u16, ttl: i64) -> String {
+fn mint_token(app_state: &AppState, aud: &str, session_id: Uuid, ttl: i64) -> String {
     let now = Utc::now().timestamp();
     let claims = ForwardClaims {
         aud: aud.to_string(),
         session_id,
-        port,
         exp: now + ttl,
         iat: now,
     };
@@ -80,8 +79,10 @@ fn mint_token(app_state: &AppState, aud: &str, session_id: Uuid, port: u16, ttl:
     .unwrap_or_default()
 }
 
-/// Verify a forward JWT and require it to match this origin's session+port.
-fn verify_token(app_state: &AppState, token: &str, aud: &str, session_id: Uuid, port: u16) -> bool {
+/// Verify a forward JWT and require it to match this origin's session. (The
+/// forward port isn't in the token — a session has at most one, looked up per
+/// request so revocation and re-pointing take effect immediately.)
+fn verify_token(app_state: &AppState, token: &str, aud: &str, session_id: Uuid) -> bool {
     let mut validation = Validation::default();
     validation.set_audience(&[aud]);
     // `set_audience` alone only checks `aud` *if present*. Require it (and
@@ -93,35 +94,26 @@ fn verify_token(app_state: &AppState, token: &str, aud: &str, session_id: Uuid, 
         &DecodingKey::from_secret(app_state.jwt_secret.as_bytes()),
         &validation,
     ) {
-        Ok(data) => data.claims.session_id == session_id && data.claims.port == port,
+        Ok(data) => data.claims.session_id == session_id,
         Err(_) => false,
     }
 }
 
-/// Normalize an authority and match it against the forward pattern:
-/// lowercase, strip `:port` and trailing dot, then require
-/// `{1-5 digits}--{32 hex}` as the first label and an exact domain match on
-/// the rest.
-pub fn parse_forward_host(host: &str, forward_domain: &str) -> Option<(u16, Uuid)> {
+/// Normalize an authority and extract the forward subdomain label: lowercase,
+/// strip `:port` and trailing dot, then require a single `{8 lowercase hex}`
+/// label and an exact domain match on the rest. The label is resolved to a
+/// session via the `forward_subdomains` LUT downstream.
+pub fn parse_forward_host(host: &str, forward_domain: &str) -> Option<String> {
     let host = normalize_authority(host);
     let domain = normalize_authority(forward_domain);
     let rest = host.strip_suffix(&domain)?;
     let label = rest.strip_suffix('.')?;
 
-    let (port_str, sid_str) = label.split_once("--")?;
-    if port_str.is_empty()
-        || port_str.len() > 5
-        || !port_str.bytes().all(|b| b.is_ascii_digit())
-        || sid_str.len() != 32
-        || !sid_str
+    let valid = label.len() == 8
+        && label
             .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-    {
-        return None;
-    }
-    let port: u16 = port_str.parse().ok().filter(|p| *p >= 1)?;
-    let session_id = Uuid::try_parse(sid_str).ok()?;
-    Some((port, session_id))
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+    valid.then(|| label.to_string())
 }
 
 fn normalize_authority(authority: &str) -> String {
@@ -150,18 +142,15 @@ pub fn validate_next(next: &str) -> String {
     }
 }
 
-/// Public origin for a forward, e.g. `http://8080--{sid}.localhost:3000`.
-fn forward_origin(app_state: &AppState, session_id: Uuid, port: u16) -> Option<String> {
+/// Public origin for a forward, e.g. `http://a3f9c2e1.localhost:3000`.
+fn forward_origin(app_state: &AppState, label: &str) -> Option<String> {
     let domain = app_state.forward_domain.as_deref()?;
     let scheme = if app_state.public_url.starts_with("https://") {
         "https"
     } else {
         "http"
     };
-    Some(format!(
-        "{scheme}://{port}--{}.{domain}",
-        session_id.simple()
-    ))
+    Some(format!("{scheme}://{label}.{domain}"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,12 +159,12 @@ pub struct OpenForwardQuery {
     pub next: Option<String>,
 }
 
-/// GET /api/sessions/{id}/forwards/{port}/open — portal-origin entry point.
+/// GET /api/sessions/{id}/forwards/open — portal-origin entry point.
 /// Authenticated by the normal portal cookie (session read access), mints the
-/// 60s handoff token and bounces to the forward origin.
+/// 60s handoff token and bounces to the session's forward origin.
 pub async fn open_forward(
     State(app_state): State<Arc<AppState>>,
-    Path((session_id, port)): Path<(Uuid, u16)>,
+    Path(session_id): Path<Uuid>,
     headers: HeaderMap,
     cookies: Cookies,
     Query(query): Query<OpenForwardQuery>,
@@ -184,34 +173,24 @@ pub async fn open_forward(
     let mut conn = app_state.conn()?;
     crate::handlers::forwards::member_session(&mut conn, session_id, user_id)?;
 
-    // Only bounce to forwards that exist (and forwarding must be enabled).
-    let origin = forward_origin(&app_state, session_id, port)
+    // Forwarding must be enabled and the session must have an active forward.
+    if app_state.forward_domain.is_none() {
+        return Err(AppError::ServiceUnavailable("Forwarding is not configured"));
+    }
+    if crate::handlers::forwards::active_forward_port(&mut conn, session_id)?.is_none() {
+        return Err(AppError::NotFound("forward"));
+    }
+    let label = crate::handlers::forwards::ensure_subdomain_label(&mut conn, session_id)?;
+    let origin = forward_origin(&app_state, &label)
         .ok_or(AppError::ServiceUnavailable("Forwarding is not configured"))?;
-    forward_row_exists(&mut conn, session_id, port)?;
 
-    let token = mint_token(&app_state, AUD_HANDOFF, session_id, port, HANDOFF_TTL_SECS);
+    let token = mint_token(&app_state, AUD_HANDOFF, session_id, HANDOFF_TTL_SECS);
     let next = validate_next(query.next.as_deref().unwrap_or("/"));
     let target = format!(
         "{origin}/__portal/auth?token={token}&next={}",
         urlencoding::encode(&next)
     );
     Ok(Redirect::temporary(&target))
-}
-
-fn forward_row_exists(
-    conn: &mut crate::db::DbConnection,
-    session_id: Uuid,
-    port: u16,
-) -> Result<(), AppError> {
-    use crate::schema::session_forwards;
-    session_forwards::table
-        .filter(session_forwards::session_id.eq(session_id))
-        .filter(session_forwards::port.eq(port as i32))
-        .select(session_forwards::id)
-        .first::<Uuid>(conn)
-        .optional()?
-        .map(|_| ())
-        .ok_or(AppError::NotFound("forward"))
 }
 
 /// Router-root middleware: requests for a forward host never reach the
@@ -234,51 +213,62 @@ pub async fn forward_host_gate(
         return next.run(req).await;
     };
     match parse_forward_host(&host, &domain) {
-        Some((port, session_id)) => dispatch(app_state, session_id, port, req).await,
+        Some(label) => dispatch(app_state, label, req).await,
         None => next.run(req).await,
     }
 }
 
-/// Everything served on a forward origin.
-async fn dispatch(app_state: Arc<AppState>, session_id: Uuid, port: u16, req: Request) -> Response {
-    if req.uri().path() == "/__portal/auth" {
-        return handle_auth(&app_state, session_id, port, &req);
-    }
-
-    // Cookie gate.
-    let authed = cookie_value(req.headers(), FWD_COOKIE)
-        .map(|token| verify_token(&app_state, &token, AUD_COOKIE, session_id, port))
-        .unwrap_or(false);
-    if !authed {
-        return unauthenticated_response(&app_state, session_id, port, &req);
-    }
-
-    // Revocation check: the allowlist row must still exist.
-    let session_key = {
+/// Everything served on a forward origin. Resolves the label to a session and
+/// its live port (both may 404) before auth + reverse proxy.
+async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Response {
+    // Resolve label → session and its currently-forwarded port up front. Both
+    // lookups are the revocation gate: an unknown label or a session with no
+    // active forward is a 404 (no leak of whether the label ever existed).
+    let (session_id, port, session_key) = {
         let mut conn = match app_state.conn() {
             Ok(conn) => conn,
             Err(_) => return plain_status(StatusCode::SERVICE_UNAVAILABLE, "database unavailable"),
         };
-        if forward_row_exists(&mut conn, session_id, port).is_err() {
-            return plain_status(StatusCode::NOT_FOUND, "this forward has been revoked");
+        let session_id = match crate::handlers::forwards::session_for_label(&mut conn, &label) {
+            Ok(id) => id,
+            Err(_) => return plain_status(StatusCode::NOT_FOUND, "no such forward"),
+        };
+
+        if req.uri().path() == "/__portal/auth" {
+            return handle_auth(&app_state, session_id, &req);
         }
+
+        // Cookie gate before the port lookup so an unauthenticated caller
+        // can't probe whether a forward is currently active.
+        let authed = cookie_value(req.headers(), FWD_COOKIE)
+            .map(|token| verify_token(&app_state, &token, AUD_COOKIE, session_id))
+            .unwrap_or(false);
+        if !authed {
+            return unauthenticated_response(&app_state, session_id, &req);
+        }
+
+        let port = match crate::handlers::forwards::active_forward_port(&mut conn, session_id) {
+            Ok(Some(port)) => port,
+            _ => return plain_status(StatusCode::NOT_FOUND, "this forward has been revoked"),
+        };
         use crate::schema::sessions;
-        match sessions::table
+        let session_key = match sessions::table
             .find(session_id)
             .select(sessions::session_key)
             .first::<String>(&mut conn)
         {
             Ok(key) => key,
             Err(_) => return plain_status(StatusCode::NOT_FOUND, "session not found"),
-        }
+        };
+        (session_id, port, session_key)
     };
 
-    proxy_request(&app_state, &session_key, session_id, port, req).await
+    proxy_request(&app_state, &session_key, session_id, port, &label, req).await
 }
 
 /// `/__portal/auth?token=…&next=…` — exchange the handoff token for the
 /// forward-origin cookie.
-fn handle_auth(app_state: &AppState, session_id: Uuid, port: u16, req: &Request) -> Response {
+fn handle_auth(app_state: &AppState, session_id: Uuid, req: &Request) -> Response {
     #[derive(Deserialize)]
     struct AuthQuery {
         token: Option<String>,
@@ -296,13 +286,13 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, port: u16, req: &Request)
     let valid = query
         .token
         .as_deref()
-        .map(|t| verify_token(app_state, t, AUD_HANDOFF, session_id, port))
+        .map(|t| verify_token(app_state, t, AUD_HANDOFF, session_id))
         .unwrap_or(false);
     if !valid {
         return plain_status(StatusCode::FORBIDDEN, "invalid or expired forward token");
     }
 
-    let cookie_jwt = mint_token(app_state, AUD_COOKIE, session_id, port, COOKIE_TTL_SECS);
+    let cookie_jwt = mint_token(app_state, AUD_COOKIE, session_id, COOKIE_TTL_SECS);
     let secure = if app_state.public_url.starts_with("https://") {
         "; Secure"
     } else {
@@ -323,12 +313,7 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, port: u16, req: &Request)
 /// Missing/expired cookie: bounce navigations through the portal origin (the
 /// user re-authenticates transparently while logged in); plain 401 for
 /// XHR/WS so API calls fail loudly instead of redirecting into HTML.
-fn unauthenticated_response(
-    app_state: &AppState,
-    session_id: Uuid,
-    port: u16,
-    req: &Request,
-) -> Response {
+fn unauthenticated_response(app_state: &AppState, session_id: Uuid, req: &Request) -> Response {
     let is_navigation = req.method() == Method::GET
         && (header_is(req.headers(), "sec-fetch-mode", "navigate")
             || req
@@ -345,10 +330,9 @@ fn unauthenticated_response(
         .map(|pq| pq.to_string())
         .unwrap_or_else(|| "/".to_string());
     let target = format!(
-        "{}/api/sessions/{}/forwards/{}/open?next={}",
+        "{}/api/sessions/{}/forwards/open?next={}",
         app_state.public_url.trim_end_matches('/'),
         session_id,
-        port,
         urlencoding::encode(&validate_next(&next))
     );
     Redirect::temporary(&target).into_response()
@@ -395,6 +379,7 @@ async fn proxy_request(
     session_key: &str,
     session_id: Uuid,
     port: u16,
+    label: &str,
     req: Request,
 ) -> Response {
     use crate::handlers::websocket::TunnelError;
@@ -473,7 +458,7 @@ async fn proxy_request(
             tokio::spawn(splice_upgraded(browser_upgrade, upstream_upgrade));
             // Relay the 101 (with its Upgrade/Connection/Sec-WebSocket-Accept
             // headers) so the browser completes its handshake.
-            build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
+            build_downstream_response(app_state, upstream_resp, label, port, original_host)
         }
         // Upstream returned 101 to a request the browser never asked to
         // upgrade — there is no browser-side splice, so refuse rather than
@@ -487,7 +472,7 @@ async fn proxy_request(
         }
         // Normal response (browser wanted an upgrade or not; upstream said no).
         (_, false) => {
-            build_downstream_response(app_state, upstream_resp, session_id, port, original_host)
+            build_downstream_response(app_state, upstream_resp, label, port, original_host)
         }
     }
 }
@@ -598,7 +583,7 @@ fn build_upstream_request(
 fn build_downstream_response(
     app_state: &AppState,
     resp: hyper::Response<hyper::body::Incoming>,
-    session_id: Uuid,
+    label: &str,
     port: u16,
     original_host: Option<String>,
 ) -> Response {
@@ -622,7 +607,7 @@ fn build_downstream_response(
     };
     let origin = original_host
         .map(|h| format!("{scheme}://{h}"))
-        .or_else(|| forward_origin(app_state, session_id, port));
+        .or_else(|| forward_origin(app_state, label));
 
     for (name, value) in parts.headers.iter() {
         let lower = name.as_str();
@@ -672,40 +657,37 @@ pub fn rewrite_upstream_location(location: &str, port: u16, origin: &str) -> Str
 mod tests {
     use super::*;
 
-    const SID: &str = "550e8400e29b41d4a716446655440000";
+    // A valid 8-lowercase-hex subdomain label.
+    const LABEL: &str = "a3f9c2e1";
 
     #[test]
     fn parse_forward_host_accepts_dev_authority() {
-        let (port, sid) =
-            parse_forward_host(&format!("8080--{SID}.localhost:3000"), "localhost:3000")
-                .expect("parses");
-        assert_eq!(port, 8080);
-        assert_eq!(sid.simple().to_string(), SID);
+        let label = parse_forward_host(&format!("{LABEL}.localhost:3000"), "localhost:3000")
+            .expect("parses");
+        assert_eq!(label, LABEL);
     }
 
     #[test]
     fn parse_forward_host_normalizes_case_and_trailing_dot() {
         // Authority is lowercased and the trailing dot stripped before
-        // matching, so mixed-case host + domain and a FQDN dot all parse.
-        assert!(parse_forward_host(
-            &format!("8080--{}.LOCALHOST.", SID.to_uppercase()),
-            "localhost"
-        )
-        .is_some());
-        assert!(parse_forward_host(&format!("8080--{SID}.LocalHost."), "LOCALHOST").is_some());
+        // matching, so a mixed-case domain and a FQDN dot both parse; the
+        // label itself is emitted lowercase.
+        assert_eq!(
+            parse_forward_host(&format!("{LABEL}.LocalHost."), "LOCALHOST").as_deref(),
+            Some(LABEL)
+        );
     }
 
     #[test]
     fn parse_forward_host_rejects_hostile_labels() {
         for host in [
-            format!("{SID}.localhost"),                // no port/separator
-            format!("8080-{SID}.localhost"),           // single dash
-            format!("99999999--{SID}.localhost"),      // port too long
-            format!("0--{SID}.localhost"),             // port zero
-            format!("8080--{SID}.evil.com"),           // wrong domain
-            format!("8080--{SID}x.localhost"),         // 33-char id
-            format!("8080--{}.localhost", &SID[..31]), // 31-char id
-            "portal.example.com".to_string(),          // ordinary host
+            format!("{LABEL}x.localhost"),        // 9 chars, too long
+            format!("{}.localhost", &LABEL[..7]), // 7 chars, too short
+            "a3f9c2eg.localhost".to_string(),     // non-hex char
+            format!("{LABEL}.evil.com"),          // wrong domain
+            format!("sub.{LABEL}.localhost"),     // extra label
+            format!("8080--{LABEL}.localhost"),   // old port-prefixed shape
+            "portal.example.com".to_string(),     // ordinary host
         ] {
             assert!(
                 parse_forward_host(&host, "localhost").is_none(),
@@ -757,11 +739,10 @@ mod tests {
     fn verify_token_requires_aud_claim() {
         // A JWT signed with the same secret but carrying no `aud` (e.g. a
         // token minted for some other purpose) must not authenticate a
-        // forward, even with a matching session_id + port + exp.
+        // forward, even with a matching session_id + exp.
         #[derive(serde::Serialize)]
         struct NoAud {
             session_id: Uuid,
-            port: u16,
             exp: i64,
         }
         let secret = b"test-secret-value-at-least-32-bytes-long";
@@ -770,7 +751,6 @@ mod tests {
             &Header::default(),
             &NoAud {
                 session_id: sid,
-                port: 8080,
                 exp: chrono::Utc::now().timestamp() + 60,
             },
             &EncodingKey::from_secret(secret),
@@ -787,7 +767,7 @@ mod tests {
 
     #[test]
     fn location_rewrite_covers_loopback_authorities() {
-        let origin = "http://8080--abc.localhost:3000";
+        let origin = "http://a3f9c2e1.localhost:3000";
         assert_eq!(
             rewrite_upstream_location("http://localhost:8080/login", 8080, origin),
             format!("{origin}/login")

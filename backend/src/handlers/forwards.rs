@@ -1,6 +1,8 @@
-//! Port-forward registration (docs/PORT_FORWARDING.md): agents declare local
-//! ports with `agent-portal forward <port>`; the rows in `session_forwards`
-//! are the authoritative allowlist the forward-origin reverse proxy checks.
+//! Port-forward registration (docs/PORT_FORWARDING.md): a session has at most
+//! one forwarded port. `session_forwards` holds it; `forward_subdomains` is the
+//! stable label ↔ session lookup the reverse proxy routes by. An agent that
+//! needs several services fronts them behind its own reverse proxy on the one
+//! forwarded port.
 //!
 //! Mounted at both `/api/sessions/{id}/forwards` (browser) and
 //! `/api/agent/sessions/{id}/forwards` (CLI) — [`resolve_user`] accepts a
@@ -16,6 +18,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use sha2::{Digest, Sha256};
 use tower_cookies::Cookies;
 use tracing::info;
 use uuid::Uuid;
@@ -27,7 +30,7 @@ use shared::{ForwardPortFields, ServerToClient, ServerToProxy};
 
 use crate::errors::AppError;
 use crate::handlers::agent_comms::resolve_user;
-use crate::models::{NewSessionForward, Session, SessionForward};
+use crate::models::{NewForwardSubdomain, NewSessionForward, Session, SessionForward};
 use crate::AppState;
 
 /// How long to wait for the proxy's `ForwardStatus` probe reply before
@@ -35,9 +38,13 @@ use crate::AppState;
 /// forwarding support and never answer.
 const FORWARD_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Public URL for a forward: `{scheme}://{port}--{session-simple}.{domain}/`.
-/// Errors when `PORTAL_FORWARD_DOMAIN` is unset (forwarding disabled).
-fn forward_url(app_state: &AppState, session_id: Uuid, port: u16) -> Result<String, AppError> {
+/// Length of a subdomain label in hex chars (32 bits). Short by design; the
+/// LUT + collision-retry in [`ensure_subdomain_label`] keeps it unambiguous.
+const LABEL_HEX_LEN: usize = 8;
+
+/// Public URL for a forward: `{scheme}://{label}.{domain}/`. Errors when
+/// `PORTAL_FORWARD_DOMAIN` is unset (forwarding disabled).
+fn forward_url(app_state: &AppState, label: &str) -> Result<String, AppError> {
     let domain = app_state
         .forward_domain
         .as_deref()
@@ -49,22 +56,123 @@ fn forward_url(app_state: &AppState, session_id: Uuid, port: u16) -> Result<Stri
     } else {
         "http"
     };
-    Ok(format!(
-        "{scheme}://{port}--{}.{domain}/",
-        session_id.simple()
-    ))
+    Ok(format!("{scheme}://{label}.{domain}/"))
 }
 
-fn to_forward_info(app_state: &AppState, row: &SessionForward) -> Result<ForwardInfo, AppError> {
+fn to_forward_info(
+    app_state: &AppState,
+    row: &SessionForward,
+    label: &str,
+) -> Result<ForwardInfo, AppError> {
     Ok(ForwardInfo {
         port: row.port as u16,
-        url: forward_url(app_state, row.session_id, row.port as u16)?,
+        url: forward_url(app_state, label)?,
         created_at: DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc).to_rfc3339(),
     })
 }
 
+/// The `attempt`-th candidate label for a session: the first [`LABEL_HEX_LEN`]
+/// hex chars of `sha256(session_id || attempt)`. Deterministic, so attempt 0 is
+/// stable across calls; later attempts only come into play on a collision.
+fn label_candidate(session_id: Uuid, attempt: u32) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(session_id.as_bytes());
+    hasher.update(attempt.to_le_bytes());
+    let digest = hasher.finalize();
+    hex::encode(digest)[..LABEL_HEX_LEN].to_string()
+}
+
+/// Return the session's stable subdomain label, allocating one on first use.
+/// Reuses the existing row if present (so the URL is stable across
+/// close/reopen); otherwise inserts the first candidate label that doesn't
+/// collide with another session's, re-deriving with a counter on conflict.
+pub(crate) fn ensure_subdomain_label(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<String, AppError> {
+    use crate::schema::forward_subdomains as fs;
+
+    if let Some(existing) = fs::table
+        .filter(fs::session_id.eq(session_id))
+        .select(fs::label)
+        .first::<String>(conn)
+        .optional()?
+    {
+        return Ok(existing);
+    }
+
+    for attempt in 0u32..256 {
+        let candidate = label_candidate(session_id, attempt);
+        let inserted = diesel::insert_into(fs::table)
+            .values(&NewForwardSubdomain {
+                label: candidate.clone(),
+                session_id,
+            })
+            .on_conflict_do_nothing()
+            .execute(conn)?;
+        if inserted == 1 {
+            return Ok(candidate);
+        }
+        // Nothing inserted: the label collides with another session's, or this
+        // session got a row concurrently. Re-check the session before trying
+        // the next candidate.
+        if let Some(existing) = fs::table
+            .filter(fs::session_id.eq(session_id))
+            .select(fs::label)
+            .first::<String>(conn)
+            .optional()?
+        {
+            return Ok(existing);
+        }
+    }
+    Err(AppError::Internal(
+        "could not allocate a forward subdomain".to_string(),
+    ))
+}
+
+/// Map a subdomain label back to its session (the reverse-proxy Host route).
+pub(crate) fn session_for_label(
+    conn: &mut crate::db::DbConnection,
+    label: &str,
+) -> Result<Uuid, AppError> {
+    use crate::schema::forward_subdomains as fs;
+    fs::table
+        .filter(fs::label.eq(label))
+        .select(fs::session_id)
+        .first::<Uuid>(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("forward"))
+}
+
+/// The session's subdomain label, if one has been allocated.
+fn existing_label(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<Option<String>, AppError> {
+    use crate::schema::forward_subdomains as fs;
+    Ok(fs::table
+        .filter(fs::session_id.eq(session_id))
+        .select(fs::label)
+        .first::<String>(conn)
+        .optional()?)
+}
+
+/// The session's forwarded port, if a forward is active.
+pub(crate) fn active_forward_port(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<Option<u16>, AppError> {
+    use crate::schema::session_forwards as sf;
+    Ok(sf::table
+        .filter(sf::session_id.eq(session_id))
+        .select(sf::port)
+        .first::<i32>(conn)
+        .optional()?
+        .map(|p| p as u16))
+}
+
 /// Authorize `user_id` as a member of `session_id` and return the session.
-/// Read access — sufficient to *see* and *use* forwards, never to change them.
+/// Read access — sufficient to *see* and *use* the forward, never to change it.
 pub(crate) fn member_session(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
@@ -80,13 +188,13 @@ pub(crate) fn member_session(
         .map_err(|_| AppError::NotFound("session"))
 }
 
-/// Authorize `user_id` as the *owner* of `session_id` and return the session.
-/// Registering a forward exposes a loopback port on the proxy host and
-/// revoking one tears it down — both are owner-only, a strictly tighter gate
-/// than transcript read access (a viewer member must not be able to
-/// open/probe ports on the machine running the agent). The CLI path clears
-/// this too: the launcher's bearer token resolves to the session owner.
-fn owner_session(
+/// Authorize the *owner* of `session_id` (registering/moving/revoking a forward
+/// exposes or tears down a loopback port on the proxy host — a strictly tighter
+/// gate than transcript read access; the CLI clears it because the launcher's
+/// bearer token resolves to the owner) **and** take a `FOR UPDATE` row lock on
+/// the session, so concurrent forward mutations for the same session serialize
+/// (the DB row is the per-session lock). Must run inside a transaction.
+fn lock_owned_session(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
     user_id: Uuid,
@@ -96,12 +204,15 @@ fn owner_session(
         .filter(sessions::id.eq(session_id))
         .filter(sessions::user_id.eq(user_id))
         .select(Session::as_select())
+        .for_update()
         .first(conn)
-        .map_err(|_| AppError::NotFound("session"))
+        .optional()?
+        .ok_or(AppError::NotFound("session"))
 }
 
-/// POST …/sessions/{id}/forwards — declare a port (idempotent), sync the
-/// proxy's allowlist, and report the probe-dial result.
+/// POST …/sessions/{id}/forwards — set the session's single forwarded port
+/// (replacing any current one), sync the proxy's allowlist, and report the
+/// probe-dial result plus any port that was replaced.
 pub async fn create_forward(
     State(app_state): State<Arc<AppState>>,
     Path(session_id): Path<Uuid>,
@@ -114,26 +225,52 @@ pub async fn create_forward(
     }
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
-    let session = owner_session(&mut conn, session_id, user_id)?;
-    // Fail before touching state when forwarding is disabled.
-    forward_url(&app_state, session_id, req.port)?;
+    if app_state.forward_domain.is_none() {
+        return Err(AppError::ServiceUnavailable(
+            "Forwarding is not configured on this server",
+        ));
+    }
 
-    use crate::schema::session_forwards;
-    diesel::insert_into(session_forwards::table)
-        .values(&NewSessionForward {
-            session_id,
-            port: req.port as i32,
-        })
-        .on_conflict((session_forwards::session_id, session_forwards::port))
-        .do_nothing()
-        .execute(&mut conn)?;
-    let row: SessionForward = session_forwards::table
-        .filter(session_forwards::session_id.eq(session_id))
-        .filter(session_forwards::port.eq(req.port as i32))
-        .select(SessionForward::as_select())
-        .first(&mut conn)?;
+    // All DB work in one transaction under a per-session row lock, so a
+    // concurrent `forward`/`forward`/`close` for the same session serializes —
+    // otherwise two racing calls could each read `previous_port` before the
+    // other commits and skip the `ForwardClose(old)` that keeps the proxy
+    // allowlist in step with the DB. Commit before any proxy I/O so the 3s
+    // probe wait never holds the lock.
+    let (session, row, label, replaced_port) = conn.transaction::<_, AppError, _>(|conn| {
+        use crate::schema::session_forwards;
+        let session = lock_owned_session(conn, session_id, user_id)?;
+        let previous_port = active_forward_port(conn, session_id)?;
+        let replaced_port = previous_port.filter(|p| *p != req.port);
 
-    // Sync the proxy's allowlist and wait (briefly) for its probe verdict.
+        // At most one row per session: insert, or move the existing port.
+        diesel::insert_into(session_forwards::table)
+            .values(&NewSessionForward {
+                session_id,
+                port: req.port as i32,
+            })
+            .on_conflict(session_forwards::session_id)
+            .do_update()
+            .set(session_forwards::port.eq(req.port as i32))
+            .execute(conn)?;
+        let row: SessionForward = session_forwards::table
+            .filter(session_forwards::session_id.eq(session_id))
+            .select(SessionForward::as_select())
+            .first(conn)?;
+        let label = ensure_subdomain_label(conn, session_id)?;
+        Ok((session, row, label, replaced_port))
+    })?;
+
+    // Drop the replaced port from the proxy's allowlist (and its live streams).
+    if let Some(old) = replaced_port {
+        app_state.session_manager.send_to_connected_session(
+            &session.session_key,
+            ServerToProxy::ForwardClose(ForwardPortFields { port: old }),
+        );
+    }
+
+    // Sync the proxy's allowlist for the new port and wait (briefly) for its
+    // probe verdict.
     let status_rx = app_state
         .session_manager
         .register_forward_status(session_id, req.port);
@@ -163,19 +300,20 @@ pub async fn create_forward(
         ServerToClient::ForwardsChanged { session_id },
     );
     info!(
-        "Forward registered: session {} port {} (listening: {:?})",
-        session_id, req.port, listening
+        "Forward set: session {} port {} (replaced: {:?}, listening: {:?})",
+        session_id, req.port, replaced_port, listening
     );
 
     Ok(Json(CreateForwardResponse {
-        forward: to_forward_info(&app_state, &row)?,
+        forward: to_forward_info(&app_state, &row, &label)?,
+        replaced_port,
         listening,
         probe_error,
     }))
 }
 
-/// GET …/sessions/{id}/forwards — active forwards. Empty (not an error) when
-/// forwarding is disabled, so session views don't 503 on every load.
+/// GET …/sessions/{id}/forwards — the session's forward (0 or 1). Empty (not an
+/// error) when forwarding is disabled, so session views don't 503 on load.
 pub async fn list_forwards(
     State(app_state): State<Arc<AppState>>,
     Path(session_id): Path<Uuid>,
@@ -191,41 +329,42 @@ pub async fn list_forwards(
     }
 
     use crate::schema::session_forwards;
-    let rows: Vec<SessionForward> = session_forwards::table
+    let row = session_forwards::table
         .filter(session_forwards::session_id.eq(session_id))
-        .order(session_forwards::port.asc())
         .select(SessionForward::as_select())
-        .load(&mut conn)?;
-
-    let forwards = rows
-        .iter()
-        .map(|row| to_forward_info(&app_state, row))
-        .collect::<Result<Vec<_>, _>>()?;
+        .first::<SessionForward>(&mut conn)
+        .optional()?;
+    let forwards = match (row, existing_label(&mut conn, session_id)?) {
+        (Some(row), Some(label)) => vec![to_forward_info(&app_state, &row, &label)?],
+        _ => vec![],
+    };
     Ok(Json(SessionForwardsResponse { forwards }))
 }
 
-/// DELETE …/sessions/{id}/forwards/{port} — revoke (owner only). Drops the
-/// allowlist row and tells the proxy to close the port and its live streams.
+/// DELETE …/sessions/{id}/forwards — revoke the session's forward (owner only).
+/// Drops the row and tells the proxy to close the port and its live streams.
+/// The subdomain label is kept so a re-forward reuses the same URL.
 pub async fn delete_forward(
     State(app_state): State<Arc<AppState>>,
-    Path((session_id, port)): Path<(Uuid, u16)>,
+    Path(session_id): Path<Uuid>,
     headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<StatusCode, AppError> {
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
-    let session = owner_session(&mut conn, session_id, user_id)?;
 
-    use crate::schema::session_forwards;
-    let deleted = diesel::delete(
-        session_forwards::table
-            .filter(session_forwards::session_id.eq(session_id))
-            .filter(session_forwards::port.eq(port as i32)),
-    )
-    .execute(&mut conn)?;
-    if deleted == 0 {
-        return Err(AppError::NotFound("forward"));
-    }
+    // Same per-session serialization as create_forward: lock the session row,
+    // read + delete the forward atomically, commit, then do proxy I/O.
+    let (session, port) = conn.transaction::<_, AppError, _>(|conn| {
+        use crate::schema::session_forwards;
+        let session = lock_owned_session(conn, session_id, user_id)?;
+        let Some(port) = active_forward_port(conn, session_id)? else {
+            return Err(AppError::NotFound("forward"));
+        };
+        diesel::delete(session_forwards::table.filter(session_forwards::session_id.eq(session_id)))
+            .execute(conn)?;
+        Ok((session, port))
+    })?;
 
     // Best effort — a disconnected proxy re-syncs from the DB on reconnect.
     app_state.session_manager.send_to_connected_session(
