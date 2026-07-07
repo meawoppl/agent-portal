@@ -386,9 +386,9 @@ pub struct NewSessionContinuation {
 // Port Forward Models (docs/PORT_FORWARDING.md)
 // ============================================================================
 
-/// One row in `session_forwards`: a port the session's agent declared with
-/// `agent-portal forward <port>`. The backend only tunnels declared ports;
-/// rows die with the session (`ON DELETE CASCADE`).
+/// The session's single forwarded port (`agent-portal forward <port>`; at most
+/// one row per session). The backend only tunnels this port; the row dies with
+/// the session (`ON DELETE CASCADE`).
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
 #[diesel(table_name = crate::schema::session_forwards)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -404,6 +404,25 @@ pub struct SessionForward {
 pub struct NewSessionForward {
     pub session_id: Uuid,
     pub port: i32,
+}
+
+/// A session's stable subdomain label (the LUT that maps a `Host`-header label
+/// back to its session). Allocated on first forward, kept across close/reopen,
+/// cascade-deleted with the session. See `forwards::ensure_subdomain_label`.
+#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[diesel(table_name = crate::schema::forward_subdomains)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ForwardSubdomain {
+    pub label: String,
+    pub session_id: Uuid,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::forward_subdomains)]
+pub struct NewForwardSubdomain {
+    pub label: String,
+    pub session_id: Uuid,
 }
 
 // ============================================================================

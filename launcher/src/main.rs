@@ -74,13 +74,13 @@ enum Command {
     },
     /// Expose a local HTTP port through the portal for the user's browser.
     ///
-    /// `forward <port>` registers and prints the URL; `forward list` shows
-    /// active forwards; `forward close <port>` revokes one.
+    /// A session forwards one port at a time (front multiple services behind
+    /// your own reverse proxy). `forward <port>` sets it and prints the URL,
+    /// replacing any current forward; `forward list` shows it; `forward close`
+    /// revokes it.
     Forward {
-        /// A port number, or `list`, or `close`.
+        /// A port number, `list`, or `close`.
         target: String,
-        /// The port, when `target` is `close`.
-        port: Option<u16>,
     },
 }
 
@@ -171,25 +171,14 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
         }
-        Some(Command::Forward { target, port }) => {
+        Some(Command::Forward { target }) => {
             return match target.as_str() {
-                // `list` and a bare port take no second arg; only `close`
-                // consumes one. Reject a stray port rather than ignoring it.
-                "list" if port.is_some() => {
-                    Err(anyhow::anyhow!("usage: agent-portal forward list"))
-                }
                 "list" => forward::list().await,
-                "close" => match port {
-                    Some(p) => forward::close(p).await,
-                    None => Err(anyhow::anyhow!("usage: agent-portal forward close <port>")),
-                },
+                "close" => forward::close().await,
                 other => match other.parse::<u16>() {
-                    Ok(_) if port.is_some() => {
-                        Err(anyhow::anyhow!("usage: agent-portal forward <port>"))
-                    }
                     Ok(p) => forward::open(p).await,
                     Err(_) => Err(anyhow::anyhow!(
-                        "expected a port number, `list`, or `close <port>`, got `{other}`"
+                        "expected a port number, `list`, or `close`, got `{other}`"
                     )),
                 },
             };

@@ -21,10 +21,15 @@ long as the session is alive.
 
 ## Design summary
 
-- **Per-forward subdomains**, not path prefixes. Every forward gets its own
-  origin: `{port}--{session}.{forward domain}`. Agent-built apps work
+- **One forward per session, on a per-session subdomain**, not path prefixes.
+  Each session gets its own origin: `{label}.{forward domain}`, where `label`
+  is a short opaque hash of the session (not the port). Agent-built apps work
   unmodified (absolute asset paths, cookies, service workers), and forwarded
-  apps are origin-isolated from the portal and from each other.
+  apps are origin-isolated from the portal and from each other. A session
+  forwards a single port at a time; an agent that needs several services
+  fronts them behind its own reverse proxy on that one port. Because the
+  subdomain identifies the *session*, re-pointing the forward to a different
+  local port keeps the same URL.
 - **One listener.** The backend keeps its single HTTP listener and routes by
   `Host` header. No per-forward port allocation anywhere — which is why the
   CLI takes only a local port, never a remote one.
@@ -49,17 +54,22 @@ browser ──HTTP──▶ backend (Host-routed reverse proxy)
 ## Naming scheme
 
 ```text
-{port}--{session-uuid-simple}.{PORTAL_FORWARD_DOMAIN}
+{label}.{PORTAL_FORWARD_DOMAIN}
 ```
 
-- `port`: decimal, 1–65535.
-- `session-uuid-simple`: the 32-hex-char `Uuid::simple()` form. UUIDs contain
-  single hyphens in canonical form, so the hyphenless form plus the `--`
-  separator makes the label unambiguous; total label length is ≤ 41 chars,
-  within the 63-char DNS limit.
-- Parsing is strict: `^(\d{1,5})--([0-9a-f]{32})$` on the first DNS label, and
-  the remaining labels must equal the configured forward domain exactly.
-  Anything else falls through to the normal router.
+- `label`: an 8-lowercase-hex subdomain (32 bits) allocated per session in the
+  `forward_subdomains` lookup table. It is derived from
+  `sha256(session_id)[..8]`, re-derived with an incrementing counter on the
+  (rare) collision, and stored so the same session always resolves to the same
+  label — stable across close/reopen and independent of which port is
+  forwarded. It does not encode the port or leak the raw session UUID.
+- Parsing is strict: `^[0-9a-f]{8}$` on the first DNS label (after
+  lowercasing / stripping any `:port` and trailing dot), and the remaining
+  labels must equal the configured forward domain exactly. Anything else falls
+  through to the normal router. The label is then resolved to a session via
+  the LUT; an unknown label is a 404.
+- Collisions are handled by the LUT + counter, so 32 bits stays unambiguous;
+  the table's `UNIQUE(label)` is the backstop.
 
 ### Forward domain configuration
 
@@ -148,51 +158,64 @@ rather than leaving the CLI hanging.
 ### Database
 
 ```sql
+-- The session's single forwarded port.
 CREATE TABLE session_forwards (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (session_id, port)
+    UNIQUE (session_id)              -- at most one forward per session
+);
+
+-- Subdomain label ↔ session lookup. A short 8-hex label is allocated on first
+-- forward (sha256(session_id)[..8], counter-bumped on collision) and kept
+-- across close/reopen so the URL stays stable.
+CREATE TABLE forward_subdomains (
+    label TEXT PRIMARY KEY,
+    session_id UUID NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-Rows are deleted with the session (cascade + the session reaper). Forward
-lifetime is strictly session lifetime — nothing outlives the session.
+Both tables cascade-delete with the session. A `session_forwards` row is
+deleted when the forward is revoked (its `forward_subdomains` label persists so
+a re-forward reuses the same URL); everything dies with the session.
 
 ### Agent-facing API (bearer token or session cookie, same rails as `/api/agent/*`)
 
 | Route | Effect |
 |---|---|
-| `POST /api/agent/sessions/{id}/forwards` `{ port }` | Insert row (idempotent on conflict), push `ForwardOpen` to the proxy, return `{ url }`. |
-| `GET /api/agent/sessions/{id}/forwards` | List `{ port, url, created_at }`. |
-| `DELETE /api/agent/sessions/{id}/forwards/{port}` | Delete row, push `ForwardClose`, drop live streams for that port. |
+| `POST /api/agent/sessions/{id}/forwards` `{ port }` | Upsert the session's single forward to `port`, push `ForwardClose(old)` + `ForwardOpen(new)` on a port change, return `{ forward, replaced_port, listening }`. |
+| `GET /api/agent/sessions/{id}/forwards` | The session's forward (0 or 1). |
+| `DELETE /api/agent/sessions/{id}/forwards` | Delete the forward row, push `ForwardClose`, drop live streams. |
 
-Request/response bodies are typed structs in `shared/src/api.rs` (house rule:
-no `serde_json::json!`).
+Request/response bodies are typed structs in `shared/src/api/forwards.rs`
+(house rule: no `serde_json::json!`). `replaced_port` is set when a `POST`
+moved an existing forward off its previous port, so the CLI can tell the
+agent.
 
 ### Browser-facing API (cookie auth)
 
 | Route | Access | Effect |
 |---|---|---|
-| `GET /api/sessions/{id}/forwards` | session read access | List forwards for UI. |
-| `POST /api/sessions/{id}/forwards` | owner | Register (same handler as the agent route). |
-| `DELETE /api/sessions/{id}/forwards/{port}` | owner | Revoke. |
-| `GET /api/sessions/{id}/forwards/{port}/open?next=/…` | session read access | Mint handoff token, `302` to the forward origin (see Auth). |
+| `GET /api/sessions/{id}/forwards` | session read access | The session's forward, for the UI. |
+| `POST /api/sessions/{id}/forwards` | owner | Set/replace (same handler as the agent route). |
+| `DELETE /api/sessions/{id}/forwards` | owner | Revoke. |
+| `GET /api/sessions/{id}/forwards/open?next=/…` | session read access | Mint handoff token, `302` to the forward origin (see Auth). |
 
-Access: read access (owner or `session_members`) is sufficient to *use* a
-forward (open it in the browser) and to list them; **registering or revoking
-a forward is owner-only** on both route sets — it exposes/tears down a
-loopback port on the proxy host, a strictly tighter capability than reading
-the transcript. The CLI clears the owner gate because the launcher's bearer
-token resolves to the session owner.
+Access: read access (owner or `session_members`) is sufficient to *use* the
+forward (open it in the browser) and to see it; **setting or revoking the
+forward is owner-only** on both route sets — it exposes/tears down a loopback
+port on the proxy host, a strictly tighter capability than reading the
+transcript. The CLI clears the owner gate because the launcher's bearer token
+resolves to the session owner.
 
 ### CLI (`launcher/src/forward.rs`, mirroring `launcher/src/message.rs`)
 
 ```console
-agent-portal forward <port>       # register (idempotent), print the URL
-agent-portal forward list         # active forwards for this session
-agent-portal forward close <port> # revoke
+agent-portal forward <port>   # set the forward (replacing any current one), print the URL
+agent-portal forward list     # show the current forward
+agent-portal forward close    # revoke it
 ```
 
 - Auth: the launcher's stored token from `launcher.json`, exactly like
@@ -202,34 +225,34 @@ agent-portal forward close <port> # revoke
   reverse map). If no session identity is available, error with "run this from
   inside an agent session".
 - On success prints exactly one URL line so agents can trivially relay it.
-  A warning line is added when the proxy's `ForwardStatus` reply reports
-  nothing listening on the port, or when no `ForwardStatus` arrives (proxy
-  too old / not connected).
+  A note line is added when the call replaced an existing forward on a
+  different port (`replaced_port`), and a warning line when the proxy's
+  `ForwardStatus` reply reports nothing listening on the port, or when no
+  `ForwardStatus` arrives (proxy too old / not connected).
 
 ## Auth: token handoff to the forward origin
 
 The forward origin cannot see the portal cookie. Flow:
 
 1. Browser (on the portal origin) hits
-   `GET /api/sessions/{id}/forwards/{port}/open?next=/some/path` —
-   authenticated by the normal portal cookie.
+   `GET /api/sessions/{id}/forwards/open?next=/some/path` — authenticated by
+   the normal portal cookie.
 2. Backend mints a JWT with the existing `jwt_secret`:
-   claims `{ aud: "forward", session_id, port, exp: now + 60 s }`. Binding the
-   port costs nothing (the redirect targets exactly one origin, and the
-   host-only cookie is per-origin anyway) and prevents cross-forward reuse of
-   a leaked token URL.
-3. `302` → `{scheme}://{port}--{session}.{domain}/__portal/auth?token=…&next=/some/path`.
+   claims `{ aud: "forward", session_id, exp: now + 60 s }`. The forward port
+   isn't in the token — a session has at most one, looked up per request so
+   revocation and re-pointing take effect immediately.
+3. `302` → `{scheme}://{label}.{domain}/__portal/auth?token=…&next=/some/path`.
    `next` is validated before use — it must be an origin-relative path:
    starts with a single `/` (reject `//` and `/\`), no scheme/authority, no
    control characters, ≤ 2048 bytes; anything else is replaced with `/`.
    Without this, `/__portal/auth?next=…` is an open redirect on the forward
    origin. The same validation applies where the forward origin bounces an
    unauthenticated navigation back to the portal `open` endpoint.
-4. The forward-origin router validates the token (including that the token's
-   `port` matches the origin's), sets a `portal_fwd` cookie (HttpOnly,
-   `SameSite=Lax`, `Secure` when the scheme is https, host-only — so it is
-   scoped to that one forward origin) containing a `{ session_id, port }` JWT
-   with a longer TTL (8 h), then `302` → `next`.
+4. The forward-origin router validates the token (`aud` + `exp` required, and
+   the token's `session_id` must match the label's session), sets a
+   `portal_fwd` cookie (HttpOnly, `SameSite=Lax`, `Secure` when the scheme is
+   https, host-only — so it is scoped to that one forward origin) containing a
+   `{ session_id }` JWT with a longer TTL (8 h), then `302` → `next`.
 5. Every subsequent request on that origin — including WebSocket upgrades —
    authenticates via the `portal_fwd` cookie.
 
@@ -243,15 +266,16 @@ WS) get a plain `401` — redirecting API calls causes confusing failures.
 
 An Axum middleware (or `Router::fallback`-level dispatch) inspects `Host`
 before the normal router. The authority is normalized first — lowercase,
-strip any `:port` suffix (dev requests arrive as
-`8080--….localhost:3000`), strip a trailing dot — and only then is the first
-DNS label matched against the strict regex:
+strip any `:port` suffix (dev requests arrive as `a3f9c2e1.localhost:3000`),
+strip a trailing dot — and only then is the first DNS label matched against
+the strict `^[0-9a-f]{8}$`:
 
-- Host matches `{port}--{session}.{forward domain}` →
+- Host matches `{label}.{forward domain}` → resolve the label to a session via
+  the LUT (unknown label → 404), then:
   - `/__portal/auth` → the handoff handler above.
-  - everything else → require `portal_fwd` cookie, verify the `session_forwards`
-    row still exists (revocation check, cheap and cacheable for a few
-    seconds), then reverse-proxy through the tunnel.
+  - everything else → require `portal_fwd` cookie, look up the session's
+    currently-forwarded port (missing → 404, which doubles as the revocation
+    check), then reverse-proxy through the tunnel to that port.
 - Otherwise → the existing router, untouched.
 
 The reverse proxy is a hyper client whose connector opens a tunnel stream
@@ -287,8 +311,9 @@ No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
 ## Security model
 
 - The proxy dials loopback only; the port must be in its `ForwardOpen`-synced
-  allowlist. The backend, authoritatively, only tunnels ports with a live
-  `session_forwards` row. Browser users cannot probe undeclared ports.
+  allowlist. The backend, authoritatively, only tunnels the port in the
+  session's live `session_forwards` row. Browser users cannot probe undeclared
+  ports.
 - Forwarded apps run on their own origins: they cannot read the portal's DOM,
   cookies, or storage, and cannot reach each other.
 - The portal auth cookie is host-only and never in scope for forward origins;
@@ -306,10 +331,11 @@ No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
 
 ## Frontend
 
-- Session view renders a chip per active forward (`:8080 ↗`), sourced from
-  `GET /api/sessions/{id}/forwards`; click opens the `open` endpoint in a new
-  tab; owners get a revoke `×`. A `ServerToClient::ForwardsChanged { session_id }`
-  event triggers a refetch so chips appear the moment the agent registers.
+- Session view renders a chip for the session's forward (`:8080 ↗`), sourced
+  from `GET /api/sessions/{id}/forwards`; click opens the `open` endpoint in a
+  new tab; owners get a revoke `×`. A
+  `ServerToClient::ForwardsChanged { session_id }` event triggers a refetch so
+  the chip appears/updates the moment the agent registers or re-points.
 - Bare forward URLs printed by the CLI already auto-link in transcripts; no
   new markdown scheme is needed (deliberate non-goal — `portal://port/…` would
   duplicate what the printed URL does).
@@ -323,8 +349,9 @@ agents:
 - **Port forwarding**: if you stand up an HTTP service the user should see
   (dev server, Jupyter, a web UI you built), run `agent-portal forward <port>`
   and share the printed URL — the user can open it in their browser while this
-  session is alive. WebSockets and SSE work. Run `agent-portal forward close
-  <port>` when the service is gone.
+  session is alive. WebSockets and SSE work. A session forwards one port at a
+  time; run `forward <port>` again to move it (front multiple services behind
+  your own reverse proxy). Run `agent-portal forward close` when done.
 ```
 
 ## Milestones

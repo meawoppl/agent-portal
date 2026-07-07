@@ -59,6 +59,13 @@ pub async fn open(port: u16) -> Result<()> {
 
     // Exactly one URL line, so agents can relay it verbatim.
     println!("{}", data.forward.url);
+    // A session forwards one port at a time; tell the caller when this moved
+    // an existing forward off its old port.
+    if let Some(old) = data.replaced_port {
+        eprintln!(
+            "note: replaced the existing forward on port {old}; only port {port} is forwarded now (front multiple services behind your own reverse proxy)"
+        );
+    }
     match data.listening {
         Some(false) => eprintln!(
             "warning: nothing is listening on port {} yet{}",
@@ -101,28 +108,26 @@ pub async fn list() -> Result<()> {
     Ok(())
 }
 
-/// `agent-portal forward close <port>` — revoke a forward.
-pub async fn close(port: u16) -> Result<()> {
+/// `agent-portal forward close` — revoke the session's forward.
+pub async fn close() -> Result<()> {
     let (base, token) = api_base()?;
     let session = session_id()?;
     let client = reqwest::Client::new();
 
     let resp = client
-        .delete(format!(
-            "{base}/api/agent/sessions/{session}/forwards/{port}"
-        ))
+        .delete(format!("{base}/api/agent/sessions/{session}/forwards"))
         .bearer_auth(&token)
         .send()
         .await
         .context("request to backend failed")?;
     let status = resp.status();
     if status.as_u16() == 404 {
-        return Err(anyhow!("no forward on port {}", port));
+        return Err(anyhow!("this session has no active forward"));
     }
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         return Err(anyhow!("backend returned {}: {}", status, body.trim()));
     }
-    println!("Closed forward on port {}.", port);
+    println!("Forward closed.");
     Ok(())
 }

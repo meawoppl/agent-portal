@@ -16,6 +16,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    forward_subdomains (label) {
+        label -> Text,
+        session_id -> Uuid,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     messages (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -237,6 +245,7 @@ diesel::table! {
 }
 
 diesel::joinable!(deleted_session_costs -> users (user_id));
+diesel::joinable!(forward_subdomains -> sessions (session_id));
 diesel::joinable!(messages -> sessions (session_id));
 diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
@@ -255,6 +264,7 @@ diesel::joinable!(turn_metrics -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     deleted_session_costs,
+    forward_subdomains,
     messages,
     pending_inputs,
     pending_permission_requests,
