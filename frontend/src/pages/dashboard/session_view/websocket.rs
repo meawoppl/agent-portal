@@ -586,6 +586,7 @@ mod tests {
             WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",
             WsEvent::InputProgress { .. } => "InputProgress",
+            WsEvent::ForwardsChanged => "ForwardsChanged",
         }
     }
 }
