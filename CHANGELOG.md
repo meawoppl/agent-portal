@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.138
+
+- **Fix duplicate migration version 2026-06-04-120000 (silent skip).** Two migrations shipped with the same version prefix (`add_send_mode_to_pending_inputs` and `decouple_turn_metrics_from_sessions`); Diesel keys migrations by version, so each database only ever applied ONE of them — fresh databases silently skipped the turn_metrics decoupling (no `user_id` column, `schema.rs` regen produced spurious drift), while databases that migrated incrementally skipped `pending_inputs.send_mode`. Both are renamed to unique versions (`-120001`, `-120002`) and rewritten idempotently (`IF NOT EXISTS` guards, null-safe backfill), so every database converges regardless of which one it previously applied; the stale `20260604120000` row in `__diesel_schema_migrations` is harmless. `scripts/check-migration-names.sh` (CI) now also fails on duplicate version prefixes so this can't recur. No schema change for a database that already has both columns.
+
 ## 2.12.137
 
 - **Spec: port forwarding (docs/PORT_FORWARDING.md).** Design for the remaining half of #689: agents expose local HTTP services through per-forward subdomains (`{port}--{session}.{PORTAL_FORWARD_DOMAIN}`), transported over a multiplexed credit-windowed byte tunnel on the existing session WebSocket, with token-handoff auth onto the forward origin, a `session_forwards` allowlist, an `agent-portal forward <port>` CLI, and WebSocket/SSE passthrough. Docs only, no code.
