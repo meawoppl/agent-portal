@@ -704,15 +704,17 @@ fn build_downstream_response(
 }
 
 /// Remove any `frame-ancestors` directive from a CSP header value, keeping
-/// every other directive intact. `None` when nothing remains.
+/// every other directive intact. `None` when nothing remains. The directive
+/// name is the first whitespace-separated token (CSP whitespace includes
+/// HTAB, not just space), compared case-insensitively.
 pub fn strip_frame_ancestors(csp: &str) -> Option<String> {
     let kept: Vec<&str> = csp
         .split(';')
         .map(str::trim)
         .filter(|d| !d.is_empty())
         .filter(|d| {
-            let dl = d.to_ascii_lowercase();
-            !(dl == "frame-ancestors" || dl.starts_with("frame-ancestors "))
+            let name = d.split_ascii_whitespace().next().unwrap_or("");
+            !name.eq_ignore_ascii_case("frame-ancestors")
         })
         .collect();
     if kept.is_empty() {
@@ -809,6 +811,8 @@ mod tests {
         // Jupyter-style: only frame-ancestors → drop the whole header.
         assert_eq!(strip_frame_ancestors("frame-ancestors 'self'"), None);
         assert_eq!(strip_frame_ancestors("FRAME-ANCESTORS 'none'"), None);
+        // CSP whitespace includes HTAB (codex review nit on #1251).
+        assert_eq!(strip_frame_ancestors("frame-ancestors\t'none'"), None);
         // Mixed policy: everything else survives verbatim.
         assert_eq!(
             strip_frame_ancestors("default-src 'self'; frame-ancestors 'none'; img-src data:")
