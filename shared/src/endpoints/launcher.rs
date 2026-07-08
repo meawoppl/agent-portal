@@ -159,6 +159,22 @@ pub enum LauncherToServer {
     },
 }
 
+/// Why a launcher registration was rejected with `fatal: true`. Machine-
+/// readable so the launcher can pick a recovery strategy without string-
+/// matching `error` (issue #1237): auth failures park with an
+/// `agent-portal login` hint and a slow self-healing retry; the rest park
+/// with their own message. Additive — old backends omit it (launcher falls
+/// back to a string heuristic), old launchers ignore it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LauncherRejectReason {
+    /// Missing, invalid, expired, or revoked auth token.
+    AuthFailed,
+    /// The user is at their launcher limit.
+    TooManyLaunchers,
+    /// Another launcher with the same (user, hostname) is already connected.
+    DuplicateLauncher,
+}
+
 /// Messages the backend sends to the launcher.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -169,9 +185,15 @@ pub enum ServerToLauncher {
         launcher_id: Uuid,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
-        /// If true the launcher must not retry — it should exit immediately
+        /// If true the launcher must not treat this as a transient failure.
+        /// (Launchers ≥ 2.13.10 park with a slow retry instead of exiting —
+        /// exiting under systemd `Restart=on-failure` was a 5s crash loop,
+        /// issue #1237.)
         #[serde(default)]
         fatal: bool,
+        /// Machine-readable rejection category when `fatal` is set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reject_reason: Option<LauncherRejectReason>,
     },
 
     /// Request to launch a new proxy instance

@@ -58,7 +58,13 @@ fn save_config(config: &LauncherConfig) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, contents)?;
+    // Write-temp + rename so the file is never observed half-written: the
+    // parked-recovery path re-reads launcher.json on every connection attempt
+    // (#1237), so a torn write during `agent-portal login` must not be
+    // readable as a corrupt config.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, &path)?;
     tracing::debug!("Saved config to {}", path.display());
     Ok(())
 }

@@ -307,18 +307,17 @@ async fn main() -> anyhow::Result<()> {
     // CLI args override config file, which overrides the compile-time default
     let backend_url = resolve_backend_url(args.backend_url, config.backend_url);
 
-    let auth_token = match args.auth_token.or(config.auth_token) {
-        Some(token) => Some(token),
-        None if args.dev => None,
-        None => {
-            tracing::info!("No auth token found, starting device flow authentication");
-            let result = portal_auth::device_flow_login(&backend_url, None).await?;
-            if let Err(e) = config::save_auth_token(&result.access_token) {
-                tracing::warn!("Failed to save auth token to config: {}", e);
-            }
-            Some(result.access_token)
+    // A CLI/env-supplied token pins auth for this run; otherwise the
+    // connection loop re-reads launcher.json on every attempt so a parked
+    // launcher picks up `agent-portal login` without a restart (#1237).
+    // Bootstrap the device flow when neither source has a token.
+    if args.auth_token.is_none() && config.auth_token.is_none() && !args.dev {
+        tracing::info!("No auth token found, starting device flow authentication");
+        let result = portal_auth::device_flow_login(&backend_url, None).await?;
+        if let Err(e) = config::save_auth_token(&result.access_token) {
+            tracing::warn!("Failed to save auth token to config: {}", e);
         }
-    };
+    }
     let launcher_name = args
         .name
         .or(config.name)
@@ -351,7 +350,7 @@ async fn main() -> anyhow::Result<()> {
         &backend_url,
         launcher_id,
         &launcher_name,
-        auth_token.as_deref(),
+        args.auth_token,
         process_manager,
         exit_rx,
     )

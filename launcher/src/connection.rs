@@ -1,7 +1,7 @@
 use crate::path_policy;
 use crate::process_manager::{ProcessManager, SessionExited, SpawnParams};
 use crate::scheduler::Scheduler;
-use shared::{LauncherEndpoint, LauncherToServer, ServerToLauncher};
+use shared::{LauncherEndpoint, LauncherRejectReason, LauncherToServer, ServerToLauncher};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -10,20 +10,70 @@ use uuid::Uuid;
 const HEARTBEAT_INTERVAL: Duration =
     Duration::from_secs(shared::protocol::LAUNCHER_HEARTBEAT_INTERVAL_SECS);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
+/// Retry cadence while parked on a fatal rejection: start here, double to the
+/// cap. Deliberately much slower than the network-error backoff — a fatal
+/// rejection won't clear until something changes (a re-login, a launcher
+/// stopping elsewhere), and hammering registration was the #1237 crash loop.
+const PARKED_BACKOFF_START: Duration = Duration::from_secs(60);
+const PARKED_BACKOFF_MAX: Duration = Duration::from_secs(600);
+
+/// How the launcher should respond to a fatal registration rejection.
+/// Prefers the backend's machine-readable reason; falls back to sniffing the
+/// error text for old backends that predate `reject_reason`.
+fn classify_fatal(reason: Option<LauncherRejectReason>, error_msg: &str) -> LauncherRejectReason {
+    if let Some(reason) = reason {
+        return reason;
+    }
+    let msg = error_msg.to_ascii_lowercase();
+    if msg.contains("auth") || msg.contains("token") {
+        LauncherRejectReason::AuthFailed
+    } else if msg.contains("already have") {
+        LauncherRejectReason::TooManyLaunchers
+    } else {
+        LauncherRejectReason::DuplicateLauncher
+    }
+}
+
+/// The one-line operator instruction for a parked launcher.
+fn parked_instruction(reason: LauncherRejectReason) -> &'static str {
+    match reason {
+        LauncherRejectReason::AuthFailed => {
+            "Authentication failed — run `agent-portal login` to re-authenticate. \
+             The launcher will keep retrying slowly and recover on its own once \
+             you log in."
+        }
+        LauncherRejectReason::TooManyLaunchers => {
+            "Launcher limit reached — disconnect another launcher. Retrying slowly."
+        }
+        LauncherRejectReason::DuplicateLauncher => {
+            "Another launcher is already connected from this host — stop it (or \
+             this one). Retrying slowly."
+        }
+    }
+}
 
 pub async fn run_launcher_loop(
     backend_url: &str,
     launcher_id: Uuid,
     launcher_name: &str,
-    auth_token: Option<&str>,
+    cli_auth_token: Option<String>,
     mut process_manager: ProcessManager,
     mut exit_rx: mpsc::UnboundedReceiver<SessionExited>,
 ) -> anyhow::Result<()> {
     process_manager.set_launcher_id(launcher_id);
     let mut backoff = Duration::from_secs(1);
+    let mut parked_backoff = PARKED_BACKOFF_START;
+    let mut parked_instruction_logged = false;
     let mut scheduler = Scheduler::new();
 
     loop {
+        // Re-resolve the token every attempt (CLI flag still wins): a parked
+        // launcher self-heals the moment `agent-portal login` writes a fresh
+        // token to launcher.json — no service restart needed (#1237).
+        let auth_token = cli_auth_token
+            .clone()
+            .or_else(|| crate::config::load_config().auth_token);
+
         info!("Connecting to backend: {}", backend_url);
 
         match ws_bridge::native_client::connect::<LauncherEndpoint>(backend_url).await {
@@ -37,7 +87,7 @@ pub async fn run_launcher_loop(
                 let register = LauncherToServer::LauncherRegister {
                     launcher_id,
                     launcher_name: launcher_name.to_string(),
-                    auth_token: auth_token.map(|s| s.to_string()),
+                    auth_token: auth_token.clone(),
                     hostname: claude_session_lib::hostname_or_unknown(),
                     version: Some(env!("CARGO_PKG_VERSION").to_string()),
                     working_directory: std::env::current_dir()
@@ -51,26 +101,27 @@ pub async fn run_launcher_loop(
                     continue;
                 }
 
-                // Wait for RegisterAck
+                // Wait for RegisterAck. `Err(reason)` = fatal rejection.
                 let ack_ok = loop {
                     match ws_receiver.recv().await {
                         Some(Ok(ServerToLauncher::LauncherRegisterAck {
                             success,
                             error,
                             fatal,
+                            reject_reason,
                             ..
                         })) => {
                             if success {
                                 info!("Registration successful");
-                                break Some(true);
+                                break Ok(true);
                             } else {
                                 let msg = error.unwrap_or_default();
                                 if fatal {
                                     error!("Registration rejected (fatal): {}", msg);
-                                    break None; // signal: exit, do not retry
+                                    break Err(classify_fatal(reject_reason, &msg));
                                 } else {
                                     error!("Registration failed: {}", msg);
-                                    break Some(false);
+                                    break Ok(false);
                                 }
                             }
                         }
@@ -79,22 +130,44 @@ pub async fn run_launcher_loop(
                             warn!("Decode error during registration: {}", e);
                             continue;
                         }
-                        None => break Some(false),
+                        None => break Ok(false),
                     }
                 };
 
                 match ack_ok {
-                    None => {
-                        // Fatal rejection — exit immediately, do not retry
-                        return Err(anyhow::anyhow!("Fatal registration error, exiting"));
+                    Err(reason) => {
+                        // Fatal rejection — park with a slow retry instead of
+                        // exiting. Exiting under systemd's Restart=on-failure
+                        // was a 5s crash loop (76k restarts on one expired
+                        // token, #1237); parking keeps one warm process that
+                        // recovers by itself when the cause clears — the token
+                        // re-read above picks up an `agent-portal login`
+                        // without a restart.
+                        if !parked_instruction_logged {
+                            error!("{}", parked_instruction(reason));
+                            parked_instruction_logged = true;
+                        } else {
+                            info!(
+                                "Still parked ({:?}); retrying in {:?}",
+                                reason, parked_backoff
+                            );
+                        }
+                        tokio::time::sleep(parked_backoff).await;
+                        parked_backoff = (parked_backoff * 2).min(PARKED_BACKOFF_MAX);
+                        continue;
                     }
-                    Some(false) => {
+                    Ok(false) => {
                         warn!("Registration failed, will retry");
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(MAX_BACKOFF);
                         continue;
                     }
-                    Some(true) => {} // fall through to main loop
+                    Ok(true) => {
+                        // Healthy again: reset the parked state so a future
+                        // rejection logs its instruction afresh.
+                        parked_backoff = PARKED_BACKOFF_START;
+                        parked_instruction_logged = false;
+                    }
                 }
 
                 // Main loop
@@ -576,6 +649,54 @@ async fn handle_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_fatal_prefers_machine_readable_reason() {
+        // A backend-supplied reason wins even over contradictory text.
+        assert_eq!(
+            classify_fatal(
+                Some(LauncherRejectReason::DuplicateLauncher),
+                "Authentication failed"
+            ),
+            LauncherRejectReason::DuplicateLauncher
+        );
+    }
+
+    #[test]
+    fn classify_fatal_string_fallback_covers_old_backends() {
+        // Pre-reject_reason backends: sniff the message text.
+        assert_eq!(
+            classify_fatal(None, "Authentication failed"),
+            LauncherRejectReason::AuthFailed
+        );
+        assert_eq!(
+            classify_fatal(None, "No auth token provided"),
+            LauncherRejectReason::AuthFailed
+        );
+        assert_eq!(
+            classify_fatal(None, "You already have 10 launchers connected (max 10)."),
+            LauncherRejectReason::TooManyLaunchers
+        );
+        assert_eq!(
+            classify_fatal(
+                None,
+                "A launcher named 'x' is already connected from this host."
+            ),
+            LauncherRejectReason::DuplicateLauncher
+        );
+    }
+
+    #[test]
+    fn every_park_reason_has_an_instruction() {
+        for reason in [
+            LauncherRejectReason::AuthFailed,
+            LauncherRejectReason::TooManyLaunchers,
+            LauncherRejectReason::DuplicateLauncher,
+        ] {
+            assert!(!parked_instruction(reason).is_empty());
+        }
+        assert!(parked_instruction(LauncherRejectReason::AuthFailed).contains("agent-portal login"));
+    }
 
     fn home_test_dir(name: &str) -> std::path::PathBuf {
         path_policy::home_dir()
