@@ -132,6 +132,23 @@ fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> 
         .unwrap_or_else(|| shared::default_backend_url().to_string())
 }
 
+/// True when some PATH entry contains an *executable* regular file named
+/// `name` — the same contract a child's `execvp` will apply. A stale
+/// non-executable file (e.g. a half-finished copy in `~/.local/bin`) must not
+/// count as resolvable, or we'd skip the fix and spawned agents would hit
+/// exec/permission errors anyway.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn path_has_executable(path: &str, name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.split(':').filter(|dir| !dir.is_empty()).any(|dir| {
+        std::path::Path::new(dir)
+            .join(name)
+            .metadata()
+            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    })
+}
+
 /// Make sure `agent-portal` resolves on this process's PATH, prepending the
 /// running binary's own directory when it doesn't. Spawned agents inherit the
 /// fixed PATH. Leaves PATH alone when some `agent-portal` already resolves —
@@ -139,11 +156,7 @@ fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn ensure_self_on_path() {
     let path = std::env::var("PATH").unwrap_or_default();
-    let resolvable = path
-        .split(':')
-        .filter(|dir| !dir.is_empty())
-        .any(|dir| std::path::Path::new(dir).join(BINARY_PREFIX).is_file());
-    if resolvable {
+    if path_has_executable(&path, BINARY_PREFIX) {
         return;
     }
     let Ok(exe) = service::current_exe_path() else {
@@ -166,6 +179,40 @@ fn ensure_self_on_path() {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn ensure_self_on_path() {}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod path_tests {
+    use super::path_has_executable;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn non_executable_file_is_not_resolvable() {
+        let dir = std::env::temp_dir().join(format!("ap-exec-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("agent-portal");
+        std::fs::write(&bin, b"#!/bin/sh\n").unwrap();
+
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(
+            !path_has_executable(&dir.to_string_lossy(), "agent-portal"),
+            "non-executable file must not count as resolvable"
+        );
+
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(path_has_executable(&dir.to_string_lossy(), "agent-portal"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_and_empty_entries_are_skipped() {
+        assert!(!path_has_executable("", "agent-portal"));
+        assert!(!path_has_executable(
+            "/nonexistent-dir::/also-missing",
+            "agent-portal"
+        ));
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
