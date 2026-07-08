@@ -77,6 +77,16 @@ pub struct ContinuationConfig {
     pub session_id: Uuid,
     pub reset_at: String,
     pub prompt: String,
+    /// Launch metadata for resuming the same session if the original local
+    /// process has already exited by the time the continuation is due.
+    #[serde(default)]
+    pub working_directory: Option<String>,
+    #[serde(default)]
+    pub session_name: Option<String>,
+    #[serde(default)]
+    pub claude_args: Vec<String>,
+    #[serde(default)]
+    pub agent_type: AgentType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

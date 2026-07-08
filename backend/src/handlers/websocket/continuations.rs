@@ -319,20 +319,31 @@ pub fn load_scheduled_continuations(
         return Vec::new();
     };
 
-    use crate::schema::session_continuations;
+    use crate::schema::{session_continuations, sessions};
     session_continuations::table
+        .inner_join(sessions::table.on(sessions::id.eq(session_continuations::session_id)))
         .filter(session_continuations::launcher_id.eq(launcher_id))
         .filter(session_continuations::user_id.eq(user_id))
         .filter(session_continuations::status.eq(STATUS_SCHEDULED))
         .order(session_continuations::reset_at.asc())
-        .load::<SessionContinuation>(&mut conn)
+        .select((SessionContinuation::as_select(), Session::as_select()))
+        .load::<(SessionContinuation, Session)>(&mut conn)
         .unwrap_or_default()
         .into_iter()
-        .map(|row| ContinuationConfig {
-            id: row.id,
-            session_id: row.session_id,
-            reset_at: row.reset_at.to_rfc3339(),
-            prompt: row.prompt,
+        .map(|(row, session)| {
+            let claude_args =
+                serde_json::from_value::<Vec<String>>(session.claude_args).unwrap_or_default();
+            let agent_type = session.agent_type.parse().unwrap_or_default();
+            ContinuationConfig {
+                id: row.id,
+                session_id: row.session_id,
+                reset_at: row.reset_at.to_rfc3339(),
+                prompt: row.prompt,
+                working_directory: Some(session.working_directory),
+                session_name: Some(session.session_name),
+                claude_args,
+                agent_type,
+            }
         })
         .collect()
 }

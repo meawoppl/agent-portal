@@ -16,8 +16,26 @@ struct ActiveTask {
     next_fire: Option<DateTime<Utc>>,
 }
 
-pub struct PendingLaunch {
-    pub task_id: Uuid,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PendingLaunchKind {
+    ScheduledTask {
+        task_id: Uuid,
+    },
+    Continuation {
+        continuation_id: Uuid,
+        session_id: Uuid,
+        prompt: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingLaunchInfo {
+    pub last_session_id: Option<Uuid>,
+    pub kind: PendingLaunchKind,
+}
+
+struct PendingLaunch {
+    kind: PendingLaunchKind,
     pub last_session_id: Option<Uuid>,
     prompt: String,
 }
@@ -34,6 +52,10 @@ pub struct ReadyContinuation {
     pub id: Uuid,
     pub session_id: Uuid,
     pub prompt: String,
+    pub working_directory: Option<String>,
+    pub session_name: Option<String>,
+    pub claude_args: Vec<String>,
+    pub agent_type: shared::AgentType,
 }
 
 pub struct RunningInfo {
@@ -156,6 +178,10 @@ impl Scheduler {
                     id: c.id,
                     session_id: c.session_id,
                     prompt: c.prompt.clone(),
+                    working_directory: c.working_directory.clone(),
+                    session_name: c.session_name.clone(),
+                    claude_args: c.claude_args.clone(),
+                    agent_type: c.agent_type,
                 });
                 false
             } else {
@@ -197,7 +223,9 @@ impl Scheduler {
             new_pending.push((
                 request_id,
                 PendingLaunch {
-                    task_id: task.config.id,
+                    kind: PendingLaunchKind::ScheduledTask {
+                        task_id: task.config.id,
+                    },
                     last_session_id: task.config.last_session_id,
                     prompt: task.config.fields.prompt.clone(),
                 },
@@ -227,20 +255,47 @@ impl Scheduler {
         to_fire
     }
 
-    /// Check if a request_id corresponds to a scheduled launch.
-    /// Returns (last_session_id, task_id) if so.
-    pub fn get_pending_launch_info(&self, request_id: &Uuid) -> Option<(Option<Uuid>, Uuid)> {
-        self.pending_launches
-            .get(request_id)
-            .map(|p| (p.last_session_id, p.task_id))
+    pub fn register_continuation_launch(&mut self, continuation: &ReadyContinuation) -> Uuid {
+        let request_id = Uuid::new_v4();
+        self.pending_launches.insert(
+            request_id,
+            PendingLaunch {
+                kind: PendingLaunchKind::Continuation {
+                    continuation_id: continuation.id,
+                    session_id: continuation.session_id,
+                    prompt: continuation.prompt.clone(),
+                },
+                last_session_id: Some(continuation.session_id),
+                prompt: continuation.prompt.clone(),
+            },
+        );
+        request_id
     }
 
-    /// Called after a scheduled session is spawned successfully.
-    pub fn on_session_spawned(&mut self, request_id: Uuid, session_id: Uuid) {
+    /// Check if a request_id corresponds to a scheduler-owned launch.
+    pub fn get_pending_launch_info(&self, request_id: &Uuid) -> Option<PendingLaunchInfo> {
+        self.pending_launches
+            .get(request_id)
+            .map(|p| PendingLaunchInfo {
+                last_session_id: p.last_session_id,
+                kind: p.kind.clone(),
+            })
+    }
+
+    /// Called after a scheduler-owned session is spawned successfully.
+    pub fn on_session_spawned(
+        &mut self,
+        request_id: Uuid,
+        session_id: Uuid,
+    ) -> Option<PendingLaunchKind> {
         if let Some(pending) = self.pending_launches.remove(&request_id) {
+            let kind = pending.kind;
+            let PendingLaunchKind::ScheduledTask { task_id } = kind else {
+                return Some(kind);
+            };
             self.pending_prompts.push(PendingPrompt {
                 session_id,
-                task_id: pending.task_id,
+                task_id,
                 prompt: pending.prompt,
                 send_at: Instant::now() + PROMPT_DELAY,
             });
@@ -248,18 +303,21 @@ impl Scheduler {
             let max_minutes = self
                 .tasks
                 .iter()
-                .find(|t| t.config.id == pending.task_id)
+                .find(|t| t.config.id == task_id)
                 .map(|t| t.config.fields.max_runtime_minutes)
                 .unwrap_or(30);
 
             self.running.insert(
                 session_id,
                 RunningInfo {
-                    task_id: pending.task_id,
+                    task_id,
                     started_at: Instant::now(),
                     max_runtime: Duration::from_secs(max_minutes as u64 * 60),
                 },
             );
+            Some(PendingLaunchKind::ScheduledTask { task_id })
+        } else {
+            None
         }
     }
 
@@ -489,6 +547,10 @@ mod tests {
             session_id: Uuid::new_v4(),
             reset_at: reset_at.to_rfc3339(),
             prompt: "continue".to_string(),
+            working_directory: Some("/home/test/project".to_string()),
+            session_name: Some("project".to_string()),
+            claude_args: vec!["--model".to_string(), "sonnet".to_string()],
+            agent_type: shared::AgentType::Claude,
         }
     }
 
@@ -518,6 +580,43 @@ mod tests {
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].id, continuation_id);
         assert!(scheduler.next_continuation_duration().is_none());
+    }
+
+    #[test]
+    fn continuation_relaunch_tracks_prompt_for_same_session() {
+        let mut scheduler = Scheduler::new();
+        let due =
+            continuation(Utc::now() - chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS + 1));
+        let continuation_id = due.id;
+        let session_id = due.session_id;
+        scheduler.update_continuations(vec![due]);
+
+        let ready = scheduler.ready_continuations();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(
+            ready[0].working_directory.as_deref(),
+            Some("/home/test/project")
+        );
+        let request_id = scheduler.register_continuation_launch(&ready[0]);
+
+        let launch = scheduler.get_pending_launch_info(&request_id).unwrap();
+        assert_eq!(launch.last_session_id, Some(session_id));
+        assert_eq!(
+            launch.kind,
+            PendingLaunchKind::Continuation {
+                continuation_id,
+                session_id,
+                prompt: "continue".to_string(),
+            }
+        );
+        assert_eq!(
+            scheduler.on_session_spawned(request_id, session_id),
+            Some(PendingLaunchKind::Continuation {
+                continuation_id,
+                session_id,
+                prompt: "continue".to_string(),
+            })
+        );
     }
 
     #[test]

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.13.13
+
+- **Limit continuations: relaunch exited sessions when the continuation is due.** Clicking the continuation card after the reset window can now resume the original session if the local agent process already exited, then queue the continuation prompt against that resumed session. Still-running sessions keep the existing direct-inject path; older continuation syncs without launch metadata fall back to a clear dropped status.
+
+
 ## 2.13.12
 
 - **Continuation cards: make the one-minute post-limit restart explicit.** The launcher already waits one minute after Claude's reported reset time before injecting a scheduled limit continuation; the card now says the continuation runs one minute after reset and the button reads "Continue 1 min after limit lifts." Added launcher scheduler regression tests that prove continuations are not ready before `reset_at + 60s` and are ready after that skew.
