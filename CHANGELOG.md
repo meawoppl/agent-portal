@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.12
+
+- **Continuation cards: make the one-minute post-limit restart explicit.** The launcher already waits one minute after Claude's reported reset time before injecting a scheduled limit continuation; the card now says the continuation runs one minute after reset and the button reads "Continue 1 min after limit lifts." Added launcher scheduler regression tests that prove continuations are not ready before `reset_at + 60s` and are ready after that skew.
+
 ## 2.13.10
 
 - **Launcher: park on fatal auth rejection instead of crash-looping (#1237 part 1).** A fatal registration rejection (expired/revoked/missing token, launcher limit, duplicate host) used to make the launcher exit 1, which under systemd `Restart=on-failure`/5s became an indefinite crash loop — one expired token racked up 76k restarts, each a full TLS+WS+registration cycle. The launcher now **parks**: it logs one prominent, actionable instruction (`run \`agent-portal login\` to re-authenticate` for auth; disconnect/stop guidance for limit/duplicate) and retries slowly (60s doubling to a 10-minute cap — distinct from the 30s network backoff). It is **self-healing**: the auth token is re-resolved from `launcher.json` on *every* connection attempt (a CLI `--auth-token` still pins), so running `agent-portal login` while parked recovers the launcher on its next retry with no service restart. `LauncherRegisterAck` gains an additive machine-readable `reject_reason` (`AuthFailed`/`TooManyLaunchers`/`DuplicateLauncher`); old backends omit it and the launcher falls back to sniffing the error text, old launchers ignore it. `save_config` is now write-temp+rename so a login concurrent with the per-attempt re-read can never observe a torn `launcher.json`. Verified live against prod with a bogus token: one instruction line, process parked (no exit). Part 2 (token rotation over the live websocket) is a follow-up.

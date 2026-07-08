@@ -483,6 +483,43 @@ mod tests {
         assert_eq!(scheduler.running[&session_id].task_id, task_id);
     }
 
+    fn continuation(reset_at: DateTime<Utc>) -> ContinuationConfig {
+        ContinuationConfig {
+            id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            reset_at: reset_at.to_rfc3339(),
+            prompt: "continue".to_string(),
+        }
+    }
+
+    #[test]
+    fn continuation_waits_one_minute_after_reset() {
+        let mut scheduler = Scheduler::new();
+        scheduler.update_continuations(vec![continuation(
+            Utc::now() - chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS - 1),
+        )]);
+
+        assert!(scheduler.ready_continuations().is_empty());
+        assert!(
+            scheduler.next_continuation_duration() > Some(Duration::ZERO),
+            "continuation should not be due until one minute after reset_at"
+        );
+    }
+
+    #[test]
+    fn continuation_is_ready_after_one_minute_skew() {
+        let mut scheduler = Scheduler::new();
+        let due =
+            continuation(Utc::now() - chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS + 1));
+        let continuation_id = due.id;
+        scheduler.update_continuations(vec![due]);
+
+        let ready = scheduler.ready_continuations();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].id, continuation_id);
+        assert!(scheduler.next_continuation_duration().is_none());
+    }
+
     #[test]
     fn session_exit_clears_running_state() {
         let mut scheduler = Scheduler::new();

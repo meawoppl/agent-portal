@@ -213,7 +213,7 @@ fn render_continuation_prompt(
     source_message: &str,
     on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
-    let reset_label = format_reset_label(reset_at);
+    let continuation_label = format_continuation_label(reset_at);
     let terminal = matches!(
         status,
         "scheduled" | "scheduling" | "fired" | "dropped" | "failed"
@@ -225,7 +225,7 @@ fn render_continuation_prompt(
         "fired" => "Continued",
         "dropped" => "Dropped",
         "failed" => "Failed",
-        _ => "Continue when limit lifted",
+        _ => "Continue 1 min after limit lifts",
     };
     let onclick = {
         let on_schedule_continuation = on_schedule_continuation.clone();
@@ -238,7 +238,7 @@ fn render_continuation_prompt(
         <div class="continuation-card">
             <div class="continuation-copy">
                 <div class="continuation-title">{ "Claude session limit reached" }</div>
-                <div class="continuation-detail">{ reset_label }</div>
+                <div class="continuation-detail">{ continuation_label }</div>
                 if !source_message.is_empty() {
                     <div class="continuation-source">{ source_message }</div>
                 }
@@ -255,17 +255,28 @@ fn render_continuation_prompt(
     }
 }
 
-fn format_reset_label(reset_at: &str) -> String {
+fn format_continuation_label(reset_at: &str) -> String {
     let ms = js_sys::Date::parse(reset_at);
     if ms.is_nan() {
-        return format!("Resets at {}", reset_at);
+        return format!(
+            "Limit resets at {}; continuation runs 1 minute later",
+            reset_at
+        );
     }
-    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
-    let local = date
+    let reset_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
+    let reset_local = reset_date
         .to_locale_string("default", &js_sys::Object::new())
         .as_string()
         .unwrap_or_else(|| reset_at.to_string());
-    format!("Resets at {}", local)
+    let continue_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms + 60_000.0));
+    let continue_local = continue_date
+        .to_locale_string("default", &js_sys::Object::new())
+        .as_string()
+        .unwrap_or_else(|| "1 minute later".to_string());
+    format!(
+        "Limit resets at {}; continuation runs at {}",
+        reset_local, continue_local
+    )
 }
 
 #[derive(Properties, PartialEq)]
