@@ -133,13 +133,13 @@
     color: var(--error);
 }
 
-/* Inline preview overlay for the session's forward (opened from the chip) */
+/* Inline preview overlay for the session's forward (opened from the chip).
+   left/top/width come from inline style (draggable by the title bar,
+   resizable by the corner grip); max-width keeps phones sane. */
 .forward-preview {
     position: fixed;
-    top: 3.25rem;
-    left: 0.75rem;
     z-index: 900;
-    width: min(760px, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1rem);
     display: flex;
     flex-direction: column;
     background: var(--bg-darker);
@@ -165,6 +165,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: move;
+
+    /* Prevent text-selection/scroll gestures from hijacking the drag. */
+    user-select: none;
+    touch-action: none;
 }
 
 .forward-preview-visit {
@@ -192,17 +197,46 @@
     color: var(--error);
 }
 
-/* Kept mounted while collapsed (height 0) so the embedded app keeps state. */
+/* Kept mounted while collapsed (inline height 0) so the embedded app keeps
+   state; height otherwise comes from inline style (resizable). */
 .forward-preview-frame {
     display: block;
     width: 100%;
-    height: min(65vh, 640px);
     border: 0;
     background: #fff;
 }
 
-.forward-preview-frame.collapsed {
-    height: 0;
+/* During drag/resize the iframe must not swallow pointer events. */
+.forward-preview-frame.interacting {
+    pointer-events: none;
+}
+
+.forward-preview-grip {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    touch-action: none;
+
+    /* Two diagonal ticks, echoing the platform resize affordance. */
+    background: linear-gradient(
+        135deg,
+        transparent 55%,
+        var(--text-secondary) 55%,
+        var(--text-secondary) 62%,
+        transparent 62%,
+        transparent 75%,
+        var(--text-secondary) 75%,
+        var(--text-secondary) 82%,
+        transparent 82%
+    );
+    opacity: 0.7;
+}
+
+.forward-preview-grip:hover {
+    opacity: 1;
 }
 
 .session-view-header .status {
