@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.15
+
+- **Port forwarding: inline preview overlay (docs/PORT_FORWARDING.md, #689).** Clicking the session-header forward chip now opens a collapsible overlay that renders the forwarded app in an `<iframe>` (via the `/open` handoff, so auth rides the normal `portal_fwd` cookie flow), with a **Visit site ↗** link to the full page in a new tab, a collapse toggle that hides the frame *without unmounting it* (the embedded app keeps running), and a close `×`. The overlay closes on session switch and disappears with the forward. To make embedding work, the reverse proxy now **re-scopes upstream framing policy**: `X-Frame-Options` and any upstream `frame-ancestors` CSP directive are stripped (all other CSP directives pass through untouched; directive names parsed per CSP whitespace incl. HTAB) and `Content-Security-Policy: frame-ancestors 'self' {portal origin}` is appended — apps like Jupyter ship `frame-ancestors 'self'` which would otherwise block the overlay, while apps that shipped no policy get *narrowed* from any-site-may-frame to portal-or-self. Unit tests cover the CSP directive stripping (only-frame-ancestors → header dropped; mixed policies preserved; HTAB whitespace; lookalike directive names untouched). Dev caveat: on `*.localhost` domains browsers treat the forward origin as cross-site so the iframe's `SameSite=Lax` cookie isn't sent — private-forward previews need production (same eTLD+1) domains; public forwards preview anywhere.
+
 ## 2.13.14
 
 - **Limit continuations: wait two minutes after the reset time.** The continuation scheduler now uses a two-minute post-reset grace period before injecting or relaunching a session, and the continuation card copy reflects that timing. This gives the upstream limit window a wider margin before automatic resume.

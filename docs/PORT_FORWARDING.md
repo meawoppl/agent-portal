@@ -327,6 +327,15 @@ Response rewriting is limited to headers:
   `localhost:{port}`, `127.0.0.1:{port}`, or `[::1]:{port}` back to the
   forward origin — apps that saw `Host: localhost:{port}` emit absolute
   redirects there, which would otherwise send the browser off-origin.
+- **Framing policy is re-scoped to the portal.** The upstream's
+  `X-Frame-Options` and any `frame-ancestors` CSP directive are stripped
+  (every other CSP directive passes through), and the proxy appends
+  `Content-Security-Policy: frame-ancestors 'self' {portal origin}` — the
+  session view's preview overlay embeds forwards in an iframe, and apps like
+  Jupyter ship `frame-ancestors 'self'` which would block it. This *narrows*
+  policy for apps that shipped none (previously any site could frame them),
+  and stripping-then-replacing is required because multiple CSP headers
+  intersect (appending alone can never loosen an upstream `'none'`).
 - `Set-Cookie` passes through untouched; a `Domain=localhost` attribute is
   the app's own (mis)behavior and scoping it is not our job.
 
@@ -364,10 +373,20 @@ No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
 ## Frontend
 
 - Session view renders a chip for the session's forward (`:8080 ↗`), sourced
-  from `GET /api/sessions/{id}/forwards`; click opens the `open` endpoint in a
-  new tab; owners get a revoke `×`. A
+  from `GET /api/sessions/{id}/forwards`; owners get a revoke `×`. A
   `ServerToClient::ForwardsChanged { session_id }` event triggers a refetch so
   the chip appears/updates the moment the agent registers or re-points.
+- **Clicking the chip opens an inline preview overlay**: a fixed collapsible
+  panel containing an `<iframe>` pointed at the `open` handoff endpoint, with
+  a "Visit site ↗" link that opens the full page in a new tab and a collapse
+  toggle that hides the frame without unmounting it (the embedded app keeps
+  running). Auth inside the iframe rides the normal handoff → `portal_fwd`
+  cookie flow; that cookie is `SameSite=Lax`, which is sent because the
+  forward origin and the portal are same-*site* (same eTLD+1) in production.
+  On `*.localhost` dev domains browsers treat the two as cross-site, so the
+  overlay's iframe can't authenticate there — public forwards still preview,
+  private ones need "Visit site". The reverse proxy re-scopes upstream
+  framing policy so the portal may embed (see Response rewriting).
 - **Settings ▸ Forwarding** lists the caller's active forwards across their
   sessions (`GET /api/forwards`, owner-scoped) with a per-forward public/private
   toggle (`PATCH …/forwards/public`), so the owner can opt a forward into

@@ -10,7 +10,11 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "anyhow",
  "chrono",
@@ -219,7 +223,11 @@ dependencies = [
 
 [[package]]
 name = "backend"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "anyhow",
  "axum",
@@ -491,7 +499,11 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "anyhow",
  "base64",
@@ -522,7 +534,11 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "anyhow",
  "base64",
@@ -560,7 +576,11 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "chrono",
  "claude-codes",
@@ -1100,7 +1120,11 @@ dependencies = [
 
 [[package]]
 name = "frontend"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "base64",
  "chrono",
@@ -2617,7 +2641,11 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "anyhow",
  "colored",
@@ -2632,7 +2660,11 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "anyhow",
  "hex",
@@ -3295,7 +3327,11 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "anyhow",
  "base64",
@@ -3360,7 +3396,11 @@ dependencies = [
 
 [[package]]
 name = "shared"
+<<<<<<< HEAD
 version = "2.13.14"
+=======
+version = "2.13.11"
+>>>>>>> ceb4c97 (Add inline forward preview overlay with portal-scoped framing)
 dependencies = [
  "base64",
  "chrono",

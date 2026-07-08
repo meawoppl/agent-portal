@@ -63,6 +63,19 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
         });
     }
 
+    // Preview overlay: open/collapsed are independent so collapsing keeps the
+    // iframe mounted (the embedded app keeps running; expand restores it
+    // where it was). Closed on session switch below.
+    let preview_open = use_state(|| false);
+    let preview_collapsed = use_state(|| false);
+    {
+        let preview_open = preview_open.clone();
+        use_effect_with(props.session_id, move |_| {
+            preview_open.set(false);
+            || ()
+        });
+    }
+
     // Ignore results tagged for a different (stale) session.
     let forwards: &[ForwardInfo] = if state.0 == props.session_id {
         &state.1
@@ -93,13 +106,39 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
 
     let open_url = utils::api_url(&format!("/api/sessions/{}/forwards/open", props.session_id));
 
+    let toggle_preview = {
+        let preview_open = preview_open.clone();
+        let preview_collapsed = preview_collapsed.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            if *preview_open {
+                preview_open.set(false);
+            } else {
+                preview_open.set(true);
+                preview_collapsed.set(false);
+            }
+        })
+    };
+    let toggle_collapse = {
+        let preview_collapsed = preview_collapsed.clone();
+        Callback::from(move |_: MouseEvent| preview_collapsed.set(!*preview_collapsed))
+    };
+    let close_preview = {
+        let preview_open = preview_open.clone();
+        Callback::from(move |_: MouseEvent| preview_open.set(false))
+    };
+
+    let forward = &forwards[0];
     html! {
+        <>
         <span class="session-forwards">
             { for forwards.iter().map(|f| {
                 let on_revoke = revoke.clone();
                 html! {
                     <span class="forward-chip" key={f.port} title={f.url.clone()}>
-                        <a href={open_url.clone()} target="_blank" rel="noopener noreferrer">
+                        // Click opens the inline preview overlay; "Visit site"
+                        // inside it goes to the full page.
+                        <a href={open_url.clone()} onclick={toggle_preview.clone()}>
                             { format!(":{} ↗", f.port) }
                         </a>
                         if props.is_owner {
@@ -113,5 +152,43 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                 }
             }) }
         </span>
+        if *preview_open {
+            <div class="forward-preview">
+                <div class="forward-preview-bar">
+                    <button
+                        class="forward-preview-btn"
+                        title={ if *preview_collapsed { "Expand" } else { "Collapse" } }
+                        onclick={toggle_collapse}
+                    >
+                        { if *preview_collapsed { "▸" } else { "▾" } }
+                    </button>
+                    <span class="forward-preview-title">
+                        { format!(":{} — {}", forward.port, forward.url) }
+                    </span>
+                    <a
+                        class="forward-preview-visit"
+                        href={open_url.clone()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >{ "Visit site ↗" }</a>
+                    <button
+                        class="forward-preview-btn forward-preview-close"
+                        title="Close preview"
+                        onclick={close_preview}
+                    >{ "×" }</button>
+                </div>
+                // Kept mounted while collapsed so the embedded app keeps its
+                // state; only the height changes.
+                <iframe
+                    class={classes!(
+                        "forward-preview-frame",
+                        preview_collapsed.then_some("collapsed"),
+                    )}
+                    src={open_url}
+                    title="Forwarded app preview"
+                />
+            </div>
+        }
+        </>
     }
 }
