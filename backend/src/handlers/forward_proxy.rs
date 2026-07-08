@@ -651,6 +651,25 @@ fn build_downstream_response(
         if HOP_BY_HOP.contains(&lower) && !keep_for_upgrade {
             continue;
         }
+        // Framing policy is rewritten below: drop the upstream's
+        // X-Frame-Options and any `frame-ancestors` CSP directive (the rest
+        // of its CSP passes through). Multiple CSP headers intersect
+        // (most-restrictive wins), so appending ours without stripping the
+        // upstream's could never *allow* the portal to embed.
+        if lower == "x-frame-options" {
+            continue;
+        }
+        if lower == "content-security-policy" {
+            if let Ok(csp) = value.to_str() {
+                // `None` = the policy was only frame-ancestors — drop it.
+                if let Some(rest) = strip_frame_ancestors(csp) {
+                    if let Ok(v) = HeaderValue::from_str(&rest) {
+                        headers.append(name.clone(), v);
+                    }
+                }
+                continue;
+            }
+        }
         if (lower == "location" || lower == "content-location") && origin.is_some() {
             if let Ok(loc) = value.to_str() {
                 let rewritten = rewrite_upstream_location(loc, port, origin.as_deref().unwrap());
@@ -663,9 +682,43 @@ fn build_downstream_response(
         headers.append(name.clone(), value.clone());
     }
 
+    // Allow the portal (and the forward origin itself) to embed the response —
+    // the session-view preview overlay renders forwards in an iframe
+    // (docs/PORT_FORWARDING.md). This *narrows* framing for apps that shipped
+    // no policy (previously any site could frame them) and re-scopes apps
+    // that shipped `frame-ancestors 'self'`/`X-Frame-Options` (e.g. Jupyter)
+    // to portal-or-self instead of blocking the overlay.
+    if !is_upgrade {
+        let portal_origin = app_state.public_url.trim_end_matches('/');
+        if let Ok(v) = HeaderValue::from_str(&format!("frame-ancestors 'self' {portal_origin}")) {
+            headers.append(header::CONTENT_SECURITY_POLICY, v);
+        }
+    }
+
     match response.body(Body::new(body)) {
         Ok(r) => r,
         Err(_) => plain_status(StatusCode::BAD_GATEWAY, "bad upstream response"),
+    }
+}
+
+/// Remove any `frame-ancestors` directive from a CSP header value, keeping
+/// every other directive intact. `None` when nothing remains. The directive
+/// name is the first whitespace-separated token (CSP whitespace includes
+/// HTAB, not just space), compared case-insensitively.
+pub fn strip_frame_ancestors(csp: &str) -> Option<String> {
+    let kept: Vec<&str> = csp
+        .split(';')
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .filter(|d| {
+            let name = d.split_ascii_whitespace().next().unwrap_or("");
+            !name.eq_ignore_ascii_case("frame-ancestors")
+        })
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        Some(kept.join("; "))
     }
 }
 
@@ -749,6 +802,31 @@ mod tests {
                 "reserved label {label} should fall through"
             );
         }
+    }
+
+    #[test]
+    fn strip_frame_ancestors_preserves_other_directives() {
+        // Jupyter-style: only frame-ancestors → drop the whole header.
+        assert_eq!(strip_frame_ancestors("frame-ancestors 'self'"), None);
+        assert_eq!(strip_frame_ancestors("FRAME-ANCESTORS 'none'"), None);
+        // CSP whitespace includes HTAB (codex review nit on #1251).
+        assert_eq!(strip_frame_ancestors("frame-ancestors\t'none'"), None);
+        // Mixed policy: everything else survives verbatim.
+        assert_eq!(
+            strip_frame_ancestors("default-src 'self'; frame-ancestors 'none'; img-src data:")
+                .as_deref(),
+            Some("default-src 'self'; img-src data:")
+        );
+        // No frame-ancestors: unchanged (modulo whitespace normalization).
+        assert_eq!(
+            strip_frame_ancestors("default-src 'self'").as_deref(),
+            Some("default-src 'self'")
+        );
+        // A directive that merely starts with the same bytes is not stripped.
+        assert_eq!(
+            strip_frame_ancestors("frame-ancestors-custom 'x'").as_deref(),
+            Some("frame-ancestors-custom 'x'")
+        );
     }
 
     #[test]
