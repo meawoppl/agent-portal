@@ -166,6 +166,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: move;
+
     /* Prevent text-selection/scroll gestures from hijacking the drag. */
     user-select: none;
     touch-action: none;
@@ -218,6 +219,7 @@
     height: 16px;
     cursor: nwse-resize;
     touch-action: none;
+
     /* Two diagonal ticks, echoing the platform resize affordance. */
     background: linear-gradient(
         135deg,
