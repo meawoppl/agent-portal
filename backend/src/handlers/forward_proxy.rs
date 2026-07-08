@@ -661,13 +661,11 @@ fn build_downstream_response(
         }
         if lower == "content-security-policy" {
             if let Ok(csp) = value.to_str() {
-                match strip_frame_ancestors(csp) {
-                    Some(rest) => {
-                        if let Ok(v) = HeaderValue::from_str(&rest) {
-                            headers.append(name.clone(), v);
-                        }
+                // `None` = the policy was only frame-ancestors — drop it.
+                if let Some(rest) = strip_frame_ancestors(csp) {
+                    if let Ok(v) = HeaderValue::from_str(&rest) {
+                        headers.append(name.clone(), v);
                     }
-                    None => {} // policy was only frame-ancestors — drop it
                 }
                 continue;
             }
