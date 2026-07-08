@@ -12,9 +12,46 @@ use gloo_net::http::Request;
 use shared::api::{ForwardInfo, SessionForwardsResponse};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
+use yew::events::PointerEvent;
 use yew::prelude::*;
 
 use crate::utils::{self, api_url, fetch_json, On401};
+
+/// Height reserved for the preview title bar when converting a resize
+/// pointer position into an iframe height.
+const PREVIEW_BAR_PX: f64 = 34.0;
+
+/// An in-progress pointer interaction with the preview overlay. Drag carries
+/// the pointer's offset inside the panel so the panel doesn't jump to put its
+/// corner under the cursor.
+#[derive(Clone, Copy, PartialEq)]
+enum PreviewInteraction {
+    Drag { dx: f64, dy: f64 },
+    Resize,
+}
+
+fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
+    v.max(lo).min(hi.max(lo))
+}
+
+fn viewport() -> (f64, f64) {
+    let win = web_sys::window();
+    let dim = |v: Option<Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>>| {
+        v.and_then(|r| r.ok()).and_then(|j| j.as_f64())
+    };
+    (
+        dim(win.as_ref().map(|w| w.inner_width())).unwrap_or(1280.0),
+        dim(win.map(|w| w.inner_height())).unwrap_or(800.0),
+    )
+}
+
+/// Capture the pointer on the element that received `e`, so pointermove keeps
+/// arriving even when the cursor crosses the embedded iframe (which would
+/// otherwise swallow the stream mid-drag).
+fn capture_pointer(e: &PointerEvent) {
+    let target: web_sys::Element = e.target_unchecked_into();
+    let _ = target.set_pointer_capture(e.pointer_id());
+}
 
 #[derive(Properties, PartialEq)]
 pub struct ForwardChipsProps {
@@ -68,6 +105,10 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
     // where it was). Closed on session switch below.
     let preview_open = use_state(|| false);
     let preview_collapsed = use_state(|| false);
+    // Panel geometry (left, top, width, iframe height) in px — dragged by the
+    // title bar, resized by the corner grip. Survives collapse/expand.
+    let geom = use_state(|| (12.0f64, 52.0f64, 760.0f64, 480.0f64));
+    let interaction = use_state(|| None::<PreviewInteraction>);
     {
         let preview_open = preview_open.clone();
         use_effect_with(props.session_id, move |_| {
@@ -128,6 +169,64 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
         Callback::from(move |_: MouseEvent| preview_open.set(false))
     };
 
+    // Drag (title bar) and resize (corner grip) share the pointer-capture
+    // pattern: capture on pointerdown so pointermove keeps flowing over the
+    // iframe, apply geometry on move, release state on up/cancel.
+    let drag_start = {
+        let geom = geom.clone();
+        let interaction = interaction.clone();
+        Callback::from(move |e: PointerEvent| {
+            e.prevent_default();
+            capture_pointer(&e);
+            let (x, y, ..) = *geom;
+            interaction.set(Some(PreviewInteraction::Drag {
+                dx: f64::from(e.client_x()) - x,
+                dy: f64::from(e.client_y()) - y,
+            }));
+        })
+    };
+    let resize_start = {
+        let interaction = interaction.clone();
+        Callback::from(move |e: PointerEvent| {
+            e.prevent_default();
+            capture_pointer(&e);
+            interaction.set(Some(PreviewInteraction::Resize));
+        })
+    };
+    let pointer_move = {
+        let geom = geom.clone();
+        let interaction = interaction.clone();
+        Callback::from(move |e: PointerEvent| {
+            let (cx, cy) = (f64::from(e.client_x()), f64::from(e.client_y()));
+            let (vw, vh) = viewport();
+            let (x, y, w, h) = *geom;
+            match *interaction {
+                Some(PreviewInteraction::Drag { dx, dy }) => {
+                    // Keep enough of the bar on-screen to grab again.
+                    geom.set((
+                        clamp(cx - dx, 8.0 - w + 120.0, vw - 120.0),
+                        clamp(cy - dy, 0.0, vh - PREVIEW_BAR_PX),
+                        w,
+                        h,
+                    ));
+                }
+                Some(PreviewInteraction::Resize) => {
+                    geom.set((
+                        x,
+                        y,
+                        clamp(cx - x, 320.0, vw - x - 4.0),
+                        clamp(cy - y - PREVIEW_BAR_PX, 160.0, vh - y - PREVIEW_BAR_PX),
+                    ));
+                }
+                None => {}
+            }
+        })
+    };
+    let pointer_end = {
+        let interaction = interaction.clone();
+        Callback::from(move |_: PointerEvent| interaction.set(None))
+    };
+
     let forward = &forwards[0];
     html! {
         <>
@@ -153,7 +252,10 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
             }) }
         </span>
         if *preview_open {
-            <div class="forward-preview">
+            <div
+                class="forward-preview"
+                style={format!("left:{}px; top:{}px; width:{}px;", geom.0, geom.1, geom.2)}
+            >
                 <div class="forward-preview-bar">
                     <button
                         class="forward-preview-btn"
@@ -162,7 +264,15 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                     >
                         { if *preview_collapsed { "▸" } else { "▾" } }
                     </button>
-                    <span class="forward-preview-title">
+                    // The title span is the drag handle (buttons/links around
+                    // it stay plain clicks).
+                    <span
+                        class="forward-preview-title"
+                        onpointerdown={drag_start}
+                        onpointermove={pointer_move.clone()}
+                        onpointerup={pointer_end.clone()}
+                        onpointercancel={pointer_end.clone()}
+                    >
                         { format!(":{} — {}", forward.port, forward.url) }
                     </span>
                     <a
@@ -178,15 +288,32 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                     >{ "×" }</button>
                 </div>
                 // Kept mounted while collapsed so the embedded app keeps its
-                // state; only the height changes.
+                // state; only the height changes. Pointer events are disabled
+                // during drag/resize so the iframe can't swallow the stream
+                // (belt to pointer capture's suspenders).
                 <iframe
                     class={classes!(
                         "forward-preview-frame",
-                        preview_collapsed.then_some("collapsed"),
+                        interaction.is_some().then_some("interacting"),
                     )}
+                    style={ if *preview_collapsed {
+                        "height:0px;".to_string()
+                    } else {
+                        format!("height:{}px;", geom.3)
+                    }}
                     src={open_url}
                     title="Forwarded app preview"
                 />
+                if !*preview_collapsed {
+                    <div
+                        class="forward-preview-grip"
+                        title="Resize"
+                        onpointerdown={resize_start}
+                        onpointermove={pointer_move}
+                        onpointerup={pointer_end.clone()}
+                        onpointercancel={pointer_end}
+                    ></div>
+                }
             </div>
         }
         </>
