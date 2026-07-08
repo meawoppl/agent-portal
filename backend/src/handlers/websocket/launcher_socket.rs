@@ -1,8 +1,8 @@
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
 use shared::{
-    LauncherEndpoint, LauncherToServer, ServerToClient, ServerToLauncher, ServerToProxy,
-    SessionStatus,
+    LauncherEndpoint, LauncherRejectReason, LauncherToServer, ServerToClient, ServerToLauncher,
+    ServerToProxy, SessionStatus,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -49,6 +49,9 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                                 fatal: true,
                                                 launcher_id,
                                                 error: Some("Authentication failed".to_string()),
+                                                reject_reason: Some(
+                                                    LauncherRejectReason::AuthFailed,
+                                                ),
                                             })
                                             .await;
                                         return;
@@ -63,6 +66,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     fatal: false,
                                     launcher_id,
                                     error: Some("Database error".to_string()),
+                                    reject_reason: None,
                                 })
                                 .await;
                             return;
@@ -77,6 +81,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                             fatal: true,
                             launcher_id,
                             error: Some("No auth token provided".to_string()),
+                            reject_reason: Some(LauncherRejectReason::AuthFailed),
                         })
                         .await;
                     return;
@@ -124,6 +129,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                      Disconnect an existing launcher before starting a new one.",
                     user_launcher_count, MAX_LAUNCHERS_PER_USER
                 )),
+                reject_reason: Some(LauncherRejectReason::TooManyLaunchers),
             })
             .await;
         return;
@@ -166,6 +172,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                      Stop the existing instance before starting a new one.",
                     existing_name
                 )),
+                reject_reason: Some(LauncherRejectReason::DuplicateLauncher),
             })
             .await;
         return;
@@ -178,6 +185,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             launcher_id,
             error: None,
             fatal: false,
+            reject_reason: None,
         })
         .await;
 
