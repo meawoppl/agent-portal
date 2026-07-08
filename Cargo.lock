@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-portal"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "anyhow",
  "axum",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "anyhow",
  "base64",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "anyhow",
  "base64",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -1100,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "base64",
  "chrono",
@@ -2617,7 +2617,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "anyhow",
  "colored",
@@ -2632,7 +2632,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "anyhow",
  "hex",
@@ -3295,7 +3295,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "anyhow",
  "base64",
@@ -3360,7 +3360,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.13.13"
+version = "2.13.14"
 dependencies = [
  "base64",
  "chrono",

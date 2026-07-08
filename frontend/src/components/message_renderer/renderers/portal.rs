@@ -225,7 +225,7 @@ fn render_continuation_prompt(
         "fired" => "Continued",
         "dropped" => "Dropped",
         "failed" => "Failed",
-        _ => "Continue 1 min after limit lifts",
+        _ => "Continue 2 min after limit lifts",
     };
     let onclick = {
         let on_schedule_continuation = on_schedule_continuation.clone();
@@ -259,7 +259,7 @@ fn format_continuation_label(reset_at: &str) -> String {
     let ms = js_sys::Date::parse(reset_at);
     if ms.is_nan() {
         return format!(
-            "Limit resets at {}; continuation runs 1 minute later",
+            "Limit resets at {}; continuation runs 2 minutes later",
             reset_at
         );
     }
@@ -268,11 +268,11 @@ fn format_continuation_label(reset_at: &str) -> String {
         .to_locale_string("default", &js_sys::Object::new())
         .as_string()
         .unwrap_or_else(|| reset_at.to_string());
-    let continue_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms + 60_000.0));
+    let continue_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms + 120_000.0));
     let continue_local = continue_date
         .to_locale_string("default", &js_sys::Object::new())
         .as_string()
-        .unwrap_or_else(|| "1 minute later".to_string());
+        .unwrap_or_else(|| "2 minutes later".to_string());
     format!(
         "Limit resets at {}; continuation runs at {}",
         reset_local, continue_local

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.13.14
+
+- **Limit continuations: wait two minutes after the reset time.** The continuation scheduler now uses a two-minute post-reset grace period before injecting or relaunching a session, and the continuation card copy reflects that timing. This gives the upstream limit window a wider margin before automatic resume.
+
+
 ## 2.13.13
 
 - **Limit continuations: relaunch exited sessions when the continuation is due.** Clicking the continuation card after the reset window can now resume the original session if the local agent process already exited, then queue the continuation prompt against that resumed session. Still-running sessions keep the existing direct-inject path; older continuation syncs without launch metadata fall back to a clear dropped status.

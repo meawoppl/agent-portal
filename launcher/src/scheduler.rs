@@ -9,7 +9,7 @@ use uuid::Uuid;
 /// Delay before sending the prompt after session spawn.
 /// Gives the proxy time to connect and register the session row.
 const PROMPT_DELAY: Duration = Duration::from_secs(5);
-const CONTINUATION_RESET_SKEW_SECS: i64 = 60;
+const CONTINUATION_RESET_SKEW_SECS: i64 = 120;
 
 struct ActiveTask {
     config: ScheduledTaskConfig,
@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_waits_one_minute_after_reset() {
+    fn continuation_waits_two_minutes_after_reset() {
         let mut scheduler = Scheduler::new();
         scheduler.update_continuations(vec![continuation(
             Utc::now() - chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS - 1),
@@ -564,12 +564,12 @@ mod tests {
         assert!(scheduler.ready_continuations().is_empty());
         assert!(
             scheduler.next_continuation_duration() > Some(Duration::ZERO),
-            "continuation should not be due until one minute after reset_at"
+            "continuation should not be due until two minutes after reset_at"
         );
     }
 
     #[test]
-    fn continuation_is_ready_after_one_minute_skew() {
+    fn continuation_is_ready_after_two_minute_skew() {
         let mut scheduler = Scheduler::new();
         let due =
             continuation(Utc::now() - chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS + 1));
