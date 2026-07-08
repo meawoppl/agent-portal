@@ -63,7 +63,10 @@ pub async fn run_launcher_loop(
     process_manager.set_launcher_id(launcher_id);
     let mut backoff = Duration::from_secs(1);
     let mut parked_backoff = PARKED_BACKOFF_START;
-    let mut parked_instruction_logged = false;
+    // The reason whose instruction was last shown; re-emit when it changes so
+    // an operator who fixes auth and then hits the launcher limit sees the new
+    // guidance, not just "Still parked".
+    let mut last_parked_reason: Option<LauncherRejectReason> = None;
     let mut scheduler = Scheduler::new();
 
     loop {
@@ -143,9 +146,9 @@ pub async fn run_launcher_loop(
                         // recovers by itself when the cause clears — the token
                         // re-read above picks up an `agent-portal login`
                         // without a restart.
-                        if !parked_instruction_logged {
+                        if last_parked_reason != Some(reason) {
                             error!("{}", parked_instruction(reason));
-                            parked_instruction_logged = true;
+                            last_parked_reason = Some(reason);
                         } else {
                             info!(
                                 "Still parked ({:?}); retrying in {:?}",
@@ -166,7 +169,7 @@ pub async fn run_launcher_loop(
                         // Healthy again: reset the parked state so a future
                         // rejection logs its instruction afresh.
                         parked_backoff = PARKED_BACKOFF_START;
-                        parked_instruction_logged = false;
+                        last_parked_reason = None;
                     }
                 }
 
