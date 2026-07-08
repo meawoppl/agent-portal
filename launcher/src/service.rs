@@ -1,32 +1,44 @@
 use anyhow::Result;
 
+/// Prepend `dir` to a colon-separated PATH unless already present.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn path_with_dir(existing: &str, dir: &str) -> String {
+    if dir.is_empty() || existing.split(':').any(|p| p == dir) {
+        existing.to_string()
+    } else if existing.is_empty() {
+        dir.to_string()
+    } else {
+        format!("{dir}:{existing}")
+    }
+}
+
 /// Build a PATH for the service that includes `$HOME/.local/bin` — the default
 /// location of the native `claude` installer. Prepends it to the supplied PATH
 /// unless already present, so a service installed from a shell that lacked it
 /// (or a unit file predating this logic) can still resolve the agent binary.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn path_with_local_bin(existing: &str, home: Option<&str>) -> String {
-    let local_bin = match home {
-        Some(h) if !h.is_empty() => format!("{h}/.local/bin"),
-        _ => return existing.to_string(),
-    };
-    if existing.split(':').any(|p| p == local_bin) {
-        existing.to_string()
-    } else if existing.is_empty() {
-        local_bin
-    } else {
-        format!("{local_bin}:{existing}")
+    match home {
+        Some(h) if !h.is_empty() => path_with_dir(existing, &format!("{h}/.local/bin")),
+        _ => existing.to_string(),
     }
 }
 
 /// The PATH the installed service should run with: the current environment's
-/// PATH, guaranteed to include `$HOME/.local/bin`.
+/// PATH, guaranteed to include `$HOME/.local/bin` (for `claude`) and the
+/// launcher binary's own directory — agents spawned by the service shell out
+/// to `agent-portal` (messaging, port forwarding), and the binary often lives
+/// somewhere systemd/launchd's minimal PATH doesn't cover.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn service_path() -> String {
-    path_with_local_bin(
+fn service_path(binary_path: &str) -> String {
+    let base = path_with_local_bin(
         &std::env::var("PATH").unwrap_or_default(),
         std::env::var("HOME").ok().as_deref(),
-    )
+    );
+    match std::path::Path::new(binary_path).parent() {
+        Some(dir) => path_with_dir(&base, &dir.to_string_lossy()),
+        None => base,
+    }
 }
 
 /// Path of the running executable, with any trailing ` (deleted)` stripped.
@@ -38,7 +50,7 @@ fn service_path() -> String {
 /// strip that suffix so it cannot leak into a generated unit file / plist and
 /// produce an `ExecStart` that systemd parses as a bogus subcommand.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn current_exe_path() -> Result<String> {
+pub(crate) fn current_exe_path() -> Result<String> {
     use anyhow::Context;
     Ok(std::env::current_exe()
         .context("Failed to get current executable path")?
@@ -63,7 +75,7 @@ fn service_file_path() -> Result<std::path::PathBuf> {
 
 #[cfg(target_os = "linux")]
 fn generate_unit(binary_path: &str) -> String {
-    let path = service_path();
+    let path = service_path(binary_path);
     format!(
         r#"[Unit]
 Description=Agent Launcher
@@ -281,7 +293,7 @@ fn log_dir() -> String {
 #[cfg(target_os = "macos")]
 fn generate_plist(binary_path: &str) -> String {
     let log_dir = log_dir();
-    let path = service_path();
+    let path = service_path(binary_path);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -556,7 +568,7 @@ pub fn logs(_lines: u32, _follow: bool) -> Result<()> {
 
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
-    use super::path_with_local_bin;
+    use super::{path_with_dir, path_with_local_bin};
 
     #[test]
     fn prepends_local_bin_when_absent() {
@@ -584,6 +596,41 @@ mod tests {
     fn no_home_returns_existing_unchanged() {
         assert_eq!(path_with_local_bin("/usr/bin", None), "/usr/bin");
         assert_eq!(path_with_local_bin("/usr/bin", Some("")), "/usr/bin");
+    }
+
+    #[test]
+    fn path_with_dir_prepends_and_dedups() {
+        assert_eq!(
+            path_with_dir("/usr/bin:/bin", "/home/u/.config/claude-portal"),
+            "/home/u/.config/claude-portal:/usr/bin:/bin"
+        );
+        // Already present anywhere → unchanged.
+        let existing = "/usr/bin:/home/u/.config/claude-portal:/bin";
+        assert_eq!(
+            path_with_dir(existing, "/home/u/.config/claude-portal"),
+            existing
+        );
+        assert_eq!(path_with_dir("", "/opt/x"), "/opt/x");
+        assert_eq!(path_with_dir("/usr/bin", ""), "/usr/bin");
+    }
+
+    #[test]
+    fn unit_path_includes_exe_dir() {
+        // The generated service PATH must contain the launcher binary's own
+        // directory so spawned agents can shell out to `agent-portal` —
+        // systemd/launchd minimal PATHs don't cover ad-hoc install locations.
+        #[cfg(target_os = "linux")]
+        {
+            let unit = super::generate_unit("/home/u/.config/claude-portal/agent-portal");
+            let path_line = unit
+                .lines()
+                .find(|l| l.starts_with("Environment=PATH="))
+                .expect("unit has a PATH line");
+            assert!(
+                path_line.contains("/home/u/.config/claude-portal"),
+                "unit PATH missing exe dir: {path_line}"
+            );
+        }
     }
 }
 

@@ -132,6 +132,41 @@ fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> 
         .unwrap_or_else(|| shared::default_backend_url().to_string())
 }
 
+/// Make sure `agent-portal` resolves on this process's PATH, prepending the
+/// running binary's own directory when it doesn't. Spawned agents inherit the
+/// fixed PATH. Leaves PATH alone when some `agent-portal` already resolves —
+/// deliberate installs (e.g. a symlink in `~/.local/bin`) keep winning.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn ensure_self_on_path() {
+    let path = std::env::var("PATH").unwrap_or_default();
+    let resolvable = path
+        .split(':')
+        .filter(|dir| !dir.is_empty())
+        .any(|dir| std::path::Path::new(dir).join(BINARY_PREFIX).is_file());
+    if resolvable {
+        return;
+    }
+    let Ok(exe) = service::current_exe_path() else {
+        return;
+    };
+    let Some(dir) = std::path::Path::new(&exe)
+        .parent()
+        .map(|d| d.to_string_lossy().to_string())
+    else {
+        return;
+    };
+    let fixed = service::path_with_dir(&path, &dir);
+    if fixed != path {
+        // Racy in theory on a multithreaded runtime, but nothing reads PATH
+        // concurrently during startup and children only inherit it at spawn.
+        std::env::set_var("PATH", &fixed);
+        info!("agent-portal not on PATH; prepended own directory {}", dir);
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn ensure_self_on_path() {}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     rustls::crypto::ring::default_provider()
@@ -187,6 +222,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // --- Daemon startup path ---
+
+    // Agents this daemon spawns shell out to `agent-portal` (messaging, port
+    // forwarding) and inherit our environment. Under systemd/launchd the
+    // service PATH often doesn't cover wherever this binary actually lives, so
+    // if `agent-portal` doesn't resolve, prepend our own directory. The unit
+    // generator bakes the same directory into `Environment=PATH` (self-heals
+    // via `service::sync` after updates); this covers the running process and
+    // units that predate that.
+    ensure_self_on_path();
 
     // Check if running as a system service; suggest installing if not
     if !args.no_update && !service::is_installed() {
