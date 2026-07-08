@@ -420,6 +420,7 @@ fn handle_launcher_message(
             agent_type,
             scheduled_task_id,
             last_session_id,
+            continuation_id,
         } => {
             info!(
                 "Launcher requested launch: dir={}, name={:?}",
@@ -434,6 +435,16 @@ fn handle_launcher_message(
                                 "Skipping launcher auto-resume for paused session {}",
                                 session_id
                             );
+                            if let Some(continuation_id) = continuation_id {
+                                super::continuations::mark_continuation_dropped(
+                                    app_state,
+                                    launcher_id,
+                                    user_id,
+                                    continuation_id,
+                                    session_id,
+                                    "session was paused before continuation relaunch".to_string(),
+                                );
+                            }
                             return;
                         }
                         Ok(Some(false)) => {}
@@ -442,6 +453,16 @@ fn handle_launcher_message(
                                 "Skipping launcher auto-resume for deleted session {}",
                                 session_id
                             );
+                            if let Some(continuation_id) = continuation_id {
+                                super::continuations::mark_continuation_dropped(
+                                    app_state,
+                                    launcher_id,
+                                    user_id,
+                                    continuation_id,
+                                    session_id,
+                                    "session was deleted before continuation relaunch".to_string(),
+                                );
+                            }
                             return;
                         }
                         Err(e) => {

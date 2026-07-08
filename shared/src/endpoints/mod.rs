@@ -451,6 +451,7 @@ mod tests {
             agent_type: AgentType::Claude,
             scheduled_task_id: None,
             last_session_id: None,
+            continuation_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"RequestLaunch""#));
@@ -460,11 +461,13 @@ mod tests {
                 working_directory,
                 session_name,
                 claude_args,
+                continuation_id,
                 ..
             } => {
                 assert_eq!(working_directory, "/home/user/project");
                 assert_eq!(session_name.as_deref(), Some("my-project"));
                 assert_eq!(claude_args, vec!["--verbose"]);
+                assert_eq!(continuation_id, None);
             }
             _ => panic!("Wrong variant"),
         }

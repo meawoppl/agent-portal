@@ -1,6 +1,6 @@
 use crate::path_policy;
 use crate::process_manager::{ProcessManager, SessionExited, SpawnParams};
-use crate::scheduler::Scheduler;
+use crate::scheduler::{PendingLaunchKind, Scheduler};
 use shared::{LauncherEndpoint, LauncherRejectReason, LauncherToServer, ServerToLauncher};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -279,6 +279,7 @@ pub async fn run_launcher_loop(
                                     agent_type: task_to_fire.config.fields.agent_type,
                                     scheduled_task_id: Some(task_to_fire.config.id),
                                     last_session_id: task_to_fire.config.last_session_id,
+                                    continuation_id: None,
                                 };
                                 if ws_sender.send(msg).await.is_err() {
                                     warn!("Failed to send RequestLaunch for scheduled task");
@@ -339,8 +340,32 @@ pub async fn run_launcher_loop(
                                         warn!("Failed to send ContinuationFired");
                                         break;
                                     }
+                                } else if let Some(working_directory) =
+                                    continuation.working_directory.clone()
+                                {
+                                    info!(
+                                        "Relaunching session {} for continuation {}",
+                                        continuation.session_id, continuation.id
+                                    );
+                                    let request_id =
+                                        scheduler.register_continuation_launch(&continuation);
+                                    let relaunch = LauncherToServer::RequestLaunch {
+                                        request_id,
+                                        working_directory,
+                                        session_name: continuation.session_name.clone(),
+                                        claude_args: continuation.claude_args.clone(),
+                                        agent_type: continuation.agent_type,
+                                        scheduled_task_id: None,
+                                        last_session_id: Some(continuation.session_id),
+                                        continuation_id: Some(continuation.id),
+                                    };
+                                    if ws_sender.send(relaunch).await.is_err() {
+                                        warn!("Failed to send continuation RequestLaunch");
+                                        scheduler.clear_pending_launch(&request_id);
+                                        break;
+                                    }
                                 } else {
-                                    let reason = "local Claude process was no longer running at reset time".to_string();
+                                    let reason = "local agent process was no longer running and this launcher did not receive resume metadata".to_string();
                                     warn!(
                                         "Dropping continuation {} for session {}: {}",
                                         continuation.id, continuation.session_id, reason
@@ -514,21 +539,22 @@ async fn handle_message(
             resume_session_id,
             ..
         } => {
-            // Check if this is a scheduled launch
-            let (resume_session_id, scheduled_task_id, is_scheduled) = if let Some((
-                resume_id,
-                task_id,
-            )) =
-                scheduler.get_pending_launch_info(&request_id)
-            {
-                (resume_id, Some(task_id), true)
-            } else {
-                (resume_session_id, None, false)
-            };
+            // Check if this is a scheduler-owned launch.
+            let pending_launch = scheduler.get_pending_launch_info(&request_id);
+            let (resume_session_id, scheduled_task_id, scheduler_owned) =
+                if let Some(info) = pending_launch.as_ref() {
+                    let scheduled_task_id = match info.kind {
+                        PendingLaunchKind::ScheduledTask { task_id } => Some(task_id),
+                        PendingLaunchKind::Continuation { .. } => None,
+                    };
+                    (info.last_session_id, scheduled_task_id, true)
+                } else {
+                    (resume_session_id, None, false)
+                };
 
             info!(
-                "Launch request: dir={}, name={:?}, agent={}, scheduled={}",
-                working_directory, session_name, agent_type, is_scheduled
+                "Launch request: dir={}, name={:?}, agent={}, scheduler_owned={}",
+                working_directory, session_name, agent_type, scheduler_owned
             );
 
             let result = process_manager
@@ -545,8 +571,32 @@ async fn handle_message(
 
             let response = match result {
                 Ok(session_id) => {
-                    if is_scheduled {
-                        scheduler.on_session_spawned(request_id, session_id);
+                    let launch_kind = if scheduler_owned {
+                        scheduler.on_session_spawned(request_id, session_id)
+                    } else {
+                        None
+                    };
+                    if let Some(PendingLaunchKind::Continuation {
+                        continuation_id,
+                        session_id,
+                        prompt,
+                    }) = launch_kind
+                    {
+                        let inject = LauncherToServer::InjectInput {
+                            session_id,
+                            content: prompt,
+                        };
+                        if ws_sender.send(inject).await.is_err() {
+                            warn!("Failed to send relaunched continuation InjectInput");
+                        } else {
+                            let fired = LauncherToServer::ContinuationFired {
+                                continuation_id,
+                                session_id,
+                            };
+                            if ws_sender.send(fired).await.is_err() {
+                                warn!("Failed to send relaunched ContinuationFired");
+                            }
+                        }
                     }
                     LauncherToServer::LaunchSessionResult {
                         request_id,
@@ -558,7 +608,7 @@ async fn handle_message(
                 }
                 Err(e) => {
                     error!("Failed to spawn: {}", e);
-                    if is_scheduled {
+                    if scheduler_owned {
                         scheduler.clear_pending_launch(&request_id);
                     }
                     LauncherToServer::LaunchSessionResult {

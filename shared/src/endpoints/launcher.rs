@@ -127,6 +127,11 @@ pub enum LauncherToServer {
         /// auto-resume when the session is paused server-side.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_session_id: Option<Uuid>,
+        /// One-shot limit continuation this launch should satisfy. Only set
+        /// when the launcher is relaunching an exited session to deliver a
+        /// scheduled continuation prompt.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        continuation_id: Option<Uuid>,
     },
 
     /// Inject input into a session on behalf of the scheduler
