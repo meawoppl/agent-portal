@@ -97,6 +97,38 @@ impl SessionManager {
         self.pending_forward_status.remove(&(session_id, port));
     }
 
+    /// Record a probe verdict for `(session, port)`. Returns `true` when the
+    /// stored health *changed* — the caller broadcasts `ForwardsChanged` so
+    /// chips refetch and re-tint.
+    pub fn update_forward_health(&self, session_id: Uuid, port: u16, listening: bool) -> bool {
+        self.forward_health.insert((session_id, port), listening) != Some(listening)
+    }
+
+    /// The last reported health for `(session, port)`, if the proxy has
+    /// probed it since it (re)connected.
+    pub fn forward_health(&self, session_id: Uuid, port: u16) -> Option<bool> {
+        self.forward_health
+            .get(&(session_id, port))
+            .map(|entry| *entry)
+    }
+
+    /// Drop a cached verdict — called when a forward is revoked or re-pointed
+    /// so the abandoned port's entry doesn't linger.
+    pub fn forget_forward_health(&self, session_id: Uuid, port: u16) {
+        self.forward_health.remove(&(session_id, port));
+    }
+
+    /// Drop every cached verdict for `session_id` — called on proxy
+    /// disconnect, when no tunnel path exists and any verdict is stale (the
+    /// chip must fall back to neutral). Returns how many entries were removed
+    /// so the caller can broadcast `ForwardsChanged` only when something
+    /// actually changed.
+    pub fn forget_forward_health_for_session(&self, session_id: Uuid) -> usize {
+        let before = self.forward_health.len();
+        self.forward_health.retain(|(sid, _), _| *sid != session_id);
+        before - self.forward_health.len()
+    }
+
     /// Deliver a proxy's `ForwardStatus` to the waiting handler. Returns
     /// `false` if nothing was waiting (replayed `ForwardOpen`s after a
     /// reconnect get unsolicited replies — that's fine).
@@ -130,5 +162,56 @@ impl SessionManager {
         self.pending_launch_sessions
             .remove(&request_id)
             .map(|(_, id)| id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::handlers::websocket::SessionManager;
+    use uuid::Uuid;
+
+    #[test]
+    fn stale_old_port_status_cannot_clobber_current_port_health() {
+        // Regression (codex review on #1257): health is keyed by
+        // (session, port), so a late status for a just-replaced port must
+        // not erase the live port's verdict.
+        let mgr = SessionManager::default();
+        let session = Uuid::new_v4();
+
+        assert!(mgr.update_forward_health(session, 9000, true));
+        // Stale frame for the old port arrives late.
+        assert!(mgr.update_forward_health(session, 8000, false));
+        // The live port's verdict is untouched.
+        assert_eq!(mgr.forward_health(session, 9000), Some(true));
+        assert_eq!(mgr.forward_health(session, 8000), Some(false));
+
+        // Change-detection: same verdict again is not a change.
+        assert!(!mgr.update_forward_health(session, 9000, true));
+        assert!(mgr.update_forward_health(session, 9000, false));
+
+        // Forgetting drops only the named pair.
+        mgr.forget_forward_health(session, 8000);
+        assert_eq!(mgr.forward_health(session, 8000), None);
+        assert_eq!(mgr.forward_health(session, 9000), Some(false));
+    }
+
+    #[test]
+    fn proxy_disconnect_clears_only_that_sessions_health() {
+        // Regression (codex re-review on #1257): a disconnected proxy has no
+        // tunnel path, so its cached verdicts must clear (chip → neutral)
+        // without touching other sessions'.
+        let mgr = SessionManager::default();
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+
+        mgr.update_forward_health(a, 8000, true);
+        mgr.update_forward_health(a, 9000, true);
+        mgr.update_forward_health(b, 8000, true);
+
+        assert_eq!(mgr.forget_forward_health_for_session(a), 2);
+        assert_eq!(mgr.forward_health(a, 8000), None);
+        assert_eq!(mgr.forward_health(a, 9000), None);
+        assert_eq!(mgr.forward_health(b, 8000), Some(true));
+        // Nothing left for `a` → nothing removed → caller skips the broadcast.
+        assert_eq!(mgr.forget_forward_health_for_session(a), 0);
     }
 }

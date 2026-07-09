@@ -69,6 +69,11 @@ fn to_forward_info(
         url: forward_url(app_state, label)?,
         created_at: DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc).to_rfc3339(),
         public: row.public,
+        // Latest probe verdict from the proxy's background health check;
+        // `None` until a probe has reported (drives the chip tint).
+        listening: app_state
+            .session_manager
+            .forward_health(row.session_id, row.port as u16),
     })
 }
 
@@ -301,8 +306,12 @@ pub async fn create_forward(
         Ok((session, row, label, replaced_port))
     })?;
 
-    // Drop the replaced port from the proxy's allowlist (and its live streams).
+    // Drop the replaced port from the proxy's allowlist (and its live
+    // streams), plus its cached health verdict.
     if let Some(old) = replaced_port {
+        app_state
+            .session_manager
+            .forget_forward_health(session_id, old);
         app_state.session_manager.send_to_connected_session(
             &session.session_key,
             ServerToProxy::ForwardClose(ForwardPortFields { port: old }),
@@ -407,6 +416,9 @@ pub async fn delete_forward(
     })?;
 
     // Best effort — a disconnected proxy re-syncs from the DB on reconnect.
+    app_state
+        .session_manager
+        .forget_forward_health(session_id, port);
     app_state.session_manager.send_to_connected_session(
         &session.session_key,
         ServerToProxy::ForwardClose(ForwardPortFields { port }),

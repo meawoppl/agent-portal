@@ -9,7 +9,7 @@ use super::{ProxySender, SessionId, SessionManager};
 use crate::AppState;
 use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
-use shared::{ProxyToServer, ServerToProxy, SessionEndpoint, SessionStatus};
+use shared::{ProxyToServer, ServerToClient, ServerToProxy, SessionEndpoint, SessionStatus};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -95,6 +95,19 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     error!(
                         "Failed to get database connection for session disconnect cleanup: {}",
                         e
+                    );
+                }
+            }
+
+            // With the proxy gone there is no tunnel path, so any cached
+            // port-health verdict is meaningless — drop it and nudge chips
+            // back to neutral. The reconnect's replayed `ForwardOpen` probe
+            // re-seeds a fresh verdict (None → Some broadcasts again).
+            if session_manager.forget_forward_health_for_session(session_id) > 0 {
+                if let Some(key) = session_key.as_ref() {
+                    session_manager.broadcast_to_web_clients(
+                        key,
+                        ServerToClient::ForwardsChanged { session_id },
                     );
                 }
             }
@@ -346,6 +359,21 @@ fn handle_proxy_message(
         ProxyToServer::SessionStatus { .. } => {}
         ProxyToServer::ForwardStatus(status) => {
             if let Some(session_id) = *db_session_id {
+                // Record port health first (drives the chip's green/red tint)
+                // and nudge web clients to refetch when it changed.
+                let changed = session_manager.update_forward_health(
+                    session_id,
+                    status.port,
+                    status.listening,
+                );
+                if changed {
+                    if let Some(key) = session_key.as_ref() {
+                        session_manager.broadcast_to_web_clients(
+                            key,
+                            ServerToClient::ForwardsChanged { session_id },
+                        );
+                    }
+                }
                 // `false` = nothing waiting: the unsolicited reply to a
                 // reconnect-replayed `ForwardOpen`. Expected, not an error.
                 session_manager.complete_forward_status(session_id, status);
