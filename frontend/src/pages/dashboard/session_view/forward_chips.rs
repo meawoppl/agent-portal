@@ -11,8 +11,9 @@ use std::rc::Rc;
 use gloo_net::http::Request;
 use shared::api::{ForwardInfo, SessionForwardsResponse};
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use yew::events::PointerEvent;
+use yew::events::{AnimationEvent, PointerEvent};
 use yew::prelude::*;
 
 use crate::utils::{self, api_url, fetch_json, On401};
@@ -102,9 +103,30 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
 
     // Preview overlay: open/collapsed are independent so collapsing keeps the
     // iframe mounted (the embedded app keeps running; expand restores it
-    // where it was). Closed on session switch below.
+    // where it was). Closed on session switch below. `closing` keeps the
+    // panel mounted while the collapse-into-the-chip animation plays;
+    // `anchor` is the chip's screen position, the animation's origin.
     let preview_open = use_state(|| false);
     let preview_collapsed = use_state(|| false);
+    let preview_closing = use_state(|| false);
+    let anchor = use_state(|| (24.0f64, 48.0f64));
+    // Fallback for the close animation's `animationend`: it never fires under
+    // `prefers-reduced-motion` (the animation is disabled), so a timer
+    // finalizes the close regardless. Armed by the effect so its closure gets
+    // fresh state handles, and dropped (cancelled) if `closing` flips back.
+    {
+        let preview_open = preview_open.clone();
+        let closing_handle = preview_closing.clone();
+        use_effect_with(*preview_closing, move |closing| {
+            let timer = closing.then(|| {
+                gloo::timers::callback::Timeout::new(250, move || {
+                    preview_open.set(false);
+                    closing_handle.set(false);
+                })
+            });
+            move || drop(timer)
+        });
+    }
     // Panel geometry (left, top, width, iframe height) in px — dragged by the
     // title bar, resized by the corner grip. Survives collapse/expand.
     let geom = use_state(|| (12.0f64, 52.0f64, 760.0f64, 480.0f64));
@@ -150,12 +172,33 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
     let toggle_preview = {
         let preview_open = preview_open.clone();
         let preview_collapsed = preview_collapsed.clone();
+        let preview_closing = preview_closing.clone();
+        let anchor = anchor.clone();
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
-            if *preview_open {
-                preview_open.set(false);
+            if *preview_open && !*preview_closing {
+                // Play the collapse-into-the-chip animation; unmount happens
+                // on animationend (with a timer fallback).
+                preview_closing.set(true);
             } else {
+                // Anchor the genie animation at the chip that launched it.
+                // `current_target` (the element this handler is bound to),
+                // NOT `target`: a click can land on a text node or future
+                // child markup inside the anchor, whose rect (or unchecked
+                // Element cast) would be wrong. Missing cast keeps the
+                // previous/default anchor.
+                if let Some(el) = e
+                    .current_target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                {
+                    let rect = el.get_bounding_client_rect();
+                    anchor.set((
+                        rect.left() + rect.width() / 2.0,
+                        rect.top() + rect.height() / 2.0,
+                    ));
+                }
                 preview_open.set(true);
+                preview_closing.set(false);
                 preview_collapsed.set(false);
             }
         })
@@ -165,8 +208,21 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
         Callback::from(move |_: MouseEvent| preview_collapsed.set(!*preview_collapsed))
     };
     let close_preview = {
+        let preview_closing = preview_closing.clone();
+        Callback::from(move |_: MouseEvent| preview_closing.set(true))
+    };
+    // Unmount as soon as the collapse animation lands on the chip. The name
+    // check gates on the out-animation, which only plays while `.closing` is
+    // applied, so no state guard is needed here.
+    let on_panel_animation_end = {
         let preview_open = preview_open.clone();
-        Callback::from(move |_: MouseEvent| preview_open.set(false))
+        let preview_closing = preview_closing.clone();
+        Callback::from(move |e: AnimationEvent| {
+            if e.animation_name() == "forward-preview-out" {
+                preview_open.set(false);
+                preview_closing.set(false);
+            }
+        })
     };
 
     // Drag (title bar) and resize (corner grip) share the pointer-capture
@@ -271,8 +327,21 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
         </span>
         if *preview_open {
             <div
-                class="forward-preview"
-                style={format!("left:{}px; top:{}px; width:{}px;", geom.0, geom.1, geom.2)}
+                class={classes!(
+                    "forward-preview",
+                    preview_closing.then_some("closing"),
+                )}
+                // transform-origin puts the genie animation's focal point on
+                // the chip that launched the panel.
+                style={format!(
+                    "left:{}px; top:{}px; width:{}px; transform-origin: {}px {}px;",
+                    geom.0,
+                    geom.1,
+                    geom.2,
+                    anchor.0 - geom.0,
+                    anchor.1 - geom.1,
+                )}
+                onanimationend={on_panel_animation_end}
             >
                 <div class="forward-preview-bar">
                     <button

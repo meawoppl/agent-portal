@@ -184,10 +184,58 @@
     display: flex;
     flex-direction: column;
     background: var(--bg-darker);
-    border: 1px solid var(--border);
+
+    /* Accent edge: the default --border blends into the dark page behind a
+       floating window; the accent line keeps the panel readable as a
+       distinct surface. */
+    border: 1px solid rgba(122, 162, 247, 0.55);
     border-radius: 10px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    box-shadow:
+        0 0 0 1px rgba(122, 162, 247, 0.15),
+        0 12px 32px rgba(0, 0, 0, 0.55);
     overflow: hidden;
+
+    /* Genie in: expand out of the launching chip (transform-origin is set
+       inline to the chip's position). */
+    animation: forward-preview-in 0.18s ease-out;
+}
+
+/* Genie out: collapse back into the chip; unmount happens on animationend
+   (with a timer fallback for reduced-motion, where this never plays). */
+.forward-preview.closing {
+    animation: forward-preview-out 0.16s ease-in forwards;
+    pointer-events: none;
+}
+
+@keyframes forward-preview-in {
+    from {
+        transform: scale(0.05);
+        opacity: 0.25;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes forward-preview-out {
+    from {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    to {
+        transform: scale(0.05);
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .forward-preview,
+    .forward-preview.closing {
+        animation: none;
+    }
 }
 
 .forward-preview-bar {
