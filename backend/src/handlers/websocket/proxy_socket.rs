@@ -98,6 +98,19 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     );
                 }
             }
+
+            // With the proxy gone there is no tunnel path, so any cached
+            // port-health verdict is meaningless — drop it and nudge chips
+            // back to neutral. The reconnect's replayed `ForwardOpen` probe
+            // re-seeds a fresh verdict (None → Some broadcasts again).
+            if session_manager.forget_forward_health_for_session(session_id) > 0 {
+                if let Some(key) = session_key.as_ref() {
+                    session_manager.broadcast_to_web_clients(
+                        key,
+                        ServerToClient::ForwardsChanged { session_id },
+                    );
+                }
+            }
         }
 
         if let Some(key) = session_key {
