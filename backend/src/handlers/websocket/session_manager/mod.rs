@@ -61,11 +61,13 @@ pub struct SessionManager {
     /// Pending `ForwardOpen` → `ForwardStatus` round-trips, keyed by
     /// `(session_id, port)` — the reply frame carries no request id.
     pending_forward_status: Arc<DashMap<(Uuid, u16), oneshot::Sender<ForwardStatusFields>>>,
-    /// Last reported forward-port health per session (`(port, listening)`),
-    /// fed by the proxy's background probe; drives the forward chip's
+    /// Last reported forward-port health, keyed by `(session, port)` — NOT
+    /// per-session, so a stale in-flight status for a just-replaced port can
+    /// never clobber the current port's verdict (codex review on #1257).
+    /// Fed by the proxy's background probe; drives the forward chip's
     /// green/red tint (docs/PORT_FORWARDING.md). In-memory only — unknown
     /// after a backend restart until the next probe report.
-    forward_health: Arc<DashMap<Uuid, (u16, bool)>>,
+    forward_health: Arc<DashMap<(Uuid, u16), bool>>,
     /// Live backend tunnel streams (docs/PORT_FORWARDING.md), keyed by
     /// stream id; the reverse proxy opens them, proxy sockets feed them.
     tunnel_streams: TunnelStreamMap,

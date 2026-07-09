@@ -97,20 +97,25 @@ impl SessionManager {
         self.pending_forward_status.remove(&(session_id, port));
     }
 
-    /// Record a probe verdict for the session's forward. Returns `true` when
-    /// the stored health *changed* — the caller broadcasts `ForwardsChanged`
-    /// so chips refetch and re-tint.
+    /// Record a probe verdict for `(session, port)`. Returns `true` when the
+    /// stored health *changed* — the caller broadcasts `ForwardsChanged` so
+    /// chips refetch and re-tint.
     pub fn update_forward_health(&self, session_id: Uuid, port: u16, listening: bool) -> bool {
-        self.forward_health.insert(session_id, (port, listening)) != Some((port, listening))
+        self.forward_health.insert((session_id, port), listening) != Some(listening)
     }
 
-    /// The last reported health for the session's forward, if the proxy has
-    /// probed `port` since it (re)connected.
+    /// The last reported health for `(session, port)`, if the proxy has
+    /// probed it since it (re)connected.
     pub fn forward_health(&self, session_id: Uuid, port: u16) -> Option<bool> {
         self.forward_health
-            .get(&session_id)
-            .filter(|entry| entry.0 == port)
-            .map(|entry| entry.1)
+            .get(&(session_id, port))
+            .map(|entry| *entry)
+    }
+
+    /// Drop a cached verdict — called when a forward is revoked or re-pointed
+    /// so the abandoned port's entry doesn't linger.
+    pub fn forget_forward_health(&self, session_id: Uuid, port: u16) {
+        self.forward_health.remove(&(session_id, port));
     }
 
     /// Deliver a proxy's `ForwardStatus` to the waiting handler. Returns
@@ -146,5 +151,36 @@ impl SessionManager {
         self.pending_launch_sessions
             .remove(&request_id)
             .map(|(_, id)| id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::handlers::websocket::SessionManager;
+    use uuid::Uuid;
+
+    #[test]
+    fn stale_old_port_status_cannot_clobber_current_port_health() {
+        // Regression (codex review on #1257): health is keyed by
+        // (session, port), so a late status for a just-replaced port must
+        // not erase the live port's verdict.
+        let mgr = SessionManager::default();
+        let session = Uuid::new_v4();
+
+        assert!(mgr.update_forward_health(session, 9000, true));
+        // Stale frame for the old port arrives late.
+        assert!(mgr.update_forward_health(session, 8000, false));
+        // The live port's verdict is untouched.
+        assert_eq!(mgr.forward_health(session, 9000), Some(true));
+        assert_eq!(mgr.forward_health(session, 8000), Some(false));
+
+        // Change-detection: same verdict again is not a change.
+        assert!(!mgr.update_forward_health(session, 9000, true));
+        assert!(mgr.update_forward_health(session, 9000, false));
+
+        // Forgetting drops only the named pair.
+        mgr.forget_forward_health(session, 8000);
+        assert_eq!(mgr.forward_health(session, 8000), None);
+        assert_eq!(mgr.forward_health(session, 9000), Some(false));
     }
 }

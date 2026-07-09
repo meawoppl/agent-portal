@@ -126,6 +126,13 @@ impl TunnelManager {
                     Ok(Err(e)) => (false, Some(e.to_string())),
                     Err(_) => (false, Some("probe dial timed out".to_string())),
                 };
+            // Re-check the allowlist after the dial: a `ForwardClose` that
+            // raced this tick must not resurrect the port with a stale
+            // status (codex review on #1257).
+            if !self.allowed.lock().await.contains(&port) {
+                self.last_health.lock().await.remove(&port);
+                continue;
+            }
             let changed = {
                 let mut health = self.last_health.lock().await;
                 health.insert(port, listening) != Some(listening)
@@ -163,6 +170,11 @@ impl TunnelManager {
                             Ok(Err(e)) => (false, Some(e.to_string())),
                             Err(_) => (false, Some("probe dial timed out".to_string())),
                         };
+                    // A `ForwardClose` may have raced the dial — don't emit a
+                    // stale status for a port that's no longer forwarded.
+                    if !mgr.allowed.lock().await.contains(&port) {
+                        return;
+                    }
                     // Seed the background prober so it only reports changes.
                     mgr.last_health.lock().await.insert(port, listening);
                     mgr.send(ProxyToServer::ForwardStatus(ForwardStatusFields {
