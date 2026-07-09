@@ -119,6 +119,25 @@
     text-decoration: underline;
 }
 
+/* Live port health from the proxy's background probe. */
+.session-view-header .forward-chip.is-up {
+    border-color: rgba(158, 206, 106, 0.6);
+    background: rgba(158, 206, 106, 0.12);
+}
+
+.session-view-header .forward-chip.is-up a {
+    color: var(--success, #9ece6a);
+}
+
+.session-view-header .forward-chip.is-down {
+    border-color: rgba(247, 118, 142, 0.6);
+    background: rgba(247, 118, 142, 0.12);
+}
+
+.session-view-header .forward-chip.is-down a {
+    color: var(--error, #f7768e);
+}
+
 .session-view-header .forward-chip-revoke {
     background: none;
     border: none;

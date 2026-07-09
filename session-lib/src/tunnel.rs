@@ -48,6 +48,10 @@ pub const INITIAL_WINDOW: u32 = 256 * 1024;
 pub const MAX_STREAMS: usize = 64;
 /// How long a probe/stream dial to loopback may take before it is refused.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(2);
+/// Cadence of the background port-health probe. A loopback dial is
+/// microseconds of work, so this can be frequent — it drives the green/red
+/// liveness tint on the frontend's forward chip.
+const PROBE_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Frames the manager's per-stream downlink loop consumes.
 enum StreamMsg {
@@ -76,15 +80,69 @@ pub struct TunnelManager {
     ws: TunnelWsWrite,
     allowed: Mutex<HashSet<u16>>,
     streams: Mutex<HashMap<Uuid, StreamHandle>>,
+    /// Last probe verdict per allowlisted port; the background prober reports
+    /// a `ForwardStatus` only when a port's verdict *changes* (the
+    /// registration-time probe seeds it), so steady state costs no frames.
+    last_health: Mutex<HashMap<u16, bool>>,
+    prober: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl TunnelManager {
     pub fn new(ws: TunnelWsWrite) -> Arc<Self> {
-        Arc::new(Self {
+        let mgr = Arc::new(Self {
             ws,
             allowed: Mutex::new(HashSet::new()),
             streams: Mutex::new(HashMap::new()),
-        })
+            last_health: Mutex::new(HashMap::new()),
+            prober: std::sync::Mutex::new(None),
+        });
+        // Background health probe: holds only a Weak so a dropped manager
+        // (connection gone) ends the loop; `shutdown` aborts it eagerly.
+        let weak = Arc::downgrade(&mgr);
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(PROBE_INTERVAL).await;
+                let Some(mgr) = weak.upgrade() else { return };
+                mgr.probe_tick().await;
+            }
+        });
+        *mgr.prober.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
+        mgr
+    }
+
+    /// One pass of the background prober: dial every allowlisted port and
+    /// report the ports whose verdict changed since the last pass.
+    async fn probe_tick(self: &Arc<Self>) {
+        let ports: Vec<u16> = self.allowed.lock().await.iter().copied().collect();
+        // Drop verdicts for ports no longer forwarded.
+        self.last_health
+            .lock()
+            .await
+            .retain(|port, _| ports.contains(port));
+        for port in ports {
+            let (listening, error) =
+                match tokio::time::timeout(DIAL_TIMEOUT, dial_loopback(port)).await {
+                    Ok(Ok(_)) => (true, None),
+                    Ok(Err(e)) => (false, Some(e.to_string())),
+                    Err(_) => (false, Some("probe dial timed out".to_string())),
+                };
+            let changed = {
+                let mut health = self.last_health.lock().await;
+                health.insert(port, listening) != Some(listening)
+            };
+            if changed {
+                info!(
+                    "Forward port {} health changed: listening={}",
+                    port, listening
+                );
+                self.send(ProxyToServer::ForwardStatus(ForwardStatusFields {
+                    port,
+                    listening,
+                    error,
+                }))
+                .await;
+            }
+        }
     }
 
     /// Returns `true` if `msg` was a forward/tunnel frame (and was handled).
@@ -105,6 +163,8 @@ impl TunnelManager {
                             Ok(Err(e)) => (false, Some(e.to_string())),
                             Err(_) => (false, Some("probe dial timed out".to_string())),
                         };
+                    // Seed the background prober so it only reports changes.
+                    mgr.last_health.lock().await.insert(port, listening);
                     mgr.send(ProxyToServer::ForwardStatus(ForwardStatusFields {
                         port,
                         listening,
@@ -116,6 +176,7 @@ impl TunnelManager {
             }
             ServerToProxy::ForwardClose(f) => {
                 self.allowed.lock().await.remove(&f.port);
+                self.last_health.lock().await.remove(&f.port);
                 let streams = self.streams.lock().await;
                 for handle in streams.values().filter(|h| h.port == f.port) {
                     let _ = handle.inbox.send(StreamMsg::Close);
@@ -193,6 +254,9 @@ impl TunnelManager {
     /// connection; a reconnect builds a fresh one and the backend replays
     /// `ForwardOpen`s to rebuild the allowlist.
     pub async fn shutdown(&self) {
+        if let Some(prober) = self.prober.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            prober.abort();
+        }
         let streams = self.streams.lock().await;
         for handle in streams.values() {
             let _ = handle.inbox.send(StreamMsg::Close);

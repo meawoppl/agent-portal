@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.17
+
+- **Forward chip: live green/red port health (docs/PORT_FORWARDING.md, #689).** The session-header forward chip now shows whether anything is actually listening on the forwarded port: green = the proxy's last probe connected, red = connection refused, neutral = no verdict yet (proxy offline / pre-probe / mixed fleet). The proxy's `TunnelManager` background-probes every allowlisted port on a 10s cadence (a loopback TCP dial — microseconds of work) and sends the existing `ForwardStatus` frame **only when a port's verdict changes**, so steady state costs zero WS frames; the registration-time probe seeds the state. The backend caches the latest verdict in memory on the `SessionManager`, exposes it as `ForwardInfo.listening` (`Option<bool>`, additive), and broadcasts `ForwardsChanged` on transitions so chips re-tint within one probe interval of a server starting or dying. No protocol change — old proxies simply never report (chips stay neutral), old backends ignore unsolicited statuses as before. Prober is `Weak`-held and aborted on connection shutdown.
+
 ## 2.13.16
 
 - **Forward preview overlay: draggable + resizable.** The inline preview panel can now be moved by dragging its title bar and resized from a corner grip (min 320×160, clamped to the viewport so the bar can't be lost off-screen; geometry survives collapse/expand). Both interactions use pointer capture — `setPointerCapture` on the handle keeps the `pointermove` stream flowing even when the cursor crosses the embedded iframe — with `pointer-events: none` applied to the iframe during an interaction as belt-and-suspenders. `touch-action: none` + `user-select: none` on the handles keep touch scrolling and text selection from hijacking the gesture, so it works on mobile too. Position/size moved from CSS to state-driven inline styles; collapse still keeps the iframe mounted (height 0).

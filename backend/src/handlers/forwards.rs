@@ -69,6 +69,11 @@ fn to_forward_info(
         url: forward_url(app_state, label)?,
         created_at: DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc).to_rfc3339(),
         public: row.public,
+        // Latest probe verdict from the proxy's background health check;
+        // `None` until a probe has reported (drives the chip tint).
+        listening: app_state
+            .session_manager
+            .forward_health(row.session_id, row.port as u16),
     })
 }
 

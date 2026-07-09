@@ -233,8 +233,25 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
         <span class="session-forwards">
             { for forwards.iter().map(|f| {
                 let on_revoke = revoke.clone();
+                // Green = last probe saw a listener on the port, red = probe
+                // got connection-refused, neutral = no verdict yet (proxy
+                // offline or pre-probe). Updates ride ForwardsChanged.
+                let health_class = match f.listening {
+                    Some(true) => Some("is-up"),
+                    Some(false) => Some("is-down"),
+                    None => None,
+                };
+                let health_title = match f.listening {
+                    Some(true) => format!("{} — port is live", f.url),
+                    Some(false) => format!("{} — nothing listening on the port", f.url),
+                    None => f.url.clone(),
+                };
                 html! {
-                    <span class="forward-chip" key={f.port} title={f.url.clone()}>
+                    <span
+                        class={classes!("forward-chip", health_class)}
+                        key={f.port}
+                        title={health_title}
+                    >
                         // Click opens the inline preview overlay; "Visit site"
                         // inside it goes to the full page.
                         <a href={open_url.clone()} onclick={toggle_preview.clone()}>

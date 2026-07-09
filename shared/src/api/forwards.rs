@@ -19,6 +19,11 @@ pub struct ForwardInfo {
     /// When true, the URL serves without a portal login (owner opt-in).
     #[serde(default)]
     pub public: bool,
+    /// Latest probe verdict for the forwarded port: `Some(true)` = something
+    /// is listening, `Some(false)` = nothing there, `None` = unknown (proxy
+    /// disconnected, pre-probe, or pre-2.13.17). Drives the chip tint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listening: Option<bool>,
 }
 
 /// One of the caller's active forwards, for the Settings ▸ Forwarding tab.

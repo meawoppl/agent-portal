@@ -376,6 +376,13 @@ No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
   from `GET /api/sessions/{id}/forwards`; owners get a revoke `×`. A
   `ServerToClient::ForwardsChanged { session_id }` event triggers a refetch so
   the chip appears/updates the moment the agent registers or re-points.
+- **The chip is tinted by live port health**: green = a listener answered the
+  proxy's last probe, red = connection refused, neutral = no verdict (proxy
+  offline / pre-probe). The proxy's `TunnelManager` background-probes every
+  allowlisted port each 10s (a loopback dial — microseconds) and sends
+  `ForwardStatus` only when a port's verdict *changes*; the backend caches
+  the verdict in memory (`ForwardInfo.listening`) and broadcasts
+  `ForwardsChanged` so chips refetch. Steady state costs zero frames.
 - **Clicking the chip opens an inline preview overlay**: a fixed collapsible
   panel containing an `<iframe>` pointed at the `open` handoff endpoint, with
   a "Visit site ↗" link that opens the full page in a new tab and a collapse

@@ -97,6 +97,22 @@ impl SessionManager {
         self.pending_forward_status.remove(&(session_id, port));
     }
 
+    /// Record a probe verdict for the session's forward. Returns `true` when
+    /// the stored health *changed* — the caller broadcasts `ForwardsChanged`
+    /// so chips refetch and re-tint.
+    pub fn update_forward_health(&self, session_id: Uuid, port: u16, listening: bool) -> bool {
+        self.forward_health.insert(session_id, (port, listening)) != Some((port, listening))
+    }
+
+    /// The last reported health for the session's forward, if the proxy has
+    /// probed `port` since it (re)connected.
+    pub fn forward_health(&self, session_id: Uuid, port: u16) -> Option<bool> {
+        self.forward_health
+            .get(&session_id)
+            .filter(|entry| entry.0 == port)
+            .map(|entry| entry.1)
+    }
+
     /// Deliver a proxy's `ForwardStatus` to the waiting handler. Returns
     /// `false` if nothing was waiting (replayed `ForwardOpen`s after a
     /// reconnect get unsolicited replies — that's fine).
