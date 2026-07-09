@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.19
+
+- **Forward preview overlay: accent edge + genie open/close.** The floating preview panel gets a contrasting accent-blue border (plus a faint outer ring in the shadow stack) so it reads as a distinct surface instead of blending into the dark page. Opening now **expands the panel out of the chip that launched it** and closing **collapses it back into the chip** — the chip's screen position is captured at click time and becomes the animation's `transform-origin` (0.18s out / 0.16s in, scale+fade). Unmount waits for `animationend` on the out-animation, with an effect-armed 250ms timer fallback for `prefers-reduced-motion` (where the animations are disabled entirely) — armed via `use_effect_with` so the closure holds fresh state handles, and cancelled if the panel reopens mid-close. The `▾` collapse-to-titlebar behavior is unchanged.
+
 ## 2.13.18
 
 - **Forward chip: bound-app name + color-only health (docs/PORT_FORWARDING.md, #689).** When the proxy's health probe finds a listener it now also resolves the owning process (the [`listeners`](https://crates.io/crates/listeners) crate — same-user `/proc`/libproc lookup, run in `spawn_blocking`) and ships it in `ForwardStatus.process` (additive). The name is part of the probe verdict, so an app swap on the same port re-reports; it surfaces as `ForwardInfo.process`, in the chip tooltip (`python3 — {url}`) and the preview overlay's title bar (`python3 :8899 — {url}`). Health is now conveyed by **color alone** — the "port is live"/"nothing listening" tooltip text is gone: the chip **breathes a subtle green** while live (2.8s ease, disabled under `prefers-reduced-motion`) and sits **flat red** when the last probe was refused; neutral when no verdict. New deterministic test binds a listener in-process and asserts the resolver names our own binary; health-cache tests extended for the (listening, process) verdict tuple.
