@@ -24,6 +24,10 @@ pub struct ForwardInfo {
     /// disconnected, pre-probe, or pre-2.13.17). Drives the chip tint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listening: Option<bool>,
+    /// Name of the process bound to the port (e.g. `python3`), when the
+    /// probe could resolve it. Shown in the chip tooltip / preview title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<String>,
 }
 
 /// One of the caller's active forwards, for the Settings ▸ Forwarding tab.

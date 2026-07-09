@@ -24,6 +24,7 @@ directories = { workspace = true }
 which = "8.0.0"
 ws-bridge = { workspace = true, features = ["native-client"] }
 base64 = "0.22.1"
+listeners = "0.6.0"
 
 # Unix-only: signal the agent's process group on stop/drop so the agent
 # process can't be orphaned when `kill_on_drop` doesn't fire (#927).

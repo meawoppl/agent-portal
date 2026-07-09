@@ -99,17 +99,28 @@ impl SessionManager {
 
     /// Record a probe verdict for `(session, port)`. Returns `true` when the
     /// stored health *changed* — the caller broadcasts `ForwardsChanged` so
-    /// chips refetch and re-tint.
-    pub fn update_forward_health(&self, session_id: Uuid, port: u16, listening: bool) -> bool {
-        self.forward_health.insert((session_id, port), listening) != Some(listening)
+    /// chips refetch and re-tint. The process name is part of the verdict so
+    /// an app swap on the same port also nudges clients.
+    pub fn update_forward_health(
+        &self,
+        session_id: Uuid,
+        port: u16,
+        listening: bool,
+        process: Option<String>,
+    ) -> bool {
+        let verdict = (listening, process);
+        self.forward_health
+            .insert((session_id, port), verdict.clone())
+            != Some(verdict)
     }
 
-    /// The last reported health for `(session, port)`, if the proxy has
-    /// probed it since it (re)connected.
-    pub fn forward_health(&self, session_id: Uuid, port: u16) -> Option<bool> {
+    /// The last reported health for `(session, port)` as
+    /// `(listening, process name)`, if the proxy has probed it since it
+    /// (re)connected.
+    pub fn forward_health(&self, session_id: Uuid, port: u16) -> Option<(bool, Option<String>)> {
         self.forward_health
             .get(&(session_id, port))
-            .map(|entry| *entry)
+            .map(|entry| entry.clone())
     }
 
     /// Drop a cached verdict — called when a forward is revoked or re-pointed
@@ -177,22 +188,25 @@ mod tests {
         // not erase the live port's verdict.
         let mgr = SessionManager::default();
         let session = Uuid::new_v4();
+        let py = || Some("python3".to_string());
 
-        assert!(mgr.update_forward_health(session, 9000, true));
+        assert!(mgr.update_forward_health(session, 9000, true, py()));
         // Stale frame for the old port arrives late.
-        assert!(mgr.update_forward_health(session, 8000, false));
+        assert!(mgr.update_forward_health(session, 8000, false, None));
         // The live port's verdict is untouched.
-        assert_eq!(mgr.forward_health(session, 9000), Some(true));
-        assert_eq!(mgr.forward_health(session, 8000), Some(false));
+        assert_eq!(mgr.forward_health(session, 9000), Some((true, py())));
+        assert_eq!(mgr.forward_health(session, 8000), Some((false, None)));
 
-        // Change-detection: same verdict again is not a change.
-        assert!(!mgr.update_forward_health(session, 9000, true));
-        assert!(mgr.update_forward_health(session, 9000, false));
+        // Change-detection: same verdict again is not a change; a listening
+        // flip or an app swap on the same port is.
+        assert!(!mgr.update_forward_health(session, 9000, true, py()));
+        assert!(mgr.update_forward_health(session, 9000, true, Some("vite".to_string())));
+        assert!(mgr.update_forward_health(session, 9000, false, None));
 
         // Forgetting drops only the named pair.
         mgr.forget_forward_health(session, 8000);
         assert_eq!(mgr.forward_health(session, 8000), None);
-        assert_eq!(mgr.forward_health(session, 9000), Some(false));
+        assert_eq!(mgr.forward_health(session, 9000), Some((false, None)));
     }
 
     #[test]
@@ -203,14 +217,14 @@ mod tests {
         let mgr = SessionManager::default();
         let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
 
-        mgr.update_forward_health(a, 8000, true);
-        mgr.update_forward_health(a, 9000, true);
-        mgr.update_forward_health(b, 8000, true);
+        mgr.update_forward_health(a, 8000, true, None);
+        mgr.update_forward_health(a, 9000, true, None);
+        mgr.update_forward_health(b, 8000, true, None);
 
         assert_eq!(mgr.forget_forward_health_for_session(a), 2);
         assert_eq!(mgr.forward_health(a, 8000), None);
         assert_eq!(mgr.forward_health(a, 9000), None);
-        assert_eq!(mgr.forward_health(b, 8000), Some(true));
+        assert_eq!(mgr.forward_health(b, 8000), Some((true, None)));
         // Nothing left for `a` → nothing removed → caller skips the broadcast.
         assert_eq!(mgr.forget_forward_health_for_session(a), 0);
     }

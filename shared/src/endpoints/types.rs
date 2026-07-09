@@ -180,14 +180,19 @@ pub struct ForwardPortFields {
     pub port: u16,
 }
 
-/// Proxy's reply to `ForwardOpen`: the allowlist was updated, and a probe dial
-/// to `127.0.0.1:{port}` reported whether anything is listening yet.
+/// Proxy's reply to `ForwardOpen` (and unsolicited background-probe reports):
+/// the allowlist was updated, and a probe dial to `127.0.0.1:{port}` reported
+/// whether anything is listening yet.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForwardStatusFields {
     pub port: u16,
     pub listening: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Name of the process bound to the port (e.g. `python3`, `vite`), when
+    /// the probe found a listener and could resolve its owner. Additive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

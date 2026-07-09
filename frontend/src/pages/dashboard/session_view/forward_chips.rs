@@ -233,17 +233,18 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
         <span class="session-forwards">
             { for forwards.iter().map(|f| {
                 let on_revoke = revoke.clone();
-                // Green = last probe saw a listener on the port, red = probe
-                // got connection-refused, neutral = no verdict yet (proxy
-                // offline or pre-probe). Updates ride ForwardsChanged.
+                // Health is conveyed by color alone: pulsing green = last
+                // probe saw a listener, flat red = connection refused,
+                // neutral = no verdict yet (proxy offline or pre-probe).
+                // Updates ride ForwardsChanged.
                 let health_class = match f.listening {
                     Some(true) => Some("is-up"),
                     Some(false) => Some("is-down"),
                     None => None,
                 };
-                let health_title = match f.listening {
-                    Some(true) => format!("{} — port is live", f.url),
-                    Some(false) => format!("{} — nothing listening on the port", f.url),
+                // Tooltip names the bound app when the probe resolved it.
+                let health_title = match &f.process {
+                    Some(process) => format!("{process} — {}", f.url),
                     None => f.url.clone(),
                 };
                 html! {
@@ -290,7 +291,10 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                         onpointerup={pointer_end.clone()}
                         onpointercancel={pointer_end.clone()}
                     >
-                        { format!(":{} — {}", forward.port, forward.url) }
+                        { match &forward.process {
+                            Some(process) => format!("{process} :{} — {}", forward.port, forward.url),
+                            None => format!(":{} — {}", forward.port, forward.url),
+                        } }
                     </span>
                     <a
                         class="forward-preview-visit"
