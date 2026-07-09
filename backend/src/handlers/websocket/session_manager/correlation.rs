@@ -6,7 +6,7 @@ use shared::{FileDownloadResponseFields, ForwardStatusFields, LauncherToServer};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::SessionManager;
+use super::{ForwardHealth, SessionManager};
 
 impl SessionManager {
     pub fn register_dir_request(&self, request_id: Uuid) -> oneshot::Receiver<LauncherToServer> {
@@ -108,16 +108,15 @@ impl SessionManager {
         listening: bool,
         process: Option<String>,
     ) -> bool {
-        let verdict = (listening, process);
+        let verdict = ForwardHealth { listening, process };
         self.forward_health
             .insert((session_id, port), verdict.clone())
             != Some(verdict)
     }
 
-    /// The last reported health for `(session, port)` as
-    /// `(listening, process name)`, if the proxy has probed it since it
-    /// (re)connected.
-    pub fn forward_health(&self, session_id: Uuid, port: u16) -> Option<(bool, Option<String>)> {
+    /// The last reported health for `(session, port)`, if the proxy has
+    /// probed it since it (re)connected.
+    pub fn forward_health(&self, session_id: Uuid, port: u16) -> Option<ForwardHealth> {
         self.forward_health
             .get(&(session_id, port))
             .map(|entry| entry.clone())
@@ -178,7 +177,7 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::handlers::websocket::SessionManager;
+    use crate::handlers::websocket::{ForwardHealth, SessionManager};
     use uuid::Uuid;
 
     #[test]
@@ -189,13 +188,15 @@ mod tests {
         let mgr = SessionManager::default();
         let session = Uuid::new_v4();
         let py = || Some("python3".to_string());
+        let health =
+            |listening: bool, process: Option<String>| Some(ForwardHealth { listening, process });
 
         assert!(mgr.update_forward_health(session, 9000, true, py()));
         // Stale frame for the old port arrives late.
         assert!(mgr.update_forward_health(session, 8000, false, None));
         // The live port's verdict is untouched.
-        assert_eq!(mgr.forward_health(session, 9000), Some((true, py())));
-        assert_eq!(mgr.forward_health(session, 8000), Some((false, None)));
+        assert_eq!(mgr.forward_health(session, 9000), health(true, py()));
+        assert_eq!(mgr.forward_health(session, 8000), health(false, None));
 
         // Change-detection: same verdict again is not a change; a listening
         // flip or an app swap on the same port is.
@@ -206,7 +207,7 @@ mod tests {
         // Forgetting drops only the named pair.
         mgr.forget_forward_health(session, 8000);
         assert_eq!(mgr.forward_health(session, 8000), None);
-        assert_eq!(mgr.forward_health(session, 9000), Some((false, None)));
+        assert_eq!(mgr.forward_health(session, 9000), health(false, None));
     }
 
     #[test]
@@ -224,7 +225,13 @@ mod tests {
         assert_eq!(mgr.forget_forward_health_for_session(a), 2);
         assert_eq!(mgr.forward_health(a, 8000), None);
         assert_eq!(mgr.forward_health(a, 9000), None);
-        assert_eq!(mgr.forward_health(b, 8000), Some((true, None)));
+        assert_eq!(
+            mgr.forward_health(b, 8000),
+            Some(ForwardHealth {
+                listening: true,
+                process: None
+            })
+        );
         // Nothing left for `a` → nothing removed → caller skips the broadcast.
         assert_eq!(mgr.forget_forward_health_for_session(a), 0);
     }

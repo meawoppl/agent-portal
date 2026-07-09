@@ -74,8 +74,8 @@ fn to_forward_info(
         url: forward_url(app_state, label)?,
         created_at: DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc).to_rfc3339(),
         public: row.public,
-        listening: health.as_ref().map(|(listening, _)| *listening),
-        process: health.and_then(|(_, process)| process),
+        listening: health.as_ref().map(|h| h.listening),
+        process: health.and_then(|h| h.process),
     })
 }
 
