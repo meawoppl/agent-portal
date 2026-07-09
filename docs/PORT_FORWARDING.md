@@ -376,13 +376,21 @@ No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
   from `GET /api/sessions/{id}/forwards`; owners get a revoke `×`. A
   `ServerToClient::ForwardsChanged { session_id }` event triggers a refetch so
   the chip appears/updates the moment the agent registers or re-points.
-- **The chip is tinted by live port health**: green = a listener answered the
-  proxy's last probe, red = connection refused, neutral = no verdict (proxy
-  offline / pre-probe). The proxy's `TunnelManager` background-probes every
-  allowlisted port each 10s (a loopback dial — microseconds) and sends
-  `ForwardStatus` only when a port's verdict *changes*; the backend caches
-  the verdict in memory (`ForwardInfo.listening`) and broadcasts
-  `ForwardsChanged` so chips refetch. Steady state costs zero frames.
+- **The chip is tinted by live port health — color only, no status text**: a
+  subtle breathing green while the port is live (disabled under
+  `prefers-reduced-motion`), flat red when the last probe was refused,
+  neutral when there's no verdict (proxy offline / pre-probe). The proxy's
+  `TunnelManager` background-probes every allowlisted port each 10s (a
+  loopback dial — microseconds) and sends `ForwardStatus` only when a port's
+  verdict *changes*; the backend caches the verdict in memory
+  (`ForwardInfo.listening`) and broadcasts `ForwardsChanged` so chips
+  refetch. Steady state costs zero frames.
+- **The bound app's name rides along**: when a probe finds a listener, the
+  proxy resolves the owning process via the `listeners` crate (same-user
+  `/proc`/libproc lookup) and includes it in `ForwardStatus.process`; it
+  surfaces as `ForwardInfo.process`, in the chip tooltip (`python3 — {url}`)
+  and the preview overlay's title bar. A name change on the same port (app
+  swap) counts as a verdict change and re-reports.
 - **Clicking the chip opens an inline preview overlay**: a fixed collapsible
   panel containing an `<iframe>` pointed at the `open` handoff endpoint, with
   a "Visit site ↗" link that opens the full page in a new tab and a collapse

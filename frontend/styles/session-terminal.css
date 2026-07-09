@@ -119,14 +119,36 @@
     text-decoration: underline;
 }
 
-/* Live port health from the proxy's background probe. */
+/* Live port health from the proxy's background probe, conveyed by color
+   alone: a subtle breathing green while the port is live, flat red when the
+   last probe was refused. */
 .session-view-header .forward-chip.is-up {
     border-color: rgba(158, 206, 106, 0.6);
     background: rgba(158, 206, 106, 0.12);
+    animation: forward-chip-breathe 2.8s ease-in-out infinite;
 }
 
 .session-view-header .forward-chip.is-up a {
     color: var(--success, #9ece6a);
+}
+
+@keyframes forward-chip-breathe {
+    0%,
+    100% {
+        background: rgba(158, 206, 106, 0.08);
+        box-shadow: 0 0 0 rgba(158, 206, 106, 0);
+    }
+
+    50% {
+        background: rgba(158, 206, 106, 0.22);
+        box-shadow: 0 0 6px rgba(158, 206, 106, 0.35);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .session-view-header .forward-chip.is-up {
+        animation: none;
+    }
 }
 
 .session-view-header .forward-chip.is-down {

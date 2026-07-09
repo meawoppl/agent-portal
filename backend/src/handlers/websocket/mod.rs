@@ -12,8 +12,8 @@ mod uploads;
 mod web_client_socket;
 
 pub use session_manager::{
-    LauncherConnection, ProxySender, SessionId, SessionManager, TunnelError, TunnelIn,
-    WebClientSender,
+    ForwardHealth, LauncherConnection, ProxySender, SessionId, SessionManager, TunnelError,
+    TunnelIn, WebClientSender,
 };
 
 use axum::{

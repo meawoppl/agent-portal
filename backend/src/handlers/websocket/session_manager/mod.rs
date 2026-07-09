@@ -41,6 +41,16 @@ pub type SessionId = String;
 pub type ProxySender = mpsc::UnboundedSender<ServerToProxy>;
 pub type WebClientSender = mpsc::UnboundedSender<ServerToClient>;
 
+/// Latest probe verdict for a forwarded port, as reported by the proxy's
+/// background health check (docs/PORT_FORWARDING.md).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardHealth {
+    /// Whether the last loopback dial connected.
+    pub listening: bool,
+    /// Name of the process bound to the port, when resolvable.
+    pub process: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct SessionManager {
     pub sessions: Arc<DashMap<SessionId, ProxySender>>,
@@ -65,9 +75,10 @@ pub struct SessionManager {
     /// per-session, so a stale in-flight status for a just-replaced port can
     /// never clobber the current port's verdict (codex review on #1257).
     /// Fed by the proxy's background probe; drives the forward chip's
-    /// green/red tint (docs/PORT_FORWARDING.md). In-memory only — unknown
-    /// after a backend restart until the next probe report.
-    forward_health: Arc<DashMap<(Uuid, u16), bool>>,
+    /// green/red tint and app-name tooltip (docs/PORT_FORWARDING.md).
+    /// In-memory only — unknown after a backend restart until the next
+    /// probe report.
+    forward_health: Arc<DashMap<(Uuid, u16), ForwardHealth>>,
     /// Live backend tunnel streams (docs/PORT_FORWARDING.md), keyed by
     /// stream id; the reverse proxy opens them, proxy sockets feed them.
     tunnel_streams: TunnelStreamMap,

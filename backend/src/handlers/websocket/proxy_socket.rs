@@ -359,12 +359,13 @@ fn handle_proxy_message(
         ProxyToServer::SessionStatus { .. } => {}
         ProxyToServer::ForwardStatus(status) => {
             if let Some(session_id) = *db_session_id {
-                // Record port health first (drives the chip's green/red tint)
-                // and nudge web clients to refetch when it changed.
+                // Record port health first (drives the chip's green/red tint
+                // + app-name tooltip) and nudge web clients on change.
                 let changed = session_manager.update_forward_health(
                     session_id,
                     status.port,
                     status.listening,
+                    status.process.clone(),
                 );
                 if changed {
                     if let Some(key) = session_key.as_ref() {

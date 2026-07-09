@@ -80,10 +80,12 @@ pub struct TunnelManager {
     ws: TunnelWsWrite,
     allowed: Mutex<HashSet<u16>>,
     streams: Mutex<HashMap<Uuid, StreamHandle>>,
-    /// Last probe verdict per allowlisted port; the background prober reports
-    /// a `ForwardStatus` only when a port's verdict *changes* (the
-    /// registration-time probe seeds it), so steady state costs no frames.
-    last_health: Mutex<HashMap<u16, bool>>,
+    /// Last probe verdict per allowlisted port (`(listening, process name)`);
+    /// the background prober reports a `ForwardStatus` only when a port's
+    /// verdict *changes* (the registration-time probe seeds it), so steady
+    /// state costs no frames. The process name is part of the verdict so an
+    /// app swap on the same port re-reports.
+    last_health: Mutex<HashMap<u16, (bool, Option<String>)>>,
     prober: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -111,7 +113,8 @@ impl TunnelManager {
     }
 
     /// One pass of the background prober: dial every allowlisted port and
-    /// report the ports whose verdict changed since the last pass.
+    /// report the ports whose verdict (listening + owning process) changed
+    /// since the last pass.
     async fn probe_tick(self: &Arc<Self>) {
         let ports: Vec<u16> = self.allowed.lock().await.iter().copied().collect();
         // Drop verdicts for ports no longer forwarded.
@@ -126,6 +129,11 @@ impl TunnelManager {
                     Ok(Err(e)) => (false, Some(e.to_string())),
                     Err(_) => (false, Some("probe dial timed out".to_string())),
                 };
+            let process = if listening {
+                process_on_port(port).await
+            } else {
+                None
+            };
             // Re-check the allowlist after the dial: a `ForwardClose` that
             // raced this tick must not resurrect the port with a stale
             // status (codex review on #1257).
@@ -133,19 +141,21 @@ impl TunnelManager {
                 self.last_health.lock().await.remove(&port);
                 continue;
             }
+            let verdict = (listening, process.clone());
             let changed = {
                 let mut health = self.last_health.lock().await;
-                health.insert(port, listening) != Some(listening)
+                health.insert(port, verdict.clone()) != Some(verdict)
             };
             if changed {
                 info!(
-                    "Forward port {} health changed: listening={}",
-                    port, listening
+                    "Forward port {} health changed: listening={} process={:?}",
+                    port, listening, process
                 );
                 self.send(ProxyToServer::ForwardStatus(ForwardStatusFields {
                     port,
                     listening,
                     error,
+                    process,
                 }))
                 .await;
             }
@@ -170,17 +180,26 @@ impl TunnelManager {
                             Ok(Err(e)) => (false, Some(e.to_string())),
                             Err(_) => (false, Some("probe dial timed out".to_string())),
                         };
+                    let process = if listening {
+                        process_on_port(port).await
+                    } else {
+                        None
+                    };
                     // A `ForwardClose` may have raced the dial — don't emit a
                     // stale status for a port that's no longer forwarded.
                     if !mgr.allowed.lock().await.contains(&port) {
                         return;
                     }
                     // Seed the background prober so it only reports changes.
-                    mgr.last_health.lock().await.insert(port, listening);
+                    mgr.last_health
+                        .lock()
+                        .await
+                        .insert(port, (listening, process.clone()));
                     mgr.send(ProxyToServer::ForwardStatus(ForwardStatusFields {
                         port,
                         listening,
                         error,
+                        process,
                     }))
                     .await;
                 });
@@ -365,6 +384,23 @@ async fn dial_loopback(port: u16) -> std::io::Result<TcpStream> {
     TcpStream::connect(("127.0.0.1", port)).await
 }
 
+/// Name of the process listening on `port`, best effort. `listeners` scans
+/// the OS socket tables (`/proc` on Linux, libproc on macOS) — a same-user
+/// lookup that can take a few ms on a busy box, hence `spawn_blocking`.
+/// `None` when the owner can't be resolved (other-user process, races, or
+/// unsupported platform); the caller treats that as "listening, name
+/// unknown".
+async fn process_on_port(port: u16) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        listeners::get_process_by_port(port, listeners::Protocol::TCP)
+            .ok()
+            .map(|p| p.name)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Credit gate: `take` blocks while the window is empty, then consumes up to
 /// `max` bytes of credit; `grant` refills (peer `TunnelWindow` or refund of
 /// reserved-but-unread bytes).
@@ -485,6 +521,19 @@ async fn run_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The port→process resolver finds our own test binary when we bind a
+    /// listener (same-user lookup, the case that matters in production).
+    #[tokio::test]
+    async fn process_on_port_resolves_own_listener() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let name = process_on_port(port).await;
+        assert!(
+            name.as_deref().is_some_and(|n| !n.is_empty()),
+            "expected to resolve our own listener, got {name:?}"
+        );
+    }
 
     /// A sender must block at zero credit and resume exactly when granted.
     #[tokio::test]
