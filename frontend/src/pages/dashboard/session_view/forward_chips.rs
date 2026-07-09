@@ -11,6 +11,7 @@ use std::rc::Rc;
 use gloo_net::http::Request;
 use shared::api::{ForwardInfo, SessionForwardsResponse};
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::events::{AnimationEvent, PointerEvent};
 use yew::prelude::*;
@@ -181,13 +182,21 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                 preview_closing.set(true);
             } else {
                 // Anchor the genie animation at the chip that launched it.
-                let rect = e
-                    .target_unchecked_into::<web_sys::Element>()
-                    .get_bounding_client_rect();
-                anchor.set((
-                    rect.left() + rect.width() / 2.0,
-                    rect.top() + rect.height() / 2.0,
-                ));
+                // `current_target` (the element this handler is bound to),
+                // NOT `target`: a click can land on a text node or future
+                // child markup inside the anchor, whose rect (or unchecked
+                // Element cast) would be wrong. Missing cast keeps the
+                // previous/default anchor.
+                if let Some(el) = e
+                    .current_target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                {
+                    let rect = el.get_bounding_client_rect();
+                    anchor.set((
+                        rect.left() + rect.width() / 2.0,
+                        rect.top() + rect.height() / 2.0,
+                    ));
+                }
                 preview_open.set(true);
                 preview_closing.set(false);
                 preview_collapsed.set(false);
