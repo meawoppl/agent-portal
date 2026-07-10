@@ -315,6 +315,26 @@ fn handle_proxy_message(
                 );
                 return ControlFlow::Continue(());
             }
+            // Record terminal stages for the idempotency gate (#1236): a
+            // client resending this id after a reconnect gets the terminal
+            // stage re-emitted instead of a duplicate delivery.
+            match stage {
+                shared::InputDeliveryStage::AgentAccepted => {
+                    session_manager.record_input_terminal(
+                        current_session_id,
+                        client_msg_id,
+                        super::session_manager::InputDeliveryState::Accepted,
+                    );
+                }
+                shared::InputDeliveryStage::Failed => {
+                    session_manager.record_input_terminal(
+                        current_session_id,
+                        client_msg_id,
+                        super::session_manager::InputDeliveryState::Failed,
+                    );
+                }
+                _ => {}
+            }
             // Relay the proxy's per-stage delivery signal to the session's web
             // clients (#939); each frontend advances the matching optimistic
             // row by client_msg_id. Failure detail isn't carried on this hop.

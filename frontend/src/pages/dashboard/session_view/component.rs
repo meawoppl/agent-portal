@@ -808,14 +808,16 @@ impl SessionView {
         }
     }
 
-    /// Resend every outbox frame not yet handed to the transport. Called on
-    /// reconnect. Dup-free: already-transmitted frames are skipped, so a frame
-    /// the backend already received is never sent twice.
+    /// Resend every unresolved outbox frame on reconnect — including ones
+    /// already handed to the old (now dead) transport, closing the
+    /// in-flight-loss window. The backend dedupes by `client_msg_id` and
+    /// re-acks anything it already handled (#1236), so this is at-least-once
+    /// with idempotent delivery, never duplicate delivery.
     fn flush_outbox(&mut self) {
         let Some(sender) = self.ws_sender.clone() else {
             return;
         };
-        for (client_msg_id, frame) in self.outbox.untransmitted() {
+        for (client_msg_id, frame) in self.outbox.unresolved() {
             if send_message(&sender, frame) {
                 self.outbox.mark_transmitted(client_msg_id);
             }

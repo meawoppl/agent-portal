@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 mod client_fanout;
 mod correlation;
+mod input_dedup;
 mod input_queue;
 mod launcher_registry;
 mod pending_queue;
@@ -32,6 +33,7 @@ mod proxy_lifecycle;
 mod session_tracking;
 mod tunnel_client;
 
+pub(crate) use input_dedup::{DedupVerdict, InputDeliveryState};
 pub use launcher_registry::LauncherConnection;
 use pending_queue::PendingMessage;
 use tunnel_client::TunnelStreamMap;
@@ -93,6 +95,9 @@ pub struct SessionManager {
     /// session's `output_tokens` at result time so session totals (and the admin
     /// spend dashboard) don't under-count sub-agent usage.
     subagent_tokens: Arc<DashMap<Uuid, i64>>,
+    /// Recent web-client input ids per session and their delivery state —
+    /// the server half of input idempotency (#1236, see `input_dedup.rs`).
+    input_dedup: Arc<DashMap<Uuid, input_dedup::InputDedupQueue>>,
     /// Monotonic counter for connection generations (prevents stale cleanup)
     gen_counter: Arc<AtomicU64>,
     /// Current connection generation per session
@@ -119,6 +124,7 @@ impl Default for SessionManager {
             pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
             subagent_tokens: Arc::new(DashMap::new()),
+            input_dedup: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
             connection_gen: Arc::new(DashMap::new()),
         }
