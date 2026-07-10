@@ -39,6 +39,7 @@ impl SessionManager {
                 sender,
                 gen,
                 cancel,
+                last_seen: std::sync::atomic::AtomicU64::new(super::liveness::epoch_secs()),
             },
         );
         gen

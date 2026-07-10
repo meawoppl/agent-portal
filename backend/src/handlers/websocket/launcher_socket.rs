@@ -182,6 +182,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             version: version.unwrap_or_default(),
             cancel: cancel.clone(),
             gen: 0, // stamped by try_register_launcher
+            last_seen: std::sync::atomic::AtomicU64::new(0), // stamped by try_register_launcher
         },
     );
 
@@ -247,6 +248,9 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             result = ws_receiver.recv() => {
                 match result {
                     Some(Ok(msg)) => {
+                        // Liveness stamp: any decodable inbound frame proves
+                        // the transport is alive (see liveness.rs).
+                        app_state.session_manager.touch_launcher(&launcher_id);
                         handle_launcher_message(
                             msg,
                             launcher_id,

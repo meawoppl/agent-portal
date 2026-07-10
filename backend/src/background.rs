@@ -97,6 +97,28 @@ pub fn spawn_stale_session_cleanup(pool: DbPool, manager: SessionManager) {
     });
 }
 
+/// Evict proxy/launcher connections that have gone silent past their
+/// liveness deadline (see `session_manager/liveness.rs`, #1256). The
+/// eviction cancels each stale connection's socket task, so the client's
+/// reconnect logic recovers automatically.
+pub async fn run_liveness_sweep(app_state: Arc<AppState>) {
+    use crate::handlers::websocket::{
+        LAUNCHER_LIVENESS_DEADLINE_SECS, PROXY_LIVENESS_DEADLINE_SECS,
+    };
+
+    let (proxies, launchers) = app_state.session_manager.sweep_stale_connections(
+        PROXY_LIVENESS_DEADLINE_SECS,
+        LAUNCHER_LIVENESS_DEADLINE_SECS,
+    );
+    if proxies > 0 || launchers > 0 {
+        tracing::warn!(
+            "Liveness sweep evicted {} proxy and {} launcher connection(s)",
+            proxies,
+            launchers
+        );
+    }
+}
+
 /// Query user spend from DB and broadcast to all connected web clients
 pub async fn broadcast_user_spend_updates(app_state: Arc<AppState>) {
     use diesel::prelude::*;
