@@ -24,6 +24,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust

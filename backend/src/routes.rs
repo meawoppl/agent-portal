@@ -111,7 +111,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(|| async {
                 Json(HealthResponse {
                     status: "OK".to_string(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    version: shared::VERSION.to_string(),
                 })
             }),
         )

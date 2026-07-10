@@ -25,7 +25,7 @@ const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
 /// Running portal version, captured at compile time from the workspace
 /// `Cargo.toml`. Surfaced in the system-reminder envelope so the agent
 /// knows which portal features and fixes are in scope.
-const PORTAL_VERSION: &str = env!("CARGO_PKG_VERSION");
+const PORTAL_VERSION: &str = shared::VERSION;
 
 /// Resolve the reminder body. Honors `PORTAL_REMINDER_FILE` at call time so
 /// operators can hot-edit the file and have the next compaction pick it up

@@ -92,7 +92,7 @@ pub async fn run_launcher_loop(
                     launcher_name: launcher_name.to_string(),
                     auth_token: auth_token.clone(),
                     hostname: claude_session_lib::hostname_or_unknown(),
-                    version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                    version: Some(shared::VERSION.to_string()),
                     working_directory: std::env::current_dir()
                         .ok()
                         .map(|p| p.to_string_lossy().to_string()),
