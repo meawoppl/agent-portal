@@ -41,6 +41,17 @@ pub type SessionId = String;
 pub type ProxySender = mpsc::UnboundedSender<ServerToProxy>;
 pub type WebClientSender = mpsc::UnboundedSender<ServerToClient>;
 
+/// A live proxy connection. `gen` identifies THIS socket (as opposed to a
+/// reconnect for the same session) — every registry mutation is guarded on
+/// it. `cancel` force-closes the socket task, so a connection whose channel
+/// is dead can be torn down server-side instead of lingering half-open
+/// (#1256: inbound-alive/outbound-dead sockets wedged delivery for 9h).
+pub struct ProxyConnection {
+    pub sender: ProxySender,
+    pub gen: u64,
+    pub cancel: tokio_util::sync::CancellationToken,
+}
+
 /// Latest probe verdict for a forwarded port, as reported by the proxy's
 /// background health check (docs/PORT_FORWARDING.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +64,7 @@ pub struct ForwardHealth {
 
 #[derive(Clone)]
 pub struct SessionManager {
-    pub sessions: Arc<DashMap<SessionId, ProxySender>>,
+    pub sessions: Arc<DashMap<SessionId, ProxyConnection>>,
     pub web_clients: Arc<DashMap<SessionId, Vec<WebClientSender>>>,
     pub user_clients: Arc<DashMap<Uuid, Vec<WebClientSender>>>,
     last_ack_seq: Arc<DashMap<Uuid, u64>>,
@@ -93,10 +104,10 @@ pub struct SessionManager {
     /// session's `output_tokens` at result time so session totals (and the admin
     /// spend dashboard) don't under-count sub-agent usage.
     subagent_tokens: Arc<DashMap<Uuid, i64>>,
-    /// Monotonic counter for connection generations (prevents stale cleanup)
+    /// Monotonic counter for connection generations (prevents stale cleanup).
+    /// Shared by proxy and launcher registrations — uniqueness is all that
+    /// matters, not contiguity per registry.
     gen_counter: Arc<AtomicU64>,
-    /// Current connection generation per session
-    connection_gen: Arc<DashMap<SessionId, u64>>,
 }
 
 impl Default for SessionManager {
@@ -120,7 +131,6 @@ impl Default for SessionManager {
             last_input_sender: Arc::new(DashMap::new()),
             subagent_tokens: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
-            connection_gen: Arc::new(DashMap::new()),
         }
     }
 }

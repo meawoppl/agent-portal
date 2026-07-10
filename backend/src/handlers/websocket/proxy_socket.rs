@@ -27,6 +27,12 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     let mut db_session_id: Option<Uuid> = None;
     let mut connection_gen: Option<u64> = None;
 
+    // Server-side kill switch for this connection. Registered with the
+    // SessionManager; fired when the manager evicts this connection (e.g.
+    // its channel died while the socket lingered half-open, #1256) so the
+    // recv loop below exits and normal cleanup runs.
+    let cancel = tokio_util::sync::CancellationToken::new();
+
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if ws_sender.send(msg).await.is_err() {
@@ -35,7 +41,20 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
         }
     });
 
-    while let Some(result) = ws_receiver.recv().await {
+    loop {
+        let result = tokio::select! {
+            result = ws_receiver.recv() => match result {
+                Some(result) => result,
+                None => break,
+            },
+            _ = cancel.cancelled() => {
+                warn!(
+                    "Proxy connection for session {:?} force-closed by server (evicted)",
+                    session_key
+                );
+                break;
+            }
+        };
         match result {
             Ok(proxy_msg) => {
                 let flow = handle_proxy_message(
@@ -44,6 +63,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     &session_manager,
                     &db_pool,
                     &tx,
+                    &cancel,
                     &mut session_key,
                     &mut db_session_id,
                     &mut connection_gen,
@@ -133,6 +153,7 @@ fn handle_proxy_message(
     session_manager: &SessionManager,
     db_pool: &crate::db::DbPool,
     tx: &ProxySender,
+    cancel: &tokio_util::sync::CancellationToken,
     session_key: &mut Option<SessionId>,
     db_session_id: &mut Option<Uuid>,
     connection_gen: &mut Option<u64>,
@@ -192,7 +213,7 @@ fn handle_proxy_message(
                 // below) flow through `tx` regardless of session-manager
                 // registration, so the proxy still gets a response on
                 // failure even though we never registered the socket.
-                let gen = session_manager.register_session(key.clone(), tx.clone());
+                let gen = session_manager.register_session(key.clone(), tx.clone(), cancel.clone());
                 *session_key = Some(key);
                 *connection_gen = Some(gen);
                 *db_session_id = result.session_id;

@@ -24,11 +24,18 @@ pub(super) struct PendingMessage {
 impl SessionManager {
     pub fn send_to_session(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {
         let msg = match self.sessions.get(session_key) {
-            Some(sender) => match sender.send(msg) {
+            Some(conn) => match conn.sender.send(msg) {
                 Ok(()) => return true,
                 // A closed channel hands the message back in the error, so
                 // there's no need to clone up front just in case.
-                Err(mpsc::error::SendError(msg)) => msg,
+                Err(mpsc::error::SendError(msg)) => {
+                    let gen = conn.gen;
+                    let cancel = conn.cancel.clone();
+                    // Release the shard guard before mutating the map.
+                    drop(conn);
+                    self.evict_dead_connection(session_key, gen, &cancel);
+                    msg
+                }
             },
             None => msg,
         };
@@ -37,9 +44,19 @@ impl SessionManager {
     }
 
     pub fn send_to_connected_session(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {
-        self.sessions
-            .get(session_key)
-            .is_some_and(|sender| sender.send(msg).is_ok())
+        match self.sessions.get(session_key) {
+            Some(conn) => match conn.sender.send(msg) {
+                Ok(()) => true,
+                Err(_) => {
+                    let gen = conn.gen;
+                    let cancel = conn.cancel.clone();
+                    drop(conn);
+                    self.evict_dead_connection(session_key, gen, &cancel);
+                    false
+                }
+            },
+            None => false,
+        }
     }
 
     /// Drain this session's pending queue into `sender`, dropping entries
@@ -109,7 +126,12 @@ impl SessionManager {
 mod tests {
     use super::super::test_support::make_output;
     use super::*;
+    use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
+
+    fn register(mgr: &SessionManager, key: &str, sender: super::super::ProxySender) -> u64 {
+        mgr.register_session(key.into(), sender, CancellationToken::new())
+    }
 
     #[test]
     fn send_to_unregistered_queues_pending() {
@@ -119,7 +141,7 @@ mod tests {
         assert!(mgr.send_to_session(&"s1".into(), make_output(2)));
 
         let (tx, mut rx) = mpsc::unbounded_channel();
-        mgr.register_session("s1".into(), tx);
+        register(&mgr, "s1", tx);
 
         let msg1 = rx.try_recv().unwrap();
         let msg2 = rx.try_recv().unwrap();
@@ -138,7 +160,7 @@ mod tests {
         }
 
         let (tx, mut rx) = mpsc::unbounded_channel();
-        mgr.register_session("s1".into(), tx);
+        register(&mgr, "s1", tx);
 
         let mut received = vec![];
         while let Ok(msg) = rx.try_recv() {
@@ -158,7 +180,8 @@ mod tests {
     fn send_to_session_queues_message_returned_by_closed_channel() {
         let mgr = SessionManager::new();
         let (tx, rx) = mpsc::unbounded_channel();
-        mgr.register_session("s1".into(), tx);
+        let cancel = CancellationToken::new();
+        mgr.register_session("s1".into(), tx, cancel.clone());
         drop(rx);
 
         let queued = mgr.send_to_session(
@@ -176,6 +199,9 @@ mod tests {
             pending.front().unwrap().msg,
             ServerToProxy::OutputAck { ack_seq: 7, .. }
         ));
+        // #1256: the dead entry must also be evicted and its socket closed.
+        assert!(!mgr.sessions.contains_key("s1"));
+        assert!(cancel.is_cancelled());
     }
 
     #[test]
@@ -183,14 +209,14 @@ mod tests {
         let mgr = SessionManager::new();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        let gen = mgr.register_session("s1".into(), tx);
+        let gen = register(&mgr, "s1", tx);
         mgr.unregister_session(&"s1".into(), Some(gen));
 
         mgr.send_to_session(&"s1".into(), make_output(1));
         mgr.send_to_session(&"s1".into(), make_output(2));
 
         let (tx2, mut rx2) = mpsc::unbounded_channel();
-        mgr.register_session("s1".into(), tx2);
+        register(&mgr, "s1", tx2);
 
         let msg1 = rx2.try_recv().unwrap();
         let msg2 = rx2.try_recv().unwrap();

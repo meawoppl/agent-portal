@@ -381,6 +381,8 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            gen: 0,
         }
     }
 
