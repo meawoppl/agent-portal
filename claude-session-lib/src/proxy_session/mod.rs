@@ -686,8 +686,9 @@ pub async fn register_session(
                     session_id: _,
                     error,
                     max_image_mb,
+                    retryable,
                 }) => {
-                    return Some((success, error, max_image_mb));
+                    return Some((success, error, max_image_mb, retryable));
                 }
                 Ok(_) => continue,
                 Err(_) => return None,
@@ -698,14 +699,23 @@ pub async fn register_session(
     .await;
 
     match ack_timeout {
-        Ok(Some((true, _, max_image_mb))) => {
+        Ok(Some((true, _, max_image_mb, _))) => {
             info!("Session registered (max_image_mb: {})", max_image_mb);
             Ok(max_image_mb)
         }
-        Ok(Some((false, error, _))) => {
+        Ok(Some((false, error, _, retryable))) => {
             let err_msg = error.as_deref().unwrap_or("Unknown error");
-            error!("Registration rejected by server: {}", err_msg);
-            Err(RegisterError::Rejected)
+            if retryable {
+                // Transient infrastructure failure (DB blip mid-deploy) —
+                // the backend explicitly asked us to retry. Keep the agent
+                // process alive and reconnect with backoff instead of
+                // exiting for relaunch. #1264.
+                warn!("Registration deferred by server (retryable): {}", err_msg);
+                Err(RegisterError::Transient(Duration::ZERO))
+            } else {
+                error!("Registration rejected by server: {}", err_msg);
+                Err(RegisterError::Rejected)
+            }
         }
         Ok(None) => {
             // The socket closed before any RegisterAck arrived — a transient
@@ -714,11 +724,13 @@ pub async fn register_session(
             Err(RegisterError::Transient(Duration::ZERO))
         }
         Err(_) => {
-            // Timeout - assume success for backwards compatibility with older backends
-            info!(
-                "No RegisterAck received (timeout), assuming success for backwards compatibility"
-            );
-            Ok(10)
+            // No ack within the window. Every deployed backend acks
+            // registration, so silence means the connection is wedged (or
+            // the backend is mid-restart) — not an old server. Reconnect
+            // with backoff rather than assuming success and running with a
+            // half-open socket. #1264.
+            warn!("No RegisterAck received within timeout; reconnecting");
+            Err(RegisterError::Transient(Duration::ZERO))
         }
     }
 }

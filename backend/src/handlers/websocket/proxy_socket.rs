@@ -203,6 +203,7 @@ fn handle_proxy_message(
                 session_id: claude_session_id,
                 error: result.error,
                 max_image_mb: app_state.max_image_mb,
+                retryable: result.retryable,
             });
 
             info!(

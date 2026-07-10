@@ -12,11 +12,24 @@ use uuid::Uuid;
 /// UUIDs by guessing.
 const SESSION_NOT_FOUND_ERROR: &str = "Session not found or not authorized";
 
+/// Error string for transient infrastructure failures during registration.
+/// Paired with `retryable: true` — clients reconnect with backoff instead of
+/// treating it as fatal. Deliberately does not mention authentication.
+const TRANSIENT_REGISTRATION_ERROR: &str = "Server temporarily unavailable - retrying";
+
 /// Result of a session registration attempt
 pub struct RegistrationResult {
     pub success: bool,
     pub session_id: Option<Uuid>,
     pub error: Option<String>,
+    /// Whether a failed registration is worth retrying with backoff.
+    ///
+    /// `true` for transient infrastructure failures (DB pool exhausted,
+    /// connection reset mid-deploy); `false` for definitive rejections
+    /// (bad token, unauthorized session). Clients treat non-retryable
+    /// failures as fatal — proxies stop reconnecting, launchers park — so
+    /// only provably-permanent conditions may set this to `false`. #1264.
+    pub retryable: bool,
 }
 
 /// Parameters for registering a session
@@ -57,7 +70,8 @@ pub fn register_or_update_session(
             return RegistrationResult {
                 success: false,
                 session_id: None,
-                error: Some("Database connection failed".to_string()),
+                error: Some(TRANSIENT_REGISTRATION_ERROR.to_string()),
+                retryable: true,
             };
         }
     };
@@ -65,17 +79,32 @@ pub fn register_or_update_session(
     // Resolve auth_token → user_id up front. Required for *both* new and
     // existing sessions so an attacker can't reactivate someone else's
     // session by knowing its UUID.
-    let Some(requesting_user_id) = get_user_id_from_token(app_state, &mut conn, params.auth_token)
-    else {
-        warn!(
-            "Session registration without valid auth_token: session_id={}",
-            params.claude_session_id
-        );
-        return RegistrationResult {
-            success: false,
-            session_id: None,
-            error: Some("Authentication failed - please re-authenticate".to_string()),
-        };
+    let requesting_user_id = match get_user_id_from_token(app_state, &mut conn, params.auth_token) {
+        TokenAuth::User(id) => id,
+        TokenAuth::Unavailable => {
+            warn!(
+                "Deferring session registration, token verification unavailable: session_id={}",
+                params.claude_session_id
+            );
+            return RegistrationResult {
+                success: false,
+                session_id: None,
+                error: Some(TRANSIENT_REGISTRATION_ERROR.to_string()),
+                retryable: true,
+            };
+        }
+        TokenAuth::Rejected => {
+            warn!(
+                "Session registration without valid auth_token: session_id={}",
+                params.claude_session_id
+            );
+            return RegistrationResult {
+                success: false,
+                session_id: None,
+                error: Some("Authentication failed - please re-authenticate".to_string()),
+                retryable: false,
+            };
+        }
     };
 
     use crate::schema::sessions;
@@ -128,6 +157,7 @@ pub fn register_or_update_session(
                 success: false,
                 session_id: None,
                 error: Some(SESSION_NOT_FOUND_ERROR.to_string()),
+                retryable: false,
             };
         }
 
@@ -167,6 +197,7 @@ pub fn register_or_update_session(
                     success: true,
                     session_id: Some(existing_session.id),
                     error: None,
+                    retryable: false,
                 }
             }
             Err(e) => {
@@ -175,6 +206,7 @@ pub fn register_or_update_session(
                     success: false,
                     session_id: None,
                     error: Some("Failed to reactivate session".to_string()),
+                    retryable: true,
                 }
             }
         }
@@ -286,6 +318,7 @@ fn create_new_session(
                 success: true,
                 session_id: Some(session.id),
                 error: None,
+                retryable: false,
             }
         }
         Err(e) => {
@@ -294,9 +327,22 @@ fn create_new_session(
                 success: false,
                 session_id: None,
                 error: Some("Failed to persist session".to_string()),
+                retryable: true,
             }
         }
     }
+}
+
+/// Outcome of resolving an auth token to a user during registration.
+///
+/// `Rejected` is definitive (bad/revoked/expired token — safe for clients to
+/// treat as fatal); `Unavailable` is a transient infrastructure failure that
+/// clients must retry with backoff. Collapsing the two is what turned deploy
+/// blips into parked launchers (#1264).
+enum TokenAuth {
+    User(Uuid),
+    Rejected,
+    Unavailable,
 }
 
 /// Get user_id from auth token using JWT verification, with dev-mode fallback.
@@ -304,12 +350,18 @@ fn get_user_id_from_token(
     app_state: &AppState,
     conn: &mut diesel::PgConnection,
     auth_token: Option<&str>,
-) -> Option<Uuid> {
+) -> TokenAuth {
     if let Some(token) = auth_token {
         match super::super::proxy_tokens::verify_and_get_user(app_state, conn, token) {
             Ok((user_id, email)) => {
                 info!("JWT token verified for user: {}", email);
-                return Some(user_id);
+                return TokenAuth::User(user_id);
+            }
+            Err(crate::errors::AppError::ServiceUnavailable(_)) => {
+                // The token was never evaluated — don't let a DB blip
+                // masquerade as an auth rejection (or fall through to a
+                // dev-mode lookup on the same struggling DB).
+                return TokenAuth::Unavailable;
             }
             Err(e) => {
                 warn!("JWT verification failed: {:?}, falling back to dev mode", e);
@@ -318,9 +370,12 @@ fn get_user_id_from_token(
     }
 
     if app_state.dev_mode {
-        crate::auth::dev_user(conn).map(|user| user.id).ok()
+        match crate::auth::dev_user(conn).map(|user| user.id) {
+            Ok(id) => TokenAuth::User(id),
+            Err(_) => TokenAuth::Rejected,
+        }
     } else {
-        None
+        TokenAuth::Rejected
     }
 }
 
@@ -335,6 +390,7 @@ mod tests {
             success: false,
             session_id: None,
             error: Some(SESSION_NOT_FOUND_ERROR.to_string()),
+            retryable: false,
         }
     }
 
@@ -352,6 +408,7 @@ mod tests {
             success: false,
             session_id: None,
             error: Some(SESSION_NOT_FOUND_ERROR.to_string()),
+            retryable: false,
         }
     }
 
@@ -389,10 +446,32 @@ mod tests {
             success: true,
             session_id: Some(session_id),
             error: None,
+            retryable: false,
         };
         assert!(r.success);
         assert_eq!(r.session_id, Some(session_id));
         assert!(r.error.is_none());
+    }
+
+    /// Retryability contract (#1264): definitive rejections (bad token,
+    /// unauthorized session) must be non-retryable so clients can safely
+    /// park/stop; transient failures must be retryable AND must not read as
+    /// auth-shaped — a proxy string-matching "auth" in an error (old
+    /// launchers do, as a pre-reject_reason fallback) would otherwise park
+    /// on a DB blip.
+    #[test]
+    fn transient_error_is_retryable_and_not_auth_shaped() {
+        let unauthorized = unauthorized_reattach_result();
+        assert!(!unauthorized.retryable);
+
+        let s = TRANSIENT_REGISTRATION_ERROR.to_lowercase();
+        for forbidden in ["auth", "token", "credential", "login", "denied"] {
+            assert!(
+                !s.contains(forbidden),
+                "TRANSIENT_REGISTRATION_ERROR (`{TRANSIENT_REGISTRATION_ERROR}`) \
+                 reads as auth-shaped via substring `{forbidden}`"
+            );
+        }
     }
 
     /// The unauthorized-reattach error must be wire-identical to the

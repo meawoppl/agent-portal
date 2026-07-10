@@ -164,6 +164,12 @@ pub enum ServerToProxy {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
         max_image_mb: u32,
+        /// On failure: whether the proxy should reconnect with backoff
+        /// (transient infrastructure error) instead of treating the
+        /// rejection as fatal. Defaults to `false` so acks from older
+        /// backends keep today's fatal semantics. #1264.
+        #[serde(default)]
+        retryable: bool,
     },
 
     /// Keepalive heartbeat
