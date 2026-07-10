@@ -64,8 +64,12 @@ impl SessionManager {
             reason: reason.clone(),
             reconnect_delay_ms,
         };
-        for entry in self.sessions.iter() {
-            let _ = entry.value().sender.send(proxy_msg.clone());
+        // Collect keys first, then send through the evicting path: a direct
+        // send off the iter guard would bypass dead-connection eviction, and
+        // eviction must not run under the shard lock the iterator holds.
+        let session_keys: Vec<_> = self.sessions.iter().map(|e| e.key().clone()).collect();
+        for key in session_keys {
+            self.send_to_connected_session(&key, proxy_msg.clone());
         }
 
         let client_msg = ServerToClient::ServerShutdown {
@@ -83,8 +87,9 @@ impl SessionManager {
             reason,
             reconnect_delay_ms,
         };
-        for entry in self.launchers.iter() {
-            let _ = entry.value().sender.send(launcher_msg.clone());
+        let launcher_ids: Vec<_> = self.launchers.iter().map(|e| *e.key()).collect();
+        for id in launcher_ids {
+            self.send_to_launcher(&id, launcher_msg.clone());
         }
     }
 }

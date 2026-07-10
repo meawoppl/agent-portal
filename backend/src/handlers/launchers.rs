@@ -294,7 +294,7 @@ pub async fn update_launcher(
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let sender = {
+    {
         let launcher = app_state
             .session_manager
             .launchers
@@ -303,10 +303,14 @@ pub async fn update_launcher(
         if launcher.user_id != user_id {
             return Err(AppError::Forbidden);
         }
-        launcher.sender.clone()
-    };
+    }
 
-    if sender.send(ServerToLauncher::UpdateAndRestart).is_err() {
+    // Route through the evicting sender (not a cloned raw sender) so a dead
+    // channel tears the stale connection down instead of lingering.
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, ServerToLauncher::UpdateAndRestart)
+    {
         warn!("Launcher {} disconnected while sending update", launcher_id);
         return Err(AppError::Internal("Launcher disconnected".to_string()));
     }

@@ -174,10 +174,11 @@ impl SessionManager {
             session_id,
             working_directory: working_directory.clone(),
         };
-        for entry in self.launchers.iter() {
-            if entry.value().running_sessions.contains(&session_id) {
-                return entry.value().sender.send(msg()).is_ok();
-            }
+        // Resolve the target id first, then send through the evicting path —
+        // a direct send off the iter guard would bypass dead-connection
+        // eviction (and eviction must not run under the same shard lock).
+        if let Some(id) = self.launcher_running_session(session_id) {
+            return self.send_to_launcher(&id, msg());
         }
         if let Some(launcher_id) = launcher_id {
             return self.send_to_launcher(&launcher_id, msg());
@@ -185,19 +186,21 @@ impl SessionManager {
         false
     }
 
+    /// The launcher whose last heartbeat reported this session as running.
+    fn launcher_running_session(&self, session_id: Uuid) -> Option<Uuid> {
+        self.launchers
+            .iter()
+            .find(|e| e.value().running_sessions.contains(&session_id))
+            .map(|e| *e.key())
+    }
+
     /// Stop a running process on its launcher without removing the launcher's
     /// persisted expected-session metadata.
     pub fn pause_session_on_launcher(&self, session_id: Uuid) -> bool {
-        for entry in self.launchers.iter() {
-            if entry.value().running_sessions.contains(&session_id) {
-                return entry
-                    .value()
-                    .sender
-                    .send(ServerToLauncher::PauseSession { session_id })
-                    .is_ok();
-            }
+        match self.launcher_running_session(session_id) {
+            Some(id) => self.send_to_launcher(&id, ServerToLauncher::PauseSession { session_id }),
+            None => false,
         }
-        false
     }
 }
 
