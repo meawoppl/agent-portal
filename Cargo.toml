@@ -14,7 +14,12 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.13.21"
+# Only `major.minor` here is meaningful — bump it by hand for a feature/breaking
+# release. The patch is a placeholder: the reported version is
+# `major.minor.{git commit count}`, derived at build time by `shared/build.rs`
+# so no PR ever edits a version line (issue #1096). Runtime version =
+# `shared::VERSION`.
+version = "2.13.0"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 

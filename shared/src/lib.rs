@@ -5,6 +5,24 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// The portal version, `major.minor.{git commit count}` — derived at build
+/// time by `build.rs` (issue #1096) so no PR ever edits a version line. Every
+/// crate reports this single value (`server_version`, launcher `version`, the
+/// frontend footer, the `agent-portal` client version). The Cargo.toml
+/// `[workspace.package] version` supplies only `major.minor`; its patch is a
+/// placeholder.
+pub const VERSION: &str = env!("PORTAL_VERSION");
+
+/// Split [`VERSION`] into `(major, minor, patch)` numeric components.
+/// `None` on the (impossible-by-construction) malformed string.
+pub fn version_parts() -> Option<(u64, u64, u64)> {
+    let mut it = VERSION.split('.');
+    let major = it.next()?.parse().ok()?;
+    let minor = it.next()?.parse().ok()?;
+    let patch = it.next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
 // Proxy token types in separate module
 pub mod proxy_tokens;
 pub use proxy_tokens::*;
@@ -586,6 +604,18 @@ pub struct AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_is_well_formed() {
+        // Derived by build.rs; must always be `major.minor.patch`, all numeric
+        // (issue #1096). A parse failure means the derivation broke.
+        let (major, minor, _patch) = version_parts().expect("VERSION is major.minor.patch");
+        // major.minor track the workspace Cargo.toml; patch is the commit
+        // count (fallback to the Cargo patch when git is absent).
+        assert!(major >= 2, "unexpected major in {VERSION}");
+        let _ = minor;
+        assert_eq!(VERSION.split('.').count(), 3, "VERSION = {VERSION}");
+    }
 
     #[test]
     fn session_status_serialization() {

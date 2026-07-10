@@ -30,7 +30,7 @@ fn write_section(buf: &mut String, title: &str, content: &str) {
 }
 
 fn build_info() -> String {
-    let version = env!("CARGO_PKG_VERSION");
+    let version = shared::VERSION;
     let binary = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "<unknown>".into());

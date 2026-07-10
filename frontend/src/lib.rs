@@ -4,8 +4,9 @@ mod hooks;
 mod pages;
 pub mod utils;
 
-/// Application version from Cargo.toml (set at compile time)
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Application version — derived at build time from the git commit count
+/// (see `shared::VERSION` / `shared/build.rs`, issue #1096).
+pub const VERSION: &str = shared::VERSION;
 
 use pages::{
     access_denied::AccessDeniedPage, admin::AdminPage, agent_messaging::AgentMessagingPage,

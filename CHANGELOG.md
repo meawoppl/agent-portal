@@ -1,8 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+- **Versioning: patch is now the git commit count (issue #1096).** The reported version is `major.minor.{git rev-list --count HEAD}`, derived at build time by `shared/build.rs` and read everywhere as `shared::VERSION`. PRs no longer bump a version line — so parallel PRs can't collide on a hand-picked number, and the patch advances by exactly one per squash-merge. `major.minor` in `Cargo.toml` is the only human knob (its patch is a placeholder). This changelog is maintained by a periodic sweep rather than in lockstep per-PR; add notable changes under this `[Unreleased]` heading.
+
 ## 2.13.21
 
-- **Health endpoint reports server version (#1048).** `/api/health` now returns a typed JSON response with the existing `status` plus the backend package `version`, so clients and operators can confirm which server build answered a health check.
+- **Health endpoint reports server version (#1048).** `/api/health` now returns a typed JSON response with the existing `status` plus the backend package `version` (now `shared::VERSION`), so clients and operators can confirm which server build answered a health check.
 
 ## 2.13.19
 

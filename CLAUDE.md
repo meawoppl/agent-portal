@@ -628,11 +628,23 @@ If code is unused, delete it. It can be recovered from git history if needed lat
 
 ### Versioning
 
-The workspace version lives in `Cargo.toml` under `[workspace.package]`. When shipping changes:
-- **Patch bump** (e.g. 1.1.2 → 1.1.3): bug fixes, dependency updates, minor tweaks
-- **Minor bump** (e.g. 1.1.3 → 1.2.0): new features, new crates, protocol changes
+The reported version is `major.minor.{git commit count}` — the **patch is
+derived at build time** from `git rev-list --count HEAD` by `shared/build.rs`,
+and read everywhere as `shared::VERSION` (issue #1096). This means:
 
-**Every PR must include at least a patch version bump.** Bump the version in the same commit/PR as the code change — do not ship a PR without incrementing the version.
+- **PRs do NOT touch the version.** There is no version line to bump and no
+  version collisions between parallel PRs. The patch advances by exactly one
+  per squash-merge, automatically.
+- **`major.minor` is the only human knob**, in `Cargo.toml` under
+  `[workspace.package] version` (the patch there is a placeholder). Bump it by
+  hand only for a **feature** (`2.13 → 2.14`) or **breaking** (`2 → 3`) release.
+- **Do not reintroduce `env!("CARGO_PKG_VERSION")` for display** — it's the
+  static placeholder, not the real version. Use `shared::VERSION`.
+
+The CHANGELOG is no longer kept in lockstep per-PR (you can't know the commit
+count in advance); it's maintained by a periodic sweep. Add notable
+user-facing changes under the `## [Unreleased]` heading if you like, but it's
+not a merge gate.
 
 ### No `serde_json::json!`
 
