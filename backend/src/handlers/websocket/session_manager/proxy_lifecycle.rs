@@ -139,7 +139,6 @@ impl SessionManager {
 mod tests {
     use super::super::test_support::make_heartbeat;
     use super::*;
-    use tokio::sync::mpsc;
 
     fn register(mgr: &SessionManager, key: &str, sender: ProxySender) -> u64 {
         mgr.register_session(key.into(), sender, CancellationToken::new())
@@ -148,7 +147,7 @@ mod tests {
     #[test]
     fn session_register_and_send() {
         let mgr = SessionManager::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::handlers::websocket::conn_channel(64);
 
         register(&mgr, "s1", tx);
 
@@ -161,7 +160,7 @@ mod tests {
     #[test]
     fn unregister_removes_session() {
         let mgr = SessionManager::new();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = crate::handlers::websocket::conn_channel(64);
 
         let gen = register(&mgr, "s1", tx);
         assert!(mgr.sessions.contains_key("s1"));
@@ -173,7 +172,7 @@ mod tests {
     #[test]
     fn unregister_force_removes_without_gen() {
         let mgr = SessionManager::new();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = crate::handlers::websocket::conn_channel(64);
 
         register(&mgr, "s1", tx);
         assert!(mgr.sessions.contains_key("s1"));
@@ -185,8 +184,8 @@ mod tests {
     #[test]
     fn stale_unregister_is_noop() {
         let mgr = SessionManager::new();
-        let (tx1, _rx1) = mpsc::unbounded_channel();
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx1, _rx1) = crate::handlers::websocket::conn_channel(64);
+        let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
 
         // Old connection registers
         let old_gen = register(&mgr, "s1", tx1);
@@ -206,12 +205,12 @@ mod tests {
     #[test]
     fn is_current_connection_checks_gen() {
         let mgr = SessionManager::new();
-        let (tx1, _rx1) = mpsc::unbounded_channel();
+        let (tx1, _rx1) = crate::handlers::websocket::conn_channel(64);
 
         let gen1 = register(&mgr, "s1", tx1);
         assert!(mgr.is_current_connection(&"s1".into(), gen1));
 
-        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let (tx2, _rx2) = crate::handlers::websocket::conn_channel(64);
         let gen2 = register(&mgr, "s1", tx2);
         assert!(!mgr.is_current_connection(&"s1".into(), gen1));
         assert!(mgr.is_current_connection(&"s1".into(), gen2));
@@ -223,7 +222,7 @@ mod tests {
     #[test]
     fn send_failure_evicts_and_cancels_dead_connection() {
         let mgr = SessionManager::new();
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = crate::handlers::websocket::conn_channel(64);
         let cancel = CancellationToken::new();
         mgr.register_session("s1".into(), tx, cancel.clone());
 
@@ -238,7 +237,7 @@ mod tests {
         assert!(cancel.is_cancelled());
 
         // A reconnect replays the queued message.
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
         register(&mgr, "s1", tx2);
         assert!(matches!(rx2.try_recv().unwrap(), ServerToProxy::Heartbeat));
     }
@@ -249,11 +248,11 @@ mod tests {
     #[test]
     fn evict_dead_connection_spares_successor() {
         let mgr = SessionManager::new();
-        let (tx1, rx1) = mpsc::unbounded_channel();
+        let (tx1, rx1) = crate::handlers::websocket::conn_channel(64);
         let cancel1 = CancellationToken::new();
         let gen1 = mgr.register_session("s1".into(), tx1, cancel1.clone());
 
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
         register(&mgr, "s1", tx2);
 
         drop(rx1);

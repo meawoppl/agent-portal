@@ -291,9 +291,9 @@ mod replay_tests {
     /// injection without standing up a full WS round-trip.
     fn capture_sender() -> (
         super::WebClientSender,
-        tokio::sync::mpsc::UnboundedReceiver<shared::ServerToClient>,
+        tokio::sync::mpsc::Receiver<shared::ServerToClient>,
     ) {
-        tokio::sync::mpsc::unbounded_channel::<shared::ServerToClient>()
+        crate::handlers::websocket::conn_channel::<shared::ServerToClient>(64)
     }
 
     /// The fix's whole point: `replay_history` with a `replay_after`

@@ -11,7 +11,6 @@ use shared::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -21,7 +20,8 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
     let initial_replay_limit = app_state.message_retention_count;
     let conn = ws_bridge::server::into_connection::<ClientEndpoint>(socket);
     let (mut ws_sender, mut ws_receiver) = conn.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerToClient>();
+    let (tx, mut rx) =
+        super::session_manager::conn_channel::<ServerToClient>(super::WEB_CLIENT_CHANNEL_CAPACITY);
 
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;

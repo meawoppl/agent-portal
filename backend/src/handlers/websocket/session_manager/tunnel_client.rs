@@ -346,6 +346,8 @@ mod tests {
         key: &str,
         gen: u64,
     ) -> (Uuid, mpsc::UnboundedReceiver<TunnelIn>) {
+        // Tunnel inboxes are NOT connection senders — they stay unbounded
+        // (flow control is the tunnel window, not the channel).
         let (tx, rx) = mpsc::unbounded_channel();
         let id = Uuid::new_v4();
         mgr.tunnel_streams.insert(

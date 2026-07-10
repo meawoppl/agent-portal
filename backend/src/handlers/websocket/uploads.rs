@@ -295,7 +295,6 @@ mod tests {
     use super::*;
     use base64::Engine;
     use shared::ServerToProxy;
-    use tokio::sync::mpsc;
 
     fn upload_with(total_chunks: u32, total_size: u64, server_cap_bytes: u64) -> PendingUpload {
         PendingUpload {
@@ -404,8 +403,8 @@ mod tests {
         // chunk count hits `total_chunks`.
         let session_manager = SessionManager::new();
         let session_key: SessionId = "test-session".to_string();
-        let (proxy_tx, mut proxy_rx) = mpsc::unbounded_channel();
-        let (client_tx, _client_rx) = mpsc::unbounded_channel();
+        let (proxy_tx, mut proxy_rx) = crate::handlers::websocket::conn_channel(64);
+        let (client_tx, _client_rx) = crate::handlers::websocket::conn_channel(64);
         session_manager.register_session(
             session_key.clone(),
             proxy_tx,
@@ -486,8 +485,8 @@ mod tests {
         // upload_id are silently dropped (the unknown-upload_id path).
         let session_manager = SessionManager::new();
         let session_key: SessionId = "test-session-2".to_string();
-        let (proxy_tx, mut proxy_rx) = mpsc::unbounded_channel();
-        let (client_tx, _client_rx) = mpsc::unbounded_channel();
+        let (proxy_tx, mut proxy_rx) = crate::handlers::websocket::conn_channel(64);
+        let (client_tx, _client_rx) = crate::handlers::websocket::conn_channel(64);
         session_manager.register_session(
             session_key.clone(),
             proxy_tx,

@@ -5,7 +5,6 @@ use shared::{
     ServerToProxy, SessionStatus,
 };
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -318,7 +317,8 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     }
 
     // Create channel for sending messages to this launcher
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerToLauncher>();
+    let (tx, mut rx) =
+        super::session_manager::conn_channel::<ServerToLauncher>(super::LAUNCHER_CHANNEL_CAPACITY);
     let tx_for_sync = tx.clone();
 
     // Server-side kill switch: fired by the SessionManager if it evicts this

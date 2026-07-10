@@ -140,7 +140,7 @@ mod tests {
         assert!(mgr.send_to_session(&"s1".into(), make_output(1)));
         assert!(mgr.send_to_session(&"s1".into(), make_output(2)));
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::handlers::websocket::conn_channel(64);
         register(&mgr, "s1", tx);
 
         let msg1 = rx.try_recv().unwrap();
@@ -159,7 +159,10 @@ mod tests {
             mgr.send_to_session(&"s1".into(), make_output(i));
         }
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        // Must exceed MAX_PENDING_MESSAGES_PER_SESSION: registration replays
+        // the whole pending queue into this channel in one burst.
+        let (tx, mut rx) =
+            crate::handlers::websocket::conn_channel(MAX_PENDING_MESSAGES_PER_SESSION * 2);
         register(&mgr, "s1", tx);
 
         let mut received = vec![];
@@ -179,7 +182,7 @@ mod tests {
     #[test]
     fn send_to_session_queues_message_returned_by_closed_channel() {
         let mgr = SessionManager::new();
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = crate::handlers::websocket::conn_channel(64);
         let cancel = CancellationToken::new();
         mgr.register_session("s1".into(), tx, cancel.clone());
         drop(rx);
@@ -207,7 +210,7 @@ mod tests {
     #[test]
     fn send_to_disconnected_session_queues_and_replays() {
         let mgr = SessionManager::new();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = crate::handlers::websocket::conn_channel(64);
 
         let gen = register(&mgr, "s1", tx);
         mgr.unregister_session(&"s1".into(), Some(gen));
@@ -215,7 +218,7 @@ mod tests {
         mgr.send_to_session(&"s1".into(), make_output(1));
         mgr.send_to_session(&"s1".into(), make_output(2));
 
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
         register(&mgr, "s1", tx2);
 
         let msg1 = rx2.try_recv().unwrap();
