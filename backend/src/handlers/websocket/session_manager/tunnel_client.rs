@@ -157,13 +157,12 @@ impl SessionManager {
         port: u16,
     ) -> Result<tokio::io::DuplexStream, TunnelError> {
         // Capture the sender and its connection generation together so the
-        // stream is reaped with the exact connection it rode on.
-        let (proxy_tx, gen): (ProxySender, u64) = match (
-            self.sessions.get(session_key),
-            self.current_connection_gen(session_key),
-        ) {
-            (Some(entry), Some(gen)) => (entry.value().clone(), gen),
-            _ => return Err(TunnelError::NotConnected),
+        // stream is reaped with the exact connection it rode on. Single
+        // lookup — sender and gen live in the same entry, so they can't
+        // disagree.
+        let (proxy_tx, gen): (ProxySender, u64) = match self.sessions.get(session_key) {
+            Some(conn) => (conn.sender.clone(), conn.gen),
+            None => return Err(TunnelError::NotConnected),
         };
 
         let stream_id = Uuid::new_v4();

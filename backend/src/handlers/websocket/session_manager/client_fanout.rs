@@ -64,8 +64,12 @@ impl SessionManager {
             reason: reason.clone(),
             reconnect_delay_ms,
         };
-        for entry in self.sessions.iter() {
-            let _ = entry.value().send(proxy_msg.clone());
+        // Collect keys first, then send through the evicting path: a direct
+        // send off the iter guard would bypass dead-connection eviction, and
+        // eviction must not run under the shard lock the iterator holds.
+        let session_keys: Vec<_> = self.sessions.iter().map(|e| e.key().clone()).collect();
+        for key in session_keys {
+            self.send_to_connected_session(&key, proxy_msg.clone());
         }
 
         let client_msg = ServerToClient::ServerShutdown {
@@ -83,8 +87,9 @@ impl SessionManager {
             reason,
             reconnect_delay_ms,
         };
-        for entry in self.launchers.iter() {
-            let _ = entry.value().sender.send(launcher_msg.clone());
+        let launcher_ids: Vec<_> = self.launchers.iter().map(|e| *e.key()).collect();
+        for id in launcher_ids {
+            self.send_to_launcher(&id, launcher_msg.clone());
         }
     }
 }
@@ -190,7 +195,11 @@ mod tests {
         let (web_tx, mut web_rx) = mpsc::unbounded_channel();
         let (user_tx, mut user_rx) = mpsc::unbounded_channel();
 
-        mgr.register_session("s1".into(), session_tx);
+        mgr.register_session(
+            "s1".into(),
+            session_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
         mgr.add_web_client("s1".into(), web_tx);
         mgr.add_user_client(Uuid::new_v4(), user_tx);
 

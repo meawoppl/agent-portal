@@ -294,7 +294,7 @@ pub async fn update_launcher(
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let sender = {
+    {
         let launcher = app_state
             .session_manager
             .launchers
@@ -303,10 +303,14 @@ pub async fn update_launcher(
         if launcher.user_id != user_id {
             return Err(AppError::Forbidden);
         }
-        launcher.sender.clone()
-    };
+    }
 
-    if sender.send(ServerToLauncher::UpdateAndRestart).is_err() {
+    // Route through the evicting sender (not a cloned raw sender) so a dead
+    // channel tears the stale connection down instead of lingering.
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, ServerToLauncher::UpdateAndRestart)
+    {
         warn!("Launcher {} disconnected while sending update", launcher_id);
         return Err(AppError::Internal("Launcher disconnected".to_string()));
     }
@@ -323,7 +327,7 @@ pub async fn probe_agents(
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<Json<ProbeAgentsResponse>, AppError> {
-    let sender = {
+    {
         let launcher = app_state
             .session_manager
             .launchers
@@ -332,15 +336,16 @@ pub async fn probe_agents(
         if launcher.user_id != user_id {
             return Err(AppError::Forbidden);
         }
-        launcher.sender.clone()
-    };
+    }
 
     let request_id = Uuid::new_v4();
     let rx = app_state.session_manager.register_probe_request(request_id);
 
-    if sender
-        .send(ServerToLauncher::ProbeAgents { request_id })
-        .is_err()
+    // Evicting send (not a cloned raw sender): a dead channel tears the
+    // stale connection down instead of lingering.
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, ServerToLauncher::ProbeAgents { request_id })
     {
         app_state.session_manager.cancel_probe_request(request_id);
         warn!("Launcher {} disconnected while probing agents", launcher_id);
@@ -381,6 +386,8 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            gen: 0,
         }
     }
 
