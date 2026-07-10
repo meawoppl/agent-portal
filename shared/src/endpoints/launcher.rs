@@ -162,6 +162,12 @@ pub enum LauncherToServer {
         exit_code: Option<i32>,
         duration_secs: u64,
     },
+
+    /// Acknowledge that a live launcher persisted a refreshed auth token.
+    ///
+    /// Additive for #1237 part 2. The backend keeps the previous token valid
+    /// until this ack, then shortens it to a small reconnect-race grace window.
+    TokenRefreshAck,
 }
 
 /// Why a launcher registration was rejected with `fatal: true`. Machine-
@@ -257,4 +263,11 @@ pub enum ServerToLauncher {
     /// Tell the launcher to pull the latest release, install it, and restart
     /// the agent-portal service. Triggered from the dashboard Launchers panel.
     UpdateAndRestart,
+
+    /// Ask a live launcher to persist a freshly rotated auth token.
+    ///
+    /// New launchers reply with `LauncherToServer::TokenRefreshAck` after the
+    /// token is written to `launcher.json`. Older launchers may log a decode
+    /// error and ignore this unknown frame; the old token remains valid.
+    TokenRefresh { auth_token: String },
 }

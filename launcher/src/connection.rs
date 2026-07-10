@@ -693,6 +693,23 @@ async fn handle_message(
                 }
             });
         }
+        ServerToLauncher::TokenRefresh { auth_token } => {
+            match crate::config::save_auth_token(&auth_token) {
+                Ok(()) => {
+                    info!("Persisted refreshed launcher auth token");
+                    if ws_sender
+                        .send(LauncherToServer::TokenRefreshAck)
+                        .await
+                        .is_err()
+                    {
+                        warn!("Failed to acknowledge refreshed launcher auth token");
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to persist refreshed launcher auth token: {}", e);
+                }
+            }
+        }
         other => {
             debug!("Unhandled message from server: {:?}", other);
         }

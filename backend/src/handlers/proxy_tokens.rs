@@ -47,12 +47,20 @@ pub struct IssuedProxyToken {
     pub user_email: String,
 }
 
+/// Result of verifying a proxy token against both JWT claims and the backing
+/// database row.
+pub struct VerifiedProxyToken {
+    pub user_id: Uuid,
+    pub email: String,
+    pub token: ProxyAuthToken,
+}
+
 /// Mint a proxy token for `user_id` and persist it: load the user, create the
 /// JWT, hash it, and insert (or renew) the `proxy_auth_tokens` row.
 ///
-/// `expires_in_days` is `Some(n)` for tokens with a fixed TTL (user dashboard
-/// tokens) or `None` for non-expiring tokens (launch/device tokens), whose
-/// lifetime is governed by revocation instead. See #932.
+/// `expires_in_days` is `Some(n)` for tokens with a fixed TTL or `None` for
+/// credentials whose lifetime is governed by DB state. Live launcher
+/// credentials are rotated to expiring replacements after registration.
 pub fn issue_proxy_token(
     conn: &mut diesel::pg::PgConnection,
     jwt_secret: &[u8],
@@ -256,13 +264,15 @@ pub async fn renew_token_handler(
     Ok(Json(response))
 }
 
-/// Verify a proxy token and return the user_id if valid
-/// This is called from the websocket handler
-pub fn verify_and_get_user(
+/// Verify a proxy token and return its user plus backing token row if valid.
+///
+/// The row metadata lets long-lived websocket clients rotate credentials after
+/// registration without changing the existing verifier's public shape.
+pub fn verify_and_get_user_with_token(
     app_state: &AppState,
     conn: &mut diesel::pg::PgConnection,
     token: &str,
-) -> Result<(Uuid, String), AppError> {
+) -> Result<VerifiedProxyToken, AppError> {
     // First verify JWT signature and expiration
     let claims =
         crate::jwt::verify_proxy_token(app_state.jwt_secret.as_bytes(), token).map_err(|e| {
@@ -300,8 +310,9 @@ pub fn verify_and_get_user(
     }
 
     // Check if expired (belt and suspenders - JWT already checked this).
-    // A NULL `expires_at` means the token never expires (launch/launcher
-    // tokens); its lifetime is governed by revocation instead. See #932.
+    // A NULL `expires_at` means the row has no fixed expiry; its lifetime is
+    // governed by revocation/session binding. Live launcher credentials rotate
+    // to expiring replacements after registration (#1237).
     if let Some(expires_at) = db_token.expires_at {
         let now = chrono::Utc::now().naive_utc();
         if expires_at < now {
@@ -337,7 +348,22 @@ pub fn verify_and_get_user(
         .set(proxy_auth_tokens::last_used_at.eq(diesel::dsl::now))
         .execute(conn);
 
-    Ok((claims.sub, claims.email))
+    Ok(VerifiedProxyToken {
+        user_id: claims.sub,
+        email: claims.email,
+        token: db_token,
+    })
+}
+
+/// Verify a proxy token and return the user_id if valid.
+/// This is called from the websocket handler.
+pub fn verify_and_get_user(
+    app_state: &AppState,
+    conn: &mut diesel::pg::PgConnection,
+    token: &str,
+) -> Result<(Uuid, String), AppError> {
+    let verified = verify_and_get_user_with_token(app_state, conn, token)?;
+    Ok((verified.user_id, verified.email))
 }
 
 /// Name stamped on tokens minted per launched session (`mint_launch_token`).

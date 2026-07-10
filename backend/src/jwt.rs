@@ -24,9 +24,10 @@ pub enum JwtError {
 
 /// Create a new JWT token for proxy authentication.
 ///
-/// `expires_in_days` is `Some(n)` for tokens with a fixed TTL (user dashboard
-/// tokens) or `None` for non-expiring tokens (launch/launcher tokens), whose
-/// validity is governed by the live DB checks instead. See #932.
+/// `expires_in_days` is `Some(n)` for tokens with a fixed TTL. `None` omits
+/// the JWT `exp` claim so live DB checks govern validity instead; long-lived
+/// launcher credentials are rotated to expiring replacements after
+/// registration (#1237).
 pub fn create_proxy_token(
     secret: &[u8],
     token_id: Uuid,

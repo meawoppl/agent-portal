@@ -55,6 +55,12 @@ pub fn load_config() -> LauncherConfig {
 fn save_config(config: &LauncherConfig) -> anyhow::Result<()> {
     let path = config_path();
     let contents = serde_json::to_string_pretty(config)?;
+    write_config_atomic(&path, &contents)?;
+    tracing::debug!("Saved config to {}", path.display());
+    Ok(())
+}
+
+fn write_config_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -64,8 +70,7 @@ fn save_config(config: &LauncherConfig) -> anyhow::Result<()> {
     // readable as a corrupt config.
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, &path)?;
-    tracing::debug!("Saved config to {}", path.display());
+    std::fs::rename(&tmp, path)?;
     Ok(())
 }
 
@@ -188,6 +193,21 @@ mod tests {
     fn config_path_is_absolute() {
         let path = config_path();
         assert!(path.is_absolute());
+    }
+
+    #[test]
+    fn write_config_atomic_replaces_file_and_removes_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        std::fs::write(&path, "old").unwrap();
+
+        write_config_atomic(&path, r#"{"auth_token":"new"}"#).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"auth_token":"new"}"#
+        );
+        assert!(!path.with_extension("json.tmp").exists());
     }
 
     #[test]
