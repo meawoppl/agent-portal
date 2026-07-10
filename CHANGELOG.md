@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.20
+
+- **Docs: live demo script (docs/DEMO_SCRIPT.md).** A feature-first, live-narrated walkthrough of the portal, ordered from the basics (browser sessions, streaming, multi-agent, mobile, persistence) through richer interaction (inline media, downloads, question cards, voice) to the team features (inter-agent messaging, scheduling, sharing) and the port-forwarding showcase (the live health chip, in-portal preview overlay, public share, admin subdomains). SAY/DO stage directions, "why it matters" notes, a pre-flight checklist, and a timing/trim cheat-sheet. Docs only.
+
 ## 2.13.19
 
 - **Forward preview overlay: accent edge + genie open/close.** The floating preview panel gets a contrasting accent-blue border (plus a faint outer ring in the shadow stack) so it reads as a distinct surface instead of blending into the dark page. Opening now **expands the panel out of the chip that launched it** and closing **collapses it back into the chip** — the chip's screen position is captured at click time and becomes the animation's `transform-origin` (0.18s out / 0.16s in, scale+fade). Unmount waits for `animationend` on the out-animation, with an effect-armed 250ms timer fallback for `prefers-reduced-motion` (where the animations are disabled entirely) — armed via `use_effect_with` so the closure holds fresh state handles, and cancelled if the panel reopens mid-close. The `▾` collapse-to-titlebar behavior is unchanged.
