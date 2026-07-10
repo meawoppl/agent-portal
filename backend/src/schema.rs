@@ -60,6 +60,7 @@ diesel::table! {
         created_at -> Timestamp,
         #[max_length = 32]
         send_mode -> Nullable<Varchar>,
+        client_msg_id -> Nullable<Uuid>,
     }
 }
 

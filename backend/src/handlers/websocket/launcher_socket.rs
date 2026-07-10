@@ -549,6 +549,7 @@ fn handle_launcher_message(
                     seq_num: next_seq,
                     content: serde_json::to_string(&content_value).unwrap_or_default(),
                     send_mode: None,
+                    client_msg_id: None,
                 };
                 let _ = diesel::insert_into(pending_inputs::table)
                     .values(&new_input)

@@ -123,9 +123,46 @@ fn handle_web_client_message(
                     return false;
                 }
             }
+            // Idempotency gate (#1236): the outbox resends everything unacked
+            // after a reconnect, so a resent id may already be tracked. Known
+            // terminal → re-emit the terminal stage (idempotent ack) and stop;
+            // known in-flight → drop the duplicate (the original's acks will
+            // arrive); new → recorded in-flight, proceed.
+            if let (Some(id), Some(session_id)) = (client_msg_id, *verified_session_id) {
+                use super::session_manager::{DedupVerdict, InputDeliveryState};
+                let verdict = match session_manager.check_and_record_input(session_id, id) {
+                    // The in-memory tracker is empty after a backend restart;
+                    // a pending_inputs row with this id proves the original
+                    // was already accepted for delivery.
+                    DedupVerdict::New if pending_input_exists(db_pool, session_id, id) => {
+                        DedupVerdict::Duplicate(InputDeliveryState::InFlight)
+                    }
+                    v => v,
+                };
+                match verdict {
+                    DedupVerdict::New => {}
+                    DedupVerdict::Duplicate(InputDeliveryState::InFlight) => return false,
+                    DedupVerdict::Duplicate(InputDeliveryState::Accepted) => {
+                        let _ = tx.send(ServerToClient::InputProgress {
+                            client_msg_id: id,
+                            stage: shared::InputDeliveryStage::AgentAccepted,
+                            message: None,
+                        });
+                        return false;
+                    }
+                    DedupVerdict::Duplicate(InputDeliveryState::Failed) => {
+                        let _ = tx.send(ServerToClient::InputProgress {
+                            client_msg_id: id,
+                            stage: shared::InputDeliveryStage::Failed,
+                            message: Some("delivery previously failed".to_string()),
+                        });
+                        return false;
+                    }
+                }
+            }
             // First delivery stage: the backend accepted the input frame. Later
             // stages (ProxyReceived / AgentAccepted) come from the proxy ack
-            // path — a follow-up slice threads client_msg_id through there.
+            // path.
             if let Some(id) = client_msg_id {
                 let _ = tx.send(ServerToClient::InputProgress {
                     client_msg_id: id,
@@ -321,6 +358,28 @@ fn handle_web_register(
             true // close connection
         }
     }
+}
+
+/// DB backstop for the idempotency gate (#1236): the in-memory tracker dies
+/// with the backend, but an undelivered original leaves a `pending_inputs`
+/// row carrying its `client_msg_id`. Errors read as "not found" — a dup
+/// slipping through on a DB blip is the at-least-once side of the contract.
+fn pending_input_exists(
+    db_pool: &crate::db::DbPool,
+    session_id: Uuid,
+    client_msg_id: Uuid,
+) -> bool {
+    use crate::schema::pending_inputs;
+    let Ok(mut conn) = db_pool.get() else {
+        return false;
+    };
+    diesel::select(diesel::dsl::exists(
+        pending_inputs::table
+            .filter(pending_inputs::session_id.eq(session_id))
+            .filter(pending_inputs::client_msg_id.eq(client_msg_id)),
+    ))
+    .get_result::<bool>(&mut conn)
+    .unwrap_or(false)
 }
 
 #[allow(clippy::too_many_arguments)]

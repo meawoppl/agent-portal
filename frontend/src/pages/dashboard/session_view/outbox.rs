@@ -10,18 +10,19 @@
 //! The outbox closes that hole:
 //! - Every `AgentInput` is recorded here, keyed by its `client_msg_id`, with a
 //!   `transmitted` flag: was the frame actually handed to the transport?
-//! - On reconnect the caller flushes only the **un-transmitted** frames.
-//!   Because those provably never reached the backend, resending them cannot
-//!   duplicate — so no backend dedupe is required.
+//! - On reconnect the caller flushes **every unresolved frame**, including
+//!   ones already handed to a transport that then died before writing them
+//!   (the in-flight-loss window). The backend deduplicates by
+//!   `client_msg_id` (#1236) and re-emits the terminal stage for anything it
+//!   already handled, so at-least-once resending cannot duplicate delivery.
 //! - An entry is removed once the backend resolves it: `AgentAccepted`
 //!   (delivered) or `Failed` (terminal).
 //! - The outbox is bounded; the oldest entry is evicted past the cap so a
 //!   perpetually-unacked backlog can't grow without limit.
 //!
-//! NOT covered here (would require backend idempotency keyed on
-//! `client_msg_id`, tracked as a follow-up): a frame handed to a socket that
-//! dies before it transmits. Such a frame is marked `transmitted` and
-//! deliberately not resent, keeping the outbox strictly dup-free.
+//! The `transmitted` flag still gates *non-reconnect* sends (a frame handed
+//! to a healthy transport isn't blindly re-sent) — only the reconnect flush
+//! resends transmitted-but-unresolved entries.
 
 use shared::ClientToServer;
 use uuid::Uuid;
@@ -77,14 +78,16 @@ impl Outbox {
         self.entries.len() != before
     }
 
-    /// `(client_msg_id, frame)` clones for every entry never handed to the
-    /// transport, in send order. The caller sends each and calls
+    /// `(client_msg_id, frame)` clones for every unresolved entry, in send
+    /// order — including transmitted-but-unacked ones, which may have died
+    /// in flight with the old socket. Safe to resend wholesale: the backend
+    /// dedupes by `client_msg_id` and re-acks anything already handled
+    /// (#1236). The caller sends each and calls
     /// [`mark_transmitted`](Self::mark_transmitted) on success — so a flush
     /// that itself fails leaves the entry queued for the next reconnect.
-    pub(super) fn untransmitted(&self) -> Vec<(Uuid, ClientToServer)> {
+    pub(super) fn unresolved(&self) -> Vec<(Uuid, ClientToServer)> {
         self.entries
             .iter()
-            .filter(|e| !e.transmitted)
             .map(|e| (e.client_msg_id, e.frame.clone()))
             .collect()
     }
@@ -108,7 +111,10 @@ mod tests {
     }
 
     #[test]
-    fn untransmitted_lists_only_unsent_in_order() {
+    fn unresolved_includes_transmitted_entries_in_order() {
+        // #1236: transmitted-but-unacked frames may have died in flight with
+        // the old socket — the reconnect flush must include them. The backend
+        // dedupes by client_msg_id, so this cannot double-deliver.
         let mut ob = Outbox::default();
         let a = Uuid::from_u128(1);
         let b = Uuid::from_u128(2);
@@ -116,26 +122,22 @@ mod tests {
         ob.record(b, input("b"));
         ob.mark_transmitted(a);
 
-        let pending: Vec<Uuid> = ob.untransmitted().into_iter().map(|(id, _)| id).collect();
-        assert_eq!(pending, vec![b], "only the un-transmitted frame flushes");
+        let pending: Vec<Uuid> = ob.unresolved().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(pending, vec![a, b], "every unresolved frame flushes");
     }
 
     #[test]
-    fn flush_is_dup_free_after_marking_transmitted() {
-        // The reconnect flush must not re-send a frame it already sent — this
-        // is what keeps resends free of duplicates without backend dedupe.
+    fn resolved_entries_never_flush_again() {
+        // Resolution (AgentAccepted/Failed) is what stops resends — a
+        // resolved id must never be flushed on a later reconnect.
         let mut ob = Outbox::default();
         let a = Uuid::from_u128(1);
         ob.record(a, input("a"));
-
-        // First flush: send + mark.
-        for (id, _frame) in ob.untransmitted() {
-            ob.mark_transmitted(id);
-        }
-        // Second flush (e.g. a later reconnect) returns nothing.
+        ob.mark_transmitted(a);
+        assert!(ob.resolve(a));
         assert!(
-            ob.untransmitted().is_empty(),
-            "a transmitted frame is never re-sent"
+            ob.unresolved().is_empty(),
+            "a resolved frame is never re-sent"
         );
     }
 
