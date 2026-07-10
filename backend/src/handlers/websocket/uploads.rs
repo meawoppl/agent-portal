@@ -372,7 +372,11 @@ mod tests {
         let session_manager = SessionManager::new();
         let session_key: SessionId = "test-session".to_string();
         let (proxy_tx, mut proxy_rx) = mpsc::unbounded_channel();
-        session_manager.register_session(session_key.clone(), proxy_tx);
+        session_manager.register_session(
+            session_key.clone(),
+            proxy_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
 
         let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
         let upload_id = "u1".to_string();
@@ -445,7 +449,11 @@ mod tests {
         let session_manager = SessionManager::new();
         let session_key: SessionId = "test-session-2".to_string();
         let (proxy_tx, mut proxy_rx) = mpsc::unbounded_channel();
-        session_manager.register_session(session_key.clone(), proxy_tx);
+        session_manager.register_session(
+            session_key.clone(),
+            proxy_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
 
         let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
         let upload_id = "u2".to_string();

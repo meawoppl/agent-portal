@@ -160,6 +160,11 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerToLauncher>();
     let tx_for_sync = tx.clone();
 
+    // Server-side kill switch: fired by the SessionManager if it evicts this
+    // connection (channel dead / half-open socket, #1256) so the select loop
+    // below exits and the launcher's reconnect logic takes over.
+    let cancel = tokio_util::sync::CancellationToken::new();
+
     // Atomically check for duplicate (user_id, hostname) and register. See
     // `SessionManager::try_register_launcher` — the check + claim happen under
     // a single DashMap shard lock to close the TOCTOU window that existed
@@ -175,29 +180,34 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             running_sessions: Vec::new(),
             working_directory,
             version: version.unwrap_or_default(),
+            cancel: cancel.clone(),
+            gen: 0, // stamped by try_register_launcher
         },
     );
 
-    if let Err(existing_name) = register_result {
-        warn!(
-            "Rejecting duplicate launcher '{}' from {} (user {}) — '{}' already connected",
-            launcher_name, hostname, user_id, existing_name
-        );
-        let _ = ws_sender
-            .send(ServerToLauncher::LauncherRegisterAck {
-                success: false,
-                launcher_id,
-                fatal: true,
-                error: Some(format!(
-                    "A launcher named '{}' is already connected from this host. \
+    let connection_gen = match register_result {
+        Ok(gen) => gen,
+        Err(existing_name) => {
+            warn!(
+                "Rejecting duplicate launcher '{}' from {} (user {}) — '{}' already connected",
+                launcher_name, hostname, user_id, existing_name
+            );
+            let _ = ws_sender
+                .send(ServerToLauncher::LauncherRegisterAck {
+                    success: false,
+                    launcher_id,
+                    fatal: true,
+                    error: Some(format!(
+                        "A launcher named '{}' is already connected from this host. \
                      Stop the existing instance before starting a new one.",
-                    existing_name
-                )),
-                reject_reason: Some(LauncherRejectReason::DuplicateLauncher),
-            })
-            .await;
-        return;
-    }
+                        existing_name
+                    )),
+                    reject_reason: Some(LauncherRejectReason::DuplicateLauncher),
+                })
+                .await;
+            return;
+        }
+    };
 
     // Send RegisterAck
     let _ = ws_sender
@@ -261,10 +271,25 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                     break;
                 }
             }
+
+            // Evicted by the SessionManager (dead channel / half-open
+            // socket, #1256): close the transport so the launcher's
+            // reconnect logic takes over.
+            _ = cancel.cancelled() => {
+                warn!(
+                    "Launcher '{}' connection force-closed by server (evicted)",
+                    launcher_name
+                );
+                break;
+            }
         }
     }
 
-    app_state.session_manager.unregister_launcher(&launcher_id);
+    // Generation-guarded: a reconnect reuses the same launcher_id, so this
+    // stale socket's cleanup must not remove the successor's registration.
+    app_state
+        .session_manager
+        .unregister_launcher(&launcher_id, Some(connection_gen));
 }
 
 /// Verify that this launcher is authorized to mutate `session_id`. A

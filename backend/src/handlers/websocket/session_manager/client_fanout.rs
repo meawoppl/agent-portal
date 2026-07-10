@@ -65,7 +65,7 @@ impl SessionManager {
             reconnect_delay_ms,
         };
         for entry in self.sessions.iter() {
-            let _ = entry.value().send(proxy_msg.clone());
+            let _ = entry.value().sender.send(proxy_msg.clone());
         }
 
         let client_msg = ServerToClient::ServerShutdown {
@@ -190,7 +190,11 @@ mod tests {
         let (web_tx, mut web_rx) = mpsc::unbounded_channel();
         let (user_tx, mut user_rx) = mpsc::unbounded_channel();
 
-        mgr.register_session("s1".into(), session_tx);
+        mgr.register_session(
+            "s1".into(),
+            session_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
         mgr.add_web_client("s1".into(), web_tx);
         mgr.add_user_client(Uuid::new_v4(), user_tx);
 
