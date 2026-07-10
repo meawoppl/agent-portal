@@ -114,15 +114,14 @@ impl SessionManager {
     /// Returns true if the session was found and the message was sent.
     pub fn disconnect_session(&self, session_id: Uuid) -> bool {
         let key = session_id.to_string();
-        if let Some(conn) = self.sessions.get(&key) {
-            conn.sender
-                .send(ServerToProxy::SessionTerminated {
-                    reason: "Session stopped by user".to_string(),
-                })
-                .is_ok()
-        } else {
-            false
-        }
+        // Evicting send: a dead channel tears the stale entry down (and
+        // closes the socket) instead of lingering half-registered.
+        self.send_to_connected_session(
+            &key,
+            ServerToProxy::SessionTerminated {
+                reason: "Session stopped by user".to_string(),
+            },
+        )
     }
 
     /// Return the set of session keys that currently have a registered proxy connection.
