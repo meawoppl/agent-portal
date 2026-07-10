@@ -1108,6 +1108,18 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                 safe_name
             };
 
+            // A duplicate Start for an in-flight upload_id (client bug or
+            // retry) must not leak the old entry's temp file: drop the old
+            // state and delete its partial before starting over.
+            if let Some(old) = state.active_uploads.remove(&upload_id) {
+                warn!(
+                    "[upload {}] Duplicate start; discarding previous partial",
+                    &upload_id[..8.min(upload_id.len())]
+                );
+                drop(old.file_handle);
+                let _ = tokio::fs::remove_file(&old.temp_path).await;
+            }
+
             // Write to a hidden temp path; renamed to the real name only on
             // completion so the agent can never read a truncated file.
             let temp_name = format!(
