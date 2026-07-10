@@ -33,6 +33,9 @@ pub(crate) struct FileReceiveState {
     pub(crate) file_handle: Option<tokio::fs::File>,
     pub(crate) start_time: std::time::Instant,
     pub(crate) last_log_percent: u32,
+    /// Bytes are written here and renamed to `filename` only on completion,
+    /// so a consumer (the agent) can never read a truncated file (#939).
+    pub(crate) temp_path: std::path::PathBuf,
 }
 
 /// A portal input classified by send mode: a plain user input or a

@@ -403,6 +403,17 @@ fn handle_proxy_message(
                 );
             }
         }
+        ProxyToServer::FileUploadResult(result) => {
+            // Relay the upload's terminal outcome to the session's web
+            // clients — the uploader is holding back the prompt that
+            // references the file until this arrives (#939 phase 4).
+            if let Some(key) = session_key {
+                session_manager.broadcast_to_web_clients(
+                    key,
+                    shared::ServerToClient::FileUploadResult(result),
+                );
+            }
+        }
         ProxyToServer::SessionStatus { .. } => {}
         ProxyToServer::ForwardStatus(status) => {
             if let Some(session_id) = *db_session_id {

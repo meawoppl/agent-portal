@@ -1047,6 +1047,44 @@ fn is_codex_compaction_event(value: &serde_json::Value) -> bool {
 }
 
 /// Handle a file upload event (start or chunk)
+/// Report an upload's terminal outcome to the backend (relayed to the web
+/// client, which gates the prompt referencing the file on it — #939).
+async fn send_upload_result(
+    state: &ConnectionState,
+    upload_id: String,
+    success: bool,
+    error: Option<String>,
+) {
+    let mut ws = state.ws_write.lock().await;
+    if let Err(e) = ws
+        .send(ProxyToServer::FileUploadResult(
+            shared::FileUploadResultFields {
+                upload_id,
+                success,
+                error,
+            },
+        ))
+        .await
+    {
+        error!("Failed to send file upload result: {}", e);
+    }
+}
+
+/// Abort an in-flight upload: drop its state, best-effort delete the
+/// partial temp file, and report the failure.
+async fn fail_upload(state: &mut ConnectionState, upload_id: String, reason: String) {
+    if let Some(recv_state) = state.active_uploads.remove(&upload_id) {
+        drop(recv_state.file_handle);
+        let _ = tokio::fs::remove_file(&recv_state.temp_path).await;
+    }
+    error!(
+        "[upload {}] Failed: {}",
+        &upload_id[..8.min(upload_id.len())],
+        reason
+    );
+    send_upload_result(state, upload_id, false, Some(reason)).await;
+}
+
 async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut ConnectionState) {
     match upload_event {
         FileUploadEvent::Start {
@@ -1070,8 +1108,15 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                 safe_name
             };
 
-            let file_path = std::path::Path::new(&state.working_directory).join(&safe_name);
-            match tokio::fs::File::create(&file_path).await {
+            // Write to a hidden temp path; renamed to the real name only on
+            // completion so the agent can never read a truncated file.
+            let temp_name = format!(
+                ".{}.{}.upload",
+                safe_name,
+                &upload_id[..8.min(upload_id.len())]
+            );
+            let temp_path = std::path::Path::new(&state.working_directory).join(&temp_name);
+            match tokio::fs::File::create(&temp_path).await {
                 Ok(fh) => {
                     state.active_uploads.insert(
                         upload_id,
@@ -1084,11 +1129,13 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                             file_handle: Some(fh),
                             start_time: Instant::now(),
                             last_log_percent: 0,
+                            temp_path,
                         },
                     );
                 }
                 Err(e) => {
-                    error!("Failed to create file {}: {}", file_path.display(), e);
+                    let reason = format!("failed to create {}: {}", temp_path.display(), e);
+                    fail_upload(state, upload_id, reason).await;
                 }
             }
         }
@@ -1098,6 +1145,8 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
 
             let upload_id_short = &upload_id[..8.min(upload_id.len())];
             let Some(recv_state) = state.active_uploads.get_mut(&upload_id) else {
+                // Post-abort stragglers land here; the failure was already
+                // reported when the upload state was dropped.
                 warn!("[upload {}] Chunk for unknown upload", upload_id_short);
                 return;
             };
@@ -1105,14 +1154,16 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             let decoded = match base64::engine::general_purpose::STANDARD.decode(&data) {
                 Ok(b) => b,
                 Err(e) => {
-                    error!("[upload {}] Base64 decode error: {}", upload_id_short, e);
+                    let reason = format!("base64 decode error: {e}");
+                    fail_upload(state, upload_id, reason).await;
                     return;
                 }
             };
 
             if let Some(ref mut fh) = recv_state.file_handle {
                 if let Err(e) = fh.write_all(&decoded).await {
-                    error!("[upload {}] Write error: {}", upload_id_short, e);
+                    let reason = format!("write error: {e}");
+                    fail_upload(state, upload_id, reason).await;
                     return;
                 }
             }
@@ -1157,17 +1208,32 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                     0.0
                 };
 
-                // Flush and close file
+                // Flush + close, then commit: rename the temp file to its
+                // real name. Only a successful rename counts as delivered.
                 if let Some(mut fh) = recv_state.file_handle.take() {
-                    let _ = fh.flush().await;
+                    if let Err(e) = fh.flush().await {
+                        let reason = format!("flush error: {e}");
+                        fail_upload(state, upload_id, reason).await;
+                        return;
+                    }
                 }
 
                 let filename = recv_state.filename.clone();
+                let received_bytes = recv_state.received_bytes;
+                let final_path = std::path::Path::new(&state.working_directory).join(&filename);
+                let temp_path = recv_state.temp_path.clone();
+                if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
+                    let reason = format!("rename to {} failed: {e}", final_path.display());
+                    fail_upload(state, upload_id, reason).await;
+                    return;
+                }
+
                 info!(
                     "[upload {}] Complete: {} ({} bytes in {:.1}s, avg {:.1} KB/s)",
-                    upload_id_short, filename, recv_state.received_bytes, elapsed, rate_kb
+                    upload_id_short, filename, received_bytes, elapsed, rate_kb
                 );
                 state.active_uploads.remove(&upload_id);
+                send_upload_result(state, upload_id, true, None).await;
             }
         }
     }

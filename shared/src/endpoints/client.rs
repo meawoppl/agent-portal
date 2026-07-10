@@ -3,7 +3,8 @@ use uuid::Uuid;
 use ws_bridge::WsEndpoint;
 
 use super::types::{
-    FileUploadChunkFields, FileUploadStartFields, PermissionResponseFields, RegisterFields,
+    FileUploadChunkFields, FileUploadResultFields, FileUploadStartFields, PermissionResponseFields,
+    RegisterFields,
 };
 use crate::{AgentType, PermissionSuggestion, SendMode, SessionCost, SessionStatus, TurnMetrics};
 
@@ -243,6 +244,12 @@ pub enum ServerToClient {
 
     /// Error message
     Error { message: String },
+
+    /// Terminal outcome of a chunked file upload (#939 phase 4). Relayed
+    /// from the proxy (or synthesized by the backend for failures it can
+    /// detect itself); the client withholds the prompt referencing the
+    /// file until every named upload commits.
+    FileUploadResult(FileUploadResultFields),
 
     /// Session metadata changed
     SessionUpdate {

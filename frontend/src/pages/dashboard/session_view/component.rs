@@ -139,9 +139,20 @@ pub enum SessionViewMsg {
     /// `ClientToServer::ClaudeInput` frame.
     SendText(String, SendMode),
     /// InputBar emitted a raw WS frame (used by the file-upload pipeline
-    /// for `FileUploadStart` / `FileUploadChunk` / the final combined
-    /// `ClaudeInput`). We just forward it over the WebSocket.
+    /// for `FileUploadStart` / `FileUploadChunk`). We just forward it over
+    /// the WebSocket.
     SendFrame(ClientToServer),
+    /// InputBar finished emitting upload chunks and hands us the composed
+    /// prompt plus the upload ids it references. We hold the prompt until
+    /// every id commits (`WsEvent::UploadResult`), then dispatch it as a
+    /// normal agent input (#939 phase 4).
+    UploadPrompt {
+        content: String,
+        upload_ids: Vec<String>,
+    },
+    /// The upload-commit wait expired (old proxy or very slow link):
+    /// dispatch the held prompt anyway — pre-transactional behavior.
+    UploadCommitTimeout,
     /// InputBar reports that a submission landed — bumps the parent's
     /// `on_message_sent` prop.
     MessageSent,
@@ -167,6 +178,17 @@ pub enum SessionViewMsg {
 }
 
 /// SessionView - Main terminal view for a single session
+/// A composed upload prompt held back until every file it references has
+/// been committed on the proxy host (#939 phase 4).
+struct PendingUploadPrompt {
+    remaining: std::collections::HashSet<String>,
+    content: String,
+    /// Compat fallback: proxies that predate upload acks never send
+    /// `FileUploadResult`, so fire the prompt anyway after this window
+    /// (pre-transactional behavior). Cancelled by drop.
+    _timeout: Timeout,
+}
+
 pub struct SessionView {
     messages: Vec<RenderedMessage>,
     ws_connected: bool,
@@ -174,6 +196,12 @@ pub struct SessionView {
     /// Unacked `AgentInput` frames, resent on reconnect so inputs typed while
     /// the socket is down aren't silently dropped. See [`Outbox`].
     outbox: Outbox,
+    /// See [`PendingUploadPrompt`].
+    pending_upload_prompt: Option<PendingUploadPrompt>,
+    /// Upload outcomes that arrived before the prompt handoff (a small
+    /// file can commit while later files are still streaming). Bounded;
+    /// consumed by `handle_upload_prompt`.
+    early_upload_results: std::collections::HashMap<String, Result<(), String>>,
     messages_ref: NodeRef,
     should_autoscroll: bool,
     #[allow(dead_code)]
@@ -281,6 +309,8 @@ impl Component for SessionView {
             ws_connected: false,
             ws_sender: None,
             outbox: Outbox::default(),
+            pending_upload_prompt: None,
+            early_upload_results: HashMap::new(),
             messages_ref: NodeRef::default(),
             should_autoscroll: true,
             scroll_listener: None,
@@ -452,6 +482,25 @@ impl Component for SessionView {
                     false
                 }
             },
+            SessionViewMsg::UploadPrompt {
+                content,
+                upload_ids,
+            } => self.handle_upload_prompt(ctx, content, upload_ids),
+            SessionViewMsg::UploadCommitTimeout => {
+                if let Some(pending) = self.pending_upload_prompt.take() {
+                    // Old proxy (no upload acks) or a very slow link: fall
+                    // back to pre-transactional behavior instead of eating
+                    // the prompt.
+                    log::warn!(
+                        "Upload commit ack timed out ({} outstanding); sending prompt anyway",
+                        pending.remaining.len()
+                    );
+                    self.dispatch_agent_input(serde_json::Value::String(pending.content), None);
+                    true
+                } else {
+                    false
+                }
+            }
             SessionViewMsg::MessageSent => {
                 let session_id = ctx.props().session.id;
                 ctx.props().on_message_sent.emit(session_id);
@@ -716,7 +765,99 @@ impl SessionView {
                 self.forwards_refresh = self.forwards_refresh.wrapping_add(1);
                 true
             }
+            WsEvent::UploadResult(fields) => self.handle_upload_result(fields),
         }
+    }
+
+    /// InputBar handed over the composed upload prompt: consume any commit
+    /// results that raced ahead of the handoff, then either dispatch
+    /// immediately, fail loudly, or hold for the outstanding ids (#939).
+    fn handle_upload_prompt(
+        &mut self,
+        ctx: &Context<Self>,
+        content: String,
+        upload_ids: Vec<String>,
+    ) -> bool {
+        let mut remaining: std::collections::HashSet<String> = upload_ids.into_iter().collect();
+        let mut early_failure: Option<String> = None;
+        remaining.retain(|id| match self.early_upload_results.remove(id) {
+            Some(Ok(())) => false,
+            Some(Err(e)) => {
+                early_failure = Some(e);
+                true
+            }
+            None => true,
+        });
+        self.early_upload_results.clear();
+
+        if let Some(err) = early_failure {
+            self.push_upload_error(&err);
+            return true;
+        }
+        if remaining.is_empty() {
+            self.dispatch_agent_input(serde_json::Value::String(content), None);
+            return true;
+        }
+
+        let link = ctx.link().clone();
+        let timeout = Timeout::new(45_000, move || {
+            link.send_message(SessionViewMsg::UploadCommitTimeout);
+        });
+        self.pending_upload_prompt = Some(PendingUploadPrompt {
+            remaining,
+            content,
+            _timeout: timeout,
+        });
+        false
+    }
+
+    /// A `FileUploadResult` arrived from the proxy (or was synthesized by
+    /// the backend). Resolve the held prompt, or stash the result if the
+    /// prompt handoff hasn't happened yet.
+    fn handle_upload_result(&mut self, fields: shared::FileUploadResultFields) -> bool {
+        if let Some(ref mut pending) = self.pending_upload_prompt {
+            if pending.remaining.contains(&fields.upload_id) {
+                if fields.success {
+                    pending.remaining.remove(&fields.upload_id);
+                    if pending.remaining.is_empty() {
+                        if let Some(done) = self.pending_upload_prompt.take() {
+                            self.dispatch_agent_input(
+                                serde_json::Value::String(done.content),
+                                None,
+                            );
+                        }
+                    }
+                } else {
+                    self.pending_upload_prompt = None;
+                    let err = fields.error.unwrap_or_else(|| "upload failed".to_string());
+                    self.push_upload_error(&err);
+                }
+                return true;
+            }
+        }
+        // Pre-handoff (or unrelated) result: stash for handle_upload_prompt.
+        if self.early_upload_results.len() < 64 {
+            let outcome = if fields.success {
+                Ok(())
+            } else {
+                Err(fields.error.unwrap_or_else(|| "upload failed".to_string()))
+            };
+            self.early_upload_results.insert(fields.upload_id, outcome);
+        }
+        false
+    }
+
+    /// Surface a terminal upload failure in the transcript. The prompt
+    /// referencing the file is deliberately NOT sent — the agent must never
+    /// be told about a file that isn't fully on disk.
+    fn push_upload_error(&mut self, err: &str) {
+        let error_msg = ErrorMessage::new(format!(
+            "File upload failed: {err} — your message was not sent"
+        ));
+        self.messages.push(RenderedMessage::new(
+            serde_json::to_string(&error_msg).unwrap_or_default(),
+            None,
+        ));
     }
 
     /// Hydrate the message buffer + task panel from a REST history batch.
@@ -918,6 +1059,12 @@ impl SessionView {
         let on_send_text =
             link.callback(|(text, mode): (String, SendMode)| SessionViewMsg::SendText(text, mode));
         let on_send_frame = link.callback(SessionViewMsg::SendFrame);
+        let on_upload_prompt = link.callback(|(content, upload_ids): (String, Vec<String>)| {
+            SessionViewMsg::UploadPrompt {
+                content,
+                upload_ids,
+            }
+        });
         let on_message_sent = link.callback(|_| SessionViewMsg::MessageSent);
         html! {
             <InputBar
@@ -927,6 +1074,7 @@ impl SessionView {
                 {on_register}
                 {on_send_text}
                 {on_send_frame}
+                {on_upload_prompt}
                 {on_message_sent}
             />
         }

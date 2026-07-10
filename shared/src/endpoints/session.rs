@@ -4,9 +4,10 @@ use ws_bridge::WsEndpoint;
 
 use super::types::{
     FileDownloadRequestFields, FileDownloadResponseFields, FileUploadChunkFields,
-    FileUploadStartFields, ForwardPortFields, ForwardStatusFields, PermissionResponseFields,
-    RegisterFields, SessionLimitContinuationFields, TunnelCloseFields, TunnelDataFields,
-    TunnelOpenFields, TunnelRefusedFields, TunnelStreamFields, TunnelWindowFields,
+    FileUploadResultFields, FileUploadStartFields, ForwardPortFields, ForwardStatusFields,
+    PermissionResponseFields, RegisterFields, SessionLimitContinuationFields, TunnelCloseFields,
+    TunnelDataFields, TunnelOpenFields, TunnelRefusedFields, TunnelStreamFields,
+    TunnelWindowFields,
 };
 use crate::{AgentType, PermissionSuggestion, SendMode, SessionStatus, TurnMetrics};
 
@@ -131,6 +132,10 @@ pub enum ProxyToServer {
 
     /// Response to a backend-requested local file download.
     FileDownloadResponse(FileDownloadResponseFields),
+
+    /// Terminal outcome of a chunked file upload: the file is fully written
+    /// and renamed into place, or has definitively failed (#939 phase 4).
+    FileUploadResult(FileUploadResultFields),
 
     /// Reply to `ForwardOpen`: allowlist updated + probe-dial result
     /// (docs/PORT_FORWARDING.md).

@@ -129,6 +129,21 @@ pub struct FileUploadChunkFields {
     pub data: String,
 }
 
+/// Terminal outcome of a file upload (#939 phase 4).
+///
+/// Emitted by the proxy once the file is fully written and renamed into
+/// place (or has definitively failed), relayed by the backend to the web
+/// client — which withholds the prompt referencing the file until every
+/// upload it names has committed. The backend also synthesizes failures it
+/// can detect itself (proxy offline, size-cap abort).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileUploadResultFields {
+    pub upload_id: String,
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // ---- Port forwarding (docs/PORT_FORWARDING.md) ------------------------------
 
 /// Open a tunnel stream to `127.0.0.1:{port}` on the proxy host.

@@ -31,10 +31,23 @@ pub(super) struct PendingUpload {
     received_bytes: u64,
 }
 
+/// Tell the uploading web client its upload definitively failed (#939
+/// phase 4) — it is holding back the prompt that references the file.
+fn send_upload_failure(tx: &super::WebClientSender, upload_id: String, error: &str) {
+    let _ = tx.send(shared::ServerToClient::FileUploadResult(
+        shared::FileUploadResultFields {
+            upload_id,
+            success: false,
+            error: Some(error.to_string()),
+        },
+    ));
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn handle_file_upload_start(
     session_manager: &SessionManager,
     session_key: &Option<SessionId>,
+    tx: &super::WebClientSender,
     pending_uploads: &mut HashMap<String, PendingUpload>,
     upload_id: String,
     filename: String,
@@ -48,6 +61,7 @@ pub(super) fn handle_file_upload_start(
             "Invalid total_chunks {} for upload {}",
             total_chunks, upload_id
         );
+        send_upload_failure(tx, upload_id, "invalid chunk count");
         return;
     }
 
@@ -60,6 +74,7 @@ pub(super) fn handle_file_upload_start(
             "Upload {} declared total_size {} > server cap {} bytes; rejecting",
             upload_id, total_size, effective_max_total_bytes
         );
+        send_upload_failure(tx, upload_id, "file exceeds server size limit");
         return;
     }
 
@@ -69,8 +84,28 @@ pub(super) fn handle_file_upload_start(
         safe_filename, total_chunks, total_size, upload_id
     );
 
+    // Uploads are connected-only transactions: the in-memory pending queue
+    // caps at 100 frames, so "queueing" a multi-thousand-chunk upload for a
+    // disconnected proxy silently drops most of it. Failing fast is honest.
+    let Some(key) = session_key else {
+        send_upload_failure(tx, upload_id, "session not registered");
+        return;
+    };
+    let msg = ServerToProxy::FileUploadStart(shared::FileUploadStartFields {
+        upload_id: upload_id.clone(),
+        filename: safe_filename,
+        content_type,
+        total_chunks,
+        total_size,
+    });
+    if !session_manager.send_to_connected_session(key, msg) {
+        warn!("Session not connected for file upload start");
+        send_upload_failure(tx, upload_id, "agent is offline");
+        return;
+    }
+
     pending_uploads.insert(
-        upload_id.clone(),
+        upload_id,
         PendingUpload {
             total_chunks,
             total_size,
@@ -79,20 +114,6 @@ pub(super) fn handle_file_upload_start(
             received_bytes: 0,
         },
     );
-
-    // Forward start message to proxy
-    if let Some(ref key) = session_key {
-        let msg = ServerToProxy::FileUploadStart(shared::FileUploadStartFields {
-            upload_id,
-            filename: safe_filename,
-            content_type,
-            total_chunks,
-            total_size,
-        });
-        if !session_manager.send_to_session(key, msg) {
-            warn!("Session not connected for file upload start");
-        }
-    }
 }
 
 /// Result of validating an incoming chunk against the `PendingUpload` state.
@@ -153,12 +174,15 @@ fn validate_and_record_chunk(
 pub(super) fn handle_file_upload_chunk(
     session_manager: &SessionManager,
     session_key: &Option<SessionId>,
+    tx: &super::WebClientSender,
     pending_uploads: &mut HashMap<String, PendingUpload>,
     upload_id: String,
     chunk_index: u32,
     data: String,
 ) {
     let Some(upload) = pending_uploads.get_mut(&upload_id) else {
+        // Post-abort stragglers; the failure was already reported when the
+        // entry was dropped.
         warn!("Received chunk for unknown upload_id={}", upload_id);
         return;
     };
@@ -175,6 +199,7 @@ pub(super) fn handle_file_upload_chunk(
                 upload_id, chunk_index
             );
             pending_uploads.remove(&upload_id);
+            send_upload_failure(tx, upload_id, "invalid chunk encoding");
             return;
         }
     };
@@ -194,28 +219,36 @@ pub(super) fn handle_file_upload_chunk(
                 upload_id, chunk_index, reason
             );
             pending_uploads.remove(&upload_id);
+            send_upload_failure(tx, upload_id, reason);
             return;
         }
         ChunkOutcome::Accept | ChunkOutcome::AcceptAndComplete => {}
     }
 
-    // Forward chunk directly to proxy
+    // Forward chunk directly to proxy. Connected-only (see
+    // `handle_file_upload_start`): a proxy that dropped mid-upload can't
+    // resume a partial stream, so fail the transaction honestly.
+    let total_chunks = upload.total_chunks;
     if let Some(ref key) = session_key {
         let msg = ServerToProxy::FileUploadChunk(shared::FileUploadChunkFields {
             upload_id: upload_id.clone(),
             chunk_index,
             data,
         });
-        if !session_manager.send_to_session(key, msg) {
+        if !session_manager.send_to_connected_session(key, msg) {
             warn!("Session not connected for file upload chunk");
+            pending_uploads.remove(&upload_id);
+            send_upload_failure(tx, upload_id, "agent disconnected during upload");
+            return;
         }
     }
 
-    // Clean up tracking when all chunks forwarded
+    // Clean up tracking when all chunks forwarded. The success result comes
+    // from the proxy once the file is committed to disk — not from here.
     if outcome == ChunkOutcome::AcceptAndComplete {
         info!(
             "All {} chunks forwarded for upload_id={}",
-            upload.total_chunks, upload_id
+            total_chunks, upload_id
         );
         pending_uploads.remove(&upload_id);
     }
@@ -372,6 +405,7 @@ mod tests {
         let session_manager = SessionManager::new();
         let session_key: SessionId = "test-session".to_string();
         let (proxy_tx, mut proxy_rx) = mpsc::unbounded_channel();
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
         session_manager.register_session(
             session_key.clone(),
             proxy_tx,
@@ -388,6 +422,7 @@ mod tests {
         handle_file_upload_chunk(
             &session_manager,
             &Some(session_key.clone()),
+            &client_tx,
             &mut pending_uploads,
             upload_id.clone(),
             0,
@@ -397,6 +432,7 @@ mod tests {
         handle_file_upload_chunk(
             &session_manager,
             &Some(session_key.clone()),
+            &client_tx,
             &mut pending_uploads,
             upload_id.clone(),
             0,
@@ -410,6 +446,7 @@ mod tests {
         handle_file_upload_chunk(
             &session_manager,
             &Some(session_key.clone()),
+            &client_tx,
             &mut pending_uploads,
             upload_id.clone(),
             1,
@@ -418,6 +455,7 @@ mod tests {
         handle_file_upload_chunk(
             &session_manager,
             &Some(session_key.clone()),
+            &client_tx,
             &mut pending_uploads,
             upload_id.clone(),
             2,
@@ -449,6 +487,7 @@ mod tests {
         let session_manager = SessionManager::new();
         let session_key: SessionId = "test-session-2".to_string();
         let (proxy_tx, mut proxy_rx) = mpsc::unbounded_channel();
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
         session_manager.register_session(
             session_key.clone(),
             proxy_tx,
@@ -465,6 +504,7 @@ mod tests {
         handle_file_upload_chunk(
             &session_manager,
             &Some(session_key.clone()),
+            &client_tx,
             &mut pending_uploads,
             upload_id.clone(),
             0,
