@@ -74,6 +74,7 @@ impl SessionManager {
             .map(|e| (e.key().clone(), e.value().gen))
             .collect();
 
+        let mut proxies_evicted = 0;
         for (key, gen) in &stale_sessions {
             if let Some(conn) = self.sessions.get(key) {
                 if conn.gen != *gen {
@@ -81,11 +82,13 @@ impl SessionManager {
                 }
                 let cancel = conn.cancel.clone();
                 drop(conn);
-                warn!(
-                    "Liveness sweep: proxy connection for session {} silent > {}s; evicting",
-                    key, proxy_deadline_secs
-                );
-                self.evict_dead_connection(key, *gen, &cancel);
+                if self.evict_dead_connection(key, *gen, &cancel) {
+                    warn!(
+                        "Liveness sweep: proxy connection for session {} silent > {}s; evicted",
+                        key, proxy_deadline_secs
+                    );
+                    proxies_evicted += 1;
+                }
             }
         }
 
@@ -99,6 +102,7 @@ impl SessionManager {
             .map(|e| (*e.key(), e.value().gen))
             .collect();
 
+        let mut launchers_evicted = 0;
         for (id, gen) in &stale_launchers {
             if let Some(conn) = self.launchers.get(id) {
                 if conn.gen != *gen {
@@ -106,16 +110,21 @@ impl SessionManager {
                 }
                 let cancel = conn.cancel.clone();
                 drop(conn);
-                warn!(
-                    "Liveness sweep: launcher {} silent > {}s; evicting",
-                    id, launcher_deadline_secs
-                );
-                self.unregister_launcher(id, Some(*gen));
+                if self.unregister_launcher(id, Some(*gen)) {
+                    warn!(
+                        "Liveness sweep: launcher {} silent > {}s; evicted",
+                        id, launcher_deadline_secs
+                    );
+                    launchers_evicted += 1;
+                }
                 cancel.cancel();
             }
         }
 
-        (stale_sessions.len(), stale_launchers.len())
+        // Real evictions, not stale candidates — a candidate can be spared
+        // by the gen re-check when it reconnected mid-sweep, and incident
+        // forensics should never overcount.
+        (proxies_evicted, launchers_evicted)
     }
 }
 

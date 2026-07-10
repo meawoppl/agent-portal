@@ -86,8 +86,8 @@ impl SessionManager {
     /// Unregister a launcher. If `gen` is provided, only removes the entry
     /// when it matches — a reconnect reuses the same `launcher_id`, so the
     /// old socket's cleanup must not remove the new socket's registration.
-    /// Pass `None` to force removal.
-    pub fn unregister_launcher(&self, launcher_id: &Uuid, gen: Option<u64>) {
+    /// Pass `None` to force removal. Returns whether an entry was removed.
+    pub fn unregister_launcher(&self, launcher_id: &Uuid, gen: Option<u64>) -> bool {
         let removed = match gen {
             Some(expected) => self
                 .launchers
@@ -104,6 +104,7 @@ impl SessionManager {
                 let dedup_key = (connection.user_id, connection.hostname);
                 self.launcher_dedup
                     .remove_if(&dedup_key, |_, claimed_by| claimed_by == launcher_id);
+                true
             }
             None => {
                 if gen.is_some() {
@@ -112,6 +113,7 @@ impl SessionManager {
                         launcher_id
                     );
                 }
+                false
             }
         }
     }
