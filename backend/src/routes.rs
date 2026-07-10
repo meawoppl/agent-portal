@@ -1,10 +1,10 @@
 use axum::{
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use governor::clock::QuantaInstant;
 use governor::middleware::NoOpMiddleware;
-use shared::WsEndpoint;
+use shared::{api::HealthResponse, WsEndpoint};
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -106,7 +106,15 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
 
     Router::new()
         // Health check endpoint
-        .route("/api/health", get(|| async { "OK" }))
+        .route(
+            "/api/health",
+            get(|| async {
+                Json(HealthResponse {
+                    status: "OK".to_string(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                })
+            }),
+        )
         // App configuration (public, no auth required)
         .route("/api/config", get(handlers::config::get_config))
         // Session API routes
