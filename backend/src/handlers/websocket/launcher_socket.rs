@@ -39,6 +39,27 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     info!("Launcher authenticated as {} ({})", email, uid);
                                     uid
                                 }
+                                Err(crate::errors::AppError::ServiceUnavailable(_)) => {
+                                    // Transient DB failure while checking the
+                                    // token — the token was never evaluated.
+                                    // Must not be fatal: a fatal AuthFailed
+                                    // parks the launcher for a deploy blip
+                                    // (#1264). Non-fatal → normal reconnect
+                                    // backoff.
+                                    let _ = ws_sender
+                                        .send(ServerToLauncher::LauncherRegisterAck {
+                                            success: false,
+                                            fatal: false,
+                                            launcher_id,
+                                            error: Some(
+                                                "Server temporarily unavailable - retrying"
+                                                    .to_string(),
+                                            ),
+                                            reject_reason: None,
+                                        })
+                                        .await;
+                                    return;
+                                }
                                 Err(_) => {
                                     if app_state.dev_mode {
                                         get_dev_user_id(&app_state)

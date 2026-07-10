@@ -270,14 +270,27 @@ pub fn verify_and_get_user(
             AppError::Unauthorized
         })?;
 
-    // Then check database for revocation
+    // Then check database for revocation.
+    //
+    // Only `NotFound` means the token is bad. Any other Diesel error is a
+    // transient infrastructure failure (connection reset, pool timeout,
+    // statement timeout — common during deploys), and MUST NOT be reported
+    // as Unauthorized: clients treat auth rejection as fatal (launchers
+    // park, proxies stop reconnecting), so conflating the two turns a DB
+    // blip into a fleet-wide manual-restart event. See #1264.
     let token_hash = hash_token(token);
     let db_token: ProxyAuthToken = proxy_auth_tokens::table
         .filter(proxy_auth_tokens::token_hash.eq(&token_hash))
         .first(conn)
-        .map_err(|_| {
-            error!("Token not found in database");
-            AppError::Unauthorized
+        .map_err(|e| match e {
+            diesel::result::Error::NotFound => {
+                error!("Token not found in database");
+                AppError::Unauthorized
+            }
+            other => {
+                error!("Transient DB error verifying token: {}", other);
+                AppError::ServiceUnavailable("token verification unavailable")
+            }
         })?;
 
     // Check if revoked
@@ -299,10 +312,20 @@ pub fn verify_and_get_user(
 
     // Check if user is banned
     use crate::schema::users;
-    let user: crate::models::User = users::table.find(claims.sub).first(conn).map_err(|_| {
-        error!("User not found for token");
-        AppError::Unauthorized
-    })?;
+    let user: crate::models::User =
+        users::table
+            .find(claims.sub)
+            .first(conn)
+            .map_err(|e| match e {
+                diesel::result::Error::NotFound => {
+                    error!("User not found for token");
+                    AppError::Unauthorized
+                }
+                other => {
+                    error!("Transient DB error loading token user: {}", other);
+                    AppError::ServiceUnavailable("token verification unavailable")
+                }
+            })?;
 
     if user.disabled {
         error!("Token belongs to banned user: {}", user.email);
