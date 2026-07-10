@@ -103,7 +103,8 @@ pub struct ProxyTokenInfo {
     pub name: String,
     pub created_at: String,
     pub last_used_at: Option<String>,
-    /// `None` for non-expiring tokens (launch/launcher tokens). See #932.
+    /// `None` for rows without a fixed expiry; launcher credentials may be
+    /// rotated to expiring replacements after registration.
     pub expires_at: Option<String>,
     pub revoked: bool,
 }

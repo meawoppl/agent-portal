@@ -483,8 +483,9 @@ pub async fn complete_device_flow(
         error!("Failed to get database connection: {}", e);
     })?;
 
-    // Device-flow tokens (used by launchers and CLI proxies) never expire;
-    // revocation governs their lifetime. See #932.
+    // Initial device-flow tokens have no fixed expiry so freshly authenticated
+    // CLIs can start immediately. Launchers rotate these to expiring
+    // credentials on websocket registration (#1237).
     let name = format!(
         "Device auth {}",
         chrono::Utc::now().format("%Y-%m-%d %H:%M")

@@ -10,14 +10,169 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::LauncherConnection;
-use crate::AppState;
+use crate::{
+    handlers::proxy_tokens::{
+        issue_proxy_token, verify_and_get_user_with_token, TokenPersist, VerifiedProxyToken,
+    },
+    schema::proxy_auth_tokens,
+    AppState,
+};
+
+const LAUNCHER_TOKEN_TTL_DAYS: u32 = 30;
+const TOKEN_REFRESH_GRACE_MINUTES: i64 = 10;
+const TOKEN_REFRESH_MINT_COOLDOWN_HOURS: i64 = 1;
+
+struct PendingTokenRefresh {
+    old_token_id: Uuid,
+    auth_token: String,
+}
+
+fn launcher_token_needs_refresh(
+    created_at: chrono::NaiveDateTime,
+    expires_at: Option<chrono::NaiveDateTime>,
+    now: chrono::NaiveDateTime,
+) -> bool {
+    let Some(expires_at) = expires_at else {
+        return true;
+    };
+
+    let lifetime_secs = expires_at.signed_duration_since(created_at).num_seconds();
+    if lifetime_secs <= 0 {
+        return true;
+    }
+
+    let age_secs = now.signed_duration_since(created_at).num_seconds().max(0);
+    age_secs >= lifetime_secs / 2
+}
+
+fn token_grace_expires_at(now: chrono::NaiveDateTime) -> chrono::NaiveDateTime {
+    now + chrono::Duration::minutes(TOKEN_REFRESH_GRACE_MINUTES)
+}
+
+fn recent_refresh_cutoff(now: chrono::NaiveDateTime) -> chrono::NaiveDateTime {
+    now - chrono::Duration::hours(TOKEN_REFRESH_MINT_COOLDOWN_HOURS)
+}
+
+fn maybe_issue_launcher_token_refresh(
+    app_state: &AppState,
+    conn: &mut diesel::PgConnection,
+    verified: &VerifiedProxyToken,
+) -> Option<PendingTokenRefresh> {
+    let now = chrono::Utc::now().naive_utc();
+    if !launcher_token_needs_refresh(verified.token.created_at, verified.token.expires_at, now) {
+        return None;
+    }
+
+    match launcher_recently_minted_same_name_token(conn, verified, now) {
+        Ok(true) => {
+            info!(
+                "Skipping launcher token refresh for user {} token {}: same-name token minted within {}h",
+                verified.user_id,
+                verified.token.id,
+                TOKEN_REFRESH_MINT_COOLDOWN_HOURS
+            );
+            return None;
+        }
+        Ok(false) => {}
+        Err(e) => {
+            warn!(
+                "Could not check launcher token refresh cooldown for user {} token {}: {}",
+                verified.user_id, verified.token.id, e
+            );
+            return None;
+        }
+    }
+
+    match issue_proxy_token(
+        conn,
+        app_state.jwt_secret.as_bytes(),
+        verified.user_id,
+        TokenPersist::Create {
+            name: &verified.token.name,
+        },
+        Some(LAUNCHER_TOKEN_TTL_DAYS),
+    ) {
+        Ok(issued) => {
+            info!(
+                "Issued refreshed launcher token row {} for user {} (old row {})",
+                issued.row_id, verified.user_id, verified.token.id
+            );
+            Some(PendingTokenRefresh {
+                old_token_id: verified.token.id,
+                auth_token: issued.token,
+            })
+        }
+        Err(e) => {
+            warn!(
+                "Launcher token refresh skipped for user {} token {}: {:?}",
+                verified.user_id, verified.token.id, e
+            );
+            None
+        }
+    }
+}
+
+fn launcher_recently_minted_same_name_token(
+    conn: &mut diesel::PgConnection,
+    verified: &VerifiedProxyToken,
+    now: chrono::NaiveDateTime,
+) -> Result<bool, diesel::result::Error> {
+    let cutoff = recent_refresh_cutoff(now);
+    proxy_auth_tokens::table
+        .filter(proxy_auth_tokens::user_id.eq(verified.user_id))
+        .filter(proxy_auth_tokens::name.eq(&verified.token.name))
+        .filter(proxy_auth_tokens::revoked.eq(false))
+        .filter(proxy_auth_tokens::id.ne(verified.token.id))
+        .filter(proxy_auth_tokens::created_at.ge(cutoff))
+        .select(proxy_auth_tokens::id)
+        .first::<Uuid>(conn)
+        .optional()
+        .map(|row| row.is_some())
+}
+
+fn grace_old_launcher_token(app_state: &AppState, token_id: Uuid) {
+    let Ok(mut conn) = app_state.db_pool.get() else {
+        warn!(
+            "Could not grace old launcher token {}: database pool unavailable",
+            token_id
+        );
+        return;
+    };
+    let expires_at = token_grace_expires_at(chrono::Utc::now().naive_utc());
+    match diesel::update(
+        proxy_auth_tokens::table
+            .filter(proxy_auth_tokens::id.eq(token_id))
+            .filter(proxy_auth_tokens::revoked.eq(false)),
+    )
+    .set(proxy_auth_tokens::expires_at.eq(Some(expires_at)))
+    .execute(&mut conn)
+    {
+        Ok(0) => warn!(
+            "Launcher token refresh ack referenced unknown/revoked token {}",
+            token_id
+        ),
+        Ok(_) => info!(
+            "Old launcher token {} now expires after {} minute grace",
+            token_id, TOKEN_REFRESH_GRACE_MINUTES
+        ),
+        Err(e) => warn!("Failed to grace old launcher token {}: {}", token_id, e),
+    }
+}
 
 pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>) {
     let conn = ws_bridge::server::into_connection::<LauncherEndpoint>(socket);
     let (mut ws_sender, mut ws_receiver) = conn.split();
 
     // Wait for LauncherRegister message
-    let (launcher_id, launcher_name, hostname, user_id, working_directory, version) = loop {
+    let (
+        launcher_id,
+        launcher_name,
+        hostname,
+        user_id,
+        working_directory,
+        version,
+        pending_token_refresh,
+    ) = loop {
         match ws_receiver.recv().await {
             Some(Ok(LauncherToServer::LauncherRegister {
                 launcher_id,
@@ -27,17 +182,22 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 working_directory,
                 version,
             })) => {
-                // Authenticate. Launcher tokens never expire (see #932), so
-                // there is no expiry to track here.
-                let user_id = if let Some(ref token) = auth_token {
+                // Authenticate and, for live launcher credentials, opportunistically
+                // rotate legacy non-expiring or half-lived tokens while the
+                // websocket is healthy (#1237 part 2).
+                let (user_id, pending_token_refresh) = if let Some(ref token) = auth_token {
                     match app_state.db_pool.get() {
                         Ok(mut conn) => {
-                            match crate::handlers::proxy_tokens::verify_and_get_user(
-                                &app_state, &mut conn, token,
-                            ) {
-                                Ok((uid, email)) => {
-                                    info!("Launcher authenticated as {} ({})", email, uid);
-                                    uid
+                            match verify_and_get_user_with_token(&app_state, &mut conn, token) {
+                                Ok(verified) => {
+                                    info!(
+                                        "Launcher authenticated as {} ({})",
+                                        verified.email, verified.user_id
+                                    );
+                                    let refresh = maybe_issue_launcher_token_refresh(
+                                        &app_state, &mut conn, &verified,
+                                    );
+                                    (verified.user_id, refresh)
                                 }
                                 Err(crate::errors::AppError::ServiceUnavailable(_)) => {
                                     // Transient DB failure while checking the
@@ -62,7 +222,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                 }
                                 Err(_) => {
                                     if app_state.dev_mode {
-                                        get_dev_user_id(&app_state)
+                                        (get_dev_user_id(&app_state), None)
                                     } else {
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
@@ -94,7 +254,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         }
                     }
                 } else if app_state.dev_mode {
-                    get_dev_user_id(&app_state)
+                    (get_dev_user_id(&app_state), None)
                 } else {
                     let _ = ws_sender
                         .send(ServerToLauncher::LauncherRegisterAck {
@@ -115,6 +275,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                     user_id,
                     working_directory,
                     version,
+                    pending_token_refresh,
                 );
             }
             Some(Ok(_)) => continue,
@@ -221,6 +382,20 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         })
         .await;
 
+    let mut token_refresh_old_id = pending_token_refresh
+        .as_ref()
+        .map(|refresh| refresh.old_token_id);
+    if let Some(refresh) = pending_token_refresh {
+        if tx_for_sync
+            .send(ServerToLauncher::TokenRefresh {
+                auth_token: refresh.auth_token,
+            })
+            .is_err()
+        {
+            warn!("Failed to queue token refresh for launcher {}", launcher_id);
+        }
+    }
+
     info!(
         "Launcher '{}' registered for user {}",
         launcher_name, user_id
@@ -251,10 +426,17 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         // Liveness stamp: any decodable inbound frame proves
                         // the transport is alive (see liveness.rs).
                         app_state.session_manager.touch_launcher(&launcher_id);
+                        let token_refresh_ack_old_id =
+                            if matches!(&msg, LauncherToServer::TokenRefreshAck) {
+                                token_refresh_old_id.take()
+                            } else {
+                                token_refresh_old_id
+                            };
                         handle_launcher_message(
                             msg,
                             launcher_id,
                             user_id,
+                            token_refresh_ack_old_id,
                             &app_state,
                         );
                     }
@@ -345,9 +527,20 @@ fn handle_launcher_message(
     msg: LauncherToServer,
     launcher_id: Uuid,
     user_id: Uuid,
+    token_refresh_old_id: Option<Uuid>,
     app_state: &AppState,
 ) {
     match msg {
+        LauncherToServer::TokenRefreshAck => {
+            if let Some(old_token_id) = token_refresh_old_id {
+                grace_old_launcher_token(app_state, old_token_id);
+            } else {
+                warn!(
+                    "Launcher {} sent TokenRefreshAck without a pending refresh",
+                    launcher_id
+                );
+            }
+        }
         LauncherToServer::LaunchSessionResult {
             request_id,
             success,
@@ -961,7 +1154,9 @@ fn get_dev_user_id(app_state: &AppState) -> Uuid {
 
 #[cfg(test)]
 mod tests {
-    use super::launch_backoff;
+    use super::{
+        launch_backoff, launcher_token_needs_refresh, recent_refresh_cutoff, token_grace_expires_at,
+    };
 
     #[test]
     fn backoff_is_zero_until_first_failure() {
@@ -988,5 +1183,73 @@ mod tests {
         // cap rather than overflowing the left-shift.
         assert_eq!(launch_backoff(1000).num_seconds(), 900);
         assert_eq!(launch_backoff(i32::MAX).num_seconds(), 900);
+    }
+
+    #[test]
+    fn launcher_token_refreshes_legacy_non_expiring_tokens() {
+        let created = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let now = created + chrono::Duration::days(1);
+
+        assert!(launcher_token_needs_refresh(created, None, now));
+    }
+
+    #[test]
+    fn launcher_token_refreshes_after_half_life() {
+        let created = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let expires = created + chrono::Duration::days(30);
+
+        assert!(!launcher_token_needs_refresh(
+            created,
+            Some(expires),
+            created + chrono::Duration::days(14)
+        ));
+        assert!(launcher_token_needs_refresh(
+            created,
+            Some(expires),
+            created + chrono::Duration::days(15)
+        ));
+    }
+
+    #[test]
+    fn launcher_token_refreshes_malformed_expiry() {
+        let created = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+
+        assert!(launcher_token_needs_refresh(
+            created,
+            Some(created),
+            created + chrono::Duration::seconds(1)
+        ));
+    }
+
+    #[test]
+    fn token_refresh_ack_graces_old_token_for_ten_minutes() {
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+
+        assert_eq!(
+            token_grace_expires_at(now),
+            now + chrono::Duration::minutes(10)
+        );
+    }
+
+    #[test]
+    fn token_refresh_cooldown_looks_back_one_hour() {
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+
+        assert_eq!(recent_refresh_cutoff(now), now - chrono::Duration::hours(1));
     }
 }

@@ -176,8 +176,9 @@ pub struct ProxyAuthToken {
     pub token_hash: String,
     pub created_at: NaiveDateTime,
     pub last_used_at: Option<NaiveDateTime>,
-    /// `None` means the token never expires (launch/launcher tokens). User
-    /// dashboard tokens still carry an explicit expiry. See #932.
+    /// `None` means the token has no row-level expiry. Session launch tokens
+    /// track their session lifetime; live launcher credentials are rotated to
+    /// expiring replacements after registration.
     pub expires_at: Option<NaiveDateTime>,
     pub revoked: bool,
     /// Session whose proxy holds this token, if it is a launch token. Used to
