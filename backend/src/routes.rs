@@ -61,11 +61,19 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
     // binding is consumed by `.with_state` below.
     let app_state_for_forward_gate = app_state.clone();
 
-    // Rate-limited device flow auth routes
-    let auth_device_routes = Router::new()
+    // Rate-limited device-code creation. Keep this strict: creating a code is
+    // user-visible work and should not be spammed.
+    let auth_device_code_routes = Router::new()
         .route(AUTH_DEVICE_CODE, post(handlers::device_flow::device_code))
-        .route(AUTH_DEVICE_POLL, post(handlers::device_flow::device_poll))
         .layer(rate_limit(6, 10))
+        .with_state(app_state.clone());
+
+    // Rate-limited device polling. The CLI polls every 5s, and this limiter is
+    // per-IP, so it must sustain normal polling plus a few machines behind one
+    // NAT without draining the burst during a slow browser approval (#1047).
+    let auth_device_poll_routes = Router::new()
+        .route(AUTH_DEVICE_POLL, post(handlers::device_flow::device_poll))
+        .layer(rate_limit(2, 30))
         .with_state(app_state.clone());
 
     // Rate-limited browser auth routes. These endpoints either initiate OAuth
@@ -309,7 +317,8 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         // Add single unified state
         .with_state(app_state)
         // Merge rate-limited route groups
-        .merge(auth_device_routes)
+        .merge(auth_device_code_routes)
+        .merge(auth_device_poll_routes)
         .merge(auth_login_routes)
         .merge(auth_device_action_routes)
         .merge(download_routes)

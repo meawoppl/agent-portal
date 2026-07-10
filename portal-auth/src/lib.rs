@@ -1,5 +1,9 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
+use reqwest::{
+    header::{HeaderMap, RETRY_AFTER},
+    StatusCode,
+};
 use shared::api::{DeviceCodeRequest, DeviceCodeResponse, DeviceFlowPollRequest};
 use shared::DevicePollResponse;
 use std::time::Duration;
@@ -17,6 +21,24 @@ pub struct DeviceFlowResult {
 pub fn ws_to_http(url: &str) -> String {
     url.replace("ws://", "http://")
         .replace("wss://", "https://")
+}
+
+fn retry_after_delay(headers: &HeaderMap, interval: Duration) -> Duration {
+    headers
+        .get(RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(interval)
+        .max(interval)
+}
+
+fn poll_retry_delay(
+    status: StatusCode,
+    headers: &HeaderMap,
+    interval: Duration,
+) -> Option<Duration> {
+    (status == StatusCode::TOO_MANY_REQUESTS).then(|| retry_after_delay(headers, interval))
 }
 
 /// Run the OAuth device flow against a portal backend.
@@ -132,6 +154,10 @@ pub async fn device_flow_login(
 
         if !poll_http_response.status().is_success() {
             let status = poll_http_response.status();
+            if let Some(delay) = poll_retry_delay(status, poll_http_response.headers(), interval) {
+                sleep(delay).await;
+                continue;
+            }
             let body = poll_http_response.text().await.unwrap_or_default();
             anyhow::bail!("Poll request failed with status {}: {}", status, body);
         }
@@ -165,5 +191,71 @@ pub async fn device_flow_login(
                 anyhow::bail!("Authentication was denied");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::header::HeaderValue;
+
+    #[test]
+    fn poll_retry_delay_retries_429_for_poll_interval() {
+        let headers = HeaderMap::new();
+        assert_eq!(
+            poll_retry_delay(
+                StatusCode::TOO_MANY_REQUESTS,
+                &headers,
+                Duration::from_secs(5)
+            ),
+            Some(Duration::from_secs(5))
+        );
+    }
+
+    #[test]
+    fn poll_retry_delay_honors_longer_retry_after() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, HeaderValue::from_static("17"));
+        assert_eq!(
+            poll_retry_delay(
+                StatusCode::TOO_MANY_REQUESTS,
+                &headers,
+                Duration::from_secs(5)
+            ),
+            Some(Duration::from_secs(17))
+        );
+    }
+
+    #[test]
+    fn poll_retry_delay_rejects_short_or_invalid_retry_after() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, HeaderValue::from_static("0"));
+        assert_eq!(
+            poll_retry_delay(
+                StatusCode::TOO_MANY_REQUESTS,
+                &headers,
+                Duration::from_secs(5)
+            ),
+            Some(Duration::from_secs(5))
+        );
+
+        headers.insert(RETRY_AFTER, HeaderValue::from_static("not-seconds"));
+        assert_eq!(
+            poll_retry_delay(
+                StatusCode::TOO_MANY_REQUESTS,
+                &headers,
+                Duration::from_secs(5)
+            ),
+            Some(Duration::from_secs(5))
+        );
+    }
+
+    #[test]
+    fn poll_retry_delay_does_not_retry_other_statuses() {
+        let headers = HeaderMap::new();
+        assert_eq!(
+            poll_retry_delay(StatusCode::BAD_GATEWAY, &headers, Duration::from_secs(5)),
+            None
+        );
     }
 }
