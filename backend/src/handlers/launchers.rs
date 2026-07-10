@@ -374,10 +374,9 @@ pub async fn probe_agents(
 mod tests {
     use super::*;
     use crate::handlers::websocket::LauncherConnection;
-    use tokio::sync::mpsc;
 
     fn launcher_for(user_id: Uuid, hostname: &str) -> LauncherConnection {
-        let (sender, _rx) = mpsc::unbounded_channel();
+        let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
             sender,
             launcher_name: format!("launcher-{}", hostname),

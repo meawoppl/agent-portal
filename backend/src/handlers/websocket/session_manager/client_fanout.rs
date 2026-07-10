@@ -98,13 +98,12 @@ impl SessionManager {
 mod tests {
     use super::super::test_support::make_client_msg;
     use super::*;
-    use tokio::sync::mpsc;
 
     #[test]
     fn broadcast_to_web_clients() {
         let mgr = SessionManager::new();
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx1, mut rx1) = crate::handlers::websocket::conn_channel(64);
+        let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
 
         mgr.add_web_client("s1".into(), tx1);
         mgr.add_web_client("s1".into(), tx2);
@@ -124,8 +123,8 @@ mod tests {
     #[test]
     fn broadcast_removes_closed_clients() {
         let mgr = SessionManager::new();
-        let (tx1, rx1) = mpsc::unbounded_channel();
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx1, rx1) = crate::handlers::websocket::conn_channel(64);
+        let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
 
         mgr.add_web_client("s1".into(), tx1);
         mgr.add_web_client("s1".into(), tx2);
@@ -149,9 +148,9 @@ mod tests {
         // closed channel in that last slot still prunes correctly and the
         // open clients before it were already served.
         let mgr = SessionManager::new();
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
-        let (tx3, rx3) = mpsc::unbounded_channel();
+        let (tx1, mut rx1) = crate::handlers::websocket::conn_channel(64);
+        let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
+        let (tx3, rx3) = crate::handlers::websocket::conn_channel(64);
 
         mgr.add_web_client("s1".into(), tx1);
         mgr.add_web_client("s1".into(), tx2);
@@ -177,7 +176,7 @@ mod tests {
     fn broadcast_to_user() {
         let mgr = SessionManager::new();
         let user_id = Uuid::new_v4();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::handlers::websocket::conn_channel(64);
 
         mgr.add_user_client(user_id, tx);
         mgr.broadcast_to_user(&user_id, make_client_msg());
@@ -191,9 +190,9 @@ mod tests {
     #[test]
     fn broadcast_shutdown_reaches_all() {
         let mgr = SessionManager::new();
-        let (session_tx, mut session_rx) = mpsc::unbounded_channel();
-        let (web_tx, mut web_rx) = mpsc::unbounded_channel();
-        let (user_tx, mut user_rx) = mpsc::unbounded_channel();
+        let (session_tx, mut session_rx) = crate::handlers::websocket::conn_channel(64);
+        let (web_tx, mut web_rx) = crate::handlers::websocket::conn_channel(64);
+        let (user_tx, mut user_rx) = crate::handlers::websocket::conn_channel(64);
 
         mgr.register_session(
             "s1".into(),
@@ -224,8 +223,8 @@ mod tests {
         let mgr = SessionManager::new();
         let id1 = Uuid::new_v4();
         let id2 = Uuid::new_v4();
-        let (tx1, _rx1) = mpsc::unbounded_channel();
-        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let (tx1, _rx1) = crate::handlers::websocket::conn_channel(64);
+        let (tx2, _rx2) = crate::handlers::websocket::conn_channel(64);
 
         mgr.add_user_client(id1, tx1);
         mgr.add_user_client(id2, tx2);

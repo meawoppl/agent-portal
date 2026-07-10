@@ -1,13 +1,12 @@
 use shared::ServerToLauncher;
 use std::sync::atomic::Ordering;
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::SessionManager;
 
-pub type LauncherSender = mpsc::UnboundedSender<ServerToLauncher>;
+pub type LauncherSender = super::ConnSender<ServerToLauncher>;
 
 /// A connected launcher daemon.
 ///
@@ -217,7 +216,7 @@ mod tests {
     use super::*;
 
     fn make_launcher_connection(user_id: Uuid, hostname: &str) -> LauncherConnection {
-        let (sender, _rx) = mpsc::unbounded_channel();
+        let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
             sender,
             launcher_name: format!("launcher-{}", hostname),
@@ -328,7 +327,7 @@ mod tests {
         let user_id = Uuid::new_v4();
         let id = Uuid::new_v4();
 
-        let (sender, rx) = mpsc::unbounded_channel();
+        let (sender, rx) = crate::handlers::websocket::conn_channel(64);
         let cancel = CancellationToken::new();
         let conn = LauncherConnection {
             sender,
@@ -400,7 +399,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 let launcher_id = Uuid::new_v4();
                 let conn = {
-                    let (sender, _rx) = mpsc::unbounded_channel();
+                    let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
                     LauncherConnection {
                         sender,
                         launcher_name: format!("launcher-{}", launcher_id),

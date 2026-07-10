@@ -44,8 +44,55 @@ use tunnel_client::TunnelStreamMap;
 pub use tunnel_client::{TunnelError, TunnelIn};
 
 pub type SessionId = String;
-pub type ProxySender = mpsc::UnboundedSender<ServerToProxy>;
-pub type WebClientSender = mpsc::UnboundedSender<ServerToClient>;
+pub type ProxySender = ConnSender<ServerToProxy>;
+pub type WebClientSender = ConnSender<ServerToClient>;
+
+/// Bounded, non-blocking sender for per-connection outbound channels
+/// (#939 phase 5).
+///
+/// Overflow is deliberately indistinguishable from a closed channel: the
+/// caller's existing send-failure handling evicts the connection and
+/// closes its socket (#1256 machinery), because a peer that can't drain
+/// its queue within the capacity budget is operationally identical to a
+/// wedged one — and an unbounded queue behind it grows memory without
+/// limit, which is the failure mode this bounds.
+pub struct ConnSender<T>(mpsc::Sender<T>);
+
+// Manual impl: `#[derive(Clone)]` would needlessly require `T: Clone`.
+impl<T> Clone for ConnSender<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> ConnSender<T> {
+    pub fn send(&self, value: T) -> Result<(), mpsc::error::SendError<T>> {
+        self.0.try_send(value).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(v) => mpsc::error::SendError(v),
+            mpsc::error::TrySendError::Closed(v) => mpsc::error::SendError(v),
+        })
+    }
+}
+
+/// Construct a bounded per-connection channel (see [`ConnSender`]).
+pub fn conn_channel<T>(capacity: usize) -> (ConnSender<T>, mpsc::Receiver<T>) {
+    let (tx, rx) = mpsc::channel(capacity);
+    (ConnSender(tx), rx)
+}
+
+/// Proxy outbound capacity. Sized so a full maximum-size file upload
+/// (PORTAL_MAX_IMAGE_MB=10MiB at ~1KiB decoded per chunk ≈ 10,240 frames)
+/// fits even when the proxy's link is much slower than the uploader's —
+/// the chunk fan-in is the largest legitimate burst this channel carries.
+pub const PROXY_CHANNEL_CAPACITY: usize = 16 * 1024;
+
+/// Launcher outbound capacity: reconcile/launch/schedule traffic is a few
+/// frames per heartbeat; this is orders of magnitude above legitimate use.
+pub const LAUNCHER_CHANNEL_CAPACITY: usize = 1024;
+
+/// Web-client outbound capacity: streamed agent output is paced by the
+/// agent; history replay is a single batched frame.
+pub const WEB_CLIENT_CHANNEL_CAPACITY: usize = 4096;
 
 /// A live proxy connection. `gen` identifies THIS socket (as opposed to a
 /// reconnect for the same session) — every registry mutation is guarded on

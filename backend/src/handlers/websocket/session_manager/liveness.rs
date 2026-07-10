@@ -133,7 +133,6 @@ mod tests {
     use super::super::test_support::make_heartbeat;
     use super::super::LauncherConnection;
     use super::*;
-    use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
     fn launcher_conn(
@@ -141,7 +140,7 @@ mod tests {
         hostname: &str,
         cancel: CancellationToken,
     ) -> LauncherConnection {
-        let (sender, rx) = mpsc::unbounded_channel();
+        let (sender, rx) = crate::handlers::websocket::conn_channel(64);
         // Keep the channel open so eviction is attributable to liveness,
         // not to a dead channel.
         std::mem::forget(rx);
@@ -164,11 +163,11 @@ mod tests {
         let mgr = SessionManager::new();
 
         // Fresh proxy connection.
-        let (tx_fresh, _rx_fresh) = mpsc::unbounded_channel();
+        let (tx_fresh, _rx_fresh) = crate::handlers::websocket::conn_channel(64);
         mgr.register_session("fresh".into(), tx_fresh, CancellationToken::new());
 
         // Silent proxy connection: backdate its last_seen.
-        let (tx_stale, mut rx_stale) = mpsc::unbounded_channel();
+        let (tx_stale, mut rx_stale) = crate::handlers::websocket::conn_channel(64);
         let stale_cancel = CancellationToken::new();
         mgr.register_session("stale".into(), tx_stale, stale_cancel.clone());
         mgr.sessions
@@ -211,7 +210,7 @@ mod tests {
     #[test]
     fn touch_resets_the_clock() {
         let mgr = SessionManager::new();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = crate::handlers::websocket::conn_channel(64);
         mgr.register_session("s1".into(), tx, CancellationToken::new());
         mgr.sessions
             .get("s1")
