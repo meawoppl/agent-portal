@@ -203,6 +203,7 @@ fn handle_web_client_message(
             handle_file_upload_start(
                 session_manager,
                 session_key,
+                tx,
                 pending_uploads,
                 upload_id,
                 filename,
@@ -230,6 +231,7 @@ fn handle_web_client_message(
             handle_file_upload_chunk(
                 session_manager,
                 session_key,
+                tx,
                 pending_uploads,
                 upload_id,
                 chunk_index,

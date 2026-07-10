@@ -52,6 +52,9 @@ pub enum WsEvent {
     /// The session's port-forward set changed; the view refetches
     /// `GET /api/sessions/{id}/forwards` (docs/PORT_FORWARDING.md).
     ForwardsChanged,
+    /// Terminal outcome of a file upload (#939 phase 4). The view gates the
+    /// prompt referencing the file on this.
+    UploadResult(shared::FileUploadResultFields),
 }
 
 /// Connect to WebSocket and start receiving messages.
@@ -173,6 +176,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
                 input,
                 permission_suggestions,
             }));
+        }
+        ServerToClient::FileUploadResult(fields) => {
+            on_event.emit(WsEvent::UploadResult(fields));
         }
         ServerToClient::Error { message } => {
             let error_msg = ErrorMessage::new(message);
@@ -587,6 +593,7 @@ mod tests {
             WsEvent::TurnMetrics(_) => "TurnMetrics",
             WsEvent::InputProgress { .. } => "InputProgress",
             WsEvent::ForwardsChanged => "ForwardsChanged",
+            WsEvent::UploadResult(_) => "UploadResult",
         }
     }
 }

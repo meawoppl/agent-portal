@@ -46,9 +46,14 @@ pub struct InputBarProps {
     /// and emits the optimistic local echo.
     pub on_send_text: Callback<(String, SendMode)>,
     /// Raw WS frame emitted by the bar. Used by the file-upload pipeline
-    /// to stream `FileUploadStart` / `FileUploadChunk` / the combined
-    /// `ClaudeInput` frames.
+    /// to stream `FileUploadStart` / `FileUploadChunk` frames.
     pub on_send_frame: Callback<ClientToServer>,
+    /// The composed upload prompt plus the upload ids it references,
+    /// handed to the parent AFTER all chunks are emitted. The parent holds
+    /// the prompt until every upload commits on the proxy host (#939
+    /// phase 4) — the agent must never be told about a file that isn't
+    /// fully on disk.
+    pub on_upload_prompt: Callback<(String, Vec<String>)>,
     /// Fires once per submit (text or upload) so the parent can bump its
     /// per-session "I sent something" bookkeeping.
     pub on_message_sent: Callback<()>,
@@ -515,9 +520,11 @@ impl InputBar {
 
         let link = ctx.link().clone();
         let on_send_frame = ctx.props().on_send_frame.clone();
+        let on_upload_prompt = ctx.props().on_upload_prompt.clone();
 
         spawn_local(async move {
             let mut uploaded_files: Vec<(String, u64)> = Vec::new();
+            let mut upload_ids: Vec<String> = Vec::new();
             let total_files = files.len();
 
             for (file_idx, file) in files.iter().enumerate() {
@@ -575,20 +582,17 @@ impl InputBar {
                 }
 
                 uploaded_files.push((file_name, file_size));
+                upload_ids.push(upload_id);
 
                 let overall_progress = (file_idx + 1) as f32 / total_files as f32;
                 link.send_message(InputBarMsg::FileUploadProgress(overall_progress));
             }
 
+            // Hand the composed prompt to the parent instead of sending it:
+            // the parent dispatches it only once every upload above has
+            // committed on the proxy host (#939 phase 4).
             let combined = build_upload_message(&user_input, &uploaded_files);
-            on_send_frame.emit(ClientToServer::AgentInput {
-                content: serde_json::Value::String(combined),
-                send_mode: None,
-                // `SessionView::prepare_outbound_frame` assigns the
-                // browser-side correlation id and optimistic row for every
-                // AgentInput frame, including file-upload summaries.
-                client_msg_id: None,
-            });
+            on_upload_prompt.emit((combined, upload_ids));
 
             link.send_message(InputBarMsg::FileUploaded(
                 uploaded_files
