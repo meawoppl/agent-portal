@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.21
+
+- **Health endpoint reports server version (#1048).** `/api/health` now returns a typed JSON response with the existing `status` plus the backend package `version`, so clients and operators can confirm which server build answered a health check.
+
 ## 2.13.19
 
 - **Forward preview overlay: accent edge + genie open/close.** The floating preview panel gets a contrasting accent-blue border (plus a faint outer ring in the shadow stack) so it reads as a distinct surface instead of blending into the dark page. Opening now **expands the panel out of the chip that launched it** and closing **collapses it back into the chip** — the chip's screen position is captured at click time and becomes the animation's `transform-origin` (0.18s out / 0.16s in, scale+fade). Unmount waits for `animationend` on the out-animation, with an effect-armed 250ms timer fallback for `prefers-reduced-motion` (where the animations are disabled entirely) — armed via `use_effect_with` so the closure holds fresh state handles, and cancelled if the panel reopens mid-close. The `▾` collapse-to-titlebar behavior is unchanged.
