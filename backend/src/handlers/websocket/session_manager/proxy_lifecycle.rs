@@ -39,6 +39,7 @@ impl SessionManager {
                 sender,
                 gen,
                 cancel,
+                last_seen: std::sync::atomic::AtomicU64::new(super::liveness::epoch_secs()),
             },
         );
         gen
@@ -74,23 +75,27 @@ impl SessionManager {
     /// registry entry (generation-guarded) and cancel the socket task so the
     /// transport actually closes and the peer's reconnect logic takes over,
     /// instead of the send failure looping silently forever.
+    /// Returns whether this call actually removed the entry (false when a
+    /// newer generation had already replaced it — the socket is still
+    /// cancelled either way).
     pub(super) fn evict_dead_connection(
         &self,
         session_key: &SessionId,
         gen: u64,
         cancel: &CancellationToken,
-    ) {
-        if self
+    ) -> bool {
+        let removed = self
             .sessions
             .remove_if(session_key, |_, conn| conn.gen == gen)
-            .is_some()
-        {
+            .is_some();
+        if removed {
             warn!(
                 "Evicted dead proxy connection for session {} (gen {}); closing its socket",
                 session_key, gen
             );
         }
         cancel.cancel();
+        removed
     }
 
     /// Check whether the given generation is still the current connection for

@@ -57,6 +57,11 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
         };
         match result {
             Ok(proxy_msg) => {
+                // Liveness stamp: any decodable inbound frame proves the
+                // transport is alive (see liveness.rs).
+                if let Some(key) = session_key.as_ref() {
+                    session_manager.touch_session(key);
+                }
                 let flow = handle_proxy_message(
                     proxy_msg,
                     &app_state,

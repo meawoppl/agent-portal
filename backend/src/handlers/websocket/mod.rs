@@ -13,7 +13,8 @@ mod web_client_socket;
 
 pub use session_manager::{
     ForwardHealth, LauncherConnection, ProxySender, SessionId, SessionManager, TunnelError,
-    TunnelIn, WebClientSender,
+    TunnelIn, WebClientSender, LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS,
+    PROXY_LIVENESS_DEADLINE_SECS,
 };
 
 use axum::{

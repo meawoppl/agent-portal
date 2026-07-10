@@ -27,6 +27,9 @@ pub struct LauncherConnection {
     pub cancel: CancellationToken,
     /// Stamped by `try_register_launcher`; caller-supplied values are ignored.
     pub gen: u64,
+    /// Epoch seconds of the last inbound frame; read by the liveness
+    /// sweeper (see `liveness.rs`). Stamped at registration.
+    pub last_seen: std::sync::atomic::AtomicU64,
 }
 
 impl SessionManager {
@@ -48,6 +51,9 @@ impl SessionManager {
         mut connection: LauncherConnection,
     ) -> Result<u64, String> {
         connection.gen = self.gen_counter.fetch_add(1, Ordering::Relaxed);
+        connection
+            .last_seen
+            .store(super::liveness::epoch_secs(), Ordering::Relaxed);
         let dedup_key = (connection.user_id, connection.hostname.clone());
 
         // Use `entry().or_insert_with` so the duplicate check and the
@@ -80,8 +86,8 @@ impl SessionManager {
     /// Unregister a launcher. If `gen` is provided, only removes the entry
     /// when it matches — a reconnect reuses the same `launcher_id`, so the
     /// old socket's cleanup must not remove the new socket's registration.
-    /// Pass `None` to force removal.
-    pub fn unregister_launcher(&self, launcher_id: &Uuid, gen: Option<u64>) {
+    /// Pass `None` to force removal. Returns whether an entry was removed.
+    pub fn unregister_launcher(&self, launcher_id: &Uuid, gen: Option<u64>) -> bool {
         let removed = match gen {
             Some(expected) => self
                 .launchers
@@ -98,6 +104,7 @@ impl SessionManager {
                 let dedup_key = (connection.user_id, connection.hostname);
                 self.launcher_dedup
                     .remove_if(&dedup_key, |_, claimed_by| claimed_by == launcher_id);
+                true
             }
             None => {
                 if gen.is_some() {
@@ -106,6 +113,7 @@ impl SessionManager {
                         launcher_id
                     );
                 }
+                false
             }
         }
     }
@@ -220,6 +228,7 @@ mod tests {
             version: "test".to_string(),
             cancel: CancellationToken::new(),
             gen: 0,
+            last_seen: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -331,6 +340,7 @@ mod tests {
             version: "test".to_string(),
             cancel: cancel.clone(),
             gen: 0,
+            last_seen: std::sync::atomic::AtomicU64::new(0),
         };
         mgr.try_register_launcher(id, conn).expect("register");
         drop(rx);
@@ -401,6 +411,7 @@ mod tests {
                         version: "test".to_string(),
                         cancel: CancellationToken::new(),
                         gen: 0,
+                        last_seen: std::sync::atomic::AtomicU64::new(0),
                     }
                 };
                 mgr_clone

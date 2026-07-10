@@ -28,6 +28,7 @@ mod correlation;
 mod input_dedup;
 mod input_queue;
 mod launcher_registry;
+mod liveness;
 mod pending_queue;
 mod proxy_lifecycle;
 mod session_tracking;
@@ -35,6 +36,9 @@ mod tunnel_client;
 
 pub(crate) use input_dedup::{DedupVerdict, InputDeliveryState};
 pub use launcher_registry::LauncherConnection;
+pub use liveness::{
+    LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS, PROXY_LIVENESS_DEADLINE_SECS,
+};
 use pending_queue::PendingMessage;
 use tunnel_client::TunnelStreamMap;
 pub use tunnel_client::{TunnelError, TunnelIn};
@@ -52,6 +56,11 @@ pub struct ProxyConnection {
     pub sender: ProxySender,
     pub gen: u64,
     pub cancel: tokio_util::sync::CancellationToken,
+    /// Epoch seconds of the last inbound frame from this connection.
+    /// Stamped by the socket task; read by the liveness sweeper, which
+    /// evicts connections silent past their deadline (proxies heartbeat
+    /// every 1s, so a long silence means a dead transport). #1256.
+    pub last_seen: std::sync::atomic::AtomicU64,
 }
 
 /// Latest probe verdict for a forwarded port, as reported by the proxy's

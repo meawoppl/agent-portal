@@ -193,6 +193,12 @@ pub async fn run() -> anyhow::Result<()> {
         app_state.clone(),
         background::run_expired_token_cleanup,
     );
+    background::spawn_periodic(
+        "connection liveness sweep (every 30 seconds)",
+        Duration::from_secs(handlers::websocket::LIVENESS_SWEEP_INTERVAL_SECS),
+        app_state.clone(),
+        background::run_liveness_sweep,
+    );
 
     // Run the server with graceful shutdown
     let addr = format!("{}:{}", config.host, config.port);

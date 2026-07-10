@@ -388,6 +388,7 @@ mod tests {
             version: "test".to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             gen: 0,
+            last_seen: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
