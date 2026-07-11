@@ -202,6 +202,7 @@ diesel::table! {
         last_launch_attempt_at -> Nullable<Timestamp>,
         launch_lease_until -> Nullable<Timestamp>,
         open_prs -> Jsonb,
+        archived_at -> Nullable<Timestamp>,
     }
 }
 

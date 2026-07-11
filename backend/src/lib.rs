@@ -9,6 +9,7 @@
 //! [`AppState`] and drive [`routes::build_router`] against a real server +
 //! Postgres (#1209 item 1, the E2E WS/protocol harness).
 
+pub mod archive;
 pub mod auth;
 pub mod background;
 pub mod config;
@@ -73,6 +74,8 @@ pub struct AppState {
     /// Authority under which per-forward subdomains are served
     /// (docs/PORT_FORWARDING.md). `None` = forwarding disabled.
     pub forward_domain: Option<String>,
+    /// Long-term session archive runtime (#1258). `None` = disabled.
+    pub archive: Option<Arc<archive::ArchiveRuntime>>,
 }
 
 impl AppState {
@@ -152,6 +155,9 @@ pub async fn run() -> anyhow::Result<()> {
             config.image_store_ttl,
         ),
         forward_domain: config.forward_domain,
+        archive: config
+            .archive
+            .map(|cfg| Arc::new(archive::ArchiveRuntime::new(cfg))),
     });
 
     // Build our application with routes
@@ -199,6 +205,14 @@ pub async fn run() -> anyhow::Result<()> {
         app_state.clone(),
         background::run_liveness_sweep,
     );
+    if app_state.archive.is_some() {
+        background::spawn_periodic(
+            "session archive sweep (every 5 minutes)",
+            Duration::from_secs(archive::ARCHIVE_SWEEP_INTERVAL_SECS),
+            app_state.clone(),
+            background::run_archive_sweep,
+        );
+    }
 
     // Run the server with graceful shutdown
     let addr = format!("{}:{}", config.host, config.port);

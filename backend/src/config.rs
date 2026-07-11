@@ -156,6 +156,9 @@ pub struct ServerConfig {
     /// Authority (host, optionally `:port`) under which per-forward subdomains
     /// are served (docs/PORT_FORWARDING.md). `None` = forwarding disabled.
     pub forward_domain: Option<String>,
+    /// Long-term session archive settings (#1258). `None` = disabled (the
+    /// default, including on hosted deployments).
+    pub archive: Option<crate::archive::ArchiveConfig>,
 }
 
 impl ServerConfig {
@@ -304,6 +307,21 @@ impl ServerConfig {
             None => tracing::info!("Port forwarding disabled (PORTAL_FORWARD_DOMAIN unset)"),
         }
 
+        // Long-term session archive (#1258). Fail-fast on partial config.
+        let archive = crate::archive::archive_config_from_env()
+            .map_err(|e| anyhow::anyhow!("invalid archive configuration: {e}"))?;
+        match &archive {
+            Some(cfg) => tracing::info!(
+                "Session archive enabled: local root {} (compression {}, transcripts {})",
+                cfg.local_root.display(),
+                cfg.compression.as_str(),
+                cfg.transcripts
+            ),
+            None => {
+                tracing::info!("Session archive disabled (PORTAL_SESSION_ARCHIVE_BACKEND unset)")
+            }
+        }
+
         // Fail fast: report every malformed variable at once rather than
         // silently using a default for each.
         if !errors.is_empty() {
@@ -331,6 +349,7 @@ impl ServerConfig {
             image_store_max_bytes,
             image_store_ttl,
             forward_domain,
+            archive,
         })
     }
 }

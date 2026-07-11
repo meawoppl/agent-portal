@@ -97,6 +97,246 @@ pub fn spawn_stale_session_cleanup(pool: DbPool, manager: SessionManager) {
     });
 }
 
+/// Archive terminal sessions to long-term storage (#1258 phase 1).
+///
+/// Selection is idempotent: a session is eligible when it is not active,
+/// has been idle past the grace window, and has never been archived — or
+/// its `last_activity` advanced past its `archived_at` (it reactivated
+/// after archival; deterministic keys make the re-archive an overwrite).
+/// DB + file IO run on the blocking pool.
+pub async fn run_archive_sweep(app_state: Arc<AppState>) {
+    let Some(runtime) = app_state.archive.clone() else {
+        return;
+    };
+    let db_pool = app_state.db_pool.clone();
+    match tokio::task::spawn_blocking(move || archive_pending_sessions(&db_pool, &runtime)).await {
+        Ok(Ok((archived, failed))) => {
+            if archived > 0 || failed > 0 {
+                tracing::info!(
+                    "Archive sweep: {} session(s) archived, {} failed",
+                    archived,
+                    failed
+                );
+            }
+        }
+        Ok(Err(e)) => tracing::error!("ARCHIVE_SWEEP_FAILED: {e}"),
+        Err(e) => tracing::error!("archive sweep task panicked: {e}"),
+    }
+}
+
+/// Public for the integration harness (`backend/tests/harness.rs`), which
+/// drives it against a real Postgres.
+pub fn archive_pending_sessions(
+    pool: &DbPool,
+    runtime: &crate::archive::ArchiveRuntime,
+) -> anyhow::Result<(usize, usize)> {
+    use diesel::prelude::*;
+    use schema::sessions;
+
+    let mut conn = pool.get()?;
+    let cutoff = chrono::Utc::now().naive_utc()
+        - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
+
+    let eligible: Vec<models::Session> = sessions::table
+        .filter(sessions::status.ne(shared::SessionStatus::Active.as_str()))
+        .filter(sessions::last_activity.lt(cutoff))
+        .filter(
+            sessions::archived_at
+                .is_null()
+                .or(sessions::archived_at.lt(sessions::last_activity.nullable())),
+        )
+        .order(sessions::last_activity.asc())
+        .limit(crate::archive::ARCHIVE_SWEEP_BATCH)
+        .load(&mut conn)?;
+
+    let mut archived = 0;
+    let mut failed = 0;
+    for session in eligible {
+        match archive_one_session(&mut conn, runtime, &session) {
+            Ok(()) => {
+                diesel::update(sessions::table.find(session.id))
+                    .set(sessions::archived_at.eq(chrono::Utc::now().naive_utc()))
+                    .execute(&mut conn)?;
+                archived += 1;
+            }
+            Err(e) => {
+                // Stable marker for alerting, mirroring the retention-path
+                // markers documented in CLAUDE.md.
+                tracing::error!("SESSION_ARCHIVE_FAILED session={}: {e}", session.id);
+                failed += 1;
+            }
+        }
+    }
+    Ok((archived, failed))
+}
+
+fn archive_one_session(
+    conn: &mut diesel::PgConnection,
+    runtime: &crate::archive::ArchiveRuntime,
+    session: &models::Session,
+) -> anyhow::Result<()> {
+    use crate::archive::{
+        transcript_key, ArchiveMessageLine, ArchiveTokenTotals, ArchiveTranscriptInfo,
+        ArchiveTurnStats, SessionArchiveBundle, SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION,
+    };
+    use diesel::prelude::*;
+    use schema::{messages, turn_metrics, users};
+    use std::collections::BTreeMap;
+
+    let (owner_email, owner_name): (String, Option<String>) = users::table
+        .find(session.user_id)
+        .select((users::email, users::name))
+        .first(conn)?;
+
+    // Transcript rows, oldest first. Note: hot-DB retention may already
+    // have trimmed old messages; the archive preserves what remains (phase
+    // 2 orders archival ahead of retention deletion).
+    type MessageRow = (uuid::Uuid, String, String, chrono::NaiveDateTime, String);
+    let rows: Vec<MessageRow> = messages::table
+        .filter(messages::session_id.eq(session.id))
+        .order(messages::created_at.asc())
+        .select((
+            messages::id,
+            messages::role,
+            messages::content,
+            messages::created_at,
+            messages::agent_type,
+        ))
+        .load(conn)?;
+
+    let mut message_counts: BTreeMap<String, i64> = BTreeMap::new();
+    for (_, role, ..) in &rows {
+        *message_counts.entry(role.clone()).or_default() += 1;
+    }
+
+    // Turn aggregates for the manifest (analytics reads these, never the
+    // transcript body).
+    type TurnAggRow = (
+        Option<String>,
+        Option<String>,
+        bool,
+        i64,
+        i64,
+        Option<String>,
+        i32,
+        i32,
+        Option<i64>,
+    );
+    let turn_rows: Vec<TurnAggRow> = turn_metrics::table
+        .filter(turn_metrics::session_id.eq(session.id))
+        .select((
+            turn_metrics::model,
+            turn_metrics::stop_reason,
+            turn_metrics::is_error,
+            turn_metrics::thinking_tokens,
+            turn_metrics::subagent_tokens,
+            turn_metrics::service_tier,
+            turn_metrics::tool_call_count,
+            turn_metrics::stream_restarts,
+            turn_metrics::total_duration_ms,
+        ))
+        .load(conn)?;
+
+    let mut turns = ArchiveTurnStats {
+        count: turn_rows.len() as i64,
+        ..Default::default()
+    };
+    let mut thinking = 0i64;
+    let mut subagent = 0i64;
+    let mut models_seen = std::collections::BTreeSet::new();
+    for (model, stop_reason, is_error, t, s, tier, tool_calls, restarts, duration_ms) in &turn_rows
+    {
+        if *is_error {
+            turns.errored += 1;
+        }
+        if let Some(reason) = stop_reason {
+            *turns.stop_reasons.entry(reason.clone()).or_default() += 1;
+        }
+        if let Some(model) = model {
+            models_seen.insert(model.clone());
+        }
+        if let Some(tier) = tier {
+            *turns.service_tiers.entry(tier.clone()).or_default() += 1;
+        }
+        turns.tool_calls += i64::from(*tool_calls);
+        turns.stream_restarts += i64::from(*restarts);
+        turns.total_duration_ms += duration_ms.unwrap_or(0);
+        thinking += t;
+        subagent += s;
+    }
+    turns.models = models_seen.into_iter().collect();
+
+    let archived_at = chrono::Utc::now().naive_utc();
+    let transcripts_enabled = runtime.config.transcripts && !rows.is_empty();
+    let compression = runtime.config.compression;
+
+    let (transcript_ndjson, transcript_info) = if transcripts_enabled {
+        let mut ndjson = Vec::new();
+        for (id, role, content, created_at, agent_type) in &rows {
+            let line = ArchiveMessageLine {
+                id: *id,
+                role: role.clone(),
+                created_at: *created_at,
+                agent_type: agent_type.clone(),
+                // Stored content is JSON text; embed it as a value so the
+                // archive round-trips it. Non-JSON content (shouldn't
+                // exist) degrades to a JSON string.
+                content: serde_json::from_str(content)
+                    .unwrap_or_else(|_| serde_json::Value::String(content.clone())),
+            };
+            serde_json::to_writer(&mut ndjson, &line)?;
+            ndjson.push(b'\n');
+        }
+        let info = ArchiveTranscriptInfo {
+            object_key: transcript_key(session.user_id, session.id, compression),
+            compression: compression.as_str().to_string(),
+            message_count: rows.len() as i64,
+            bytes: ndjson.len() as u64,
+        };
+        (Some(ndjson), Some(info))
+    } else {
+        (None, None)
+    };
+
+    let bundle = SessionArchiveBundle {
+        manifest: SessionArchiveManifest {
+            schema_version: ARCHIVE_SCHEMA_VERSION,
+            session_id: session.id,
+            user_id: session.user_id,
+            owner_email,
+            owner_name,
+            session_name: session.session_name.clone(),
+            agent_type: session.agent_type.clone(),
+            status: session.status.clone(),
+            working_directory: session.working_directory.clone(),
+            hostname: session.hostname.clone(),
+            git_branch: session.git_branch.clone(),
+            repo_url: session.repo_url.clone(),
+            pr_url: session.pr_url.clone(),
+            client_version: session.client_version.clone(),
+            created_at: session.created_at,
+            last_activity: session.last_activity,
+            archived_at,
+            message_counts,
+            tokens: ArchiveTokenTotals {
+                input: session.input_tokens,
+                output: session.output_tokens,
+                cache_creation: session.cache_creation_tokens,
+                cache_read: session.cache_read_tokens,
+                thinking,
+                subagent,
+            },
+            total_cost_usd: session.total_cost_usd,
+            turns,
+            transcript: transcript_info,
+        },
+        transcript_ndjson,
+    };
+
+    runtime.store.put_session_archive(&bundle, compression)?;
+    Ok(())
+}
+
 /// Evict proxy/launcher connections that have gone silent past their
 /// liveness deadline (see `session_manager/liveness.rs`, #1256). The
 /// eviction cancels each stale connection's socket task, so the client's
