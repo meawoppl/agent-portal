@@ -21,6 +21,15 @@
     <!-- General meta -->
     <meta name="description" content="Rich, interactive agent sessions. Visually pleasant and easy to multitask between many sessions." />
 
+    <!-- PWA: installable web app (see manifest.webmanifest + sw.js) -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1b26" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Portal" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 
@@ -100,6 +109,15 @@
     <link data-trunk rel="copy-file" href="assets/favicon.svg" />
     <link data-trunk rel="copy-file" href="assets/anthropic-mark.svg" />
     <link data-trunk rel="copy-file" href="assets/openai-mark.png" />
+    <!-- PWA assets — must be real emitted files at the dist root: the backend
+         SPA fallback (backend/src/routes.rs) returns index.html/200 for unknown
+         paths, so a missing sw.js would silently install HTML as the worker. -->
+    <link data-trunk rel="copy-file" href="manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="sw.js" />
+    <link data-trunk rel="copy-file" href="assets/icon-192.png" />
+    <link data-trunk rel="copy-file" href="assets/icon-512.png" />
+    <link data-trunk rel="copy-file" href="assets/icon-maskable-512.png" />
+    <link data-trunk rel="copy-file" href="assets/apple-touch-icon.png" />
 </head>
 <body>
     <div id="loading">

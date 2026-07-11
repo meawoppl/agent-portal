@@ -74,8 +74,31 @@ fn app() -> Html {
     }
 }
 
+/// Register the PWA service worker (`frontend/sw.js`).
+///
+/// The `?v=` query carries `shared::VERSION` (compiled into the WASM) so the
+/// worker derives a per-deploy cache name from `self.location.search` and drops
+/// stale caches on activate — the guard against serving stale WASM after a
+/// deploy. Fire-and-forget: registration is best-effort and must never block or
+/// panic app startup, so we feature-detect and ignore the returned Promise.
+fn register_service_worker() {
+    use wasm_bindgen::JsValue;
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let navigator = window.navigator();
+    // `serviceWorker` is undefined on unsupported browsers / insecure contexts.
+    if !js_sys::Reflect::has(&navigator, &JsValue::from_str("serviceWorker")).unwrap_or(false) {
+        return;
+    }
+    let url = format!("/sw.js?v={}", shared::VERSION);
+    let _ = navigator.service_worker().register(&url);
+}
+
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn run_app() {
     wasm_logger::init(wasm_logger::Config::default());
+    register_service_worker();
     yew::Renderer::<App>::new().render();
 }
