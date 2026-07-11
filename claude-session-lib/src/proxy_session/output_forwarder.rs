@@ -18,7 +18,7 @@ use super::git_metadata::{
     check_and_send_branch_update, claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
 };
 use super::image_uploader::upload_image;
-use super::{format_duration, truncate, PendingInputDisplayEvents, SharedWsWrite};
+use super::{format_duration, truncate, SharedWsWrite};
 
 /// Images at or above this raw-byte size get sent via the chunked upload
 /// stream (`/ws/session/upload`) instead of inlined as base64 on the main
@@ -41,7 +41,6 @@ pub fn spawn_output_forwarder(
     output_buffer: std::sync::Arc<tokio::sync::Mutex<PendingOutputBuffer>>,
     max_image_mb: u32,
     agent_type: AgentType,
-    pending_input_display_events: PendingInputDisplayEvents,
 ) -> tokio::task::JoinHandle<()> {
     let max_bytes = max_image_mb as usize * 1024 * 1024;
     tokio::spawn(async move {
@@ -51,10 +50,10 @@ pub fn spawn_output_forwarder(
 
         while let Some(value) = output_rx.recv().await {
             // `Session` is now agent-neutral and forwards raw wire JSON. Re-parse
-            // it to `ClaudeOutput` here, ONCE, at the Claude proxy edge; all the
-            // typed side-effects (logging, git-signal, image extraction, echo
-            // replacement) hang off this `Option`. Malformed / non-Claude frames
-            // skip the typed work and are forwarded verbatim — never dropped or
+            // it to `ClaudeOutput` here, ONCE, at the Claude proxy edge; all
+            // the typed side-effects (logging, git-signal, image extraction)
+            // hang off this `Option`. Malformed / non-Claude frames skip the
+            // typed work and are forwarded verbatim — never dropped or
             // rewritten (#1165 item 2, slice 1).
             let parsed = super::parse_visible_claude_output(&value);
 
@@ -85,16 +84,7 @@ pub fn spawn_output_forwarder(
                 // large images, base64 for small ones).
                 let image_items = extract_image_work_items(output, &mut image_read_map, max_bytes);
 
-                // Echo-replacement swaps the rendered content for typed portal
-                // inputs (`agent-portal message`); otherwise persist + forward
-                // the EXACT raw value (invariant: exact raw Value is what gets
-                // persisted and sent).
-                let content =
-                    replacement_input_display_event(output, &pending_input_display_events)
-                        .await
-                        .unwrap_or_else(|| value.clone());
-
-                (content, image_items)
+                (value.clone(), image_items)
             } else {
                 // Malformed / non-Claude frame: forward verbatim, no typed work.
                 (value.clone(), Vec::new())
@@ -205,33 +195,6 @@ enum ImageWorkItem {
     },
     /// Image exceeded the hard cap; this is a textual rejection notice.
     TooLarge(shared::PortalMessage),
-}
-
-async fn replacement_input_display_event(
-    output: &ClaudeOutput,
-    pending_input_display_events: &PendingInputDisplayEvents,
-) -> Option<serde_json::Value> {
-    let echoed_text = user_text_echo(output)?;
-    let mut pending = pending_input_display_events.lock().await;
-    let pos = pending
-        .iter()
-        .position(|event| event.echoed_text == echoed_text)?;
-    pending.remove(pos).map(|event| event.content)
-}
-
-fn user_text_echo(output: &ClaudeOutput) -> Option<String> {
-    let ClaudeOutput::User(user) = output else {
-        return None;
-    };
-    let mut text_blocks = user.message.content.iter().filter_map(|block| match block {
-        ContentBlock::Text(text) => Some(text.text.clone()),
-        _ => None,
-    });
-    let text = text_blocks.next()?;
-    if text_blocks.next().is_some() {
-        return None;
-    }
-    Some(text)
 }
 
 /// Return the MIME type for a supported image extension, or None.

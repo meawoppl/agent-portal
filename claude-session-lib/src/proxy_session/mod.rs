@@ -16,7 +16,6 @@ pub(crate) use portal_reminder::inject_portal_reminder;
 pub use wiggum::wiggum_prompt;
 pub use ws_reader::{classify_portal_input, RoutedPortalInput};
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -212,8 +211,8 @@ pub struct PermissionResponseData {
 /// Portal-originated user input plus optional backend ack metadata.
 pub struct PortalInput {
     pub text: String,
-    /// Optional typed portal event that should replace the agent's echoed user
-    /// text in the transcript.
+    /// Optional typed portal event that the agent I/O task should synthesize
+    /// into the transcript instead of a plain user-text echo.
     pub display_event: Option<serde_json::Value>,
     pub ack: Option<PortalInputAck>,
     /// Browser-assigned delivery-tracking id (#939). When present, the main
@@ -226,13 +225,6 @@ pub struct PortalInputAck {
     pub session_id: Uuid,
     pub seq: i64,
 }
-
-pub(crate) struct PendingInputDisplayEvent {
-    pub echoed_text: String,
-    pub content: serde_json::Value,
-}
-
-pub(crate) type PendingInputDisplayEvents = Arc<Mutex<VecDeque<PendingInputDisplayEvent>>>;
 
 /// Signal for graceful server shutdown with recommended reconnect delay
 pub struct GracefulShutdown {
@@ -365,9 +357,6 @@ struct ConnectionState {
     /// [`CodexThreadIdSink`] doc. Cloned out of `ProxySessionConfig` so
     /// the per-connection state doesn't need to carry a config reference.
     codex_thread_id_sink: Option<CodexThreadIdSink>,
-    /// Typed portal events waiting to replace the corresponding echoed user
-    /// message from the agent process.
-    pending_input_display_events: PendingInputDisplayEvents,
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
@@ -790,9 +779,6 @@ async fn run_message_loop<A: Agent>(
     // Shared state for tracking git branch, PR URL, and repo URL updates
     let git_metadata = GitMetadataState::new(config.git_branch.clone());
 
-    let pending_input_display_events: PendingInputDisplayEvents =
-        Arc::new(Mutex::new(VecDeque::new()));
-
     // Spawn output forwarder task with buffer
     let output_task = spawn_output_forwarder(
         output_rx,
@@ -805,7 +791,6 @@ async fn run_message_loop<A: Agent>(
         session.output_buffer.clone(),
         max_image_mb,
         config.agent_type,
-        pending_input_display_events.clone(),
     );
 
     // Spawn WebSocket reader task
@@ -849,7 +834,6 @@ async fn run_message_loop<A: Agent>(
         git_metadata,
         git_refresh: GitRefreshTrigger::default(),
         codex_thread_id_sink: config.codex_thread_id_sink.clone(),
-        pending_input_display_events,
     };
 
     // On the very first connection of this session, inject the portal
@@ -968,8 +952,6 @@ async fn run_main_loop<A: Agent>(
                     state.session_id,
                     &state.working_directory,
                     &state.git_metadata,
-                    state.agent_type,
-                    &state.pending_input_display_events,
                     claude_session,
                     input,
                 )
@@ -1032,7 +1014,7 @@ async fn run_main_loop<A: Agent>(
 /// Re-parse a neutral `Visible` output value back to the typed `ClaudeOutput`
 /// at the Claude proxy edge. `Session` is now agent-neutral (it forwards raw
 /// `Value`s); the Claude-specific consumers — the `output_forwarder`'s
-/// image/git/echo handling and `wiggum`'s DONE detection — re-parse here.
+/// image/git handling and `wiggum`'s DONE detection — re-parse here.
 /// Returns `None` for malformed/non-Claude frames, which callers forward
 /// verbatim rather than drop (#1165 item 2, slice 1).
 pub(super) fn parse_visible_claude_output(value: &serde_json::Value) -> Option<ClaudeOutput> {
@@ -1349,8 +1331,8 @@ mod tests {
     use uuid::Uuid;
 
     /// The Claude proxy-edge re-parse gate (#1165 item 2, slice 1). Valid Claude
-    /// frames parse to `Some`, so the typed side-effects (echo replacement,
-    /// wiggum DONE, image/git handling) run; malformed / non-Claude frames yield
+    /// frames parse to `Some`, so the typed side-effects (wiggum DONE,
+    /// image/git handling) run; malformed / non-Claude frames yield
     /// `None`, so the caller forwards the original raw value verbatim — never
     /// dropping or rewriting it, and never panicking.
     #[test]

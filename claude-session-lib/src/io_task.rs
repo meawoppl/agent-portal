@@ -7,6 +7,7 @@
 //! turn-retry state machine (see the `RATE_LIMIT_TEXT_PREFIX` comment
 //! below).
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use chrono::{NaiveTime, TimeZone, Utc};
@@ -20,7 +21,7 @@ use session_lib::{
     AgentOutputClassifier, ClaudeAdapter, PermissionDecision, TurnOutcome, TurnTracker,
 };
 use shared::PortalMessage;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 /// Build a Claude `ControlResponse` from a neutral [`PermissionDecision`].
@@ -51,6 +52,181 @@ fn claude_control_response(request_id: &str, decision: PermissionDecision) -> Co
 const SESSION_LIMIT_TEXT: &str = "You've hit your session limit";
 const SESSION_LIMIT_CONTINUE_PROMPT: &str =
     "Continue from where you stopped before the Claude session limit was reached.";
+
+#[derive(Debug)]
+struct EchoDropMarker {
+    expected_text: String,
+}
+
+struct ClaudeUserInputSend<'a> {
+    client: &'a mut ClaudeAsyncClient,
+    session_id: Uuid,
+    text: String,
+    delivered: Option<oneshot::Sender<Result<(), String>>>,
+    display_event: Option<Box<serde_json::Value>>,
+    event_tx: &'a mpsc::UnboundedSender<IoEvent>,
+    pending_echo_drops: &'a mut VecDeque<EchoDropMarker>,
+    synthesize_visible_echo: bool,
+}
+
+async fn send_claude_user_input(
+    args: ClaudeUserInputSend<'_>,
+) -> Result<ClaudeInput, claude_codes::Error> {
+    let ClaudeUserInputSend {
+        client,
+        session_id,
+        text,
+        delivered,
+        display_event,
+        event_tx,
+        pending_echo_drops,
+        synthesize_visible_echo,
+    } = args;
+    let input = ClaudeInput::user_message(text.clone(), session_id);
+    let result = client.send(&input).await;
+
+    if result.is_ok() {
+        pending_echo_drops.push_back(EchoDropMarker {
+            expected_text: text.clone(),
+        });
+        if synthesize_visible_echo {
+            if let Some(value) = synthetic_user_echo_value(&text, display_event, session_id) {
+                let _ = event_tx.send(IoEvent::RawOutput(value));
+            }
+        }
+    }
+
+    if let Some(delivered) = delivered {
+        let _ = delivered.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+    }
+
+    result.map(|_| input)
+}
+
+pub(crate) fn claude_user_echo_value(text: String, session_id: Uuid) -> serde_json::Value {
+    let input = ClaudeInput::user_message(text, session_id);
+    let ClaudeInput::User(user) = input else {
+        return serde_json::Value::Null;
+    };
+    serde_json::to_value(ClaudeOutput::User(user)).unwrap_or_default()
+}
+
+fn synthetic_user_echo_value(
+    text: &str,
+    display_event: Option<Box<serde_json::Value>>,
+    session_id: Uuid,
+) -> Option<serde_json::Value> {
+    if let Some(event) = display_event {
+        return Some(*event);
+    }
+    if should_suppress_synthetic_user_echo(text) {
+        return None;
+    }
+    Some(claude_user_echo_value(text.to_string(), session_id))
+}
+
+fn plain_input_text(input: &ClaudeInput) -> Option<String> {
+    let ClaudeInput::User(user) = input else {
+        return None;
+    };
+    let mut text = String::new();
+    let mut saw_text = false;
+    for block in &user.message.content {
+        match block {
+            ContentBlock::Text(t) => {
+                saw_text = true;
+                text.push_str(&t.text);
+            }
+            _ => return None,
+        }
+    }
+    saw_text.then_some(text)
+}
+
+fn should_suppress_synthetic_user_echo(text: &str) -> bool {
+    text.trim().is_empty() || is_system_reminder_text(text)
+}
+
+fn is_system_reminder_text(text: &str) -> bool {
+    text.trim_start().starts_with("<system-reminder>")
+}
+
+fn plain_user_echo_text(output: &ClaudeOutput) -> Option<String> {
+    let ClaudeOutput::User(user) = output else {
+        return None;
+    };
+    if user.tool_use_result.is_some() {
+        return None;
+    }
+
+    let mut saw_text = false;
+    let mut text = String::new();
+    for block in &user.message.content {
+        match block {
+            ContentBlock::Text(t) => {
+                saw_text = true;
+                text.push_str(&t.text);
+            }
+            // Tool results, images, and other structured user frames are real
+            // agent output, not CLI echoes of stdin.
+            _ => return None,
+        }
+    }
+
+    saw_text.then_some(text)
+}
+
+fn should_drop_claude_user_echo(
+    output: &ClaudeOutput,
+    pending_echo_drops: &mut VecDeque<EchoDropMarker>,
+) -> bool {
+    let Some(echoed_text) = plain_user_echo_text(output) else {
+        return false;
+    };
+
+    if is_system_reminder_text(&echoed_text) {
+        tracing::debug!("Dropping system-reminder user echo from transcript");
+        return true;
+    }
+
+    if echoed_text.trim().is_empty() {
+        tracing::debug!("Dropping empty user echo from transcript");
+        return true;
+    }
+
+    if let Some(marker) = pending_echo_drops.pop_front() {
+        if marker.expected_text != echoed_text {
+            tracing::warn!(
+                "Dropping Claude user echo with mismatched text; expected={}, echoed={}",
+                truncate_for_log(&marker.expected_text),
+                truncate_for_log(&echoed_text)
+            );
+        }
+        return true;
+    }
+
+    false
+}
+
+fn clear_stale_echo_markers_at_turn_boundary(pending_echo_drops: &mut VecDeque<EchoDropMarker>) {
+    let count = pending_echo_drops.len();
+    if count == 0 {
+        return;
+    }
+    pending_echo_drops.clear();
+    tracing::warn!(
+        "Cleared {} pending Claude user echo drop marker(s) at turn boundary",
+        count
+    );
+}
+
+fn truncate_for_log(text: &str) -> String {
+    const LIMIT: usize = 120;
+    if text.chars().count() <= LIMIT {
+        return text.to_string();
+    }
+    format!("{}...", text.chars().take(LIMIT).collect::<String>())
+}
 
 /// Background task that owns the Claude process and handles all I/O.
 ///
@@ -108,22 +284,18 @@ pub(crate) async fn claude_io_task(
     // first turn starts land outside every turn window.
     let mut subagent_rollup = claude_codes::SubagentUsageRollup::default();
     let mut subagent_tokens_at_turn_start: i64 = 0;
+    let mut pending_echo_drops: VecDeque<EchoDropMarker> = VecDeque::new();
 
     loop {
         tokio::select! {
             // Handle incoming commands (input to send to Claude).
             Some(cmd) = command_rx.recv() => {
                 let result = match cmd {
-                    // `display_event` is for agents that don't echo (Codex);
-                    // claude echoes its input and the proxy swaps the typed
-                    // event in via output_forwarder, so it's ignored here.
                     IoCommand::UserInput {
                         text,
                         delivered,
-                        display_event: _,
+                        display_event,
                     } => {
-                        // Build Claude's wire form from the neutral text.
-                        let input = ClaudeInput::user_message(text, session_id);
                         // Each fresh user input gets its own retry budget.
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
@@ -133,12 +305,21 @@ pub(crate) async fn claude_io_task(
                         // chrono::Utc::now(); the monotonic instant is the
                         // anchor for TTFT / total / gap durations.
                         turn_tracker.start(Instant::now(), chrono::Utc::now());
-                        let r = client.send(&input).await;
-                        last_input = Some(input);
-                        if let Some(delivered) = delivered {
-                            let _ = delivered.send(r.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+                        let r = send_claude_user_input(ClaudeUserInputSend {
+                            client: &mut client,
+                            session_id,
+                            text,
+                            delivered,
+                            display_event,
+                            event_tx: &event_tx,
+                            pending_echo_drops: &mut pending_echo_drops,
+                            synthesize_visible_echo: true,
+                        })
+                        .await;
+                        if let Ok(input) = &r {
+                            last_input = Some(input.clone());
                         }
-                        r
+                        r.map(|_| ())
                     }
                     IoCommand::Permission {
                         request_id,
@@ -157,6 +338,10 @@ pub(crate) async fn claude_io_task(
             result = client.receive() => {
                 match result {
                     Ok(output) => {
+                        if should_drop_claude_user_echo(&output, &mut pending_echo_drops) {
+                            continue;
+                        }
+
                         // Feed every frame to the subagent rollup (cheap
                         // no-op for non-Task-result frames; agentId-deduped).
                         subagent_rollup.observe(&output);
@@ -235,6 +420,7 @@ pub(crate) async fn claude_io_task(
                         // turn (which will get its own row when `start` runs
                         // again).
                         if let ClaudeOutput::Result(ref r) = output {
+                            clear_stale_echo_markers_at_turn_boundary(&mut pending_echo_drops);
                             let usage = r.usage.as_ref();
                             let model = current_model.clone();
                             let outcome = TurnOutcome {
@@ -382,6 +568,10 @@ pub(crate) async fn claude_io_task(
                                     let _ = event_tx.send(IoEvent::Error(
                                         SessionError::Agent(e.to_string()),
                                     ));
+                                } else if let Some(expected_text) = plain_input_text(&input) {
+                                    pending_echo_drops.push_back(EchoDropMarker {
+                                        expected_text,
+                                    });
                                 }
                             }
                             Some(cmd) = command_rx.recv() => {
@@ -389,26 +579,35 @@ pub(crate) async fn claude_io_task(
                                     IoCommand::UserInput {
                                         text,
                                         delivered,
-                                        display_event: _,
+                                        display_event,
                                     } => {
                                         // User typed something while we were waiting
                                         // — honor that, abandon the retry, and reset
                                         // the budget for the new prompt.
-                                        let new_input = ClaudeInput::user_message(text, session_id);
                                         rate_limit_attempts = 0;
                                         pending_session_limit = None;
                                         subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
                                         turn_tracker.start(Instant::now(), chrono::Utc::now());
-                                        let r = client.send(&new_input).await;
-                                        last_input = Some(new_input);
-                                        if let Some(delivered) = delivered {
-                                            let _ = delivered
-                                                .send(r.as_ref().map(|_| ()).map_err(|e| e.to_string()));
-                                        }
-                                        if let Err(e) = r {
-                                            let _ = event_tx.send(IoEvent::Error(
-                                                SessionError::Agent(e.to_string()),
-                                            ));
+                                        let r = send_claude_user_input(ClaudeUserInputSend {
+                                            client: &mut client,
+                                            session_id,
+                                            text,
+                                            delivered,
+                                            display_event,
+                                            event_tx: &event_tx,
+                                            pending_echo_drops: &mut pending_echo_drops,
+                                            synthesize_visible_echo: true,
+                                        })
+                                        .await;
+                                        match r {
+                                            Ok(new_input) => {
+                                                last_input = Some(new_input);
+                                            }
+                                            Err(e) => {
+                                                let _ = event_tx.send(IoEvent::Error(
+                                                    SessionError::Agent(e.to_string()),
+                                                ));
+                                            }
                                         }
                                     }
                                     IoCommand::Permission {
@@ -722,6 +921,157 @@ mod tests {
         // A genuinely new subagent in this turn is attributed by the diff.
         rollup.observe(&task_result("agent-b", 500));
         assert_eq!(rollup.subagent_tokens - at_turn_start, 500);
+    }
+
+    fn user_output_with_content(content: serde_json::Value) -> ClaudeOutput {
+        serde_json::from_value(serde_json::json!({
+            "type": "user",
+            "session_id": "00000000-0000-0000-0000-000000000000",
+            "message": {
+                "role": "user",
+                "content": content,
+            },
+        }))
+        .expect("valid user output")
+    }
+
+    fn text_user_output(text: &str) -> ClaudeOutput {
+        user_output_with_content(serde_json::json!([
+            { "type": "text", "text": text }
+        ]))
+    }
+
+    #[test]
+    fn claude_user_echo_value_roundtrips_as_plain_user_output() {
+        let value = claude_user_echo_value("hello portal".to_string(), Uuid::nil());
+        let output: ClaudeOutput = serde_json::from_value(value).expect("synthetic output parses");
+        assert_eq!(
+            plain_user_echo_text(&output).as_deref(),
+            Some("hello portal")
+        );
+    }
+
+    #[test]
+    fn synthetic_user_echo_prefers_display_event_and_suppresses_private_prompts() {
+        let display = serde_json::json!({"type": "portal", "message": "agent card"});
+        assert_eq!(
+            synthetic_user_echo_value("agent-facing", Some(Box::new(display.clone())), Uuid::nil()),
+            Some(display)
+        );
+        assert!(synthetic_user_echo_value(
+            "<system-reminder>hidden</system-reminder>",
+            None,
+            Uuid::nil()
+        )
+        .is_none());
+        assert!(synthetic_user_echo_value("   \n\t", None, Uuid::nil()).is_none());
+    }
+
+    #[test]
+    fn pending_echo_drop_markers_are_fifo() {
+        let mut pending = VecDeque::from([
+            EchoDropMarker {
+                expected_text: "first".to_string(),
+            },
+            EchoDropMarker {
+                expected_text: "second".to_string(),
+            },
+        ]);
+
+        assert!(should_drop_claude_user_echo(
+            &text_user_output("first"),
+            &mut pending
+        ));
+        assert_eq!(pending.len(), 1);
+        assert!(should_drop_claude_user_echo(
+            &text_user_output("second"),
+            &mut pending
+        ));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn pending_echo_marker_drops_mismatched_plain_echo_but_not_future_frames() {
+        let mut pending = VecDeque::from([EchoDropMarker {
+            expected_text: "expected".to_string(),
+        }]);
+
+        assert!(should_drop_claude_user_echo(
+            &text_user_output("changed by cli"),
+            &mut pending
+        ));
+        assert!(pending.is_empty());
+        assert!(!should_drop_claude_user_echo(
+            &text_user_output("future legitimate user frame"),
+            &mut pending
+        ));
+    }
+
+    #[test]
+    fn stale_echo_markers_clear_at_turn_boundary() {
+        let mut pending = VecDeque::from([EchoDropMarker {
+            expected_text: "never echoed".to_string(),
+        }]);
+        clear_stale_echo_markers_at_turn_boundary(&mut pending);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn system_reminder_and_empty_user_echoes_drop_without_marker() {
+        let mut pending = VecDeque::new();
+        assert!(should_drop_claude_user_echo(
+            &text_user_output("<system-reminder>hidden</system-reminder>"),
+            &mut pending
+        ));
+        assert!(should_drop_claude_user_echo(
+            &text_user_output(" \n\t "),
+            &mut pending
+        ));
+    }
+
+    #[test]
+    fn unconditional_echo_drops_do_not_consume_pending_marker() {
+        let mut pending = VecDeque::from([EchoDropMarker {
+            expected_text: "real prompt".to_string(),
+        }]);
+
+        assert!(should_drop_claude_user_echo(
+            &text_user_output(" \n\t "),
+            &mut pending
+        ));
+        assert_eq!(pending.len(), 1);
+
+        assert!(should_drop_claude_user_echo(
+            &text_user_output("<system-reminder>hidden</system-reminder>"),
+            &mut pending
+        ));
+        assert_eq!(pending.len(), 1);
+
+        assert!(should_drop_claude_user_echo(
+            &text_user_output("real prompt"),
+            &mut pending
+        ));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn structured_user_frames_are_not_plain_echoes() {
+        let mut pending = VecDeque::from([EchoDropMarker {
+            expected_text: "next prompt".to_string(),
+        }]);
+        let tool_result = user_output_with_content(serde_json::json!([
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "ok"
+            }
+        ]));
+        assert!(!should_drop_claude_user_echo(&tool_result, &mut pending));
+        assert_eq!(pending.len(), 1);
+
+        let no_blocks = user_output_with_content(serde_json::json!([]));
+        assert!(!should_drop_claude_user_echo(&no_blocks, &mut pending));
+        assert_eq!(pending.len(), 1);
     }
 
     #[test]

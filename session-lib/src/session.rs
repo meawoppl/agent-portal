@@ -327,8 +327,9 @@ impl<A: Agent> Session<A> {
     /// Like [`send_input`](Self::send_input), but carries an optional typed
     /// portal `display_event` to render in place of the agent's echo (see
     /// [`IoCommand::UserInput::display_event`]). The proxy passes the inter-agent
-    /// `PortalContent::AgentMessage` envelope here so the Codex path (which
-    /// can't rely on echo-replacement) still renders the typed card.
+    /// `PortalContent::AgentMessage` envelope here so the agent I/O task can
+    /// synthesize the typed card into the replay buffer instead of relying on a
+    /// CLI echo.
     pub async fn send_input_with_display(
         &mut self,
         content: serde_json::Value,
