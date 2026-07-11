@@ -179,6 +179,13 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 return None;
             }
 
+            // Same classification, different disguise: loop-priming user
+            // echoes with no visible text render as blank bubbles (#715).
+            if is_empty_user_echo(&output) {
+                debug!("Dropping empty user echo from transcript");
+                return None;
+            }
+
             // Forward the output
             if output_tx.send(value.clone()).is_err() {
                 error!("Failed to forward Claude output");
@@ -382,6 +389,31 @@ fn is_system_reminder_echo(output: &ClaudeOutput) -> bool {
     })
 }
 
+/// Is this Claude output a user echo whose every text block is empty or
+/// whitespace-only? The CLI occasionally emits these loop-priming echoes;
+/// rendering them fragments the transcript with blank "user" bubbles
+/// (#715). Echoes with no text blocks at all (tool results, images) are
+/// real content and must NOT match.
+fn is_empty_user_echo(output: &ClaudeOutput) -> bool {
+    let ClaudeOutput::User(user) = output else {
+        return false;
+    };
+    let mut saw_text = false;
+    for block in &user.message.content {
+        match block {
+            ContentBlock::Text(t) => {
+                saw_text = true;
+                if !t.text.trim().is_empty() {
+                    return false;
+                }
+            }
+            // Any non-text block means this echo carries real content.
+            _ => return false,
+        }
+    }
+    saw_text
+}
+
 fn check_wiggum_done(result: &claude_codes::io::ResultMessage) -> bool {
     // Check if it was an error (don't continue on errors)
     if result.is_error {
@@ -496,6 +528,60 @@ mod tests {
             result: Some("failed".to_string()),
             ..result_message("failed")
         }
+    }
+
+    /// Build a `ClaudeOutput::User` frame from raw content blocks, the same
+    /// way the CLI ships them.
+    fn user_frame(content: serde_json::Value) -> ClaudeOutput {
+        serde_json::from_value(serde_json::json!({
+            "type": "user",
+            "session_id": "00000000-0000-0000-0000-000000000000",
+            "message": { "role": "user", "content": content }
+        }))
+        .expect("parses as ClaudeOutput")
+    }
+
+    /// #715 predicate contract: drop ONLY user echoes whose every text
+    /// block is empty/whitespace — anything carrying real content (tool
+    /// results, images, non-empty text, or no text blocks at all) must
+    /// render.
+    #[test]
+    fn empty_user_echo_predicate_contract() {
+        // Whitespace-only text → dropped.
+        assert!(is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "   \n\t" }
+        ]))));
+        assert!(is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "" },
+            { "type": "text", "text": " " }
+        ]))));
+
+        // No content blocks at all → NOT what we filter.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([]))));
+
+        // Tool-result / non-text block → real content, passes through.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
+        ]))));
+
+        // Mixed empty text + non-text → passes through.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "" },
+            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
+        ]))));
+
+        // Non-empty text → passes through.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "hello" }
+        ]))));
+
+        // Non-user frames never match.
+        let result_frame: ClaudeOutput = serde_json::from_value(serde_json::json!({
+            "type": "system", "subtype": "init",
+            "session_id": "00000000-0000-0000-0000-000000000000"
+        }))
+        .expect("parses");
+        assert!(!is_empty_user_echo(&result_frame));
     }
 
     #[test]
