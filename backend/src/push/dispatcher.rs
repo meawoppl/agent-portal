@@ -22,8 +22,8 @@ use uuid::Uuid;
 
 use crate::db::DbConnection;
 use crate::models::PushSubscription;
-use crate::push::transport::{LogTransport, PushTransport, SendOutcome};
-use crate::push::NotificationEvent;
+use crate::push::transport::{PushTransport, SendOutcome};
+use crate::push::{ConfiguredTransport, NotificationEvent};
 use crate::AppState;
 
 /// Stable log marker for a real (non-dead-endpoint) delivery failure. Alert on
@@ -34,12 +34,12 @@ const PUSH_DISPATCH_FAILED: &str = "PUSH_DISPATCH_FAILED";
 
 /// Spawn the dispatcher task. Consumes the receiver end of the notification
 /// channel; runs until the channel closes (backend shutdown).
-pub fn spawn_dispatcher(app_state: Arc<AppState>, mut rx: UnboundedReceiver<NotificationEvent>) {
+pub fn spawn_dispatcher(
+    app_state: Arc<AppState>,
+    mut rx: UnboundedReceiver<NotificationEvent>,
+    transport: ConfiguredTransport,
+) {
     tokio::spawn(async move {
-        // v1 transport (C2): log delivery intent. Real Web Push (C3) and native
-        // transports (C7) slot in behind `PushTransport` without touching the
-        // policy engine below.
-        let transport = LogTransport;
         tracing::info!("push dispatcher started");
         while let Some(event) = rx.recv().await {
             dispatch_one(&app_state, &transport, event).await;

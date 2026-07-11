@@ -14,6 +14,7 @@ use oauth2::{
 };
 use std::env;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::str::FromStr;
 use tower_cookies::Key;
 
@@ -163,6 +164,9 @@ pub struct ServerConfig {
     /// (`GET /api/push/vapid-key`). `None` = push unconfigured; the endpoint
     /// 404s and the frontend degrades to "push unavailable".
     pub vapid_public_key: Option<String>,
+    /// Native APNs/FCM push settings (mobile-apps plan C7). Missing provider
+    /// groups disable that provider; partial APNs config fails fast.
+    pub native_push: crate::push::NativePushConfig,
 }
 
 impl ServerConfig {
@@ -330,6 +334,8 @@ impl ServerConfig {
             None => tracing::info!("Web Push disabled (PORTAL_VAPID_PUBLIC_KEY unset)"),
         }
 
+        let native_push = native_push_config_from_env(&mut errors);
+
         // Long-term session archive (#1258). Fail-fast on partial config.
         let archive = crate::archive::archive_config_from_env()
             .map_err(|e| anyhow::anyhow!("invalid archive configuration: {e}"))?;
@@ -386,8 +392,102 @@ impl ServerConfig {
             forward_domain,
             archive,
             vapid_public_key,
+            native_push,
         })
     }
+}
+
+fn optional_non_empty(name: &str) -> Option<String> {
+    env::var(name).ok().and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn native_push_config_from_env(errors: &mut Vec<String>) -> crate::push::NativePushConfig {
+    let apns_path = optional_non_empty("PORTAL_APNS_KEY_P8_PATH");
+    let apns_key_id = optional_non_empty("PORTAL_APNS_KEY_ID");
+    let apns_team_id = optional_non_empty("PORTAL_APNS_TEAM_ID");
+    let apns_bundle_id = optional_non_empty("PORTAL_APNS_BUNDLE_ID");
+
+    let apns_any = apns_path.is_some()
+        || apns_key_id.is_some()
+        || apns_team_id.is_some()
+        || apns_bundle_id.is_some();
+    let apns = if apns_any {
+        for (name, value) in [
+            ("PORTAL_APNS_KEY_P8_PATH", &apns_path),
+            ("PORTAL_APNS_KEY_ID", &apns_key_id),
+            ("PORTAL_APNS_TEAM_ID", &apns_team_id),
+            ("PORTAL_APNS_BUNDLE_ID", &apns_bundle_id),
+        ] {
+            log_source(name, value.is_some());
+        }
+
+        match (apns_path, apns_key_id, apns_team_id, apns_bundle_id) {
+            (Some(key_p8_path), Some(key_id), Some(team_id), Some(bundle_id)) => {
+                tracing::info!("APNs push transport configured");
+                Some(crate::push::ApnsTransportConfig {
+                    key_p8_path: PathBuf::from(key_p8_path),
+                    key_id,
+                    team_id,
+                    bundle_id,
+                })
+            }
+            (path, key_id, team_id, bundle_id) => {
+                let mut missing = Vec::new();
+                if path.is_none() {
+                    missing.push("PORTAL_APNS_KEY_P8_PATH");
+                }
+                if key_id.is_none() {
+                    missing.push("PORTAL_APNS_KEY_ID");
+                }
+                if team_id.is_none() {
+                    missing.push("PORTAL_APNS_TEAM_ID");
+                }
+                if bundle_id.is_none() {
+                    missing.push("PORTAL_APNS_BUNDLE_ID");
+                }
+                errors.push(format!(
+                    "APNs push config is partial; missing {}",
+                    missing.join(", ")
+                ));
+                None
+            }
+        }
+    } else {
+        for name in [
+            "PORTAL_APNS_KEY_P8_PATH",
+            "PORTAL_APNS_KEY_ID",
+            "PORTAL_APNS_TEAM_ID",
+            "PORTAL_APNS_BUNDLE_ID",
+        ] {
+            log_source(name, false);
+        }
+        tracing::info!("APNs push transport disabled (PORTAL_APNS_* unset)");
+        None
+    };
+
+    let fcm = match optional_non_empty("PORTAL_FCM_SERVICE_ACCOUNT_PATH") {
+        Some(path) => {
+            log_source("PORTAL_FCM_SERVICE_ACCOUNT_PATH", true);
+            tracing::info!("FCM push transport configured");
+            Some(crate::push::FcmTransportConfig {
+                service_account_path: PathBuf::from(path),
+            })
+        }
+        None => {
+            log_source("PORTAL_FCM_SERVICE_ACCOUNT_PATH", false);
+            tracing::info!("FCM push transport disabled (PORTAL_FCM_SERVICE_ACCOUNT_PATH unset)");
+            None
+        }
+    };
+
+    crate::push::NativePushConfig { apns, fcm }
 }
 
 #[cfg(test)]

@@ -832,6 +832,11 @@ When making changes, verify:
 | `PORTAL_SESSION_ARCHIVE_TRANSCRIPTS` | Archive transcript bodies (always zstd-compressed), not just manifests | Optional (default: true) |
 | `PORTAL_VAPID_PUBLIC_KEY` | Web Push VAPID application-server public key, served to clients via `GET /api/push/vapid-key` (unset → endpoint 404s, frontend shows push unavailable) | Optional (Web Push only) |
 | `PORTAL_VAPID_PRIVATE_KEY` | Web Push VAPID private key, used by the Web Push sender to sign pushes; never served to clients | Optional (Web Push only) |
+| `PORTAL_APNS_KEY_P8_PATH` | APNs provider-token `.p8` private key path for native iOS push | Required with other `PORTAL_APNS_*` vars |
+| `PORTAL_APNS_KEY_ID` | APNs provider-token key id for native iOS push | Required with other `PORTAL_APNS_*` vars |
+| `PORTAL_APNS_TEAM_ID` | Apple Developer Team ID for native iOS push | Required with other `PORTAL_APNS_*` vars |
+| `PORTAL_APNS_BUNDLE_ID` | App bundle id used as the APNs topic | Required with other `PORTAL_APNS_*` vars |
+| `PORTAL_FCM_SERVICE_ACCOUNT_PATH` | Google service-account JSON path for FCM v1 native Android push | Optional (FCM disabled when unset) |
 
 Note: Dev mode is enabled via `--dev-mode` CLI flag, not an environment variable. Voice input is browser-native (Web Speech API on Chromium / Safari); no server-side speech credentials are needed.
 
