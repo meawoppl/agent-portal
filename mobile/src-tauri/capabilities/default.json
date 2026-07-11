@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default Agent Portal mobile shell capability.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

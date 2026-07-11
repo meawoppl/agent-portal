@@ -10,6 +10,7 @@ members = [
     "launcher",
     "portal-auth",
     "portal-update",
+    "mobile/src-tauri",
 ]
 resolver = "2"
 
