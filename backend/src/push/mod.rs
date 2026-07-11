@@ -16,9 +16,11 @@ pub mod apns;
 pub mod dispatcher;
 pub mod fcm;
 pub mod transport;
+pub mod webpush;
 
 pub use dispatcher::spawn_dispatcher;
 pub use transport::{LogTransport, PushError, PushTransport, SendOutcome};
+pub use webpush::WebPushTransport;
 
 use crate::models::PushSubscription;
 use shared::api::NotificationPrefs;
@@ -52,31 +54,51 @@ pub struct NativePushConfig {
 
 /// Startup-selected transport set. `PushTransport` is not object-safe because
 /// it returns `impl Future`, so static dispatch through an enum keeps the
-/// dispatcher generic-free while allowing APNs/FCM to be optional.
+/// dispatcher generic-free while every real transport (Web Push / APNs / FCM)
+/// stays individually optional.
 pub enum ConfiguredTransport {
+    /// Nothing configured: log delivery intent only.
     Log(LogTransport),
-    Native {
+    /// At least one real transport configured. Subscriptions route by their
+    /// `platform` column; platforms without a configured transport fall back
+    /// to the log transport (visible intent, never an error).
+    Registry {
         log: LogTransport,
+        webpush: Option<Box<WebPushTransport>>,
         apns: Option<Box<apns::ApnsTransport>>,
         fcm: Option<Box<fcm::FcmTransport>>,
     },
 }
 
 impl ConfiguredTransport {
-    pub fn from_native_config(config: NativePushConfig) -> anyhow::Result<Self> {
-        let apns = config
+    /// Build the transport registry from startup config. `vapid_private_key`
+    /// enables Web Push (C3); `native` enables APNs / FCM (C7). Missing config
+    /// never panics — it just leaves that platform on the log fallback.
+    pub fn from_config(
+        vapid_private_key: Option<String>,
+        native: NativePushConfig,
+    ) -> anyhow::Result<Self> {
+        let webpush = vapid_private_key.map(WebPushTransport::new).map(Box::new);
+        let apns = native
             .apns
             .map(apns::ApnsTransport::new)
             .transpose()?
             .map(Box::new);
-        let fcm = config
+        let fcm = native
             .fcm
             .map(fcm::FcmTransport::new)
             .transpose()?
             .map(Box::new);
-        if apns.is_some() || fcm.is_some() {
-            Ok(Self::Native {
+        tracing::info!(
+            webpush = webpush.is_some(),
+            apns = apns.is_some(),
+            fcm = fcm.is_some(),
+            "push transports configured"
+        );
+        if webpush.is_some() || apns.is_some() || fcm.is_some() {
+            Ok(Self::Registry {
                 log: LogTransport,
+                webpush,
                 apns,
                 fcm,
             })
@@ -94,7 +116,16 @@ impl PushTransport for ConfiguredTransport {
     ) -> Result<SendOutcome, PushError> {
         match self {
             ConfiguredTransport::Log(t) => t.send(sub, payload).await,
-            ConfiguredTransport::Native { log, apns, fcm } => match sub.platform.as_str() {
+            ConfiguredTransport::Registry {
+                log,
+                webpush,
+                apns,
+                fcm,
+            } => match sub.platform.as_str() {
+                "webpush" => match webpush {
+                    Some(t) => t.send(sub, payload).await,
+                    None => log.send(sub, payload).await,
+                },
                 "apns" => match apns {
                     Some(t) => t.send(sub, payload).await,
                     None => log.send(sub, payload).await,

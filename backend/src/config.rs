@@ -167,6 +167,12 @@ pub struct ServerConfig {
     /// Native APNs/FCM push settings (mobile-apps plan C7). Missing provider
     /// groups disable that provider; partial APNs config fails fast.
     pub native_push: crate::push::NativePushConfig,
+    /// VAPID application-server private key for Web Push (mobile-apps plan
+    /// §8.3, C3). URL-safe base64 (no padding) or a PEM/DER private key.
+    /// `None` = Web Push disabled; the dispatcher keeps the log-only transport.
+    /// The matching public half is `PORTAL_VAPID_PUBLIC_KEY`, served to browsers
+    /// as the `applicationServerKey`.
+    pub vapid_private_key: Option<String>,
 }
 
 impl ServerConfig {
@@ -363,6 +369,21 @@ impl ServerConfig {
             }
         }
 
+        // VAPID private key for Web Push (mobile-apps plan §8.3). Only the
+        // private half lives here — the public half (PORTAL_VAPID_PUBLIC_KEY)
+        // is served to browsers. Unset = Web Push disabled (log-only transport);
+        // never a hard error, so the server still boots without push configured.
+        let vapid_private_key = match env::var("PORTAL_VAPID_PRIVATE_KEY") {
+            Ok(v) => {
+                log_source("PORTAL_VAPID_PRIVATE_KEY", true);
+                Some(v)
+            }
+            Err(_) => {
+                log_source("PORTAL_VAPID_PRIVATE_KEY", false);
+                None
+            }
+        };
+
         // Fail fast: report every malformed variable at once rather than
         // silently using a default for each.
         if !errors.is_empty() {
@@ -393,6 +414,7 @@ impl ServerConfig {
             archive,
             vapid_public_key,
             native_push,
+            vapid_private_key,
         })
     }
 }

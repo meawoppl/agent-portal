@@ -830,8 +830,8 @@ When making changes, verify:
 | `PORTAL_SESSION_ARCHIVE_S3_BUCKET` | Bucket for the `s3` archive backend (region/credentials/endpoint via standard `AWS_*` vars) | Required when backend=s3 |
 | `PORTAL_SESSION_ARCHIVE_S3_PREFIX` | Key prefix inside the archive bucket | Optional |
 | `PORTAL_SESSION_ARCHIVE_TRANSCRIPTS` | Archive transcript bodies (always zstd-compressed), not just manifests | Optional (default: true) |
-| `PORTAL_VAPID_PUBLIC_KEY` | Web Push VAPID application-server public key, served to clients via `GET /api/push/vapid-key` (unset → endpoint 404s, frontend shows push unavailable) | Optional (Web Push only) |
-| `PORTAL_VAPID_PRIVATE_KEY` | Web Push VAPID private key, used by the Web Push sender to sign pushes; never served to clients | Optional (Web Push only) |
+| `PORTAL_VAPID_PRIVATE_KEY` | VAPID application-server private key for Web Push (mobile-apps plan §8.3). URL-safe base64 (no padding) or a PEM EC private key. Unset = Web Push disabled (dispatcher keeps the log-only transport for webpush rows). Mint with `scripts/generate-vapid-keys.sh`. | Optional |
+| `PORTAL_VAPID_PUBLIC_KEY` | VAPID public key served to browsers as the `applicationServerKey` (`GET /api/push/vapid-key`). Must be the matching half of `PORTAL_VAPID_PRIVATE_KEY` (same `generate-vapid-keys.sh` run). | Optional |
 | `PORTAL_APNS_KEY_P8_PATH` | APNs provider-token `.p8` private key path for native iOS push | Required with other `PORTAL_APNS_*` vars |
 | `PORTAL_APNS_KEY_ID` | APNs provider-token key id for native iOS push | Required with other `PORTAL_APNS_*` vars |
 | `PORTAL_APNS_TEAM_ID` | Apple Developer Team ID for native iOS push | Required with other `PORTAL_APNS_*` vars |

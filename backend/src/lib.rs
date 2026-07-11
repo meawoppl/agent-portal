@@ -150,7 +150,8 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Parse remaining configuration from environment variables
     let config = config::ServerConfig::from_env(args.dev_mode)?;
-    let push_transport = push::ConfiguredTransport::from_native_config(config.native_push)?;
+    let push_transport =
+        push::ConfiguredTransport::from_config(config.vapid_private_key, config.native_push)?;
 
     // Create app state
     let app_state = Arc::new(AppState {
