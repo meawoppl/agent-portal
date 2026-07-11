@@ -695,6 +695,7 @@ mod tests {
             image_store: ImageStore::new(1024 * 1024, Duration::from_secs(60)),
             forward_domain: None,
             archive: None,
+            notifications: crate::push::channel().0,
         })
     }
 

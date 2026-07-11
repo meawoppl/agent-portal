@@ -67,6 +67,9 @@ async fn spawn_test_app() -> SocketAddr {
         image_store: ImageStore::new(config.image_store_max_bytes, config.image_store_ttl),
         forward_domain: config.forward_domain,
         archive: None,
+        // No dispatcher is spawned in the harness; the receiver drops
+        // immediately, so emits are silently no-ops (see NotificationSender).
+        notifications: backend::push::channel().0,
     });
 
     let app = backend::routes::build_router(state);

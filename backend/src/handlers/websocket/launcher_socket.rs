@@ -560,6 +560,15 @@ fn handle_launcher_message(
                     if let Ok(mut conn) = app_state.db_pool.get() {
                         use crate::schema::sessions;
                         use diesel::prelude::*;
+                        // Read prior status + name so we only push on a genuine
+                        // active → disconnected drop (mobile-apps plan §8.1); a
+                        // launch failure on a not-yet-active session is not a
+                        // "your running session dropped" event.
+                        let prior: Option<(String, String)> = sessions::table
+                            .find(session_id)
+                            .select((sessions::status, sessions::session_name))
+                            .first::<(String, String)>(&mut conn)
+                            .ok();
                         // Record the failure WITHOUT pausing. Pausing here used
                         // to wedge the session permanently: `paused` doubles as
                         // the user's "don't relaunch" flag, and reconcile only
@@ -583,6 +592,15 @@ fn handle_launcher_message(
                             .execute(&mut conn)
                         {
                             warn!("Failed to record launch failure for {}: {}", session_id, e);
+                        } else if let Some((status, session_name)) = prior {
+                            if status == SessionStatus::Active.as_str() {
+                                app_state.notifications.emit(
+                                    crate::push::NotificationEvent::SessionDisconnected {
+                                        session_id,
+                                        session_name,
+                                    },
+                                );
+                            }
                         }
                     }
                 }
