@@ -268,6 +268,7 @@ pub fn transcript_key(user_id: Uuid, session_id: Uuid, compression: ArchiveCompr
 pub struct ArchiveRuntime {
     pub store: ArchiveStore,
     pub config: ArchiveConfig,
+    pub stats: ArchiveStats,
 }
 
 impl ArchiveRuntime {
@@ -275,8 +276,59 @@ impl ArchiveRuntime {
         Self {
             store: ArchiveStore::from_config(&config),
             config,
+            stats: ArchiveStats::default(),
         }
     }
+}
+
+/// Process-lifetime archival counters (#1258 phase 2 observability).
+/// Logged by the sweep; a later phase surfaces them on an admin endpoint.
+#[derive(Default)]
+pub struct ArchiveStats {
+    pub archived_total: std::sync::atomic::AtomicU64,
+    pub failed_total: std::sync::atomic::AtomicU64,
+    pub bytes_written: std::sync::atomic::AtomicU64,
+    pub last_error: std::sync::Mutex<Option<String>>,
+}
+
+impl ArchiveStats {
+    pub fn record_success(&self, bytes: u64) {
+        use std::sync::atomic::Ordering;
+        self.archived_total.fetch_add(1, Ordering::Relaxed);
+        self.bytes_written.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn record_failure(&self, error: &str) {
+        use std::sync::atomic::Ordering;
+        self.failed_total.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut last) = self.last_error.lock() {
+            *last = Some(error.to_string());
+        }
+    }
+}
+
+/// Union an existing archived transcript with the messages currently in the
+/// hot DB, keyed by message id (#1258 phase 2). Retention may have trimmed
+/// hot rows that only exist in the archive, and the DB may hold rows newer
+/// than the archive — the merge keeps both, ordered by `created_at` (id as
+/// a deterministic tiebreaker). A re-archive can therefore never shrink an
+/// archived transcript.
+pub fn merge_transcript_lines(
+    existing: Vec<ArchiveMessageLine>,
+    current: Vec<ArchiveMessageLine>,
+) -> Vec<ArchiveMessageLine> {
+    let mut by_id: BTreeMap<Uuid, ArchiveMessageLine> = BTreeMap::new();
+    for line in existing {
+        by_id.insert(line.id, line);
+    }
+    // Current DB rows win on id collision (content is immutable in
+    // practice; this just prefers the freshest serialization).
+    for line in current {
+        by_id.insert(line.id, line);
+    }
+    let mut merged: Vec<ArchiveMessageLine> = by_id.into_values().collect();
+    merged.sort_by(|a, b| (a.created_at, a.id).cmp(&(b.created_at, b.id)));
+    merged
 }
 
 /// Typed archive store. An enum (not a trait object) so backends stay a
@@ -311,6 +363,25 @@ impl ArchiveStore {
     ) -> std::io::Result<Option<SessionArchiveManifest>> {
         match self {
             Self::Local(store) => store.get_session_manifest(user_id, session_id),
+        }
+    }
+
+    /// Read an archived transcript's lines, or `None` if no transcript
+    /// object exists yet. Used by the merge-on-rearchive path.
+    pub fn read_transcript_lines(
+        &self,
+        user_id: Uuid,
+        session_id: Uuid,
+        compression: ArchiveCompression,
+    ) -> std::io::Result<Option<Vec<ArchiveMessageLine>>> {
+        match self {
+            Self::Local(store) => {
+                match read_transcript(&store.root, user_id, session_id, compression) {
+                    Ok(lines) => Ok(Some(lines)),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                    Err(e) => Err(e),
+                }
+            }
         }
     }
 }
@@ -511,6 +582,53 @@ mod tests {
             })
             .collect();
         assert!(leftovers.is_empty(), "temp files leaked: {leftovers:?}");
+    }
+
+    /// #1258 phase 2: the merge is a union by message id, ordered by
+    /// (created_at, id), with current DB rows winning id collisions — a
+    /// re-archive can only grow a transcript, never shrink it.
+    #[test]
+    fn merge_never_shrinks_and_orders_deterministically() {
+        let t0 = chrono::NaiveDate::from_ymd_opt(2026, 7, 11)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let line = |id: u128, secs: u32, text: &str| ArchiveMessageLine {
+            id: Uuid::from_u128(id),
+            role: "user".into(),
+            created_at: t0 + chrono::Duration::seconds(secs as i64),
+            agent_type: "claude".into(),
+            content: serde_json::json!({ "text": text }),
+        };
+
+        // Archive holds 1,2 (retention later trimmed them from the DB);
+        // DB holds 2 (fresher serialization) and 3 (new).
+        let existing = vec![line(1, 0, "one"), line(2, 10, "two-old")];
+        let current = vec![line(2, 10, "two-new"), line(3, 20, "three")];
+
+        let merged = merge_transcript_lines(existing, current);
+        let texts: Vec<&str> = merged
+            .iter()
+            .map(|l| l.content["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(texts, vec!["one", "two-new", "three"]);
+
+        // Idempotent: merging the result with itself changes nothing.
+        let again = merge_transcript_lines(
+            merged.iter().map(clone_line).collect(),
+            merged.iter().map(clone_line).collect(),
+        );
+        assert_eq!(again.len(), merged.len());
+    }
+
+    fn clone_line(l: &ArchiveMessageLine) -> ArchiveMessageLine {
+        ArchiveMessageLine {
+            id: l.id,
+            role: l.role.clone(),
+            created_at: l.created_at,
+            agent_type: l.agent_type.clone(),
+            content: l.content.clone(),
+        }
     }
 
     #[test]

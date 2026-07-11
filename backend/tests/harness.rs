@@ -144,6 +144,11 @@ async fn proxy_register_returns_ack_success() {
     assert!(success, "dev-mode register should succeed");
 }
 
+/// The archive tests each run a global sweep against the SHARED test
+/// Postgres — two sweeps racing can re-mark each other's sessions and
+/// break idempotency assertions. Serialize them.
+static ARCHIVE_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// #1258 phase 1: the archive sweep persists a manifest + compressed
 /// transcript for a terminal session, marks it archived (idempotent — a
 /// second sweep is a no-op), and re-archives after new activity.
@@ -153,6 +158,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
         eprintln!("skipping: DATABASE_URL not set");
         return;
     }
+    let _guard = ARCHIVE_DB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     use backend::archive::{read_transcript, ArchiveCompression, ArchiveConfig, ArchiveRuntime};
     use backend::models::{NewMessage, NewSessionWithId};
     use backend::schema::{messages, sessions};
@@ -282,6 +288,142 @@ async fn archive_sweep_persists_and_is_idempotent() {
     assert!(rearchived >= 1, "reactivated session re-archives");
 
     // Cleanup.
+    diesel::delete(messages::table.filter(messages::session_id.eq(session_id)))
+        .execute(&mut conn)
+        .ok();
+    diesel::delete(sessions::table.find(session_id))
+        .execute(&mut conn)
+        .ok();
+}
+
+/// #1258 phase 2: a re-archive after hot-DB messages were trimmed must
+/// MERGE with the archived transcript, never shrink it.
+#[tokio::test]
+async fn rearchive_after_trim_merges_transcript() {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    }
+    let _guard = ARCHIVE_DB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    use backend::archive::{read_transcript, ArchiveCompression, ArchiveConfig, ArchiveRuntime};
+    use backend::models::{NewMessage, NewSessionWithId};
+    use backend::schema::{messages, sessions};
+    use diesel::prelude::*;
+
+    let pool = backend::db::create_pool().expect("pool");
+    backend::db::run_migrations_logged(&pool).expect("migrations");
+    backend::db::seed_dev_user(&pool).expect("dev user");
+    let mut conn = pool.get().expect("conn");
+    let user_id: uuid::Uuid = backend::schema::users::table
+        .select(backend::schema::users::id)
+        .order(backend::schema::users::created_at.asc())
+        .first(&mut conn)
+        .expect("seeded user");
+
+    let session_id = uuid::Uuid::new_v4();
+    let stale = chrono::Utc::now().naive_utc() - chrono::Duration::hours(2);
+    diesel::insert_into(sessions::table)
+        .values(&NewSessionWithId {
+            id: session_id,
+            user_id,
+            session_name: "merge-harness".to_string(),
+            session_key: session_id.to_string(),
+            working_directory: "/tmp/merge-harness".to_string(),
+            status: shared::SessionStatus::Disconnected.as_str().to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "harness".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(vec![]),
+        })
+        .execute(&mut conn)
+        .expect("insert session");
+    diesel::update(sessions::table.find(session_id))
+        .set(sessions::last_activity.eq(stale))
+        .execute(&mut conn)
+        .expect("backdate");
+
+    let insert_msg = |conn: &mut diesel::PgConnection, text: &str| {
+        diesel::insert_into(messages::table)
+            .values(&NewMessage {
+                session_id,
+                role: "user".to_string(),
+                content: format!(r#"{{"text":"{text}"}}"#),
+                user_id,
+                agent_type: "claude".to_string(),
+                provenance_kind: None,
+                provenance_session_id: None,
+                provenance_agent_type: None,
+            })
+            .execute(conn)
+            .expect("insert message");
+    };
+    insert_msg(&mut conn, "first");
+    insert_msg(&mut conn, "second");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let runtime = ArchiveRuntime::new(ArchiveConfig {
+        local_root: tmp.path().to_path_buf(),
+        compression: ArchiveCompression::Zstd,
+        transcripts: true,
+    });
+
+    // First archive captures both messages.
+    backend::background::archive_pending_sessions(&pool, &runtime).expect("first sweep");
+    assert_eq!(
+        read_transcript(tmp.path(), user_id, session_id, ArchiveCompression::Zstd)
+            .expect("read")
+            .len(),
+        2
+    );
+
+    // Retention trims one hot row; a third message arrives; re-archive.
+    diesel::delete(
+        messages::table
+            .filter(messages::session_id.eq(session_id))
+            .filter(messages::content.like("%first%")),
+    )
+    .execute(&mut conn)
+    .expect("trim");
+    insert_msg(&mut conn, "third");
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::last_activity.eq(chrono::Utc::now().naive_utc()
+                - chrono::Duration::seconds(backend::archive::ARCHIVE_IDLE_SECS + 60)),
+            sessions::archived_at.eq(stale),
+        ))
+        .execute(&mut conn)
+        .expect("make stale again");
+    backend::background::archive_pending_sessions(&pool, &runtime).expect("second sweep");
+
+    let lines = read_transcript(tmp.path(), user_id, session_id, ArchiveCompression::Zstd)
+        .expect("read merged");
+    let texts: Vec<String> = lines
+        .iter()
+        .map(|l| l.content["text"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        lines.len(),
+        3,
+        "merge must keep the trimmed message: {texts:?}"
+    );
+    assert!(
+        texts.contains(&"first".to_string()),
+        "trimmed message survives"
+    );
+    assert!(texts.contains(&"third".to_string()), "new message included");
+
+    let manifest = runtime
+        .store
+        .get_session_manifest(user_id, session_id)
+        .expect("manifest read")
+        .expect("manifest");
+    assert_eq!(manifest.message_counts.get("user"), Some(&3));
+
     diesel::delete(messages::table.filter(messages::session_id.eq(session_id)))
         .execute(&mut conn)
         .ok();
