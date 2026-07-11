@@ -37,12 +37,15 @@ mod tests {
         // — item_id present, reason and grantRoot optional.
         let input = CodexPermissionInput::FileChange {
             item_id: "call_HKaP84kozIUwWE1Ynd5hPpCN".to_string(),
+            paths: vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
             reason: None,
             grant_root: None,
         };
         let json = serde_json::to_value(&input).unwrap();
         assert_eq!(json["tool"], "fileChange");
         assert_eq!(json["itemId"], "call_HKaP84kozIUwWE1Ynd5hPpCN");
+        assert_eq!(json["paths"][0], "src/main.rs");
+        assert_eq!(json["paths"][1], "src/lib.rs");
         // Optional `None`s should not be serialized
         assert!(json.get("reason").is_none());
         assert!(json.get("grantRoot").is_none());
@@ -50,6 +53,25 @@ mod tests {
         let parsed: CodexPermissionInput = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, input);
         assert_eq!(parsed.tool_name(), "FileChange");
+    }
+
+    #[test]
+    fn codex_permission_input_file_change_paths_default_empty() {
+        let json = serde_json::json!({
+            "tool": "fileChange",
+            "itemId": "call_HKaP84kozIUwWE1Ynd5hPpCN"
+        });
+
+        let parsed: CodexPermissionInput = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            parsed,
+            CodexPermissionInput::FileChange {
+                item_id: "call_HKaP84kozIUwWE1Ynd5hPpCN".to_string(),
+                paths: vec![],
+                reason: None,
+                grant_root: None,
+            }
+        );
     }
 
     #[test]
@@ -212,10 +234,12 @@ mod tests {
         match parsed {
             CodexPermissionInput::FileChange {
                 item_id,
+                paths,
                 reason,
                 grant_root,
             } => {
                 assert_eq!(item_id, "call_HKaP84kozIUwWE1Ynd5hPpCN");
+                assert!(paths.is_empty());
                 assert!(reason.is_none());
                 assert!(grant_root.is_none());
             }

@@ -243,17 +243,27 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
     match input {
         C::FileChange {
             item_id,
+            paths,
             reason,
             grant_root,
         } => {
-            let mut lines = vec![format!("File change for item `{}`", item_id)];
+            let mut lines = if paths.is_empty() {
+                vec![
+                    "File change".to_string(),
+                    format!("Item: `{}`", item_id),
+                    "(diff streamed above under this item id)".to_string(),
+                ]
+            } else {
+                let mut lines = vec![format!("File change {} file(s):", paths.len())];
+                lines.extend(paths.iter().map(|p| format!("  {}", p)));
+                lines
+            };
             if let Some(r) = reason.as_deref().filter(|s| !s.is_empty()) {
                 lines.push(format!("Reason: {}", r));
             }
             if let Some(g) = grant_root.as_deref().filter(|s| !s.is_empty()) {
                 lines.push(format!("Grant root: {}", g));
             }
-            lines.push("(diff streamed above under this item id)".to_string());
             lines.join("\n")
         }
         C::ApplyPatch { file_changes, .. } => {
@@ -343,5 +353,20 @@ mod tests {
             "cwd": "/tmp"
         });
         assert_eq!(format_permission_input("Bash", &input), "$ ls");
+    }
+
+    #[test]
+    fn format_codex_file_change_permission_prefers_paths() {
+        let input = serde_json::json!({
+            "tool": "fileChange",
+            "itemId": "fc1",
+            "paths": ["src/main.rs", "tests/app.rs"],
+            "reason": "needs approval"
+        });
+
+        assert_eq!(
+            format_permission_input("FileChange", &input),
+            "File change 2 file(s):\n  src/main.rs\n  tests/app.rs\nReason: needs approval"
+        );
     }
 }

@@ -10,6 +10,9 @@
 
 use crate::components::message_renderer::types::ClaudeMessage;
 use crate::components::message_renderer::RenderedMessage;
+use crate::pages::dashboard::types::PendingPermission;
+use codex_codes::io::items::{FileUpdateChange, ThreadItem};
+use std::collections::HashSet;
 
 /// Cross-agent activity classification used by the session-rail sparkline and
 /// the pending-send reconciler. The same enum bridges Claude wire shapes
@@ -50,6 +53,91 @@ pub(crate) enum ActivityTag {
     TaskStart,
     /// End of a sub-task range.
     TaskEnd,
+}
+
+/// Enrich Codex FileChange permission requests with filenames resolved from
+/// the already-streamed item events. The Codex approval request carries only
+/// `itemId`, while the matching `item.started` / patch-updated frames carry
+/// the human-readable paths and diffs.
+pub(crate) fn enrich_codex_file_change_permission(
+    mut perm: PendingPermission,
+    messages: &[RenderedMessage],
+) -> PendingPermission {
+    let Ok(shared::CodexPermissionInput::FileChange {
+        item_id,
+        paths,
+        reason,
+        grant_root,
+    }) = serde_json::from_value::<shared::CodexPermissionInput>(perm.input.clone())
+    else {
+        return perm;
+    };
+
+    if !paths.is_empty() {
+        return perm;
+    }
+
+    let resolved_paths = codex_file_change_paths_for_item(messages, &item_id);
+    if resolved_paths.is_empty() {
+        return perm;
+    }
+
+    let enriched = shared::CodexPermissionInput::FileChange {
+        item_id,
+        paths: resolved_paths,
+        reason,
+        grant_root,
+    };
+    if let Ok(input) = serde_json::to_value(enriched) {
+        perm.input = input;
+    }
+    perm
+}
+
+fn codex_file_change_paths_for_item(messages: &[RenderedMessage], item_id: &str) -> Vec<String> {
+    use crate::components::codex_renderer::{CodexEvent, CodexItem};
+
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for message in messages {
+        let Ok(event) = serde_json::from_str::<CodexEvent>(&message.content) else {
+            continue;
+        };
+        match event {
+            CodexEvent::ItemStarted {
+                item: Some(CodexItem::Thread(ThreadItem::FileChange(file_change))),
+            }
+            | CodexEvent::ItemUpdated {
+                item: Some(CodexItem::Thread(ThreadItem::FileChange(file_change))),
+            }
+            | CodexEvent::ItemCompleted {
+                item: Some(CodexItem::Thread(ThreadItem::FileChange(file_change))),
+            } if file_change.id == item_id => {
+                push_file_change_paths(&mut paths, &mut seen, &file_change.changes);
+            }
+            CodexEvent::FileChangePatchUpdated {
+                params: Some(params),
+            } if params.item_id.as_deref() == Some(item_id) => {
+                if let Some(changes) = params.changes {
+                    push_file_change_paths(&mut paths, &mut seen, &changes);
+                }
+            }
+            _ => {}
+        }
+    }
+    paths
+}
+
+fn push_file_change_paths(
+    paths: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+    changes: &[FileUpdateChange],
+) {
+    for change in changes {
+        if seen.insert(change.path.clone()) {
+            paths.push(change.path.clone());
+        }
+    }
 }
 
 impl ActivityTag {
@@ -233,11 +321,11 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
         CodexEvent::ItemStarted { item: Some(item) }
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
-            CodexItem::AppServer(
+            CodexItem::AppServer(item) => match item.as_ref() {
                 AppServerThreadItem::ContextCompaction { .. }
-                | AppServerThreadItem::CollabAgentToolCall { .. },
-            ) => Some(ActivityTag::Assistant),
-            CodexItem::AppServer(_) => None,
+                | AppServerThreadItem::CollabAgentToolCall { .. } => Some(ActivityTag::Assistant),
+                _ => None,
+            },
             CodexItem::Thread(ThreadItem::Error(_)) => Some(ActivityTag::Error),
             CodexItem::Thread(ThreadItem::CommandExecution(ref it))
                 if command_execution_reads_file(&it.command) =>
@@ -456,6 +544,48 @@ mod tests {
         assert!(ActivityTag::CompactionEnd.is_compaction_end());
         assert!(ActivityTag::TaskStart.is_task_start());
         assert!(ActivityTag::TaskEnd.is_task_end());
+    }
+
+    #[test]
+    fn enrich_codex_file_change_permission_resolves_paths_from_item_events() {
+        let messages = vec![
+            RenderedMessage::new(
+                r#"{"type":"item.started","item":{"type":"fileChange","id":"fc1","changes":[{"path":"src/main.rs","kind":{"type":"update"},"diff":"@@ -1 +1 @@"},{"path":"src/lib.rs","kind":{"type":"add"},"diff":"new"}],"status":"inProgress"}}"#
+                    .to_string(),
+                None,
+            ),
+            RenderedMessage::new(
+                r#"{"type":"item/fileChange/patchUpdated","params":{"itemId":"fc1","changes":[{"path":"src/main.rs","kind":{"type":"update"},"diff":"@@ -1 +1 @@"},{"path":"tests/app.rs","kind":{"type":"delete"},"diff":"gone"}]}}"#
+                    .to_string(),
+                None,
+            ),
+        ];
+        let perm = PendingPermission {
+            request_id: "rid-1".to_string(),
+            tool_name: "FileChange".to_string(),
+            input: serde_json::json!({
+                "tool": "fileChange",
+                "itemId": "fc1"
+            }),
+            permission_suggestions: vec![],
+        };
+
+        let enriched = enrich_codex_file_change_permission(perm, &messages);
+        let parsed: shared::CodexPermissionInput = serde_json::from_value(enriched.input).unwrap();
+
+        assert_eq!(
+            parsed,
+            shared::CodexPermissionInput::FileChange {
+                item_id: "fc1".to_string(),
+                paths: vec![
+                    "src/main.rs".to_string(),
+                    "src/lib.rs".to_string(),
+                    "tests/app.rs".to_string()
+                ],
+                reason: None,
+                grant_root: None,
+            }
+        );
     }
 
     // --- classify_output_msg_type ---

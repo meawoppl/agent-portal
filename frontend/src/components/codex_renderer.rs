@@ -138,27 +138,29 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
             // here to avoid duplication.
             ThreadItem::UserMessage(_) => html! {},
         },
-        CodexItem::AppServer(AppServerThreadItem::ContextCompaction { .. }) => {
-            render_context_compaction_item(completed)
-        }
-        CodexItem::AppServer(AppServerThreadItem::CollabAgentToolCall {
-            agents_states,
-            model,
-            prompt,
-            reasoning_effort,
-            status,
-            tool,
-            ..
-        }) => render_collab_agent_tool_call(
-            tool,
-            model.as_deref(),
-            reasoning_effort.as_ref(),
-            status,
-            prompt.as_deref(),
-            agents_states,
-            completed,
-        ),
-        CodexItem::AppServer(_) => html! {},
+        CodexItem::AppServer(item) => match item.as_ref() {
+            AppServerThreadItem::ContextCompaction { .. } => {
+                render_context_compaction_item(completed)
+            }
+            AppServerThreadItem::CollabAgentToolCall {
+                agents_states,
+                model,
+                prompt,
+                reasoning_effort,
+                status,
+                tool,
+                ..
+            } => render_collab_agent_tool_call(
+                tool,
+                model.as_deref(),
+                reasoning_effort.as_ref(),
+                status,
+                prompt.as_deref(),
+                agents_states,
+                completed,
+            ),
+            _ => html! {},
+        },
     }
 }
 
@@ -355,10 +357,13 @@ mod tests {
 
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         let CodexEvent::ItemStarted {
-            item: Some(CodexItem::AppServer(AppServerThreadItem::ContextCompaction { ref id })),
+            item: Some(CodexItem::AppServer(item)),
         } = event
         else {
             panic!("expected ItemStarted{{ContextCompaction}}, got {:?}", event);
+        };
+        let AppServerThreadItem::ContextCompaction { id } = item.as_ref() else {
+            panic!("expected ContextCompaction item, got {:?}", item);
         };
         assert_eq!(id, "9edb35c0-6b6b-407f-84e3-d03a03050a2a");
         assert_eq!(
@@ -392,18 +397,7 @@ mod tests {
         }"#;
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         let CodexEvent::ItemCompleted {
-            item:
-                Some(CodexItem::AppServer(AppServerThreadItem::CollabAgentToolCall {
-                    agents_states,
-                    id,
-                    model,
-                    prompt,
-                    reasoning_effort,
-                    receiver_thread_ids,
-                    sender_thread_id,
-                    status,
-                    tool,
-                })),
+            item: Some(CodexItem::AppServer(item)),
         } = event
         else {
             panic!(
@@ -411,18 +405,32 @@ mod tests {
                 event
             );
         };
+        let AppServerThreadItem::CollabAgentToolCall {
+            agents_states,
+            id,
+            model,
+            prompt,
+            reasoning_effort,
+            receiver_thread_ids,
+            sender_thread_id,
+            status,
+            tool,
+        } = item.as_ref()
+        else {
+            panic!("expected CollabAgentToolCall item, got {:?}", item);
+        };
         assert_eq!(id, "call_i1HC5jbTllWgsrMnJjqmRU05");
-        assert_eq!(tool, serde_json::Value::String("spawnAgent".to_string()));
+        assert_eq!(tool, &serde_json::Value::String("spawnAgent".to_string()));
         assert_eq!(model.as_deref(), Some("gpt-5.5"));
         assert_eq!(
             reasoning_effort.as_ref().map(|effort| effort.0.as_str()),
             Some("medium")
         );
-        assert_eq!(status, serde_json::Value::String("completed".to_string()));
+        assert_eq!(status, &serde_json::Value::String("completed".to_string()));
         assert_eq!(sender_thread_id, "019ed195-44b1-77e0-a234-10307ce08eac");
         assert_eq!(
-            receiver_thread_ids,
-            vec!["019ed247-768f-7603-8c71-911fd841766e".to_string()]
+            receiver_thread_ids.as_slice(),
+            ["019ed247-768f-7603-8c71-911fd841766e"]
         );
         assert_eq!(agents_states.len(), 1);
         assert!(matches!(

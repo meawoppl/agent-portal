@@ -95,16 +95,13 @@ pub enum CodexEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-// codex-codes 0.143 grew the app-server item payloads past clippy's variant
-// gap threshold. Transient per-render value (see `AgentFrame`); not boxed.
-#[allow(clippy::large_enum_variant)]
 pub enum CodexItem {
     /// Exec-level item wrapper used by the stable codex renderer paths.
     Thread(ThreadItem),
     /// App-server item wrapper for item variants that the exec-level helper
     /// model intentionally does not expose yet, such as `contextCompaction`
     /// and `collabAgentToolCall`.
-    AppServer(AppServerThreadItem),
+    AppServer(Box<AppServerThreadItem>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -287,9 +284,11 @@ pub fn thread_item_id(item: &ThreadItem) -> &str {
 pub fn codex_item_id(item: &CodexItem) -> Option<&str> {
     match item {
         CodexItem::Thread(it) => Some(thread_item_id(it)),
-        CodexItem::AppServer(AppServerThreadItem::ContextCompaction { id }) => Some(id),
-        CodexItem::AppServer(AppServerThreadItem::CollabAgentToolCall { id, .. }) => Some(id),
-        CodexItem::AppServer(_) => None,
+        CodexItem::AppServer(item) => match item.as_ref() {
+            AppServerThreadItem::ContextCompaction { id } => Some(id),
+            AppServerThreadItem::CollabAgentToolCall { id, .. } => Some(id),
+            _ => None,
+        },
     }
 }
 
