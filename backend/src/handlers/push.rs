@@ -12,7 +12,8 @@ use axum::{
 };
 use diesel::prelude::*;
 use shared::api::{
-    PushSubscriptionInfo, PushSubscriptionsResponse, RegisterPushSubscriptionRequest,
+    NotificationPrefs, PushSubscriptionInfo, PushSubscriptionsResponse,
+    RegisterPushSubscriptionRequest,
 };
 use std::sync::Arc;
 use tracing::info;
@@ -132,4 +133,144 @@ pub async fn delete_subscription(
         subscription_id, user_id
     );
     Ok(EmptyResponse::NO_CONTENT)
+}
+
+/// GET /api/push/prefs — the caller's own notification preferences.
+///
+/// The prefs live in the nullable `users.notification_prefs` jsonb column. A
+/// NULL column (user never saved prefs) or a value that no longer parses into
+/// the current [`NotificationPrefs`] shape both fall back to
+/// [`NotificationPrefs::default`], so an older/partial stored payload never
+/// wedges the endpoint.
+pub async fn get_prefs(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+) -> Result<Json<NotificationPrefs>, AppError> {
+    use crate::schema::users;
+    let mut conn = app_state.conn()?;
+
+    let stored: Option<serde_json::Value> = users::table
+        .find(user_id)
+        .select(users::notification_prefs)
+        .first(&mut conn)?;
+
+    let prefs = stored
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
+    Ok(Json(prefs))
+}
+
+/// PUT /api/push/prefs — replace the caller's notification preferences.
+///
+/// Stores the typed prefs as jsonb and echoes back the stored value.
+pub async fn put_prefs(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Json(prefs): Json<NotificationPrefs>,
+) -> Result<Json<NotificationPrefs>, AppError> {
+    use crate::schema::users;
+    let mut conn = app_state.conn()?;
+
+    // `NotificationPrefs` is a flat struct of bools, so serialization can only
+    // fail on OOM — an `AppError::Internal` is the honest response.
+    let value = serde_json::to_value(prefs).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    diesel::update(users::table.find(user_id))
+        .set(users::notification_prefs.eq(Some(value)))
+        .execute(&mut conn)?;
+
+    Ok(Json(prefs))
+}
+
+// DB-touching round-trip test for the notification-prefs query path.
+//
+// Mirrors the harness in `messages.rs::db_tests` / `auth.rs`: auto-skips when
+// `DATABASE_URL` is unset (CI stays green without a DB) and runs locally via:
+//
+//   DATABASE_URL=postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal \
+//     cargo test -p backend handlers::push::db_tests
+//
+// We exercise the query layer directly (read/update the jsonb column) rather
+// than the Axum handler, which needs a full `AppState`; the handlers are thin
+// wrappers over exactly this read/parse/write logic.
+#[cfg(test)]
+mod db_tests {
+    use super::*;
+    use crate::models::{NewUser, User};
+    use diesel::r2d2::{ConnectionManager, Pool};
+
+    type DbPool = Pool<ConnectionManager<diesel::pg::PgConnection>>;
+
+    fn try_pool() -> Option<DbPool> {
+        let url = std::env::var("DATABASE_URL").ok()?;
+        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
+        Pool::builder().build(manager).ok()
+    }
+
+    fn make_user(conn: &mut diesel::pg::PgConnection) -> User {
+        use crate::schema::users;
+        let nonce = Uuid::new_v4();
+        let new_user = NewUser {
+            google_id: format!("test_push_prefs_{nonce}"),
+            email: format!("test_push_prefs_{nonce}@example.invalid"),
+            name: Some("Test Prefs".to_string()),
+            avatar_url: None,
+        };
+        diesel::insert_into(users::table)
+            .values(&new_user)
+            .get_result::<User>(conn)
+            .expect("insert test user")
+    }
+
+    /// Read `users.notification_prefs`, applying the same NULL/parse-failure ->
+    /// default fallback as the `get_prefs` handler.
+    fn read_prefs(conn: &mut diesel::pg::PgConnection, user_id: Uuid) -> NotificationPrefs {
+        use crate::schema::users;
+        let stored: Option<serde_json::Value> = users::table
+            .find(user_id)
+            .select(users::notification_prefs)
+            .first(conn)
+            .expect("select notification_prefs");
+        stored
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn prefs_round_trip_default_then_custom() {
+        let Some(pool) = try_pool() else {
+            eprintln!("DATABASE_URL not set, skipping");
+            return;
+        };
+        let mut conn = pool.get().expect("get conn");
+        let user = make_user(&mut conn);
+
+        // GET on a fresh user: column is NULL -> defaults.
+        assert_eq!(read_prefs(&mut conn, user.id), NotificationPrefs::default());
+
+        // PUT a custom (non-default) value.
+        let custom = NotificationPrefs {
+            permission_request: false,
+            turn_complete: false,
+            session_disconnected: true,
+            agent_message: true,
+        };
+        assert_ne!(custom, NotificationPrefs::default());
+        {
+            use crate::schema::users;
+            let value = serde_json::to_value(custom).unwrap();
+            diesel::update(users::table.find(user.id))
+                .set(users::notification_prefs.eq(Some(value)))
+                .execute(&mut conn)
+                .expect("update prefs");
+        }
+
+        // GET again: the custom value round-trips.
+        assert_eq!(read_prefs(&mut conn, user.id), custom);
+
+        // Cleanup.
+        use crate::schema::users;
+        let _ = diesel::delete(users::table.find(user.id)).execute(&mut conn);
+    }
 }

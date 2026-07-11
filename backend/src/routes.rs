@@ -255,6 +255,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/push/subscriptions/{id}",
             axum::routing::delete(handlers::push::delete_subscription),
         )
+        .route(
+            "/api/push/prefs",
+            get(handlers::push::get_prefs).put(handlers::push::put_prefs),
+        )
         // Sound settings
         .route(
             "/api/settings/sound",

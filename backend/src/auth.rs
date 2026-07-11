@@ -175,6 +175,7 @@ mod tests {
             disabled,
             ban_reason: None,
             sound_config: None,
+            notification_prefs: None,
         }
     }
 
