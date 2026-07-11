@@ -200,6 +200,40 @@ pub struct NewProxyAuthToken {
     pub expires_at: Option<NaiveDateTime>,
 }
 
+/// A push-notification subscription (mobile-apps plan §8.3).
+///
+/// One row per `(user_id, endpoint_or_token)`. `platform` stores the
+/// `PushPlatform` snake_case string (`webpush` | `apns` | `fcm`); Web Push rows
+/// carry `p256dh`/`auth`, native rows leave them `None`. `disabled_at` marks a
+/// dead endpoint (pruned on a 404/410) without deleting the row, so a
+/// re-registration can revive it by clearing the timestamp.
+#[derive(Debug, Queryable, Selectable, Clone)]
+#[diesel(table_name = crate::schema::push_subscriptions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PushSubscription {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub platform: String,
+    pub endpoint_or_token: String,
+    pub p256dh: Option<String>,
+    pub auth: Option<String>,
+    pub device_label: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub disabled_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::push_subscriptions)]
+pub struct NewPushSubscription {
+    pub user_id: Uuid,
+    pub platform: String,
+    pub endpoint_or_token: String,
+    pub p256dh: Option<String>,
+    pub auth: Option<String>,
+    pub device_label: Option<String>,
+}
+
 // ============================================================================
 // Pending Permission Request Models
 // ============================================================================

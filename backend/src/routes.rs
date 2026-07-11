@@ -246,6 +246,15 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/scheduled-tasks/{id}/runs",
             get(handlers::scheduled_tasks::list_runs_handler),
         )
+        // Push notification subscriptions (mobile-apps plan C1)
+        .route(
+            "/api/push/subscriptions",
+            get(handlers::push::list_subscriptions).post(handlers::push::register_subscription),
+        )
+        .route(
+            "/api/push/subscriptions/{id}",
+            axum::routing::delete(handlers::push::delete_subscription),
+        )
         // Sound settings
         .route(
             "/api/settings/sound",
