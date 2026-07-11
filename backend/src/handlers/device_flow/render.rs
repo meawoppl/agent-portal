@@ -1,3 +1,165 @@
+pub(super) fn render_device_code_form(
+    user_code: Option<&str>,
+    error_message: Option<&str>,
+) -> String {
+    let value = escape_html_text(user_code.unwrap_or(""));
+    let error = error_message
+        .map(|message| {
+            format!(
+                r#"<p class="error-message">{}</p>"#,
+                escape_html_text(message)
+            )
+        })
+        .unwrap_or_default();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Device Authentication - Agent Portal</title>
+    <style>
+        :root {{
+            --bg-dark: #1a1b26;
+            --bg-darker: #16161e;
+            --text-primary: #c0caf5;
+            --text-secondary: #7f849c;
+            --accent: #7aa2f7;
+            --accent-hover: #9eb3ff;
+            --border: #292e42;
+            --error: #f7768e;
+        }}
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100dvh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+        }}
+        .container {{
+            background: var(--bg-darker);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 400px;
+            width: min(100%, 400px);
+            text-align: center;
+        }}
+        h1 {{
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+        }}
+        p {{
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            line-height: 1.45;
+        }}
+        .error-message {{
+            color: var(--error);
+            margin-bottom: 1rem;
+        }}
+        .code-input {{
+            width: 100%;
+            padding: 1rem;
+            font-size: 1.5rem;
+            text-align: center;
+            background: var(--bg-dark);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: 'Courier New', monospace;
+            letter-spacing: 0.25rem;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }}
+        .code-input:focus {{
+            outline: none;
+            border-color: var(--accent);
+        }}
+        .code-input::placeholder {{
+            color: var(--text-secondary);
+            letter-spacing: normal;
+            text-transform: none;
+        }}
+        button {{
+            width: 100%;
+            min-height: 48px;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            background: var(--accent);
+            color: var(--bg-dark);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }}
+        button:hover {{
+            background: var(--accent-hover);
+        }}
+        .hint {{
+            margin: 1rem 0 0;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }}
+        @media (max-width: 480px) {{
+            .container {{
+                padding: 1.5rem;
+            }}
+            .code-input {{
+                font-size: 1.25rem;
+                letter-spacing: 0.18rem;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Device Authentication</h1>
+        <p>Enter the code displayed in your terminal to authenticate this device.</p>
+        {error}
+        <form action="/api/auth/device" method="get">
+            <input
+                type="text"
+                name="user_code"
+                class="code-input"
+                placeholder="XXX-XXX"
+                pattern="[A-Za-z0-9]{{3}}-?[A-Za-z0-9]{{3}}"
+                maxlength="7"
+                value="{value}"
+                inputmode="text"
+                autocomplete="one-time-code"
+                autocapitalize="characters"
+                required
+                autofocus
+            >
+            <button type="submit">Continue</button>
+        </form>
+        <p class="hint">The code is shown in your terminal after running <code>claude-portal</code></p>
+    </div>
+    <script>
+        const input = document.querySelector('.code-input');
+        input.addEventListener('input', () => {{
+            const compact = input.value.replace(/[^a-z0-9]/gi, '').slice(0, 6).toUpperCase();
+            input.value = compact.length > 3 ? compact.slice(0, 3) + '-' + compact.slice(3) : compact;
+        }});
+    </script>
+</body>
+</html>"#
+    )
+}
+
 pub(super) fn render_approval_page(
     user_code: &str,
     hostname: Option<&str>,
@@ -23,7 +185,7 @@ pub(super) fn render_approval_page(
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Approve Device - Agent Portal</title>
     <style>
         :root {{
@@ -43,10 +205,11 @@ pub(super) fn render_approval_page(
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: var(--bg-dark);
             color: var(--text-primary);
-            min-height: 100vh;
+            min-height: 100dvh;
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
         }}
         .container {{
             background: var(--bg-darker);
@@ -54,7 +217,7 @@ pub(super) fn render_approval_page(
             border-radius: 12px;
             padding: 2rem;
             max-width: 450px;
-            width: 90%;
+            width: min(100%, 450px);
             text-align: center;
         }}
         h1 {{
@@ -109,6 +272,7 @@ pub(super) fn render_approval_page(
         }}
         button {{
             flex: 1;
+            min-height: 48px;
             padding: 0.75rem 1.5rem;
             font-size: 1rem;
             border: none;
@@ -153,6 +317,19 @@ pub(super) fn render_approval_page(
             background: rgba(247, 118, 142, 0.1);
             border: 1px solid var(--error);
             color: var(--error);
+        }}
+        @media (max-width: 480px) {{
+            .container {{
+                padding: 1.5rem;
+            }}
+            .buttons {{
+                flex-direction: column-reverse;
+                gap: 0.75rem;
+            }}
+            .code-display {{
+                font-size: 1.1rem;
+                letter-spacing: 0.14rem;
+            }}
         }}
     </style>
 </head>
