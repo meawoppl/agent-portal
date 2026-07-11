@@ -72,6 +72,13 @@ impl<T> ConnSender<T> {
             mpsc::error::TrySendError::Closed(v) => mpsc::error::SendError(v),
         })
     }
+
+    /// Whether `self` and `other` are handles to the same underlying channel
+    /// (i.e. clones of one another). Used to identify a specific connection's
+    /// sender for eager removal from the presence registries on disconnect.
+    pub fn same_channel(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
 }
 
 /// Construct a bounded per-connection channel (see [`ConnSender`]).
