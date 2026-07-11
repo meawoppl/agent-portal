@@ -74,11 +74,15 @@ impl SessionManager {
         drop(entry);
 
         let gen = connection.gen;
+        let user_id = connection.user_id;
         info!(
             "Registering launcher: {} ({}) (gen={})",
             connection.launcher_name, launcher_id, gen
         );
         self.launchers.insert(launcher_id, connection);
+        // Push signal so open dashboards reflect the launcher coming
+        // online without a refresh (#710).
+        self.broadcast_to_user(&user_id, shared::ServerToClient::LaunchersChanged);
         Ok(gen)
     }
 
@@ -100,9 +104,14 @@ impl SessionManager {
                 // Only release the dedup slot if it still points at us — a
                 // different launcher_id may have claimed (user_id, hostname)
                 // since, and must not be evicted.
+                let user_id = connection.user_id;
                 let dedup_key = (connection.user_id, connection.hostname);
                 self.launcher_dedup
                     .remove_if(&dedup_key, |_, claimed_by| claimed_by == launcher_id);
+                // Covers clean disconnects, dead-channel evictions, and
+                // liveness-sweep evictions alike — they all come through
+                // here (#710).
+                self.broadcast_to_user(&user_id, shared::ServerToClient::LaunchersChanged);
                 true
             }
             None => {

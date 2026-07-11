@@ -271,6 +271,11 @@ pub enum ServerToClient {
         session_costs: Vec<SessionCost>,
     },
 
+    /// The user's launcher set changed (connected, disconnected, or
+    /// evicted). Push signal for the #710 live-dashboard direction: clients
+    /// refetch `GET /api/launchers` instead of waiting for a page refresh.
+    LaunchersChanged,
+
     /// Server is shutting down
     ServerShutdown {
         reason: String,

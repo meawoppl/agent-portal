@@ -37,6 +37,10 @@ pub struct UseClientWebSocket {
     /// the new session becomes findable — no polling burst needed. The
     /// value itself is opaque; only its *change* is meaningful.
     pub launch_event_counter: u32,
+    /// Ticks on every `ServerToClient::LaunchersChanged` broadcast — a
+    /// launcher connected, disconnected, or was evicted. Consumers hang a
+    /// `use_effect_with` on it to refetch `/api/launchers` (#710).
+    pub launcher_event_counter: u32,
 }
 
 /// Calculate exponential backoff delay for reconnection attempts.
@@ -85,6 +89,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     let update_available = use_state(|| None::<String>);
     let recent_turn_metrics = use_state(Vec::<TurnMetrics>::new);
     let launch_event_counter = use_state(|| 0u32);
+    let launcher_event_counter = use_state(|| 0u32);
 
     // One-shot REST hydration on hook mount. Fires alongside (not gated on)
     // the WS connect — the dashboard pill shows immediately if the user
@@ -110,6 +115,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         let update_available = update_available.clone();
         let recent_turn_metrics = recent_turn_metrics.clone();
         let launch_event_counter = launch_event_counter.clone();
+        let launcher_event_counter = launcher_event_counter.clone();
 
         use_effect_with((), move |_| {
             let total_spend = total_spend.clone();
@@ -117,6 +123,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
             let update_available = update_available.clone();
             let recent_turn_metrics = recent_turn_metrics.clone();
             let launch_event_counter = launch_event_counter.clone();
+            let launcher_event_counter = launcher_event_counter.clone();
 
             spawn_local(async move {
                 let mut attempt: u32 = 0;
@@ -161,6 +168,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                         &shutdown_reason,
                                         &recent_turn_metrics,
                                         &launch_event_counter,
+                                        &launcher_event_counter,
                                     ),
                                     Err(e) => {
                                         log::error!("Client WebSocket error: {:?}", e);
@@ -199,6 +207,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         update_available: (*update_available).clone(),
         recent_turn_metrics: (*recent_turn_metrics).clone(),
         launch_event_counter: *launch_event_counter,
+        launcher_event_counter: *launcher_event_counter,
     }
 }
 

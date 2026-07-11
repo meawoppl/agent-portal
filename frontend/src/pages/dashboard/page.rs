@@ -570,7 +570,11 @@ pub fn dashboard_page() -> Html {
 
             // Launch session dialog
             if ui_state.show_launch_dialog {
-                <LaunchDialog on_close={on_launch_close.clone()} on_launched={on_launch_success.clone()} />
+                <LaunchDialog
+                    on_close={on_launch_close.clone()}
+                    on_launched={on_launch_success.clone()}
+                    launcher_refresh={ws_hook.launcher_event_counter}
+                />
             }
 
             if loading {

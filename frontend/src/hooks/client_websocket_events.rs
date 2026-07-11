@@ -13,6 +13,7 @@ pub(crate) fn handle_server_message(
     shutdown_reason: &UseStateHandle<Option<String>>,
     recent_turn_metrics: &UseStateHandle<Vec<TurnMetrics>>,
     launch_event_counter: &UseStateHandle<u32>,
+    launcher_event_counter: &UseStateHandle<u32>,
 ) {
     match msg {
         ServerToClient::UserSpendUpdate {
@@ -51,6 +52,11 @@ pub(crate) fn handle_server_message(
                 );
             }
             launch_event_counter.set(launch_event_counter.wrapping_add(1));
+        }
+        ServerToClient::LaunchersChanged => {
+            // A launcher connected, dropped, or was evicted: tick so open
+            // launcher lists refetch at the moment the change is visible.
+            launcher_event_counter.set(launcher_event_counter.wrapping_add(1));
         }
         _ => {}
     }
