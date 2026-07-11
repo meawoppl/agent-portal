@@ -3,7 +3,10 @@
 # Uses pre-built binaries from CI (faster builds with caching)
 # =============================================================================
 
-FROM debian:bookworm-slim
+# Base must provide a glibc at least as new as the CI build runner's
+# (container.yml pins runs-on: ubuntu-24.04) — the backend binary is built
+# there and copied in below. Keep these two in lockstep.
+FROM ubuntu:24.04
 
 WORKDIR /app
 
@@ -12,7 +15,7 @@ RUN apt-get update && \
     apt-get install -y \
     ca-certificates \
     libpq5 \
-    libssl3 \
+    libssl3t64 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
