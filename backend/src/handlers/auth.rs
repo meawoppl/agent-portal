@@ -1,5 +1,6 @@
 use axum::{
     extract::{Query, State},
+    http::HeaderMap,
     response::{IntoResponse, Redirect},
     Json,
 };
@@ -292,9 +293,11 @@ pub async fn callback(
 
 pub async fn me(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Json<MeResponse>, AppError> {
-    let user = crate::auth::extract_user(&app_state, &cookies).map_err(auth_user_error)?;
+    let user =
+        crate::auth::extract_user(&app_state, Some(&headers), &cookies).map_err(auth_user_error)?;
 
     Ok(Json(MeResponse {
         id: user.id,

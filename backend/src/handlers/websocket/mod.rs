@@ -20,7 +20,7 @@ pub use session_manager::{
 
 use axum::{
     extract::{ws::WebSocketUpgrade, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
@@ -53,9 +53,10 @@ pub async fn handle_launcher_websocket(
 pub async fn handle_web_client_websocket(
     ws: WebSocketUpgrade,
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Response {
-    let user_id = match crate::auth::extract_user_id(&app_state, &cookies).ok() {
+    let user_id = match crate::auth::extract_user_id(&app_state, Some(&headers), &cookies).ok() {
         Some(id) => id,
         None => {
             warn!("Unauthenticated WebSocket connection attempt to /ws/client");

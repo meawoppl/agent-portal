@@ -6,7 +6,7 @@
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use sha2::{Digest, Sha256};
-use shared::ProxyTokenClaims;
+use shared::{ProxyTokenClaims, TOKEN_TYPE_PROXY};
 use uuid::Uuid;
 
 /// Error type for JWT operations
@@ -35,6 +35,24 @@ pub fn create_proxy_token(
     email: &str,
     expires_in_days: Option<u32>,
 ) -> Result<String, JwtError> {
+    create_proxy_token_with_type(
+        secret,
+        token_id,
+        user_id,
+        email,
+        expires_in_days,
+        TOKEN_TYPE_PROXY,
+    )
+}
+
+pub fn create_proxy_token_with_type(
+    secret: &[u8],
+    token_id: Uuid,
+    user_id: Uuid,
+    email: &str,
+    expires_in_days: Option<u32>,
+    token_type: &str,
+) -> Result<String, JwtError> {
     let now = Utc::now();
     let exp = expires_in_days.map(|days| (now + Duration::days(days as i64)).timestamp());
 
@@ -44,7 +62,7 @@ pub fn create_proxy_token(
         email: email.to_string(),
         iat: now.timestamp(),
         exp,
-        token_type: "proxy".to_string(),
+        token_type: token_type.to_string(),
     };
 
     let token = encode(

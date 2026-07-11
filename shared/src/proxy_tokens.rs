@@ -10,6 +10,10 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub const TOKEN_TYPE_PROXY: &str = "proxy";
+pub const TOKEN_TYPE_LAUNCHER: &str = "launcher";
+pub const TOKEN_TYPE_MOBILE: &str = "mobile";
+
 /// JWT claims for proxy authentication tokens
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyTokenClaims {
@@ -26,13 +30,13 @@ pub struct ProxyTokenClaims {
     /// instead of a fixed TTL. See #932.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exp: Option<i64>,
-    /// Token type: "proxy" or "launcher"
+    /// Token type: "proxy", "launcher", or "mobile".
     #[serde(default = "default_token_type")]
     pub token_type: String,
 }
 
 fn default_token_type() -> String {
-    "proxy".to_string()
+    TOKEN_TYPE_PROXY.to_string()
 }
 
 /// Configuration encoded in the init URL

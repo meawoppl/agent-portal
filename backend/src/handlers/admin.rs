@@ -4,6 +4,7 @@
 
 use axum::{
     extract::{Path, State},
+    http::HeaderMap,
     Json,
 };
 use diesel::prelude::*;
@@ -26,10 +27,14 @@ use crate::{
 // Admin Guard - extracts and validates admin user from cookies
 // ============================================================================
 
-/// Extract the current user from cookies and verify they are an admin.
+/// Extract the current user from bearer/cookies and verify they are an admin.
 /// Returns the User if they are an admin, or an appropriate application error.
-pub fn require_admin(app_state: &Arc<AppState>, cookies: &Cookies) -> Result<User, AppError> {
-    let user = crate::auth::extract_user(app_state, cookies)?;
+pub fn require_admin(
+    app_state: &Arc<AppState>,
+    headers: &HeaderMap,
+    cookies: &Cookies,
+) -> Result<User, AppError> {
+    let user = crate::auth::extract_user(app_state, Some(headers), cookies)?;
 
     if !user.is_admin {
         warn!("Non-admin user {} attempted admin access", user.email);
@@ -90,9 +95,10 @@ struct DeletedCostStats {
 
 pub async fn get_stats(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Json<AdminStats>, AppError> {
-    let admin = require_admin(&app_state, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
     info!("Admin {} requested system stats", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -168,9 +174,10 @@ pub async fn get_stats(
 
 pub async fn list_users(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Json<AdminUsersResponse>, AppError> {
-    let admin = require_admin(&app_state, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
     info!("Admin {} requested user list", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -212,11 +219,12 @@ pub async fn list_users(
 
 pub async fn update_user(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
     Path(user_id): Path<Uuid>,
     Json(update): Json<UpdateUserRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    let admin = require_admin(&app_state, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
 
     // Prevent admin from demoting themselves
     if user_id == admin.id && update.is_admin == Some(false) {
@@ -324,9 +332,10 @@ pub async fn update_user(
 
 pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Json<AdminSessionsResponse>, AppError> {
-    let admin = require_admin(&app_state, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
     info!("Admin {} requested sessions list", admin.email);
 
     let mut conn = app_state.conn()?;
@@ -371,10 +380,11 @@ pub async fn list_sessions(
 
 pub async fn delete_session(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
     Path(session_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    let admin = require_admin(&app_state, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
 
     let mut conn = app_state.conn()?;
 

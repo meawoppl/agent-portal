@@ -32,17 +32,7 @@ pub(crate) fn resolve_user(
     headers: &HeaderMap,
     cookies: &Cookies,
 ) -> Result<Uuid, AppError> {
-    if let Some(token) = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-    {
-        let mut conn = app_state.conn()?;
-        let (user_id, _email) =
-            crate::handlers::proxy_tokens::verify_and_get_user(app_state, &mut conn, token)?;
-        return Ok(user_id);
-    }
-    crate::auth::extract_user_id(app_state, cookies)
+    crate::auth::extract_user_id(app_state, Some(headers), cookies)
 }
 
 /// Look up a display name for `user_id` (name, falling back to email).

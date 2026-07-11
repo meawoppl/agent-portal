@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -73,9 +73,10 @@ fn validate_custom_label(label: &str) -> Result<(), &'static str> {
 /// GET /api/admin/subdomains — all custom subdomains, newest first.
 pub async fn list_custom_subdomains(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Json<CustomSubdomainsResponse>, AppError> {
-    require_admin(&app_state, &cookies)?;
+    require_admin(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
 
     use crate::schema::{custom_subdomains as cs, sessions};
@@ -111,10 +112,11 @@ pub async fn list_custom_subdomains(
 /// a taken label or a session that already has one is a 409.
 pub async fn create_custom_subdomain(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
     Json(req): Json<CreateCustomSubdomainRequest>,
 ) -> Result<(StatusCode, Json<CustomSubdomainInfo>), AppError> {
-    let admin = require_admin(&app_state, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
     let label = req.label.trim().to_ascii_lowercase();
     validate_custom_label(&label).map_err(AppError::BadRequest)?;
     if app_state.forward_domain.is_none() {
@@ -197,9 +199,10 @@ pub async fn create_custom_subdomain(
 pub async fn delete_custom_subdomain(
     State(app_state): State<Arc<AppState>>,
     Path(label): Path<String>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<StatusCode, AppError> {
-    let admin = require_admin(&app_state, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
 
     use crate::schema::custom_subdomains as cs;
@@ -215,9 +218,10 @@ pub async fn delete_custom_subdomain(
 /// admin subdomain-assignment picker.
 pub async fn list_admin_forwards(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Json<AdminForwardsResponse>, AppError> {
-    require_admin(&app_state, &cookies)?;
+    require_admin(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
 
     use crate::schema::{forward_subdomains as fs, session_forwards as sf, sessions, users};

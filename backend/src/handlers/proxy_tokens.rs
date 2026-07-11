@@ -20,11 +20,12 @@ use crate::{
     auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
-    jwt::{create_proxy_token, hash_token},
+    jwt::{create_proxy_token_with_type, hash_token},
     models::{NewProxyAuthToken, ProxyAuthToken, User},
     schema::proxy_auth_tokens,
     AppState,
 };
+use shared::TOKEN_TYPE_PROXY;
 
 /// How [`issue_proxy_token`] persists the freshly minted token.
 pub enum TokenPersist<'a> {
@@ -68,18 +69,37 @@ pub fn issue_proxy_token(
     persist: TokenPersist<'_>,
     expires_in_days: Option<u32>,
 ) -> Result<IssuedProxyToken, AppError> {
+    issue_proxy_token_with_type(
+        conn,
+        jwt_secret,
+        user_id,
+        persist,
+        expires_in_days,
+        TOKEN_TYPE_PROXY,
+    )
+}
+
+pub fn issue_proxy_token_with_type(
+    conn: &mut diesel::pg::PgConnection,
+    jwt_secret: &[u8],
+    user_id: Uuid,
+    persist: TokenPersist<'_>,
+    expires_in_days: Option<u32>,
+    token_type: &str,
+) -> Result<IssuedProxyToken, AppError> {
     use crate::schema::users;
     let user: User = users::table.find(user_id).first(conn)?;
 
     let expires_at =
         expires_in_days.map(|days| chrono::Utc::now() + chrono::Duration::days(days as i64));
 
-    let token = create_proxy_token(
+    let token = create_proxy_token_with_type(
         jwt_secret,
         Uuid::new_v4(),
         user_id,
         &user.email,
         expires_in_days,
+        token_type,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
 
