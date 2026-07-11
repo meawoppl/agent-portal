@@ -825,6 +825,11 @@ When making changes, verify:
 | `PORTAL_IMAGE_STORE_MAX_MB` | Backend served-image cache total-byte cap (LRU eviction past this) | Optional (default: 256) |
 | `PORTAL_IMAGE_STORE_TTL_SECS` | Backend served-image per-entry TTL in seconds | Optional (default: 3600) |
 | `PORTAL_REMINDER_FILE` | Path to a markdown file overriding the bundled portal-features reminder (proxy/launcher side). Falls back to default if unset/unreadable. | Optional |
+| `PORTAL_SESSION_ARCHIVE_BACKEND` | Long-term session archive (#1258): `disabled`, `local`, or `s3` | Optional (default: disabled) |
+| `PORTAL_SESSION_ARCHIVE_LOCAL_ROOT` | Filesystem root for the `local` archive backend | Required when backend=local |
+| `PORTAL_SESSION_ARCHIVE_S3_BUCKET` | Bucket for the `s3` archive backend (region/credentials/endpoint via standard `AWS_*` vars) | Required when backend=s3 |
+| `PORTAL_SESSION_ARCHIVE_S3_PREFIX` | Key prefix inside the archive bucket | Optional |
+| `PORTAL_SESSION_ARCHIVE_TRANSCRIPTS` | Archive transcript bodies (always zstd-compressed), not just manifests | Optional (default: true) |
 
 Note: Dev mode is enabled via `--dev-mode` CLI flag, not an environment variable. Voice input is browser-native (Web Speech API on Chromium / Safari); no server-side speech credentials are needed.
 

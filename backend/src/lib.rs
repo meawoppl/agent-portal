@@ -155,9 +155,12 @@ pub async fn run() -> anyhow::Result<()> {
             config.image_store_ttl,
         ),
         forward_domain: config.forward_domain,
-        archive: config
-            .archive
-            .map(|cfg| Arc::new(archive::ArchiveRuntime::new(cfg))),
+        archive: match config.archive {
+            Some(cfg) => Some(Arc::new(
+                archive::ArchiveRuntime::new(cfg).map_err(|e| anyhow::anyhow!(e))?,
+            )),
+            None => None,
+        },
     });
 
     // Build our application with routes

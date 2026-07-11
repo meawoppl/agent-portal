@@ -311,12 +311,24 @@ impl ServerConfig {
         let archive = crate::archive::archive_config_from_env()
             .map_err(|e| anyhow::anyhow!("invalid archive configuration: {e}"))?;
         match &archive {
-            Some(cfg) => tracing::info!(
-                "Session archive enabled: local root {} (compression {}, transcripts {})",
-                cfg.local_root.display(),
-                cfg.compression.as_str(),
-                cfg.transcripts
-            ),
+            Some(cfg) => {
+                let backend = match &cfg.backend {
+                    crate::archive::ArchiveBackendConfig::Local { root } => {
+                        format!("local root {}", root.display())
+                    }
+                    crate::archive::ArchiveBackendConfig::S3 { bucket, prefix } => format!(
+                        "s3 bucket {bucket}{}",
+                        prefix
+                            .as_deref()
+                            .map(|p| format!(" prefix {p}"))
+                            .unwrap_or_default()
+                    ),
+                };
+                tracing::info!(
+                    "Session archive enabled: {backend} (zstd transcripts: {})",
+                    cfg.transcripts
+                );
+            }
             None => {
                 tracing::info!("Session archive disabled (PORTAL_SESSION_ARCHIVE_BACKEND unset)")
             }
