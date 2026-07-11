@@ -16,11 +16,12 @@ use uuid::Uuid;
 
 use crate::{
     auth,
-    handlers::proxy_tokens::{issue_proxy_token, TokenPersist},
+    handlers::proxy_tokens::{issue_proxy_token_with_type, TokenPersist},
     routes, AppState,
 };
 
 use shared::protocol::{DEVICE_CODE_EXPIRES_SECS, SESSION_COOKIE_NAME};
+use shared::TOKEN_TYPE_MOBILE;
 
 mod api_error;
 mod render;
@@ -32,6 +33,8 @@ use api_error::{auth_error_to_device_flow, DeviceFlowApiError};
 use render::render_approval_page;
 use state::{generate_device_code, generate_user_code, VerifyQuery};
 pub use state::{DeviceFlowState, DeviceFlowStatus, DeviceFlowStore};
+
+const MOBILE_TOKEN_TTL_DAYS: u32 = 30;
 
 // POST /auth/device/code
 pub async fn device_code(
@@ -251,7 +254,7 @@ pub async fn device_approve(
         event = "device_approve_request",
         user_code = %req.user_code,
     );
-    let user_id = auth::extract_user_id(&app_state, &cookies).map_err(|e| {
+    let user_id = auth::extract_user_id(&app_state, None, &cookies).map_err(|e| {
         warn!(
             target: "auth_audit",
             event = "device_approve_denied",
@@ -308,7 +311,7 @@ pub async fn device_deny(
         event = "device_deny_request",
         user_code = %req.user_code,
     );
-    let user_id = auth::extract_user_id(&app_state, &cookies).map_err(|e| {
+    let user_id = auth::extract_user_id(&app_state, None, &cookies).map_err(|e| {
         warn!(
             target: "auth_audit",
             event = "device_deny_denied",
@@ -479,23 +482,40 @@ pub async fn complete_device_flow(
     user_code: &str,
     user_id: Uuid,
 ) -> Result<(), ()> {
+    complete_device_flow_with_expiry(
+        app_state,
+        store,
+        user_code,
+        user_id,
+        Some(MOBILE_TOKEN_TTL_DAYS),
+    )
+    .await
+}
+
+async fn complete_device_flow_with_expiry(
+    app_state: &AppState,
+    store: &DeviceFlowStore,
+    user_code: &str,
+    user_id: Uuid,
+    expires_in_days: Option<u32>,
+) -> Result<(), ()> {
     let mut conn = app_state.db_pool.get().map_err(|e| {
         error!("Failed to get database connection: {}", e);
     })?;
 
-    // Initial device-flow tokens have no fixed expiry so freshly authenticated
-    // CLIs can start immediately. Launchers rotate these to expiring
-    // credentials on websocket registration (#1237).
+    // Device-flow credentials are mobile bearer tokens with a fixed lifetime;
+    // B2 adds the refresh endpoint so native shells can rotate before expiry.
     let name = format!(
         "Device auth {}",
         chrono::Utc::now().format("%Y-%m-%d %H:%M")
     );
-    let issued = issue_proxy_token(
+    let issued = issue_proxy_token_with_type(
         &mut conn,
         app_state.jwt_secret.as_bytes(),
         user_id,
         TokenPersist::Create { name: &name },
-        None,
+        expires_in_days,
+        TOKEN_TYPE_MOBILE,
     )
     .map_err(|e| {
         error!("Failed to issue device token: {:?}", e);
