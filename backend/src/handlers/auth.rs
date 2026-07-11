@@ -1,26 +1,35 @@
 use axum::{
     extract::{Query, State},
-    http::HeaderMap,
+    http::{header, HeaderMap},
     response::{IntoResponse, Redirect},
     Json,
 };
 use diesel::prelude::*;
 use oauth2::{AuthorizationCode, TokenResponse};
 use serde::Deserialize;
-use shared::api::MeResponse;
+use shared::api::{MeResponse, TokenRefreshResponse};
+use shared::TOKEN_TYPE_MOBILE;
 use std::sync::Arc;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 use tracing::{info, warn};
 
 use crate::{
     errors::AppError,
+    handlers::proxy_tokens::{
+        issue_proxy_token_with_type, verify_and_get_user_with_token, TokenPersist,
+    },
     models::{NewUser, User},
-    routes, AppState,
+    routes,
+    schema::proxy_auth_tokens,
+    AppState,
 };
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
 mod oauth;
+
+const MOBILE_TOKEN_TTL_DAYS: u32 = 30;
+const TOKEN_REFRESH_GRACE_MINUTES: i64 = 10;
 
 /// Regular web login - redirects to Google OAuth
 pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
@@ -299,13 +308,141 @@ pub async fn me(
     let user =
         crate::auth::extract_user(&app_state, Some(&headers), &cookies).map_err(auth_user_error)?;
 
-    Ok(Json(MeResponse {
+    Ok(Json(me_response(user)))
+}
+
+pub async fn refresh_token(
+    State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<TokenRefreshResponse>, AppError> {
+    let token = bearer_token(&headers).ok_or(AppError::Unauthorized)?;
+    let mut conn = app_state.conn()?;
+    let verified = verify_and_get_user_with_token(&app_state, &mut conn, token)?;
+    require_mobile_token(&verified.token_type)?;
+
+    let now = chrono::Utc::now().naive_utc();
+    if !mobile_token_needs_refresh(verified.token.created_at, verified.token.expires_at, now) {
+        return Ok(Json(TokenRefreshResponse {
+            refreshed: false,
+            auth_token: None,
+            expires_at: verified
+                .token
+                .expires_at
+                .map(|dt| dt.and_utc().to_rfc3339()),
+        }));
+    }
+
+    let issued = issue_proxy_token_with_type(
+        &mut conn,
+        app_state.jwt_secret.as_bytes(),
+        verified.user_id,
+        TokenPersist::Create {
+            name: &verified.token.name,
+        },
+        Some(MOBILE_TOKEN_TTL_DAYS),
+        TOKEN_TYPE_MOBILE,
+    )?;
+
+    let grace_expires_at = mobile_token_grace_expires_at(now);
+    diesel::update(
+        proxy_auth_tokens::table
+            .filter(proxy_auth_tokens::id.eq(verified.token.id))
+            .filter(proxy_auth_tokens::revoked.eq(false)),
+    )
+    .set(proxy_auth_tokens::expires_at.eq(Some(grace_expires_at)))
+    .execute(&mut conn)?;
+
+    info!(
+        target: "auth_audit",
+        event = "mobile_token_refreshed",
+        user_id = %verified.user_id,
+        user_email = %verified.email,
+        old_token_id = %verified.token.id,
+        new_token_id = %issued.row_id,
+    );
+
+    Ok(Json(TokenRefreshResponse {
+        refreshed: true,
+        auth_token: Some(issued.token),
+        expires_at: issued.expires_at.map(|dt| dt.to_rfc3339()),
+    }))
+}
+
+pub async fn token_login(
+    State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<Json<MeResponse>, AppError> {
+    let token = bearer_token(&headers).ok_or(AppError::Unauthorized)?;
+    let mut conn = app_state.conn()?;
+    let verified = verify_and_get_user_with_token(&app_state, &mut conn, token)?;
+    require_mobile_token(&verified.token_type)?;
+
+    use crate::schema::users;
+    let user = users::table
+        .find(verified.user_id)
+        .first::<User>(&mut conn)
+        .map_err(|_| AppError::Unauthorized)?;
+    if user.disabled {
+        return Err(AppError::Forbidden);
+    }
+
+    add_session_cookie(&cookies, &app_state, &user);
+    info!(
+        target: "auth_audit",
+        event = "mobile_token_login",
+        user_id = %user.id,
+        user_email = %user.email,
+    );
+
+    Ok(Json(me_response(user)))
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+}
+
+fn require_mobile_token(token_type: &str) -> Result<(), AppError> {
+    if token_type == TOKEN_TYPE_MOBILE {
+        Ok(())
+    } else {
+        Err(AppError::Unauthorized)
+    }
+}
+
+fn mobile_token_needs_refresh(
+    created_at: chrono::NaiveDateTime,
+    expires_at: Option<chrono::NaiveDateTime>,
+    now: chrono::NaiveDateTime,
+) -> bool {
+    let Some(expires_at) = expires_at else {
+        return true;
+    };
+
+    let lifetime_secs = expires_at.signed_duration_since(created_at).num_seconds();
+    if lifetime_secs <= 0 {
+        return true;
+    }
+
+    let age_secs = now.signed_duration_since(created_at).num_seconds().max(0);
+    age_secs >= lifetime_secs / 2
+}
+
+fn mobile_token_grace_expires_at(now: chrono::NaiveDateTime) -> chrono::NaiveDateTime {
+    now + chrono::Duration::minutes(TOKEN_REFRESH_GRACE_MINUTES)
+}
+
+fn me_response(user: User) -> MeResponse {
+    MeResponse {
         id: user.id,
         email: user.email,
         name: user.name,
         avatar_url: user.avatar_url,
         is_admin: user.is_admin,
-    }))
+    }
 }
 
 pub async fn logout(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
@@ -459,6 +596,13 @@ fn encode_query_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handlers::images::ImageStore;
+    use crate::handlers::websocket::SessionManager;
+    use crate::models::{NewUser, ProxyAuthToken};
+    use crate::schema::{proxy_auth_tokens, users};
+    use axum::http::{header::AUTHORIZATION, HeaderValue};
+    use std::time::Duration;
+    use tower_cookies::cookie::Key;
 
     #[test]
     fn auth_user_error_preserves_forbidden_and_database_errors() {
@@ -502,5 +646,200 @@ mod tests {
             encode_query_value("ABC-123 reason?/"),
             "ABC-123+reason%3F%2F"
         );
+    }
+
+    #[test]
+    fn mobile_token_needs_refresh_at_half_life() {
+        let now = chrono::Utc::now().naive_utc();
+        let created = now - chrono::Duration::days(16);
+        let expires = created + chrono::Duration::days(30);
+        assert!(mobile_token_needs_refresh(created, Some(expires), now));
+
+        let created = now - chrono::Duration::days(10);
+        let expires = created + chrono::Duration::days(30);
+        assert!(!mobile_token_needs_refresh(created, Some(expires), now));
+        assert!(mobile_token_needs_refresh(created, None, now));
+    }
+
+    static DB_SETUP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn test_pool() -> Option<crate::db::DbPool> {
+        if std::env::var("DATABASE_URL").is_err() {
+            eprintln!("DATABASE_URL not set, skipping DB-backed mobile auth test");
+            return None;
+        }
+        let _guard = DB_SETUP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let pool = crate::db::create_pool().expect("create test DB pool");
+        crate::db::run_migrations_logged(&pool).expect("run migrations");
+        Some(pool)
+    }
+
+    fn test_state(pool: crate::db::DbPool) -> Arc<AppState> {
+        Arc::new(AppState {
+            dev_mode: false,
+            db_pool: pool,
+            session_manager: SessionManager::new(),
+            oauth_basic_client: None,
+            device_flow_store: None,
+            public_url: "http://localhost:3000".to_string(),
+            cookie_key: Key::generate(),
+            jwt_secret: "test-secret-key-at-least-32-bytes".to_string(),
+            app_title: "Agent Portal Test".to_string(),
+            splash_text: None,
+            allowed_email_domain: None,
+            allowed_emails: None,
+            message_retention_count: 100,
+            message_retention_days: 30,
+            session_max_age_days: 14,
+            max_image_mb: 10,
+            image_store: ImageStore::new(1024 * 1024, Duration::from_secs(60)),
+            forward_domain: None,
+            archive: None,
+        })
+    }
+
+    fn insert_user(conn: &mut diesel::PgConnection) -> User {
+        let id = uuid::Uuid::new_v4();
+        diesel::insert_into(users::table)
+            .values(&NewUser {
+                google_id: format!("google-{id}"),
+                email: format!("mobile-{id}@example.com"),
+                name: Some("Mobile Test".to_string()),
+                avatar_url: None,
+            })
+            .get_result(conn)
+            .expect("insert user")
+    }
+
+    fn issue_mobile_token(
+        app_state: &AppState,
+        conn: &mut diesel::PgConnection,
+        user_id: uuid::Uuid,
+    ) -> (uuid::Uuid, String) {
+        let issued = issue_proxy_token_with_type(
+            conn,
+            app_state.jwt_secret.as_bytes(),
+            user_id,
+            TokenPersist::Create {
+                name: "mobile-refresh-test",
+            },
+            Some(MOBILE_TOKEN_TTL_DAYS),
+            TOKEN_TYPE_MOBILE,
+        )
+        .expect("issue mobile token");
+        (issued.row_id, issued.token)
+    }
+
+    fn bearer_headers(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).expect("valid bearer header"),
+        );
+        headers
+    }
+
+    fn set_token_window(
+        conn: &mut diesel::PgConnection,
+        token_id: uuid::Uuid,
+        created_at: chrono::NaiveDateTime,
+        expires_at: chrono::NaiveDateTime,
+    ) {
+        diesel::update(proxy_auth_tokens::table.find(token_id))
+            .set((
+                proxy_auth_tokens::created_at.eq(created_at),
+                proxy_auth_tokens::expires_at.eq(Some(expires_at)),
+            ))
+            .execute(conn)
+            .expect("set token window");
+    }
+
+    #[tokio::test]
+    async fn refresh_token_waits_until_half_life() {
+        let Some(pool) = test_pool() else {
+            return;
+        };
+        let app_state = test_state(pool);
+        let mut conn = app_state.conn().expect("conn");
+        let user = insert_user(&mut conn);
+        let (token_id, token) = issue_mobile_token(&app_state, &mut conn, user.id);
+        let now = chrono::Utc::now().naive_utc();
+        set_token_window(
+            &mut conn,
+            token_id,
+            now - chrono::Duration::days(10),
+            now + chrono::Duration::days(20),
+        );
+
+        let Json(response) = refresh_token(State(app_state), bearer_headers(&token))
+            .await
+            .expect("refresh response");
+
+        assert!(!response.refreshed);
+        assert!(response.auth_token.is_none());
+        assert!(response.expires_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn refresh_token_rotates_after_half_life_and_graces_old_row() {
+        let Some(pool) = test_pool() else {
+            return;
+        };
+        let app_state = test_state(pool);
+        let mut conn = app_state.conn().expect("conn");
+        let user = insert_user(&mut conn);
+        let (token_id, token) = issue_mobile_token(&app_state, &mut conn, user.id);
+        let now = chrono::Utc::now().naive_utc();
+        set_token_window(
+            &mut conn,
+            token_id,
+            now - chrono::Duration::days(20),
+            now + chrono::Duration::days(10),
+        );
+
+        let Json(response) = refresh_token(State(app_state.clone()), bearer_headers(&token))
+            .await
+            .expect("refresh response");
+
+        assert!(response.refreshed);
+        let new_token = response.auth_token.expect("new token");
+        let claims = crate::jwt::verify_proxy_token(app_state.jwt_secret.as_bytes(), &new_token)
+            .expect("new token verifies");
+        assert_eq!(claims.token_type, TOKEN_TYPE_MOBILE);
+        assert!(claims.exp.is_some());
+
+        let old_row: ProxyAuthToken = proxy_auth_tokens::table
+            .find(token_id)
+            .first(&mut conn)
+            .expect("old row");
+        let grace = old_row.expires_at.expect("old row grace expiry");
+        let remaining = grace.signed_duration_since(chrono::Utc::now().naive_utc());
+        assert!(remaining.num_minutes() <= TOKEN_REFRESH_GRACE_MINUTES);
+        assert!(remaining.num_minutes() >= TOKEN_REFRESH_GRACE_MINUTES - 1);
+    }
+
+    #[tokio::test]
+    async fn token_login_sets_session_cookie() {
+        let Some(pool) = test_pool() else {
+            return;
+        };
+        let app_state = test_state(pool);
+        let mut conn = app_state.conn().expect("conn");
+        let user = insert_user(&mut conn);
+        let (_token_id, token) = issue_mobile_token(&app_state, &mut conn, user.id);
+        let cookies = Cookies::default();
+
+        let Json(response) = token_login(
+            State(app_state.clone()),
+            bearer_headers(&token),
+            cookies.clone(),
+        )
+        .await
+        .expect("token login");
+
+        assert_eq!(response.id, user.id);
+        let cookie_user =
+            crate::auth::extract_user(&app_state, None, &cookies).expect("session cookie auth");
+        assert_eq!(cookie_user.id, user.id);
     }
 }

@@ -1,5 +1,6 @@
 //! Shared API request/response types for HTTP endpoints.
 
+mod auth;
 mod device_flow;
 mod error;
 mod forwards;
@@ -13,6 +14,7 @@ mod sessions;
 mod system_extra;
 mod users;
 
+pub use auth::*;
 pub use device_flow::*;
 pub use error::*;
 pub use forwards::*;

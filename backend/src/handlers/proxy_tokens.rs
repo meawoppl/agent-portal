@@ -53,6 +53,7 @@ pub struct IssuedProxyToken {
 pub struct VerifiedProxyToken {
     pub user_id: Uuid,
     pub email: String,
+    pub token_type: String,
     pub token: ProxyAuthToken,
 }
 
@@ -371,6 +372,7 @@ pub fn verify_and_get_user_with_token(
     Ok(VerifiedProxyToken {
         user_id: claims.sub,
         email: claims.email,
+        token_type: claims.token_type,
         token: db_token,
     })
 }
