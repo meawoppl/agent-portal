@@ -209,8 +209,14 @@ pub struct SessionArchiveManifest {
 /// One transcript line, serialized as NDJSON. `content` is the raw stored
 /// message JSON, embedded as a JSON value so the archive round-trips the
 /// wire content byte-for-byte semantically.
+///
+/// `id` is the message row's UUID — the merge key that lets a re-archive
+/// UNION the existing archived transcript with whatever remains in the hot
+/// DB (phase 2 trims hot messages after archival; a later re-archive must
+/// never shrink the archived transcript).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArchiveMessageLine {
+    pub id: Uuid,
     pub role: String,
     pub created_at: NaiveDateTime,
     pub agent_type: String,
@@ -443,6 +449,7 @@ mod tests {
         let (u, s) = (Uuid::from_u128(7), Uuid::from_u128(9));
 
         let line = ArchiveMessageLine {
+            id: Uuid::from_u128(11),
             role: "user".into(),
             created_at: chrono::NaiveDate::from_ymd_opt(2026, 7, 11)
                 .unwrap()

@@ -191,10 +191,12 @@ fn archive_one_session(
     // Transcript rows, oldest first. Note: hot-DB retention may already
     // have trimmed old messages; the archive preserves what remains (phase
     // 2 orders archival ahead of retention deletion).
-    let rows: Vec<(String, String, chrono::NaiveDateTime, String)> = messages::table
+    type MessageRow = (uuid::Uuid, String, String, chrono::NaiveDateTime, String);
+    let rows: Vec<MessageRow> = messages::table
         .filter(messages::session_id.eq(session.id))
         .order(messages::created_at.asc())
         .select((
+            messages::id,
             messages::role,
             messages::content,
             messages::created_at,
@@ -203,7 +205,7 @@ fn archive_one_session(
         .load(conn)?;
 
     let mut message_counts: BTreeMap<String, i64> = BTreeMap::new();
-    for (role, ..) in &rows {
+    for (_, role, ..) in &rows {
         *message_counts.entry(role.clone()).or_default() += 1;
     }
 
@@ -249,8 +251,9 @@ fn archive_one_session(
 
     let (transcript_ndjson, transcript_info) = if transcripts_enabled {
         let mut ndjson = Vec::new();
-        for (role, content, created_at, agent_type) in &rows {
+        for (id, role, content, created_at, agent_type) in &rows {
             let line = ArchiveMessageLine {
+                id: *id,
                 role: role.clone(),
                 created_at: *created_at,
                 agent_type: agent_type.clone(),
