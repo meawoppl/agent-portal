@@ -36,6 +36,7 @@ web-sys = { workspace = true, features = [
     "Location",
     "Storage",
     "Navigator",
+    "ServiceWorkerContainer",
     "Clipboard",
     "File",
     "FileList",
