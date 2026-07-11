@@ -530,6 +530,60 @@ mod tests {
         }
     }
 
+    /// Build a `ClaudeOutput::User` frame from raw content blocks, the same
+    /// way the CLI ships them.
+    fn user_frame(content: serde_json::Value) -> ClaudeOutput {
+        serde_json::from_value(serde_json::json!({
+            "type": "user",
+            "session_id": "00000000-0000-0000-0000-000000000000",
+            "message": { "role": "user", "content": content }
+        }))
+        .expect("parses as ClaudeOutput")
+    }
+
+    /// #715 predicate contract: drop ONLY user echoes whose every text
+    /// block is empty/whitespace — anything carrying real content (tool
+    /// results, images, non-empty text, or no text blocks at all) must
+    /// render.
+    #[test]
+    fn empty_user_echo_predicate_contract() {
+        // Whitespace-only text → dropped.
+        assert!(is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "   \n\t" }
+        ]))));
+        assert!(is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "" },
+            { "type": "text", "text": " " }
+        ]))));
+
+        // No content blocks at all → NOT what we filter.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([]))));
+
+        // Tool-result / non-text block → real content, passes through.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
+        ]))));
+
+        // Mixed empty text + non-text → passes through.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "" },
+            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
+        ]))));
+
+        // Non-empty text → passes through.
+        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
+            { "type": "text", "text": "hello" }
+        ]))));
+
+        // Non-user frames never match.
+        let result_frame: ClaudeOutput = serde_json::from_value(serde_json::json!({
+            "type": "system", "subtype": "init",
+            "session_id": "00000000-0000-0000-0000-000000000000"
+        }))
+        .expect("parses");
+        assert!(!is_empty_user_echo(&result_frame));
+    }
+
     #[test]
     fn wiggum_done_accepts_standalone_done_only() {
         for text in [
