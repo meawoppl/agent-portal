@@ -179,6 +179,13 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 return None;
             }
 
+            // Same classification, different disguise: loop-priming user
+            // echoes with no visible text render as blank bubbles (#715).
+            if is_empty_user_echo(&output) {
+                debug!("Dropping empty user echo from transcript");
+                return None;
+            }
+
             // Forward the output
             if output_tx.send(value.clone()).is_err() {
                 error!("Failed to forward Claude output");
@@ -380,6 +387,31 @@ fn is_system_reminder_echo(output: &ClaudeOutput) -> bool {
     user.message.content.iter().any(|block| {
         matches!(block, ContentBlock::Text(t) if t.text.trim_start().starts_with("<system-reminder>"))
     })
+}
+
+/// Is this Claude output a user echo whose every text block is empty or
+/// whitespace-only? The CLI occasionally emits these loop-priming echoes;
+/// rendering them fragments the transcript with blank "user" bubbles
+/// (#715). Echoes with no text blocks at all (tool results, images) are
+/// real content and must NOT match.
+fn is_empty_user_echo(output: &ClaudeOutput) -> bool {
+    let ClaudeOutput::User(user) = output else {
+        return false;
+    };
+    let mut saw_text = false;
+    for block in &user.message.content {
+        match block {
+            ContentBlock::Text(t) => {
+                saw_text = true;
+                if !t.text.trim().is_empty() {
+                    return false;
+                }
+            }
+            // Any non-text block means this echo carries real content.
+            _ => return false,
+        }
+    }
+    saw_text
 }
 
 fn check_wiggum_done(result: &claude_codes::io::ResultMessage) -> bool {
