@@ -474,9 +474,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.159"
+version = "2.1.160"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24ec342792a75382f891a20b6898cdf297c8fed1b7d450b154ac762ba43bb58d"
+checksum = "7fa83c7d339f486dac04be90454e13db9328deed4a398d6b848f8075251d64e9"
 dependencies = [
  "anyhow",
  "chrono",
@@ -546,9 +546,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.142.0"
+version = "0.143.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6456182c080103eb13cb02130e2c629a325f65f57695cf3b0afccae661968186"
+checksum = "ea80f1d28514a83fde0bd2909ff8be4eb7065d78673ffbcda6767241757d57b1"
 dependencies = [
  "log",
  "serde",

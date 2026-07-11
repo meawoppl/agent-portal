@@ -95,6 +95,9 @@ pub enum CodexEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
+// codex-codes 0.143 grew the app-server item payloads past clippy's variant
+// gap threshold. Transient per-render value (see `AgentFrame`); not boxed.
+#[allow(clippy::large_enum_variant)]
 pub enum CodexItem {
     /// Exec-level item wrapper used by the stable codex renderer paths.
     Thread(ThreadItem),

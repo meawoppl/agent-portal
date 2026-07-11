@@ -65,8 +65,10 @@ impl ClaudeMessage {
                 shared::ClaudeOutput::Result(msg) => Self::Result(msg),
                 shared::ClaudeOutput::Error(msg) => Self::Error(msg),
                 shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
-                shared::ClaudeOutput::ControlRequest(_)
-                | shared::ClaudeOutput::ControlResponse(_) => Self::Unknown,
+                // Wildcard: control frames plus the 2.1.160 wire additions
+                // (stream_event, tool_progress, transcript variants, …) that
+                // have no dedicated renderer yet.
+                _ => Self::Unknown,
             });
         }
 
@@ -88,8 +90,10 @@ impl<'de> Deserialize<'de> for ClaudeMessage {
                 shared::ClaudeOutput::Result(msg) => Self::Result(msg),
                 shared::ClaudeOutput::Error(msg) => Self::Error(msg),
                 shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
-                shared::ClaudeOutput::ControlRequest(_)
-                | shared::ClaudeOutput::ControlResponse(_) => Self::Unknown,
+                // Wildcard: control frames plus the 2.1.160 wire additions
+                // (stream_event, tool_progress, transcript variants, …) that
+                // have no dedicated renderer yet.
+                _ => Self::Unknown,
             });
         }
         serde_json::from_value::<LocalMessage>(value)

@@ -100,10 +100,14 @@ pub(crate) async fn claude_io_task(
     // know either on its own.
     let mut current_model: Option<String> = None;
     let mut current_service_tier: Option<String> = None;
-    // Per-turn subagent (`Task`) token rollup: summed from each Task result's
-    // typed `SubagentResult.total_tokens` (claude-codes 2.1.159, #169), reset
-    // at every turn start so it matches the turn the metrics row represents.
-    let mut current_turn_subagent_tokens: i64 = 0;
+    // Session-lifetime subagent (`Task`) usage rollup (claude-codes 2.1.160,
+    // #1275). Unlike the hand-rolled per-turn sum it replaces, the rollup
+    // dedupes Task results by agentId — so frames replayed on resume can
+    // never double-count. Per-turn attribution is total-at-finalize minus
+    // total-at-turn-start; resume-replayed results that arrive BEFORE the
+    // first turn starts land outside every turn window.
+    let mut subagent_rollup = claude_codes::SubagentUsageRollup::default();
+    let mut subagent_tokens_at_turn_start: i64 = 0;
 
     loop {
         tokio::select! {
@@ -124,7 +128,7 @@ pub(crate) async fn claude_io_task(
                         rate_limit_attempts = 0;
                         current_turn_was_rate_limited = false;
                         pending_session_limit = None;
-                        current_turn_subagent_tokens = 0;
+                        subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
                         // Begin per-turn metrics capture. Wall-clock UTC is
                         // chrono::Utc::now(); the monotonic instant is the
                         // anchor for TTFT / total / gap durations.
@@ -153,6 +157,9 @@ pub(crate) async fn claude_io_task(
             result = client.receive() => {
                 match result {
                     Ok(output) => {
+                        // Feed every frame to the subagent rollup (cheap
+                        // no-op for non-Task-result frames; agentId-deduped).
+                        subagent_rollup.observe(&output);
                         // Classify the frame before forwarding so we can
                         // decide whether the turn's terminator triggers an
                         // auto-retry, and feed the per-turn metrics tracker.
@@ -219,16 +226,6 @@ pub(crate) async fn claude_io_task(
                                 current_turn_was_rate_limited = false;
                                 pending_session_limit = None;
                             }
-                            ClaudeOutput::User(user) => {
-                                // A `Task` tool's result is echoed as a user
-                                // message carrying a typed `SubagentResult` in
-                                // `tool_use_result`. Sum its `total_tokens` into
-                                // the per-turn rollup (claude-codes 2.1.159, #169).
-                                if let Some(sub) = user.subagent_result() {
-                                    current_turn_subagent_tokens +=
-                                        sub.total_tokens.unwrap_or(0) as i64;
-                                }
-                            }
                             _ => {}
                         }
 
@@ -261,12 +258,13 @@ pub(crate) async fn claude_io_task(
                                     .map(|u| u.cache_read_input_tokens as i64)
                                     .unwrap_or(0),
                                 thinking_tokens: 0,
-                                // Subagent (`Task`) tokens summed across this
-                                // turn's Task results via the typed
-                                // `SubagentResult.total_tokens` (claude-codes
-                                // 2.1.159, #169) — the `<subagent_tokens>` line
-                                // the CLI renders in its terminal `<usage>`.
-                                subagent_tokens: current_turn_subagent_tokens,
+                                // Subagent (`Task`) tokens attributed to THIS
+                                // turn: the session-lifetime rollup's total
+                                // minus its value when the turn started —
+                                // the `<subagent_tokens>` line the CLI renders
+                                // in its terminal `<usage>` (2.1.160, #1275).
+                                subagent_tokens: (subagent_rollup.subagent_tokens as i64)
+                                    .saturating_sub(subagent_tokens_at_turn_start),
                                 stop_reason: r.stop_reason.clone(),
                                 is_error: r.is_error,
                                 total_cost_usd: Some(r.total_cost_usd),
@@ -377,7 +375,7 @@ pub(crate) async fn claude_io_task(
                                 // turn from a metrics standpoint, but tag
                                 // the new turn with a stream-restart count
                                 // so the dashboard can spot retried turns.
-                                current_turn_subagent_tokens = 0;
+                                subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
                                 turn_tracker.start(Instant::now(), chrono::Utc::now());
                                 turn_tracker.record_stream_restart();
                                 if let Err(e) = client.send(&input).await {
@@ -399,7 +397,7 @@ pub(crate) async fn claude_io_task(
                                         let new_input = ClaudeInput::user_message(text, session_id);
                                         rate_limit_attempts = 0;
                                         pending_session_limit = None;
-                                        current_turn_subagent_tokens = 0;
+                                        subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
                                         turn_tracker.start(Instant::now(), chrono::Utc::now());
                                         let r = client.send(&new_input).await;
                                         last_input = Some(new_input);
@@ -686,6 +684,44 @@ mod tests {
         };
         let sub = user.subagent_result().expect("typed SubagentResult");
         assert_eq!(sub.total_tokens, Some(12345));
+    }
+
+    /// Locks the rollup semantics the per-turn attribution relies on
+    /// (claude-codes 2.1.160, #1275): Task results are deduped by agentId,
+    /// so a frame replayed on resume contributes zero to a later
+    /// turn-boundary diff — and results lacking an agentId/totalTokens
+    /// (arbitrary tool_use_result objects) don't count at all.
+    #[test]
+    fn subagent_rollup_dedupes_replayed_task_results_by_agent_id() {
+        let task_result = |agent_id: &str, tokens: u64| {
+            serde_json::from_value::<ClaudeOutput>(serde_json::json!({
+                "type": "user",
+                "session_id": "00000000-0000-0000-0000-000000000000",
+                "message": { "role": "user", "content": [] },
+                "tool_use_result": {
+                    "status": "completed",
+                    "agentId": agent_id,
+                    "totalTokens": tokens
+                }
+            }))
+            .expect("parses as ClaudeOutput")
+        };
+
+        let mut rollup = claude_codes::SubagentUsageRollup::default();
+        rollup.observe(&task_result("agent-a", 1000));
+        assert_eq!(rollup.subagent_tokens, 1000);
+
+        // Turn boundary: snapshot, then replay the SAME result (resume).
+        let at_turn_start = rollup.subagent_tokens;
+        rollup.observe(&task_result("agent-a", 1000));
+        assert_eq!(
+            rollup.subagent_tokens, at_turn_start,
+            "replayed Task result must not re-count"
+        );
+
+        // A genuinely new subagent in this turn is attributed by the diff.
+        rollup.observe(&task_result("agent-b", 500));
+        assert_eq!(rollup.subagent_tokens - at_turn_start, 500);
     }
 
     #[test]

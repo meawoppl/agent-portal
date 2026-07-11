@@ -11,6 +11,11 @@ use super::codex_renderer::CodexEvent;
 use super::message_renderer::types::ClaudeMessage;
 
 #[derive(Debug, Clone)]
+// SDK 2.1.160 grew `ClaudeMessage`'s largest payloads past clippy's variant
+// gap threshold. `AgentFrame` is a transient per-render classification (never
+// stored in bulk), so boxing would churn every construction/match site for no
+// retained-memory win.
+#[allow(clippy::large_enum_variant)]
 pub enum AgentFrame {
     Claude(ClaudeMessage),
     Codex(CodexEvent),

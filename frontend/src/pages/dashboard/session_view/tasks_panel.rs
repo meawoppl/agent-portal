@@ -551,14 +551,18 @@ pub(super) fn derive_task_events(
     match claude_msg {
         shared::ClaudeOutput::System(sys) => {
             if let Some(task) = sys.as_task_started() {
-                let task_type = match task.task_type {
-                    shared::TaskType::LocalAgent => "local_agent",
-                    shared::TaskType::LocalBash => "local_bash",
-                }
-                .to_string();
+                // 2.1.160: `task_type`/`tool_use_id` became Option and
+                // TaskType is an open enum; `as_str` yields the wire tag
+                // ("local_agent"/"local_bash"/…) the panel matches on.
+                let task_type = task
+                    .task_type
+                    .as_ref()
+                    .map(|tt| tt.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
                 events.push(TaskEvent::Started {
                     task_id: task.task_id.clone(),
-                    tool_use_id: task.tool_use_id.clone(),
+                    tool_use_id: task.tool_use_id.clone().unwrap_or_default(),
                     task_type,
                     description: task.description.clone(),
                     started_at: resolve_ts(),
@@ -567,28 +571,38 @@ pub(super) fn derive_task_events(
                 events.push(TaskEvent::Progress {
                     task_id: progress.task_id.clone(),
                     description: progress.description.clone(),
-                    last_tool_name: progress.last_tool_name.clone(),
+                    // Option in 2.1.160; empty string renders as "no tool yet".
+                    last_tool_name: progress.last_tool_name.clone().unwrap_or_default(),
                     duration_ms: progress.usage.duration_ms,
                     tool_uses: progress.usage.tool_uses,
                     total_tokens: progress.usage.total_tokens,
                     fallback_started_at: resolve_ts(),
                 });
             } else if let Some(notif) = sys.as_task_notification() {
-                let status = match notif.status {
-                    shared::TaskStatus::Completed => TaskStatus::Completed,
-                    shared::TaskStatus::Failed => TaskStatus::Failed,
+                // 2.1.160: TaskStatus is an open enum with non-terminal
+                // states. Only terminal statuses complete a panel entry;
+                // killed/stopped read as failure, non-terminal and unknown
+                // statuses leave the task running.
+                let status = match &notif.status {
+                    shared::TaskStatus::Completed => Some(TaskStatus::Completed),
+                    shared::TaskStatus::Failed
+                    | shared::TaskStatus::Killed
+                    | shared::TaskStatus::Stopped => Some(TaskStatus::Failed),
+                    _ => None,
                 };
-                let usage = notif
-                    .usage
-                    .as_ref()
-                    .map(|u| (u.duration_ms, u.tool_uses, u.total_tokens));
-                events.push(TaskEvent::Notification {
-                    task_id: notif.task_id.clone(),
-                    summary: notif.summary.clone(),
-                    status,
-                    completed_at: resolve_ts(),
-                    usage,
-                });
+                if let Some(status) = status {
+                    let usage = notif
+                        .usage
+                        .as_ref()
+                        .map(|u| (u.duration_ms, u.tool_uses, u.total_tokens));
+                    events.push(TaskEvent::Notification {
+                        task_id: notif.task_id.clone(),
+                        summary: notif.summary.clone(),
+                        status,
+                        completed_at: resolve_ts(),
+                        usage,
+                    });
+                }
             }
         }
         shared::ClaudeOutput::User(user_msg) => {
