@@ -310,9 +310,7 @@ async fn rearchive_after_trim_merges_transcript() {
     use backend::schema::{messages, sessions};
     use diesel::prelude::*;
 
-    let pool = backend::db::create_pool().expect("pool");
-    backend::db::run_migrations_logged(&pool).expect("migrations");
-    backend::db::seed_dev_user(&pool).expect("dev user");
+    let pool = test_pool();
     let mut conn = pool.get().expect("conn");
     let user_id: uuid::Uuid = backend::schema::users::table
         .select(backend::schema::users::id)
