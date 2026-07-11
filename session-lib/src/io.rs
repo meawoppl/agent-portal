@@ -23,12 +23,12 @@ pub enum IoCommand {
         /// user-message form.
         text: String,
         delivered: Option<oneshot::Sender<Result<(), String>>>,
-        /// Optional typed portal event to display in place of the agent's echo
-        /// of this input (e.g. an inter-agent `PortalContent::AgentMessage`).
-        /// Claude relies on the proxy's echo-replacement and ignores this;
-        /// Codex — which doesn't echo — emits this verbatim as its synthetic
-        /// echo so inter-agent messages render as the typed card with
-        /// provenance instead of a raw `[message from …]` / JSON user bubble.
+        /// Optional typed portal event to display in place of the user-facing
+        /// text for this input (e.g. an inter-agent
+        /// `PortalContent::AgentMessage`). Agent I/O tasks emit this verbatim
+        /// as their synthetic echo so inter-agent messages render as the typed
+        /// provenance card instead of a raw `[message from …]` / JSON user
+        /// bubble.
         /// Boxed to keep this variant from dominating `IoCommand`'s size.
         display_event: Option<Box<serde_json::Value>>,
     },
@@ -96,9 +96,9 @@ pub enum SessionEvent {
     ///
     /// Both backends now arrive here: the per-agent I/O task classifies its
     /// native output and `Session` forwards each `AgentOutput::Visible` value
-    /// verbatim. Agent-specific consumers (e.g. the Claude proxy
-    /// `output_forwarder`, which re-parses for image/git/echo handling) live at
-    /// the proxy edge, keyed on `agent_type` — `Session` stays neutral.
+    /// verbatim. Agent-specific consumers (e.g. the Claude proxy edge, which
+    /// re-parses for image/git handling and wiggum DONE detection) live outside
+    /// `Session`, keyed on `agent_type` — `Session` stays neutral.
     RawOutput(serde_json::Value),
 
     /// The agent is requesting permission for a tool.

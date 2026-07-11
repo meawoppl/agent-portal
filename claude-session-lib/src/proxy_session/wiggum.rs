@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use claude_codes::io::ContentBlock;
 use claude_codes::ClaudeOutput;
 use shared::{AgentType, ProxyToServer};
 use tokio::sync::{mpsc, Mutex};
@@ -13,6 +12,8 @@ use uuid::Uuid;
 use session_lib::agent::Agent;
 use session_lib::output_buffer::PendingOutputBuffer;
 use session_lib::session::Session;
+
+use crate::io_task::claude_user_echo_value;
 
 use super::git_metadata::{check_and_send_branch_update_if_branch_changed, GitMetadataState};
 use super::{
@@ -81,15 +82,17 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
         shared::InputDeliveryStage::ProxyReceived,
     )
     .await;
-    let prompt = wiggum_prompt(&wiggum_input.text);
+    let original_prompt = wiggum_input.text.clone();
+    let prompt = wiggum_prompt(&original_prompt);
+    let display_event = claude_user_echo_value(original_prompt.clone(), session_id);
     *wiggum_state = Some(WiggumState {
-        original_prompt: wiggum_input.text,
+        original_prompt,
         iteration: 1,
         loop_start: Instant::now(),
         loop_durations: Vec::new(),
     });
     if let Err(e) = claude_session
-        .send_input(serde_json::Value::String(prompt))
+        .send_input_with_display(serde_json::Value::String(prompt), Some(display_event))
         .await
     {
         error!("Failed to send wiggum prompt to Claude: {}", e);
@@ -117,6 +120,7 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
     event: Option<session_lib::SessionEvent>,
+    session_id: Uuid,
     output_tx: &mpsc::UnboundedSender<serde_json::Value>,
     ws_write: &SharedWsWrite,
     connection_start: Instant,
@@ -131,8 +135,8 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
         Some(SessionEvent::RawOutput(ref value)) => {
             // Claude visible output now arrives as neutral raw JSON. Re-parse to
             // `ClaudeOutput` for the typed side-effects (wiggum DONE, compaction
-            // reminder, system-reminder echo drop); malformed/non-Claude frames
-            // skip those and are forwarded verbatim, never dropped.
+            // reminder); malformed/non-Claude frames skip those and are
+            // forwarded verbatim, never dropped.
             let Some(output) = super::parse_visible_claude_output(value) else {
                 if output_tx.send(value.clone()).is_err() {
                     error!("Failed to forward Claude output");
@@ -168,23 +172,6 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 ClaudeOutput::System(sys) => shared::is_compaction_boundary(sys),
                 _ => false,
             };
-
-            // The portal-features reminder is injected as user input wrapped in
-            // <system-reminder> tags. Claude echoes that back as a User message
-            // on its stdout — if we forward it, the wrapper text leaks into the
-            // user's transcript as if they had typed it. Drop those echoes.
-            if is_system_reminder_echo(&output) {
-                debug!("Dropping system-reminder user echo from transcript");
-                // Skip forwarding and skip the rest of the handler.
-                return None;
-            }
-
-            // Same classification, different disguise: loop-priming user
-            // echoes with no visible text render as blank bubbles (#715).
-            if is_empty_user_echo(&output) {
-                debug!("Dropping empty user echo from transcript");
-                return None;
-            }
 
             // Forward the output
             if output_tx.send(value.clone()).is_err() {
@@ -244,8 +231,13 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
 
                         // Resend the prompt
                         let prompt = wiggum_prompt(&state.original_prompt);
+                        let display_event =
+                            claude_user_echo_value(state.original_prompt.clone(), session_id);
                         if let Err(e) = claude_session
-                            .send_input(serde_json::Value::String(prompt))
+                            .send_input_with_display(
+                                serde_json::Value::String(prompt),
+                                Some(display_event),
+                            )
                             .await
                         {
                             error!("Failed to resend wiggum prompt: {}", e);
@@ -375,45 +367,6 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
     }
 }
 
-/// Check if Claude's result indicates wiggum completion (responded with "DONE")
-/// Is this Claude output Claude's echo of a `<system-reminder>`-wrapped user
-/// input? Those wrapped messages are how we inject the portal-features
-/// reminder (and similar out-of-band context); they shouldn't leak into the
-/// user's transcript as if the user had typed them.
-fn is_system_reminder_echo(output: &ClaudeOutput) -> bool {
-    let ClaudeOutput::User(user) = output else {
-        return false;
-    };
-    user.message.content.iter().any(|block| {
-        matches!(block, ContentBlock::Text(t) if t.text.trim_start().starts_with("<system-reminder>"))
-    })
-}
-
-/// Is this Claude output a user echo whose every text block is empty or
-/// whitespace-only? The CLI occasionally emits these loop-priming echoes;
-/// rendering them fragments the transcript with blank "user" bubbles
-/// (#715). Echoes with no text blocks at all (tool results, images) are
-/// real content and must NOT match.
-fn is_empty_user_echo(output: &ClaudeOutput) -> bool {
-    let ClaudeOutput::User(user) = output else {
-        return false;
-    };
-    let mut saw_text = false;
-    for block in &user.message.content {
-        match block {
-            ContentBlock::Text(t) => {
-                saw_text = true;
-                if !t.text.trim().is_empty() {
-                    return false;
-                }
-            }
-            // Any non-text block means this echo carries real content.
-            _ => return false,
-        }
-    }
-    saw_text
-}
-
 fn check_wiggum_done(result: &claude_codes::io::ResultMessage) -> bool {
     // Check if it was an error (don't continue on errors)
     if result.is_error {
@@ -528,60 +481,6 @@ mod tests {
             result: Some("failed".to_string()),
             ..result_message("failed")
         }
-    }
-
-    /// Build a `ClaudeOutput::User` frame from raw content blocks, the same
-    /// way the CLI ships them.
-    fn user_frame(content: serde_json::Value) -> ClaudeOutput {
-        serde_json::from_value(serde_json::json!({
-            "type": "user",
-            "session_id": "00000000-0000-0000-0000-000000000000",
-            "message": { "role": "user", "content": content }
-        }))
-        .expect("parses as ClaudeOutput")
-    }
-
-    /// #715 predicate contract: drop ONLY user echoes whose every text
-    /// block is empty/whitespace — anything carrying real content (tool
-    /// results, images, non-empty text, or no text blocks at all) must
-    /// render.
-    #[test]
-    fn empty_user_echo_predicate_contract() {
-        // Whitespace-only text → dropped.
-        assert!(is_empty_user_echo(&user_frame(serde_json::json!([
-            { "type": "text", "text": "   \n\t" }
-        ]))));
-        assert!(is_empty_user_echo(&user_frame(serde_json::json!([
-            { "type": "text", "text": "" },
-            { "type": "text", "text": " " }
-        ]))));
-
-        // No content blocks at all → NOT what we filter.
-        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([]))));
-
-        // Tool-result / non-text block → real content, passes through.
-        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
-            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
-        ]))));
-
-        // Mixed empty text + non-text → passes through.
-        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
-            { "type": "text", "text": "" },
-            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
-        ]))));
-
-        // Non-empty text → passes through.
-        assert!(!is_empty_user_echo(&user_frame(serde_json::json!([
-            { "type": "text", "text": "hello" }
-        ]))));
-
-        // Non-user frames never match.
-        let result_frame: ClaudeOutput = serde_json::from_value(serde_json::json!({
-            "type": "system", "subtype": "init",
-            "session_id": "00000000-0000-0000-0000-000000000000"
-        }))
-        .expect("parses");
-        assert!(!is_empty_user_echo(&result_frame));
     }
 
     #[test]

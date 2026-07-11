@@ -35,7 +35,7 @@ pub(super) async fn handle_next_event<A: Agent>(
     // `SessionEvent::RawOutput(value)`. Route by agent at the proxy edge: Codex
     // uses this simple inline path; Claude falls through to the
     // wiggum/output-forwarder path, which re-parses the value to `ClaudeOutput`
-    // for its image/git/echo/wiggum side-effects.
+    // for its image/git/wiggum side-effects.
     if state.agent_type != shared::AgentType::Claude {
         if let Some(SessionEvent::RawOutput(ref value)) = event {
             if state.git_refresh.should_check_before_message() {
@@ -132,6 +132,7 @@ pub(super) async fn handle_next_event<A: Agent>(
 
     handle_session_event_with_wiggum(
         event,
+        state.session_id,
         &state.output_tx,
         &state.ws_write,
         state.connection_start,
