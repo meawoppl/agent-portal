@@ -12,6 +12,7 @@ pub fn handle_permission_request(
     session_key: &Option<String>,
     db_session_id: Option<Uuid>,
     db_pool: &DbPool,
+    notifications: &crate::push::NotificationSender,
     request_id: String,
     tool_name: String,
     input: serde_json::Value,
@@ -62,6 +63,9 @@ pub fn handle_permission_request(
         }
     }
 
+    // Keep the tool name for the push event before the fanout moves it.
+    let push_tool_name = tool_name.clone();
+
     // Forward to web clients
     if let Some(ref key) = session_key {
         info!(
@@ -79,6 +83,18 @@ pub fn handle_permission_request(
                 permission_suggestions,
             },
         );
+    }
+
+    // Emit a push notification (mobile-apps plan §8.1 — the highest-value
+    // interrupt). The dispatcher resolves the owning user and suppresses the
+    // push if a live web client is already present, so this is a cheap fire.
+    // `session_name` is left empty; the dispatcher backfills it from the row.
+    if let Some(session_id) = db_session_id {
+        notifications.emit(crate::push::NotificationEvent::PermissionRequest {
+            session_id,
+            session_name: String::new(),
+            tool_name: push_tool_name,
+        });
     }
 }
 

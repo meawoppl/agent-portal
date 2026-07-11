@@ -99,6 +99,17 @@ impl SessionManager {
         self.user_clients.iter().map(|r| *r.key()).collect()
     }
 
+    /// Whether `user_id` currently has at least one live web client. Used by the
+    /// push dispatcher to suppress a push when in-app WS delivery already covers
+    /// the user (mobile-apps plan §8.2). Presence is trustworthy because dead
+    /// senders are pruned eagerly on socket close (#1291): an empty (or absent)
+    /// vector means genuinely no live client.
+    pub fn has_user_client(&self, user_id: Uuid) -> bool {
+        self.user_clients
+            .get(&user_id)
+            .is_some_and(|clients| !clients.value().is_empty())
+    }
+
     /// Broadcast a shutdown message to all connected clients of every type.
     pub fn broadcast_shutdown(&self, reason: String, reconnect_delay_ms: u64) {
         let proxy_msg = ServerToProxy::ServerShutdown {
@@ -295,6 +306,34 @@ mod tests {
         assert!(mgr.user_clients.get(&user_id).is_none());
         // Presence query must no longer see the user.
         assert!(!mgr.get_all_user_ids().contains(&user_id));
+    }
+
+    #[test]
+    fn has_user_client_presence() {
+        let mgr = SessionManager::new();
+        let present = Uuid::new_v4();
+        let absent = Uuid::new_v4();
+        let (tx, _rx) = crate::handlers::websocket::conn_channel(64);
+
+        assert!(!mgr.has_user_client(present));
+        mgr.add_user_client(present, tx);
+        assert!(mgr.has_user_client(present));
+        // A user with no registered client (never added) is absent.
+        assert!(!mgr.has_user_client(absent));
+    }
+
+    #[test]
+    fn has_user_client_false_after_prune_empties_vec() {
+        // A dead sender pruned to an empty vec must read as "no live client"
+        // so the push dispatcher does not wrongly suppress (§8.2).
+        let mgr = SessionManager::new();
+        let user = Uuid::new_v4();
+        let (tx, rx) = crate::handlers::websocket::conn_channel(64);
+        mgr.add_user_client(user, tx);
+        drop(rx);
+        // Prune the dead sender via a fanout (fanout removes closed senders).
+        mgr.broadcast_to_user(&user, make_client_msg());
+        assert!(!mgr.has_user_client(user));
     }
 
     #[test]

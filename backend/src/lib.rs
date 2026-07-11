@@ -18,6 +18,7 @@ pub mod errors;
 pub mod handlers;
 pub mod jwt;
 pub mod models;
+pub mod push;
 pub mod routes;
 pub mod schema;
 
@@ -76,6 +77,10 @@ pub struct AppState {
     pub forward_domain: Option<String>,
     /// Long-term session archive runtime (#1258). `None` = disabled.
     pub archive: Option<Arc<archive::ArchiveRuntime>>,
+    /// Non-blocking handle for emitting push notification events
+    /// (mobile-apps plan §8). Drained by the dispatcher task spawned in
+    /// [`run`]; hooks call `notifications.emit(..)`.
+    pub notifications: push::NotificationSender,
 }
 
 impl AppState {
@@ -126,8 +131,19 @@ pub async fn run() -> anyhow::Result<()> {
     // Create session manager for WebSocket connections
     let session_manager = SessionManager::new();
 
-    // Mark sessions whose proxies do not reconnect within the grace period
-    background::spawn_stale_session_cleanup(pool.clone(), session_manager.clone());
+    // Push-notification channel (mobile-apps plan §8): the sender lives on
+    // AppState and is threaded into the event hooks; the receiver is drained by
+    // the dispatcher task spawned once AppState exists (below).
+    let (notifications, notification_rx) = push::channel();
+
+    // Mark sessions whose proxies do not reconnect within the grace period.
+    // A stale ACTIVE session losing its proxy is an unexpected disconnect, so
+    // the sweep emits SessionDisconnected pushes for the sessions it downs.
+    background::spawn_stale_session_cleanup(
+        pool.clone(),
+        session_manager.clone(),
+        notifications.clone(),
+    );
 
     // Parse remaining configuration from environment variables
     let config = config::ServerConfig::from_env(args.dev_mode)?;
@@ -161,7 +177,11 @@ pub async fn run() -> anyhow::Result<()> {
             )),
             None => None,
         },
+        notifications,
     });
+
+    // Drain notification events and dispatch pushes (mobile-apps plan §8.2).
+    push::spawn_dispatcher(app_state.clone(), notification_rx);
 
     // Build our application with routes
     let app = routes::build_router(app_state.clone());

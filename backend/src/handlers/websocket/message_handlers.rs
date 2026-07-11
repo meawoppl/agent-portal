@@ -144,6 +144,7 @@ pub fn handle_claude_output(
     session_key: &Option<String>,
     db_session_id: Option<Uuid>,
     db_pool: &DbPool,
+    notifications: &crate::push::NotificationSender,
     tx: &ProxySender,
     content: serde_json::Value,
     seq: Option<u64>,
@@ -309,6 +310,14 @@ pub fn handle_claude_output(
             if role == shared::MessageRole::Result {
                 let subagent_tokens = session_manager.subagent_tokens(session_id);
                 store_result_metadata(&mut conn, session_id, &content, subagent_tokens);
+
+                // Turn finished — emit a push (mobile-apps plan §8.1, collapsed
+                // per session by the dispatcher). Suppressed automatically when
+                // a live web client is present; name backfilled from the row.
+                notifications.emit(crate::push::NotificationEvent::TurnComplete {
+                    session_id,
+                    session_name: String::new(),
+                });
             }
 
             session_manager.queue_truncation(session_id);

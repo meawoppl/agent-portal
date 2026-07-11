@@ -36,7 +36,11 @@ where
 /// period, a backend restart would immediately hide all sessions from the
 /// frontend (which only shows status="active") and users would have to
 /// restart launchers to get sessions back.
-pub fn spawn_stale_session_cleanup(pool: DbPool, manager: SessionManager) {
+pub fn spawn_stale_session_cleanup(
+    pool: DbPool,
+    manager: SessionManager,
+    notifications: crate::push::NotificationSender,
+) {
     tokio::spawn(async move {
         const RECONNECT_GRACE_SECS: u64 = shared::protocol::MAX_RECONNECT_BACKOFF_SECS * 2;
         tracing::info!(
@@ -56,9 +60,9 @@ pub fn spawn_stale_session_cleanup(pool: DbPool, manager: SessionManager) {
         use diesel::prelude::*;
         use schema::sessions;
 
-        let active_sessions: Vec<(uuid::Uuid,)> = match sessions::table
+        let active_sessions: Vec<(uuid::Uuid, String)> = match sessions::table
             .filter(sessions::status.eq(shared::SessionStatus::Active.as_str()))
-            .select((sessions::id,))
+            .select((sessions::id, sessions::session_name))
             .load(&mut conn)
         {
             Ok(s) => s,
@@ -68,16 +72,20 @@ pub fn spawn_stale_session_cleanup(pool: DbPool, manager: SessionManager) {
             }
         };
 
-        let stale_ids: Vec<uuid::Uuid> = active_sessions
+        // These were ACTIVE and lost their proxy across the grace period — an
+        // unexpected disconnect, so each earns a SessionDisconnected push
+        // (mobile-apps plan §8.1). We keep the names to fill the payload.
+        let stale: Vec<(uuid::Uuid, String)> = active_sessions
             .into_iter()
-            .map(|(id,)| id)
-            .filter(|id| !connected_keys.contains(&id.to_string()))
+            .filter(|(id, _)| !connected_keys.contains(&id.to_string()))
             .collect();
 
-        if stale_ids.is_empty() {
+        if stale.is_empty() {
             tracing::info!("No stale sessions to clean up after reconnect grace period");
             return;
         }
+
+        let stale_ids: Vec<uuid::Uuid> = stale.iter().map(|(id, _)| *id).collect();
 
         match diesel::update(sessions::table.filter(sessions::id.eq_any(&stale_ids)))
             .set(sessions::status.eq(shared::SessionStatus::Disconnected.as_str()))
@@ -89,6 +97,12 @@ pub fn spawn_stale_session_cleanup(pool: DbPool, manager: SessionManager) {
                     updated,
                     RECONNECT_GRACE_SECS
                 );
+                for (session_id, session_name) in stale {
+                    notifications.emit(crate::push::NotificationEvent::SessionDisconnected {
+                        session_id,
+                        session_name,
+                    });
+                }
             }
             Err(e) => {
                 tracing::error!("Failed to mark stale sessions as disconnected: {}", e);

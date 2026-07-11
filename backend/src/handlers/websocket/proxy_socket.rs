@@ -112,9 +112,27 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
             match db_pool.get() {
                 Ok(mut conn) => {
                     use crate::schema::sessions;
+                    // Read the prior status + name first so we only push on a
+                    // genuine active → disconnected drop (never a user-requested
+                    // stop, which is already Inactive) — mobile-apps plan §8.1.
+                    let prior: Option<(String, String)> = sessions::table
+                        .find(session_id)
+                        .select((sessions::status, sessions::session_name))
+                        .first::<(String, String)>(&mut conn)
+                        .ok();
                     let _ = diesel::update(sessions::table.find(session_id))
                         .set(sessions::status.eq(SessionStatus::Disconnected.as_str()))
                         .execute(&mut conn);
+                    if let Some((status, session_name)) = prior {
+                        if status == SessionStatus::Active.as_str() {
+                            app_state.notifications.emit(
+                                crate::push::NotificationEvent::SessionDisconnected {
+                                    session_id,
+                                    session_name,
+                                },
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     error!(
@@ -257,6 +275,7 @@ fn handle_proxy_message(
                 session_key,
                 *db_session_id,
                 db_pool,
+                &app_state.notifications,
                 tx,
                 content,
                 None,
@@ -274,6 +293,7 @@ fn handle_proxy_message(
                 session_key,
                 *db_session_id,
                 db_pool,
+                &app_state.notifications,
                 tx,
                 content,
                 Some(seq),
@@ -295,6 +315,7 @@ fn handle_proxy_message(
                 session_key,
                 *db_session_id,
                 db_pool,
+                &app_state.notifications,
                 request_id,
                 tool_name,
                 input,
