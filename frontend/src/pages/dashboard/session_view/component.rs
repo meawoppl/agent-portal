@@ -26,8 +26,8 @@ use yew::prelude::*;
 
 use super::forward_chips::ForwardChips;
 use super::helpers::{
-    autoscroll_transition, classify_output_msg_type, is_claude_awaiting, reconcile_pending_sends,
-    update_pending_send_delivery, ActivityTag,
+    autoscroll_transition, classify_output_msg_type, enrich_codex_file_change_permission,
+    is_claude_awaiting, reconcile_pending_sends, update_pending_send_delivery, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -713,6 +713,7 @@ impl SessionView {
                 true
             }
             WsEvent::Permission(perm) => {
+                let perm = enrich_codex_file_change_permission(perm, &self.messages);
                 self.last_permission_request = Some(perm.clone());
                 if let Some(ref dispatcher) = self.permission_dispatcher {
                     dispatcher.emit(perm);

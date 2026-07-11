@@ -153,6 +153,7 @@ fn classify_request(request_id: String, request: ServerRequest) -> Vec<AgentOutp
             request_id,
             CodexPermissionInput::FileChange {
                 item_id: p.item_id,
+                paths: vec![],
                 reason: p.reason,
                 grant_root: p.grant_root,
             },

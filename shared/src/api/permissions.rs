@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// Serializes with a `tool` discriminant in camelCase:
 ///
 /// ```json
-/// {"tool": "fileChange", "itemId": "call_…", "reason": null, "grantRoot": null}
+/// {"tool": "fileChange", "itemId": "call_…", "paths": ["src/main.rs"], "reason": null, "grantRoot": null}
 /// {"tool": "applyPatch", "fileChanges": {…}, "grantRoot": null, "reason": null}
 /// {"tool": "bash", "command": "ls -la", "cwd": "/tmp"}
 /// {"tool": "execCommand", "command": "ls -la", "cwd": "/tmp", "parsedCmd": [...]}
@@ -34,10 +34,13 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "tool", rename_all = "camelCase")]
 pub enum CodexPermissionInput {
     /// Codex `item/fileChange/requestApproval` — file-modification approval.
-    /// The actual diff streamed earlier under the matching `itemId`.
+    /// The actual diff streamed earlier under the matching `itemId`; the
+    /// frontend may enrich the request with `paths` resolved from that item.
     FileChange {
         #[serde(rename = "itemId")]
         item_id: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        paths: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
         #[serde(rename = "grantRoot", default, skip_serializing_if = "Option::is_none")]
