@@ -159,6 +159,10 @@ pub struct ServerConfig {
     /// Long-term session archive settings (#1258). `None` = disabled (the
     /// default, including on hosted deployments).
     pub archive: Option<crate::archive::ArchiveConfig>,
+    /// VAPID application-server public key served to Web Push clients
+    /// (`GET /api/push/vapid-key`). `None` = push unconfigured; the endpoint
+    /// 404s and the frontend degrades to "push unavailable".
+    pub vapid_public_key: Option<String>,
 }
 
 impl ServerConfig {
@@ -307,6 +311,25 @@ impl ServerConfig {
             None => tracing::info!("Port forwarding disabled (PORTAL_FORWARD_DOMAIN unset)"),
         }
 
+        // VAPID public key for Web Push. Only the public half lives here — it
+        // is served to browsers; the private key (PORTAL_VAPID_PRIVATE_KEY) is
+        // read by the Web Push sender, never by this endpoint. Unset = push
+        // disabled (the vapid-key endpoint 404s).
+        let vapid_public_key = match env::var("PORTAL_VAPID_PUBLIC_KEY") {
+            Ok(v) if !v.trim().is_empty() => {
+                log_source("PORTAL_VAPID_PUBLIC_KEY", true);
+                Some(v)
+            }
+            _ => {
+                log_source("PORTAL_VAPID_PUBLIC_KEY", false);
+                None
+            }
+        };
+        match &vapid_public_key {
+            Some(_) => tracing::info!("Web Push VAPID public key configured"),
+            None => tracing::info!("Web Push disabled (PORTAL_VAPID_PUBLIC_KEY unset)"),
+        }
+
         // Long-term session archive (#1258). Fail-fast on partial config.
         let archive = crate::archive::archive_config_from_env()
             .map_err(|e| anyhow::anyhow!("invalid archive configuration: {e}"))?;
@@ -362,6 +385,7 @@ impl ServerConfig {
             image_store_ttl,
             forward_domain,
             archive,
+            vapid_public_key,
         })
     }
 }

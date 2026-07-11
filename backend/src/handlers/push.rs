@@ -13,7 +13,7 @@ use axum::{
 use diesel::prelude::*;
 use shared::api::{
     NotificationPrefs, PushSubscriptionInfo, PushSubscriptionsResponse,
-    RegisterPushSubscriptionRequest,
+    RegisterPushSubscriptionRequest, VapidKeyResponse,
 };
 use std::sync::Arc;
 use tracing::info;
@@ -42,6 +42,22 @@ fn to_info(row: PushSubscription) -> PushSubscriptionInfo {
         created_at: row.created_at.to_rfc3339(),
         last_success_at: row.last_success_at.map(|t| t.to_rfc3339()),
         disabled_at: row.disabled_at.map(|t| t.to_rfc3339()),
+    }
+}
+
+/// GET /api/push/vapid-key — the server's VAPID application-server public key.
+///
+/// Returns 404 when the deployment has no key configured
+/// (`PORTAL_VAPID_PUBLIC_KEY` unset); the frontend treats that as "push
+/// unavailable" and degrades gracefully rather than erroring.
+pub async fn get_vapid_key(
+    State(app_state): State<Arc<AppState>>,
+) -> Result<Json<VapidKeyResponse>, AppError> {
+    match &app_state.vapid_public_key {
+        Some(public_key) => Ok(Json(VapidKeyResponse {
+            public_key: public_key.clone(),
+        })),
+        None => Err(AppError::NotFound("push not configured")),
     }
 }
 

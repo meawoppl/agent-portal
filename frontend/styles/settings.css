@@ -605,6 +605,40 @@
     cursor: pointer;
 }
 
+/* Notifications panel (mobile-apps plan D3) */
+.notifications-section {
+    max-width: 900px;
+}
+
+.push-device-control {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: var(--bg-darker);
+    border-radius: 8px;
+}
+
+.push-device-control.unavailable {
+    opacity: 0.85;
+}
+
+.push-device-control .unsupported-hint {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+.notification-prefs {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.notification-prefs h3 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
 .sound-event-cards {
     display: flex;
     flex-direction: column;

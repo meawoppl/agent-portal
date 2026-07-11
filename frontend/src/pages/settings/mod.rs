@@ -1,6 +1,7 @@
 mod appearance_panel;
 mod forwarding_panel;
 mod launchers_panel;
+mod notifications_panel;
 mod performance_panel;
 mod sessions_panel;
 mod sounds_panel;
@@ -10,6 +11,7 @@ use crate::utils;
 use appearance_panel::AppearancePanel;
 use forwarding_panel::ForwardingPanel;
 use launchers_panel::LaunchersPanel;
+use notifications_panel::NotificationsPanel;
 use performance_panel::PerformancePanel;
 use sessions_panel::SessionsPanel;
 use shared::{ProxyTokenInfo, SessionInfo};
@@ -24,6 +26,7 @@ enum SettingsTab {
     Launchers,
     Forwarding,
     Sounds,
+    Notifications,
     Performance,
     Appearance,
 }
@@ -66,6 +69,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_launchers_tab = make_tab_handler(SettingsTab::Launchers);
     let on_forwarding_tab = make_tab_handler(SettingsTab::Forwarding);
     let on_sounds_tab = make_tab_handler(SettingsTab::Sounds);
+    let on_notifications_tab = make_tab_handler(SettingsTab::Notifications);
     let on_performance_tab = make_tab_handler(SettingsTab::Performance);
     let on_appearance_tab = make_tab_handler(SettingsTab::Appearance);
 
@@ -122,6 +126,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     { "Sounds" }
                 </button>
                 <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Notifications).then_some("active"))}
+                    onclick={on_notifications_tab}
+                >
+                    { "Notifications" }
+                </button>
+                <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Performance).then_some("active"))}
                     onclick={on_performance_tab}
                 >
@@ -147,6 +157,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Sounds {
                     <SoundsPanel />
+                }
+                if *active_tab == SettingsTab::Notifications {
+                    <NotificationsPanel />
                 }
                 if *active_tab == SettingsTab::Sessions {
                     <SessionsPanel on_sessions_loaded={on_sessions_loaded} />
