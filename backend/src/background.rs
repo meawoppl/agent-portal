@@ -220,7 +220,7 @@ fn archive_one_session(
     // archive; a re-archive must never shrink it.
     let existing_lines = runtime
         .store
-        .read_transcript_lines(session.user_id, session.id, runtime.config.compression)?
+        .read_transcript_lines(session.user_id, session.id)?
         .unwrap_or_default();
     let merged_lines = crate::archive::merge_transcript_lines(existing_lines, current_lines);
 
@@ -288,7 +288,6 @@ fn archive_one_session(
 
     let archived_at = chrono::Utc::now().naive_utc();
     let transcripts_enabled = runtime.config.transcripts && !merged_lines.is_empty();
-    let compression = runtime.config.compression;
 
     let (transcript_ndjson, transcript_info) = if transcripts_enabled {
         let mut ndjson = Vec::new();
@@ -297,8 +296,8 @@ fn archive_one_session(
             ndjson.push(b'\n');
         }
         let info = ArchiveTranscriptInfo {
-            object_key: transcript_key(session.user_id, session.id, compression),
-            compression: compression.as_str().to_string(),
+            object_key: transcript_key(session.user_id, session.id),
+            compression: crate::archive::TRANSCRIPT_COMPRESSION.to_string(),
             message_count: merged_lines.len() as i64,
             bytes: ndjson.len() as u64,
         };
@@ -347,7 +346,7 @@ fn archive_one_session(
         .as_ref()
         .map(|b| b.len() as u64)
         .unwrap_or(0);
-    runtime.store.put_session_archive(&bundle, compression)?;
+    runtime.store.put_session_archive(&bundle)?;
     runtime.stats.record_success(bytes);
     Ok(())
 }

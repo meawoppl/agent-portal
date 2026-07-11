@@ -159,7 +159,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
         return;
     }
     let _guard = ARCHIVE_DB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    use backend::archive::{read_transcript, ArchiveCompression, ArchiveConfig, ArchiveRuntime};
+    use backend::archive::{read_transcript, ArchiveBackendConfig, ArchiveConfig, ArchiveRuntime};
     use backend::models::{NewMessage, NewSessionWithId};
     use backend::schema::{messages, sessions};
     use diesel::prelude::*;
@@ -225,10 +225,12 @@ async fn archive_sweep_persists_and_is_idempotent() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let runtime = ArchiveRuntime::new(ArchiveConfig {
-        local_root: tmp.path().to_path_buf(),
-        compression: ArchiveCompression::Zstd,
+        backend: ArchiveBackendConfig::Local {
+            root: tmp.path().to_path_buf(),
+        },
         transcripts: true,
-    });
+    })
+    .expect("local archive runtime");
 
     let (archived, failed) =
         backend::background::archive_pending_sessions(&pool, &runtime).expect("sweep");
@@ -247,8 +249,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
     let transcript = manifest.transcript.as_ref().expect("transcript info");
     assert_eq!(transcript.message_count, 2);
 
-    let lines = read_transcript(tmp.path(), user_id, session_id, ArchiveCompression::Zstd)
-        .expect("read transcript");
+    let lines = read_transcript(tmp.path(), user_id, session_id).expect("read transcript");
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].content["text"], "hello");
 
@@ -305,7 +306,7 @@ async fn rearchive_after_trim_merges_transcript() {
         return;
     }
     let _guard = ARCHIVE_DB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    use backend::archive::{read_transcript, ArchiveCompression, ArchiveConfig, ArchiveRuntime};
+    use backend::archive::{read_transcript, ArchiveBackendConfig, ArchiveConfig, ArchiveRuntime};
     use backend::models::{NewMessage, NewSessionWithId};
     use backend::schema::{messages, sessions};
     use diesel::prelude::*;
@@ -365,15 +366,17 @@ async fn rearchive_after_trim_merges_transcript() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let runtime = ArchiveRuntime::new(ArchiveConfig {
-        local_root: tmp.path().to_path_buf(),
-        compression: ArchiveCompression::Zstd,
+        backend: ArchiveBackendConfig::Local {
+            root: tmp.path().to_path_buf(),
+        },
         transcripts: true,
-    });
+    })
+    .expect("local archive runtime");
 
     // First archive captures both messages.
     backend::background::archive_pending_sessions(&pool, &runtime).expect("first sweep");
     assert_eq!(
-        read_transcript(tmp.path(), user_id, session_id, ArchiveCompression::Zstd)
+        read_transcript(tmp.path(), user_id, session_id)
             .expect("read")
             .len(),
         2
@@ -398,8 +401,7 @@ async fn rearchive_after_trim_merges_transcript() {
         .expect("make stale again");
     backend::background::archive_pending_sessions(&pool, &runtime).expect("second sweep");
 
-    let lines = read_transcript(tmp.path(), user_id, session_id, ArchiveCompression::Zstd)
-        .expect("read merged");
+    let lines = read_transcript(tmp.path(), user_id, session_id).expect("read merged");
     let texts: Vec<String> = lines
         .iter()
         .map(|l| l.content["text"].as_str().unwrap_or_default().to_string())
