@@ -95,6 +95,21 @@ diesel::table! {
 }
 
 diesel::table! {
+    push_subscriptions (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        platform -> Varchar,
+        endpoint_or_token -> Text,
+        p256dh -> Nullable<Text>,
+        auth -> Nullable<Text>,
+        device_label -> Nullable<Varchar>,
+        created_at -> Timestamptz,
+        last_success_at -> Nullable<Timestamptz>,
+        disabled_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
     scheduled_tasks (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -265,6 +280,7 @@ diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
 diesel::joinable!(pending_permission_requests -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
+diesel::joinable!(push_subscriptions -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
 diesel::joinable!(session_continuations -> sessions (session_id));
 diesel::joinable!(session_continuations -> users (user_id));
@@ -284,6 +300,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     pending_inputs,
     pending_permission_requests,
     proxy_auth_tokens,
+    push_subscriptions,
     scheduled_tasks,
     session_continuations,
     session_forwards,
