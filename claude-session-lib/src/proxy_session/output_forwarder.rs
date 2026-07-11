@@ -570,13 +570,20 @@ fn log_claude_output(output: &ClaudeOutput) {
         ClaudeOutput::RateLimitEvent(evt) => {
             let info = &evt.rate_limit_info;
             debug!(
-                "← [rate_limit_event] status={} type={:?} resets_at={:?} utilization={:?} overage={}",
+                "← [rate_limit_event] status={} type={:?} resets_at={:?} utilization={:?} overage={:?}",
                 info.status,
                 info.rate_limit_type,
                 info.resets_at,
                 info.utilization,
                 info.is_using_overage
             );
+        }
+        // 2.1.160 wire coverage: stream_event / tool_progress / auth_status /
+        // tool_use_summary / prompt_suggestion / conversation_reset plus the
+        // transcript-corpus variants. This fn only produces debug logging, so
+        // a variant-tag line is all they need.
+        other => {
+            debug!("← [{}]", other.message_type());
         }
     }
 }

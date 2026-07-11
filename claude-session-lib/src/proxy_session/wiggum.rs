@@ -480,6 +480,13 @@ mod tests {
             terminal_reason: None,
             fast_mode_state: None,
             model_usage: None,
+            // 2.1.160 additions — all absent in a minimal test result.
+            time_to_request_from_spawn_ms: None,
+            warm_spare_claimed: None,
+            time_origin_ms: None,
+            structured_output: None,
+            deferred_tool_use: None,
+            origin: None,
         }
     }
 

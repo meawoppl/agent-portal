@@ -179,10 +179,12 @@ fn render_task_started(msg: &shared::SystemMessage, timestamp: Option<&str>) -> 
 
     let type_label = task
         .as_ref()
-        .map(|t| t.task_type.clone())
+        .and_then(|t| t.task_type.clone())
         .map(|tt| match tt {
             shared::TaskType::LocalAgent => "Sub-agent",
             shared::TaskType::LocalBash => "Background Bash",
+            // Open enum (2.1.160): unrecognized task types render generically.
+            _ => "Task",
         })
         .unwrap_or("Task");
 

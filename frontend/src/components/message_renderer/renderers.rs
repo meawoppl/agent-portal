@@ -316,7 +316,7 @@ pub fn render_rate_limit_event(msg: &shared::RateLimitEvent, timestamp: Option<&
                     if let Some(text) = reset_text {
                         <span class="rate-limit-detail">{ text }</span>
                     }
-                    if using_overage {
+                    if using_overage.unwrap_or(false) {
                         <span class="rate-limit-detail">{ "using overage" }</span>
                     }
                     if let Some(text) = utilization_text {
