@@ -30,7 +30,7 @@ mod state;
 #[cfg(test)]
 use api_error::DeviceFlowError;
 use api_error::{auth_error_to_device_flow, DeviceFlowApiError};
-use render::render_approval_page;
+use render::{render_approval_page, render_device_code_form};
 use state::{generate_device_code, generate_user_code, VerifyQuery};
 pub use state::{DeviceFlowState, DeviceFlowStatus, DeviceFlowStore};
 
@@ -183,11 +183,12 @@ pub async fn device_verify_page(
     cookies: Cookies,
     Query(query): Query<VerifyQuery>,
 ) -> impl IntoResponse {
-    // If no user_code provided, show a form to enter it
-    let user_code = match query.user_code {
+    // If no user_code provided, show a form to enter it.
+    let user_code = match query.user_code.as_deref().and_then(normalize_user_code) {
         Some(code) => code,
         None => {
-            return axum::response::Html(DEVICE_CODE_FORM_HTML.to_string()).into_response();
+            let html = render_device_code_form(query.user_code.as_deref(), None);
+            return axum::response::Html(html).into_response();
         }
     };
 
@@ -205,9 +206,13 @@ pub async fn device_verify_page(
         Some(state) => (state.hostname.clone(), state.working_directory.clone()),
         None => {
             drop(store_lock);
-            // Unknown or expired code: send the user back to the code-entry
-            // form so they can try again.
-            return Redirect::temporary(routes::AUTH_DEVICE).into_response();
+            // Unknown or expired code: keep the attempted code visible so a
+            // mobile user can edit it without retyping from scratch.
+            let html = render_device_code_form(
+                Some(&user_code),
+                Some("That code was not found or has expired."),
+            );
+            return axum::response::Html(html).into_response();
         }
     };
     drop(store_lock);
@@ -236,6 +241,20 @@ pub async fn device_verify_page(
         user_code
     ))
     .into_response()
+}
+
+fn normalize_user_code(input: &str) -> Option<String> {
+    let compact: String = input
+        .chars()
+        .filter(|ch| *ch != '-' && !ch.is_whitespace())
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect();
+
+    if compact.len() != 6 || !compact.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return None;
+    }
+
+    Some(format!("{}-{}", &compact[..3], &compact[3..]))
 }
 
 /// POST /auth/device/approve - Approve device authorization
@@ -354,125 +373,6 @@ pub async fn device_deny(
         message: "Device authorization denied".to_string(),
     }))
 }
-
-const DEVICE_CODE_FORM_HTML: &str = r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Device Authentication - Agent Portal</title>
-    <style>
-        :root {
-            --bg-dark: #1a1b26;
-            --bg-darker: #16161e;
-            --text-primary: #c0caf5;
-            --text-secondary: #7f849c;
-            --accent: #7aa2f7;
-            --accent-hover: #9eb3ff;
-            --border: #292e42;
-            --success: #9ece6a;
-            --error: #f7768e;
-        }
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .container {
-            background: var(--bg-darker);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 2rem;
-            max-width: 400px;
-            width: 90%;
-            text-align: center;
-        }
-        h1 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            color: var(--accent);
-        }
-        p {
-            color: var(--text-secondary);
-            margin-bottom: 1.5rem;
-            font-size: 0.9rem;
-        }
-        .code-input {
-            width: 100%;
-            padding: 1rem;
-            font-size: 1.5rem;
-            text-align: center;
-            background: var(--bg-dark);
-            border: 2px solid var(--border);
-            border-radius: 8px;
-            color: var(--text-primary);
-            font-family: 'Courier New', monospace;
-            letter-spacing: 0.25rem;
-            text-transform: uppercase;
-            margin-bottom: 1rem;
-        }
-        .code-input:focus {
-            outline: none;
-            border-color: var(--accent);
-        }
-        .code-input::placeholder {
-            color: var(--text-secondary);
-            letter-spacing: normal;
-            text-transform: none;
-        }
-        button {
-            width: 100%;
-            padding: 0.75rem 1.5rem;
-            font-size: 1rem;
-            background: var(--accent);
-            color: var(--bg-dark);
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: var(--accent-hover);
-        }
-        .hint {
-            margin-top: 1rem;
-            font-size: 0.8rem;
-            color: var(--text-secondary);
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Device Authentication</h1>
-        <p>Enter the code displayed in your terminal to authenticate this device.</p>
-        <form action="/api/auth/device" method="get">
-            <input
-                type="text"
-                name="user_code"
-                class="code-input"
-                placeholder="XXX-XXX"
-                pattern="[A-Za-z0-9]{3}-?[A-Za-z0-9]{3}"
-                maxlength="7"
-                required
-                autofocus
-            >
-            <button type="submit">Continue</button>
-        </form>
-        <p class="hint">The code is shown in your terminal after running <code>claude-portal</code></p>
-    </div>
-</body>
-</html>
-"#;
 
 // Called after OAuth success to complete device flow
 // Creates a proper JWT token and stores it in the database
@@ -897,30 +797,44 @@ mod tests {
     #[test]
     fn test_device_code_form_html_content() {
         // Verify the HTML form contains expected elements
+        let html = render_device_code_form(None, None);
+
         assert!(
-            DEVICE_CODE_FORM_HTML.contains("Device Authentication"),
+            html.contains("Device Authentication"),
             "Should contain title"
         );
+        assert!(html.contains("user_code"), "Should contain user_code input");
+        assert!(html.contains("<form"), "Should contain form element");
         assert!(
-            DEVICE_CODE_FORM_HTML.contains("user_code"),
-            "Should contain user_code input"
-        );
-        assert!(
-            DEVICE_CODE_FORM_HTML.contains("<form"),
-            "Should contain form element"
-        );
-        assert!(
-            DEVICE_CODE_FORM_HTML.contains("/api/auth/device"),
+            html.contains("/api/auth/device"),
             "Should submit to device endpoint"
         );
+        assert!(html.contains("XXX-XXX"), "Should show expected format");
         assert!(
-            DEVICE_CODE_FORM_HTML.contains("XXX-XXX"),
-            "Should show expected format"
-        );
-        assert!(
-            DEVICE_CODE_FORM_HTML.contains("pattern="),
+            html.contains("pattern="),
             "Should have input validation pattern"
         );
+    }
+
+    #[test]
+    fn device_code_form_prefills_and_escapes_attempted_code() {
+        let html = render_device_code_form(
+            Some(r#"ABC-123" autofocus onfocus="alert(1)"#),
+            Some(r#"Bad <code>"#),
+        );
+
+        assert!(html.contains("ABC-123&quot;"));
+        assert!(!html.contains(r#"value="ABC-123" autofocus"#));
+        assert!(html.contains("Bad &lt;code&gt;"));
+    }
+
+    #[test]
+    fn normalize_user_code_accepts_mobile_friendly_variants() {
+        assert_eq!(normalize_user_code("abc123").as_deref(), Some("ABC-123"));
+        assert_eq!(normalize_user_code("abc-123").as_deref(), Some("ABC-123"));
+        assert_eq!(normalize_user_code(" abc 123 ").as_deref(), Some("ABC-123"));
+        assert_eq!(normalize_user_code("abc12").as_deref(), None);
+        assert_eq!(normalize_user_code("abc-12!").as_deref(), None);
     }
 
     #[test]
