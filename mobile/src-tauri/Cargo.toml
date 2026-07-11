@@ -1,0 +1,18 @@
+[package]
+name = "agent-portal-mobile"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+name = "agent_portal_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri = { version = "2", features = [] }
+
+[lints]
+workspace = true
