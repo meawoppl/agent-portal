@@ -108,6 +108,9 @@ pub fn launchers_panel() -> Html {
     let loading = use_state(|| true);
     let action_result = use_state(|| None::<(bool, String)>);
     let update_in_progress = use_state(|| None::<Uuid>);
+    // Live LaunchersChanged ticks (#710): a launcher restarting while this
+    // panel is open shows its reconnect without a page refresh.
+    let ws_hook = crate::hooks::use_client_websocket();
 
     let fetch_launchers = {
         let launchers = launchers.clone();
@@ -130,7 +133,7 @@ pub fn launchers_panel() -> Html {
 
     {
         let fetch = fetch_launchers.clone();
-        use_effect_with((), move |_| {
+        use_effect_with(ws_hook.launcher_event_counter, move |_| {
             fetch.emit(());
             || ()
         });

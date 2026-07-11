@@ -190,6 +190,11 @@ fn is_path_home_scoped(path: &str, home_root: Option<&str>) -> bool {
 pub struct LaunchDialogProps {
     pub on_close: Callback<()>,
     pub on_launched: Callback<()>,
+    /// Ticks on `ServerToClient::LaunchersChanged` (#710): the dialog
+    /// refetches its launcher list live, so a launcher coming online while
+    /// the dialog is open appears without reopening it.
+    #[prop_or(0)]
+    pub launcher_refresh: u32,
 }
 
 #[function_component(LaunchDialog)]
@@ -215,7 +220,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let agent_installs = use_state(Vec::<AgentInstall>::new);
     let probing_agents = use_state(|| false);
 
-    // Fetch launchers on mount; auto-select install mode when none are connected
+    // Fetch launchers on mount and on every LaunchersChanged tick (#710);
+    // auto-select install mode when none are connected.
     {
         let launchers = launchers.clone();
         let selected_launcher = selected_launcher.clone();
@@ -223,18 +229,23 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let dir = dir.clone();
         let agent_installs = agent_installs.clone();
         let probing_agents = probing_agents.clone();
-        use_effect_with((), move |_| {
+        use_effect_with(props.launcher_refresh, move |_| {
             spawn_local(async move {
                 if let Ok(data) =
                     utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
                 {
-                    if let Some(first) = data.first() {
-                        let lid = first.launcher_id;
-                        selected_launcher.set(Some(lid));
-                        dir.fetch(lid, "~".to_string(), true);
-                        probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
-                    } else {
-                        show_install.set(true);
+                    // Only steer selection/install-mode from scratch; a
+                    // live refresh must not yank an existing selection.
+                    if selected_launcher.is_none() {
+                        if let Some(first) = data.first() {
+                            let lid = first.launcher_id;
+                            selected_launcher.set(Some(lid));
+                            dir.fetch(lid, "~".to_string(), true);
+                            probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
+                            show_install.set(false);
+                        } else {
+                            show_install.set(true);
+                        }
                     }
                     launchers.set(data);
                 }
