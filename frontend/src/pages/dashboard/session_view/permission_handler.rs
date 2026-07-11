@@ -173,6 +173,12 @@ impl Component for PermissionHandler {
                 true
             }
             PermissionHandlerMsg::SetQuestionAnswer(question_idx, answer) => {
+                let keep_multi_select = should_keep_multi_select_options(
+                    self.request.as_ref(),
+                    question_idx,
+                    &answer,
+                    self.multi_select_options.get(&question_idx),
+                );
                 // A blank answer (e.g. a cleared "something else" field)
                 // un-answers the question rather than counting an empty string
                 // as a valid answer.
@@ -181,7 +187,9 @@ impl Component for PermissionHandler {
                 } else {
                     self.question_answers.insert(question_idx, answer);
                 }
-                self.multi_select_options.remove(&question_idx);
+                if !keep_multi_select {
+                    self.multi_select_options.remove(&question_idx);
+                }
                 true
             }
             PermissionHandlerMsg::ToggleQuestionOption(question_idx, option_idx) => {
@@ -321,6 +329,38 @@ fn max_option_index(perm: &PendingPermission) -> usize {
     } else {
         1
     }
+}
+
+fn should_keep_multi_select_options(
+    perm: Option<&PendingPermission>,
+    question_idx: usize,
+    answer: &str,
+    selected: Option<&HashSet<usize>>,
+) -> bool {
+    let Some(selected) = selected.filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let Some(parsed) = perm.and_then(|p| parse_ask_user_question(&p.input)) else {
+        return false;
+    };
+    let Some(question) = parsed.questions.get(question_idx) else {
+        return false;
+    };
+
+    let selected_labels: HashSet<&str> = selected
+        .iter()
+        .filter_map(|idx| question.options.get(*idx).map(|o| o.label.as_str()))
+        .collect();
+    if selected_labels.is_empty() {
+        return false;
+    }
+
+    let answer_labels: HashSet<&str> = answer
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    selected_labels == answer_labels
 }
 
 /// Pure helper: compute the next selected index when the user presses
@@ -493,6 +533,32 @@ mod tests {
             permission_suggestions: vec![],
         };
         assert_eq!(max_option_index(&perm), 0);
+    }
+
+    #[test]
+    fn committed_multi_select_answer_keeps_visual_selection() {
+        let perm = mk_ask_user_question(&[3]);
+        let selected = HashSet::from([0, 2]);
+
+        assert!(should_keep_multi_select_options(
+            Some(&perm),
+            0,
+            "opt-2, opt-0",
+            Some(&selected)
+        ));
+    }
+
+    #[test]
+    fn custom_answer_clears_multi_select_visual_selection() {
+        let perm = mk_ask_user_question(&[3]);
+        let selected = HashSet::from([0, 2]);
+
+        assert!(!should_keep_multi_select_options(
+            Some(&perm),
+            0,
+            "custom answer",
+            Some(&selected)
+        ));
     }
 
     // --- next_selection ---
