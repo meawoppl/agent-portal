@@ -152,19 +152,10 @@ pub fn archive_pending_sessions(
     let mut archived = 0;
     let mut failed = 0;
     for session in eligible {
-        match archive_one_session(&mut conn, runtime, &session) {
-            Ok(()) => {
-                diesel::update(sessions::table.find(session.id))
-                    .set(sessions::archived_at.eq(chrono::Utc::now().naive_utc()))
-                    .execute(&mut conn)?;
-                archived += 1;
-            }
-            Err(e) => {
-                // Stable marker for alerting, mirroring the retention-path
-                // markers documented in CLAUDE.md.
-                tracing::error!("SESSION_ARCHIVE_FAILED session={}: {e}", session.id);
-                failed += 1;
-            }
+        if ensure_session_archived(&mut conn, runtime, &session) {
+            archived += 1;
+        } else {
+            failed += 1;
         }
     }
     Ok((archived, failed))
@@ -204,9 +195,38 @@ fn archive_one_session(
         ))
         .load(conn)?;
 
+    let current_lines: Vec<ArchiveMessageLine> = rows
+        .into_iter()
+        .map(|(id, role, content, created_at, agent_type)| {
+            // Stored content is JSON text; embed it as a value so the
+            // archive round-trips it. Non-JSON content (shouldn't exist)
+            // degrades to a JSON string.
+            let content = match serde_json::from_str(&content) {
+                Ok(value) => value,
+                Err(_) => serde_json::Value::String(content),
+            };
+            ArchiveMessageLine {
+                id,
+                role,
+                created_at,
+                agent_type,
+                content,
+            }
+        })
+        .collect();
+
+    // Merge with any previously-archived transcript (#1258 phase 2):
+    // retention may have trimmed hot rows that only survive in the
+    // archive; a re-archive must never shrink it.
+    let existing_lines = runtime
+        .store
+        .read_transcript_lines(session.user_id, session.id, runtime.config.compression)?
+        .unwrap_or_default();
+    let merged_lines = crate::archive::merge_transcript_lines(existing_lines, current_lines);
+
     let mut message_counts: BTreeMap<String, i64> = BTreeMap::new();
-    for (_, role, ..) in &rows {
-        *message_counts.entry(role.clone()).or_default() += 1;
+    for line in &merged_lines {
+        *message_counts.entry(line.role.clone()).or_default() += 1;
     }
 
     // Turn aggregates for the manifest (analytics reads these, never the
@@ -267,30 +287,19 @@ fn archive_one_session(
     turns.models = models_seen.into_iter().collect();
 
     let archived_at = chrono::Utc::now().naive_utc();
-    let transcripts_enabled = runtime.config.transcripts && !rows.is_empty();
+    let transcripts_enabled = runtime.config.transcripts && !merged_lines.is_empty();
     let compression = runtime.config.compression;
 
     let (transcript_ndjson, transcript_info) = if transcripts_enabled {
         let mut ndjson = Vec::new();
-        for (id, role, content, created_at, agent_type) in &rows {
-            let line = ArchiveMessageLine {
-                id: *id,
-                role: role.clone(),
-                created_at: *created_at,
-                agent_type: agent_type.clone(),
-                // Stored content is JSON text; embed it as a value so the
-                // archive round-trips it. Non-JSON content (shouldn't
-                // exist) degrades to a JSON string.
-                content: serde_json::from_str(content)
-                    .unwrap_or_else(|_| serde_json::Value::String(content.clone())),
-            };
-            serde_json::to_writer(&mut ndjson, &line)?;
+        for line in &merged_lines {
+            serde_json::to_writer(&mut ndjson, line)?;
             ndjson.push(b'\n');
         }
         let info = ArchiveTranscriptInfo {
             object_key: transcript_key(session.user_id, session.id, compression),
             compression: compression.as_str().to_string(),
-            message_count: rows.len() as i64,
+            message_count: merged_lines.len() as i64,
             bytes: ndjson.len() as u64,
         };
         (Some(ndjson), Some(info))
@@ -333,8 +342,117 @@ fn archive_one_session(
         transcript_ndjson,
     };
 
+    let bytes = bundle
+        .transcript_ndjson
+        .as_ref()
+        .map(|b| b.len() as u64)
+        .unwrap_or(0);
     runtime.store.put_session_archive(&bundle, compression)?;
+    runtime.stats.record_success(bytes);
     Ok(())
+}
+
+/// Archive every session whose messages the retention trim is about to
+/// touch (#1258 phase 2): sessions holding messages older than the age
+/// cutoff, plus sessions over the per-session count cap. Unlike the idle
+/// sweep, this deliberately ignores idle/status eligibility — an ACTIVE
+/// long-running session gets its history captured before it's trimmed,
+/// and merge-on-rearchive folds later messages in.
+fn archive_retention_candidates(
+    conn: &mut diesel::PgConnection,
+    runtime: &crate::archive::ArchiveRuntime,
+    config: &handlers::retention::RetentionConfig,
+) {
+    use diesel::dsl::count_star;
+    use diesel::prelude::*;
+    use schema::{messages, sessions};
+
+    let mut affected: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+
+    if config.retention_days > 0 {
+        let cutoff = chrono::Utc::now().naive_utc()
+            - chrono::Duration::days(i64::from(config.retention_days));
+        match messages::table
+            .filter(messages::created_at.lt(cutoff))
+            .select(messages::session_id)
+            .distinct()
+            .load::<uuid::Uuid>(conn)
+        {
+            Ok(ids) => affected.extend(ids),
+            Err(e) => tracing::error!("Failed to query age-retention candidates: {e}"),
+        }
+    }
+
+    match messages::table
+        .group_by(messages::session_id)
+        .having(count_star().gt(config.max_messages_per_session))
+        .select(messages::session_id)
+        .load::<uuid::Uuid>(conn)
+    {
+        Ok(ids) => affected.extend(ids),
+        Err(e) => tracing::error!("Failed to query count-retention candidates: {e}"),
+    }
+
+    if affected.is_empty() {
+        return;
+    }
+
+    let candidates: Vec<models::Session> = match sessions::table
+        .filter(sessions::id.eq_any(affected.iter().copied().collect::<Vec<_>>()))
+        .load(conn)
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to load retention-candidate sessions: {e}");
+            return;
+        }
+    };
+
+    let mut archived = 0;
+    for session in &candidates {
+        if ensure_session_archived(conn, runtime, session) {
+            archived += 1;
+        }
+    }
+    if archived > 0 {
+        tracing::info!(
+            "Pre-retention archive: {} of {} candidate session(s) captured",
+            archived,
+            candidates.len()
+        );
+    }
+}
+
+/// Archive `session` if its archive is missing or stale, updating
+/// `archived_at` on success. Returns whether the session now has a fresh
+/// archive. Shared by the sweep and the retention gates (#1258 phase 2).
+fn ensure_session_archived(
+    conn: &mut diesel::PgConnection,
+    runtime: &crate::archive::ArchiveRuntime,
+    session: &models::Session,
+) -> bool {
+    use diesel::prelude::*;
+    use schema::sessions;
+
+    let fresh = session
+        .archived_at
+        .is_some_and(|archived| archived >= session.last_activity);
+    if fresh {
+        return true;
+    }
+    match archive_one_session(conn, runtime, session) {
+        Ok(()) => {
+            let _ = diesel::update(sessions::table.find(session.id))
+                .set(sessions::archived_at.eq(chrono::Utc::now().naive_utc()))
+                .execute(conn);
+            true
+        }
+        Err(e) => {
+            runtime.stats.record_failure(&e.to_string());
+            tracing::error!("SESSION_ARCHIVE_FAILED session={}: {e}", session.id);
+            false
+        }
+    }
 }
 
 /// Evict proxy/launcher connections that have gone silent past their
@@ -483,6 +601,15 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
         app_state.message_retention_days,
     );
 
+    // #1258 phase 2: capture messages into the archive BEFORE the trim
+    // deletes them from the hot DB. Sessions whose archive attempt fails
+    // still get trimmed (best-effort with an explicit recorded failure) —
+    // the merge-on-rearchive semantics mean anything captured earlier is
+    // never lost, only the failed delta.
+    if let Some(runtime) = &app_state.archive {
+        archive_retention_candidates(&mut conn, runtime, &config);
+    }
+
     let (age_deleted, count_deleted) = run_retention_cleanup(&mut conn, session_ids, config);
 
     if age_deleted > 0 || count_deleted > 0 {
@@ -535,7 +662,18 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
     }
 
     let mut deleted = 0;
+    let mut held = 0;
     for session in &old_sessions {
+        // #1258 phase 2: when archiving is enabled, an eligible session is
+        // only deleted once it has a fresh archive; on archive failure the
+        // deletion is HELD (retried next cycle) and the failure recorded —
+        // retention can never silently destroy the last copy.
+        if let Some(runtime) = &app_state.archive {
+            if !ensure_session_archived(&mut conn, runtime, session) {
+                held += 1;
+                continue;
+            }
+        }
         match delete_session_with_data(&mut conn, session, true) {
             Ok(_) => deleted += 1,
             Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
@@ -543,9 +681,14 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
     }
 
     tracing::info!(
-        "Session age cleanup: deleted {} sessions older than {} days",
+        "Session age cleanup: deleted {} sessions older than {} days{}",
         deleted,
-        max_days
+        max_days,
+        if held > 0 {
+            format!(" ({held} held pending archive)")
+        } else {
+            String::new()
+        }
     );
 }
 
