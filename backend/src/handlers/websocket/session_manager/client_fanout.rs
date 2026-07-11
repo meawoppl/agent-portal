@@ -43,6 +43,26 @@ impl SessionManager {
         }
     }
 
+    /// Eagerly remove `sender`'s connection from a session's web-client
+    /// registry when its socket task ends, dropping the map entry once the
+    /// last client leaves.
+    ///
+    /// WHY: presence must not contain dead senders. Push-notification
+    /// suppression ("don't push if the user has a live web client") reads
+    /// these registries; without eager removal, a disconnected tab/phone
+    /// would keep suppressing pushes until the next failed send lazily
+    /// pruned it (see docs/MOBILE_APPS_PLAN.md §8.2). The lazy prune in
+    /// `fanout_to_clients` stays as a backstop.
+    pub fn remove_web_client(&self, session_key: &SessionId, sender: &WebClientSender) {
+        if let Some(mut clients) = self.web_clients.get_mut(session_key) {
+            clients.retain(|c| !c.same_channel(sender));
+            if clients.is_empty() {
+                drop(clients);
+                self.web_clients.remove(session_key);
+            }
+        }
+    }
+
     pub fn add_user_client(&self, user_id: Uuid, sender: WebClientSender) {
         info!("Adding web client for user: {}", user_id);
         self.user_clients.entry(user_id).or_default().push(sender);
@@ -51,6 +71,27 @@ impl SessionManager {
     pub fn broadcast_to_user(&self, user_id: &Uuid, msg: ServerToClient) {
         if let Some(mut clients) = self.user_clients.get_mut(user_id) {
             fanout_to_clients(clients.value_mut(), msg);
+        }
+    }
+
+    /// Eagerly remove `sender`'s connection from a user's client registry
+    /// when its socket task ends, dropping the map entry once the user's
+    /// last client leaves.
+    ///
+    /// WHY: presence must not contain dead senders. Push-notification
+    /// suppression ("don't push if the user has a live web client") reads
+    /// `user_clients` (and treats a present key as "user is watching");
+    /// without eager removal, a disconnected tab/phone would keep
+    /// suppressing pushes until the next failed send lazily pruned it (see
+    /// docs/MOBILE_APPS_PLAN.md §8.2). The lazy prune in `fanout_to_clients`
+    /// stays as a backstop.
+    pub fn remove_user_client(&self, user_id: &Uuid, sender: &WebClientSender) {
+        if let Some(mut clients) = self.user_clients.get_mut(user_id) {
+            clients.retain(|c| !c.same_channel(sender));
+            if clients.is_empty() {
+                drop(clients);
+                self.user_clients.remove(user_id);
+            }
         }
     }
 
@@ -216,6 +257,44 @@ mod tests {
             user_rx.try_recv().unwrap(),
             ServerToClient::ServerShutdown { .. }
         ));
+    }
+
+    #[test]
+    fn remove_web_client_drops_entry_when_empty() {
+        let mgr = SessionManager::new();
+        let (tx1, _rx1) = crate::handlers::websocket::conn_channel(64);
+        let (tx2, _rx2) = crate::handlers::websocket::conn_channel(64);
+
+        mgr.add_web_client("s1".into(), tx1.clone());
+        mgr.add_web_client("s1".into(), tx2.clone());
+
+        // Removing one sender leaves the other and keeps the entry.
+        mgr.remove_web_client(&"s1".into(), &tx1);
+        assert_eq!(mgr.web_clients.get("s1").unwrap().len(), 1);
+
+        // Removing the last sender drops the map entry entirely, so presence
+        // checks (map contains session) stay correct.
+        mgr.remove_web_client(&"s1".into(), &tx2);
+        assert!(mgr.web_clients.get("s1").is_none());
+    }
+
+    #[test]
+    fn remove_user_client_drops_entry_when_empty() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let (tx1, _rx1) = crate::handlers::websocket::conn_channel(64);
+        let (tx2, _rx2) = crate::handlers::websocket::conn_channel(64);
+
+        mgr.add_user_client(user_id, tx1.clone());
+        mgr.add_user_client(user_id, tx2.clone());
+
+        mgr.remove_user_client(&user_id, &tx1);
+        assert_eq!(mgr.user_clients.get(&user_id).unwrap().len(), 1);
+
+        mgr.remove_user_client(&user_id, &tx2);
+        assert!(mgr.user_clients.get(&user_id).is_none());
+        // Presence query must no longer see the user.
+        assert!(!mgr.get_all_user_ids().contains(&user_id));
     }
 
     #[test]

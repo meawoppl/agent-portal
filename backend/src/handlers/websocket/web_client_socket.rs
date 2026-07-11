@@ -64,6 +64,17 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
     }
 
     send_task.abort();
+
+    // Eagerly drop this connection's senders from the presence registries.
+    // All exit paths of the loop above (client close, decode-fatal break,
+    // access-denied replace) funnel through here, so presence never retains
+    // a dead sender — push-notification suppression depends on that
+    // (docs/MOBILE_APPS_PLAN.md §8.2). The lazy prune in `fanout_to_clients`
+    // remains as a backstop for the send-failure path.
+    session_manager.remove_user_client(&user_id, &tx);
+    if let Some(ref key) = session_key {
+        session_manager.remove_web_client(key, &tx);
+    }
 }
 
 /// Returns true if the connection should be closed
