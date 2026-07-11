@@ -234,9 +234,15 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 if let Ok(data) =
                     utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
                 {
-                    // Only steer selection/install-mode from scratch; a
-                    // live refresh must not yank an existing selection.
-                    if selected_launcher.is_none() {
+                    // A live refresh must not yank a selection that is
+                    // still valid — but a selection whose launcher just
+                    // dropped off the list is stale, and launching against
+                    // it would send a dead launcher_id (codex review on
+                    // this PR). Re-steer whenever the current selection
+                    // isn't in the fresh list.
+                    let selection_valid = selected_launcher
+                        .is_some_and(|id| data.iter().any(|l| l.launcher_id == id));
+                    if !selection_valid {
                         if let Some(first) = data.first() {
                             let lid = first.launcher_id;
                             selected_launcher.set(Some(lid));
@@ -244,6 +250,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
                             show_install.set(false);
                         } else {
+                            selected_launcher.set(None);
                             show_install.set(true);
                         }
                     }
