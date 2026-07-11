@@ -54,6 +54,7 @@ async fn spawn_test_app() -> SocketAddr {
         max_image_mb: config.max_image_mb,
         image_store: ImageStore::new(config.image_store_max_bytes, config.image_store_ttl),
         forward_domain: config.forward_domain,
+        archive: None,
     });
 
     let app = backend::routes::build_router(state);
@@ -129,4 +130,152 @@ async fn proxy_register_returns_ack_success() {
     .expect("connection closed before RegisterAck");
 
     assert!(success, "dev-mode register should succeed");
+}
+
+/// #1258 phase 1: the archive sweep persists a manifest + compressed
+/// transcript for a terminal session, marks it archived (idempotent — a
+/// second sweep is a no-op), and re-archives after new activity.
+#[tokio::test]
+async fn archive_sweep_persists_and_is_idempotent() {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    }
+    use backend::archive::{read_transcript, ArchiveCompression, ArchiveConfig, ArchiveRuntime};
+    use backend::models::{NewMessage, NewSessionWithId};
+    use backend::schema::{messages, sessions};
+    use diesel::prelude::*;
+
+    let pool = backend::db::create_pool().expect("pool");
+    backend::db::run_migrations_logged(&pool).expect("migrations");
+    backend::db::seed_dev_user(&pool).expect("dev user");
+    let mut conn = pool.get().expect("conn");
+
+    let user_id: uuid::Uuid = backend::schema::users::table
+        .select(backend::schema::users::id)
+        .order(backend::schema::users::created_at.asc())
+        .first(&mut conn)
+        .expect("seeded user");
+
+    // A terminal session, idle for two hours.
+    let session_id = uuid::Uuid::new_v4();
+    let stale = chrono::Utc::now().naive_utc() - chrono::Duration::hours(2);
+    diesel::insert_into(sessions::table)
+        .values(&NewSessionWithId {
+            id: session_id,
+            user_id,
+            session_name: "archive-harness".to_string(),
+            session_key: session_id.to_string(),
+            working_directory: "/tmp/archive-harness".to_string(),
+            status: shared::SessionStatus::Disconnected.as_str().to_string(),
+            git_branch: Some("main".to_string()),
+            client_version: None,
+            hostname: "harness".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(vec![]),
+        })
+        .execute(&mut conn)
+        .expect("insert session");
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::last_activity.eq(stale),
+            sessions::created_at.eq(stale),
+        ))
+        .execute(&mut conn)
+        .expect("backdate session");
+
+    for (role, content) in [
+        ("user", r#"{"type":"user","text":"hello"}"#),
+        ("assistant", r#"{"type":"assistant","text":"hi"}"#),
+    ] {
+        diesel::insert_into(messages::table)
+            .values(&NewMessage {
+                session_id,
+                role: role.to_string(),
+                content: content.to_string(),
+                user_id,
+                agent_type: "claude".to_string(),
+                provenance_kind: None,
+                provenance_session_id: None,
+                provenance_agent_type: None,
+            })
+            .execute(&mut conn)
+            .expect("insert message");
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let runtime = ArchiveRuntime::new(ArchiveConfig {
+        local_root: tmp.path().to_path_buf(),
+        compression: ArchiveCompression::Zstd,
+        transcripts: true,
+    });
+
+    let (archived, failed) =
+        backend::background::archive_pending_sessions(&pool, &runtime).expect("sweep");
+    assert!(failed == 0, "no failures expected");
+    assert!(archived >= 1, "our session must be archived");
+
+    let manifest = runtime
+        .store
+        .get_session_manifest(user_id, session_id)
+        .expect("read manifest")
+        .expect("manifest exists");
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(manifest.session_name, "archive-harness");
+    assert_eq!(manifest.message_counts.get("user"), Some(&1));
+    assert_eq!(manifest.message_counts.get("assistant"), Some(&1));
+    let transcript = manifest.transcript.as_ref().expect("transcript info");
+    assert_eq!(transcript.message_count, 2);
+
+    let lines = read_transcript(tmp.path(), user_id, session_id, ArchiveCompression::Zstd)
+        .expect("read transcript");
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].content["text"], "hello");
+
+    // Idempotent: our session must not be picked up again unchanged.
+    // (Other stale sessions in a shared dev DB may legitimately archive.)
+    let archived_at: Option<chrono::NaiveDateTime> = sessions::table
+        .find(session_id)
+        .select(sessions::archived_at)
+        .first(&mut conn)
+        .expect("read archived_at");
+    let first_mark = archived_at.expect("archived_at set");
+    backend::background::archive_pending_sessions(&pool, &runtime).expect("second sweep");
+    let second_mark: Option<chrono::NaiveDateTime> = sessions::table
+        .find(session_id)
+        .select(sessions::archived_at)
+        .first(&mut conn)
+        .expect("re-read archived_at");
+    assert_eq!(
+        second_mark,
+        Some(first_mark),
+        "unchanged session not re-archived"
+    );
+
+    // New activity past archived_at → eligible again.
+    diesel::update(sessions::table.find(session_id))
+        .set(sessions::last_activity.eq(chrono::Utc::now().naive_utc()
+            - chrono::Duration::seconds(backend::archive::ARCHIVE_IDLE_SECS + 60)))
+        .execute(&mut conn)
+        .expect("bump activity");
+    // Guard: only when the bumped activity is later than the mark.
+    diesel::update(sessions::table.find(session_id))
+        .set(sessions::archived_at.eq(stale))
+        .execute(&mut conn)
+        .expect("backdate mark");
+    let (rearchived, _) =
+        backend::background::archive_pending_sessions(&pool, &runtime).expect("third sweep");
+    assert!(rearchived >= 1, "reactivated session re-archives");
+
+    // Cleanup.
+    diesel::delete(messages::table.filter(messages::session_id.eq(session_id)))
+        .execute(&mut conn)
+        .ok();
+    diesel::delete(sessions::table.find(session_id))
+        .execute(&mut conn)
+        .ok();
 }

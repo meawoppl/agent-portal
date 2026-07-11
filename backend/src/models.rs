@@ -65,6 +65,10 @@ pub struct Session {
     /// (`[{number,url,branch}]`). Surfaces on the wire via `SessionWithRole`'s
     /// flatten, where the frontend deserializes it into `Vec<PrRef>`.
     pub open_prs: serde_json::Value,
+    /// When this session was last archived to long-term storage (#1258).
+    /// `None` = never; the sweep re-archives when `last_activity` advances
+    /// past this.
+    pub archived_at: Option<NaiveDateTime>,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)
