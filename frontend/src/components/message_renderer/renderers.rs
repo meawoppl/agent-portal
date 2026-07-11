@@ -241,6 +241,7 @@ pub fn render_error_message(msg: &shared::AnthropicError, timestamp: Option<&str
                 {
                     html! { <span class="error-type">{ error_type }</span> }
                 }
+                <CopyButton text={message.to_string()} title="Copy error" />
             </div>
             <div class="message-body">
                 <div class="error-text">{ crate::components::markdown::linkify_urls(message) }</div>

@@ -1,6 +1,7 @@
 use super::renderers;
 use super::types::{ClaudeMessage, RenderedMessage};
 use crate::components::agent_frame::{AgentFrame, AgentFrameRegistry, FrameRenderer};
+use crate::components::copy_button::CopyButton;
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -163,6 +164,7 @@ fn render_raw_json(json: &str) -> Html {
         <div class="claude-message raw-message">
             <div class="message-header">
                 <span class="message-type-badge raw">{ "Unrecognized Message" }</span>
+                <CopyButton text={display.clone()} title="Copy raw JSON" />
             </div>
             <div class="message-body">
                 <pre class="raw-json">{ display }</pre>
