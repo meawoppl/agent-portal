@@ -25,6 +25,18 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "mobile": [
+        {
+          "scheme": ["https"],
+          "host": "txcl.io",
+          "pathPrefix": ["/"],
+          "appLink": true
+        }
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all"

@@ -84,6 +84,8 @@ pub struct AppState {
     /// VAPID application-server public key served to Web Push clients
     /// (`GET /api/push/vapid-key`). `None` = push unconfigured (endpoint 404s).
     pub vapid_public_key: Option<String>,
+    /// Native mobile app-link association payload configuration.
+    pub mobile_app_links: config::MobileAppLinksConfig,
 }
 
 impl AppState {
@@ -184,6 +186,7 @@ pub async fn run() -> anyhow::Result<()> {
         },
         notifications,
         vapid_public_key: config.vapid_public_key,
+        mobile_app_links: config.mobile_app_links,
     });
 
     // Drain notification events and dispatch pushes (mobile-apps plan §8.2).
