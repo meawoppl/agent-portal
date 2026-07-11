@@ -249,6 +249,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(handlers::scheduled_tasks::list_runs_handler),
         )
         // Push notification subscriptions (mobile-apps plan C1)
+        .route("/api/push/vapid-key", get(handlers::push::get_vapid_key))
         .route(
             "/api/push/subscriptions",
             get(handlers::push::list_subscriptions).post(handlers::push::register_subscription),

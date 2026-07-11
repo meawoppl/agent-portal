@@ -168,6 +168,14 @@ pub fn storage_set(key: &str, value: &str) {
     }
 }
 
+/// Remove a key from browser localStorage, silently doing nothing when
+/// storage is unavailable.
+pub fn storage_remove(key: &str) {
+    if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.remove_item(key);
+    }
+}
+
 /// Human-readable file size: `"512 B"`, `"1.5 KB"`, `"2.0 MB"`.
 pub fn format_file_size(bytes: u64) -> String {
     if bytes < 1024 {

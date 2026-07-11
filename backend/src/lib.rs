@@ -81,6 +81,9 @@ pub struct AppState {
     /// (mobile-apps plan §8). Drained by the dispatcher task spawned in
     /// [`run`]; hooks call `notifications.emit(..)`.
     pub notifications: push::NotificationSender,
+    /// VAPID application-server public key served to Web Push clients
+    /// (`GET /api/push/vapid-key`). `None` = push unconfigured (endpoint 404s).
+    pub vapid_public_key: Option<String>,
 }
 
 impl AppState {
@@ -178,6 +181,7 @@ pub async fn run() -> anyhow::Result<()> {
             None => None,
         },
         notifications,
+        vapid_public_key: config.vapid_public_key,
     });
 
     // Drain notification events and dispatch pushes (mobile-apps plan §8.2).

@@ -226,6 +226,7 @@ mod tests {
             forward_domain: None,
             archive: None,
             notifications: crate::push::channel().0,
+            vapid_public_key: None,
         }
     }
 

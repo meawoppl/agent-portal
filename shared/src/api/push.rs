@@ -46,6 +46,18 @@ impl PushPlatform {
     }
 }
 
+/// Response from GET /api/push/vapid-key — the server's VAPID public key.
+///
+/// The key is the base64url-encoded (unpadded) VAPID application-server public
+/// key the browser passes to `pushManager.subscribe({ applicationServerKey })`.
+/// The endpoint returns 404 when the deployment has no key configured
+/// (`PORTAL_VAPID_PUBLIC_KEY` unset), which the client treats as "push
+/// unavailable" and degrades gracefully.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VapidKeyResponse {
+    pub public_key: String,
+}
+
 /// Register (or re-register) a push subscription for the caller.
 ///
 /// The backend upserts on the `(user_id, endpoint_or_token)` unique key:

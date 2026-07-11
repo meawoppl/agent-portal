@@ -116,3 +116,75 @@ self.addEventListener("fetch", (event) => {
 
   // Everything else: default network handling (no respondWith).
 });
+
+// ---------------------------------------------------------------------------
+// Web Push (mobile-apps plan D1).
+//
+// Payload contract (JSON, sent by the backend Web Push sender): {
+//   session_id, event_kind, title, body, collapse_key }. The `collapse_key`
+// becomes the notification `tag` so one visible notification per collapse key
+// is shown (newest wins) — one card per session rather than a growing stack.
+// Everything is best-effort and defensive: a malformed/empty payload still
+// surfaces a generic notification rather than throwing inside the SW.
+// ---------------------------------------------------------------------------
+self.addEventListener("push", (event) => {
+  let payload = {};
+  if (event.data) {
+    try {
+      payload = event.data.json() || {};
+    } catch (e) {
+      // Non-JSON payload — fall back to the raw text as the body.
+      payload = { body: event.data.text() };
+    }
+  }
+
+  const title = payload.title || "Agent Portal";
+  const options = {
+    body: payload.body || "",
+    tag: payload.collapse_key || undefined,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: { session_id: payload.session_id || null },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Clicking a notification focuses an already-open portal tab (navigating it to
+// the session if we have an id) or opens a fresh window. The app has no
+// per-session route yet (routes live in dashboard state), so we deep-link to
+// `/dashboard` and carry `?session=<id>` for a future consumer — harmless
+// today, forward-compatible tomorrow.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const sessionId =
+    event.notification.data && event.notification.data.session_id;
+  const target = sessionId ? `/dashboard?session=${sessionId}` : "/dashboard";
+  const targetUrl = new URL(target, self.location.origin).href;
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          // Reuse any same-origin portal tab: focus it and route to the target.
+          if (new URL(client.url).origin === self.location.origin) {
+            if ("focus" in client) {
+              return client
+                .focus()
+                .then((focused) =>
+                  "navigate" in focused
+                    ? focused.navigate(targetUrl).catch(() => focused)
+                    : focused,
+                );
+            }
+          }
+        }
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(targetUrl);
+        }
+        return undefined;
+      }),
+  );
+});

@@ -70,6 +70,7 @@ async fn spawn_test_app() -> SocketAddr {
         // No dispatcher is spawned in the harness; the receiver drops
         // immediately, so emits are silently no-ops (see NotificationSender).
         notifications: backend::push::channel().0,
+        vapid_public_key: config.vapid_public_key,
     });
 
     let app = backend::routes::build_router(state);
