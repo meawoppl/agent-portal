@@ -23,6 +23,8 @@ pub const ACCESS_DENIED: &str = "/access-denied";
 pub const AUTH_GOOGLE: &str = "/api/auth/google";
 pub const AUTH_GOOGLE_CALLBACK: &str = "/api/auth/google/callback";
 pub const AUTH_ME: &str = "/api/auth/me";
+pub const AUTH_REFRESH: &str = "/api/auth/refresh";
+pub const AUTH_TOKEN_LOGIN: &str = "/api/auth/token-login";
 pub const AUTH_LOGOUT: &str = "/api/auth/logout";
 pub const AUTH_DEV_LOGIN: &str = "/api/auth/dev-login";
 pub const AUTH_DEVICE_LOGIN: &str = "/api/auth/device-login";
@@ -262,6 +264,8 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
                 .put(handlers::sound_settings::save_sound_settings),
         )
         .route(AUTH_ME, get(handlers::auth::me))
+        .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
+        .route(AUTH_TOKEN_LOGIN, post(handlers::auth::token_login))
         .route(AUTH_LOGOUT, get(handlers::auth::logout))
         // Non-rate-limited device flow verify page (form + browser refreshes)
         .route(AUTH_DEVICE, get(handlers::device_flow::device_verify_page))
