@@ -49,8 +49,59 @@ impl GitRefreshTrigger {
     }
 }
 
-/// Get the current git branch name, if in a git repository.
+/// Branch detection result, worktree-aware (#1067).
+pub struct GitBranchInfo {
+    /// Branch checked out in the session's own working directory.
+    pub checkout: String,
+    /// Branch of the most-recently-active *other* worktree of the same
+    /// repo, when its HEAD moved more recently than the session
+    /// checkout's. Agents routinely do their real work in `git worktree`
+    /// checkouts the session cwd knows nothing about.
+    pub active_worktree: Option<String>,
+}
+
+impl GitBranchInfo {
+    /// The pill string: `checkout (+ active)` when an outside worktree is
+    /// where the action is, plain `checkout` otherwise.
+    pub fn display(&self) -> String {
+        match &self.active_worktree {
+            Some(active) => format!("{} (+ {})", self.checkout, active),
+            None => self.checkout.clone(),
+        }
+    }
+
+    /// The branch to use for PR lookups: PRs ship from the branch being
+    /// worked on, which is the active worktree's when one exists.
+    pub fn pr_branch(&self) -> &str {
+        self.active_worktree.as_deref().unwrap_or(&self.checkout)
+    }
+}
+
+/// Get the current git branch name, if in a git repository. Worktree-aware:
+/// see [`GitBranchInfo::display`] for the composite form.
 pub fn get_git_branch(cwd: &str) -> Option<String> {
+    get_branch_info(cwd).map(|info| info.display())
+}
+
+/// Worktree-aware branch detection (#1067).
+pub(super) fn get_branch_info(cwd: &str) -> Option<GitBranchInfo> {
+    let checkout = checkout_branch(cwd)?;
+    let active_worktree = most_recently_active_worktree_branch(cwd)
+        .filter(|(branch, _)| *branch != checkout)
+        .filter(|(_, mtime)| {
+            // Only surface the outside worktree while it's genuinely the
+            // more recent site of activity.
+            head_mtime_for_checkout(cwd).is_none_or(|cwd_mtime| *mtime > cwd_mtime)
+        })
+        .map(|(branch, _)| branch);
+    Some(GitBranchInfo {
+        checkout,
+        active_worktree,
+    })
+}
+
+/// The branch checked out at `cwd` (the pre-#1067 one-shot behavior).
+fn checkout_branch(cwd: &str) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(cwd)
@@ -78,6 +129,72 @@ pub fn get_git_branch(cwd: &str) -> Option<String> {
     } else {
         Some(branch)
     }
+}
+
+/// When did this checkout last see git activity? The per-worktree reflog
+/// (`logs/HEAD`) is appended by every commit/checkout/reset made in that
+/// worktree, so its mtime is a cheap, robust activity signal. (`HEAD`
+/// itself only changes on branch switches.) Falls back to `HEAD` for
+/// reflog-disabled repos. For a linked worktree `<path>/.git` is a file
+/// containing `gitdir: <dir>`; for the main checkout it's the `.git`
+/// directory itself.
+fn head_mtime(worktree_path: &std::path::Path) -> Option<std::time::SystemTime> {
+    let dot_git = worktree_path.join(".git");
+    let git_dir = if dot_git.is_file() {
+        let contents = std::fs::read_to_string(&dot_git).ok()?;
+        std::path::PathBuf::from(contents.strip_prefix("gitdir:")?.trim())
+    } else {
+        dot_git
+    };
+    std::fs::metadata(git_dir.join("logs/HEAD"))
+        .or_else(|_| std::fs::metadata(git_dir.join("HEAD")))
+        .ok()?
+        .modified()
+        .ok()
+}
+
+fn head_mtime_for_checkout(cwd: &str) -> Option<std::time::SystemTime> {
+    // The session cwd may be a subdirectory; resolve the worktree root.
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let top = String::from_utf8(output.stdout).ok()?;
+    head_mtime(std::path::Path::new(top.trim()))
+}
+
+/// Enumerate this repo's worktrees and return the branch + HEAD mtime of the
+/// most recently active one (excluding detached checkouts, which have no
+/// branch to display).
+fn most_recently_active_worktree_branch(cwd: &str) -> Option<(String, std::time::SystemTime)> {
+    let output = std::process::Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8(output.stdout).ok()?;
+
+    let mut best: Option<(String, std::time::SystemTime)> = None;
+    let mut current_path: Option<std::path::PathBuf> = None;
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current_path = Some(std::path::PathBuf::from(path));
+        } else if let Some(branch_ref) = line.strip_prefix("branch ") {
+            let branch = branch_ref
+                .strip_prefix("refs/heads/")
+                .unwrap_or(branch_ref)
+                .to_string();
+            if let Some(mtime) = current_path.as_deref().and_then(head_mtime) {
+                if best.as_ref().is_none_or(|(_, t)| mtime > *t) {
+                    best = Some((branch, mtime));
+                }
+            }
+        }
+    }
+    best
 }
 
 /// Look up the GitHub repository URL using the `gh` CLI.
@@ -237,10 +354,13 @@ pub(super) async fn check_and_send_branch_update(
     working_directory: &str,
     state: &GitMetadataState,
 ) {
-    let new_branch = get_git_branch(working_directory);
-    let new_pr_url = new_branch
-        .as_deref()
-        .and_then(|b| get_pr_url(working_directory, b));
+    let info = get_branch_info(working_directory);
+    let new_branch = info.as_ref().map(|i| i.display());
+    // PR lookup keys on the branch the work ships from — the active
+    // worktree's when one exists (#1067), never the composite display form.
+    let new_pr_url = info
+        .as_ref()
+        .and_then(|i| get_pr_url(working_directory, i.pr_branch()));
     let new_repo_url = get_repo_url(working_directory);
     let new_open_prs = get_open_prs(working_directory);
 
@@ -319,6 +439,67 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git runs");
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    /// #1067: a sibling worktree with more recent HEAD activity surfaces as
+    /// the active branch — in the display composite AND as the PR-lookup
+    /// branch — and drops back out when the main checkout is active again.
+    #[test]
+    fn branch_info_surfaces_most_recently_active_worktree() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let cwd = repo.to_str().unwrap();
+
+        // Single worktree: plain branch, no composite.
+        let info = get_branch_info(cwd).expect("in a repo");
+        assert_eq!(info.checkout, "main");
+        assert_eq!(info.active_worktree, None);
+        assert_eq!(info.display(), "main");
+        assert_eq!(info.pr_branch(), "main");
+
+        // Add a worktree; its HEAD was just written, so it's the most
+        // recently active checkout.
+        let side = tmp.path().join("side");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                side.to_str().unwrap(),
+                "-b",
+                "feature-side",
+            ],
+        );
+        let info = get_branch_info(cwd).expect("in a repo");
+        assert_eq!(info.checkout, "main");
+        assert_eq!(info.active_worktree.as_deref(), Some("feature-side"));
+        assert_eq!(info.display(), "main (+ feature-side)");
+        assert_eq!(info.pr_branch(), "feature-side");
+
+        // Activity moves back to the main checkout (HEAD rewritten):
+        // the composite drops away.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "more"]);
+        let info = get_branch_info(cwd).expect("in a repo");
+        assert_eq!(info.active_worktree, None, "cwd is the active checkout");
+        assert_eq!(info.display(), "main");
+    }
 
     #[test]
     fn codex_git_signal_detects_command_events() {
