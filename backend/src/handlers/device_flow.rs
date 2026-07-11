@@ -6,7 +6,8 @@ use axum::{
 use diesel::prelude::*;
 use serde::Deserialize;
 use shared::api::{
-    DeviceCodeRequest, DeviceCodeResponse, DeviceFlowActionResponse, DeviceFlowPollRequest,
+    DeviceClientType, DeviceCodeRequest, DeviceCodeResponse, DeviceFlowActionResponse,
+    DeviceFlowPollRequest,
 };
 use shared::DevicePollResponse;
 use std::sync::Arc;
@@ -21,7 +22,7 @@ use crate::{
 };
 
 use shared::protocol::{DEVICE_CODE_EXPIRES_SECS, SESSION_COOKIE_NAME};
-use shared::TOKEN_TYPE_MOBILE;
+use shared::{TOKEN_TYPE_MOBILE, TOKEN_TYPE_PROXY};
 
 mod api_error;
 mod render;
@@ -50,6 +51,7 @@ pub async fn device_code(
     let req = body.map(|b| b.0).unwrap_or_default();
     let hostname = req.hostname;
     let working_directory = req.working_directory;
+    let client_type = req.client_type;
     let device_code = generate_device_code();
     let user_code = generate_user_code();
 
@@ -65,6 +67,7 @@ pub async fn device_code(
         status: DeviceFlowStatus::Pending,
         hostname: hostname.clone(),
         working_directory: working_directory.clone(),
+        client_type,
     };
 
     let mut store_lock = store.write().await;
@@ -77,6 +80,7 @@ pub async fn device_code(
         user_code = %user_code,
         hostname = ?hostname,
         working_directory = ?working_directory,
+        client_type = ?client_type,
     );
 
     Ok(Json(DeviceCodeResponse {
@@ -382,14 +386,7 @@ pub async fn complete_device_flow(
     user_code: &str,
     user_id: Uuid,
 ) -> Result<(), ()> {
-    complete_device_flow_with_expiry(
-        app_state,
-        store,
-        user_code,
-        user_id,
-        Some(MOBILE_TOKEN_TTL_DAYS),
-    )
-    .await
+    complete_device_flow_with_expiry(app_state, store, user_code, user_id).await
 }
 
 async fn complete_device_flow_with_expiry(
@@ -397,14 +394,26 @@ async fn complete_device_flow_with_expiry(
     store: &DeviceFlowStore,
     user_code: &str,
     user_id: Uuid,
-    expires_in_days: Option<u32>,
 ) -> Result<(), ()> {
     let mut conn = app_state.db_pool.get().map_err(|e| {
         error!("Failed to get database connection: {}", e);
     })?;
 
-    // Device-flow credentials are mobile bearer tokens with a fixed lifetime;
-    // B2 adds the refresh endpoint so native shells can rotate before expiry.
+    let client_type = {
+        let store_lock = store.read().await;
+        store_lock
+            .values()
+            .find(|s| s.user_code == user_code && s.status == DeviceFlowStatus::Pending)
+            .map(|state| state.client_type)
+            .ok_or_else(|| {
+                error!("Device flow state not found for user_code: {}", user_code);
+            })?
+    };
+
+    let (expires_in_days, token_type) = device_client_token_policy(client_type);
+
+    // CLI/proxy device-flow credentials intentionally remain non-expiring
+    // (#932). Mobile shells opt into expiring refreshable tokens.
     let name = format!(
         "Device auth {}",
         chrono::Utc::now().format("%Y-%m-%d %H:%M")
@@ -415,7 +424,7 @@ async fn complete_device_flow_with_expiry(
         user_id,
         TokenPersist::Create { name: &name },
         expires_in_days,
-        TOKEN_TYPE_MOBILE,
+        token_type,
     )
     .map_err(|e| {
         error!("Failed to issue device token: {:?}", e);
@@ -442,11 +451,20 @@ async fn complete_device_flow_with_expiry(
             user_code = %user_code,
             user_id = %user_id,
             user_email = %issued.user_email,
+            client_type = ?client_type,
+            token_type = %token_type,
         );
         Ok(())
     } else {
         error!("Device flow state not found for user_code: {}", user_code);
         Err(())
+    }
+}
+
+fn device_client_token_policy(client_type: DeviceClientType) -> (Option<u32>, &'static str) {
+    match client_type {
+        DeviceClientType::Cli => (None, TOKEN_TYPE_PROXY),
+        DeviceClientType::Mobile => (Some(MOBILE_TOKEN_TTL_DAYS), TOKEN_TYPE_MOBILE),
     }
 }
 
@@ -556,6 +574,18 @@ mod tests {
     }
 
     #[test]
+    fn device_client_token_policy_preserves_cli_proxy_tokens() {
+        assert_eq!(
+            device_client_token_policy(DeviceClientType::Cli),
+            (None, TOKEN_TYPE_PROXY)
+        );
+        assert_eq!(
+            device_client_token_policy(DeviceClientType::Mobile),
+            (Some(MOBILE_TOKEN_TTL_DAYS), TOKEN_TYPE_MOBILE)
+        );
+    }
+
+    #[test]
     fn test_device_flow_state_transitions() {
         // Test that DeviceFlowStatus can represent all states
         let pending = DeviceFlowStatus::Pending;
@@ -593,6 +623,7 @@ mod tests {
             status: DeviceFlowStatus::Pending,
             hostname: Some("test-host".to_string()),
             working_directory: Some("/home/user/project".to_string()),
+            client_type: DeviceClientType::Cli,
         };
 
         assert_eq!(state.device_code, device_code);
@@ -605,6 +636,7 @@ mod tests {
             state.working_directory,
             Some("/home/user/project".to_string())
         );
+        assert_eq!(state.client_type, DeviceClientType::Cli);
     }
 
     #[tokio::test]
@@ -625,6 +657,7 @@ mod tests {
             status: DeviceFlowStatus::Pending,
             hostname: Some("test-host".to_string()),
             working_directory: Some("/test/dir".to_string()),
+            client_type: DeviceClientType::Cli,
         };
 
         // Insert into store
@@ -775,6 +808,7 @@ mod tests {
             status: DeviceFlowStatus::Pending,
             hostname: None,
             working_directory: None,
+            client_type: DeviceClientType::Cli,
         };
 
         // Insert into store

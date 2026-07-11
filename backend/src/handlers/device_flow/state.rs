@@ -1,5 +1,6 @@
 use rand::{distributions::Alphanumeric, Rng};
 use serde::Deserialize;
+use shared::api::DeviceClientType;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -21,6 +22,8 @@ pub struct DeviceFlowState {
     pub hostname: Option<String>,
     /// Working directory / repository path
     pub working_directory: Option<String>,
+    /// Client class requested when the device flow was initiated.
+    pub client_type: DeviceClientType,
 }
 
 #[derive(Debug, Clone, PartialEq)]
