@@ -197,19 +197,22 @@ fn archive_one_session(
 
     let current_lines: Vec<ArchiveMessageLine> = rows
         .into_iter()
-        .map(
-            |(id, role, content, created_at, agent_type)| ArchiveMessageLine {
+        .map(|(id, role, content, created_at, agent_type)| {
+            // Stored content is JSON text; embed it as a value so the
+            // archive round-trips it. Non-JSON content (shouldn't exist)
+            // degrades to a JSON string.
+            let content = match serde_json::from_str(&content) {
+                Ok(value) => value,
+                Err(_) => serde_json::Value::String(content),
+            };
+            ArchiveMessageLine {
                 id,
                 role,
                 created_at,
                 agent_type,
-                // Stored content is JSON text; embed it as a value so the
-                // archive round-trips it. Non-JSON content (shouldn't exist)
-                // degrades to a JSON string.
-                content: serde_json::from_str(&content)
-                    .unwrap_or_else(|_| serde_json::Value::String(content)),
-            },
-        )
+                content,
+            }
+        })
         .collect();
 
     // Merge with any previously-archived transcript (#1258 phase 2):

@@ -327,7 +327,7 @@ pub fn merge_transcript_lines(
         by_id.insert(line.id, line);
     }
     let mut merged: Vec<ArchiveMessageLine> = by_id.into_values().collect();
-    merged.sort_by(|a, b| (a.created_at, a.id).cmp(&(b.created_at, b.id)));
+    merged.sort_by_key(|line| (line.created_at, line.id));
     merged
 }
 
