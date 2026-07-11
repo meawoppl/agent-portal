@@ -20,16 +20,29 @@ use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
 use crate::utils;
 use gloo_net::http::Request;
+use serde::Deserialize;
 use shared::SessionInfo;
 use std::collections::HashSet;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
 use yew::prelude::*;
+use yew_router::prelude::*;
 
 // =============================================================================
 // Dashboard Page - Main Orchestrating Component
 // =============================================================================
+
+/// Query string consumed on dashboard mount for push-notification deep links
+/// (mobile-apps plan item D4). `sw.js`'s `notificationclick` handler opens
+/// `/dashboard?session=<uuid>`; we read `session` once, select that session as
+/// a rail click would, then strip the query so a refresh / back-nav can't
+/// re-fire a stale selection.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+struct DeepLinkQuery {
+    #[serde(default)]
+    session: Option<String>,
+}
 
 #[function_component(DashboardPage)]
 pub fn dashboard_page() -> Html {
@@ -113,6 +126,42 @@ pub fn dashboard_page() -> Html {
         loading,
         session_state.clone(),
     );
+
+    // Push-notification deep link (mobile-apps plan D4). `sw.js` opens
+    // `/dashboard?session=<uuid>` on notification click; parse that id once at
+    // mount and hold it until the target session shows up in `active_sessions`
+    // (it may arrive before the list finishes loading). When it does, select it
+    // via the same `on_select_session` path a rail click uses, then clear the
+    // target *and* strip the query (`navigator.replace(Route::Dashboard)`) so a
+    // refresh or back-nav can't re-fire a stale selection. An unknown or
+    // inaccessible id simply never matches and is silently ignored.
+    let navigator = use_navigator();
+    let location = use_location();
+    let deep_link_target = use_state(move || {
+        location
+            .and_then(|loc| loc.query::<DeepLinkQuery>().ok())
+            .and_then(|q| q.session)
+            .and_then(|s| Uuid::parse_str(&s).ok())
+    });
+    {
+        let on_select = focus.on_select_session.clone();
+        let deep_link_target = deep_link_target.clone();
+        use_effect_with(
+            (active_session_ids(&active_sessions), *deep_link_target),
+            move |(session_ids, target)| {
+                if let Some(target_id) = *target {
+                    if let Some(index) = session_ids.iter().position(|id| *id == target_id) {
+                        on_select.emit(index);
+                        if let Some(navigator) = navigator {
+                            navigator.replace(&crate::Route::Dashboard);
+                        }
+                        deep_link_target.set(None);
+                    }
+                }
+                || ()
+            },
+        );
+    }
 
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
