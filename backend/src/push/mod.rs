@@ -12,15 +12,102 @@
 //! v1 ships only the [`transport::LogTransport`] (logs delivery intent); real
 //! Web Push / APNs / FCM transports land in C3 / C7 behind the same trait.
 
+pub mod apns;
 pub mod dispatcher;
+pub mod fcm;
 pub mod transport;
 
 pub use dispatcher::spawn_dispatcher;
 pub use transport::{LogTransport, PushError, PushTransport, SendOutcome};
 
+use crate::models::PushSubscription;
 use shared::api::NotificationPrefs;
+use std::path::PathBuf;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
+
+/// APNs provider-token configuration. All fields must be present together; an
+/// absent group leaves APNs delivery disabled while the dispatcher still runs.
+#[derive(Debug, Clone)]
+pub struct ApnsTransportConfig {
+    pub key_p8_path: PathBuf,
+    pub key_id: String,
+    pub team_id: String,
+    pub bundle_id: String,
+}
+
+/// FCM v1 service-account configuration. Absent = FCM delivery disabled.
+#[derive(Debug, Clone)]
+pub struct FcmTransportConfig {
+    pub service_account_path: PathBuf,
+}
+
+/// Native mobile push configuration (C7). Web Push is intentionally separate
+/// (C3); this group only owns APNs and FCM.
+#[derive(Debug, Clone, Default)]
+pub struct NativePushConfig {
+    pub apns: Option<ApnsTransportConfig>,
+    pub fcm: Option<FcmTransportConfig>,
+}
+
+/// Startup-selected transport set. `PushTransport` is not object-safe because
+/// it returns `impl Future`, so static dispatch through an enum keeps the
+/// dispatcher generic-free while allowing APNs/FCM to be optional.
+pub enum ConfiguredTransport {
+    Log(LogTransport),
+    Native {
+        log: LogTransport,
+        apns: Option<Box<apns::ApnsTransport>>,
+        fcm: Option<Box<fcm::FcmTransport>>,
+    },
+}
+
+impl ConfiguredTransport {
+    pub fn from_native_config(config: NativePushConfig) -> anyhow::Result<Self> {
+        let apns = config
+            .apns
+            .map(apns::ApnsTransport::new)
+            .transpose()?
+            .map(Box::new);
+        let fcm = config
+            .fcm
+            .map(fcm::FcmTransport::new)
+            .transpose()?
+            .map(Box::new);
+        if apns.is_some() || fcm.is_some() {
+            Ok(Self::Native {
+                log: LogTransport,
+                apns,
+                fcm,
+            })
+        } else {
+            Ok(Self::Log(LogTransport))
+        }
+    }
+}
+
+impl PushTransport for ConfiguredTransport {
+    async fn send(
+        &self,
+        sub: &PushSubscription,
+        payload: &PushPayload,
+    ) -> Result<SendOutcome, PushError> {
+        match self {
+            ConfiguredTransport::Log(t) => t.send(sub, payload).await,
+            ConfiguredTransport::Native { log, apns, fcm } => match sub.platform.as_str() {
+                "apns" => match apns {
+                    Some(t) => t.send(sub, payload).await,
+                    None => log.send(sub, payload).await,
+                },
+                "fcm" => match fcm {
+                    Some(t) => t.send(sub, payload).await,
+                    None => log.send(sub, payload).await,
+                },
+                _ => log.send(sub, payload).await,
+            },
+        }
+    }
+}
 
 /// A user-visible event worth a push. Each variant names the session it
 /// concerns so the dispatcher can resolve the owning user and (as a fallback)

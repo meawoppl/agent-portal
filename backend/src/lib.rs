@@ -150,6 +150,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Parse remaining configuration from environment variables
     let config = config::ServerConfig::from_env(args.dev_mode)?;
+    let push_transport = push::ConfiguredTransport::from_native_config(config.native_push)?;
 
     // Create app state
     let app_state = Arc::new(AppState {
@@ -185,7 +186,7 @@ pub async fn run() -> anyhow::Result<()> {
     });
 
     // Drain notification events and dispatch pushes (mobile-apps plan §8.2).
-    push::spawn_dispatcher(app_state.clone(), notification_rx);
+    push::spawn_dispatcher(app_state.clone(), notification_rx, push_transport);
 
     // Build our application with routes
     let app = routes::build_router(app_state.clone());
