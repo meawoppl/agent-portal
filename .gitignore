@@ -26,6 +26,10 @@ target
 # Frontend build artifacts
 frontend/dist/
 
+# Mobile (Tauri) shell build artifacts
+mobile/src-tauri/target/
+mobile/src-tauri/gen/
+
 # Database
 *.db
 *.db-shm

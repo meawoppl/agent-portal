@@ -11,6 +11,16 @@ members = [
     "portal-auth",
     "portal-update",
 ]
+# `mobile/src-tauri` (the Tauri 2 mobile shell, crate `portal-mobile`) is
+# deliberately NOT a workspace member. Desktop Tauri links webkit2gtk on Linux
+# and the mobile builds need Android SDK/NDK + Xcode — none of which the main
+# CI/build environment provides. A workspace member is compiled by
+# `cargo {build,test,clippy} --workspace` regardless of `default-members`, so
+# adding it here would break existing CI. Excluding it keeps every existing
+# workspace command byte-for-byte unaffected. It is built independently via the
+# Tauri CLI (see mobile/README.md); F1/F2 add mobile CI lanes and can promote
+# it to a member once the toolchain is provisioned. (Plan §10.)
+exclude = ["mobile/src-tauri"]
 resolver = "2"
 
 [workspace.package]

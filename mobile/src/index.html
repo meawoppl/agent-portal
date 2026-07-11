@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Agent Portal</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0e7490;
+        color: #f8fafc;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      .splash {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        text-align: center;
+      }
+      .title { font-size: 1.5rem; font-weight: 600; }
+      .sub { font-size: 0.9rem; opacity: 0.8; }
+    </style>
+  </head>
+  <body>
+    <!--
+      This is a local placeholder only. Tauri requires a `frontendDist`, but
+      this shell is a REMOTE-URL WebView (decision D3, docs/MOBILE_APPS_PLAN.md
+      §5.B.2): the window loads the deployed portal URL from tauri.conf.json
+      (app.windows[0].url) / the PORTAL_SHELL_URL build-time override, so this
+      page is normally only visible for a moment while the portal loads.
+    -->
+    <div class="splash">
+      <div class="title">Agent Portal</div>
+      <div class="sub">Connecting…</div>
+    </div>
+  </body>
+</html>
