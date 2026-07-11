@@ -24,13 +24,25 @@ use shared::endpoints::SessionEndpoint;
 use shared::{AgentType, ProxyToServer, RegisterFields, ServerToProxy};
 use tokio::net::TcpListener;
 
-/// Boot the backend (dev mode) on an ephemeral port; returns its address.
-/// Mirrors `backend::run`'s state construction, minus the background tasks.
-async fn spawn_test_app() -> SocketAddr {
+/// Migration/seed guard: harness tests run concurrently against ONE shared
+/// Postgres, and Diesel's migration runner is not safe to race with itself.
+/// Every test acquires the pool through here, which serializes the
+/// migrate+seed step (the lock is released before the test body runs).
+static DB_SETUP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn test_pool() -> backend::db::DbPool {
+    let _guard = DB_SETUP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let pool = backend::db::create_pool()
         .expect("DATABASE_URL must point to a test Postgres (docker-compose.test.yml)");
     backend::db::run_migrations_logged(&pool).expect("run migrations");
     backend::db::seed_dev_user(&pool).expect("seed dev user");
+    pool
+}
+
+/// Boot the backend (dev mode) on an ephemeral port; returns its address.
+/// Mirrors `backend::run`'s state construction, minus the background tasks.
+async fn spawn_test_app() -> SocketAddr {
+    let pool = test_pool();
 
     let config = ServerConfig::from_env(true).expect("parse server config");
     let oauth = backend::config::build_google_oauth_client(true).expect("oauth client");
@@ -146,9 +158,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
     use backend::schema::{messages, sessions};
     use diesel::prelude::*;
 
-    let pool = backend::db::create_pool().expect("pool");
-    backend::db::run_migrations_logged(&pool).expect("migrations");
-    backend::db::seed_dev_user(&pool).expect("dev user");
+    let pool = test_pool();
     let mut conn = pool.get().expect("conn");
 
     let user_id: uuid::Uuid = backend::schema::users::table

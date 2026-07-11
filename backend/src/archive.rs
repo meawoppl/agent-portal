@@ -156,6 +156,13 @@ pub struct ArchiveTokenTotals {
     pub subagent: i64,
 }
 
+/// Turn-level aggregates for the manifest, sourced from `turn_metrics`.
+///
+/// Known v1 gaps, documented deliberately: **rate-limit event counts and
+/// reconnect counts have no durable DB source today** (limit events are
+/// transient wire frames; reconnects live only in logs), so they cannot
+/// appear in manifests until something persists them. `errored` counts
+/// turns with `is_error`, which subsumes limit-terminated turns.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct ArchiveTurnStats {
     pub count: i64,
@@ -164,6 +171,14 @@ pub struct ArchiveTurnStats {
     pub stop_reasons: BTreeMap<String, i64>,
     /// Distinct models observed, sorted.
     pub models: Vec<String>,
+    /// Service-tier histogram (e.g. "standard" / "priority").
+    pub service_tiers: BTreeMap<String, i64>,
+    /// Total tool invocations across all turns.
+    pub tool_calls: i64,
+    /// Total stream restarts (auto-retried turns) across all turns.
+    pub stream_restarts: i64,
+    /// Sum of per-turn wall-clock durations, milliseconds.
+    pub total_duration_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

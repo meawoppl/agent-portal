@@ -211,7 +211,17 @@ fn archive_one_session(
 
     // Turn aggregates for the manifest (analytics reads these, never the
     // transcript body).
-    type TurnAggRow = (Option<String>, Option<String>, bool, i64, i64);
+    type TurnAggRow = (
+        Option<String>,
+        Option<String>,
+        bool,
+        i64,
+        i64,
+        Option<String>,
+        i32,
+        i32,
+        Option<i64>,
+    );
     let turn_rows: Vec<TurnAggRow> = turn_metrics::table
         .filter(turn_metrics::session_id.eq(session.id))
         .select((
@@ -220,6 +230,10 @@ fn archive_one_session(
             turn_metrics::is_error,
             turn_metrics::thinking_tokens,
             turn_metrics::subagent_tokens,
+            turn_metrics::service_tier,
+            turn_metrics::tool_call_count,
+            turn_metrics::stream_restarts,
+            turn_metrics::total_duration_ms,
         ))
         .load(conn)?;
 
@@ -230,7 +244,8 @@ fn archive_one_session(
     let mut thinking = 0i64;
     let mut subagent = 0i64;
     let mut models_seen = std::collections::BTreeSet::new();
-    for (model, stop_reason, is_error, t, s) in &turn_rows {
+    for (model, stop_reason, is_error, t, s, tier, tool_calls, restarts, duration_ms) in &turn_rows
+    {
         if *is_error {
             turns.errored += 1;
         }
@@ -240,6 +255,12 @@ fn archive_one_session(
         if let Some(model) = model {
             models_seen.insert(model.clone());
         }
+        if let Some(tier) = tier {
+            *turns.service_tiers.entry(tier.clone()).or_default() += 1;
+        }
+        turns.tool_calls += i64::from(*tool_calls);
+        turns.stream_restarts += i64::from(*restarts);
+        turns.total_duration_ms += duration_ms.unwrap_or(0);
         thinking += t;
         subagent += s;
     }
