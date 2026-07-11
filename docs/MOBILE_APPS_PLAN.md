@@ -2,6 +2,9 @@
 
 Status: **proposal / planning document** (no code changes implied by merging this).
 Author: planning session 2026-07-11. Reviewed by: _pending_.
+Rev 2 (2026-07-11): claims verified against the codebase (file:line refs added,
+JWT `aud` → `token_type` corrected, presence-pruning caveat added); §15 work
+breakdown and §16 parallel execution plan added.
 
 ---
 
@@ -49,7 +52,10 @@ What is **genuinely missing** for mobile is exactly three things:
   Compose) only if WebView quality or App Store review forces it.
 
 Total to a store-published v1 (M0–M4): roughly **6–9 engineer-weeks** at our
-PR cadence, of which push (M2) is ~40%.
+PR cadence, of which push (M2) is ~40%. Because most tracks are mutually
+independent (§16), running them as parallel agent sessions compresses M0–M2 to
+roughly **1.5–2 wall-clock weeks** and M0–M4 to **3–4**, gated mostly by store
+review latency and the merge train, not by engineering.
 
 ---
 
@@ -118,6 +124,19 @@ whole difference between "the website on a phone" and "an app".
 Add `manifest.webmanifest`, icons, a service worker (network-first for the
 app shell, cache-first for static assets), iOS meta tags. Trunk supports
 copying extra assets; the backend already serves everything same-origin.
+
+Grounding (verified): **no PWA scaffolding exists today** — no manifest, no
+service worker, no `apple-touch-icon`/`theme-color` meta. Static assets are
+added via `data-trunk rel="copy-file"` links in `frontend/index.html:96-102`
+and served by `memory_serve` from the embedded `dist/`
+(`backend/src/routes.rs:325-334`). Two serving details that shape the work:
+the router has an **SPA fallback that returns `index.html` with 200 for any
+unknown path**, so `/sw.js` and `/manifest.webmanifest` must be real emitted
+assets (a typo'd path would silently serve HTML as your service worker); and
+`html_cache_control = NoCache` while hashed assets get `Long` — exactly the
+split a network-first-shell / cache-first-assets SW wants. The viewport is
+already `viewport-fit=cover` (`index.html:5`) and `styles/session-mobile.css`
+exists, confirming M0 is additive hardening.
 
 | Problem | How A handles it |
 |---|---|
@@ -261,17 +280,38 @@ client on `ws-bridge::native_client`, outbox, auth) exposed via UniFFI.
 
 ## 7. Auth design (M1)
 
-**Today**: `/ws/client` extracts the user from the signed session cookie and
-rejects otherwise; every REST handler uses `CurrentUserId` (cookie). Device
-flow (`/api/auth/device/*`) already mints JWTs after browser approval, with
-rate limiting.
+**Today** (verified against the code):
+
+- REST handlers authenticate via the `CurrentUserId` extractor
+  (`backend/src/auth.rs:83`), which reads the signed session cookie in
+  `extract_user` (`auth.rs:44`) and rejects disabled users.
+- `/ws/client` uses the same cookie path: `handle_web_client_websocket` →
+  `extract_user_id` (`backend/src/handlers/websocket/mod.rs:58`); 401 otherwise.
+- A bearer path **already exists on some REST routes**: `resolve_user`
+  (`backend/src/handlers/agent_comms.rs:30`) accepts `Authorization: Bearer`
+  (proxy token) *or* the cookie, and `/api/sessions/{id}/forwards*` follows the
+  same dual convention (`backend/src/routes.rs:167`). M1 generalizes an
+  existing in-repo pattern; it does not invent one.
+- JWT claims: `ProxyTokenClaims` (`shared/src/proxy_tokens.rs:15`) carries
+  `jti` (revocation key), `sub`, `email`, `iat`, optional `exp`, and a
+  `token_type` string (`"proxy"` | `"launcher"`). **There is no `aud` claim** —
+  the per-class discriminator in this codebase is `token_type`.
+- Device flow completion (`complete_device_flow`,
+  `backend/src/handlers/device_flow.rs:476`) currently mints **non-expiring**
+  tokens (`expires_in_days = None`, per #932). DB-backed revocation,
+  ban-checking, and `last_used_at` tracking already exist
+  (`verify_and_get_user_with_token`,
+  `backend/src/handlers/proxy_tokens.rs:271`).
 
 **Plan**:
 
 1. **Accept `Authorization: Bearer <jwt>`** as an alternative to the cookie in
-   `extract_user` (one function; every handler and the WS upgrade inherit it).
-   Token audience `mobile` distinct from proxy/launcher tokens so revocation
-   can be per-class.
+   `extract_user` (one function; every `CurrentUserId` handler and the WS
+   upgrade inherit it). Mobile tokens get `token_type: "mobile"` (extending the
+   existing `"proxy"`/`"launcher"` values — there is no `aud` claim in this
+   codebase) so revocation and policy can be per-class. Unlike device tokens,
+   mobile tokens are minted **expiring** (30 days) — the device-flow completion
+   gains an `expires_in_days` knob for the mobile client class.
 2. **Same-device login without code-typing**: app opens
    `https://portal/device?user_code=XXXX` (the existing verify page,
    pre-filled) in `ASWebAuthenticationSession` / Custom Tabs; the user does the
@@ -294,18 +334,26 @@ Backend delta: ~2 focused PRs (bearer path + refresh; token-login exchange).
 
 ### 8.1 Events worth a push (v1)
 
-| Event | Source hook | Priority |
+| Event | Source hook (verified) | Priority |
 |---|---|---|
-| Permission request pending | permission dispatch to web clients | **highest** — this is the "agent is blocked on you" interrupt |
-| Turn complete (Result) | proxy `SequencedOutput` Result finalize | high; collapse per session |
-| Session errored/disconnected unexpectedly | status transition | medium |
+| Permission request pending | `handle_permission_request` → `broadcast_to_web_clients` (`backend/src/handlers/websocket/permissions.rs:73`) | **highest** — this is the "agent is blocked on you" interrupt |
+| Turn complete (Result) | Result role detected + `store_result_metadata` (`backend/src/handlers/websocket/message_handlers.rs:309`) | high; collapse per session |
+| Session disconnected unexpectedly | `Disconnected` transitions: proxy socket teardown (`proxy_socket.rs:116`), stale-session sweep (`background.rs:83`), launcher cleanup (`launcher_socket.rs:577`). Note: `SessionStatus` has no `Errored` variant — "errored" collapses into `Disconnected` here | medium |
 | Inter-agent message received | message delivery | low, off by default |
 
 ### 8.2 Delivery policy
 
 - **Suppress when present**: if the user has a live web client
-  (`SessionManager` user-client registry — the presence source already exists),
-  deliver in-app only. Push is for the pocketed phone.
+  (`SessionManager.user_clients`, a per-user `DashMap`
+  at `session_manager/mod.rs:127`), deliver in-app only. Push is for the
+  pocketed phone.
+- **Presence caveat (verified)**: `user_clients` is pruned **lazily** — dead
+  senders are only removed when a send to them fails
+  (`client_fanout.rs:13`); there is no disconnect-time removal. A phone that
+  backgrounded 20 minutes ago can still look "present" and wrongly suppress a
+  push. Prerequisite work item (C5 in §15): remove the sender eagerly on
+  socket close in `web_client_socket.rs` so suppression is trustworthy. Small,
+  independent, and load-bearing for the whole delivery policy.
 - **Collapse keys**: one visible notification per session, newest wins
   (`apns-collapse-id` / FCM `collapse_key` / Web Push `tag`).
 - **Payload discipline**: session id + event kind + short preview only. The tap
@@ -386,6 +434,10 @@ Backend delta: ~2 focused PRs (bearer path + refresh; token-login exchange).
 ## 11. Phased plan (PR-series shape, per repo process)
 
 Each phase = a PR series, cross-reviewed by Codex, squash-merged serially.
+The milestones below are the *sequential* story; §15 breaks them into
+individually-shippable work items and §16 shows which of those run in
+parallel (the milestones overlap heavily — M1, M2, and M3's scaffold can all
+be in flight at once).
 
 **M0 — PWA baseline** (~1 wk): manifest + icons + iOS meta (1 PR); service
 worker with cache-versioning tied to `shared::VERSION` (1 PR); install hint UI
@@ -450,3 +502,179 @@ session list).
   of the permission/turn? (Privacy vs. usefulness on the lock screen.)
 - **O5**: Should launchers be drivable from the phone in v1 (launch new
   sessions), or is driving existing sessions enough?
+
+---
+
+## 15. Work breakdown structure
+
+Every item below is one PR (occasionally two), independently shippable and
+independently revertable. IDs are used by the dependency graph and wave plan
+in §16. Sizes: **XS** < half a day, **S** ~a day, **M** 2–4 days.
+
+### W0 — API contracts (do this first; it unblocks three tracks)
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| W0 | Typed request/response structs for push-subscription CRUD (`RegisterPushSubscriptionRequest`, `PushSubscriptionInfo`, …) and `NotificationPrefs`, plus agreed endpoint paths (`/api/push/subscriptions`, `/api/push/prefs`), per the no-`serde_json::json!` rule | `shared/src/api.rs` | XS | — |
+
+W0 is deliberately tiny: once the wire contract is merged, the backend
+implementation (C1/C6), the frontend subscribe flow (D2) and settings panel
+(D3), and the shell registration calls (E4/E5) can all be built **against the
+contract, concurrently**, instead of serializing on the backend landing first.
+
+### Track A — PWA baseline (M0)
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| A1 | `manifest.webmanifest`, icon set (maskable + `apple-touch-icon`), `theme-color`/iOS meta, `copy-file` links | `frontend/index.html`, `frontend/assets/` | S | — |
+| A2 | Service worker: network-first `index.html`, cache-first hashed assets, cache name keyed on `shared::VERSION` (injected at build); registration in app bootstrap. Must be a real emitted asset — the SPA fallback (`routes.rs:325`) returns HTML/200 for unknown paths | `frontend/sw.js` (new), `frontend/index.html`, small build glue | M | A1 |
+| A3 | Install-hint UI (iOS "Add to Home Screen" ritual has no prompt API); standalone-display detection polish | `frontend/src/` | S | A1 |
+
+*Exit test*: Lighthouse PWA pass; installed app on Android + iOS survives a
+backend deploy without serving stale WASM (the SW-cache risk from §12).
+
+### Track B — Mobile token auth (M1)
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| B1 | Bearer-JWT alternative in `extract_user` (mirrors the `resolve_user` dual path); `token_type: "mobile"`; expiring mint variant in device-flow completion; tests for cookie/bearer/disabled/revoked/expired matrix | `backend/src/auth.rs`, `backend/src/handlers/device_flow.rs`, `shared/src/proxy_tokens.rs` | M | — |
+| B2 | `POST /api/auth/refresh` (half-life policy, mirroring `maybe_issue_launcher_token_refresh`, `launcher_socket.rs:55`) + `POST /api/auth/token-login` (bearer → session cookie, for the WebView handoff) | `backend/src/handlers/`, `backend/src/routes.rs` | M | B1 |
+| B3 | Device verify page accepts pre-filled `?user_code=`; mobile-layout polish of the approve screen | `frontend/src/pages/` | S | — |
+
+*Exit test*: a device-flow JWT drives `/ws/client` and the session REST
+surface end to end, refresh included, with no cookie in play.
+
+### Track C — Push backend (M2 core)
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| C1 | `push_subscriptions` migration (§8.3 schema) + Diesel models + CRUD handlers + routes | `backend/migrations/`, `models.rs`, `handlers/push.rs` (new), `routes.rs` | M | W0 |
+| C2 | Dispatcher core: `NotificationEvent` enum, mpsc channel on `AppState`, policy engine (suppression via presence, collapse keys, prefs lookup), `PushTransport` trait, `PUSH_DISPATCH_FAILED` marker | `backend/src/push/` (new module) | M | C1 (schema only) |
+| C3 | Web Push transport: `web-push` crate, `PORTAL_VAPID_{PUBLIC,PRIVATE}_KEY` env, dead-endpoint pruning on 404/410 → `disabled_at` | `backend/src/push/webpush.rs`, workspace `Cargo.toml` | M | C2 |
+| C4 | Event hooks: emit `NotificationEvent` from the three verified points — `permissions.rs:73`, `message_handlers.rs:309`, and the `Disconnected` transitions (`proxy_socket.rs:116`, `background.rs:83`, `launcher_socket.rs:577`) | those files | S | C2 |
+| C5 | **Presence liveness** (§8.2 caveat): eagerly remove `user_clients` senders on socket close in `web_client_socket.rs` instead of lazy prune-on-failed-send | `backend/src/handlers/websocket/` | S | — |
+| C6 | `notification_prefs` storage (jsonb on `users`, same pattern as the existing `sound_config` column) + GET/PUT API | migration, `handlers/push.rs` | S | W0 |
+| C7 | Native transports: APNs via `a2` (HTTP/2, p8 key) + FCM v1 (HTTP, service account) behind the same `PushTransport` trait | `backend/src/push/{apns,fcm}.rs`, `Cargo.toml` | M | C2 |
+
+*Exit test* (C1–C6): locked Android phone with the installed PWA receives a
+permission-request push that deep-links into the session; an open dashboard
+tab suppresses the same push.
+
+### Track D — Frontend push UX
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| D1 | SW `push` event handler + `notificationclick` deep link to `/app/session/{id}`; collapse via Web Push `tag` | `frontend/sw.js` | S | A2 |
+| D2 | Subscribe flow: `pushManager.subscribe` with VAPID public key, POST to `/api/push/subscriptions`, notification-permission prompt UX, unsubscribe | `frontend/src/` | M | A2, W0 (e2e needs C1/C3) |
+| D3 | Settings → Notifications panel: new `SettingsTab` variant + panel alongside `sounds_panel.rs` (`frontend/src/pages/settings/mod.rs:20`); per-event-kind toggles | `frontend/src/pages/settings/` | S | W0 (e2e needs C6) |
+
+### Track E — Tauri shell (M3)
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| E1 | Scaffold: `mobile/` Tauri 2 project, remote-URL WebView config, splash, workspace membership, dev-run docs (`mobile/README.md`) | `mobile/` (new), workspace `Cargo.toml` | M | — |
+| E2 | Deep links: universal links / app links; backend serves `/.well-known/assetlinks.json` + `apple-app-site-association` (tiny handler); shell routes links into the WebView | `mobile/`, `backend/src/routes.rs` | S–M | E1 |
+| E3 | Auth handoff: `ASWebAuthenticationSession` / Custom Tabs → device flow → JWT in Keychain/Keystore → `token-login` cookie exchange into the WebView | `mobile/` | M | E1, B2 |
+| E4 | APNs bridge: ~200-line Swift registration bridge, token POST to `/api/push/subscriptions` (platform `apns`) | `mobile/ios/` | M | E1, W0 (e2e needs C7) |
+| E5 | FCM bridge: Kotlin equivalent (platform `fcm`) | `mobile/android/` | M | E1, W0 (e2e needs C7) |
+| E6 | Share extension (iOS) / share target (Android) → existing transactional upload path → open session | `mobile/` | M | E1, E3 |
+
+### Track F — CI, signing, ops
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| F1 | Android CI lane: SDK/NDK setup, `tauri android build` on PRs touching `mobile/`, debug APK artifact | `.github/workflows/` | S–M | E1 |
+| F2 | iOS CI lane: macOS runner, cert/profile injection, `tauri ios build`, TestFlight upload on dispatch/tag | `.github/workflows/` | M | E1, F3 |
+| F3 | **Ops, not code**: Play Console + App Store Connect accounts, bundle IDs, keystore + fastlane match cert repo, APNs p8 key, FCM service account, GH secrets | — | S (elapsed days) | — |
+
+### Track G / H — launch prerequisites
+
+| ID | Deliverable | Files | Size | Depends on |
+|---|---|---|---|---|
+| G1 | Sign in with Apple as a second OAuth provider (O3), same allowlist gates as Google | `backend/src/handlers/auth.rs`, `routes.rs` | M | — (decision O3) |
+| H1 | Privacy policy page, store listings, screenshots, data-safety form answers | `docs/`, store consoles | S | — |
+
+---
+
+## 16. Parallel execution plan
+
+This repo is developed by concurrent agent sessions feeding a squash-merge
+train, so the unit of parallelism is a **track owned by one session**, and
+the scarce resource is not engineering time but **merge serialization on hot
+files**. The plan below maximizes independent lanes and calls out the files
+where lanes collide.
+
+### 16.1 Dependency graph
+
+```
+W0 ──┬────────────► C1 ──► C2 ──┬─► C3 ──► (M2 exit test w/ D2)
+     │                          ├─► C4
+     │                          └─► C7 ◄─── (e2e: E4, E5)
+     ├────────────► C6
+     ├────────────► D2 ◄── A2 ◄── A1 ──► A3
+     ├────────────► D3            └────► D1 (after A2)
+     └────────────► E4, E5 ◄── E1 ──► E2, F1
+B1 ──► B2 ──► E3 ◄── E1          └───► F2 ◄── F3
+B3   C5   G1   H1   F3            (no incoming edges: start anytime)
+```
+
+**Critical path**: `W0 → C1 → C2 → C3 → D2 → M2 exit test` — push, as
+predicted (~40% of total). Everything else parallelizes around it, so the
+critical path should be staffed first and never blocked on review.
+
+### 16.2 Wave plan
+
+**Wave 1 — start immediately, all mutually independent (up to 9 lanes):**
+
+| Lane | Items | Why it's independent |
+|---|---|---|
+| 1 | W0 (hours) then C1 → C2 | The critical path; W0 unblocks lanes 4–6 the same day |
+| 2 | A1 → A2 → A3 | Pure frontend assets; touches nothing the backend lanes touch |
+| 3 | B1 → B2 | `auth.rs`/`device_flow.rs` only |
+| 4 | C5 | Tiny, zero deps, prerequisite for trustworthy suppression |
+| 5 | E1 | New `mobile/` dir; conflicts with nothing |
+| 6 | G1 | `auth.rs` OAuth section — coordinate merge order with B1 (see 16.3) |
+| 7 | B3 | Frontend device page only |
+| 8 | F3 | Ops/accounts — pure elapsed time, start day 1 because cert/console provisioning has multi-day latency |
+| 9 | H1 | Prose + assets |
+
+**Wave 2 — unblocked as Wave 1 lands:** C3, C4, C6 (after C2); D1, D2
+(after A2 + W0); D3 (after W0); E2, F1, F2 (after E1).
+
+**Wave 3 — integration:** E3 (needs B2 + E1); C7; E4 + E5 (need C7 for
+end-to-end, buildable against the C1 contract before that); E6.
+
+**Wave 4 — launch:** M4 store submission (needs E-track + F-track + G1 + H1);
+O3 decision must be resolved before this wave, not during it.
+
+### 16.3 Hot files — where parallel lanes collide
+
+Conflicts here are guaranteed but trivial (a few lines each); the mitigation
+is *scheduling*, not redesign: keep each PR's touch on these files minimal
+and land them in a known order rather than simultaneously.
+
+| File | Touched by | Handling |
+|---|---|---|
+| `backend/src/routes.rs` | B2, C1, C6, E2, G1 | Each adds 1–3 route lines; rebase-and-merge serially, any order |
+| `backend/src/auth.rs` | B1, G1 | Different regions (token vs OAuth provider); land B1 first — G1 is decision-gated anyway |
+| `frontend/index.html` | A1, A2 | Same lane by design (Track A is one session) |
+| `shared/src/api.rs` | W0, then read-only for C/D/E | W0 lands first precisely to freeze this file |
+| workspace `Cargo.toml` | C3 (`web-push`), C7 (`a2`), E1 (tauri) | One-line dep adds; trivial |
+| `backend/src/handlers/websocket/*` | C4, C5 | Adjacent code; land C5 before C4 so hooks are written against corrected presence |
+
+### 16.4 What this buys
+
+Serial estimate (§1) is 6–9 engineer-weeks. The work above has ~9 independent
+Wave-1 lanes and a critical path of roughly 2 weeks (W0→C1→C2→C3→D2 plus the
+exit test). With 4–6 concurrent sessions and the merge train as the only
+synchronization point:
+
+- **M0–M2** (installed PWA with working push — the O2 checkpoint):
+  ~1.5–2 wall-clock weeks.
+- **M0–M4** (store-published): ~3–4 wall-clock weeks, dominated by store
+  review latency and F3 provisioning, both of which start in Wave 1 for
+  exactly that reason.
+
+The two things that would break this schedule: letting the critical-path lane
+(push) wait on review while side lanes merge, and starting F3/O3 late — every
+other item is code we control end to end.
