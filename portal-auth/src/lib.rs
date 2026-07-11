@@ -4,7 +4,7 @@ use reqwest::{
     header::{HeaderMap, RETRY_AFTER},
     StatusCode,
 };
-use shared::api::{DeviceCodeRequest, DeviceCodeResponse, DeviceFlowPollRequest};
+use shared::api::{DeviceClientType, DeviceCodeRequest, DeviceCodeResponse, DeviceFlowPollRequest};
 use shared::DevicePollResponse;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -64,6 +64,7 @@ pub async fn device_flow_login(
     let body = DeviceCodeRequest {
         hostname: Some(hostname),
         working_directory: working_directory.map(|s| s.to_string()),
+        client_type: DeviceClientType::Cli,
     };
     let http_response = client
         .post(&device_code_url)
