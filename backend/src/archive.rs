@@ -297,7 +297,10 @@ pub struct ArchiveRuntime {
 
 impl ArchiveRuntime {
     /// Build the runtime, constructing the backing store. Fails fast on
-    /// invalid S3 configuration (bad bucket, missing region, no runtime).
+    /// malformed S3 configuration (invalid bucket name, missing region,
+    /// no runtime) — but bucket reachability and credential validity are
+    /// only proven by the first write; watch `SESSION_ARCHIVE_FAILED`
+    /// after enabling.
     pub fn new(config: ArchiveConfig) -> Result<Self, String> {
         Ok(Self {
             store: ArchiveStore::from_config(&config)?,
