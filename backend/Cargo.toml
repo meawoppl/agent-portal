@@ -30,6 +30,9 @@ oauth2 = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
 a2 = { version = "0.10.0", default-features = false, features = ["ring", "tracing"] }
 
+# Web Push transport (VAPID + RFC8291); sent over the reqwest client above.
+web-push = { workspace = true }
+
 # Environment variables
 dotenvy = { workspace = true }
 
