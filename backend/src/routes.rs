@@ -135,6 +135,9 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/.well-known/apple-app-site-association",
             get(handlers::mobile_links::apple_app_site_association),
         )
+        // Privacy policy (public, server-rendered from live config; must be an
+        // exact route so it beats the SPA fallback below).
+        .route("/privacy", get(handlers::privacy::privacy_policy))
         // App configuration (public, no auth required)
         .route("/api/config", get(handlers::config::get_config))
         // Session API routes

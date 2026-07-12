@@ -13,6 +13,7 @@ pub mod images;
 pub mod launchers;
 pub mod messages;
 pub mod mobile_links;
+pub mod privacy;
 pub mod proxy_tokens;
 pub mod push;
 pub mod responses;
