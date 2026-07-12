@@ -1,0 +1,122 @@
+# Additive, NON-required workflow: builds the Tauri Android debug APK on PRs
+# that touch mobile/. It is intentionally NOT part of the `pr-to-main` ruleset's
+# required job set — do not rename these jobs into an existing required lane and
+# do not add this to branch protection (renaming a required job blocks all PRs;
+# see #1217). This lane exists to catch mobile build regressions and to hand out
+# a downloadable debug APK artifact; it must never gate merges.
+name: Mobile Android
+
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned NDK — keep in sync with the sdkmanager install below.
+  ANDROID_NDK_VERSION: '26.3.11579264'
+  TAURI_CLI_VERSION: '2.11.4'
+
+jobs:
+  android-build:
+    name: Android Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
+
+      - name: Install Rust (aarch64-linux-android)
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: clippy
+          targets: aarch64-linux-android
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mobile-android
+
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK + platform + build-tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "platform-tools"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('mobile/**/*.gradle*', 'mobile/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Cache tauri-cli binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: ${{ runner.os }}-cargo-tauri-${{ env.TAURI_CLI_VERSION }}
+
+      - name: Install tauri-cli v2
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+
+      - name: Verify tauri-cli
+        run: cargo tauri --version
+
+      # Fast-fail on the mobile crate before the (slow) full Android build.
+      # This is the exact check the E2 author ran locally, so it is known-good.
+      - name: Clippy (aarch64-linux-android)
+        working-directory: mobile
+        run: cargo clippy -p agent-portal-mobile --target aarch64-linux-android -- -D warnings
+
+      - name: Initialize Android project
+        working-directory: mobile
+        run: cargo tauri android init --ci
+
+      - name: Build debug APK (aarch64)
+        working-directory: mobile
+        run: cargo tauri android build --debug --target aarch64
+
+      - name: Locate APK
+        id: apk
+        run: |
+          apk="$(find mobile/src-tauri/gen/android -name '*.apk' -path '*debug*' | head -n1)"
+          if [ -z "$apk" ]; then
+            echo "No debug APK found" >&2
+            find mobile/src-tauri/gen/android -name '*.apk' >&2 || true
+            exit 1
+          fi
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $apk"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-portal-android-debug
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error

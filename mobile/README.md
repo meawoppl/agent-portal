@@ -66,3 +66,39 @@ npm run ios:dev
 
 The fallback `mobile/www/index.html` is only a splash screen for build tooling;
 normal app navigation uses the configured remote URL.
+
+## Icons
+
+`src-tauri/icons/` holds the canonical Tauri icon set (generated with
+`cargo tauri icon <source.png>`), including the Android `mipmap-*` foreground /
+launcher variants. `tauri::generate_context!` embeds a default window icon, so
+these must exist for the crate to even compile for a mobile target — regenerate
+the whole set from a single source PNG rather than hand-editing individual sizes.
+
+## CI
+
+`.github/workflows/mobile-android.yml` (job **Android Debug APK**) builds an
+unsigned debug APK. It runs on:
+
+- **Pull requests** that touch `mobile/**` or the workflow file itself.
+- **Manual dispatch** (Actions tab → "Mobile Android" → "Run workflow").
+
+It is an **additive, non-required** lane: it is deliberately kept out of the
+`pr-to-main` branch-protection ruleset, so a mobile build failure never blocks a
+merge (and, conversely, do not rename its job into a required lane — see #1217).
+
+What the lane does, in order:
+
+1. Installs the pinned Rust toolchain with the `aarch64-linux-android` target,
+   Java 17 (Temurin), and the Android SDK cmdline-tools + a pinned NDK (26.x).
+2. Runs `cargo clippy -p agent-portal-mobile --target aarch64-linux-android -- -D warnings`
+   as a fast-fail gate before the slow build.
+3. Runs `cargo tauri android init --ci` to generate `gen/android` (the native
+   project is not committed; it is regenerated every run).
+4. Runs `cargo tauri android build --debug --target aarch64` to produce the APK.
+
+**Downloading the debug APK:** open the workflow run (Actions tab or the PR's
+"Checks" view), scroll to the **Artifacts** section, and download
+`agent-portal-android-debug`. It contains the unsigned `*-debug.apk`, installable
+on a device or emulator with `adb install <file>.apk` (developer mode / unknown
+sources enabled).
