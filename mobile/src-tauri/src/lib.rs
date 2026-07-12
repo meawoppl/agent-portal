@@ -476,7 +476,7 @@ mod mobile {
     ) -> Vec<StatusNotificationLine> {
         sessions
             .into_iter()
-            .filter(|session| should_show_status_session(session))
+            .filter(should_show_status_session)
             .filter_map(|session| {
                 let url = shell_url
                     .join(&format!("/dashboard?session={}", session.id))
