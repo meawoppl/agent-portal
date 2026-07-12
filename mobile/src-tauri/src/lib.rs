@@ -62,12 +62,14 @@ mod mobile {
                     route_deep_links(&app_handle, event.urls());
                 });
 
-                let app_handle = app.handle().clone();
-                app.on_window_event(move |_window, event| {
-                    if matches!(event, tauri::WindowEvent::Focused(true)) {
-                        run_auth_handoff(&app_handle, auth_in_progress.clone(), None);
-                    }
-                });
+                if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                    let app_handle = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        if matches!(event, tauri::WindowEvent::Focused(true)) {
+                            run_auth_handoff(&app_handle, auth_in_progress.clone(), None);
+                        }
+                    });
+                }
 
                 Ok(())
             })
@@ -350,7 +352,10 @@ mod mobile {
     }
 
     fn shell_base_url() -> Url {
-        shell_url_override().unwrap_or_else(|| Url::parse(DEFAULT_SHELL_URL).unwrap())
+        shell_url_override().unwrap_or_else(|| match Url::parse(DEFAULT_SHELL_URL) {
+            Ok(url) => url,
+            Err(err) => panic!("invalid built-in shell URL {DEFAULT_SHELL_URL}: {err}"),
+        })
     }
 
     fn navigate_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: Url) {
