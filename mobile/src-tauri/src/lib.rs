@@ -481,10 +481,12 @@ mod mobile {
                 let url = shell_url
                     .join(&format!("/dashboard?session={}", session.id))
                     .ok()?;
+                let name = compact_session_name(&session.session_name);
+                let state = status_state(&session);
                 Some(StatusNotificationLine {
                     session_id: session.id,
-                    name: compact_session_name(&session.session_name),
-                    state: status_state(&session),
+                    name,
+                    state,
                     url: url.to_string(),
                 })
             })
