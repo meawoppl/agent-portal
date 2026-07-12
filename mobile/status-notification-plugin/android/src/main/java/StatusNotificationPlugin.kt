@@ -23,6 +23,13 @@ class ShowArgs {
     lateinit var sessionsJson: String
 }
 
+@InvokeArg
+class FcmRegistrationArgs {
+    lateinit var backendUrl: String
+    lateinit var authToken: String
+    lateinit var deviceLabel: String
+}
+
 @TauriPlugin
 class StatusNotificationPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
@@ -56,6 +63,32 @@ class StatusNotificationPlugin(private val activity: Activity) : Plugin(activity
                 action = StatusNotificationService.ACTION_CLEAR
             }
             activity.startService(intent)
+            invoke.resolve()
+        } catch (ex: Exception) {
+            invoke.reject(ex.message)
+        }
+    }
+
+    @Command
+    fun registerFcm(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(FcmRegistrationArgs::class.java)
+            PortalFcmBridge.register(
+                context = activity.applicationContext,
+                backendUrl = args.backendUrl,
+                authToken = args.authToken,
+                deviceLabel = args.deviceLabel,
+            )
+            invoke.resolve()
+        } catch (ex: Exception) {
+            invoke.reject(ex.message)
+        }
+    }
+
+    @Command
+    fun unregisterFcm(invoke: Invoke) {
+        try {
+            PortalFcmBridge.unregister(activity.applicationContext)
             invoke.resolve()
         } catch (ex: Exception) {
             invoke.reject(ex.message)

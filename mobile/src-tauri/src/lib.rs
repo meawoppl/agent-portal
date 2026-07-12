@@ -20,7 +20,8 @@ mod mobile {
 
     #[cfg(target_os = "android")]
     use agent_portal_mobile_status_notification::{
-        StatusNotificationExt, StatusNotificationLine, StatusNotificationPayload,
+        FcmRegistrationPayload, StatusNotificationExt, StatusNotificationLine,
+        StatusNotificationPayload,
     };
     #[cfg(target_os = "android")]
     use shared::api::{AgentSessionInfo, AgentSessionsResponse};
@@ -128,12 +129,14 @@ mod mobile {
             match refresh_mobile_token(&shell_url, &token).await? {
                 RefreshDecision::UseExisting => {
                     login_webview_with_token(app, &token, destination_url).await?;
+                    register_fcm_subscription(app, &shell_url, &token).await;
                     update_status_notification_once(app, &shell_url, &token).await;
                     return Ok(());
                 }
                 RefreshDecision::UseReplacement(token) => {
                     save_auth_token(&store, &token)?;
                     login_webview_with_token(app, &token, destination_url).await?;
+                    register_fcm_subscription(app, &shell_url, &token).await;
                     update_status_notification_once(app, &shell_url, &token).await;
                     return Ok(());
                 }
@@ -142,6 +145,7 @@ mod mobile {
                     store
                         .save()
                         .map_err(|err| format!("failed to clear auth token: {err}"))?;
+                    unregister_fcm_subscription(app).await;
                 }
             }
         }
@@ -149,6 +153,7 @@ mod mobile {
         let token = run_device_flow(app, &shell_url).await?;
         save_auth_token(&store, &token)?;
         login_webview_with_token(app, &token, destination_url).await?;
+        register_fcm_subscription(app, &shell_url, &token).await;
         update_status_notification_once(app, &shell_url, &token).await;
         Ok(())
     }
@@ -350,6 +355,40 @@ mod mobile {
             eprintln!("failed to update Android status notification: {err}");
         }
     }
+
+    #[cfg(target_os = "android")]
+    async fn register_fcm_subscription<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        shell_url: &Url,
+        token: &str,
+    ) {
+        let payload = FcmRegistrationPayload {
+            backend_url: shell_url.to_string(),
+            auth_token: token.to_string(),
+            device_label: "Agent Portal Android".to_string(),
+        };
+        if let Err(err) = app.status_notification().register_fcm(payload) {
+            eprintln!("failed to register Android FCM subscription: {err}");
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    async fn register_fcm_subscription<R: tauri::Runtime>(
+        _app: &tauri::AppHandle<R>,
+        _shell_url: &Url,
+        _token: &str,
+    ) {
+    }
+
+    #[cfg(target_os = "android")]
+    async fn unregister_fcm_subscription<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+        if let Err(err) = app.status_notification().unregister_fcm() {
+            eprintln!("failed to unregister Android FCM subscription: {err}");
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    async fn unregister_fcm_subscription<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) {}
 
     #[cfg(target_os = "android")]
     fn start_status_notification_polling<R: tauri::Runtime>(app: tauri::AppHandle<R>) {

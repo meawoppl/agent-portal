@@ -7,10 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 class StatusNotificationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -134,5 +136,32 @@ class StatusNotificationService : Service() {
         private const val NOTIFICATION_ID = 2401
         private const val MAX_LINES = 5
         private const val MAX_ACTIONS = 3
+
+        fun showStored(context: Context) {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+            val config = StatusPayloadStore.loadRefreshConfig(context) ?: return
+            val payload = StatusPayloadStore.load(context)
+            val sessionsJson = StatusPayloadStore.statusLinesJson(payload.sessions)
+            if (sessionsJson == "[]") return
+            val intent = Intent(context, StatusNotificationService::class.java).apply {
+                action = ACTION_SHOW
+                putExtra(EXTRA_TITLE, "Agent Portal sessions")
+                putExtra(EXTRA_SUMMARY, payload.summary)
+                putExtra(EXTRA_DASHBOARD_URL, payload.dashboardUrl)
+                putExtra(EXTRA_STATUS_URL, config.statusUrl)
+                putExtra(EXTRA_AUTH_TOKEN, config.authToken)
+                putExtra(EXTRA_SESSIONS_JSON, sessionsJson)
+            }
+            runCatching {
+                ContextCompat.startForegroundService(context, intent)
+            }
+        }
     }
 }

@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-unregister-fcm"
+description = "Allows unregistering the Android FCM push token from Agent Portal."
+commands.allow = ["unregisterFcm"]
+
+[[permission]]
+identifier = "deny-unregister-fcm"
+description = "Denies unregistering the Android FCM push token from Agent Portal."
+commands.deny = ["unregisterFcm"]

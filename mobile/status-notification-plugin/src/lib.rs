@@ -32,6 +32,14 @@ pub struct ClearStatusNotification;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FcmRegistrationPayload {
+    pub backend_url: String,
+    pub auth_token: String,
+    pub device_label: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatusNotificationLine {
     pub session_id: String,
     pub name: String,
@@ -83,6 +91,33 @@ impl<R: Runtime> StatusNotification<R> {
         {
             self.0
                 .run_mobile_plugin("clear", ClearStatusNotification)
+                .map_err(Into::into)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(())
+        }
+    }
+
+    pub fn register_fcm(&self, payload: FcmRegistrationPayload) -> Result<()> {
+        #[cfg(target_os = "android")]
+        {
+            self.0
+                .run_mobile_plugin("registerFcm", payload)
+                .map_err(Into::into)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = payload;
+            Ok(())
+        }
+    }
+
+    pub fn unregister_fcm(&self) -> Result<()> {
+        #[cfg(target_os = "android")]
+        {
+            self.0
+                .run_mobile_plugin("unregisterFcm", ClearStatusNotification)
                 .map_err(Into::into)
         }
         #[cfg(not(target_os = "android"))]
