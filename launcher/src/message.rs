@@ -213,6 +213,8 @@ mod tests {
             agent_type: "codex".to_string(),
             status: "active".to_string(),
             hostname: "host".to_string(),
+            awaiting_permission: false,
+            last_activity: String::new(),
         }
     }
 

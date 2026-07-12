@@ -64,7 +64,7 @@ pub async fn list_agent_sessions(
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
 
-    use crate::schema::{session_members, sessions};
+    use crate::schema::{pending_permission_requests, session_members, sessions};
     let rows: Vec<Session> = sessions::table
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(session_members::user_id.eq(user_id))
@@ -74,10 +74,22 @@ pub async fn list_agent_sessions(
         .order(sessions::last_activity.desc())
         .load(&mut conn)?;
 
+    // One batched lookup for the "blocked on you" flag, not one per session.
+    let session_ids: Vec<Uuid> = rows.iter().map(|s| s.id).collect();
+    let awaiting: std::collections::HashSet<Uuid> = pending_permission_requests::table
+        .filter(pending_permission_requests::session_id.eq_any(&session_ids))
+        .select(pending_permission_requests::session_id)
+        .distinct()
+        .load::<Uuid>(&mut conn)?
+        .into_iter()
+        .collect();
+
     let sessions = rows
         .into_iter()
         .map(|s| AgentSessionInfo {
             id: s.id,
+            awaiting_permission: awaiting.contains(&s.id),
+            last_activity: s.last_activity.and_utc().to_rfc3339(),
             session_name: s.session_name,
             working_directory: s.working_directory,
             agent_type: s.agent_type,
