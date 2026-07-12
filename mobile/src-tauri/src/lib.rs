@@ -62,12 +62,14 @@ mod mobile {
                     route_deep_links(&app_handle, event.urls());
                 });
 
-                let app_handle = app.handle().clone();
-                app.on_window_event(move |_window, event| {
-                    if matches!(event, tauri::WindowEvent::Focused(true)) {
-                        run_auth_handoff(&app_handle, auth_in_progress.clone(), None);
-                    }
-                });
+                if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                    let app_handle = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        if matches!(event, tauri::WindowEvent::Focused(true)) {
+                            run_auth_handoff(&app_handle, auth_in_progress.clone(), None);
+                        }
+                    });
+                }
 
                 Ok(())
             })
