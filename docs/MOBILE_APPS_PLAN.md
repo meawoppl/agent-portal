@@ -490,18 +490,43 @@ session list).
 | D6 | Web Push before native push | One integration serves both platforms + desktop immediately | n/a (kept either way) |
 | D7 | No Dioxus/UniFFI in v1 | Second UI is the most expensive artifact we could create | Path preserved: M1/M2 fully shared with Option D |
 
-## 14. Open questions for Matt
+## 14. Open questions for Matt — RESOLVED 2026-07-11
 
-- **O1**: iPhone or Android first for dogfooding? (Determines which push
-  bridge lands first in M3.)
-- **O2**: Store presence a hard requirement, or is installed-PWA + push (M0–M2)
-  possibly sufficient? M2 is the natural checkpoint to reassess.
-- **O3**: Add Sign in with Apple to the backend (Apple 4.8), or defer store
-  launch until we're ready to do it?
-- **O4**: Push preview content — session name only, or include a text snippet
-  of the permission/turn? (Privacy vs. usefulness on the lock screen.)
-- **O5**: Should launchers be drivable from the phone in v1 (launch new
-  sessions), or is driving existing sessions enough?
+- **O1 — RESOLVED: both platforms in parallel.** Work divvied across two
+  agent sessions: Android native track (persistent notification, widget, FCM
+  bridge) to the agent-portal-2 session; backend/content-options + APNs prep
+  to the meawoppl-fc session. Android is fully testable today (CI debug APK +
+  sideload); iOS native push remains code-complete-only until Apple
+  credentials exist.
+- **O2 — RESOLVED: PWA now, reassess later.** No store submission for now;
+  installed-PWA + push, plus sideloaded/TestFlight shell builds, is the
+  distribution story. M4 store work (and F2 iOS CI) parked.
+- **O3 — RESOLVED: deferred.** Sign in with Apple only becomes binding if a
+  public App Store launch is later committed (TestFlight-internal avoids
+  guideline 4.8). G1 parked. Note for the future: Apple private-relay emails
+  conflict with `ALLOWED_EMAILS`-style allowlisting and need a policy.
+- **O4 — RESOLVED: richer than any of the proposed options.** Three new work
+  items (§15 Track O4):
+  - **O4a** — configurable push content depth (`generic` | `tool_name` |
+    `snippet`) as a `NotificationPrefs` field, honored by the dispatcher,
+    surfaced in Settings → Notifications. Snippet option gets a UI note that
+    Web Push payloads are e2e-encrypted while native APNs/FCM are not.
+  - **O4b** — persistent status surface: an ongoing Android notification
+    rendering active sessions as contracted status pills (working / awaiting
+    input / disconnected), tap deep-links into the session.
+  - **O4c** — home-screen status widget (Android AppWidget first, iOS
+    WidgetKit later) with the same session vignette.
+  Both O4b/O4c consume a new compact bearer-auth session-status endpoint
+  (extends `/api/agent/sessions` with `awaiting_permission` +
+  `last_activity`) — contract-first, then poll now / FCM data messages later.
+- **O5 — RESOLVED: already satisfied.** The responsive web UI (and therefore
+  the shell WebView) already launches sessions on connected launchers; no
+  mobile-specific work needed for v1.
+
+**Still gated on Matt (ops, not decisions):** VAPID keys on the deploy
+(`scripts/generate-vapid-keys.sh` → `PORTAL_VAPID_*`); a Firebase project +
+`google-services.json` + service account for E5/FCM; Apple developer account
++ APNs p8 key whenever iOS native push should go live.
 
 ---
 
