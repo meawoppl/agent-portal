@@ -661,19 +661,6 @@ mod tests {
         assert!(mobile_token_needs_refresh(created, None, now));
     }
 
-    static DB_SETUP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn test_pool() -> Option<crate::db::DbPool> {
-        if std::env::var("DATABASE_URL").is_err() {
-            eprintln!("DATABASE_URL not set, skipping DB-backed mobile auth test");
-            return None;
-        }
-        let _guard = DB_SETUP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let pool = crate::db::create_pool().expect("create test DB pool");
-        crate::db::run_migrations_logged(&pool).expect("run migrations");
-        Some(pool)
-    }
-
     fn test_state(pool: crate::db::DbPool) -> Arc<AppState> {
         Arc::new(AppState {
             dev_mode: false,
@@ -759,7 +746,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_token_waits_until_half_life() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -785,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_token_rotates_after_half_life_and_graces_old_row() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -823,7 +810,7 @@ mod tests {
 
     #[tokio::test]
     async fn token_login_sets_session_cookie() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);

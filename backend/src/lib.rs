@@ -22,6 +22,9 @@ pub mod push;
 pub mod routes;
 pub mod schema;
 
+#[cfg(test)]
+pub mod test_support;
+
 use crate::db::DbPool;
 use crate::handlers::device_flow::DeviceFlowStore;
 use clap::Parser;
