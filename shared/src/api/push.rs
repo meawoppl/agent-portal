@@ -108,6 +108,25 @@ fn default_true() -> bool {
     true
 }
 
+/// How much content push payloads carry (decision O4a).
+///
+/// Web Push payloads are end-to-end encrypted to the browser, but APNs and
+/// FCM payloads transit Apple/Google in plaintext — `Snippet` trades that
+/// exposure for lock-screen usefulness, which is why it is opt-in and the
+/// settings UI carries the warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationContentDetail {
+    /// Event kind + session name only.
+    Generic,
+    /// Adds the tool name to permission requests (the original behavior).
+    #[default]
+    ToolName,
+    /// Adds a short excerpt where available (e.g. permission tool input),
+    /// hard-capped server-side (~120 chars).
+    Snippet,
+}
+
 /// Per-user, per-event-kind notification toggles.
 ///
 /// Defaults are `(permission_request, turn_complete, session_disconnected) =
@@ -125,6 +144,10 @@ pub struct NotificationPrefs {
     pub session_disconnected: bool,
     #[serde(default)]
     pub agent_message: bool,
+    /// How much content notifications carry (O4a). Defaults to `ToolName`
+    /// for wire compat with prefs stored before this field existed.
+    #[serde(default)]
+    pub content_detail: NotificationContentDetail,
 }
 
 impl Default for NotificationPrefs {
@@ -134,6 +157,7 @@ impl Default for NotificationPrefs {
             turn_complete: true,
             session_disconnected: true,
             agent_message: false,
+            content_detail: NotificationContentDetail::default(),
         }
     }
 }
@@ -223,5 +247,19 @@ mod tests {
         assert!(!parsed.turn_complete);
         assert!(parsed.session_disconnected);
         assert!(!parsed.agent_message);
+        assert_eq!(parsed.content_detail, NotificationContentDetail::ToolName);
+    }
+
+    #[test]
+    fn content_detail_wire_values_are_snake_case() {
+        for (variant, wire) in [
+            (NotificationContentDetail::Generic, "\"generic\""),
+            (NotificationContentDetail::ToolName, "\"tool_name\""),
+            (NotificationContentDetail::Snippet, "\"snippet\""),
+        ] {
+            assert_eq!(serde_json::to_string(&variant).unwrap(), wire);
+            let parsed: NotificationContentDetail = serde_json::from_str(wire).unwrap();
+            assert_eq!(parsed, variant);
+        }
     }
 }

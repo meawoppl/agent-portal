@@ -18,8 +18,8 @@
 use base64::Engine;
 use gloo_net::http::Request;
 use shared::api::{
-    NotificationPrefs, PushPlatform, PushSubscriptionInfo, RegisterPushSubscriptionRequest,
-    VapidKeyResponse,
+    NotificationContentDetail, NotificationPrefs, PushPlatform, PushSubscriptionInfo,
+    RegisterPushSubscriptionRequest, VapidKeyResponse,
 };
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{spawn_local, JsFuture};
@@ -201,7 +201,74 @@ pub fn notifications_panel() -> Html {
                     }
                 }) }
             </div>
+
+            { render_content_detail(&prefs) }
         </section>
+    }
+}
+
+/// The O4a content-depth radio group: how much a notification reveals on the
+/// lock screen.
+fn render_content_detail(prefs: &UseStateHandle<NotificationPrefs>) -> Html {
+    let make_select = |detail: NotificationContentDetail| {
+        let prefs = prefs.clone();
+        Callback::from(move |_: Event| {
+            let mut next = *prefs;
+            next.content_detail = detail;
+            prefs.set(next);
+            spawn_local(async move {
+                save_prefs(&next).await;
+            });
+        })
+    };
+
+    let options = [
+        (
+            NotificationContentDetail::Generic,
+            "Generic",
+            "Event and session name only — e.g. “Permission needed”.",
+        ),
+        (
+            NotificationContentDetail::ToolName,
+            "Tool name",
+            "Adds the tool being approved — e.g. “Permission needed: Bash”.",
+        ),
+        (
+            NotificationContentDetail::Snippet,
+            "Snippet",
+            "Adds a short excerpt of the request — e.g. the command being run.",
+        ),
+    ];
+
+    html! {
+        <div class="notification-prefs">
+            <h3>{ "Notification content" }</h3>
+            <p class="section-description">
+                { "How much detail notifications show on your lock screen." }
+            </p>
+            { for options.iter().map(|(detail, label, description)| {
+                let onchange = make_select(*detail);
+                html! {
+                    <label class="toggle-label" key={*label}>
+                        <span>
+                            { *label }
+                            <span class="section-description">{ format!(" — {description}") }</span>
+                        </span>
+                        <input
+                            type="radio"
+                            name="notification-content-detail"
+                            checked={prefs.content_detail == *detail}
+                            {onchange}
+                        />
+                    </label>
+                }
+            }) }
+            <p class="section-description">
+                { "Note: browser (Web Push) notifications are end-to-end encrypted, but \
+                   Apple (APNs) and Google (FCM) notifications are not — with “Snippet”, \
+                   excerpts of tool input may transit those services in plaintext." }
+            </p>
+        </div>
     }
 }
 
