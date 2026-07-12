@@ -23,7 +23,7 @@ mod mobile {
         StatusNotificationExt, StatusNotificationLine, StatusNotificationPayload,
     };
     #[cfg(target_os = "android")]
-    use serde::Deserialize;
+    use shared::api::{AgentSessionInfo, AgentSessionsResponse};
     use shared::api::{
         DeviceClientType, DeviceCodeRequest, DeviceFlowPollRequest, TokenRefreshResponse,
     };
@@ -417,7 +417,7 @@ mod mobile {
         match response.status() {
             reqwest::StatusCode::OK => {
                 let body = response
-                    .json::<MobileAgentSessionsResponse>()
+                    .json::<AgentSessionsResponse>()
                     .await
                     .map_err(|err| format!("status sessions response was invalid: {err}"))?;
                 let lines = status_notification_lines(shell_url, body.sessions);
@@ -454,25 +454,9 @@ mod mobile {
     }
 
     #[cfg(target_os = "android")]
-    #[derive(Debug, Deserialize)]
-    struct MobileAgentSessionsResponse {
-        sessions: Vec<MobileAgentSessionInfo>,
-    }
-
-    #[cfg(target_os = "android")]
-    #[derive(Debug, Deserialize)]
-    struct MobileAgentSessionInfo {
-        id: String,
-        session_name: String,
-        status: String,
-        #[serde(default)]
-        awaiting_permission: bool,
-    }
-
-    #[cfg(target_os = "android")]
     fn status_notification_lines(
         shell_url: &Url,
-        sessions: Vec<MobileAgentSessionInfo>,
+        sessions: Vec<AgentSessionInfo>,
     ) -> Vec<StatusNotificationLine> {
         sessions
             .into_iter()
@@ -484,7 +468,7 @@ mod mobile {
                 let name = compact_session_name(&session.session_name);
                 let state = status_state(&session);
                 Some(StatusNotificationLine {
-                    session_id: session.id,
+                    session_id: session.id.to_string(),
                     name,
                     state,
                     url: url.to_string(),
@@ -495,7 +479,7 @@ mod mobile {
     }
 
     #[cfg(target_os = "android")]
-    fn should_show_status_session(session: &MobileAgentSessionInfo) -> bool {
+    fn should_show_status_session(session: &AgentSessionInfo) -> bool {
         let status = session.status.to_ascii_lowercase();
         session.awaiting_permission
             || status.contains("active")
@@ -505,7 +489,7 @@ mod mobile {
     }
 
     #[cfg(target_os = "android")]
-    fn status_state(session: &MobileAgentSessionInfo) -> String {
+    fn status_state(session: &AgentSessionInfo) -> String {
         if session.awaiting_permission {
             return "awaiting input".to_string();
         }
