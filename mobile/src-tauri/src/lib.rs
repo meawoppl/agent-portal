@@ -352,7 +352,10 @@ mod mobile {
     }
 
     fn shell_base_url() -> Url {
-        shell_url_override().unwrap_or_else(|| Url::parse(DEFAULT_SHELL_URL).unwrap())
+        shell_url_override().unwrap_or_else(|| match Url::parse(DEFAULT_SHELL_URL) {
+            Ok(url) => url,
+            Err(err) => panic!("invalid built-in shell URL {DEFAULT_SHELL_URL}: {err}"),
+        })
     }
 
     fn navigate_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: Url) {
