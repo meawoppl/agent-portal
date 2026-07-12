@@ -94,6 +94,15 @@ first runs each platform init. This scaffold keeps E1 small and gives follow-up
 PRs a clean place to add deep links, auth handoff, push bridges, and share
 targets.
 
+## iOS push (APNs) bridge
+
+The APNs registration bridge lives in [`ios/`](ios/) —
+`PushRegistrationBridge.swift` plus its integration checklist
+([`ios/README.md`](ios/README.md)). It is kept outside the gitignored
+`gen/apple` tree so `ios:init` regeneration can't destroy it; add it to the
+Xcode project when wiring push (requires the Push Notifications entitlement
+and, in CI, the F2/F3 signing prerequisites).
+
 ## Development
 
 Run on Android:
