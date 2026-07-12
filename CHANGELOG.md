@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Launcher model picker.** The launch dialog gains a "Model" selector fed by
+  the SDK crates' model catalogs — `claude_codes::ClaudeModel` (floating
+  aliases grouped separately from pinned models) and `codex_codes::CodexModel`
+  (hidden catalog entries excluded). The selection is passed as `--model <arg>`
+  (Claude) or `-c model=<slug>` (Codex), placed before the free-form extra
+  args so an explicit model there still wins; "Agent default" sends nothing.
+  Bumps claude-codes to 2.1.161 and codex-codes to 0.143.2.
+
 - **Versioning: patch is now the git commit count (issue #1096).** The reported version is `major.minor.{git rev-list --count HEAD}`, derived at build time by `shared/build.rs` and read everywhere as `shared::VERSION`. PRs no longer bump a version line — so parallel PRs can't collide on a hand-picked number, and the patch advances by exactly one per squash-merge. `major.minor` in `Cargo.toml` is the only human knob (its patch is a placeholder). This changelog is maintained by a periodic sweep rather than in lockstep per-PR; add notable changes under this `[Unreleased]` heading.
 
 ## 2.13.21

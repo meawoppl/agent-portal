@@ -976,9 +976,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.160"
+version = "2.1.161"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fa83c7d339f486dac04be90454e13db9328deed4a398d6b848f8075251d64e9"
+checksum = "43463847135e5131f36df274467ea944b610675ec2f40296af28b6a97cea6e62"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1074,9 +1074,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.143.1"
+version = "0.143.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea80f1d28514a83fde0bd2909ff8be4eb7065d78673ffbcda6767241757d57b1"
+checksum = "b68c487129969fd39175c7bd3d54f9c2a1cb42d2003ed91ecf8f80ec05bc420a"
 dependencies = [
  "log",
  "serde",
@@ -2275,6 +2275,7 @@ version = "2.13.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "claude-codes",
  "codex-codes",
  "futures-channel",
  "futures-util",
@@ -4472,7 +4473,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 2.0.0",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
