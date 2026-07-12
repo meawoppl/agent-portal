@@ -68,6 +68,9 @@ fn splash_footer(github_icon: bool) -> Html {
             >
                 { "Report a Bug" }
             </a>
+            <a href="/privacy" class="footer-link">
+                { "Privacy" }
+            </a>
         </div>
     }
 }
