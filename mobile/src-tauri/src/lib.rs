@@ -438,6 +438,8 @@ mod mobile {
                         title: "Agent Portal sessions".to_string(),
                         summary,
                         dashboard_url: dashboard_url.to_string(),
+                        status_url: url.to_string(),
+                        auth_token: token.to_string(),
                         sessions_json,
                     })
                     .map_err(|err| format!("failed to show notification: {err}"))?;

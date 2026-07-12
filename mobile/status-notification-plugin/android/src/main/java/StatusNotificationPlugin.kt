@@ -18,6 +18,8 @@ class ShowArgs {
     lateinit var title: String
     lateinit var summary: String
     lateinit var dashboardUrl: String
+    lateinit var statusUrl: String
+    lateinit var authToken: String
     lateinit var sessionsJson: String
 }
 
@@ -36,6 +38,8 @@ class StatusNotificationPlugin(private val activity: Activity) : Plugin(activity
                 putExtra(StatusNotificationService.EXTRA_TITLE, args.title)
                 putExtra(StatusNotificationService.EXTRA_SUMMARY, args.summary)
                 putExtra(StatusNotificationService.EXTRA_DASHBOARD_URL, args.dashboardUrl)
+                putExtra(StatusNotificationService.EXTRA_STATUS_URL, args.statusUrl)
+                putExtra(StatusNotificationService.EXTRA_AUTH_TOKEN, args.authToken)
                 putExtra(StatusNotificationService.EXTRA_SESSIONS_JSON, args.sessionsJson)
             }
             ContextCompat.startForegroundService(activity, intent)

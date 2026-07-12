@@ -89,6 +89,11 @@ no active sessions are present. The notification runs as a `dataSync` foreground
 service; the widget renders the same saved session payload, so it updates
 whenever the notification poller receives fresh status.
 
+The widget also schedules a native WorkManager refresh using the same stored
+mobile JWT and status endpoint. Android enforces a 15-minute minimum interval
+for periodic work; widget system updates also enqueue a one-time refresh when
+network is available.
+
 On Android 13+, the first status update requests `POST_NOTIFICATIONS`; if the
 permission is not granted yet, the shell skips the update and retries on the
 next poll. Dogfood should confirm that first-launch permission UX is clear.

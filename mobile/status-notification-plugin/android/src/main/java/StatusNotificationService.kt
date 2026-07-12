@@ -18,6 +18,7 @@ class StatusNotificationService : Service() {
             ACTION_CLEAR -> {
                 StatusPayloadStore.clear(this)
                 StatusWidgetProvider.updateAll(this)
+                StatusWidgetRefreshWorker.cancel(this)
                 if (Build.VERSION.SDK_INT >= 24) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                 } else {
@@ -29,9 +30,12 @@ class StatusNotificationService : Service() {
             ACTION_SHOW -> {
                 val summary = intent.getStringExtra(EXTRA_SUMMARY) ?: ""
                 val dashboardUrl = intent.getStringExtra(EXTRA_DASHBOARD_URL) ?: ""
+                val statusUrl = intent.getStringExtra(EXTRA_STATUS_URL) ?: ""
+                val authToken = intent.getStringExtra(EXTRA_AUTH_TOKEN) ?: ""
                 val sessionsJson = intent.getStringExtra(EXTRA_SESSIONS_JSON) ?: "[]"
-                StatusPayloadStore.save(this, summary, dashboardUrl, sessionsJson)
+                StatusPayloadStore.save(this, summary, dashboardUrl, statusUrl, authToken, sessionsJson)
                 StatusWidgetProvider.updateAll(this)
+                StatusWidgetRefreshWorker.schedule(this)
                 val notification = buildNotification(
                     context = this,
                     title = intent.getStringExtra(EXTRA_TITLE) ?: "Agent Portal",
@@ -122,6 +126,8 @@ class StatusNotificationService : Service() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_SUMMARY = "summary"
         const val EXTRA_DASHBOARD_URL = "dashboard_url"
+        const val EXTRA_STATUS_URL = "status_url"
+        const val EXTRA_AUTH_TOKEN = "auth_token"
         const val EXTRA_SESSIONS_JSON = "sessions_json"
 
         private const val CHANNEL_ID = "agent_portal_status"

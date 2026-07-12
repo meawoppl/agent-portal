@@ -21,6 +21,8 @@ pub struct StatusNotificationPayload {
     pub title: String,
     pub summary: String,
     pub dashboard_url: String,
+    pub status_url: String,
+    pub auth_token: String,
     pub sessions_json: String,
 }
 
