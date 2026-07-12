@@ -71,6 +71,7 @@ async fn spawn_test_app() -> SocketAddr {
         // immediately, so emits are silently no-ops (see NotificationSender).
         notifications: backend::push::channel().0,
         vapid_public_key: config.vapid_public_key,
+        mobile_app_links: config.mobile_app_links,
     });
 
     let app = backend::routes::build_router(state);

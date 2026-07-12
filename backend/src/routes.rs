@@ -125,6 +125,16 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
                 })
             }),
         )
+        // Native mobile app-link association files. These must be served at
+        // exact well-known paths, before the SPA fallback below.
+        .route(
+            "/.well-known/assetlinks.json",
+            get(handlers::mobile_links::assetlinks),
+        )
+        .route(
+            "/.well-known/apple-app-site-association",
+            get(handlers::mobile_links::apple_app_site_association),
+        )
         // App configuration (public, no auth required)
         .route("/api/config", get(handlers::config::get_config))
         // Session API routes

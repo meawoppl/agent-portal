@@ -173,6 +173,32 @@ pub struct ServerConfig {
     /// The matching public half is `PORTAL_VAPID_PUBLIC_KEY`, served to browsers
     /// as the `applicationServerKey`.
     pub vapid_private_key: Option<String>,
+    /// Native mobile app-link association payload configuration.
+    pub mobile_app_links: MobileAppLinksConfig,
+}
+
+/// Public mobile app-link association payload configuration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MobileAppLinksConfig {
+    pub bundle_id: String,
+    pub apple_team_id: String,
+    pub android_sha256_cert_fingerprints: Vec<String>,
+}
+
+impl Default for MobileAppLinksConfig {
+    fn default() -> Self {
+        Self {
+            bundle_id: "io.txcl.agentportal".to_string(),
+            apple_team_id: "TEAMID".to_string(),
+            android_sha256_cert_fingerprints: vec![
+                // Placeholder debug fingerprint. Hosted/prod builds should set
+                // PORTAL_MOBILE_ANDROID_SHA256_CERT_FINGERPRINTS to the release
+                // signing certificate fingerprint(s).
+                "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"
+                    .to_string(),
+            ],
+        }
+    }
 }
 
 impl ServerConfig {
@@ -341,6 +367,7 @@ impl ServerConfig {
         }
 
         let native_push = native_push_config_from_env(&mut errors);
+        let mobile_app_links = mobile_app_links_config_from_env();
 
         // Long-term session archive (#1258). Fail-fast on partial config.
         let archive = crate::archive::archive_config_from_env()
@@ -415,7 +442,62 @@ impl ServerConfig {
             vapid_public_key,
             native_push,
             vapid_private_key,
+            mobile_app_links,
         })
+    }
+}
+
+fn mobile_app_links_config_from_env() -> MobileAppLinksConfig {
+    let defaults = MobileAppLinksConfig::default();
+
+    let bundle_id = match optional_non_empty("PORTAL_MOBILE_BUNDLE_ID") {
+        Some(value) => {
+            log_source("PORTAL_MOBILE_BUNDLE_ID", true);
+            value
+        }
+        None => {
+            log_source("PORTAL_MOBILE_BUNDLE_ID", false);
+            defaults.bundle_id
+        }
+    };
+
+    let apple_team_id = match optional_non_empty("PORTAL_MOBILE_APPLE_TEAM_ID") {
+        Some(value) => {
+            log_source("PORTAL_MOBILE_APPLE_TEAM_ID", true);
+            value
+        }
+        None => {
+            log_source("PORTAL_MOBILE_APPLE_TEAM_ID", false);
+            defaults.apple_team_id
+        }
+    };
+
+    let android_sha256_cert_fingerprints =
+        match optional_non_empty("PORTAL_MOBILE_ANDROID_SHA256_CERT_FINGERPRINTS") {
+            Some(value) => {
+                log_source("PORTAL_MOBILE_ANDROID_SHA256_CERT_FINGERPRINTS", true);
+                let fingerprints = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|fingerprint| !fingerprint.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if fingerprints.is_empty() {
+                    defaults.android_sha256_cert_fingerprints
+                } else {
+                    fingerprints
+                }
+            }
+            None => {
+                log_source("PORTAL_MOBILE_ANDROID_SHA256_CERT_FINGERPRINTS", false);
+                defaults.android_sha256_cert_fingerprints
+            }
+        };
+
+    MobileAppLinksConfig {
+        bundle_id,
+        apple_team_id,
+        android_sha256_cert_fingerprints,
     }
 }
 

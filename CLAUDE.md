@@ -832,6 +832,10 @@ When making changes, verify:
 | `PORTAL_SESSION_ARCHIVE_TRANSCRIPTS` | Archive transcript bodies (always zstd-compressed), not just manifests | Optional (default: true) |
 | `PORTAL_VAPID_PRIVATE_KEY` | VAPID application-server private key for Web Push (mobile-apps plan §8.3). URL-safe base64 (no padding) or a PEM EC private key. Unset = Web Push disabled (dispatcher keeps the log-only transport for webpush rows). Mint with `scripts/generate-vapid-keys.sh`. | Optional |
 | `PORTAL_VAPID_PUBLIC_KEY` | VAPID public key served to browsers as the `applicationServerKey` (`GET /api/push/vapid-key`). Must be the matching half of `PORTAL_VAPID_PRIVATE_KEY` (same `generate-vapid-keys.sh` run). | Optional |
+| `PORTAL_MOBILE_BUNDLE_ID` | Native shell bundle/package id for app-link association documents | Optional (default: `io.txcl.agentportal`) |
+| `PORTAL_MOBILE_ANDROID_SHA256_CERT_FINGERPRINTS` | Comma-separated Android signing certificate SHA-256 fingerprints for `/.well-known/assetlinks.json` | Optional (placeholder served when unset) |
+| `PORTAL_MOBILE_APPLE_TEAM_ID` | Apple Developer Team ID for `/.well-known/apple-app-site-association` | Optional (placeholder served when unset) |
+| `PORTAL_SHELL_URL` | Build-time mobile shell URL override baked by `mobile/src-tauri/build.rs`; unset keeps `https://txcl.io` | Optional (mobile build only) |
 | `PORTAL_APNS_KEY_P8_PATH` | APNs provider-token `.p8` private key path for native iOS push | Required with other `PORTAL_APNS_*` vars |
 | `PORTAL_APNS_KEY_ID` | APNs provider-token key id for native iOS push | Required with other `PORTAL_APNS_*` vars |
 | `PORTAL_APNS_TEAM_ID` | Apple Developer Team ID for native iOS push | Required with other `PORTAL_APNS_*` vars |

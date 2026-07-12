@@ -36,6 +36,31 @@ npm run ios:dev -- --config '{"app":{"windows":[{"url":"http://localhost:3000"}]
 
 Use a LAN IP instead of `localhost` for physical devices.
 
+For a self-hosted or long-lived dev shell build, bake the target URL into the
+native binary instead:
+
+```bash
+PORTAL_SHELL_URL="https://portal.example.com" npm run android:build
+```
+
+When unset, the app loads `https://txcl.io` directly with no startup redirect.
+
+## Deep Links
+
+The shell registers verified HTTPS app links / universal links for `txcl.io`.
+Opened links are routed into the existing WebView, so URLs such as
+`https://txcl.io/dashboard?session=<id>` land on the corresponding dashboard
+session.
+
+The backend serves the association documents at:
+
+- `/.well-known/assetlinks.json`
+- `/.well-known/apple-app-site-association`
+
+Set `PORTAL_MOBILE_ANDROID_SHA256_CERT_FINGERPRINTS` and
+`PORTAL_MOBILE_APPLE_TEAM_ID` on the backend before production verification.
+`PORTAL_MOBILE_BUNDLE_ID` defaults to `io.txcl.agentportal`.
+
 ## First-Time Native Project Generation
 
 Generate the platform project before the first device run:
