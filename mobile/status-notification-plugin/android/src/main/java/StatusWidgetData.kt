@@ -188,7 +188,7 @@ object StatusPayloadStore {
         }
     }
 
-    private fun statusLinesJson(lines: List<StatusSession>): String {
+    fun statusLinesJson(lines: List<StatusSession>): String {
         val array = JSONArray()
         lines.forEach { line ->
             array.put(

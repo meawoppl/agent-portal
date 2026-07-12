@@ -34,5 +34,6 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("com.google.firebase:firebase-messaging-ktx:24.0.1")
     implementation(project(":tauri-android"))
 }

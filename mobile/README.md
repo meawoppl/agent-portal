@@ -99,9 +99,60 @@ permission is not granted yet, the shell skips the update and retries on the
 next poll. Dogfood should confirm that first-launch permission UX is clear.
 
 If device/OEM battery policy reaps the app process despite the foreground
-service, note the device and behavior here. The durable refresh path is the
-future E5 FCM data-message bridge, which will wake the Android surfaces without
-relying on process-local polling.
+service, note the device and behavior here. The FCM data-message bridge below
+is the durable refresh path that wakes the Android surfaces without relying
+only on process-local polling.
+
+## Android FCM Bridge
+
+Android builds include the Firebase Messaging receive bridge, but it is
+runtime-gated: without Firebase configuration, token registration is skipped
+and CI still builds a debug APK. When Firebase is configured, the shell obtains
+the FCM registration token after mobile auth and registers it with
+`POST /api/push/subscriptions` as:
+
+```json
+{
+  "platform": "fcm",
+  "endpoint_or_token": "<FCM registration token>",
+  "p256dh": null,
+  "auth": null,
+  "device_label": "Agent Portal Android"
+}
+```
+
+The request uses the stored mobile JWT as `Authorization: Bearer ...`.
+`onNewToken` re-posts the rotated token. When the shell rejects the stored JWT
+and clears auth, it also deletes the saved backend subscription id if one was
+registered.
+
+FCM data messages enqueue the same native status refresh used by the widget
+WorkManager path; that refresh updates the widget and best-effort re-shows the
+persistent status notification from the fetched session payload.
+
+To enable FCM for a local or release Android build, Matt must provision:
+
+- A Firebase project with an Android app for `io.txcl.agentportal`.
+- The app's `google-services.json` in the generated Android app module after
+  `npm run android:init` (`mobile/src-tauri/gen/android/app/google-services.json`).
+- Conditional Google Services plugin application in the generated Android app
+  Gradle file only when that JSON exists. Do not require it in CI.
+- A Firebase service-account JSON on the backend host and
+  `PORTAL_FCM_SERVICE_ACCOUNT_PATH=/path/to/service-account.json` so the
+  existing backend FCM transport can send to `platform=fcm` rows.
+
+The generated Android app Gradle file should apply Google Services only when
+the Firebase file is present, for example:
+
+```kotlin
+plugins {
+    id("com.google.gms.google-services") version "4.4.2" apply false
+}
+
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+```
 
 ## First-Time Native Project Generation
 

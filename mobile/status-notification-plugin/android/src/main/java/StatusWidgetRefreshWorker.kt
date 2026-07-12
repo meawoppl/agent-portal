@@ -31,7 +31,10 @@ class StatusWidgetRefreshWorker(
                     responseBody = response.body,
                 )
                 StatusWidgetProvider.updateAll(applicationContext)
-                if (hasSessions) Result.success() else {
+                if (hasSessions) {
+                    StatusNotificationService.showStored(applicationContext)
+                    Result.success()
+                } else {
                     cancel(applicationContext)
                     Result.success()
                 }
