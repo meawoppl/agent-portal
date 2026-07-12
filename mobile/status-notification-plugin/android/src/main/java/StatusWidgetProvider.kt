@@ -19,6 +19,7 @@ class StatusWidgetProvider : AppWidgetProvider() {
         appWidgetIds.forEach { appWidgetId ->
             updateWidget(context, appWidgetManager, appWidgetId)
         }
+        StatusWidgetRefreshWorker.refreshNow(context)
     }
 
     companion object {
