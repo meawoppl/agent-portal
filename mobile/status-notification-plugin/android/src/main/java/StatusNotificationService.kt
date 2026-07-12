@@ -11,12 +11,13 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import org.json.JSONArray
 
 class StatusNotificationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CLEAR -> {
+                StatusPayloadStore.clear(this)
+                StatusWidgetProvider.updateAll(this)
                 if (Build.VERSION.SDK_INT >= 24) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                 } else {
@@ -26,12 +27,17 @@ class StatusNotificationService : Service() {
                 stopSelf()
             }
             ACTION_SHOW -> {
+                val summary = intent.getStringExtra(EXTRA_SUMMARY) ?: ""
+                val dashboardUrl = intent.getStringExtra(EXTRA_DASHBOARD_URL) ?: ""
+                val sessionsJson = intent.getStringExtra(EXTRA_SESSIONS_JSON) ?: "[]"
+                StatusPayloadStore.save(this, summary, dashboardUrl, sessionsJson)
+                StatusWidgetProvider.updateAll(this)
                 val notification = buildNotification(
                     context = this,
                     title = intent.getStringExtra(EXTRA_TITLE) ?: "Agent Portal",
-                    summary = intent.getStringExtra(EXTRA_SUMMARY) ?: "",
-                    dashboardUrl = intent.getStringExtra(EXTRA_DASHBOARD_URL) ?: "",
-                    sessionsJson = intent.getStringExtra(EXTRA_SESSIONS_JSON) ?: "[]",
+                    summary = summary,
+                    dashboardUrl = dashboardUrl,
+                    sessionsJson = sessionsJson,
                 )
                 startForeground(NOTIFICATION_ID, notification)
             }
@@ -49,7 +55,7 @@ class StatusNotificationService : Service() {
         sessionsJson: String,
     ): Notification {
         ensureChannel(context)
-        val sessions = parseSessions(sessionsJson)
+        val sessions = StatusPayloadStore.parseSessions(sessionsJson)
         val inbox = NotificationCompat.InboxStyle().setSummaryText(summary)
         sessions.take(MAX_LINES).forEach { session ->
             inbox.addLine("${session.name} - ${session.state}")
@@ -76,20 +82,6 @@ class StatusNotificationService : Service() {
         }
 
         return builder.build()
-    }
-
-    private fun parseSessions(sessionsJson: String): List<StatusSession> {
-        val sessions = mutableListOf<StatusSession>()
-        val json = JSONArray(sessionsJson)
-        for (index in 0 until json.length()) {
-            val item = json.getJSONObject(index)
-            val name = item.optString("name").ifBlank { "Session" }
-            val state = item.optString("state").ifBlank { "working" }
-            val url = item.optString("url")
-            if (url.isBlank()) continue
-            sessions.add(StatusSession(name, state, url))
-        }
-        return sessions
     }
 
     private fun ensureChannel(context: Context) {
@@ -122,14 +114,6 @@ class StatusNotificationService : Service() {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-    }
-
-    private data class StatusSession(
-        val name: String,
-        val state: String,
-        val url: String,
-    ) {
-        fun actionLabel(): String = "$name: $state".take(32)
     }
 
     companion object {

@@ -80,6 +80,24 @@ persistent storage and keeps this first auth handoff small and portable across
 Android/iOS. A later native-security pass can swap this for a platform keychain
 bridge without changing the backend API contract.
 
+## Android Status Surfaces
+
+Android builds include a persistent status notification and a home-screen
+widget. Both use the stored mobile JWT to poll `GET /api/agent/sessions` while
+the app process is alive, currently every 45 seconds, and clear themselves when
+no active sessions are present. The notification runs as a `dataSync` foreground
+service; the widget renders the same saved session payload, so it updates
+whenever the notification poller receives fresh status.
+
+On Android 13+, the first status update requests `POST_NOTIFICATIONS`; if the
+permission is not granted yet, the shell skips the update and retries on the
+next poll. Dogfood should confirm that first-launch permission UX is clear.
+
+If device/OEM battery policy reaps the app process despite the foreground
+service, note the device and behavior here. The durable refresh path is the
+future E5 FCM data-message bridge, which will wake the Android surfaces without
+relying on process-local polling.
+
 ## First-Time Native Project Generation
 
 Generate the platform project before the first device run:

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_portal_status_widget_description">Active Agent Portal session status</string>
+</resources>
