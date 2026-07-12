@@ -192,15 +192,7 @@ pub(crate) fn disable_subscription(conn: &mut DbConnection, sub_id: Uuid) -> Que
 #[cfg(test)]
 mod db_tests {
     use super::*;
-    use crate::db::DbPool;
     use crate::models::{NewPushSubscription, NewUser, PushSubscription, User};
-    use diesel::r2d2::{ConnectionManager, Pool};
-
-    fn try_pool() -> Option<DbPool> {
-        let url = std::env::var("DATABASE_URL").ok()?;
-        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
-        Pool::builder().build(manager).ok()
-    }
 
     fn make_user(conn: &mut DbConnection) -> User {
         use crate::schema::users;
@@ -235,8 +227,7 @@ mod db_tests {
 
     #[test]
     fn dead_endpoint_sets_disabled_at() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping push dispatcher DB test");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("db conn");
@@ -265,8 +256,7 @@ mod db_tests {
 
     #[test]
     fn record_success_sets_last_success_at() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping push dispatcher DB test");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("db conn");
@@ -287,8 +277,7 @@ mod db_tests {
 
     #[test]
     fn resolve_recipient_finds_owner_and_name() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping push dispatcher DB test");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("db conn");

@@ -24,19 +24,29 @@ use shared::endpoints::SessionEndpoint;
 use shared::{AgentType, ProxyToServer, RegisterFields, ServerToProxy};
 use tokio::net::TcpListener;
 
-/// Migration/seed guard: harness tests run concurrently against ONE shared
-/// Postgres, and Diesel's migration runner is not safe to race with itself.
-/// Every test acquires the pool through here, which serializes the
-/// migrate+seed step (the lock is released before the test body runs).
-static DB_SETUP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+/// One process-wide pool for the whole harness binary.
+///
+/// WHY: harness tests run concurrently against ONE shared Postgres. Building a
+/// fresh pool per test multiplies open connections and, together with the
+/// other DB-gated test binaries, can exhaust Postgres `max_connections` (~100
+/// in `docker-compose.test.yml`) — the parallel-suite flake this change fixes.
+/// The pool is built (and migrated+seeded) exactly once via `OnceLock`;
+/// `get_or_init` serializes that setup (Diesel's migration runner is not safe
+/// to race with itself), and `DbPool` clones share the underlying pool.
+///
+/// This mirrors `backend::test_support::shared_pool`, duplicated here because
+/// that module is `#[cfg(test)]`-gated in the lib and so isn't visible to this
+/// separate integration-test binary.
 fn test_pool() -> backend::db::DbPool {
-    let _guard = DB_SETUP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let pool = backend::db::create_pool()
-        .expect("DATABASE_URL must point to a test Postgres (docker-compose.test.yml)");
-    backend::db::run_migrations_logged(&pool).expect("run migrations");
-    backend::db::seed_dev_user(&pool).expect("seed dev user");
-    pool
+    static POOL: std::sync::OnceLock<backend::db::DbPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        let pool = backend::db::create_pool()
+            .expect("DATABASE_URL must point to a test Postgres (docker-compose.test.yml)");
+        backend::db::run_migrations_logged(&pool).expect("run migrations");
+        backend::db::seed_dev_user(&pool).expect("seed dev user");
+        pool
+    })
+    .clone()
 }
 
 /// Boot the backend (dev mode) on an ephemeral port; returns its address.

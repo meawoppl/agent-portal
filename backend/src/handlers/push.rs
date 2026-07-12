@@ -214,16 +214,6 @@ pub async fn put_prefs(
 mod db_tests {
     use super::*;
     use crate::models::{NewUser, User};
-    use diesel::r2d2::{ConnectionManager, Pool};
-
-    type DbPool = Pool<ConnectionManager<diesel::pg::PgConnection>>;
-
-    fn try_pool() -> Option<DbPool> {
-        let url = std::env::var("DATABASE_URL").ok()?;
-        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
-        Pool::builder().build(manager).ok()
-    }
-
     fn make_user(conn: &mut diesel::pg::PgConnection) -> User {
         use crate::schema::users;
         let nonce = Uuid::new_v4();
@@ -255,8 +245,7 @@ mod db_tests {
 
     #[test]
     fn prefs_round_trip_default_then_custom() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("get conn");

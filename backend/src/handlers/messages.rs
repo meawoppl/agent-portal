@@ -289,16 +289,6 @@ mod db_tests {
     use super::*;
     use crate::models::{NewSessionWithId, NewUser, Session, User};
     use chrono::Utc;
-    use diesel::r2d2::{ConnectionManager, Pool};
-
-    type DbPool = Pool<ConnectionManager<diesel::pg::PgConnection>>;
-
-    fn try_pool() -> Option<DbPool> {
-        let url = std::env::var("DATABASE_URL").ok()?;
-        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
-        Pool::builder().build(manager).ok()
-    }
-
     fn make_user(conn: &mut diesel::pg::PgConnection, label: &str) -> User {
         use crate::schema::users;
         let nonce = uuid::Uuid::new_v4();
@@ -408,8 +398,7 @@ mod db_tests {
     /// frontend issues.
     #[test]
     fn default_returns_last_n_chronological() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");
@@ -445,8 +434,7 @@ mod db_tests {
     /// limited to `limit` rows, chronological order.
     #[test]
     fn before_cursor_returns_older_page() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");
@@ -483,8 +471,7 @@ mod db_tests {
     /// limited to `limit` rows, chronological order.
     #[test]
     fn after_cursor_returns_newer_page() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");

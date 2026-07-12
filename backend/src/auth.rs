@@ -160,8 +160,6 @@ mod tests {
     use tower_cookies::cookie::Key;
     use tower_cookies::Cookie;
 
-    static DB_SETUP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn user(disabled: bool) -> User {
         User {
             id: Uuid::new_v4(),
@@ -191,17 +189,6 @@ mod tests {
             reject_disabled_user(user(true)),
             Err(AppError::Forbidden)
         ));
-    }
-
-    fn test_pool() -> Option<crate::db::DbPool> {
-        if std::env::var("DATABASE_URL").is_err() {
-            eprintln!("DATABASE_URL not set, skipping DB-backed auth test");
-            return None;
-        }
-        let _guard = DB_SETUP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let pool = crate::db::create_pool().expect("create test DB pool");
-        crate::db::run_migrations_logged(&pool).expect("run migrations");
-        Some(pool)
     }
 
     fn test_state(pool: crate::db::DbPool) -> AppState {
@@ -294,7 +281,7 @@ mod tests {
 
     #[test]
     fn extract_user_allows_valid_cookie() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -308,7 +295,7 @@ mod tests {
 
     #[test]
     fn extract_user_rejects_disabled_cookie_user() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -324,7 +311,7 @@ mod tests {
 
     #[test]
     fn extract_user_rejects_missing_cookie() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -338,7 +325,7 @@ mod tests {
 
     #[test]
     fn extract_user_allows_valid_mobile_bearer() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -354,7 +341,7 @@ mod tests {
 
     #[test]
     fn extract_user_rejects_expired_mobile_bearer() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -377,7 +364,7 @@ mod tests {
 
     #[test]
     fn extract_user_rejects_revoked_mobile_bearer() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -398,7 +385,7 @@ mod tests {
 
     #[test]
     fn extract_user_rejects_disabled_mobile_bearer_user() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);
@@ -415,7 +402,7 @@ mod tests {
 
     #[test]
     fn extract_user_does_not_fall_back_from_bad_bearer_to_valid_cookie() {
-        let Some(pool) = test_pool() else {
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let app_state = test_state(pool);

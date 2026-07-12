@@ -192,18 +192,6 @@ pub fn is_session_mutator(app_state: &AppState, session_id: Uuid, user_id: Uuid)
 mod db_tests {
     use super::*;
     use crate::models::{NewSessionMember, NewSessionWithId, NewUser, Session, User};
-    use diesel::r2d2::{ConnectionManager, Pool};
-
-    type DbPool = Pool<ConnectionManager<diesel::pg::PgConnection>>;
-
-    /// Try to build a DB pool from `DATABASE_URL`; returns `None` if the env
-    /// var isn't set (so the test silently skips on CI without DB).
-    fn try_pool() -> Option<DbPool> {
-        let url = std::env::var("DATABASE_URL").ok()?;
-        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
-        Pool::builder().build(manager).ok()
-    }
-
     /// Insert a throwaway user with a random google_id/email and return its row.
     fn make_user(conn: &mut diesel::pg::PgConnection, label: &str) -> User {
         use crate::schema::users;
@@ -281,8 +269,7 @@ mod db_tests {
 
     #[test]
     fn viewer_cannot_mutate_and_editor_can() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");
@@ -316,8 +303,7 @@ mod db_tests {
 
     #[test]
     fn non_member_cannot_mutate() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");
@@ -337,8 +323,7 @@ mod db_tests {
 
     #[test]
     fn owner_member_row_can_mutate() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");

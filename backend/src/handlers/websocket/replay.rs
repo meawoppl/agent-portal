@@ -130,16 +130,6 @@ mod replay_tests {
     use crate::models::{NewSessionWithId, NewUser, Session, User};
     use chrono::Utc;
     use diesel::prelude::*;
-    use diesel::r2d2::{ConnectionManager, Pool};
-
-    type DbPool = Pool<ConnectionManager<diesel::pg::PgConnection>>;
-
-    fn try_pool() -> Option<DbPool> {
-        let url = std::env::var("DATABASE_URL").ok()?;
-        let manager = ConnectionManager::<diesel::pg::PgConnection>::new(url);
-        Pool::builder().build(manager).ok()
-    }
-
     fn make_user(conn: &mut diesel::pg::PgConnection, label: &str) -> User {
         use crate::schema::users;
         let nonce = uuid::Uuid::new_v4();
@@ -237,8 +227,7 @@ mod replay_tests {
     /// the render-window default so the wire payload is bounded.
     #[test]
     fn replay_after_none_caps_to_retention_count() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");
@@ -306,8 +295,7 @@ mod replay_tests {
     /// now performs end-to-end (#784).
     #[test]
     fn replay_history_strict_gt_round_trips_server_timestamp() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping replay_history test");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");
@@ -378,8 +366,7 @@ mod replay_tests {
     /// the component takes when REST history returned empty / failed.
     #[test]
     fn replay_history_no_watermark_returns_all_and_advances_high_water() {
-        let Some(pool) = try_pool() else {
-            eprintln!("DATABASE_URL not set, skipping replay_history test");
+        let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
         let mut conn = pool.get().expect("conn");
