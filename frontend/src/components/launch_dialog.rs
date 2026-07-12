@@ -5,6 +5,8 @@ use crate::components::skip_permissions::{skip_permissions_args, skip_permission
 use crate::components::ProxyTokenSetup;
 use crate::hooks::use_escape;
 use crate::utils::{self, FetchError, On401};
+use claude_codes::ClaudeModel;
+use codex_codes::CodexModel;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
@@ -213,6 +215,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     };
     let extra_args = use_state(String::new);
     let agent_type = use_state(|| shared::AgentType::Claude);
+    // Model selector value — the CLI model argument, or "" for the agent's
+    // own default. Reset on agent switch since the catalogs don't overlap.
+    let model_arg = use_state(String::new);
     let skip_permissions = use_state(|| false);
     let launching = use_state(|| false);
     let error_msg = use_state(|| None::<String>);
@@ -293,6 +298,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     let on_agent_type_change = {
         let agent_type = agent_type.clone();
+        let model_arg = model_arg.clone();
         Callback::from(move |e: Event| {
             if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                 let val = select.value();
@@ -301,6 +307,16 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 } else {
                     shared::AgentType::Claude
                 });
+                model_arg.set(String::new());
+            }
+        })
+    };
+
+    let on_model_change = {
+        let model_arg = model_arg.clone();
+        Callback::from(move |e: Event| {
+            if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
+                model_arg.set(select.value());
             }
         })
     };
@@ -372,6 +388,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let home_root = dir.home_root.clone();
         let extra_args = extra_args.clone();
         let agent_type = agent_type.clone();
+        let model_arg = model_arg.clone();
         let skip_permissions = skip_permissions.clone();
         let selected_launcher = selected_launcher.clone();
         let launching = launching.clone();
@@ -391,10 +408,20 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 return;
             }
 
-            let mut claude_args: Vec<String> = (*extra_args)
-                .split_whitespace()
-                .map(|s| s.to_string())
-                .collect();
+            // Picker args go first so an explicit --model / -c model=… in the
+            // extra-args field still wins (both CLIs take the last occurrence).
+            let mut claude_args: Vec<String> = Vec::new();
+            if !model_arg.is_empty() {
+                match *agent_type {
+                    AgentType::Claude => {
+                        claude_args.extend(["--model".to_string(), (*model_arg).clone()]);
+                    }
+                    AgentType::Codex => {
+                        claude_args.extend(["-c".to_string(), format!("model={}", *model_arg)]);
+                    }
+                }
+            }
+            claude_args.extend((*extra_args).split_whitespace().map(|s| s.to_string()));
             if *skip_permissions {
                 claude_args.extend(
                     skip_permissions_args(*agent_type)
@@ -500,6 +527,41 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let selected_agent_label = match *agent_type {
         AgentType::Claude => "Claude",
         AgentType::Codex => "Codex",
+    };
+
+    // Model catalog options for the selected agent, from the SDK crates'
+    // known-model tables. Values are the exact CLI model arguments.
+    let model_option = |value: &str, label: &str| -> Html {
+        html! {
+            <option value={value.to_string()} selected={*model_arg == value}>
+                { label }
+            </option>
+        }
+    };
+    let model_options: Html = match *agent_type {
+        AgentType::Claude => html! {
+            <>
+                <optgroup label="Aliases — track the newest model">
+                    { for ClaudeModel::known()
+                        .iter()
+                        .filter(|m| m.is_alias())
+                        .map(|m| model_option(m.cli_arg(), m.display_name())) }
+                </optgroup>
+                <optgroup label="Pinned models">
+                    { for ClaudeModel::known()
+                        .iter()
+                        .filter(|m| !m.is_alias())
+                        .map(|m| model_option(m.cli_arg(), m.display_name())) }
+                </optgroup>
+            </>
+        },
+        AgentType::Codex => html! {
+            // CodexAutoReview is hidden from Codex's own picker; mirror that.
+            { for CodexModel::known()
+                .iter()
+                .filter(|m| !matches!(m, CodexModel::CodexAutoReview))
+                .map(|m| model_option(m.cli_arg(), m.display_name())) }
+        },
     };
 
     // Pre-compute directory listing HTML
@@ -623,6 +685,18 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             { "Codex support is highly experimental." }
                         </div>
                     }
+
+                    // Model picker — catalogs from the claude-codes /
+                    // codex-codes crates; "" means the agent's own default.
+                    <div class="launch-field">
+                        <label>{ "Model" }</label>
+                        <select class="launcher-select" onchange={on_model_change}>
+                            <option value="" selected={model_arg.is_empty()}>
+                                { "Agent default" }
+                            </option>
+                            { model_options.clone() }
+                        </select>
+                    </div>
 
                     // Directory browser
                     <div class="launch-field">

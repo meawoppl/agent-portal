@@ -16,6 +16,10 @@ shared = { path = "../shared" }
 # PatchChangeKind types that drifted from the wire shape (#827).
 codex-codes = { workspace = true }
 
+# Typed Claude protocol types — ClaudeModel catalog for the launcher's
+# model picker (same types-only, WASM-compat configuration).
+claude-codes = { workspace = true }
+
 # Yew framework
 yew = { workspace = true }
 yew-router = { workspace = true }
