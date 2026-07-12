@@ -78,7 +78,7 @@ async fn dispatch_one<T: PushTransport>(
             return;
         }
     };
-    let (user_id, db_name) = resolved;
+    let (user_id, db_name, prefs) = resolved;
 
     // (b) Suppress when the user has a live web client — in-app WS delivery
     // already covers them. Presence is trustworthy post-#1291 (eager prune).
@@ -89,9 +89,8 @@ async fn dispatch_one<T: PushTransport>(
         return;
     }
 
-    // (c) Prefs filter. Per-user prefs storage lands in C6; until then every
-    // user gets the defaults (permission/turn/disconnect on, agent chatter off).
-    let prefs = NotificationPrefs::default();
+    // (c) Prefs filter, on the user's stored prefs (C6 storage, loaded in the
+    // same query as the recipient above).
     if !event.is_enabled(&prefs) {
         debug!(
             "push suppressed for user {user_id}: event kind {} disabled by prefs",
@@ -107,7 +106,7 @@ async fn dispatch_one<T: PushTransport>(
     } else {
         event.session_name().to_string()
     };
-    let payload = event.into_payload(name);
+    let payload = event.into_payload(name, prefs.content_detail);
 
     // (d) Fan out to every non-disabled subscription for the user.
     let subs: Vec<PushSubscription> = match crate::schema::push_subscriptions::table
@@ -153,18 +152,32 @@ async fn dispatch_one<T: PushTransport>(
     }
 }
 
-/// Resolve `(owning user, session name)` for a session, or `None` when the row
-/// is gone.
+/// Resolve `(owning user, session name, notification prefs)` for a session in
+/// one round trip, or `None` when the session row is gone. Prefs semantics
+/// match the C6 endpoints: a NULL `users.notification_prefs` column or a
+/// stored value that no longer parses both fall back to
+/// [`NotificationPrefs::default`].
 fn resolve_recipient(
     conn: &mut DbConnection,
     session_id: Uuid,
-) -> QueryResult<Option<(Uuid, String)>> {
-    use crate::schema::sessions;
-    sessions::table
-        .find(session_id)
-        .select((sessions::user_id, sessions::session_name))
-        .first::<(Uuid, String)>(conn)
-        .optional()
+) -> QueryResult<Option<(Uuid, String, NotificationPrefs)>> {
+    use crate::schema::{sessions, users};
+    let row = sessions::table
+        .inner_join(users::table.on(users::id.eq(sessions::user_id)))
+        .filter(sessions::id.eq(session_id))
+        .select((
+            sessions::user_id,
+            sessions::session_name,
+            users::notification_prefs,
+        ))
+        .first::<(Uuid, String, Option<serde_json::Value>)>(conn)
+        .optional()?;
+    Ok(row.map(|(user_id, name, stored)| {
+        let prefs = stored
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+        (user_id, name, prefs)
+    }))
 }
 
 /// Stamp `last_success_at = now()` after a delivered push.
@@ -320,7 +333,15 @@ mod db_tests {
             .expect("insert session");
 
         let resolved = resolve_recipient(&mut conn, session_id).expect("resolve");
-        assert_eq!(resolved, Some((user.id, "resolve-test".to_string())));
+        // A fresh user has NULL notification_prefs -> defaults (C6 semantics).
+        assert_eq!(
+            resolved,
+            Some((
+                user.id,
+                "resolve-test".to_string(),
+                NotificationPrefs::default()
+            ))
+        );
 
         // Unknown session resolves to None.
         assert_eq!(

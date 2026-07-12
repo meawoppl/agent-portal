@@ -63,8 +63,12 @@ pub fn handle_permission_request(
         }
     }
 
-    // Keep the tool name for the push event before the fanout moves it.
+    // Keep the tool name and a compact input excerpt for the push event
+    // before the fanout moves them. The excerpt is only shown to users who
+    // opted into `content_detail = snippet` (O4a); the dispatcher hard-caps
+    // it again at payload build.
     let push_tool_name = tool_name.clone();
+    let push_input_snippet = permission_input_snippet(&input);
 
     // Forward to web clients
     if let Some(ref key) = session_key {
@@ -94,8 +98,28 @@ pub fn handle_permission_request(
             session_id,
             session_name: String::new(),
             tool_name: push_tool_name,
+            input_snippet: push_input_snippet,
         });
     }
+}
+
+/// Compact one-line excerpt of a permission request's tool input for the
+/// snippet content level. Prefers the human-meaningful field the common tools
+/// put front and center (`command`, `file_path`, `url`); otherwise falls back
+/// to the compact JSON. Length is only roughly bounded here — the dispatcher
+/// enforces the hard cap when it builds the payload body.
+fn permission_input_snippet(input: &serde_json::Value) -> Option<String> {
+    const ROUGH_MAX: usize = 200;
+    let primary = ["command", "file_path", "url"]
+        .iter()
+        .find_map(|k| input.get(k).and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .or_else(|| serde_json::to_string(input).ok())?;
+    let one_line = primary.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.is_empty() {
+        return None;
+    }
+    Some(one_line.chars().take(ROUGH_MAX).collect())
 }
 
 /// Handle a permission response from a web client: clear from DB and forward to proxy.

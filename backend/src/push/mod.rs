@@ -23,7 +23,7 @@ pub use transport::{LogTransport, PushError, PushTransport, SendOutcome};
 pub use webpush::WebPushTransport;
 
 use crate::models::PushSubscription;
-use shared::api::NotificationPrefs;
+use shared::api::{NotificationContentDetail, NotificationPrefs};
 use std::path::PathBuf;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
@@ -154,6 +154,10 @@ pub enum NotificationEvent {
         session_id: Uuid,
         session_name: String,
         tool_name: String,
+        /// Compact rendering of the tool input, supplied by the emitting
+        /// hook. Only shown under `content_detail = snippet` (O4a); capped
+        /// again in [`NotificationEvent::into_payload`].
+        input_snippet: Option<String>,
     },
     /// A turn finished (a `Result` message was stored); collapse per session.
     TurnComplete {
@@ -208,10 +212,15 @@ impl NotificationEvent {
     }
 
     /// Build the transport-agnostic payload. `session_name` is the resolved
-    /// name (event name when the hook provided one, else the DB name). Payload
+    /// name (event name when the hook provided one, else the DB name);
+    /// `detail` is the user's `content_detail` preference (O4a). Payload
     /// discipline (§8.2): a short preview only — the tap deep-links to the
     /// session and richer content stays server-side.
-    pub fn into_payload(self, session_name: String) -> PushPayload {
+    pub fn into_payload(
+        self,
+        session_name: String,
+        detail: NotificationContentDetail,
+    ) -> PushPayload {
         let session_id = self.session_id();
         let event_kind = self.event_kind().to_string();
         // Collapse key = session id: one visible notification per session,
@@ -223,9 +232,23 @@ impl NotificationEvent {
             session_name
         };
         let body = match self {
-            NotificationEvent::PermissionRequest { tool_name, .. } => {
-                format!("Permission needed: {tool_name}")
-            }
+            NotificationEvent::PermissionRequest {
+                tool_name,
+                input_snippet,
+                ..
+            } => match detail {
+                NotificationContentDetail::Generic => "Permission needed".to_string(),
+                NotificationContentDetail::ToolName => format!("Permission needed: {tool_name}"),
+                NotificationContentDetail::Snippet => match input_snippet {
+                    Some(snippet) if !snippet.trim().is_empty() => cap_snippet(&format!(
+                        "Permission needed: {tool_name} — {}",
+                        snippet.trim()
+                    )),
+                    // No excerpt available: degrade to the tool-name body
+                    // rather than an empty tease.
+                    _ => format!("Permission needed: {tool_name}"),
+                },
+            },
             NotificationEvent::TurnComplete { .. } => "Turn complete".to_string(),
             NotificationEvent::SessionDisconnected { .. } => "Session disconnected".to_string(),
         };
@@ -237,6 +260,22 @@ impl NotificationEvent {
             collapse_key,
         }
     }
+}
+
+/// Hard cap for snippet-detail bodies (O4a): lock screens truncate around
+/// here anyway, and the payload-discipline rule (§8.2) wants a preview, not
+/// the content. Applied on top of whatever the emitting hook produced.
+const SNIPPET_BODY_MAX_CHARS: usize = 120;
+
+/// Truncate to [`SNIPPET_BODY_MAX_CHARS`] on a char boundary, appending an
+/// ellipsis when anything was cut.
+fn cap_snippet(s: &str) -> String {
+    if s.chars().count() <= SNIPPET_BODY_MAX_CHARS {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(SNIPPET_BODY_MAX_CHARS - 1).collect();
+    out.push('…');
+    out
 }
 
 /// A push payload, independent of transport. `collapse_key` is the session id
@@ -286,6 +325,7 @@ mod tests {
             session_id: Uuid::nil(),
             session_name: name.to_string(),
             tool_name: "Bash".to_string(),
+            input_snippet: None,
         }
     }
 
@@ -353,8 +393,12 @@ mod tests {
             session_id: id,
             session_name: "my-session".into(),
             tool_name: "Edit".into(),
+            input_snippet: None,
         };
-        let payload = ev.into_payload("my-session".to_string());
+        let payload = ev.into_payload(
+            "my-session".to_string(),
+            NotificationContentDetail::ToolName,
+        );
         assert_eq!(payload.title, "my-session");
         assert_eq!(payload.body, "Permission needed: Edit");
         assert_eq!(payload.event_kind, "permission_request");
@@ -368,9 +412,76 @@ mod tests {
             session_id: Uuid::nil(),
             session_name: String::new(),
         }
-        .into_payload(String::new());
+        .into_payload(String::new(), NotificationContentDetail::ToolName);
         assert_eq!(payload.title, "Agent Portal");
         assert_eq!(payload.body, "Turn complete");
+    }
+
+    fn perm_with_snippet(snippet: Option<&str>) -> NotificationEvent {
+        NotificationEvent::PermissionRequest {
+            session_id: Uuid::nil(),
+            session_name: "s".into(),
+            tool_name: "Bash".into(),
+            input_snippet: snippet.map(str::to_string),
+        }
+    }
+
+    /// O4a: the three detail levels shape the permission body as specified —
+    /// generic never leaks the tool name, snippet includes the excerpt under
+    /// the hard cap, and a missing excerpt degrades to the tool-name body.
+    #[test]
+    fn content_detail_shapes_permission_body() {
+        let body = |ev: NotificationEvent, d| ev.into_payload("s".into(), d).body;
+
+        assert_eq!(
+            body(perm_with_snippet(None), NotificationContentDetail::Generic),
+            "Permission needed"
+        );
+        assert_eq!(
+            body(
+                perm_with_snippet(Some("rm -rf /tmp/x")),
+                NotificationContentDetail::ToolName
+            ),
+            "Permission needed: Bash"
+        );
+        assert_eq!(
+            body(
+                perm_with_snippet(Some("rm -rf /tmp/x")),
+                NotificationContentDetail::Snippet
+            ),
+            "Permission needed: Bash — rm -rf /tmp/x"
+        );
+        assert_eq!(
+            body(perm_with_snippet(None), NotificationContentDetail::Snippet),
+            "Permission needed: Bash",
+            "missing excerpt degrades to tool-name body"
+        );
+
+        let long = "x".repeat(500);
+        let capped = body(
+            perm_with_snippet(Some(&long)),
+            NotificationContentDetail::Snippet,
+        );
+        assert_eq!(capped.chars().count(), SNIPPET_BODY_MAX_CHARS);
+        assert!(capped.ends_with('…'));
+    }
+
+    /// Non-permission bodies carry no tool/content either way — detail level
+    /// must not change them.
+    #[test]
+    fn content_detail_leaves_other_events_unchanged() {
+        for d in [
+            NotificationContentDetail::Generic,
+            NotificationContentDetail::ToolName,
+            NotificationContentDetail::Snippet,
+        ] {
+            let payload = NotificationEvent::TurnComplete {
+                session_id: Uuid::nil(),
+                session_name: "s".into(),
+            }
+            .into_payload("s".into(), d);
+            assert_eq!(payload.body, "Turn complete");
+        }
     }
 
     #[test]

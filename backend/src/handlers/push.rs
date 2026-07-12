@@ -271,6 +271,7 @@ mod db_tests {
             turn_complete: false,
             session_disconnected: true,
             agent_message: true,
+            content_detail: shared::api::NotificationContentDetail::Snippet,
         };
         assert_ne!(custom, NotificationPrefs::default());
         {
