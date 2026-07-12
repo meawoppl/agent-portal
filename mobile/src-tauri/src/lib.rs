@@ -18,6 +18,12 @@ mod mobile {
     };
     use std::time::Duration;
 
+    #[cfg(target_os = "android")]
+    use agent_portal_mobile_status_notification::{
+        StatusNotificationExt, StatusNotificationLine, StatusNotificationPayload,
+    };
+    #[cfg(target_os = "android")]
+    use serde::Deserialize;
     use shared::api::{
         DeviceClientType, DeviceCodeRequest, DeviceFlowPollRequest, TokenRefreshResponse,
     };
@@ -31,12 +37,22 @@ mod mobile {
     const MAIN_WINDOW_LABEL: &str = "main";
     const AUTH_STORE_PATH: &str = "mobile-auth.json";
     const AUTH_TOKEN_KEY: &str = "auth_token";
+    #[cfg(target_os = "android")]
+    const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(45);
+    #[cfg(target_os = "android")]
+    const MAX_STATUS_SESSIONS: usize = 5;
 
     pub fn run() -> tauri::Result<()> {
-        tauri::Builder::default()
+        let mut builder = tauri::Builder::default()
             .plugin(tauri_plugin_deep_link::init())
             .plugin(tauri_plugin_opener::init())
-            .plugin(tauri_plugin_store::Builder::default().build())
+            .plugin(tauri_plugin_store::Builder::default().build());
+        #[cfg(target_os = "android")]
+        {
+            builder = builder.plugin(agent_portal_mobile_status_notification::init());
+        }
+
+        builder
             .setup(|app| {
                 let app_handle = app.handle().clone();
                 let auth_in_progress = Arc::new(AtomicBool::new(false));
@@ -70,6 +86,8 @@ mod mobile {
                         }
                     });
                 }
+
+                start_status_notification_polling(app.handle().clone());
 
                 Ok(())
             })
@@ -110,11 +128,13 @@ mod mobile {
             match refresh_mobile_token(&shell_url, &token).await? {
                 RefreshDecision::UseExisting => {
                     login_webview_with_token(app, &token, destination_url).await?;
+                    update_status_notification_once(app, &shell_url, &token).await;
                     return Ok(());
                 }
                 RefreshDecision::UseReplacement(token) => {
                     save_auth_token(&store, &token)?;
                     login_webview_with_token(app, &token, destination_url).await?;
+                    update_status_notification_once(app, &shell_url, &token).await;
                     return Ok(());
                 }
                 RefreshDecision::TokenRejected => {
@@ -129,6 +149,7 @@ mod mobile {
         let token = run_device_flow(app, &shell_url).await?;
         save_auth_token(&store, &token)?;
         login_webview_with_token(app, &token, destination_url).await?;
+        update_status_notification_once(app, &shell_url, &token).await;
         Ok(())
     }
 
@@ -317,6 +338,215 @@ mod mobile {
         window
             .eval(&script)
             .map_err(|err| format!("failed to run token-login in WebView: {err}"))
+    }
+
+    async fn update_status_notification_once<R: tauri::Runtime>(
+        #[allow(unused_variables)] app: &tauri::AppHandle<R>,
+        #[allow(unused_variables)] shell_url: &Url,
+        #[allow(unused_variables)] token: &str,
+    ) {
+        #[cfg(target_os = "android")]
+        if let Err(err) = refresh_status_notification(app, shell_url, token).await {
+            eprintln!("failed to update Android status notification: {err}");
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn start_status_notification_polling<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+        tauri::async_runtime::spawn(async move {
+            let client = reqwest::Client::new();
+            let mut interval = tokio::time::interval(STATUS_POLL_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                interval.tick().await;
+                let shell_url = shell_base_url();
+                let token = match app
+                    .store(AUTH_STORE_PATH)
+                    .ok()
+                    .and_then(|store| stored_auth_token(&store))
+                {
+                    Some(token) => token,
+                    None => {
+                        if let Err(err) = app.status_notification().clear() {
+                            eprintln!("failed to clear Android status notification: {err}");
+                        }
+                        continue;
+                    }
+                };
+
+                if let Err(err) =
+                    refresh_status_notification_with_client(&app, &client, &shell_url, &token).await
+                {
+                    eprintln!("failed to refresh Android status notification: {err}");
+                }
+            }
+        });
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn start_status_notification_polling<R: tauri::Runtime>(_app: tauri::AppHandle<R>) {}
+
+    #[cfg(target_os = "android")]
+    async fn refresh_status_notification<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        shell_url: &Url,
+        token: &str,
+    ) -> Result<(), String> {
+        let client = reqwest::Client::new();
+        refresh_status_notification_with_client(app, &client, shell_url, token).await
+    }
+
+    #[cfg(target_os = "android")]
+    async fn refresh_status_notification_with_client<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        client: &reqwest::Client,
+        shell_url: &Url,
+        token: &str,
+    ) -> Result<(), String> {
+        let url = shell_url
+            .join("/api/agent/sessions")
+            .map_err(|err| format!("failed to build sessions URL: {err}"))?;
+        let response = client
+            .get(url.as_str())
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|err| format!("status sessions request failed: {err}"))?;
+
+        match response.status() {
+            reqwest::StatusCode::OK => {
+                let body = response
+                    .json::<MobileAgentSessionsResponse>()
+                    .await
+                    .map_err(|err| format!("status sessions response was invalid: {err}"))?;
+                let lines = status_notification_lines(shell_url, body.sessions);
+                if lines.is_empty() {
+                    app.status_notification()
+                        .clear()
+                        .map_err(|err| format!("failed to clear notification: {err}"))?;
+                    return Ok(());
+                }
+                let dashboard_url = shell_url
+                    .join("/dashboard")
+                    .map_err(|err| format!("failed to build dashboard URL: {err}"))?;
+                let sessions_json = serde_json::to_string(&lines)
+                    .map_err(|err| format!("failed to encode notification sessions: {err}"))?;
+                let summary = status_notification_summary(&lines);
+                app.status_notification()
+                    .show(StatusNotificationPayload {
+                        title: "Agent Portal sessions".to_string(),
+                        summary,
+                        dashboard_url: dashboard_url.to_string(),
+                        sessions_json,
+                    })
+                    .map_err(|err| format!("failed to show notification: {err}"))?;
+                Ok(())
+            }
+            reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
+                app.status_notification()
+                    .clear()
+                    .map_err(|err| format!("failed to clear notification: {err}"))?;
+                Ok(())
+            }
+            status => Err(format!("status sessions request returned {status}")),
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    #[derive(Debug, Deserialize)]
+    struct MobileAgentSessionsResponse {
+        sessions: Vec<MobileAgentSessionInfo>,
+    }
+
+    #[cfg(target_os = "android")]
+    #[derive(Debug, Deserialize)]
+    struct MobileAgentSessionInfo {
+        id: String,
+        session_name: String,
+        status: String,
+        #[serde(default)]
+        awaiting_permission: bool,
+    }
+
+    #[cfg(target_os = "android")]
+    fn status_notification_lines(
+        shell_url: &Url,
+        sessions: Vec<MobileAgentSessionInfo>,
+    ) -> Vec<StatusNotificationLine> {
+        sessions
+            .into_iter()
+            .filter(|session| should_show_status_session(session))
+            .filter_map(|session| {
+                let url = shell_url
+                    .join(&format!("/dashboard?session={}", session.id))
+                    .ok()?;
+                Some(StatusNotificationLine {
+                    session_id: session.id,
+                    name: compact_session_name(&session.session_name),
+                    state: status_state(&session),
+                    url: url.to_string(),
+                })
+            })
+            .take(MAX_STATUS_SESSIONS)
+            .collect()
+    }
+
+    #[cfg(target_os = "android")]
+    fn should_show_status_session(session: &MobileAgentSessionInfo) -> bool {
+        let status = session.status.to_ascii_lowercase();
+        session.awaiting_permission
+            || status.contains("active")
+            || status.contains("working")
+            || status.contains("running")
+            || status.contains("disconnect")
+    }
+
+    #[cfg(target_os = "android")]
+    fn status_state(session: &MobileAgentSessionInfo) -> String {
+        if session.awaiting_permission {
+            return "awaiting input".to_string();
+        }
+        let status = session.status.to_ascii_lowercase();
+        if status.contains("disconnect") {
+            "disconnected".to_string()
+        } else {
+            "working".to_string()
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn compact_session_name(name: &str) -> String {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return "Session".to_string();
+        }
+        const MAX_CHARS: usize = 32;
+        if trimmed.chars().count() <= MAX_CHARS {
+            return trimmed.to_string();
+        }
+        let mut compact = trimmed.chars().take(MAX_CHARS - 1).collect::<String>();
+        compact.push_str("...");
+        compact
+    }
+
+    #[cfg(target_os = "android")]
+    fn status_notification_summary(lines: &[StatusNotificationLine]) -> String {
+        let awaiting = lines
+            .iter()
+            .filter(|line| line.state == "awaiting input")
+            .count();
+        let disconnected = lines
+            .iter()
+            .filter(|line| line.state == "disconnected")
+            .count();
+        if awaiting > 0 {
+            format!("{awaiting} awaiting input")
+        } else if disconnected > 0 {
+            format!("{disconnected} disconnected")
+        } else {
+            format!("{} working", lines.len())
+        }
     }
 
     fn first_allowed_shell_url(urls: &[Url]) -> Option<Url> {

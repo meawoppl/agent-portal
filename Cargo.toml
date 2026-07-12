@@ -12,6 +12,7 @@ members = [
     "portal-update",
     "mobile/src-tauri",
 ]
+exclude = ["mobile/status-notification-plugin"]
 resolver = "2"
 
 [workspace.package]

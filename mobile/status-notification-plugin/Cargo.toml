@@ -1,0 +1,15 @@
+[package]
+name = "agent-portal-mobile-status-notification"
+version = "0.1.0"
+edition = "2021"
+links = "agent-portal-mobile-status-notification"
+
+[workspace]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2", features = [] }
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
