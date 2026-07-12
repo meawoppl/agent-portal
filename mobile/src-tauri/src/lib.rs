@@ -12,20 +12,41 @@ pub fn run() {}
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mobile {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    use shared::api::{
+        DeviceClientType, DeviceCodeRequest, DeviceFlowPollRequest, TokenRefreshResponse,
+    };
+    use shared::DevicePollResponse;
     use tauri::{Manager, Url};
     use tauri_plugin_deep_link::DeepLinkExt;
+    use tauri_plugin_opener::OpenerExt;
+    use tauri_plugin_store::StoreExt;
 
     const DEFAULT_SHELL_URL: &str = "https://txcl.io";
     const MAIN_WINDOW_LABEL: &str = "main";
+    const AUTH_STORE_PATH: &str = "mobile-auth.json";
+    const AUTH_TOKEN_KEY: &str = "auth_token";
 
     pub fn run() -> tauri::Result<()> {
         tauri::Builder::default()
             .plugin(tauri_plugin_deep_link::init())
+            .plugin(tauri_plugin_opener::init())
+            .plugin(tauri_plugin_store::Builder::default().build())
             .setup(|app| {
                 let app_handle = app.handle().clone();
+                let auth_in_progress = Arc::new(AtomicBool::new(false));
 
+                let mut startup_destination = None;
                 match app.deep_link().get_current() {
-                    Ok(Some(urls)) => route_deep_links(&app_handle, urls),
+                    Ok(Some(urls)) => {
+                        startup_destination = first_allowed_shell_url(&urls);
+                        route_deep_links(&app_handle, urls);
+                    }
                     Ok(None) => {
                         if let Some(url) = shell_url_override() {
                             navigate_main_window(&app_handle, url);
@@ -34,14 +55,288 @@ mod mobile {
                     Err(err) => eprintln!("failed to read startup deep link: {err}"),
                 }
 
+                run_auth_handoff(&app_handle, auth_in_progress.clone(), startup_destination);
+
                 let app_handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
                     route_deep_links(&app_handle, event.urls());
                 });
 
+                let app_handle = app.handle().clone();
+                app.on_window_event(move |_window, event| {
+                    if matches!(event, tauri::WindowEvent::Focused(true)) {
+                        run_auth_handoff(&app_handle, auth_in_progress.clone(), None);
+                    }
+                });
+
                 Ok(())
             })
             .run(tauri::generate_context!())
+    }
+
+    fn run_auth_handoff<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        in_progress: Arc<AtomicBool>,
+        destination_url: Option<Url>,
+    ) {
+        if in_progress
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(err) = ensure_mobile_auth(&app, destination_url).await {
+                eprintln!("mobile auth handoff failed: {err}");
+            }
+            in_progress.store(false, Ordering::Release);
+        });
+    }
+
+    async fn ensure_mobile_auth<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        destination_url: Option<Url>,
+    ) -> Result<(), String> {
+        let shell_url = shell_base_url();
+        let store = app
+            .store(AUTH_STORE_PATH)
+            .map_err(|err| format!("failed to open auth store: {err}"))?;
+
+        if let Some(token) = stored_auth_token(&store) {
+            match refresh_mobile_token(&shell_url, &token).await? {
+                RefreshDecision::UseExisting => {
+                    login_webview_with_token(app, &token, destination_url).await?;
+                    return Ok(());
+                }
+                RefreshDecision::UseReplacement(token) => {
+                    save_auth_token(&store, &token)?;
+                    login_webview_with_token(app, &token, destination_url).await?;
+                    return Ok(());
+                }
+                RefreshDecision::TokenRejected => {
+                    store.delete(AUTH_TOKEN_KEY);
+                    store
+                        .save()
+                        .map_err(|err| format!("failed to clear auth token: {err}"))?;
+                }
+            }
+        }
+
+        let token = run_device_flow(app, &shell_url).await?;
+        save_auth_token(&store, &token)?;
+        login_webview_with_token(app, &token, destination_url).await?;
+        Ok(())
+    }
+
+    enum RefreshDecision {
+        UseExisting,
+        UseReplacement(String),
+        TokenRejected,
+    }
+
+    async fn refresh_mobile_token(shell_url: &Url, token: &str) -> Result<RefreshDecision, String> {
+        let url = shell_url
+            .join("/api/auth/refresh")
+            .map_err(|err| format!("failed to build refresh URL: {err}"))?;
+        let response = reqwest::Client::new()
+            .post(url.as_str())
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|err| format!("refresh request failed: {err}"))?;
+
+        match response.status() {
+            reqwest::StatusCode::OK => {
+                let body = response
+                    .json::<TokenRefreshResponse>()
+                    .await
+                    .map_err(|err| format!("refresh response was invalid: {err}"))?;
+                Ok(match body.auth_token {
+                    Some(token) => RefreshDecision::UseReplacement(token),
+                    None => RefreshDecision::UseExisting,
+                })
+            }
+            reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
+                Ok(RefreshDecision::TokenRejected)
+            }
+            status => Err(format!("refresh request returned {status}")),
+        }
+    }
+
+    async fn run_device_flow<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        shell_url: &Url,
+    ) -> Result<String, String> {
+        let code = create_mobile_device_code(shell_url).await?;
+        let verification_url = device_verification_url(&code.verification_uri, &code.user_code)?;
+        app.opener()
+            .open_url(verification_url.as_str(), None::<&str>)
+            .map_err(|err| format!("failed to open device verification URL: {err}"))?;
+
+        let interval = code.interval.max(5);
+        let expires_at = std::time::Instant::now() + Duration::from_secs(code.expires_in);
+        let poll_url = shell_url
+            .join("/api/auth/device/poll")
+            .map_err(|err| format!("failed to build poll URL: {err}"))?;
+        let client = reqwest::Client::new();
+
+        loop {
+            if std::time::Instant::now() >= expires_at {
+                return Err("device authorization expired".to_string());
+            }
+
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+            let request = DeviceFlowPollRequest {
+                device_code: code.device_code.clone(),
+            };
+            let response = client
+                .post(poll_url.as_str())
+                .json(&request)
+                .send()
+                .await
+                .map_err(|err| format!("device poll failed: {err}"))?;
+
+            if !response.status().is_success() {
+                return Err(format!("device poll returned {}", response.status()));
+            }
+
+            match response
+                .json::<DevicePollResponse>()
+                .await
+                .map_err(|err| format!("device poll response was invalid: {err}"))?
+            {
+                DevicePollResponse::Pending => {}
+                DevicePollResponse::Complete { access_token, .. } => return Ok(access_token),
+                DevicePollResponse::Expired => {
+                    return Err("device authorization expired".to_string())
+                }
+                DevicePollResponse::Denied => return Err("device authorization denied".to_string()),
+            }
+        }
+    }
+
+    async fn create_mobile_device_code(
+        shell_url: &Url,
+    ) -> Result<shared::api::DeviceCodeResponse, String> {
+        let url = shell_url
+            .join("/api/auth/device/code")
+            .map_err(|err| format!("failed to build device-code URL: {err}"))?;
+        let request = DeviceCodeRequest {
+            hostname: Some("Agent Portal mobile".to_string()),
+            working_directory: None,
+            client_type: DeviceClientType::Mobile,
+        };
+
+        let response = reqwest::Client::new()
+            .post(url.as_str())
+            .json(&request)
+            .send()
+            .await
+            .map_err(|err| format!("device-code request failed: {err}"))?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "device-code request returned {}",
+                response.status()
+            ));
+        }
+        response
+            .json::<shared::api::DeviceCodeResponse>()
+            .await
+            .map_err(|err| format!("device-code response was invalid: {err}"))
+    }
+
+    fn device_verification_url(verification_uri: &str, user_code: &str) -> Result<Url, String> {
+        let mut url = Url::parse(verification_uri)
+            .map_err(|err| format!("device verification URI was invalid: {err}"))?;
+        url.query_pairs_mut().append_pair("user_code", user_code);
+        Ok(url)
+    }
+
+    async fn login_webview_with_token<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        token: &str,
+        preferred_destination_url: Option<Url>,
+    ) -> Result<(), String> {
+        let window = app
+            .get_webview_window(MAIN_WINDOW_LABEL)
+            .ok_or_else(|| "Agent Portal shell window is not available".to_string())?;
+        let shell_url = shell_base_url();
+        let mut destination_url = shell_url
+            .join("/dashboard")
+            .map_err(|err| format!("failed to build dashboard URL: {err}"))?;
+        let has_preferred_destination = preferred_destination_url.is_some();
+        if let Some(preferred_destination_url) =
+            preferred_destination_url.filter(|url| same_origin(url, shell_url.as_str()))
+        {
+            destination_url = preferred_destination_url;
+        }
+        match window.url() {
+            Ok(current_url) if same_origin(&current_url, shell_url.as_str()) => {
+                if !has_preferred_destination {
+                    destination_url = current_url;
+                }
+            }
+            Ok(_) | Err(_) => {
+                window
+                    .navigate(shell_url.clone())
+                    .map_err(|err| format!("failed to navigate Agent Portal shell: {err}"))?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+        let token = serde_json::to_string(token)
+            .map_err(|err| format!("failed to encode auth token for WebView: {err}"))?;
+        let token_login_url = shell_url
+            .join("/api/auth/token-login")
+            .map_err(|err| format!("failed to build token-login URL: {err}"))?;
+        let token_login_url = serde_json::to_string(token_login_url.as_str())
+            .map_err(|err| format!("failed to encode token-login URL: {err}"))?;
+        let destination_url = serde_json::to_string(destination_url.as_str())
+            .map_err(|err| format!("failed to encode dashboard URL: {err}"))?;
+        let script = format!(
+            r#"(async () => {{
+                try {{
+                    const response = await fetch({token_login_url}, {{
+                        method: "POST",
+                        headers: {{ "Authorization": "Bearer " + {token} }},
+                        credentials: "include"
+                    }});
+                    if (response.ok) {{
+                        window.location.assign({destination_url});
+                    }} else {{
+                        console.error("mobile token-login failed", response.status);
+                    }}
+                }} catch (error) {{
+                    console.error("mobile token-login failed", error);
+                }}
+            }})()"#
+        );
+        window
+            .eval(&script)
+            .map_err(|err| format!("failed to run token-login in WebView: {err}"))
+    }
+
+    fn first_allowed_shell_url(urls: &[Url]) -> Option<Url> {
+        urls.iter().find(|url| is_allowed_shell_url(url)).cloned()
+    }
+
+    fn stored_auth_token<R: tauri::Runtime>(
+        store: &tauri_plugin_store::Store<R>,
+    ) -> Option<String> {
+        store
+            .get(AUTH_TOKEN_KEY)
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+    }
+
+    fn save_auth_token<R: tauri::Runtime>(
+        store: &tauri_plugin_store::Store<R>,
+        token: &str,
+    ) -> Result<(), String> {
+        store.set(AUTH_TOKEN_KEY, token);
+        store
+            .save()
+            .map_err(|err| format!("failed to save auth token: {err}"))
     }
 
     fn route_deep_links<R: tauri::Runtime>(app: &tauri::AppHandle<R>, urls: Vec<Url>) {
@@ -52,6 +347,10 @@ mod mobile {
                 eprintln!("ignoring unexpected Agent Portal deep link: {url}");
             }
         }
+    }
+
+    fn shell_base_url() -> Url {
+        shell_url_override().unwrap_or_else(|| Url::parse(DEFAULT_SHELL_URL).unwrap())
     }
 
     fn navigate_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: Url) {

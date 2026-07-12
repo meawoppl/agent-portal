@@ -61,6 +61,25 @@ Set `PORTAL_MOBILE_ANDROID_SHA256_CERT_FINGERPRINTS` and
 `PORTAL_MOBILE_APPLE_TEAM_ID` on the backend before production verification.
 `PORTAL_MOBILE_BUNDLE_ID` defaults to `io.txcl.agentportal`.
 
+## Mobile Authentication
+
+On first launch, the native shell requests a mobile device-flow code from the
+configured portal origin with `client_type=mobile`, opens the pre-filled verify
+page in the system browser, polls until the flow completes, and stores the
+returned mobile JWT in the Tauri store. The app then runs
+`POST /api/auth/token-login` from inside the WebView so the session cookie is
+written into the WebView's cookie jar before navigating to the current portal
+URL, preserving deep links such as `/dashboard?session=<id>`.
+
+On startup and when the app returns to the foreground, the shell calls
+`POST /api/auth/refresh` with the stored mobile JWT. If the backend returns a
+replacement token, the shell saves it and repeats the WebView token-login step.
+
+The initial token persistence uses `tauri-plugin-store`, which is app-private
+persistent storage and keeps this first auth handoff small and portable across
+Android/iOS. A later native-security pass can swap this for a platform keychain
+bridge without changing the backend API contract.
+
 ## First-Time Native Project Generation
 
 Generate the platform project before the first device run:
