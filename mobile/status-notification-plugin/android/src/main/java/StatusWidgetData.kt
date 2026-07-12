@@ -17,6 +17,7 @@ data class StatusPayload(
     val summary: String,
     val dashboardUrl: String,
     val sessions: List<StatusSession>,
+    val updatedAtMillis: Long,
 )
 
 object StatusPayloadStore {
@@ -26,6 +27,7 @@ object StatusPayloadStore {
     private const val KEY_STATUS_URL = "status_url"
     private const val KEY_AUTH_TOKEN = "auth_token"
     private const val KEY_SESSIONS_JSON = "sessions_json"
+    private const val KEY_UPDATED_AT_MS = "updated_at_ms"
 
     fun save(
         context: Context,
@@ -42,6 +44,7 @@ object StatusPayloadStore {
             .putString(KEY_STATUS_URL, statusUrl)
             .putString(KEY_AUTH_TOKEN, authToken)
             .putString(KEY_SESSIONS_JSON, sessionsJson)
+            .putLong(KEY_UPDATED_AT_MS, System.currentTimeMillis())
             .apply()
     }
 
@@ -59,6 +62,7 @@ object StatusPayloadStore {
             summary = prefs.getString(KEY_SUMMARY, "No active sessions") ?: "No active sessions",
             dashboardUrl = prefs.getString(KEY_DASHBOARD_URL, "") ?: "",
             sessions = parseSessions(sessionsJson),
+            updatedAtMillis = prefs.getLong(KEY_UPDATED_AT_MS, 0L),
         )
     }
 

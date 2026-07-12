@@ -86,7 +86,29 @@ class StatusWidgetProvider : AppWidgetProvider() {
 
         private fun widgetSummary(payload: StatusPayload, sessions: List<StatusSession>): String {
             if (sessions.isEmpty()) return "No active sessions"
-            return payload.summary.ifBlank { "${sessions.size} active" }
+            val summary = payload.summary.ifBlank { "${sessions.size} active" }
+            val freshness = freshnessLabel(payload.updatedAtMillis)
+            return if (freshness.isBlank()) summary else "$summary • $freshness"
+        }
+
+        private fun freshnessLabel(updatedAtMillis: Long): String {
+            if (updatedAtMillis <= 0L) return ""
+            val ageMillis = (System.currentTimeMillis() - updatedAtMillis).coerceAtLeast(0L)
+            val age = compactAge(ageMillis)
+            return if (ageMillis > STALE_AFTER_MILLIS) {
+                "stale $age"
+            } else {
+                "updated $age"
+            }
+        }
+
+        private fun compactAge(ageMillis: Long): String {
+            val minutes = ageMillis / 60_000L
+            if (minutes < 1L) return "now"
+            if (minutes < 60L) return "${minutes}m"
+            val hours = minutes / 60L
+            if (hours < 24L) return "${hours}h"
+            return "${hours / 24L}d"
         }
 
         private fun bindRow(
@@ -132,5 +154,7 @@ class StatusWidgetProvider : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         }
+
+        private const val STALE_AFTER_MILLIS = 20L * 60L * 1000L
     }
 }

@@ -92,7 +92,11 @@ whenever the notification poller receives fresh status.
 The widget also schedules a native WorkManager refresh using the same stored
 mobile JWT and status endpoint. Android enforces a 15-minute minimum interval
 for periodic work; widget system updates also enqueue a one-time refresh when
-network is available.
+network is available. The widget summary includes a compact freshness label,
+switching to a stale marker after the expected refresh window so cached session
+state is visible as cached state. Tapping the widget opens the dashboard deep
+link, which brings the app process back and lets the poller/one-shot refresh
+run again.
 
 On Android 13+, the first status update requests `POST_NOTIFICATIONS`; if the
 permission is not granted yet, the shell skips the update and retries on the
