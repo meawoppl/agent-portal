@@ -95,8 +95,9 @@ pub struct MessagesListResponse<T> {
 // ---- Inter-agent messaging --------------------------------------------------
 
 /// One of the caller's sessions, as listed for the agent-messaging page/API
-/// (`GET /api/agent/sessions`). A lightweight summary — enough to pick a
-/// recipient — not the full `SessionInfo`.
+/// and mobile status surfaces (`GET /api/agent/sessions`). A lightweight
+/// summary — enough to pick a recipient or render a widget row — not the
+/// full `SessionInfo`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionInfo {
     pub id: Uuid,
@@ -105,6 +106,14 @@ pub struct AgentSessionInfo {
     pub agent_type: String,
     pub status: String,
     pub hostname: String,
+    /// True when the session has a pending permission request waiting on the
+    /// user — the "agent is blocked on you" signal mobile widgets surface.
+    #[serde(default)]
+    pub awaiting_permission: bool,
+    /// RFC3339 UTC timestamp of the session's last activity. Empty when the
+    /// backend predates this field (`serde(default)`).
+    #[serde(default)]
+    pub last_activity: String,
 }
 
 /// Response for `GET /api/agent/sessions`.
@@ -133,4 +142,27 @@ pub struct SendAgentMessageResponse {
     pub delivered: bool,
     /// The input sequence number assigned to the injected message.
     pub seq: i64,
+}
+
+#[cfg(test)]
+mod agent_session_wire_tests {
+    use super::*;
+
+    /// Widget/CLI consumers must be able to parse responses from backends
+    /// that predate the status-surface fields: absent `awaiting_permission`
+    /// and `last_activity` fall back to defaults rather than failing.
+    #[test]
+    fn agent_session_info_defaults_missing_status_fields() {
+        let old_wire = r#"{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "session_name": "s",
+            "working_directory": "/w",
+            "agent_type": "claude",
+            "status": "active",
+            "hostname": "h"
+        }"#;
+        let parsed: AgentSessionInfo = serde_json::from_str(old_wire).unwrap();
+        assert!(!parsed.awaiting_permission);
+        assert!(parsed.last_activity.is_empty());
+    }
 }
