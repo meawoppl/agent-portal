@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:text="Agent Portal"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_summary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:text="No active sessions"
+        android:textColor="#BDC1C6"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:id="@+id/widget_row_1"
+        style="@style/AgentPortalWidgetRow">
+
+        <TextView
+            android:id="@+id/widget_row_1_name"
+            style="@style/AgentPortalWidgetName" />
+
+        <TextView
+            android:id="@+id/widget_row_1_state"
+            style="@style/AgentPortalWidgetState" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_2"
+        style="@style/AgentPortalWidgetRow">
+
+        <TextView
+            android:id="@+id/widget_row_2_name"
+            style="@style/AgentPortalWidgetName" />
+
+        <TextView
+            android:id="@+id/widget_row_2_state"
+            style="@style/AgentPortalWidgetState" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_3"
+        style="@style/AgentPortalWidgetRow">
+
+        <TextView
+            android:id="@+id/widget_row_3_name"
+            style="@style/AgentPortalWidgetName" />
+
+        <TextView
+            android:id="@+id/widget_row_3_state"
+            style="@style/AgentPortalWidgetState" />
+    </LinearLayout>
+</LinearLayout>

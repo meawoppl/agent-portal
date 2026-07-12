@@ -5,6 +5,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application>
+        <receiver
+            android:name=".StatusWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/agent_portal_status_widget" />
+        </receiver>
+
         <service
             android:name=".StatusNotificationService"
             android:exported="false"
