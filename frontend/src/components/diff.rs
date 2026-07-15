@@ -111,6 +111,90 @@ fn render_diff_html(lines: &[DiffLine<'_>]) -> Html {
     }
 }
 
+/// One file section parsed out of a multi-file `git diff` payload by
+/// [`split_git_diff`], ready to feed one `DiffCard`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GitDiffFile {
+    /// Display path (the post-image `b/…` path, which is also the pre-image
+    /// path for ordinary edits and deletions).
+    pub path: String,
+    /// `add` / `delete` / `update` — drives the `DiffCard` kind chip.
+    pub kind: String,
+    /// Hunk text from the first `@@` onward, fed to `DiffSource::Unified`.
+    /// Empty when the file has no textual hunks (binary, or a pure
+    /// rename/mode change) — the card then shows just the header.
+    pub hunks: String,
+}
+
+/// Split a raw `git diff` payload into per-file sections. Each section begins
+/// at a `diff --git a/… b/…` line. The `index`/`mode`/`---`/`+++` preamble is
+/// dropped (only the path, a change kind, and the hunk bodies are kept) so the
+/// UI can render one clean `DiffCard` per file.
+pub fn split_git_diff(diff: &str) -> Vec<GitDiffFile> {
+    let mut files: Vec<GitDiffFile> = Vec::new();
+    let mut path = String::new();
+    let mut kind = "update".to_string();
+    let mut hunks = String::new();
+    let mut in_file = false;
+    let mut in_hunks = false;
+
+    // Push the section we've been accumulating, if any.
+    let flush = |files: &mut Vec<GitDiffFile>, path: &str, kind: &str, hunks: &str| {
+        if !path.is_empty() {
+            files.push(GitDiffFile {
+                path: path.to_string(),
+                kind: kind.to_string(),
+                hunks: hunks.to_string(),
+            });
+        }
+    };
+
+    for line in diff.lines() {
+        if let Some(header) = line.strip_prefix("diff --git ") {
+            flush(&mut files, &path, &kind, &hunks);
+            path = parse_git_header_path(header);
+            kind = "update".to_string();
+            hunks = String::new();
+            in_file = true;
+            in_hunks = false;
+            continue;
+        }
+        if !in_file {
+            continue;
+        }
+        if line.starts_with("new file mode") {
+            kind = "add".to_string();
+        } else if line.starts_with("deleted file mode") {
+            kind = "delete".to_string();
+        }
+        if line.starts_with("@@ ") {
+            in_hunks = true;
+        }
+        if in_hunks {
+            hunks.push_str(line);
+            hunks.push('\n');
+        }
+    }
+    flush(&mut files, &path, &kind, &hunks);
+    files
+}
+
+/// Extract the display path from a `diff --git a/<path> b/<path>` header body
+/// (the part after `diff --git `). Prefers the post-image `b/` path (correct
+/// for renames); falls back to the raw header when the shape is unexpected.
+fn parse_git_header_path(header: &str) -> String {
+    if let Some(idx) = header.rfind(" b/") {
+        return header[idx + 3..].to_string();
+    }
+    header
+        .strip_prefix("a/")
+        .unwrap_or(header)
+        .split(" b/")
+        .next()
+        .unwrap_or(header)
+        .to_string()
+}
+
 /// Best-effort parse of a unified-diff payload. Skips file headers
 /// (`--- `, `+++ `), hunk headers (`@@ `), and the `\ No newline at end of file`
 /// marker. Body lines are classified by their leading character; lines without
@@ -286,6 +370,61 @@ mod tests {
         let diff = "@@ -1 +1 @@\n-old\n+new\n";
         let parsed = parse_unified_diff(diff);
         assert_eq!(classify(&parsed), vec![("rem", "old"), ("add", "new"),]);
+    }
+
+    #[test]
+    fn split_git_diff_multiple_files_with_kinds() {
+        let diff = "diff --git a/src/foo.rs b/src/foo.rs\n\
+index 111..222 100644\n\
+--- a/src/foo.rs\n\
++++ b/src/foo.rs\n\
+@@ -1,2 +1,2 @@\n a\n-b\n+B\n\
+diff --git a/new.txt b/new.txt\n\
+new file mode 100644\n\
+index 0000000..333\n\
+--- /dev/null\n\
++++ b/new.txt\n\
+@@ -0,0 +1 @@\n+hello\n\
+diff --git a/gone.txt b/gone.txt\n\
+deleted file mode 100644\n\
+index 444..0000000\n\
+--- a/gone.txt\n\
++++ /dev/null\n\
+@@ -1 +0,0 @@\n-bye\n";
+        let files = split_git_diff(diff);
+        assert_eq!(files.len(), 3);
+
+        assert_eq!(files[0].path, "src/foo.rs");
+        assert_eq!(files[0].kind, "update");
+        assert!(files[0].hunks.starts_with("@@ -1,2 +1,2 @@"));
+        // Preamble (index / ---/+++) must be excluded from the hunk body.
+        assert!(!files[0].hunks.contains("index 111"));
+
+        assert_eq!(files[1].path, "new.txt");
+        assert_eq!(files[1].kind, "add");
+        assert!(files[1].hunks.contains("+hello"));
+
+        assert_eq!(files[2].path, "gone.txt");
+        assert_eq!(files[2].kind, "delete");
+        assert!(files[2].hunks.contains("-bye"));
+    }
+
+    #[test]
+    fn split_git_diff_binary_file_has_empty_hunks() {
+        let diff = "diff --git a/img.png b/img.png\n\
+new file mode 100644\n\
+index 0000000..555\n\
+Binary files /dev/null and b/img.png differ\n";
+        let files = split_git_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "img.png");
+        assert_eq!(files[0].kind, "add");
+        assert!(files[0].hunks.is_empty());
+    }
+
+    #[test]
+    fn split_git_diff_empty_input() {
+        assert!(split_git_diff("").is_empty());
     }
 
     #[test]

@@ -158,6 +158,11 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/sessions/{id}/resume",
             post(handlers::sessions::resume_session),
         )
+        // On-demand diff of the session's working directory (#1329)
+        .route(
+            "/api/sessions/{id}/diff",
+            get(handlers::sessions::get_session_diff),
+        )
         // Session member management routes
         .route(
             "/api/sessions/{id}/members",

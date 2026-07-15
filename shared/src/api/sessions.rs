@@ -73,6 +73,31 @@ pub struct SessionMembersResponse {
     pub members: Vec<SessionMemberInfo>,
 }
 
+/// Response from `GET /api/sessions/:id/diff`.
+///
+/// The on-demand diff viewer (#1329): the backend runs `git diff HEAD` in the
+/// session's `working_directory` **on the backend host** and returns the raw
+/// unified diff. The frontend splits it into per-file cards for display.
+///
+/// v1 scope: this reflects the backend host's view of the path, so it works
+/// for co-located / single-host deployments (and `--dev-mode`). When the
+/// working directory lives on a remote proxy host that path won't exist on the
+/// backend, so `is_git_repo` is `false` and `diff` is empty — the UI shows a
+/// hint rather than a spurious empty diff.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SessionDiffResponse {
+    /// The working directory the diff was computed in.
+    pub working_directory: String,
+    /// Whether `working_directory` is a git work tree on the backend host.
+    /// When `false`, `diff` is empty.
+    #[serde(default)]
+    pub is_git_repo: bool,
+    /// Raw unified diff of `git diff HEAD` (empty when there are no changes,
+    /// or when `is_git_repo` is `false`). Untracked files are not included.
+    #[serde(default)]
+    pub diff: String,
+}
+
 /// Response envelope for listing messages.
 ///
 /// Generic over the message element type because the two sides project the

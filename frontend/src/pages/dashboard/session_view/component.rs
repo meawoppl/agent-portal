@@ -11,6 +11,7 @@
 use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroupRenderer,
+    SessionDiffPanel,
 };
 use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
@@ -98,8 +99,19 @@ fn optimistic_user_message(
     )
 }
 
+/// Which view the session pane is currently showing. `Conversation` is the
+/// normal transcript; `Diff` swaps in the on-demand working-directory
+/// `git diff` panel (#1329).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionTab {
+    Conversation,
+    Diff,
+}
+
 /// Messages for the SessionView component
 pub enum SessionViewMsg {
+    /// Switch the session pane between the conversation and diff tabs.
+    SetTab(SessionTab),
     LoadHistory(Vec<MessageData>, Option<String>),
     ReceivedOutput(RenderedMessage),
     WebSocketConnected(WsSender),
@@ -250,6 +262,8 @@ pub struct SessionView {
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
+    /// Which tab the pane is showing (conversation vs. working-dir diff).
+    active_tab: SessionTab,
 }
 
 impl Component for SessionView {
@@ -326,6 +340,7 @@ impl Component for SessionView {
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
             forwards_refresh: 0,
+            active_tab: SessionTab::Conversation,
         }
     }
 
@@ -373,6 +388,13 @@ impl Component for SessionView {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
+            SessionViewMsg::SetTab(tab) => {
+                if self.active_tab == tab {
+                    return false;
+                }
+                self.active_tab = tab;
+                true
+            }
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
             SessionViewMsg::LoadHistory(messages, last_timestamp) => {
                 self.handle_load_history(ctx, messages, last_timestamp);
@@ -634,31 +656,60 @@ impl Component for SessionView {
                     />
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
                 </div>
-                <div class="session-view-scroll-area">
-                    <div class="session-view-messages" ref={self.messages_ref.clone()}>
-                        {
-                            groups.into_iter().enumerate().map(|(i, group)| {
-                                let key = group.key(i);
-                                let metrics = group_metrics.get(i).cloned().flatten();
-                                let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
-                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
-                            }).collect::<Html>()
-                        }
-                        { for self.pending_sends.iter().enumerate().map(|(i, message)| {
-                            html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
-                        })}
-                    </div>
-                    if !is_tailing {
-                        <button
-                            class="jump-to-live-pill"
-                            onclick={on_jump_to_live}
-                            title="Resume live tailing of new messages"
-                        >
-                            { "Jump to live ↓" }
-                        </button>
-                    }
-                    { self.render_tasks_panel(ctx) }
+                <div class="session-view-tabs" role="tablist">
+                    <button
+                        type="button"
+                        role="tab"
+                        class={classes!("session-view-tab", (self.active_tab == SessionTab::Conversation).then_some("active"))}
+                        aria-selected={(self.active_tab == SessionTab::Conversation).to_string()}
+                        onclick={link.callback(|_| SessionViewMsg::SetTab(SessionTab::Conversation))}
+                    >
+                        { "Conversation" }
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        class={classes!("session-view-tab", (self.active_tab == SessionTab::Diff).then_some("active"))}
+                        aria-selected={(self.active_tab == SessionTab::Diff).to_string()}
+                        onclick={link.callback(|_| SessionViewMsg::SetTab(SessionTab::Diff))}
+                    >
+                        { "Diff" }
+                    </button>
                 </div>
+                if self.active_tab == SessionTab::Diff {
+                    <div class="session-view-scroll-area">
+                        <SessionDiffPanel
+                            session_id={ctx.props().session.id}
+                            working_directory={ctx.props().session.working_directory.clone()}
+                        />
+                    </div>
+                } else {
+                    <div class="session-view-scroll-area">
+                        <div class="session-view-messages" ref={self.messages_ref.clone()}>
+                            {
+                                groups.into_iter().enumerate().map(|(i, group)| {
+                                    let key = group.key(i);
+                                    let metrics = group_metrics.get(i).cloned().flatten();
+                                    let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
+                                    html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                }).collect::<Html>()
+                            }
+                            { for self.pending_sends.iter().enumerate().map(|(i, message)| {
+                                html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                            })}
+                        </div>
+                        if !is_tailing {
+                            <button
+                                class="jump-to-live-pill"
+                                onclick={on_jump_to_live}
+                                title="Resume live tailing of new messages"
+                            >
+                                { "Jump to live ↓" }
+                            </button>
+                        }
+                        { self.render_tasks_panel(ctx) }
+                    </div>
+                }
 
                 { self.render_permission_handler(ctx) }
                 { self.render_input_bar(ctx) }

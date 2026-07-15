@@ -423,3 +423,101 @@
 .jump-to-live-pill:active {
     transform: translateX(-50%) translateY(0);
 }
+
+/* ==========================================================================
+   Session view tabs — Conversation vs. working-dir Diff (#1329).
+   ========================================================================== */
+
+.session-view-tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0 1.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid var(--border);
+}
+
+.session-view-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.session-view-tab:hover {
+    color: var(--text-primary);
+}
+
+.session-view-tab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+}
+
+/* --- On-demand working-directory diff panel (#1329) --- */
+
+.session-diff-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.session-diff-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.5rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.session-diff-path {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.session-diff-refresh {
+    flex-shrink: 0;
+    background: rgba(122, 162, 247, 0.08);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    padding: 0.25rem 0.6rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.session-diff-refresh:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.18);
+}
+
+.session-diff-refresh:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.session-diff-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.75rem 1.5rem 1rem;
+}
+
+.session-diff-message {
+    padding: 1.5rem 0.5rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.session-diff-message.error {
+    color: var(--error);
+}

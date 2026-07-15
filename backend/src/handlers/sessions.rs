@@ -5,8 +5,8 @@ use axum::{
 use diesel::prelude::*;
 use serde::Serialize;
 use shared::api::{
-    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse, SessionMemberInfo,
-    SessionMembersResponse, UpdateMemberRoleRequest,
+    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse, SessionDiffResponse,
+    SessionMemberInfo, SessionMembersResponse, UpdateMemberRoleRequest,
 };
 use shared::SessionStatus;
 use std::sync::Arc;
@@ -171,6 +171,97 @@ pub async fn get_session(
         session,
         recent_messages,
     }))
+}
+
+/// On-demand diff viewer (#1329): return the unified diff of the session's
+/// working directory.
+///
+/// Runs `git diff HEAD` in the session's `working_directory` **on the backend
+/// host** and returns the raw unified diff. Any session member (viewer role
+/// included) may view it — the diff is read-only.
+///
+/// v1 scoping: the diff reflects the backend host's filesystem. This is the
+/// clean, self-contained slice — it covers co-located / single-host
+/// deployments and `--dev-mode`. When the working directory lives on a remote
+/// proxy host the path is absent on the backend, so we return
+/// `is_git_repo: false` with an empty diff (the UI surfaces a hint) rather
+/// than a misleading empty result. Routing the command through the proxy's
+/// WebSocket for distributed hosts is a follow-up (would need a new
+/// request/response protocol pair; out of scope for v1).
+pub async fn get_session_diff(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(current_user_id): CurrentUserId,
+    Path(session_id): Path<Uuid>,
+) -> Result<Json<SessionDiffResponse>, AppError> {
+    // Scope the pooled connection so it's released before the (potentially
+    // slow) git subprocess runs — never hold a DB connection across an await.
+    let working_directory = {
+        let mut conn = app_state.conn()?;
+        crate::handlers::session_access::verify_session_reader(
+            &mut conn,
+            session_id,
+            current_user_id,
+        )?
+        .working_directory
+    };
+
+    let (is_git_repo, diff) = compute_working_dir_diff(&working_directory).await;
+    if !is_git_repo {
+        tracing::info!(
+            "diff requested for session {} but {:?} is not a git work tree on this host",
+            session_id,
+            working_directory
+        );
+    }
+
+    Ok(Json(SessionDiffResponse {
+        working_directory,
+        is_git_repo,
+        diff,
+    }))
+}
+
+/// Run `git diff HEAD` in `dir` on the backend host, returning
+/// `(is_git_repo, diff_text)`. `is_git_repo` is `false` when the path is
+/// missing on this host or is not a git work tree (see the v1 scoping note on
+/// [`get_session_diff`]).
+async fn compute_working_dir_diff(dir: &str) -> (bool, String) {
+    // Confirm the path is a git work tree on this host first. This also
+    // gracefully handles the remote-proxy case: a missing directory makes the
+    // spawn fail, which we treat as "not a repo" rather than an error.
+    let inside = tokio::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(dir)
+        .output()
+        .await;
+    let is_repo = matches!(&inside, Ok(o) if o.status.success());
+    if !is_repo {
+        return (false, String::new());
+    }
+
+    // Prefer `git diff HEAD` (staged + unstaged tracked changes vs the last
+    // commit — the fullest picture of what the agent changed). Fall back to a
+    // plain `git diff` when HEAD is unborn (a fresh repo with no commits).
+    let diff = match run_git_diff(dir, &["diff", "HEAD"]).await {
+        Some(text) => text,
+        None => run_git_diff(dir, &["diff"]).await.unwrap_or_default(),
+    };
+    (true, diff)
+}
+
+/// Run `git <args>` in `dir` and return stdout as a `String`, or `None` when
+/// the command fails to spawn, exits non-zero, or emits non-UTF-8 output.
+async fn run_git_diff(dir: &str, args: &[&str]) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
 }
 
 pub async fn delete_session(
