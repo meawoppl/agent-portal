@@ -360,6 +360,15 @@ impl Component for InputBar {
                 let textarea: HtmlTextAreaElement = e.target_unchecked_into();
                 match vim::handle_key(&mut vim.borrow_mut(), &textarea, &e) {
                     vim::VimHandled::Consumed { rerender } => {
+                        // Stop the event from bubbling to the dashboard's
+                        // `use_keyboard_nav` hook. Without this, keys vim owns
+                        // (Esc → NORMAL, and motions like w/j/k/x/i) also reach
+                        // the nav hook: Esc would flip the dashboard into Nav
+                        // mode and `w` would jump to the next waiting session
+                        // instead of moving a word. It also prevents a vim
+                        // user's repeated Esc from firing the triple-Esc
+                        // session interrupt.
+                        e.stop_propagation();
                         return if rerender {
                             InputBarMsg::VimSync
                         } else {
