@@ -1,5 +1,5 @@
 use serde_json::Value;
-use shared::{EditInput, WriteInput};
+use shared::{EditInput, MultiEditInput, WriteInput};
 use yew::prelude::*;
 
 use crate::components::diff::{DiffCard, DiffSource};
@@ -26,6 +26,37 @@ pub fn render_edit_tool(input: &Value) -> Html {
             file_path={AttrValue::from(edit.file_path)}
             {replace_all}
         />
+    }
+}
+
+pub fn render_multiedit_tool(input: &Value) -> Html {
+    let multi = extract_tool_input::<MultiEditInput>(input).unwrap_or(MultiEditInput {
+        file_path: "unknown file".to_string(),
+        edits: Vec::new(),
+    });
+    let file_path = AttrValue::from(multi.file_path);
+    let edit_count = multi.edits.len();
+
+    html! {
+        <div class="tool-use multiedit-tool">
+            <div class="tool-use-header">
+                <span class="tool-icon">{ "\u{270f}\u{fe0f}" }</span>
+                <span class="tool-name">{ "MultiEdit" }</span>
+                <span class="edit-file-path">{ &file_path }</span>
+                <span class="tool-meta">
+                    { format!("({} edit{})", edit_count, if edit_count == 1 { "" } else { "s" }) }
+                </span>
+            </div>
+            {
+                multi.edits.into_iter().map(|edit| {
+                    let source = DiffSource::OldNew {
+                        old: edit.old_string,
+                        new: edit.new_string,
+                    };
+                    html! { <DiffCard {source} /> }
+                }).collect::<Html>()
+            }
+        </div>
     }
 }
 
