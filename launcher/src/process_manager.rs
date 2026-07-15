@@ -390,6 +390,37 @@ async fn run_session_task(
                 // gap is the only signal — it did register, so the launch
                 // "succeeded"). A healthy run resets the backoff counter.
                 if alive < CRASH_LOOP_THRESHOLD {
+                    // A *resume* that dies this fast is almost always a wiped
+                    // transcript: `claude --resume <id>` prints "No conversation
+                    // found" and exits ~immediately, which surfaces here as a
+                    // clean NormalExit (not SessionNotFound). The pre-flight
+                    // guard only catches that when the project dir exists
+                    // (TranscriptStatus::Missing); when the whole project dir is
+                    // absent it returns Unknown and lets the spawn through — so
+                    // reconcile would relaunch the same doomed --resume forever.
+                    // Break the loop by rotating to a fresh session once. Skip
+                    // the rotation only when the transcript is confirmed Present:
+                    // then the early exit is some other fault, and discarding the
+                    // resume would needlessly lose conversation continuity.
+                    if config.resume
+                        && config.agent_type == shared::AgentType::Claude
+                        && claude_transcript_status(
+                            std::path::Path::new(&config.working_directory),
+                            config.session_id,
+                        ) != TranscriptStatus::Present
+                    {
+                        let old_id = config.session_id;
+                        let new_id = Uuid::new_v4();
+                        warn!(
+                            "Session {} exited after only {:.1?} on resume with no confirmed \
+                             transcript — rotating to fresh session {} instead of crash-looping",
+                            old_id, alive, new_id
+                        );
+                        config.session_id = new_id;
+                        config.resume = false;
+                        config.replaces_session_id = Some(old_id);
+                        continue;
+                    }
                     warn!(
                         "Session {} exited normally after only {:.1?} — likely crash loop, \
                          reporting CrashedEarly so reconcile backs off",
