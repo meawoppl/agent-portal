@@ -371,11 +371,18 @@ fn archive_one_session(
 /// sweep, this deliberately ignores idle/status eligibility — an ACTIVE
 /// long-running session gets its history captured before it's trimmed,
 /// and merge-on-rearchive folds later messages in.
+///
+/// Returns the set of session ids whose archive attempt FAILED this cycle.
+/// Archive-first is the invariant: the caller holds the trim for these
+/// sessions (excludes them from both delete paths) so an archive outage that
+/// coincides with a retention cycle can never lose the unarchived delta — the
+/// trim is retried next cycle once the archive succeeds. Sessions with a
+/// fresh/successful archive are absent from the set and trim normally.
 fn archive_retention_candidates(
     conn: &mut diesel::PgConnection,
     runtime: &crate::archive::ArchiveRuntime,
     config: &handlers::retention::RetentionConfig,
-) {
+) -> std::collections::HashSet<uuid::Uuid> {
     use diesel::dsl::count_star;
     use diesel::prelude::*;
     use schema::{messages, sessions};
@@ -407,7 +414,7 @@ fn archive_retention_candidates(
     }
 
     if affected.is_empty() {
-        return;
+        return std::collections::HashSet::new();
     }
 
     let candidates: Vec<models::Session> = match sessions::table
@@ -417,14 +424,19 @@ fn archive_retention_candidates(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to load retention-candidate sessions: {e}");
-            return;
+            // Could not confirm any archive this cycle: hold every candidate
+            // rather than risk trimming an unarchived session.
+            return affected;
         }
     };
 
     let mut archived = 0;
+    let mut failed: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
     for session in &candidates {
         if ensure_session_archived(conn, runtime, session) {
             archived += 1;
+        } else {
+            failed.insert(session.id);
         }
     }
     if archived > 0 {
@@ -434,6 +446,7 @@ fn archive_retention_candidates(
             candidates.len()
         );
     }
+    failed
 }
 
 /// Archive `session` if its archive is missing or stale, updating
@@ -615,15 +628,31 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
     );
 
     // #1258 phase 2: capture messages into the archive BEFORE the trim
-    // deletes them from the hot DB. Sessions whose archive attempt fails
-    // still get trimmed (best-effort with an explicit recorded failure) —
-    // the merge-on-rearchive semantics mean anything captured earlier is
-    // never lost, only the failed delta.
-    if let Some(runtime) = &app_state.archive {
-        archive_retention_candidates(&mut conn, runtime, &config);
+    // deletes them from the hot DB. Archive-first is the invariant — a
+    // session whose pre-trim archive FAILS this cycle has its trim HELD
+    // (excluded from both delete paths below) and retried next cycle, so an
+    // archive outage that coincides with a retention cycle never loses the
+    // unarchived delta. Trade-off: the hot DB keeps growing for those
+    // sessions until the archive recovers, which is the correct failure mode
+    // (data preserved over a bounded space cost). This mirrors the held
+    // semantics of run_session_age_cleanup. When archiving is DISABLED the
+    // held set is empty and trims run exactly as before — running retention
+    // without an archive is the operator's explicit choice.
+    let held_ids: std::collections::HashSet<uuid::Uuid> = match &app_state.archive {
+        Some(runtime) => archive_retention_candidates(&mut conn, runtime, &config),
+        None => std::collections::HashSet::new(),
+    };
+    if !held_ids.is_empty() {
+        // Stable marker aligned with SESSION_ARCHIVE_FAILED: alert on this to
+        // catch an archive outage that is silently blocking retention.
+        tracing::warn!(
+            "RETENTION_TRIM_HELD {} sessions pending archive",
+            held_ids.len()
+        );
     }
 
-    let (age_deleted, count_deleted) = run_retention_cleanup(&mut conn, session_ids, config);
+    let (age_deleted, count_deleted) =
+        run_retention_cleanup(&mut conn, session_ids, config, &held_ids);
 
     if age_deleted > 0 || count_deleted > 0 {
         tracing::info!(
