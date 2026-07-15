@@ -141,6 +141,13 @@ impl VimState {
         self.count = None;
     }
 
+    /// Whether a multi-key command is mid-flight (operator/text-object/`r`/`g`
+    /// or a count prefix). Used so `Esc` cancels a half-typed command before it
+    /// falls through to "leave the input for dashboard Nav mode".
+    fn has_pending(&self) -> bool {
+        !matches!(self.pending, Pending::None) || self.count.is_some()
+    }
+
     /// Consume the pending count, defaulting to 1.
     fn take_count(&mut self) -> usize {
         self.count.take().unwrap_or(1).max(1)
@@ -398,11 +405,26 @@ fn handle_normal(
         }
 
         "Escape" => {
-            // Already NORMAL — clear any half-typed operator / count.
-            state.clear_pending();
-            place_block(textarea, &text, cursor);
-            event.prevent_default();
-            VimHandled::Consumed { rerender: false }
+            if state.has_pending() {
+                // A command is half-typed (`d`, `2`, `di`, `r`, `g`…) — `Esc`
+                // cancels it and stays in NORMAL, like real vim.
+                state.clear_pending();
+                place_block(textarea, &text, cursor);
+                event.prevent_default();
+                VimHandled::Consumed { rerender: false }
+            } else {
+                // Clean NORMAL: a second `Esc` drops out of the input into the
+                // dashboard's keyboard-nav (Nav mode). Blur so subsequent nav
+                // keys reach the nav hook instead of vim, and Passthrough (no
+                // `stop_propagation` in the caller) so this Esc bubbles up and
+                // flips Nav mode on. First Esc (INSERT→NORMAL) is still
+                // consumed, so it takes two presses to leave — matching the
+                // "double-Esc = Nav mode" contract.
+                state.clear_pending();
+                let html_el: &web_sys::HtmlElement = textarea.as_ref();
+                let _ = html_el.blur();
+                VimHandled::Passthrough
+            }
         }
         _ => {
             // Swallow any other single printable character so stray letters
