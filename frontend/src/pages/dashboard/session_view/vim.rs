@@ -1646,8 +1646,10 @@ mod tests {
 
     #[test]
     fn count_accumulation_via_take() {
-        let mut st = VimState::default();
-        st.count = Some(2);
+        let mut st = VimState {
+            count: Some(2),
+            ..Default::default()
+        };
         assert_eq!(st.take_count(), 2);
         assert_eq!(st.take_count(), 1); // default after clear
     }
