@@ -22,6 +22,32 @@
     margin-right: -0.35rem;
 }
 
+/* Vim mode indicator — small NORMAL/INSERT badge beside the prompt. */
+.session-view-input .vim-mode-indicator {
+    align-self: flex-end;
+    margin-bottom: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-family: var(--font-mono, monospace);
+    line-height: 1.4;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.session-view-input .vim-mode-indicator.normal {
+    color: var(--bg-darker);
+    background: var(--accent);
+}
+
+.session-view-input .vim-mode-indicator.insert {
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+}
+
 .session-view-input .message-input {
     flex: 1;
     background: rgba(0, 0, 0, 0.3);
@@ -42,6 +68,21 @@
 
 .session-view-input .message-input:focus {
     border-color: var(--accent);
+}
+
+/* Vim NORMAL-mode block cursor. vim.rs keeps a one-character selection at the
+   cursor, painted below as a solid vim-style block. caret-color is the accent
+   (not transparent): browsers hide the blinking caret while a selection is
+   non-empty, so the caret only appears when the selection collapses
+   (end-of-line / empty input) — keeping the cursor visible everywhere without
+   double-rendering a caret next to the block. */
+.session-view-input .message-input.vim-normal {
+    caret-color: var(--accent);
+}
+
+.session-view-input .message-input.vim-normal::selection {
+    background: var(--accent);
+    color: var(--bg-darker);
 }
 
 .session-view-input .message-input:disabled {
