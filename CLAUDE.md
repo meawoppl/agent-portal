@@ -410,6 +410,32 @@ trunk serve  # Auto-reload on changes
 cargo run -p claude-portal -- --backend-url ws://localhost:3000
 ```
 
+### Viewing the dev UI: prefer `localhost` over port-forwarding
+
+When your agent session runs on the **same machine as the user** (the usual case
+for local dev), have the user open `http://localhost:<PORT>/` in their browser
+**directly**. Do **not** reach for `agent-portal forward` in this case.
+
+Port-forwarding tunnels the local service over the session WebSocket and exists
+for the case where the agent runs on a **different** machine than the user (a
+remote/cloud dev box, where there is no shared `localhost`). It is a
+beta-status feature (see [docs/PORT_FORWARDING.md](docs/PORT_FORWARDING.md)) and
+adds a fragile hop: if the session WebSocket blips — which is easy to trigger
+with heavy CPU (cold Rust builds) or by restarting the backend — the browser
+gets "nothing listening on the forwarded port". Using it on a same-machine
+setup adds that flakiness for zero benefit.
+
+Rule of thumb:
+
+| Where is the agent running? | How the user views the dev server |
+|---|---|
+| On the user's own machine | `http://localhost:<PORT>/` **directly** — no forward |
+| On a remote/different machine | `agent-portal forward <PORT>` (or an SSH tunnel) |
+
+Note the backend binds `HOST` (default `0.0.0.0`, IPv4). If a forwarder resolves
+`localhost` to IPv6 `::1`, it can intermittently miss the backend; bind
+`HOST=::` for dual-stack when a forward must reach it.
+
 ### GitHub CI / Waiting for Checks
 
 **NEVER use `sleep` to wait for CI checks.** Instead, use `gh pr checks --watch` to wait for GitHub Actions workflows:
