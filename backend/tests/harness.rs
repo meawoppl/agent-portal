@@ -312,6 +312,167 @@ async fn archive_sweep_persists_and_is_idempotent() {
         .ok();
 }
 
+/// Build a minimal `AppState` wired to the shared test pool, with the given
+/// archive runtime and a 1-day age-retention window. Used by the held-trim
+/// test to drive `background::run_retention_cleanup` directly.
+fn retention_test_state(archive: Option<Arc<backend::archive::ArchiveRuntime>>) -> Arc<AppState> {
+    let mut config = ServerConfig::from_env(true).expect("parse server config");
+    // A short age window so backdated messages are trim-eligible; a high
+    // per-session cap so only the age path (not truncation) is exercised.
+    config.message_retention_days = 1;
+    config.message_retention_count = 100_000;
+    let oauth = backend::config::build_google_oauth_client(true).expect("oauth client");
+    Arc::new(AppState {
+        dev_mode: true,
+        db_pool: test_pool(),
+        session_manager: SessionManager::new(),
+        oauth_basic_client: oauth,
+        device_flow_store: Some(DeviceFlowStore::default()),
+        public_url: config.public_url,
+        cookie_key: config.cookie_key,
+        jwt_secret: config.jwt_secret,
+        app_title: config.app_title,
+        splash_text: config.splash_text,
+        allowed_email_domain: config.allowed_email_domain,
+        allowed_emails: config.allowed_emails,
+        message_retention_count: config.message_retention_count,
+        message_retention_days: config.message_retention_days,
+        session_max_age_days: config.session_max_age_days,
+        max_image_mb: config.max_image_mb,
+        image_store: ImageStore::new(config.image_store_max_bytes, config.image_store_ttl),
+        forward_domain: config.forward_domain,
+        archive,
+        notifications: backend::push::channel().0,
+        vapid_public_key: config.vapid_public_key,
+        mobile_app_links: config.mobile_app_links,
+    })
+}
+
+/// #1258 phase 2: retention holds the message trim for a session whose
+/// pre-trim archive FAILED this cycle (archive-first invariant, matching
+/// `run_session_age_cleanup`). A cycle with a broken archive must leave the
+/// old messages in place; a later cycle with a working archive trims them.
+#[tokio::test]
+async fn retention_holds_trim_when_archive_fails() {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    }
+    // No ARCHIVE_DB_LOCK: this test is self-isolating. Its 1-day age window
+    // excludes every other test's freshly-inserted rows, and its own session
+    // keeps a fresh `last_activity` so the idle-only global sweeps in the
+    // other archive tests never touch it. Holding the std lock across the
+    // `await`s below would trip `clippy::await_holding_lock`.
+    use backend::archive::{ArchiveBackendConfig, ArchiveConfig, ArchiveRuntime};
+    use backend::models::{NewMessage, NewSessionWithId};
+    use backend::schema::{messages, sessions};
+    use diesel::prelude::*;
+
+    let pool = test_pool();
+    let mut conn = pool.get().expect("conn");
+    let user_id: uuid::Uuid = backend::schema::users::table
+        .select(backend::schema::users::id)
+        .order(backend::schema::users::created_at.asc())
+        .first(&mut conn)
+        .expect("seeded user");
+
+    let session_id = uuid::Uuid::new_v4();
+    diesel::insert_into(sessions::table)
+        .values(&NewSessionWithId {
+            id: session_id,
+            user_id,
+            session_name: "held-trim-harness".to_string(),
+            session_key: session_id.to_string(),
+            working_directory: "/tmp/held-trim-harness".to_string(),
+            status: shared::SessionStatus::Disconnected.as_str().to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "harness".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(vec![]),
+        })
+        .execute(&mut conn)
+        .expect("insert session");
+
+    // Two messages, backdated well past the 1-day age window so the age path
+    // would delete them if the trim were not held.
+    let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(3);
+    for text in ["first", "second"] {
+        diesel::insert_into(messages::table)
+            .values(&NewMessage {
+                session_id,
+                role: "user".to_string(),
+                content: format!(r#"{{"text":"{text}"}}"#),
+                user_id,
+                agent_type: "claude".to_string(),
+                provenance_kind: None,
+                provenance_session_id: None,
+                provenance_agent_type: None,
+            })
+            .execute(&mut conn)
+            .expect("insert message");
+    }
+    diesel::update(messages::table.filter(messages::session_id.eq(session_id)))
+        .set(messages::created_at.eq(old))
+        .execute(&mut conn)
+        .expect("backdate messages");
+
+    let count = |conn: &mut diesel::PgConnection| -> i64 {
+        messages::table
+            .filter(messages::session_id.eq(session_id))
+            .count()
+            .get_result(conn)
+            .expect("count")
+    };
+    assert_eq!(count(&mut conn), 2, "precondition: two old messages");
+
+    // Cycle 1: archive backend is UNWRITABLE — root points at a plain file, so
+    // `create_dir_all` (and thus every put) fails. The session's archive fails,
+    // its id lands in the held set, and its old messages must survive.
+    let bad_root = tempfile::NamedTempFile::new().expect("temp file");
+    let broken = ArchiveRuntime::new(ArchiveConfig {
+        backend: ArchiveBackendConfig::Local {
+            root: bad_root.path().to_path_buf(),
+        },
+        transcripts: true,
+    })
+    .expect("runtime (construction succeeds; writes fail)");
+    backend::background::run_retention_cleanup(retention_test_state(Some(Arc::new(broken)))).await;
+    assert_eq!(
+        count(&mut conn),
+        2,
+        "archive failed → trim held, messages preserved"
+    );
+
+    // Cycle 2: a working archive. The session archives, then the age trim
+    // deletes the now-safely-captured old messages.
+    let good_root = tempfile::tempdir().expect("tempdir");
+    let working = ArchiveRuntime::new(ArchiveConfig {
+        backend: ArchiveBackendConfig::Local {
+            root: good_root.path().to_path_buf(),
+        },
+        transcripts: true,
+    })
+    .expect("working runtime");
+    backend::background::run_retention_cleanup(retention_test_state(Some(Arc::new(working)))).await;
+    assert_eq!(
+        count(&mut conn),
+        0,
+        "archive succeeded → age trim removes old messages"
+    );
+
+    diesel::delete(messages::table.filter(messages::session_id.eq(session_id)))
+        .execute(&mut conn)
+        .ok();
+    diesel::delete(sessions::table.find(session_id))
+        .execute(&mut conn)
+        .ok();
+}
+
 /// #1258 phase 2: a re-archive after hot-DB messages were trimmed must
 /// MERGE with the archived transcript, never shrink it.
 #[tokio::test]

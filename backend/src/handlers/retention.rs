@@ -3,6 +3,7 @@
 use crate::schema::messages;
 use chrono::Utc;
 use diesel::prelude::*;
+use std::collections::HashSet;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -76,11 +77,19 @@ pub fn truncate_session_messages(
 }
 
 /// Delete messages older than the configured retention period, up to the per-cycle cap.
-/// Returns the number of deleted messages
+/// Returns the number of deleted messages.
+///
+/// `held_ids` names sessions whose pre-trim archive failed this cycle (#1258
+/// phase 2): their messages are excluded from the bulk delete so the
+/// unarchived delta survives to be retried next cycle. Archive-first is the
+/// invariant — retention never destroys the last copy. When the set is empty
+/// (the common case, and always when archiving is disabled) the query is
+/// unchanged and stays index-friendly on `created_at`.
 pub fn delete_old_messages(
     conn: &mut diesel::pg::PgConnection,
     config: RetentionConfig,
     budget: usize,
+    held_ids: &HashSet<Uuid>,
 ) -> Result<usize, diesel::result::Error> {
     if config.retention_days == 0 || budget == 0 {
         return Ok(0);
@@ -88,9 +97,17 @@ pub fn delete_old_messages(
 
     let cutoff = Utc::now().naive_utc() - chrono::Duration::days(config.retention_days as i64);
 
-    // Select IDs to delete, capped by remaining budget
-    let ids_to_delete: Vec<Uuid> = messages::table
+    // Select IDs to delete, capped by remaining budget. Boxed so we can add
+    // the held-session exclusion only when there is one (keeps the empty-set
+    // path identical to the pre-#1258 query plan).
+    let mut query = messages::table
         .filter(messages::created_at.lt(cutoff))
+        .into_boxed();
+    if !held_ids.is_empty() {
+        let held: Vec<Uuid> = held_ids.iter().copied().collect();
+        query = query.filter(messages::session_id.ne_all(held));
+    }
+    let ids_to_delete: Vec<Uuid> = query
         .order(messages::created_at.asc())
         .limit(budget as i64)
         .select(messages::id)
@@ -118,10 +135,17 @@ pub fn delete_old_messages(
 /// 2. Truncate per-session message counts
 ///
 /// Applies a 5-second statement timeout and caps total deletes at 1000 per cycle.
+///
+/// `held_ids` names sessions whose pre-trim archive failed this cycle (#1258
+/// phase 2). Both delete paths exclude them so no unarchived message is lost
+/// during an archive outage — the trim is held and retried next cycle. The
+/// set is always empty when archiving is disabled, in which case the trim
+/// runs exactly as before.
 pub fn run_retention_cleanup(
     conn: &mut diesel::pg::PgConnection,
     pending_session_ids: Vec<Uuid>,
     config: RetentionConfig,
+    held_ids: &HashSet<Uuid>,
 ) -> (usize, usize) {
     // Set a 5-second timeout for cleanup queries
     if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(conn) {
@@ -135,8 +159,8 @@ pub fn run_retention_cleanup(
     let mut age_deleted = 0;
     let mut count_deleted = 0;
 
-    // First, bulk delete old messages (up to budget)
-    match delete_old_messages(conn, config, budget) {
+    // First, bulk delete old messages (up to budget), skipping held sessions
+    match delete_old_messages(conn, config, budget, held_ids) {
         Ok(deleted) => {
             age_deleted = deleted;
             budget = budget.saturating_sub(deleted);
@@ -148,6 +172,10 @@ pub fn run_retention_cleanup(
     for session_id in pending_session_ids {
         if budget == 0 {
             break;
+        }
+        // Hold the trim for any session whose pre-trim archive failed.
+        if held_ids.contains(&session_id) {
+            continue;
         }
         match truncate_session_messages(conn, session_id, config, budget) {
             Ok(deleted) => {
