@@ -329,13 +329,9 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, req: &Request) -> Respons
     }
 
     let cookie_jwt = mint_token(app_state, AUD_COOKIE, session_id, COOKIE_TTL_SECS);
-    let secure = if app_state.public_url.starts_with("https://") {
-        "; Secure"
-    } else {
-        ""
-    };
+    let same_site = forward_cookie_same_site(app_state);
     let cookie = format!(
-        "{FWD_COOKIE}={cookie_jwt}; Path=/; Max-Age={COOKIE_TTL_SECS}; HttpOnly; SameSite=Lax{secure}"
+        "{FWD_COOKIE}={cookie_jwt}; Path=/; Max-Age={COOKIE_TTL_SECS}; HttpOnly; {same_site}"
     );
     let next = validate_next(query.next.as_deref().unwrap_or("/"));
 
@@ -350,14 +346,7 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, req: &Request) -> Respons
 /// user re-authenticates transparently while logged in); plain 401 for
 /// XHR/WS so API calls fail loudly instead of redirecting into HTML.
 fn unauthenticated_response(app_state: &AppState, session_id: Uuid, req: &Request) -> Response {
-    let is_navigation = req.method() == Method::GET
-        && (header_is(req.headers(), "sec-fetch-mode", "navigate")
-            || req
-                .headers()
-                .get(header::ACCEPT)
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|accept| accept.contains("text/html")));
-    if !is_navigation {
+    if !should_redirect_for_forward_auth(req.method(), req.headers()) {
         return plain_status(StatusCode::UNAUTHORIZED, "forward session expired");
     }
     let next = req
@@ -372,6 +361,43 @@ fn unauthenticated_response(app_state: &AppState, session_id: Uuid, req: &Reques
         urlencoding::encode(&validate_next(&next))
     );
     Redirect::temporary(&target).into_response()
+}
+
+fn forward_cookie_same_site(app_state: &AppState) -> &'static str {
+    if app_state.public_url.starts_with("https://") {
+        // Forward previews are commonly embedded in the portal UI on a
+        // different site from the forward domain. `SameSite=Lax` is not sent
+        // in that iframe/subresource context, so private forwards can loop
+        // through handoff auth and then immediately look expired. `None`
+        // requires `Secure`, hence the dev-mode fallback below.
+        "SameSite=None; Secure"
+    } else {
+        "SameSite=Lax"
+    }
+}
+
+fn should_redirect_for_forward_auth(method: &Method, headers: &HeaderMap) -> bool {
+    if !matches!(*method, Method::GET | Method::HEAD) || wants_upgrade(headers) {
+        return false;
+    }
+
+    if header_is(headers, "sec-fetch-mode", "navigate") {
+        return true;
+    }
+
+    if headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|accept| accept.contains("text/html"))
+    {
+        return true;
+    }
+
+    // Older browsers and plain diagnostic clients (curl, health probes) do
+    // not send Fetch Metadata. Treat safe, non-upgrade requests without that
+    // signal as navigation-like so an expired/missing forward cookie goes
+    // through the normal token handoff instead of surfacing a misleading 401.
+    !headers.contains_key("sec-fetch-mode")
 }
 
 fn header_is(headers: &HeaderMap, name: &str, value: &str) -> bool {
@@ -866,6 +892,39 @@ mod tests {
         split.append(header::CONNECTION, HeaderValue::from_static("Upgrade"));
         split.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
         assert!(wants_upgrade(&split));
+    }
+
+    #[test]
+    fn forward_auth_redirects_navigation_like_safe_requests() {
+        let mut h = HeaderMap::new();
+        h.insert("sec-fetch-mode", HeaderValue::from_static("navigate"));
+        assert!(should_redirect_for_forward_auth(&Method::GET, &h));
+
+        let mut h = HeaderMap::new();
+        h.insert(header::ACCEPT, HeaderValue::from_static("text/html,*/*"));
+        assert!(should_redirect_for_forward_auth(&Method::GET, &h));
+
+        // Curl/health probes usually do not send Fetch Metadata. They should
+        // see the same handoff redirect as a browser navigation, not a stale
+        // "forward session expired" 401.
+        let h = HeaderMap::new();
+        assert!(should_redirect_for_forward_auth(&Method::GET, &h));
+        assert!(should_redirect_for_forward_auth(&Method::HEAD, &h));
+    }
+
+    #[test]
+    fn forward_auth_does_not_redirect_xhr_posts_or_websocket_handshakes() {
+        let mut h = HeaderMap::new();
+        h.insert("sec-fetch-mode", HeaderValue::from_static("cors"));
+        assert!(!should_redirect_for_forward_auth(&Method::GET, &h));
+
+        let h = HeaderMap::new();
+        assert!(!should_redirect_for_forward_auth(&Method::POST, &h));
+
+        let mut h = HeaderMap::new();
+        h.insert(header::CONNECTION, HeaderValue::from_static("Upgrade"));
+        h.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+        assert!(!should_redirect_for_forward_auth(&Method::GET, &h));
     }
 
     #[test]
