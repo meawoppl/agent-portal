@@ -672,7 +672,14 @@ async fn resolve_auth_token(
             auth_token: result.access_token.clone(),
             user_email: Some(result.user_email),
             last_used: chrono::Utc::now().to_rfc3339(),
-            backend_url: None,
+            // Pin the resolved backend_url to the token we just minted. The
+            // two are only valid as a pair (a token authenticates against the
+            // server that issued it), and this per-directory URL is what the
+            // next run resolves before falling back to the default — so a
+            // `--backend-url wss://newhost` login must persist newhost here,
+            // otherwise the next plain run reconnects to the default host with
+            // a mismatched token.
+            backend_url: Some(backend_url.to_string()),
         },
     );
     config.atomic_save()?;

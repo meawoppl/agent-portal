@@ -314,8 +314,12 @@ async fn main() -> anyhow::Result<()> {
     if args.auth_token.is_none() && config.auth_token.is_none() && !args.dev {
         tracing::info!("No auth token found, starting device flow authentication");
         let result = portal_auth::device_flow_login(&backend_url, None).await?;
-        if let Err(e) = config::save_auth_token(&result.access_token) {
-            tracing::warn!("Failed to save auth token to config: {}", e);
+        // Persist the resolved backend_url alongside the token: the token is
+        // only valid against the server that minted it, so a plain restart or
+        // the installed service (no --backend-url on its command line) must
+        // reconnect to the same host.
+        if let Err(e) = config::save_credentials(&backend_url, &result.access_token) {
+            tracing::warn!("Failed to save credentials to config: {}", e);
         }
     }
     let launcher_name = args
@@ -364,9 +368,17 @@ async fn cmd_login(args: &Args) -> anyhow::Result<()> {
 
     println!("Authenticating with {}...", backend_url);
     let result = portal_auth::device_flow_login(&backend_url, None).await?;
-    config::save_auth_token(&result.access_token)?;
+    // Store the resolved backend_url with the token so switching servers
+    // (e.g. `login --backend-url wss://newhost`) sticks — a token minted by
+    // one server won't authenticate against another.
+    config::save_credentials(&backend_url, &result.access_token)?;
     println!();
     println!("Logged in as {}", result.user_email);
+    println!(
+        "Credentials for {} saved to {}",
+        backend_url,
+        config::config_path_display()
+    );
     Ok(())
 }
 
