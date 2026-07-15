@@ -102,6 +102,12 @@ pub struct SpawnParams {
     pub agent_type: shared::AgentType,
     pub scheduled_task_id: Option<Uuid>,
     pub resume_session_id: Option<Uuid>,
+    /// When true, create a git worktree from the repository containing
+    /// `working_directory` and run the session inside the new worktree.
+    pub create_worktree: bool,
+    /// Optional branch name for the worktree. When omitted a timestamped
+    /// default (`session-<YYYYMMDD-HHMMSS>`) is derived.
+    pub worktree_branch: Option<String>,
 }
 
 pub struct ProcessManager {
@@ -151,10 +157,24 @@ impl ProcessManager {
             );
         }
 
-        let working_directory =
-            path_policy::ensure_existing_dir_under_home(&params.working_directory)?
-                .to_string_lossy()
-                .to_string();
+        // Resolve (and validate) the base directory the request targets. It
+        // must exist and live under the launcher user's home directory.
+        let base_dir = path_policy::ensure_existing_dir_under_home(&params.working_directory)?;
+
+        // When the request opts into a worktree, create it from the repo that
+        // contains `base_dir` and run the session there instead. Otherwise the
+        // session runs directly in `base_dir`.
+        let working_directory = if params.create_worktree {
+            let worktree =
+                crate::worktree::create_worktree(&base_dir, params.worktree_branch.as_deref())?;
+            // The derived worktree must also be under home (create_worktree
+            // places it inside the repo, which already passed the check, but we
+            // re-validate defensively before running anything there).
+            path_policy::ensure_canonical_path_under_home(&worktree)?;
+            worktree.to_string_lossy().to_string()
+        } else {
+            base_dir.to_string_lossy().to_string()
+        };
 
         let (session_id, resume) = match params.resume_session_id {
             Some(id) => (id, true),

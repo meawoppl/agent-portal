@@ -219,6 +219,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // own default. Reset on agent switch since the catalogs don't overlap.
     let model_arg = use_state(String::new);
     let skip_permissions = use_state(|| false);
+    // Opt-in git worktree: when checked, the launcher creates a worktree from
+    // the repo containing the chosen directory and runs the session there.
+    let create_worktree = use_state(|| false);
+    let worktree_branch = use_state(String::new);
     let launching = use_state(|| false);
     let error_msg = use_state(|| None::<String>);
     let debounce_handle = use_mut_ref(|| None::<Timeout>);
@@ -330,6 +334,24 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
+    let on_create_worktree = {
+        let create_worktree = create_worktree.clone();
+        Callback::from(move |e: Event| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                create_worktree.set(input.checked());
+            }
+        })
+    };
+
+    let on_worktree_branch_input = {
+        let worktree_branch = worktree_branch.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                worktree_branch.set(input.value());
+            }
+        })
+    };
+
     // navigate_to: Yew's Callback<String> is Rc-backed and cheap to clone,
     // replacing the previous Rc<dyn Fn(String)>. Call sites use .emit(path).
     let navigate_to: Callback<String> = {
@@ -390,6 +412,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let agent_type = agent_type.clone();
         let model_arg = model_arg.clone();
         let skip_permissions = skip_permissions.clone();
+        let create_worktree = create_worktree.clone();
+        let worktree_branch = worktree_branch.clone();
         let selected_launcher = selected_launcher.clone();
         let launching = launching.clone();
         let error_msg = error_msg.clone();
@@ -432,6 +456,13 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
             let launcher_id = *selected_launcher;
             let selected_agent_type = *agent_type;
+            let want_worktree = *create_worktree;
+            let branch = (*worktree_branch).trim().to_string();
+            let branch = if branch.is_empty() {
+                None
+            } else {
+                Some(branch)
+            };
             let launching = launching.clone();
             let error_msg = error_msg.clone();
             let on_close = on_close.clone();
@@ -446,6 +477,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     launcher_id,
                     claude_args,
                     agent_type: selected_agent_type,
+                    create_worktree: want_worktree,
+                    worktree_branch: branch,
                 };
 
                 match Request::post("/api/launch")
@@ -763,6 +796,31 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             { format!(" {}", skip_permissions_label(*agent_type)) }
                         </label>
                     </div>
+
+                    // Git worktree: create an isolated worktree for this session
+                    // when the chosen directory lives in a git repository.
+                    <div class="launch-field launch-checkbox">
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={*create_worktree}
+                                onchange={on_create_worktree.clone()}
+                            />
+                            { " Create git worktree (requires a git repo)" }
+                        </label>
+                    </div>
+
+                    if *create_worktree {
+                        <div class="launch-field">
+                            <label>{ "Worktree branch (optional)" }</label>
+                            <input
+                                type="text"
+                                placeholder="defaults to session-<timestamp>"
+                                value={(*worktree_branch).clone()}
+                                oninput={on_worktree_branch_input.clone()}
+                            />
+                        </div>
+                    }
 
                     if let Some(ref err) = *error_msg {
                         <p class="launch-error">{ err }</p>

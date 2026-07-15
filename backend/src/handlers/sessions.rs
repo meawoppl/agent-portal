@@ -314,6 +314,10 @@ pub async fn resume_session(
         agent_type,
         scheduled_task_id: session.scheduled_task_id,
         resume_session_id: Some(session.id),
+        // Resuming an existing session: run in its recorded working directory,
+        // never create a new worktree.
+        create_worktree: false,
+        worktree_branch: None,
     };
 
     if !app_state
