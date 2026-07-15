@@ -71,24 +71,16 @@
 }
 
 /* Vim NORMAL-mode block cursor. vim.rs keeps a one-character selection at the
-   cursor; this paints it as a solid vim-style block and hides the thin caret so
-   the two don't render at once. At end-of-line/empty the selection collapses
-   (nothing to cover) — acceptable for a chat box. */
-/* NORMAL-mode block cursor. On a character the caret sits inside a 1-char
-   selection, and browsers hide the blinking caret whenever a selection is
-   non-empty — so the accent caret below only shows when the selection collapses
-   (end-of-line / empty input), keeping the cursor visible everywhere without
+   cursor, painted below as a solid vim-style block. caret-color is the accent
+   (not transparent): browsers hide the blinking caret while a selection is
+   non-empty, so the caret only appears when the selection collapses
+   (end-of-line / empty input) — keeping the cursor visible everywhere without
    double-rendering a caret next to the block. */
 .session-view-input .message-input.vim-normal {
     caret-color: var(--accent);
 }
 
 .session-view-input .message-input.vim-normal::selection {
-    background: var(--accent);
-    color: var(--bg-darker);
-}
-
-.session-view-input .message-input.vim-normal::-moz-selection {
     background: var(--accent);
     color: var(--bg-darker);
 }
