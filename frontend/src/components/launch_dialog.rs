@@ -19,6 +19,26 @@ use yew::prelude::*;
 /// Sentinel value used in the launcher <select> to represent the "connect new host" option.
 const CONNECT_NEW: &str = "__install__";
 
+/// Storage key for the last-used launch directory in localStorage (#1326).
+const LAST_LAUNCH_DIR_STORAGE_KEY: &str = "claude-portal-last-launch-dir";
+
+/// Load the last-used launch directory from localStorage. Returns `None` when
+/// nothing is remembered so callers can fall back to the launcher's home (`~`).
+fn load_last_launch_dir() -> Option<String> {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(LAST_LAUNCH_DIR_STORAGE_KEY).ok().flatten())
+        .filter(|v| !v.is_empty())
+}
+
+/// Persist the last-used launch directory to localStorage so reopening the
+/// launch dialog defaults to the directory the user last launched from (#1326).
+fn save_last_launch_dir(dir: &str) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(LAST_LAUNCH_DIR_STORAGE_KEY, dir);
+    }
+}
+
 /// Fetch the current install state for both agent CLIs from the given launcher.
 /// Stores the result in `agents` and clears `probing` when done.
 fn probe_agents_for(
@@ -103,12 +123,7 @@ impl DirBrowser {
         browser.loading.set(true);
         browser.error.set(None);
         spawn_local(async move {
-            let api_path = format!(
-                "/api/launchers/{}/directories?path={}",
-                launcher_id,
-                js_sys::encode_uri_component(&path)
-            );
-            match utils::fetch_json::<DirectoryListingResponse>(&api_path, On401::Ignore).await {
+            match fetch_listing(launcher_id, &path).await {
                 Ok(listing) => {
                     if update_path && (path == "~" || path == "~/") {
                         browser.home_root.set(listing.resolved_path.clone());
@@ -122,30 +137,82 @@ impl DirBrowser {
                         }
                     }
                 }
-                Err(FetchError::Decode(_)) => {
-                    browser
-                        .error
-                        .set(Some("Failed to parse response".to_string()));
-                }
-                Err(FetchError::Status(400)) => {
-                    browser.error.set(Some(
-                        "Path not found, not readable, or outside home".to_string(),
-                    ));
-                }
-                Err(FetchError::Status(504)) => {
-                    browser
-                        .error
-                        .set(Some("Launcher not responding".to_string()));
-                }
-                Err(FetchError::Status(status)) => {
-                    browser.error.set(Some(format!("Error {}", status)));
-                }
-                Err(FetchError::Network(e)) => {
-                    browser.error.set(Some(format!("Request failed: {}", e)));
-                }
+                Err(e) => browser.error.set(Some(listing_error_message(&e))),
             }
             browser.loading.set(false);
         });
+    }
+
+    /// Initial load when the dialog opens (or a launcher is auto-selected):
+    /// resolve `~` first so `home_root` is established (the launch home-scope
+    /// check needs it), then, if a directory was remembered from a previous
+    /// launch (#1326) and it still exists under home, navigate into it.
+    /// Falls back to home when nothing is remembered or the remembered
+    /// directory is gone / unreadable / outside home.
+    fn fetch_initial(&self, launcher_id: Uuid, remembered: Option<String>) {
+        let browser = self.clone();
+        browser.loading.set(true);
+        browser.error.set(None);
+        spawn_local(async move {
+            // Step 1: resolve home to establish `home_root`.
+            let home = match fetch_listing(launcher_id, "~").await {
+                Ok(listing) => listing,
+                Err(e) => {
+                    browser.error.set(Some(listing_error_message(&e)));
+                    browser.loading.set(false);
+                    return;
+                }
+            };
+            browser.home_root.set(home.resolved_path.clone());
+            let home_path = home
+                .resolved_path
+                .clone()
+                .unwrap_or_else(|| "~".to_string());
+
+            // Step 2: if a distinct directory is remembered, try to load it.
+            let target = remembered.filter(|d| {
+                !d.is_empty()
+                    && d != "~"
+                    && d != "~/"
+                    && Some(d.as_str()) != home.resolved_path.as_deref()
+            });
+            if let Some(dir) = target {
+                if let Ok(listing) = fetch_listing(launcher_id, &dir).await {
+                    browser.entries.set(listing.entries);
+                    browser.path.set(listing.resolved_path.unwrap_or(dir));
+                    browser.loading.set(false);
+                    return;
+                }
+                // Remembered directory unavailable — fall through to home.
+            }
+            browser.entries.set(home.entries);
+            browser.path.set(home_path);
+            browser.loading.set(false);
+        });
+    }
+}
+
+/// Request a directory listing for `path` from `launcher_id`.
+async fn fetch_listing(
+    launcher_id: Uuid,
+    path: &str,
+) -> Result<DirectoryListingResponse, FetchError> {
+    let api_path = format!(
+        "/api/launchers/{}/directories?path={}",
+        launcher_id,
+        js_sys::encode_uri_component(path)
+    );
+    utils::fetch_json::<DirectoryListingResponse>(&api_path, On401::Ignore).await
+}
+
+/// Map a directory-listing fetch error to a user-facing message.
+fn listing_error_message(err: &FetchError) -> String {
+    match err {
+        FetchError::Decode(_) => "Failed to parse response".to_string(),
+        FetchError::Status(400) => "Path not found, not readable, or outside home".to_string(),
+        FetchError::Status(504) => "Launcher not responding".to_string(),
+        FetchError::Status(status) => format!("Error {}", status),
+        FetchError::Network(e) => format!("Request failed: {}", e),
     }
 }
 
@@ -207,7 +274,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // Auto-set to true when no launchers are connected; set by the dropdown sentinel.
     let show_install = use_state(|| false);
     let dir = DirBrowser {
-        path: use_state(|| "~".to_string()),
+        // Seed from the last-used launch directory (#1326), falling back to `~`.
+        // The mount effect resolves this against the launcher; if the remembered
+        // directory is gone it falls back to home.
+        path: use_state(|| load_last_launch_dir().unwrap_or_else(|| "~".to_string())),
         home_root: use_state(|| None::<String>),
         entries: use_state(Vec::<DirectoryEntry>::new),
         loading: use_state(|| false),
@@ -251,7 +321,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         if let Some(first) = data.first() {
                             let lid = first.launcher_id;
                             selected_launcher.set(Some(lid));
-                            dir.fetch(lid, "~".to_string(), true);
+                            dir.fetch_initial(lid, load_last_launch_dir());
                             probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
                             show_install.set(false);
                         } else {
@@ -442,7 +512,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
             spawn_local(async move {
                 let body = LaunchRequest {
-                    working_directory: working_dir,
+                    working_directory: working_dir.clone(),
                     launcher_id,
                     claude_args,
                     agent_type: selected_agent_type,
@@ -455,6 +525,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     .await
                 {
                     Ok(resp) if resp.ok() => {
+                        // Remember where we launched from so reopening the
+                        // dialog defaults here next time (#1326).
+                        save_last_launch_dir(&working_dir);
                         on_launched.emit(());
                         on_close.emit(());
                     }
