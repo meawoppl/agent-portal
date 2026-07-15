@@ -1,6 +1,7 @@
 use super::continuations::handle_session_limit_reached;
 use super::message_handlers::{
     handle_claude_output, replay_forward_opens_from_db, replay_pending_inputs_from_db,
+    ClaudeOutputContext, ClaudeOutputFrame,
 };
 use super::permissions::handle_permission_request;
 use super::registration::{register_or_update_session, RegistrationParams};
@@ -271,16 +272,20 @@ fn handle_proxy_message(
             agent_type,
         } => {
             handle_claude_output(
-                session_manager,
-                session_key,
-                *db_session_id,
-                db_pool,
-                &app_state.notifications,
-                tx,
-                content,
-                None,
-                &app_state.image_store,
-                agent_type,
+                ClaudeOutputContext {
+                    session_manager,
+                    session_key,
+                    db_session_id: *db_session_id,
+                    db_pool,
+                    notifications: &app_state.notifications,
+                    tx,
+                    image_store: &app_state.image_store,
+                },
+                ClaudeOutputFrame {
+                    content,
+                    seq: None,
+                    agent_type,
+                },
             );
         }
         ProxyToServer::SequencedOutput {
@@ -289,16 +294,20 @@ fn handle_proxy_message(
             agent_type,
         } => {
             handle_claude_output(
-                session_manager,
-                session_key,
-                *db_session_id,
-                db_pool,
-                &app_state.notifications,
-                tx,
-                content,
-                Some(seq),
-                &app_state.image_store,
-                agent_type,
+                ClaudeOutputContext {
+                    session_manager,
+                    session_key,
+                    db_session_id: *db_session_id,
+                    db_pool,
+                    notifications: &app_state.notifications,
+                    tx,
+                    image_store: &app_state.image_store,
+                },
+                ClaudeOutputFrame {
+                    content,
+                    seq: Some(seq),
+                    agent_type,
+                },
             );
         }
         ProxyToServer::Heartbeat => {
