@@ -11,6 +11,7 @@ mod path_policy;
 mod process_manager;
 mod scheduler;
 mod service;
+mod worktree;
 
 use clap::{Parser, Subcommand};
 use tracing::{info, warn};

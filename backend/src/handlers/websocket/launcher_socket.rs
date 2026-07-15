@@ -747,6 +747,8 @@ fn handle_launcher_message(
                         agent_type,
                         scheduled_task_id,
                         resume_session_id: last_session_id,
+                        create_worktree: false,
+                        worktree_branch: None,
                     };
                     if !app_state
                         .session_manager
@@ -1086,6 +1088,8 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             agent_type,
             scheduled_task_id: None,
             resume_session_id: Some(session.id),
+            create_worktree: false,
+            worktree_branch: None,
         };
 
         if !app_state

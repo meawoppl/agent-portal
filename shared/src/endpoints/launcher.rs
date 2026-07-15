@@ -225,6 +225,15 @@ pub enum ServerToLauncher {
         /// use its local expected-session mapping for backwards compatibility.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resume_session_id: Option<Uuid>,
+        /// When true, the launcher creates a git worktree from the repository
+        /// that contains `working_directory` and runs the session there.
+        /// Additive/opt-in: older launchers ignore it via `#[serde(default)]`.
+        #[serde(default)]
+        create_worktree: bool,
+        /// Optional branch name for the worktree. When omitted, the launcher
+        /// derives a timestamped default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worktree_branch: Option<String>,
     },
 
     /// Request to stop a session and remove the launcher's persisted

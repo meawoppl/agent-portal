@@ -537,6 +537,8 @@ async fn handle_message(
             claude_args,
             agent_type,
             resume_session_id,
+            create_worktree,
+            worktree_branch,
             ..
         } => {
             // Check if this is a scheduler-owned launch.
@@ -566,6 +568,10 @@ async fn handle_message(
                     agent_type,
                     scheduled_task_id,
                     resume_session_id,
+                    // Scheduler-owned relaunches never create a worktree; the
+                    // backend leaves these fields at their defaults for them.
+                    create_worktree,
+                    worktree_branch,
                 })
                 .await;
 

@@ -408,6 +408,8 @@ mod tests {
             agent_type: AgentType::Claude,
             scheduled_task_id: None,
             resume_session_id: None,
+            create_worktree: false,
+            worktree_branch: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LaunchSession""#));

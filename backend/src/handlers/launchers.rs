@@ -79,6 +79,8 @@ pub async fn launch_session(
         agent_type: req.agent_type,
         scheduled_task_id: None,
         resume_session_id: Some(session_id),
+        create_worktree: req.create_worktree,
+        worktree_branch: req.worktree_branch.clone(),
     };
 
     if !app_state
