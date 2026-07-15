@@ -177,6 +177,11 @@ pub enum VimHandled {
     /// Not a vim key in the current mode — the caller should run its normal
     /// keydown logic (Enter-to-send, Arrow history, plain typing, …).
     Passthrough,
+    /// NORMAL `Esc` with no pending command: vim reset itself to INSERT (block
+    /// cursor collapsed) and blurred the textarea. The caller re-renders (to
+    /// drop the `vim-normal` class) but must NOT `stop_propagation`, so the
+    /// `Esc` bubbles to `use_keyboard_nav` and hands off to Nav mode.
+    ExitToNav,
 }
 
 /// Feed a keydown event to the modal engine. Mutates `state`, applies any edit
@@ -414,16 +419,19 @@ fn handle_normal(
                 VimHandled::Consumed { rerender: false }
             } else {
                 // Clean NORMAL: a second `Esc` drops out of the input into the
-                // dashboard's keyboard-nav (Nav mode). Blur so subsequent nav
-                // keys reach the nav hook instead of vim, and Passthrough (no
-                // `stop_propagation` in the caller) so this Esc bubbles up and
-                // flips Nav mode on. First Esc (INSERT→NORMAL) is still
-                // consumed, so it takes two presses to leave — matching the
-                // "double-Esc = Nav mode" contract.
+                // dashboard's keyboard-nav (Nav mode). Reset to INSERT first —
+                // this collapses the block cursor and means returning to the box
+                // (via Nav mode's `i`, which refocuses it) lands ready to type.
+                // Then blur so nav keys reach the nav hook instead of vim, and
+                // return ExitToNav so the caller re-renders but lets the Esc
+                // bubble to the nav hook. First Esc (INSERT→NORMAL) is still
+                // consumed, so it takes two presses to leave.
+                state.mode = VimMode::Insert;
                 state.clear_pending();
+                move_cursor(textarea, &text, cursor);
                 let html_el: &web_sys::HtmlElement = textarea.as_ref();
                 let _ = html_el.blur();
-                VimHandled::Passthrough
+                VimHandled::ExitToNav
             }
         }
         _ => {

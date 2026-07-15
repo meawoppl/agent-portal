@@ -375,6 +375,13 @@ impl Component for InputBar {
                             InputBarMsg::Noop
                         };
                     }
+                    vim::VimHandled::ExitToNav => {
+                        // NORMAL Esc handed off to Nav mode: vim already reset to
+                        // INSERT + blurred. Re-render to drop the `vim-normal`
+                        // class, but do NOT stop_propagation — the Esc must bubble
+                        // to `use_keyboard_nav` so it enters Nav mode.
+                        return InputBarMsg::VimSync;
+                    }
                     vim::VimHandled::Passthrough => {}
                 }
             }
