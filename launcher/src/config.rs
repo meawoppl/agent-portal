@@ -35,9 +35,21 @@ fn config_path() -> PathBuf {
     config_dir().join("launcher.json")
 }
 
+/// Human-readable location of the launcher config, for user-facing messages
+/// (e.g. telling `login` where it just saved credentials).
+pub fn config_path_display() -> String {
+    config_path().display().to_string()
+}
+
 pub fn load_config() -> LauncherConfig {
-    let path = config_path();
-    match std::fs::read_to_string(&path) {
+    load_config_at(&config_path())
+}
+
+/// Load a [`LauncherConfig`] from an explicit path. Split out from
+/// [`load_config`] so the read-modify-write helpers can be tested against a
+/// temp path (mirrors the [`read_or_create_id`] seam).
+fn load_config_at(path: &Path) -> LauncherConfig {
+    match std::fs::read_to_string(path) {
         Ok(contents) => match serde_json::from_str(&contents) {
             Ok(config) => {
                 tracing::info!("Loaded config from {}", path.display());
@@ -79,6 +91,31 @@ pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
     config.auth_token = Some(token.to_string());
     save_config(&config)?;
     tracing::info!("Saved auth token to {}", config_path().display());
+    Ok(())
+}
+
+/// Persist `backend_url` and `auth_token` together in a single load/save cycle.
+///
+/// A token is only valid against the server that minted it, so the two MUST be
+/// written as a pair: `agent-portal login --backend-url wss://newhost` that
+/// stored only the token would leave `backend_url` pointing at the old server,
+/// and the next plain run (or the installed launchd/systemd unit, whose
+/// command line carries no `--backend-url`) would connect to the old host with
+/// a token it won't accept. Callers pass the *resolved* URL so a flag-supplied
+/// host sticks for subsequent runs. (`save_auth_token` remains for same-server
+/// token refreshes, where `backend_url` must not change.)
+pub fn save_credentials(backend_url: &str, token: &str) -> anyhow::Result<()> {
+    save_credentials_at(&config_path(), backend_url, token)
+}
+
+/// [`save_credentials`] against an explicit path, so the atomic round-trip can
+/// be unit-tested without touching the real config location.
+fn save_credentials_at(path: &Path, backend_url: &str, token: &str) -> anyhow::Result<()> {
+    let mut config = load_config_at(path);
+    config.backend_url = Some(backend_url.to_string());
+    config.auth_token = Some(token.to_string());
+    let contents = serde_json::to_string_pretty(&config)?;
+    write_config_atomic(path, &contents)?;
     Ok(())
 }
 
@@ -156,6 +193,44 @@ mod tests {
             Uuid::parse_str(std::fs::read_to_string(&path).unwrap().trim()).unwrap(),
             id
         );
+    }
+
+    #[test]
+    fn save_credentials_persists_both_fields_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+
+        // Fresh file: both fields land together.
+        save_credentials_at(&path, "wss://newhost.example", "tok_new").unwrap();
+        let config = load_config_at(&path);
+        assert_eq!(config.backend_url.as_deref(), Some("wss://newhost.example"));
+        assert_eq!(config.auth_token.as_deref(), Some("tok_new"));
+
+        // Switching servers updates the URL *and* the token in one cycle — the
+        // stale-URL-with-new-token drift this bug was about must not survive.
+        save_credentials_at(&path, "wss://other.example", "tok_other").unwrap();
+        let switched = load_config_at(&path);
+        assert_eq!(switched.backend_url.as_deref(), Some("wss://other.example"));
+        assert_eq!(switched.auth_token.as_deref(), Some("tok_other"));
+    }
+
+    #[test]
+    fn save_credentials_preserves_unrelated_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        std::fs::write(
+            &path,
+            r#"{"backend_url":"wss://old","auth_token":"old","name":"my-launcher"}"#,
+        )
+        .unwrap();
+
+        save_credentials_at(&path, "wss://new", "tok_new").unwrap();
+
+        let config = load_config_at(&path);
+        assert_eq!(config.backend_url.as_deref(), Some("wss://new"));
+        assert_eq!(config.auth_token.as_deref(), Some("tok_new"));
+        // The load/save cycle must not drop fields it doesn't touch.
+        assert_eq!(config.name.as_deref(), Some("my-launcher"));
     }
 
     #[test]
