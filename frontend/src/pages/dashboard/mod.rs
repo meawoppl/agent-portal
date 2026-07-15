@@ -18,4 +18,6 @@ mod session_view;
 mod types;
 
 pub use page::DashboardPage;
-pub use types::{load_rail_position, save_rail_position, RailPosition};
+pub use types::{
+    load_rail_position, load_vim_mode, save_rail_position, save_vim_mode, RailPosition,
+};

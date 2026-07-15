@@ -14,11 +14,15 @@
 //! UI while the actual WS send still goes through the parent.
 
 use super::history::CommandHistory;
+use super::vim::{self, VimState};
 use crate::components::VoiceInput;
+use crate::pages::dashboard::load_vim_mode;
 use crate::utils::format_file_size;
 use gloo::timers::callback::Timeout;
 use shared::protocol::UPLOAD_CHUNK_SIZE;
 use shared::{ClientToServer, SendMode};
+use std::cell::RefCell;
+use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -106,6 +110,9 @@ pub enum InputBarMsg {
     VoiceError(String),
     /// Ctrl+M keyboard shortcut: click the voice button programmatically.
     ToggleVoice,
+    /// Vim mode changed the mode or edited the text in the DOM. Re-render (to
+    /// refresh the mode indicator) and re-sync the tracked text mirror.
+    VimSync,
     /// No-op (used by keydown / paste handlers that need to return a message
     /// but don't want to mutate state).
     Noop,
@@ -128,6 +135,13 @@ pub struct InputBar {
     interim_transcription: Option<String>,
     voice_button_ref: NodeRef,
     was_focused: bool,
+    /// Whether opt-in vim editing is enabled (read once from localStorage at
+    /// create; takes effect for newly opened sessions / after reload).
+    vim_enabled: bool,
+    /// Modal editing state. Shared via `Rc<RefCell<…>>` so the `'static`
+    /// keydown closure can mutate it across keystrokes without routing every
+    /// motion through a message.
+    vim: Rc<RefCell<VimState>>,
 }
 
 impl Component for InputBar {
@@ -153,6 +167,8 @@ impl Component for InputBar {
             interim_transcription: None,
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
+            vim_enabled: load_vim_mode(),
+            vim: Rc::new(RefCell::new(VimState::default())),
         }
     }
 
@@ -304,6 +320,13 @@ impl Component for InputBar {
                 }
                 false
             }
+            InputBarMsg::VimSync => {
+                // Vim wrote directly to the (uncontrolled) textarea DOM; mirror
+                // the new value so a later re-render can restore it, and
+                // re-render to refresh the mode indicator.
+                self.input_text = self.get_input_text();
+                true
+            }
             InputBarMsg::Noop => false,
         }
     }
@@ -322,10 +345,29 @@ impl Component for InputBar {
             InputBarMsg::UpdateInput(input.value())
         });
 
-        let handle_keydown = link.callback(|e: KeyboardEvent| {
+        let vim_enabled = self.vim_enabled;
+        let vim = self.vim.clone();
+        let handle_keydown = link.callback(move |e: KeyboardEvent| {
             if e.ctrl_key() && e.key().to_lowercase() == "m" {
                 e.prevent_default();
                 return InputBarMsg::ToggleVoice;
+            }
+
+            // Modal editing (opt-in). When vim consumes the key we're done;
+            // otherwise fall through to the normal Enter/Arrow/typing handling
+            // below so behavior stays identical to the non-vim path.
+            if vim_enabled {
+                let textarea: HtmlTextAreaElement = e.target_unchecked_into();
+                match vim::handle_key(&mut vim.borrow_mut(), &textarea, &e) {
+                    vim::VimHandled::Consumed { rerender } => {
+                        return if rerender {
+                            InputBarMsg::VimSync
+                        } else {
+                            InputBarMsg::Noop
+                        };
+                    }
+                    vim::VimHandled::Passthrough => {}
+                }
             }
 
             match e.key().as_str() {
@@ -426,6 +468,7 @@ impl Component for InputBar {
                     onclick={close_dropdown}
                 >
                     <span class="input-prompt">{ ">" }</span>
+                    { self.render_vim_indicator() }
                     { self.render_interim_transcription() }
                     <textarea
                         ref={self.input_ref.clone()}
@@ -602,6 +645,22 @@ impl InputBar {
                     .join(", "),
             ));
         });
+    }
+
+    /// Small NORMAL/INSERT badge shown beside the prompt when vim mode is on.
+    fn render_vim_indicator(&self) -> Html {
+        if !self.vim_enabled {
+            return html! {};
+        }
+        let mode = self.vim.borrow().mode;
+        html! {
+            <span
+                class={mode.css_class()}
+                title="Vim mode (toggle in Settings → Appearance)"
+            >
+                { mode.label() }
+            </span>
+        }
     }
 
     fn render_interim_transcription(&self) -> Html {

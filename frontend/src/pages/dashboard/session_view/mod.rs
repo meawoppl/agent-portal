@@ -9,6 +9,7 @@
 //! - `permission_handler.rs` - Permission-request UI lifecycle
 //! - `tasks_panel.rs` - Sub-agent / background-task drawer + `derive_task_events`
 //! - `types.rs` - Types specific to SessionView (re-exports from parent)
+//! - `vim.rs` - Opt-in modal (vim-like) editing engine for the textarea
 //! - `websocket.rs` - WebSocket connection management
 //! - `history.rs` - Command history management
 
@@ -22,6 +23,7 @@ mod permission_handler;
 mod state;
 mod tasks_panel;
 mod types;
+mod vim;
 mod websocket;
 
 pub use component::SessionView;

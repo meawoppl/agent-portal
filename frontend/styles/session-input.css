@@ -22,6 +22,32 @@
     margin-right: -0.35rem;
 }
 
+/* Vim mode indicator — small NORMAL/INSERT badge beside the prompt. */
+.session-view-input .vim-mode-indicator {
+    align-self: flex-end;
+    margin-bottom: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-family: var(--font-mono, monospace);
+    line-height: 1.4;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.session-view-input .vim-mode-indicator.normal {
+    color: var(--bg-darker);
+    background: var(--accent);
+}
+
+.session-view-input .vim-mode-indicator.insert {
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+}
+
 .session-view-input .message-input {
     flex: 1;
     background: rgba(0, 0, 0, 0.3);
