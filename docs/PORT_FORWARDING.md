@@ -274,17 +274,22 @@ The forward origin cannot see the portal cookie. Flow:
    unauthenticated navigation back to the portal `open` endpoint.
 4. The forward-origin router validates the token (`aud` + `exp` required, and
    the token's `session_id` must match the label's session), sets a
-   `portal_fwd` cookie (HttpOnly, `SameSite=Lax`, `Secure` when the scheme is
-   https, host-only — so it is scoped to that one forward origin) containing a
-   `{ session_id }` JWT with a longer TTL (8 h), then `302` → `next`.
+   `portal_fwd` cookie (HttpOnly, host-only — so it is scoped to that one
+   forward origin) containing a `{ session_id }` JWT with a longer TTL (8 h),
+   then `302` → `next`. HTTPS deployments set `SameSite=None; Secure` so
+   private forwards also authenticate when embedded in the portal preview
+   iframe; local non-HTTPS development falls back to `SameSite=Lax`.
 5. Every subsequent request on that origin — including WebSocket upgrades —
    authenticates via the `portal_fwd` cookie.
 
 Cookie-missing/expired behavior on the forward origin: navigations
-(`Sec-Fetch-Mode: navigate` / `Accept: text/html`) are redirected back to the
-portal's `open` endpoint with `next` set, so a user who bookmarks a forward URL
-bounces through transparently while logged in. Non-navigation requests (XHR,
-WS) get a plain `401` — redirecting API calls causes confusing failures.
+(`Sec-Fetch-Mode: navigate` / `Accept: text/html`) and safe diagnostic
+requests without Fetch Metadata (for example `curl`/`HEAD`) are redirected back
+to the portal's `open` endpoint with `next` set, so a user who bookmarks or
+probes a forward URL bounces through transparently while logged in.
+Non-navigation requests with explicit Fetch Metadata (XHR/fetch) and WS
+handshakes get a plain `401` — redirecting API calls causes confusing
+failures.
 
 ## The forward-origin router
 
