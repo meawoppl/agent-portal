@@ -614,7 +614,7 @@ impl Component for SessionView {
             .is_some_and(|uid| uid == ctx.props().session.user_id.to_string());
 
         html! {
-            <div class="session-view">
+            <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
                 <div class="session-view-header">
                     <span class="session-name">{ &ctx.props().session.session_name }</span>
                     <span class="session-hostname">{ &ctx.props().session.hostname }</span>

@@ -7,6 +7,28 @@ use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
 use yew::prelude::*;
 
+/// Focus the message input of the currently-focused session view, so leaving
+/// Nav mode via `i`/`Enter` returns the caret to the composer. When vim mode is
+/// on, the box was reset to INSERT as it handed off to Nav, so this lands the
+/// user ready to type.
+fn focus_active_message_input() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    // Prefer the focused session's box; fall back to the only one on screen.
+    let el = doc
+        .query_selector(".session-view.focused .message-input")
+        .ok()
+        .flatten()
+        .or_else(|| doc.query_selector(".message-input").ok().flatten());
+    if let Some(input) = el
+        .as_ref()
+        .and_then(|e| e.dyn_ref::<web_sys::HtmlElement>())
+    {
+        let _ = input.focus();
+    }
+}
+
 /// Configuration for the keyboard navigation hook.
 pub struct KeyboardNavConfig {
     /// All sessions (sorted in display order)
@@ -201,8 +223,14 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 // Navigation Mode
                 match e.key().as_str() {
                     "Escape" | "i" => {
+                        // Either key leaves Nav mode AND returns focus to the
+                        // composer (ready to type). Esc is the natural "cycle
+                        // back" key — INSERT →Esc→ NORMAL →Esc→ Nav →Esc→ typing —
+                        // and refocusing on every exit means you can never get
+                        // stranded in Nav mode with nothing focused.
                         e.prevent_default();
                         nav_mode.set(false);
+                        focus_active_message_input();
                     }
                     "ArrowUp" | "ArrowLeft" | "k" | "h" => {
                         e.prevent_default();
@@ -225,6 +253,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     "Enter" => {
                         e.prevent_default();
                         nav_mode.set(false);
+                        focus_active_message_input();
                     }
                     "w" => {
                         e.prevent_default();

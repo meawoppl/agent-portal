@@ -22,6 +22,9 @@ pub const SHOW_COST_STORAGE_KEY: &str = "claude-portal-show-cost";
 /// Storage key for session rail orientation in localStorage
 pub const RAIL_ORIENTATION_STORAGE_KEY: &str = "claude-portal-rail-orientation";
 
+/// Storage key for the opt-in vim editing mode in localStorage
+pub const VIM_MODE_STORAGE_KEY: &str = "claude-portal-vim-mode";
+
 /// Maximum number of messages to keep in frontend memory (matches backend limit)
 pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
@@ -122,6 +125,16 @@ pub fn load_show_cost() -> bool {
 /// Save cost display preference to localStorage
 pub fn save_show_cost(show: bool) {
     save_bool_pref(SHOW_COST_STORAGE_KEY, show);
+}
+
+/// Load whether vim editing mode is enabled from localStorage (default: off).
+pub fn load_vim_mode() -> bool {
+    load_bool_pref(VIM_MODE_STORAGE_KEY)
+}
+
+/// Save the vim editing mode preference to localStorage.
+pub fn save_vim_mode(enabled: bool) {
+    save_bool_pref(VIM_MODE_STORAGE_KEY, enabled);
 }
 
 /// Where the session pill rail sits on the dashboard.

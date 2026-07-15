@@ -135,22 +135,43 @@ fn parse_send_mode(value: &str) -> Option<SendMode> {
     }
 }
 
+/// Stable dependencies for handling one proxy-originated output frame.
+pub struct ClaudeOutputContext<'a> {
+    pub session_manager: &'a SessionManager,
+    pub session_key: &'a Option<String>,
+    pub db_session_id: Option<Uuid>,
+    pub db_pool: &'a DbPool,
+    pub notifications: &'a crate::push::NotificationSender,
+    pub tx: &'a ProxySender,
+    pub image_store: &'a crate::handlers::images::ImageStore,
+}
+
+/// Event-specific output payload from the proxy.
+pub struct ClaudeOutputFrame {
+    pub content: serde_json::Value,
+    pub seq: Option<u64>,
+    pub agent_type: AgentType,
+}
+
 /// Handle Claude output (both legacy ClaudeOutput and new SequencedOutput).
 /// Broadcasts to web clients, deduplicates sequenced messages, stores in DB,
 /// and sends acknowledgments.
-#[allow(clippy::too_many_arguments)]
-pub fn handle_claude_output(
-    session_manager: &SessionManager,
-    session_key: &Option<String>,
-    db_session_id: Option<Uuid>,
-    db_pool: &DbPool,
-    notifications: &crate::push::NotificationSender,
-    tx: &ProxySender,
-    content: serde_json::Value,
-    seq: Option<u64>,
-    image_store: &crate::handlers::images::ImageStore,
-    agent_type: AgentType,
-) {
+pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFrame) {
+    let ClaudeOutputContext {
+        session_manager,
+        session_key,
+        db_session_id,
+        db_pool,
+        notifications,
+        tx,
+        image_store,
+    } = ctx;
+    let ClaudeOutputFrame {
+        content,
+        seq,
+        agent_type,
+    } = frame;
+
     // Deduplicate sequenced messages before broadcasting
     if let (Some(session_id), Some(seq_num)) = (db_session_id, seq) {
         let last_ack = session_manager.last_ack_seq(session_id);

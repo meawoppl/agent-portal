@@ -12,6 +12,17 @@ pub struct LaunchRequest {
     pub claude_args: Vec<String>,
     #[serde(default)]
     pub agent_type: crate::AgentType,
+    /// When true, the launcher creates a git worktree from the repository that
+    /// contains `working_directory` and runs the session inside the new
+    /// worktree instead of `working_directory` itself. Requires
+    /// `working_directory` to be inside a git repository. Additive/opt-in:
+    /// older launchers ignore it via `#[serde(default)]`.
+    #[serde(default)]
+    pub create_worktree: bool,
+    /// Optional branch name for the worktree. When omitted, the launcher
+    /// derives a timestamped default (e.g. `session-20260715-143022`).
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
 }
 
 /// Response from GET /api/launchers/:launcher_id/directories?path=…
