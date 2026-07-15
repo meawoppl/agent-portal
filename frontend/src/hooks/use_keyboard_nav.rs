@@ -3,6 +3,7 @@
 use shared::SessionInfo;
 use std::collections::HashSet;
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
 use yew::prelude::*;
 
@@ -24,6 +25,12 @@ pub struct KeyboardNavConfig {
     pub on_activate: Callback<Uuid>,
     /// Callback when triple-Escape interrupt is triggered
     pub on_interrupt: Callback<()>,
+    /// Callback to hide/show a session (nav-mode `x` on the focused session)
+    pub on_toggle_hidden: Callback<Uuid>,
+    /// Callback to open the launch dialog (nav-mode `n`)
+    pub on_new_session: Callback<()>,
+    /// Callback to open the keyboard-shortcuts help overlay (`?`)
+    pub on_show_help: Callback<()>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -49,6 +56,12 @@ const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
 /// - Numbers 1-9 select directly
 /// - Enter/Escape/i -> Edit Mode
 /// - w -> next waiting session
+/// - n -> open the launch dialog (new session)
+/// - x -> hide/show the focused session
+///
+/// `?` opens the keyboard-shortcuts help overlay whenever focus is not in the
+/// message textarea (i.e. in nav mode, or in edit mode with a non-text element
+/// focused).
 ///
 /// Triple-Escape (within 600ms) sends an interrupt to the focused session.
 #[hook]
@@ -68,10 +81,18 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
         let on_interrupt = config.on_interrupt.clone();
+        let on_toggle_hidden = config.on_toggle_hidden.clone();
+        let on_new_session = config.on_new_session.clone();
+        let on_show_help = config.on_show_help.clone();
         Callback::from(move |e: KeyboardEvent| {
-            // Don't handle keyboard nav when a modal overlay is open
+            // Don't handle keyboard nav when a modal overlay is open. The help
+            // overlay and launch dialog are included so their own keys (Esc /
+            // backdrop) win and nav shortcuts don't fire underneath them.
             if gloo::utils::document()
-                .query_selector(".sched-overlay, .share-dialog-overlay")
+                .query_selector(
+                    ".sched-overlay, .share-dialog-overlay, .help-overlay, \
+                     .launch-dialog-backdrop, .full-page-modal",
+                )
                 .ok()
                 .flatten()
                 .is_some()
@@ -140,6 +161,25 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 return;
             }
 
+            // `?` opens the keyboard-shortcuts help overlay, unless the user is
+            // typing into a text field (textarea/input). In nav mode the
+            // textarea keeps DOM focus, so allow it explicitly there.
+            if e.key() == "?" {
+                let target_is_text_input = e
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                    .map(|el| {
+                        let tag = el.tag_name();
+                        tag.eq_ignore_ascii_case("textarea") || tag.eq_ignore_ascii_case("input")
+                    })
+                    .unwrap_or(false);
+                if in_nav_mode || !target_is_text_input {
+                    e.prevent_default();
+                    on_show_help.emit(());
+                    return;
+                }
+            }
+
             // Track Escape presses for triple-Escape interrupt detection
             if e.key() == "Escape" {
                 let now = js_sys::Date::now();
@@ -195,8 +235,19 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                             on_select.emit(new_idx);
                         }
                     }
+                    "n" => {
+                        // Open the launch dialog to start a new session.
+                        e.prevent_default();
+                        on_new_session.emit(());
+                    }
                     "x" => {
-                        // Placeholder for close session
+                        // Hide/show the focused session (mirrors the rail's
+                        // "Hide Session" action — non-destructive; the session
+                        // keeps running and stays available in the hidden list).
+                        e.prevent_default();
+                        if let Some(session) = sessions.get(focused_index) {
+                            on_toggle_hidden.emit(session.id);
+                        }
                     }
                     key => {
                         // Number keys 1-9 for direct selection

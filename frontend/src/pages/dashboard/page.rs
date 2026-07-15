@@ -14,7 +14,9 @@ use super::types::{
     load_hidden_sessions, load_inactive_hidden, load_rail_position, load_show_cost,
     save_hidden_sessions, save_inactive_hidden, save_show_cost,
 };
-use crate::components::{ConfirmModal, ConfirmModalStyle, LaunchDialog, TurnMetricsHeaderPill};
+use crate::components::{
+    ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, TurnMetricsHeaderPill,
+};
 use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
@@ -163,6 +165,35 @@ pub fn dashboard_page() -> Html {
         );
     }
 
+    // Toggle a session's hidden state (persisted to localStorage). Shared by
+    // the rail's "Hide Session" action and the nav-mode `x` shortcut.
+    let on_toggle_hidden = {
+        let session_state = session_state.clone();
+        Callback::from(move |session_id: Uuid| {
+            let hidden = !session_state.hidden_sessions.contains(&session_id);
+            let mut set = session_state.hidden_sessions.clone();
+            if hidden {
+                set.insert(session_id);
+            } else {
+                set.remove(&session_id);
+            }
+            save_hidden_sessions(&set);
+            session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
+        })
+    };
+
+    // Nav-mode `n`: open the launch dialog to start a new session.
+    let on_new_session = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ToggleLaunchDialog))
+    };
+
+    // `?`: open the keyboard-shortcuts help overlay.
+    let on_show_help = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ShowHelp))
+    };
+
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
@@ -173,7 +204,15 @@ pub fn dashboard_page() -> Html {
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
         on_interrupt: focus.on_interrupt.clone(),
+        on_toggle_hidden: on_toggle_hidden.clone(),
+        on_new_session,
+        on_show_help,
     });
+
+    let close_help = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |_: ()| ui_state.dispatch(DashboardUiAction::CloseHelp))
+    };
 
     // Modal open callbacks
     let go_to_admin = {
@@ -404,21 +443,6 @@ pub fn dashboard_page() -> Html {
                     }
                 }
             });
-        })
-    };
-
-    let on_toggle_hidden = {
-        let session_state = session_state.clone();
-        Callback::from(move |session_id: Uuid| {
-            let hidden = !session_state.hidden_sessions.contains(&session_id);
-            let mut set = session_state.hidden_sessions.clone();
-            if hidden {
-                set.insert(session_id);
-            } else {
-                set.remove(&session_id);
-            }
-            save_hidden_sessions(&set);
-            session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
         })
     };
 
@@ -723,7 +747,10 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "↑↓ or jk = navigate" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
+                                            <span>{ "n = new" }</span>
+                                            <span>{ "x = hide" }</span>
                                             <span>{ "Enter/Esc = edit mode" }</span>
+                                            <span>{ "? = shortcuts" }</span>
                                         </>
                                     }
                                 } else {
@@ -733,6 +760,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "Shift+Tab = next active" }</span>
                                             <span>{ "Ctrl+M = voice" }</span>
                                             <span>{ "Enter = send" }</span>
+                                            <span>{ "? = shortcuts" }</span>
                                         </>
                                     }
                                 }
@@ -791,6 +819,11 @@ pub fn dashboard_page() -> Html {
                 <div class="full-page-modal">
                     <SettingsPage on_close={close_settings.clone()} />
                 </div>
+            }
+
+            // Keyboard shortcuts help overlay (press `?`)
+            if ui_state.show_help {
+                <HelpOverlay on_close={close_help.clone()} />
             }
 
             // Leave confirmation modal
