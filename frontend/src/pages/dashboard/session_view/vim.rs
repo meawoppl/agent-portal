@@ -30,6 +30,7 @@
 //! through Yew), so this module reads and writes the DOM element directly, the
 //! same way `InputBar::set_input_text` does.
 
+use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlTextAreaElement, KeyboardEvent};
 
 /// The two supported editing modes.
@@ -429,8 +430,7 @@ fn handle_normal(
                 state.mode = VimMode::Insert;
                 state.clear_pending();
                 move_cursor(textarea, &text, cursor);
-                let html_el: &web_sys::HtmlElement = textarea.as_ref();
-                let _ = html_el.blur();
+                hand_off_to_nav(textarea);
                 VimHandled::ExitToNav
             }
         }
@@ -828,6 +828,26 @@ fn scroll_messages(textarea: &HtmlTextAreaElement, kind: Scroll) {
         Scroll::Bottom => sh,
     };
     msgs.set_scroll_top(target);
+}
+
+/// Hand keyboard control from the input box to the dashboard's `use_keyboard_nav`
+/// hook when NORMAL `Esc` drops into Nav mode. Focus is moved onto the nav
+/// container (`.focus-flow-container`, which is `tabindex=0`) rather than merely
+/// blurred: a bare `blur()` sends focus to `<body>`, an *ancestor* of the
+/// container, so its `onkeydown` would never fire and Nav-mode keys (j/k/i/…)
+/// would be dead. Focusing the container makes keydowns target it directly.
+fn hand_off_to_nav(textarea: &HtmlTextAreaElement) {
+    if let Some(container) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.query_selector(".focus-flow-container").ok().flatten())
+        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = container.focus();
+    } else {
+        // Fallback: at least drop focus so vim stops consuming keys.
+        let html_el: &web_sys::HtmlElement = textarea.as_ref();
+        let _ = html_el.blur();
+    }
 }
 
 fn char_idx_to_utf16(text: &[char], idx: usize) -> u32 {
