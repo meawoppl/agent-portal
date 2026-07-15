@@ -474,7 +474,12 @@ impl Component for InputBar {
                         ref={self.input_ref.clone()}
                         class={classes!(
                             "message-input",
-                            self.interim_transcription.is_some().then_some("has-interim")
+                            self.interim_transcription.is_some().then_some("has-interim"),
+                            // Block-cursor styling in NORMAL mode. Yew-managed so a
+                            // re-render can't wipe it; vim.rs only sets the selection.
+                            (self.vim_enabled
+                                && self.vim.borrow().mode == vim::VimMode::Normal)
+                                .then_some("vim-normal")
                         )}
                         placeholder="Type your message... (Shift+Enter for new line)"
                         oninput={handle_input}

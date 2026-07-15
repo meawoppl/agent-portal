@@ -70,6 +70,19 @@
     border-color: var(--accent);
 }
 
+/* Vim NORMAL-mode block cursor. vim.rs keeps a one-character selection at the
+   cursor; this paints it as a solid vim-style block and hides the thin caret so
+   the two don't render at once. At end-of-line/empty the selection collapses
+   (nothing to cover) — acceptable for a chat box. */
+.session-view-input .message-input.vim-normal {
+    caret-color: transparent;
+}
+
+.session-view-input .message-input.vim-normal::selection {
+    background: var(--accent);
+    color: var(--bg-darker);
+}
+
 .session-view-input .message-input:disabled {
     opacity: 0.5;
     cursor: not-allowed;
