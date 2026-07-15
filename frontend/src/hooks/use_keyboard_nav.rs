@@ -183,13 +183,12 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
             if in_nav_mode {
                 // Navigation Mode
                 match e.key().as_str() {
-                    "Escape" => {
-                        // Leave Nav mode without grabbing the composer.
-                        e.prevent_default();
-                        nav_mode.set(false);
-                    }
-                    "i" => {
-                        // `i` = "go edit": leave Nav mode and refocus the input.
+                    "Escape" | "i" => {
+                        // Either key leaves Nav mode AND returns focus to the
+                        // composer (ready to type). Esc is the natural "cycle
+                        // back" key — INSERT →Esc→ NORMAL →Esc→ Nav →Esc→ typing —
+                        // and refocusing on every exit means you can never get
+                        // stranded in Nav mode with nothing focused.
                         e.prevent_default();
                         nav_mode.set(false);
                         focus_active_message_input();
