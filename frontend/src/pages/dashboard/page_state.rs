@@ -156,6 +156,7 @@ pub(super) struct DashboardUiState {
     pub show_launch_dialog: bool,
     pub show_admin: bool,
     pub show_settings: bool,
+    pub show_help: bool,
     pub inactive_hidden: bool,
     pub show_cost: bool,
     pub rail_position: RailPosition,
@@ -169,6 +170,7 @@ impl DashboardUiState {
             show_launch_dialog: false,
             show_admin: false,
             show_settings: false,
+            show_help: false,
             inactive_hidden,
             show_cost,
             rail_position,
@@ -186,6 +188,8 @@ pub(super) enum DashboardUiAction {
     CloseAdmin,
     ShowSettings,
     CloseSettings,
+    ShowHelp,
+    CloseHelp,
     SetInactiveHidden(bool),
     SetShowCost(bool),
     SetRailPosition(RailPosition),
@@ -219,6 +223,12 @@ impl Reducible for DashboardUiState {
             }
             DashboardUiAction::CloseSettings => {
                 state.show_settings = false;
+            }
+            DashboardUiAction::ShowHelp => {
+                state.show_help = true;
+            }
+            DashboardUiAction::CloseHelp => {
+                state.show_help = false;
             }
             DashboardUiAction::SetInactiveHidden(hidden) => {
                 state.inactive_hidden = hidden;
@@ -364,6 +374,11 @@ mod tests {
         assert!(state.show_settings);
         let state = state.reduce(DashboardUiAction::CloseSettings);
         assert!(!state.show_settings);
+
+        let state = state.reduce(DashboardUiAction::ShowHelp);
+        assert!(state.show_help);
+        let state = state.reduce(DashboardUiAction::CloseHelp);
+        assert!(!state.show_help);
     }
 
     #[test]

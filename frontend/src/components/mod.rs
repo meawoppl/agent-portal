@@ -8,6 +8,7 @@ mod count_up;
 mod cron_describe;
 mod diff;
 pub mod expandable;
+mod help_overlay;
 mod launch_dialog;
 pub(crate) mod markdown;
 pub mod message_renderer;
@@ -24,6 +25,7 @@ mod voice_input;
 pub use confirm_modal::{ConfirmModal, ConfirmModalStyle};
 pub use copy_command::CopyCommand;
 pub use count_up::CountUp;
+pub use help_overlay::HelpOverlay;
 pub use launch_dialog::LaunchDialog;
 pub use message_renderer::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroupRenderer,

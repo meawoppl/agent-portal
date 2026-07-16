@@ -47,6 +47,8 @@ pub struct KeyboardNavConfig {
     pub on_activate: Callback<Uuid>,
     /// Callback when triple-Escape interrupt is triggered
     pub on_interrupt: Callback<()>,
+    /// Callback to open the keyboard-shortcuts help overlay (`?`)
+    pub on_show_help: Callback<()>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -73,6 +75,10 @@ const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
 /// - Enter/Escape/i -> Edit Mode
 /// - w -> next waiting session
 ///
+/// `?` opens the keyboard-shortcuts help overlay whenever focus is not in the
+/// message textarea (i.e. in nav mode, or in edit mode with a non-text element
+/// focused).
+///
 /// Triple-Escape (within 600ms) sends an interrupt to the focused session.
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
@@ -91,10 +97,13 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
         let on_interrupt = config.on_interrupt.clone();
+        let on_show_help = config.on_show_help.clone();
         Callback::from(move |e: KeyboardEvent| {
-            // Don't handle keyboard nav when a modal overlay is open
+            // Don't handle keyboard nav when a modal overlay is open. The help
+            // overlay is included so its own keys (Esc / backdrop) win and nav
+            // shortcuts don't fire underneath it.
             if gloo::utils::document()
-                .query_selector(".sched-overlay, .share-dialog-overlay")
+                .query_selector(".sched-overlay, .share-dialog-overlay, .help-overlay")
                 .ok()
                 .flatten()
                 .is_some()
@@ -161,6 +170,25 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     on_select.emit(new_idx);
                 }
                 return;
+            }
+
+            // `?` opens the keyboard-shortcuts help overlay, unless the user is
+            // typing into a text field (textarea/input). In nav mode the
+            // textarea keeps DOM focus, so allow it explicitly there.
+            if e.key() == "?" {
+                let target_is_text_input = e
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                    .map(|el| {
+                        let tag = el.tag_name();
+                        tag.eq_ignore_ascii_case("textarea") || tag.eq_ignore_ascii_case("input")
+                    })
+                    .unwrap_or(false);
+                if in_nav_mode || !target_is_text_input {
+                    e.prevent_default();
+                    on_show_help.emit(());
+                    return;
+                }
             }
 
             // Track Escape presses for triple-Escape interrupt detection
