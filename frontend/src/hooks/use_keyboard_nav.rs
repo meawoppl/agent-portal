@@ -43,10 +43,10 @@ pub struct KeyboardNavConfig {
     pub on_activate: Callback<Uuid>,
     /// Callback when triple-Escape interrupt is triggered
     pub on_interrupt: Callback<()>,
-    /// Callback to open the keyboard-shortcuts help overlay (`?`)
-    pub on_show_help: Callback<()>,
     /// Callback to open the launch dialog (nav-mode `n`)
     pub on_new_session: Callback<()>,
+    /// Callback to open the keyboard-shortcuts help overlay (`?`)
+    pub on_show_help: Callback<()>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -94,11 +94,11 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
         let on_interrupt = config.on_interrupt.clone();
-        let on_show_help = config.on_show_help.clone();
         let on_new_session = config.on_new_session.clone();
+        let on_show_help = config.on_show_help.clone();
         Callback::from(move |e: KeyboardEvent| {
-            // Don't handle keyboard nav when a modal overlay is open. The help
-            // overlay, launch dialog, and full-page modals are included so their
+            // Don't handle keyboard nav when a modal overlay is open. The launch
+            // dialog, full-page modals, and help overlay are included so their
             // own keys (Esc / backdrop) win and nav shortcuts don't fire
             // underneath them.
             if gloo::utils::document()

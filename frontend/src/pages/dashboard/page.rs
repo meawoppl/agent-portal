@@ -165,16 +165,16 @@ pub fn dashboard_page() -> Html {
         );
     }
 
-    // `?`: open the keyboard-shortcuts help overlay.
-    let on_show_help = {
-        let ui_state = ui_state.clone();
-        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ShowHelp))
-    };
-
     // Nav-mode `n`: open the launch dialog to start a new session.
     let on_new_session = {
         let ui_state = ui_state.clone();
         Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ToggleLaunchDialog))
+    };
+
+    // `?`: open the keyboard-shortcuts help overlay.
+    let on_show_help = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ShowHelp))
     };
 
     // Use the keyboard navigation hook
@@ -185,8 +185,8 @@ pub fn dashboard_page() -> Html {
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
         on_interrupt: focus.on_interrupt.clone(),
-        on_show_help,
         on_new_session,
+        on_show_help,
     });
 
     let close_help = {
