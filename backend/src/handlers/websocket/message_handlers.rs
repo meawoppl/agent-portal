@@ -283,6 +283,9 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
     // Typed portal sidecar for the live broadcast, derived from the persisted
     // row's columns (#portal-meta). `None` when the insert didn't run/failed.
     let mut broadcast_meta: Option<shared::PortalMeta> = None;
+    // Server timestamp of the just-inserted row, used by the overload
+    // auto-retry to detect whether a human has responded since a failed turn.
+    let mut inserted_created_at: Option<chrono::NaiveDateTime> = None;
     if let (Some(session_id), Ok(mut conn)) = (db_session_id, db_pool.get()) {
         use crate::schema::{messages, sessions};
 
@@ -318,6 +321,7 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
                 .get_result::<crate::models::Message>(&mut conn)
             {
                 Ok(inserted) => {
+                    inserted_created_at = Some(inserted.created_at);
                     // `meta.created_at` becomes the frontend's reconnect
                     // watermark (matches `replay_history`'s `%Y-%m-%dT%H:%M:%S%.f`).
                     broadcast_meta =
@@ -331,6 +335,19 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
             if role == shared::MessageRole::Result {
                 let subagent_tokens = session_manager.subagent_tokens(session_id);
                 store_result_metadata(&mut conn, session_id, &content, subagent_tokens);
+
+                // A turn killed by a transient 529 provider overload leaves the
+                // session stalled on a user-visible error. Auto-retry it (bounded
+                // + paced) so a human doesn't have to nudge it back to life. The
+                // scheduler takes its own pooled connection (distinct from `conn`).
+                maybe_schedule_overloaded_retry(
+                    session_manager,
+                    session_key,
+                    session_id,
+                    db_pool,
+                    &content,
+                    inserted_created_at,
+                );
 
                 // Turn finished — emit a push (mobile-apps plan §8.1, collapsed
                 // per session by the dispatcher). Suppressed automatically when
@@ -373,6 +390,48 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
             },
         );
     }
+}
+
+/// Detection point for the transient-529-overload auto-retry. Parses the
+/// `Result` frame with the typed `claude_codes::io::ResultMessage`, and only
+/// when it is an error matching the conservative overload signature does it hand
+/// off to the continuation machinery. `result_created_at` is the server
+/// timestamp of the stored `Result` row (`None` if the insert failed — then we
+/// skip, since the "human already responded" guard has no baseline).
+fn maybe_schedule_overloaded_retry(
+    session_manager: &SessionManager,
+    session_key: &Option<String>,
+    session_id: Uuid,
+    db_pool: &DbPool,
+    content: &serde_json::Value,
+    result_created_at: Option<chrono::NaiveDateTime>,
+) {
+    let Some(result_created_at) = result_created_at else {
+        return;
+    };
+    let Ok(result) = claude_codes::io::ResultMessage::deserialize(content) else {
+        return;
+    };
+    if !result.is_error {
+        return;
+    }
+    // The error text lives in `result` and/or `errors`; join both so the
+    // matcher sees whatever the CLI populated.
+    let mut text = result.result.unwrap_or_default();
+    if !result.errors.is_empty() {
+        text.push('\n');
+        text.push_str(&result.errors.join("\n"));
+    }
+    if !super::continuations::is_transient_overload(&text, result.api_error_status) {
+        return;
+    }
+    super::continuations::schedule_overloaded_retry(
+        session_manager,
+        db_pool,
+        session_key,
+        session_id,
+        result_created_at,
+    );
 }
 
 struct NormalizedOutputContent {

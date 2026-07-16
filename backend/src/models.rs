@@ -413,6 +413,10 @@ pub struct SessionContinuation {
     pub fired_at: Option<NaiveDateTime>,
     pub dropped_at: Option<NaiveDateTime>,
     pub cancelled_at: Option<NaiveDateTime>,
+    /// Why the continuation exists: `"limit"` (usage-limit reset, the historical
+    /// default) or `"overloaded"` (auto-retry after a transient 529). See
+    /// `shared::CONTINUATION_REASON_*`.
+    pub reason: String,
 }
 
 #[derive(Debug, Insertable)]
@@ -425,6 +429,7 @@ pub struct NewSessionContinuation {
     pub prompt: String,
     pub status: String,
     pub source_message: Option<String>,
+    pub reason: String,
 }
 
 // ============================================================================
