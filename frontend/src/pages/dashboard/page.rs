@@ -165,6 +165,12 @@ pub fn dashboard_page() -> Html {
         );
     }
 
+    // Nav-mode `n`: open the launch dialog to start a new session.
+    let on_new_session = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ToggleLaunchDialog))
+    };
+
     // `?`: open the keyboard-shortcuts help overlay.
     let on_show_help = {
         let ui_state = ui_state.clone();
@@ -179,6 +185,7 @@ pub fn dashboard_page() -> Html {
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
         on_interrupt: focus.on_interrupt.clone(),
+        on_new_session,
         on_show_help,
     });
 
@@ -735,6 +742,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "↑↓ or jk = navigate" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
+                                            <span>{ "n = new" }</span>
                                             <span>{ "Enter/Esc = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>

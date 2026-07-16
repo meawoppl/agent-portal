@@ -43,6 +43,8 @@ pub struct KeyboardNavConfig {
     pub on_activate: Callback<Uuid>,
     /// Callback when triple-Escape interrupt is triggered
     pub on_interrupt: Callback<()>,
+    /// Callback to open the launch dialog (nav-mode `n`)
+    pub on_new_session: Callback<()>,
     /// Callback to open the keyboard-shortcuts help overlay (`?`)
     pub on_show_help: Callback<()>,
 }
@@ -70,6 +72,7 @@ const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
 /// - Numbers 1-9 select directly
 /// - Enter/Escape/i -> Edit Mode
 /// - w -> next waiting session
+/// - n -> open the launch dialog (new session)
 ///
 /// `?` opens the keyboard-shortcuts help overlay whenever focus is not in the
 /// message textarea (i.e. in nav mode, or in edit mode with a non-text element
@@ -91,13 +94,18 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
         let on_interrupt = config.on_interrupt.clone();
+        let on_new_session = config.on_new_session.clone();
         let on_show_help = config.on_show_help.clone();
         Callback::from(move |e: KeyboardEvent| {
-            // Don't handle keyboard nav when a modal overlay is open. The help
-            // overlay is included so its own keys (Esc / backdrop) win and nav
-            // shortcuts don't fire underneath it.
+            // Don't handle keyboard nav when a modal overlay is open. The launch
+            // dialog, full-page modals, and help overlay are included so their
+            // own keys (Esc / backdrop) win and nav shortcuts don't fire
+            // underneath them.
             if gloo::utils::document()
-                .query_selector(".sched-overlay, .share-dialog-overlay, .help-overlay")
+                .query_selector(
+                    ".sched-overlay, .share-dialog-overlay, .help-overlay, \
+                     .launch-dialog-backdrop, .full-page-modal",
+                )
                 .ok()
                 .flatten()
                 .is_some()
@@ -246,6 +254,11 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                             }
                             on_select.emit(new_idx);
                         }
+                    }
+                    "n" => {
+                        // Open the launch dialog to start a new session.
+                        e.prevent_default();
+                        on_new_session.emit(());
                     }
                     "x" => {
                         // Placeholder for close session
