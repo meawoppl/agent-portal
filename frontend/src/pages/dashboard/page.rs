@@ -171,6 +171,12 @@ pub fn dashboard_page() -> Html {
         Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ShowHelp))
     };
 
+    // Nav-mode `n`: open the launch dialog to start a new session.
+    let on_new_session = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ToggleLaunchDialog))
+    };
+
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
@@ -180,6 +186,7 @@ pub fn dashboard_page() -> Html {
         on_activate: focus.on_activate.clone(),
         on_interrupt: focus.on_interrupt.clone(),
         on_show_help,
+        on_new_session,
     });
 
     let close_help = {
@@ -735,6 +742,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "↑↓ or jk = navigate" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
+                                            <span>{ "n = new" }</span>
                                             <span>{ "Enter/Esc = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
