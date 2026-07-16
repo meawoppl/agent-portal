@@ -910,6 +910,7 @@ use uuid::Uuid;
 
 - **Titles**: describe the change, not the ticket. Don't reference issue/PR numbers — they're noise in the title.
 - **Bodies**: focus on *what* the change does and *why*. Keep it concise — no commit-by-commit play-by-play.
+- **No attribution footer**: don't add "Generated with Claude Code" (or similar) to PR titles or bodies.
 
 ## SHIP Workflow
 
