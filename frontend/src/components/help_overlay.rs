@@ -81,8 +81,12 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Move between sessions",
             },
             Shortcut {
-                keys: &["h", "j", "k", "l"],
+                keys: &["h", "l"],
                 description: "Move between sessions (vim keys)",
+            },
+            Shortcut {
+                keys: &["j", "k"],
+                description: "Scroll the focused transcript down / up",
             },
             Shortcut {
                 keys: &["1", "–", "9"],
