@@ -56,18 +56,40 @@ pub(super) fn session_display_cmp(a: &SessionInfo, b: &SessionInfo) -> Ordering 
 /// refreshed poll never changes which session is focused. This maps that id
 /// back to a display index for the rail / keyboard nav.
 ///
-/// Falls back to the first non-hidden session (then `0`) when the focused id
-/// is absent — e.g. nothing focused yet, or the focused session disappeared
-/// (deleted / left). That fallback is the intended "focus moved because the
-/// session is gone" behavior from the issue's acceptance criteria.
+/// `previous_index` is the index this function returned on the prior render. It
+/// is used only for the *transient-miss* case below.
+///
+/// Resolution order:
+/// 1. Focused id present in the list → its current index (the normal path).
+/// 2. Focused id set but **absent** from this snapshot → hold `previous_index`
+///    (clamped) rather than snapping to the first session. This is the #1368
+///    fix: when focus follows a just-launched session (`FocusNewlyLaunched`),
+///    a racing/stale `/api/sessions` poll — one issued *before* the session
+///    existed but landing *after* the WS-driven refresh that added it — can
+///    momentarily deliver a list without that session. Falling back to the
+///    first entry there is exactly the "creating a session steals focus to the
+///    first session" bug. Holding the previous position is safe because the
+///    display order is a *total* function of the session set
+///    (`session_display_cmp`): while the set is unchanged the same index maps
+///    to the same session, and once the focused session reappears we resolve it
+///    by id again.
+/// 3. Nothing focused yet (`focused_id` is `None`, e.g. initial load) → the
+///    first non-hidden session (then `0`).
 pub(super) fn resolve_focus_index(
     sessions: &[SessionInfo],
     focused_id: Option<Uuid>,
     hidden: &HashSet<Uuid>,
+    previous_index: usize,
 ) -> usize {
     if let Some(id) = focused_id {
         if let Some(idx) = sessions.iter().position(|s| s.id == id) {
             return idx;
+        }
+        // Focused id set but not in this snapshot: transient gap, not a real
+        // removal — hold the last resolved position instead of jumping to the
+        // first session (#1368).
+        if !sessions.is_empty() {
+            return previous_index.min(sessions.len() - 1);
         }
     }
     sessions
@@ -210,7 +232,7 @@ mod tests {
             session(b, "/b", "h", None),
             session(c, "/c", "h", None),
         ];
-        assert_eq!(resolve_focus_index(&order1, Some(b), &hidden), 1);
+        assert_eq!(resolve_focus_index(&order1, Some(b), &hidden, 0), 1);
 
         // A later poll surfaces the same sessions in a different order; focus
         // by id resolves to b's NEW index, not the stale 1.
@@ -219,29 +241,70 @@ mod tests {
             session(b, "/b", "h", None),
             session(a, "/a", "h", None),
         ];
-        assert_eq!(resolve_focus_index(&order2, Some(b), &hidden), 1);
+        assert_eq!(resolve_focus_index(&order2, Some(b), &hidden, 1), 1);
 
         let order3 = vec![
             session(b, "/b", "h", None),
             session(a, "/a", "h", None),
             session(c, "/c", "h", None),
         ];
-        assert_eq!(resolve_focus_index(&order3, Some(b), &hidden), 0);
+        assert_eq!(resolve_focus_index(&order3, Some(b), &hidden, 1), 0);
     }
 
-    /// A disappeared focus id falls back to the first non-hidden session.
+    /// Nothing focused yet (`None`) falls back to the first non-hidden session.
     #[test]
-    fn missing_focus_falls_back_to_first_non_hidden() {
+    fn no_focus_falls_back_to_first_non_hidden() {
         let a = Uuid::from_u128(1);
         let b = Uuid::from_u128(2);
-        let gone = Uuid::from_u128(99);
         let mut hidden = HashSet::new();
         hidden.insert(a);
 
         let sessions = vec![session(a, "/a", "h", None), session(b, "/b", "h", None)];
         // a is hidden → first non-hidden is b at index 1.
-        assert_eq!(resolve_focus_index(&sessions, Some(gone), &hidden), 1);
-        // None focus behaves the same.
-        assert_eq!(resolve_focus_index(&sessions, None, &hidden), 1);
+        assert_eq!(resolve_focus_index(&sessions, None, &hidden, 0), 1);
+    }
+
+    /// A focused id that is only *transiently* absent (e.g. a just-launched
+    /// session dropped by a racing/stale poll — #1368) holds the previous
+    /// position instead of snapping to the first session, and re-resolves by id
+    /// the moment the session reappears.
+    #[test]
+    fn transiently_missing_focus_holds_previous_index() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let launched = Uuid::from_u128(3);
+        let hidden = HashSet::new();
+
+        // Focus follows the just-launched session (index 2 of the full list).
+        let full = vec![
+            session(a, "/a", "h", None),
+            session(b, "/b", "h", None),
+            session(launched, "/c", "h", None),
+        ];
+        assert_eq!(resolve_focus_index(&full, Some(launched), &hidden, 0), 2);
+
+        // A stale poll response momentarily lacks the new session. Holding the
+        // previous index (clamped to bounds) avoids the "jump to the first
+        // session" bug — it does NOT fall back to index 0.
+        let stale = vec![session(a, "/a", "h", None), session(b, "/b", "h", None)];
+        assert_eq!(resolve_focus_index(&stale, Some(launched), &hidden, 2), 1);
+
+        // Next refresh brings the session back; focus resolves by id again.
+        assert_eq!(resolve_focus_index(&full, Some(launched), &hidden, 1), 2);
+    }
+
+    /// The transient-miss hold must never index past the end of the list.
+    #[test]
+    fn transiently_missing_focus_clamps_to_bounds() {
+        let a = Uuid::from_u128(1);
+        let gone = Uuid::from_u128(99);
+        let hidden = HashSet::new();
+
+        let sessions = vec![session(a, "/a", "h", None)];
+        // previous_index 5 is stale/out of range → clamped to the last index.
+        assert_eq!(resolve_focus_index(&sessions, Some(gone), &hidden, 5), 0);
+
+        // Empty list can't hold anything → 0.
+        assert_eq!(resolve_focus_index(&[], Some(gone), &hidden, 3), 0);
     }
 }

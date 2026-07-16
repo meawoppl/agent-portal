@@ -21,15 +21,23 @@ pub(super) fn use_dashboard_focus(
     session_state: UseReducerHandle<DashboardSessionState>,
 ) -> DashboardFocus {
     // Derive the focused display index from the focused session id against the
-    // current sorted order. Falls back to the first non-hidden session when the
-    // focused id is absent (nothing focused yet, or the focused session was
-    // deleted / left). The rail, keyboard nav, and focus render all consume
-    // this derived index.
+    // current sorted order. The rail, keyboard nav, and focus render all
+    // consume this derived index.
+    //
+    // `last_focused_index` retains the previously resolved position so a
+    // *transient* absence of the focused session (a just-launched session that
+    // a racing/stale poll momentarily drops — #1368) holds focus in place
+    // instead of snapping to the first session. Read-then-write of the ref
+    // during render is safe: it is plain mutable storage that never triggers a
+    // re-render.
+    let last_focused_index = use_mut_ref(|| 0usize);
     let focused_index = session_order::resolve_focus_index(
         &active_sessions,
         session_state.focused_id,
         &effective_hidden_sessions,
+        *last_focused_index.borrow(),
     );
+    *last_focused_index.borrow_mut() = focused_index;
 
     // On initial load, focus first non-hidden session and activate all non-hidden sessions.
     {
