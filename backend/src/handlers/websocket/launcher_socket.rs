@@ -170,6 +170,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         user_id,
         working_directory,
         version,
+        capabilities,
         pending_token_refresh,
     ) = loop {
         match ws_receiver.recv().await {
@@ -180,6 +181,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 hostname,
                 working_directory,
                 version,
+                capabilities,
             })) => {
                 // Authenticate and, for live launcher credentials, opportunistically
                 // rotate legacy non-expiring or half-lived tokens while the
@@ -274,6 +276,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                     user_id,
                     working_directory,
                     version,
+                    capabilities,
                     pending_token_refresh,
                 );
             }
@@ -341,6 +344,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             running_sessions: Vec::new(),
             working_directory,
             version: version.unwrap_or_default(),
+            capabilities,
             cancel: cancel.clone(),
             gen: 0, // stamped by try_register_launcher
             last_seen: std::sync::atomic::AtomicU64::new(0), // stamped by try_register_launcher

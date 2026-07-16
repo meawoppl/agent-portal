@@ -52,6 +52,9 @@ pub enum LauncherToServer {
         /// Working directory where the launcher process is running
         #[serde(default)]
         working_directory: Option<String>,
+        /// Additive feature flags supported by this launcher binary.
+        #[serde(default)]
+        capabilities: Vec<String>,
     },
 
     /// Result of a launch request

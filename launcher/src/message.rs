@@ -129,6 +129,10 @@ pub async fn send(agent_id: &str, message: &str) -> Result<()> {
     } else {
         println!("Queued for the session's reconnect (seq {}).", data.seq);
     }
+    if !data.persisted {
+        println!("warning: message was not durably persisted for reconnect replay");
+    }
+    println!("Recipient pending input backlog: {}.", data.pending_inputs);
     Ok(())
 }
 

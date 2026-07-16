@@ -17,6 +17,11 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
+#[derive(serde::Deserialize)]
+struct LaunchResponse {
+    session_id: Uuid,
+}
+
 /// Sentinel value used in the launcher <select> to represent the "connect new host" option.
 const CONNECT_NEW: &str = "__install__";
 
@@ -298,7 +303,7 @@ fn is_path_home_scoped(path: &str, home_root: Option<&str>) -> bool {
 #[derive(Properties, PartialEq)]
 pub struct LaunchDialogProps {
     pub on_close: Callback<()>,
-    pub on_launched: Callback<()>,
+    pub on_launched: Callback<Uuid>,
     /// Ticks on `ServerToClient::LaunchersChanged` (#710): the dialog
     /// refetches its launcher list live, so a launcher coming online while
     /// the dialog is open appears without reopening it.
@@ -602,6 +607,16 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     .await
                 {
                     Ok(resp) if resp.ok() => {
+                        let launched = match resp.json::<LaunchResponse>().await {
+                            Ok(launched) => launched,
+                            Err(e) => {
+                                error_msg.set(Some(format!(
+                                    "Launch succeeded but response was malformed: {e}"
+                                )));
+                                launching.set(false);
+                                return;
+                            }
+                        };
                         // Remember which machine we launched on, and where on
                         // that machine, so reopening the dialog defaults back to
                         // this launcher + directory next time (#1326).
@@ -609,7 +624,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             save_last_launcher(lid);
                             save_last_launch_dir_for(lid, &working_dir);
                         }
-                        on_launched.emit(());
+                        on_launched.emit(launched.session_id);
                         on_close.emit(());
                     }
                     Ok(resp) => {

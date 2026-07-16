@@ -96,6 +96,7 @@ pub async fn run_launcher_loop(
                     working_directory: std::env::current_dir()
                         .ok()
                         .map(|p| p.to_string_lossy().to_string()),
+                    capabilities: vec![shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
                 };
                 if ws_sender.send(register).await.is_err() {
                     warn!("Failed to send registration");

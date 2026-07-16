@@ -140,8 +140,16 @@ pub struct SendAgentMessageResponse {
     /// True if a live proxy received it; false means it was queued for the
     /// session's next reconnect.
     pub delivered: bool,
+    /// True if the backend persisted a pending-input row for replay on proxy
+    /// reconnect. If false and `delivered` is also false, the sender should
+    /// treat the message as not replay-safe.
+    #[serde(default)]
+    pub persisted: bool,
     /// The input sequence number assigned to the injected message.
     pub seq: i64,
+    /// Number of pending input rows for this session after this send.
+    #[serde(default)]
+    pub pending_inputs: usize,
 }
 
 #[cfg(test)]
