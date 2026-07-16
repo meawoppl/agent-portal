@@ -18,6 +18,13 @@ BACKEND_PID_FILE="$PID_DIR/backend.pid"
 # Log file locations
 BACKEND_LOG="/tmp/claude-portal-backend.log"
 
+# Network config. Overridable so parallel worktrees don't collide on one port.
+# HOST defaults to dual-stack (::) so IPv6 `localhost` and port-forwards reach
+# the backend — a plain 0.0.0.0 (IPv4-only) bind is missed by forwarders that
+# resolve localhost to ::1.
+PORT="${PORT:-3000}"
+HOST="${HOST:-::}"
+
 log() {
     echo -e "${BLUE}[claude-portal]${NC} $1"
 }
@@ -95,8 +102,8 @@ run_migrations() {
     export DATABASE_URL="$DEV_DATABASE_URL"
 
     if ! command -v diesel &> /dev/null; then
-        error "diesel CLI not installed. Run: ./scripts/install-deps.sh"
-        return 1
+        warn "diesel CLI not found — skipping explicit migrations (the backend runs pending migrations itself at startup)."
+        return 0
     fi
 
     log "Running database migrations..."
@@ -139,15 +146,18 @@ start_backend() {
 
     export DATABASE_URL="$DEV_DATABASE_URL"
     export DEV_MODE=true
+    export HOST PORT
 
-    log "Starting backend in dev mode..."
-    cargo run -p backend -- --dev-mode > "$BACKEND_LOG" 2>&1 &
+    log "Starting backend in dev mode on ${HOST}:${PORT}..."
+    # Run in its own session/process group (setsid) so `stop` can kill exactly
+    # this backend's group without touching other worktrees' backends.
+    setsid cargo run -p backend -- --dev-mode > "$BACKEND_LOG" 2>&1 &
     local pid=$!
     echo $pid > "$BACKEND_PID_FILE"
 
     log "Waiting for backend to start..."
     for i in {1..30}; do
-        if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+        if curl -sf "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
             success "Backend is ready (PID: $pid)"
             return 0
         fi
@@ -167,18 +177,19 @@ start_backend() {
 stop_all() {
     log "Stopping services..."
 
-    # Stop backend
+    # Stop backend. The backend was started with setsid, so its PID is also its
+    # process-group id; kill the whole group (cargo + the backend child) with a
+    # negative PID. We deliberately DO NOT `pkill -f target/debug/backend` — that
+    # matches every worktree's backend and would reap other developers'/agents'
+    # instances running on this host.
     if [ -f "$BACKEND_PID_FILE" ]; then
         local pid=$(cat "$BACKEND_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
+            kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
             success "Backend stopped (PID: $pid)"
         fi
         rm -f "$BACKEND_PID_FILE"
     fi
-
-    # Also kill any stray backend processes
-    pkill -f "target/debug/backend" 2>/dev/null || true
 
     # Stop database
     if is_db_running; then
@@ -209,7 +220,7 @@ show_status() {
         echo -e "  Backend:   ${GREEN}running${NC} (PID: $pid)"
 
         # Check if it's actually responding
-        if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+        if curl -sf http://localhost:$PORT/api/health > /dev/null 2>&1; then
             echo -e "  API:       ${GREEN}healthy${NC}"
         else
             echo -e "  API:       ${YELLOW}not responding${NC}"
@@ -220,8 +231,8 @@ show_status() {
 
     echo ""
     echo "URLs:"
-    echo "  Web Interface:  http://localhost:3000/"
-    echo "  Backend API:    http://localhost:3000/api/"
+    echo "  Web Interface:  http://localhost:$PORT/"
+    echo "  Backend API:    http://localhost:$PORT/api/"
     echo ""
     echo "Logs:"
     echo "  Backend: tail -f $BACKEND_LOG"
@@ -267,14 +278,14 @@ do_start() {
     echo "║          ✅ Agent Portal Dev Environment Ready            ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
-    echo "  🌐 Web Interface:  http://localhost:3000/"
-    echo "  📊 Backend API:    http://localhost:3000/api/"
+    echo "  🌐 Web Interface:  http://localhost:$PORT/"
+    echo "  📊 Backend API:    http://localhost:$PORT/api/"
     echo ""
     echo "  🧪 Test Account:   testing@testing.local"
     echo "  ⚠️  DEV MODE:       OAuth bypassed"
     echo ""
     echo "  🔌 To start a portal session:"
-    echo "     1. Open http://localhost:3000/ and generate a setup token"
+    echo "     1. Open http://localhost:$PORT/ and generate a setup token"
     echo "     2. Run the setup command shown in the UI"
     echo ""
     echo "Commands:"
