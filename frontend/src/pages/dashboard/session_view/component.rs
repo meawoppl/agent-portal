@@ -48,6 +48,10 @@ use crate::pages::dashboard::types::{calculate_backoff, MessageData, MessagesRes
 pub struct SessionViewProps {
     pub session: SessionInfo,
     pub focused: bool,
+    /// Whether the dashboard is in keyboard Nav mode. Forwarded to `InputBar` so
+    /// the composer goes `readonly` and stops processing keys while navigating.
+    #[prop_or(false)]
+    pub nav_mode: bool,
     pub on_awaiting_change: Callback<(Uuid, bool)>,
     pub on_connected_change: Callback<(Uuid, bool)>,
     pub on_message_sent: Callback<Uuid>,
@@ -1084,6 +1088,7 @@ impl SessionView {
             <InputBar
                 session_id={ctx.props().session.id}
                 focused={ctx.props().focused}
+                nav_mode={ctx.props().nav_mode}
                 ws_connected={self.ws_connected}
                 {on_register}
                 {on_send_text}

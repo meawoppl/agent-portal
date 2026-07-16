@@ -41,6 +41,14 @@ pub struct InputBarProps {
     /// Whether the WebSocket is currently connected. Disables the textarea
     /// + send buttons when false.
     pub ws_connected: bool,
+    /// Whether the dashboard is in keyboard Nav mode. While `true` the textarea
+    /// is made `readonly` and its key handler is inert, so keystrokes can't type
+    /// into (or submit from) the composer — otherwise Nav mode is misleading
+    /// because the caret sits in a composer that silently swallows typing. The
+    /// box keeps focus/caret (readonly, not disabled), so leaving Nav lands the
+    /// user ready to type; non-composer keys still bubble to `use_keyboard_nav`.
+    #[prop_or(false)]
+    pub nav_mode: bool,
     /// Fired exactly once on `create`, handing the parent a callback it can
     /// invoke to push inbound events into the bar. Mirrors the
     /// dispatcher-registration pattern used by `PermissionHandler` and
@@ -367,7 +375,15 @@ impl Component for InputBar {
 
         let vim_enabled = self.vim_enabled;
         let vim = self.vim.clone();
+        let nav_mode = ctx.props().nav_mode;
         let handle_keydown = link.callback(move |e: KeyboardEvent| {
+            // In Nav mode the composer is inert: do nothing here (no
+            // prevent_default / stop_propagation) so the key bubbles up to the
+            // dashboard's `use_keyboard_nav` handler, which owns navigation. The
+            // textarea is also `readonly` in this mode, so no character is typed.
+            if nav_mode {
+                return InputBarMsg::Noop;
+            }
             if e.ctrl_key() && e.key().to_lowercase() == "m" {
                 e.prevent_default();
                 return InputBarMsg::ToggleVoice;
@@ -522,6 +538,7 @@ impl Component for InputBar {
                         onkeydown={handle_keydown}
                         onpaste={handle_paste}
                         disabled={!ctx.props().ws_connected}
+                        readonly={ctx.props().nav_mode}
                         rows="1"
                     />
                     { self.render_voice_input(ctx) }

@@ -717,6 +717,7 @@ pub fn dashboard_page() -> Html {
                                             <SessionView
                                                 session={session.clone()}
                                                 focused={is_focused}
+                                                nav_mode={keyboard_nav.nav_mode}
                                                 on_awaiting_change={on_awaiting_change.clone()}
                                                 on_connected_change={on_connected_change.clone()}
                                                 on_message_sent={on_message_sent.clone()}
