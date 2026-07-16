@@ -39,10 +39,8 @@ use crate::helpers::format_request_id;
 /// `&mut self` on `classify` leaves room for a future request-id ↔ tool map.
 ///
 /// Its [`Raw`](AgentOutputClassifier::Raw) is the typed `ServerMessage` rather
-/// than `serde_json::Value`: `ServerMessage` is not `Deserialize` (the SDK
-/// client parses it with custom logic), so a `Value`-based classify could never
-/// reconstruct it. The I/O task holds the typed message and hands it straight
-/// here — no JSON round-trip.
+/// than `serde_json::Value`. The I/O task holds the typed message and hands it
+/// straight here — no JSON round-trip.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CodexClassifier;
 
@@ -165,11 +163,7 @@ fn classify_request(request_id: String, request: ServerRequest) -> Vec<AgentOutp
             } else {
                 p.command.join(" ")
             };
-            let parsed_cmd = if p.parsed_cmd.is_empty() {
-                None
-            } else {
-                Some(serde_json::to_value(&p.parsed_cmd).unwrap_or(serde_json::Value::Null))
-            };
+            let parsed_cmd = (!p.parsed_cmd.is_empty()).then_some(p.parsed_cmd);
             permission(
                 request_id,
                 CodexPermissionInput::ExecCommand {
@@ -180,38 +174,30 @@ fn classify_request(request_id: String, request: ServerRequest) -> Vec<AgentOutp
             )
         }
 
-        ServerRequest::ApplyPatchApproval(p) => {
-            let file_changes =
-                serde_json::to_value(&p.file_changes).unwrap_or(serde_json::Value::Null);
-            permission(
-                request_id,
-                CodexPermissionInput::ApplyPatch {
-                    file_changes,
-                    grant_root: p.grant_root,
-                    reason: p.reason,
-                },
-            )
-        }
+        ServerRequest::ApplyPatchApproval(p) => permission(
+            request_id,
+            CodexPermissionInput::ApplyPatch {
+                file_changes: p.file_changes,
+                grant_root: p.grant_root,
+                reason: p.reason,
+            },
+        ),
 
-        ServerRequest::PermissionsRequestApproval(p) => {
-            let permissions = serde_json::to_value(&p.permissions).ok();
-            permission(
-                request_id,
-                CodexPermissionInput::Permissions {
-                    cwd: Some(p.cwd.0),
-                    permissions,
-                    reason: p.reason,
-                },
-            )
-        }
+        ServerRequest::PermissionsRequestApproval(p) => permission(
+            request_id,
+            CodexPermissionInput::Permissions {
+                cwd: Some(p.cwd.0),
+                permissions: Some(p.permissions),
+                reason: p.reason,
+            },
+        ),
 
-        ServerRequest::ToolRequestUserInput(p) => {
-            let questions = serde_json::to_value(&p.questions).unwrap_or(serde_json::Value::Null);
-            permission(
-                request_id,
-                CodexPermissionInput::AskUserQuestion { questions },
-            )
-        }
+        ServerRequest::ToolRequestUserInput(p) => permission(
+            request_id,
+            CodexPermissionInput::AskUserQuestion {
+                questions: p.questions,
+            },
+        ),
 
         ServerRequest::McpServerElicitationRequest(_p) => permission(
             request_id,

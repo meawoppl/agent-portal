@@ -89,6 +89,7 @@ fn render_portal_content(
             reset_at,
             status,
             source_message,
+            reason,
         } => render_continuation_prompt(
             *continuation_id,
             reset_at,
@@ -97,6 +98,7 @@ fn render_portal_content(
                 .map(String::as_str)
                 .unwrap_or(status),
             source_message,
+            reason,
             on_schedule_continuation,
         ),
         shared::PortalContent::AgentMessage { text, .. } => {
@@ -211,21 +213,39 @@ fn render_continuation_prompt(
     reset_at: &str,
     status: &str,
     source_message: &str,
+    reason: &str,
     on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
-    let continuation_label = format_continuation_label(reset_at);
-    let terminal = matches!(
-        status,
-        "scheduled" | "scheduling" | "fired" | "dropped" | "failed"
-    );
+    let overloaded = reason == shared::CONTINUATION_REASON_OVERLOADED;
+    let terminal = overloaded
+        || matches!(
+            status,
+            "scheduled" | "scheduling" | "fired" | "dropped" | "failed"
+        );
     let status_class = status.to_string();
-    let button_label = match status {
-        "scheduled" => "Scheduled",
-        "scheduling" => "Scheduling...",
-        "fired" => "Continued",
-        "dropped" => "Dropped",
-        "failed" => "Failed",
-        _ => "Continue 2 min after limit lifts",
+    // Overload retries are auto-scheduled (no user click), so the button is a
+    // passive status pill and its wording reflects the retry, not a limit reset.
+    let button_label = if overloaded {
+        match status {
+            "fired" => "Retried",
+            "dropped" => "Retry dropped",
+            "failed" => "Retry failed",
+            _ => "Auto-retrying",
+        }
+    } else {
+        match status {
+            "scheduled" => "Scheduled",
+            "scheduling" => "Scheduling...",
+            "fired" => "Continued",
+            "dropped" => "Dropped",
+            "failed" => "Failed",
+            _ => "Continue 2 min after limit lifts",
+        }
+    };
+    let title = if overloaded {
+        "Provider overloaded — auto-retrying"
+    } else {
+        "Claude session limit reached"
     };
     let onclick = {
         let on_schedule_continuation = on_schedule_continuation.clone();
@@ -237,8 +257,10 @@ fn render_continuation_prompt(
     html! {
         <div class="continuation-card">
             <div class="continuation-copy">
-                <div class="continuation-title">{ "Claude session limit reached" }</div>
-                <div class="continuation-detail">{ continuation_label }</div>
+                <div class="continuation-title">{ title }</div>
+                if !overloaded {
+                    <div class="continuation-detail">{ format_continuation_label(reset_at) }</div>
+                }
                 if !source_message.is_empty() {
                     <div class="continuation-source">{ source_message }</div>
                 }

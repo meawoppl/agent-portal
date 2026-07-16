@@ -9,8 +9,10 @@ use std::path::Path;
 use std::time::Instant;
 
 use codex_codes::{
-    methods, AppServerBuilder, AsyncClient as CodexAsyncClient, ThreadResumeParams,
-    ThreadResumeResponse, ThreadStartParams, TurnInterruptParams, TurnStartParams, UserInput,
+    AppServerBuilder, ApplyPatchApprovalResponse, AsyncClient as CodexAsyncClient,
+    CommandExecutionRequestApprovalResponse, ExecCommandApprovalResponse, ServerMessage,
+    ServerRequest, ThreadResumeParams, ThreadStartParams, TurnInterruptParams, TurnStartParams,
+    UserInput,
 };
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
@@ -22,18 +24,43 @@ use crate::events::{
     to_raw_output, CodexUsageEvent, ThreadStartedEvent, TurnFailedEvent, UserEchoEvent,
 };
 use crate::handler::handle_codex_server_message;
-use crate::helpers::parse_request_id;
+use crate::helpers::{format_request_id, parse_request_id};
 
-/// Map a neutral [`PermissionDecision`] to Codex's approval JSON
-/// (`{"decision": "accept" | "decline"}`). Codex approval is a coarse
-/// allow/deny, so the decision's `modified_input` / `remember` are unused.
-fn codex_approval_result(decision: &PermissionDecision) -> serde_json::Value {
-    #[derive(serde::Serialize)]
-    struct CodexApprovalResult<'a> {
-        decision: &'a str,
-    }
-    let decision = if decision.allow { "accept" } else { "decline" };
-    serde_json::to_value(CodexApprovalResult { decision }).unwrap_or(serde_json::Value::Null)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexApprovalResponseKind {
+    AcceptDecline,
+    ExecApprovedDenied,
+    ApplyPatchApprovedDenied,
+}
+
+/// Map a neutral [`PermissionDecision`] to Codex's approval response. Codex's
+/// v2 command/file-change requests use `accept` / `decline`; older v1
+/// exec/apply-patch requests use `approved` / `denied`.
+fn codex_approval_result(
+    decision: &PermissionDecision,
+    kind: CodexApprovalResponseKind,
+) -> serde_json::Value {
+    let result = match kind {
+        CodexApprovalResponseKind::AcceptDecline if decision.allow => {
+            serde_json::to_value(CommandExecutionRequestApprovalResponse::accept())
+        }
+        CodexApprovalResponseKind::AcceptDecline => {
+            serde_json::to_value(CommandExecutionRequestApprovalResponse::decline())
+        }
+        CodexApprovalResponseKind::ExecApprovedDenied if decision.allow => {
+            serde_json::to_value(ExecCommandApprovalResponse::approved())
+        }
+        CodexApprovalResponseKind::ExecApprovedDenied => {
+            serde_json::to_value(ExecCommandApprovalResponse::denied())
+        }
+        CodexApprovalResponseKind::ApplyPatchApprovedDenied if decision.allow => {
+            serde_json::to_value(ApplyPatchApprovalResponse::approved())
+        }
+        CodexApprovalResponseKind::ApplyPatchApprovedDenied => {
+            serde_json::to_value(ApplyPatchApprovalResponse::denied())
+        }
+    };
+    result.unwrap_or(serde_json::Value::Null)
 }
 
 type DeliveryAck = oneshot::Sender<Result<(), String>>;
@@ -115,36 +142,18 @@ pub(crate) async fn codex_io_task(
 
     // Re-attach to a prior codex thread when this is a resume launch
     // (`config.resume == true`) and the proxy persisted a thread id from
-    // the previous incarnation. codex-codes 0.129.3 doesn't expose a
-    // typed `thread_resume` helper on AsyncClient yet — only
-    // `thread_start` / `turn_*` / `thread_archive` — so we drive the
-    // JSON-RPC call directly via the low-level `request<P, R>` primitive
-    // using `methods::THREAD_RESUME`. Upstream issue filed against
-    // meawoppl/rust-code-agent-sdks for the missing helper.
+    // the previous incarnation.
     let mut resumed_thread: Option<(String, Option<String>)> = None;
     if config.resume {
         if let Some(prior) = config.codex_thread_id.as_ref() {
             let resume_params = ThreadResumeParams {
                 thread_id: prior.clone(),
-                approval_policy: None,
-                approvals_reviewer: None,
-                base_instructions: None,
-                config: None,
                 // Leave cwd as None on resume — the app-server stored the
                 // thread's working directory at first launch and we don't
                 // want to override it from the launcher's POV.
-                cwd: None,
-                developer_instructions: None,
-                model: None,
-                model_provider: None,
-                personality: None,
-                sandbox: None,
-                service_tier: None,
+                ..ThreadResumeParams::default()
             };
-            match client
-                .request::<_, ThreadResumeResponse>(methods::THREAD_RESUME, &resume_params)
-                .await
-            {
+            match client.thread_resume(&resume_params).await {
                 Ok(resp) => {
                     tracing::info!("Codex thread resumed: {}", prior);
                     let model = started_thread_model(resp.model, &configured_model_fallback);
@@ -174,12 +183,7 @@ pub(crate) async fn codex_io_task(
     let (thread_id, thread_model) = match resumed_thread {
         Some(thread) => thread,
         None => {
-            // codex-codes 0.129.3 removed the `Default` impl on
-            // `ThreadStartParams` (15 Option<...> fields, all
-            // skip_serializing_if Some); the SDK's idiom for an "empty"
-            // params is round-tripping through `{}` JSON. See codex-codes
-            // 0.129.3 src/lib.rs:18-30 example.
-            let thread_params = empty_thread_start_params();
+            let thread_params = ThreadStartParams::default();
             match client.thread_start(&thread_params).await {
                 Ok(resp) => {
                     let model = started_thread_model(resp.model, &configured_model_fallback);
@@ -230,6 +234,8 @@ pub(crate) async fn codex_io_task(
     let mut current_turn_usage: Option<codex_codes::TokenUsageBreakdown> = None;
     let mut current_turn_model: Option<String> = None;
     let mut subagent_token_tracker = CodexSubagentTokenTracker::new(thread_id.clone());
+    let mut pending_approval_response_kinds: HashMap<String, CodexApprovalResponseKind> =
+        HashMap::new();
 
     loop {
         if turn_active {
@@ -238,6 +244,10 @@ pub(crate) async fn codex_io_task(
                 result = client.next_message() => {
                     match result {
                         Ok(Some(msg)) => {
+                            if let Some((request_id, kind)) = approval_response_kind(&msg) {
+                                pending_approval_response_kinds.insert(request_id, kind);
+                            }
+
                             // Peek for turn lifecycle so we can name the
                             // turn on later `turn/interrupt` requests, and
                             // feed the per-turn metrics tracker. We can't
@@ -326,25 +336,11 @@ pub(crate) async fn codex_io_task(
                                         _ => {}
                                     }
                                 }
-                                if let Ok((method, params_opt)) =
-                                    notif.clone().into_envelope()
-                                {
-                                    match method.as_str() {
-                                        "turn/started" => {
-                                            if let Some(turn_id) = params_opt
-                                                .as_ref()
-                                                .and_then(|p| p.get("turn"))
-                                                .and_then(|t| t.get("id"))
-                                                .and_then(|v| v.as_str())
-                                            {
-                                                current_turn_id = Some(turn_id.to_string());
-                                            }
-                                        }
-                                        "turn/completed" => {
-                                            current_turn_id = None;
-                                        }
-                                        _ => {}
-                                    }
+                                if let Some(turn_id) = notif.turn_id() {
+                                    current_turn_id = Some(turn_id.to_string());
+                                }
+                                if matches!(notif, codex_codes::Notification::TurnCompleted(_)) {
+                                    current_turn_id = None;
                                 }
                             }
 
@@ -386,7 +382,10 @@ pub(crate) async fn codex_io_task(
                                         .as_ref()
                                         .map(|u| u.output_tokens)
                                         .unwrap_or(0),
-                                    cache_creation_tokens: 0,
+                                    cache_creation_tokens: usage
+                                        .as_ref()
+                                        .and_then(|u| u.cache_write_input_tokens)
+                                        .unwrap_or(0),
                                     cache_read_tokens: usage
                                         .as_ref()
                                         .map(|u| u.cached_input_tokens)
@@ -557,7 +556,10 @@ pub(crate) async fn codex_io_task(
                             decision,
                         } => {
                             let rid = parse_request_id(&request_id);
-                            let result = codex_approval_result(&decision);
+                            let kind = pending_approval_response_kinds
+                                .remove(&request_id)
+                                .unwrap_or(CodexApprovalResponseKind::AcceptDecline);
+                            let result = codex_approval_result(&decision, kind);
                             if let Err(e) = client.respond(rid, &result).await {
                                 tracing::error!("Failed to send Codex approval: {}", e);
                             }
@@ -669,11 +671,6 @@ async fn start_codex_turn_request(
 ) -> bool {
     tracing::info!("Starting Codex turn with {} chars", prompt.len());
 
-    // codex-codes 0.129.3 generated TurnStartParams from its schema:
-    // `reasoning_effort` is now `effort`, a new required `text_elements` field
-    // landed on `UserInput::Text`, and the struct has many more Option fields
-    // with no Default impl. Keep this construction explicit so SDK schema
-    // changes become compile errors.
     let turn_params = turn_start_params(thread_id, prompt);
     match client.turn_start(&turn_params).await {
         Ok(_) => {
@@ -694,45 +691,30 @@ async fn start_codex_turn_request(
     }
 }
 
-fn empty_thread_start_params() -> ThreadStartParams {
-    ThreadStartParams {
-        approval_policy: None,
-        approvals_reviewer: None,
-        base_instructions: None,
-        config: None,
-        cwd: None,
-        developer_instructions: None,
-        ephemeral: None,
-        model: None,
-        model_provider: None,
-        personality: None,
-        sandbox: None,
-        service_name: None,
-        service_tier: None,
-        session_start_source: None,
-        thread_source: None,
-    }
-}
-
 fn turn_start_params(thread_id: &str, prompt: String) -> TurnStartParams {
     TurnStartParams {
-        approval_policy: None,
-        approvals_reviewer: None,
-        client_user_message_id: None,
-        cwd: None,
-        effort: None,
         input: vec![UserInput::Text {
             text: prompt,
             text_elements: None,
         }],
-        model: None,
-        output_schema: None,
-        personality: None,
-        sandbox_policy: None,
-        service_tier: None,
-        summary: None,
         thread_id: thread_id.to_string(),
+        ..TurnStartParams::default()
     }
+}
+
+fn approval_response_kind(msg: &ServerMessage) -> Option<(String, CodexApprovalResponseKind)> {
+    let ServerMessage::Request { id, request } = msg else {
+        return None;
+    };
+    let kind = match request {
+        ServerRequest::CmdExecApproval(_) | ServerRequest::FileChangeApproval(_) => {
+            CodexApprovalResponseKind::AcceptDecline
+        }
+        ServerRequest::ExecCommandApproval(_) => CodexApprovalResponseKind::ExecApprovedDenied,
+        ServerRequest::ApplyPatchApproval(_) => CodexApprovalResponseKind::ApplyPatchApprovedDenied,
+        _ => return None,
+    };
+    Some((format_request_id(id), kind))
 }
 
 fn non_empty_string(value: String) -> Option<String> {
@@ -817,6 +799,7 @@ fn token_breakdown_total(usage: &codex_codes::TokenUsageBreakdown) -> i64 {
     } else {
         usage.input_tokens
             + usage.cached_input_tokens
+            + usage.cache_write_input_tokens.unwrap_or(0)
             + usage.output_tokens
             + usage.reasoning_output_tokens
     }
@@ -862,23 +845,99 @@ mod tests {
         values.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Neutral `PermissionDecision` → Codex approval JSON. Ported from the
+    /// Neutral `PermissionDecision` → Codex approval response. Ported from the
     /// deleted `respond_permission` codex branch — approval is a coarse
     /// accept/decline, so only `allow` matters.
     #[test]
     fn codex_approval_result_maps_allow_to_accept_decline() {
-        let accept = codex_approval_result(&PermissionDecision {
-            allow: true,
-            ..Default::default()
-        });
+        let accept = codex_approval_result(
+            &PermissionDecision {
+                allow: true,
+                ..Default::default()
+            },
+            CodexApprovalResponseKind::AcceptDecline,
+        );
         assert_eq!(accept["decision"], serde_json::json!("accept"));
 
-        let decline = codex_approval_result(&PermissionDecision {
-            allow: false,
-            reason: Some("nope".to_string()),
-            ..Default::default()
-        });
+        let decline = codex_approval_result(
+            &PermissionDecision {
+                allow: false,
+                reason: Some("nope".to_string()),
+                ..Default::default()
+            },
+            CodexApprovalResponseKind::AcceptDecline,
+        );
         assert_eq!(decline["decision"], serde_json::json!("decline"));
+    }
+
+    #[test]
+    fn codex_approval_result_maps_exec_and_patch_to_approved_denied() {
+        let approve = PermissionDecision {
+            allow: true,
+            ..Default::default()
+        };
+        let deny = PermissionDecision {
+            allow: false,
+            ..Default::default()
+        };
+
+        let exec_approved =
+            codex_approval_result(&approve, CodexApprovalResponseKind::ExecApprovedDenied);
+        assert_eq!(exec_approved["decision"], serde_json::json!("approved"));
+        let exec_denied =
+            codex_approval_result(&deny, CodexApprovalResponseKind::ExecApprovedDenied);
+        assert_eq!(exec_denied["decision"], serde_json::json!("denied"));
+
+        let patch_approved = codex_approval_result(
+            &approve,
+            CodexApprovalResponseKind::ApplyPatchApprovedDenied,
+        );
+        assert_eq!(patch_approved["decision"], serde_json::json!("approved"));
+        let patch_denied =
+            codex_approval_result(&deny, CodexApprovalResponseKind::ApplyPatchApprovedDenied);
+        assert_eq!(patch_denied["decision"], serde_json::json!("denied"));
+    }
+
+    #[test]
+    fn approval_response_kind_distinguishes_codex_protocol_families() {
+        let exec_req: codex_codes::ExecCommandApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "callId": "c",
+                "conversationId": "cv",
+                "command": ["ls"],
+                "cwd": "/tmp"
+            }))
+            .unwrap();
+        let exec = ServerMessage::Request {
+            id: codex_codes::RequestId::Integer(7),
+            request: ServerRequest::ExecCommandApproval(exec_req),
+        };
+        assert_eq!(
+            approval_response_kind(&exec),
+            Some((
+                "7".to_string(),
+                CodexApprovalResponseKind::ExecApprovedDenied
+            ))
+        );
+
+        let cmd_req: codex_codes::CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "itemId": "i",
+                "command": "ls",
+                "cwd": "/tmp",
+                "startedAtMs": 0,
+                "threadId": "t",
+                "turnId": "tu"
+            }))
+            .unwrap();
+        let cmd = ServerMessage::Request {
+            id: codex_codes::RequestId::Integer(8),
+            request: ServerRequest::CmdExecApproval(cmd_req),
+        };
+        assert_eq!(
+            approval_response_kind(&cmd),
+            Some(("8".to_string(), CodexApprovalResponseKind::AcceptDecline))
+        );
     }
 
     #[test]
@@ -940,6 +999,7 @@ mod tests {
         codex_codes::TokenUsageBreakdown {
             input_tokens: input,
             cached_input_tokens: cached,
+            cache_write_input_tokens: Some(0),
             output_tokens: output,
             reasoning_output_tokens: reasoning,
             total_tokens: total,

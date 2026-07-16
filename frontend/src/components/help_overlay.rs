@@ -38,6 +38,14 @@ const GROUPS: &[ShortcutGroup] = &[
                 keys: &["Shift", "Tab"],
                 description: "Jump to the next active session",
             },
+            Shortcut {
+                keys: &["Ctrl/Cmd", "K"],
+                description: "Toggle nav mode (enter / leave)",
+            },
+            Shortcut {
+                keys: &["Ctrl", "C"],
+                description: "Interrupt the running agent (copies if text is selected)",
+            },
         ],
     },
     ShortcutGroup {
@@ -63,14 +71,6 @@ const GROUPS: &[ShortcutGroup] = &[
                 keys: &["Ctrl", "M"],
                 description: "Toggle voice input",
             },
-            Shortcut {
-                keys: &["Esc"],
-                description: "Switch to nav mode",
-            },
-            Shortcut {
-                keys: &["Esc", "Esc", "Esc"],
-                description: "Interrupt the running agent",
-            },
         ],
     },
     ShortcutGroup {
@@ -93,23 +93,19 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Jump to the next waiting session",
             },
             Shortcut {
+                keys: &["G"],
+                description: "Jump to the latest message (resume live tailing)",
+            },
+            Shortcut {
                 keys: &["n"],
                 description: "New session (open the launch dialog)",
             },
             Shortcut {
-                keys: &["x"],
-                description: "Hide / show the focused session",
+                keys: &["d"],
+                description: "Delete the focused session (with confirmation)",
             },
             Shortcut {
-                keys: &["i"],
-                description: "Return to edit mode",
-            },
-            Shortcut {
-                keys: &["Enter"],
-                description: "Return to edit mode",
-            },
-            Shortcut {
-                keys: &["Esc"],
+                keys: &["Ctrl/Cmd", "K"],
                 description: "Return to edit mode",
             },
         ],

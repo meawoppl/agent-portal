@@ -62,6 +62,7 @@ web-sys = { workspace = true, features = [
     "AudioDestinationNode",
     "AudioParam",
     "KeyboardEvent",
+    "Selection",
     "ClipboardEvent",
     "DataTransfer",
     "DataTransferItem",

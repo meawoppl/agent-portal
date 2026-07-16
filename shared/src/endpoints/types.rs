@@ -3,6 +3,13 @@ use uuid::Uuid;
 
 use crate::{AgentType, PermissionSuggestion};
 
+/// A session continuation created for a usage-limit reset (`#231`/`#1260`).
+pub const CONTINUATION_REASON_LIMIT: &str = "limit";
+/// A session continuation created to auto-retry a turn that a transient 529
+/// overload killed. Fires immediately (no reset skew) — the CLI already backs
+/// off internally, so the portal adds no further delay.
+pub const CONTINUATION_REASON_OVERLOADED: &str = "overloaded";
+
 /// Fields for session registration (shared by proxy and web client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterFields {
@@ -87,6 +94,13 @@ pub struct ContinuationConfig {
     pub claude_args: Vec<String>,
     #[serde(default)]
     pub agent_type: AgentType,
+    /// `CONTINUATION_REASON_LIMIT` (default, wire-compatible with older
+    /// launchers/backends that omit it) or `CONTINUATION_REASON_OVERLOADED`.
+    /// The launcher uses this to decide the reset skew: limit resets wait
+    /// `CONTINUATION_RESET_SKEW_SECS` past `reset_at`; overload retries fire at
+    /// `reset_at` with no skew.
+    #[serde(default = "crate::default_continuation_reason")]
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -33,6 +33,7 @@ use shared::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -48,6 +49,15 @@ pub const INITIAL_WINDOW: u32 = 256 * 1024;
 pub const MAX_STREAMS: usize = 64;
 /// How long a probe/stream dial to loopback may take before it is refused.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a *browser-stream* dial keeps retrying loopback before giving up.
+/// A refused dial usually just means the local service is momentarily down —
+/// mid-restart, or finishing a build — so we back off and retry within this
+/// budget instead of instantly reporting the port dead (which surfaces as
+/// "nothing listening on the forwarded port"). A genuinely dead port still
+/// fails within the budget rather than hanging the browser indefinitely. The
+/// background health probe (`probe_tick`) does NOT retry — it must reflect the
+/// true, current liveness for the frontend's forward chip.
+const STREAM_DIAL_RETRY_BUDGET: Duration = Duration::from_secs(8);
 /// Cadence of the background port-health probe. A loopback dial is
 /// microseconds of work, so this can be frequent — it drives the green/red
 /// liveness tint on the frontend's forward chip.
@@ -337,22 +347,13 @@ impl TunnelManager {
         let stream_id = open.stream_id;
         let port = open.port;
         tokio::spawn(async move {
-            let tcp = match tokio::time::timeout(DIAL_TIMEOUT, dial_loopback(port)).await {
-                Ok(Ok(tcp)) => tcp,
-                Ok(Err(e)) => {
+            let tcp = match dial_loopback_for_stream(port).await {
+                Ok(tcp) => tcp,
+                Err(e) => {
                     mgr.remove_stream(stream_id).await;
                     mgr.send(ProxyToServer::TunnelRefused(TunnelRefusedFields {
                         stream_id,
                         error: e.to_string(),
-                    }))
-                    .await;
-                    return;
-                }
-                Err(_) => {
-                    mgr.remove_stream(stream_id).await;
-                    mgr.send(ProxyToServer::TunnelRefused(TunnelRefusedFields {
-                        stream_id,
-                        error: "dial timed out".to_string(),
                     }))
                     .await;
                     return;
@@ -382,6 +383,38 @@ impl TunnelManager {
 /// The proxy only ever dials loopback — hard-coded, not configurable.
 async fn dial_loopback(port: u16) -> std::io::Result<TcpStream> {
     TcpStream::connect(("127.0.0.1", port)).await
+}
+
+/// Dial loopback for a browser stream, retrying while the local service is
+/// momentarily unavailable so a forward self-heals across a quick backend
+/// restart instead of reporting the port dead. Each attempt is bounded by
+/// `DIAL_TIMEOUT`; a *refused* dial backs off briefly and retries until
+/// `STREAM_DIAL_RETRY_BUDGET` elapses. A dial that *times out* (the service is
+/// hung, not down) is not retried — repeating a multi-second hang would only
+/// stall the browser — so it fails immediately.
+async fn dial_loopback_for_stream(port: u16) -> std::io::Result<TcpStream> {
+    let deadline = Instant::now() + STREAM_DIAL_RETRY_BUDGET;
+    let mut backoff = Duration::from_millis(100);
+    loop {
+        match tokio::time::timeout(DIAL_TIMEOUT, dial_loopback(port)).await {
+            Ok(Ok(tcp)) => return Ok(tcp),
+            Ok(Err(e)) => {
+                // Refused (or similar) — the service is likely mid-restart.
+                // Back off and retry until the budget runs out.
+                if Instant::now() + backoff >= deadline {
+                    return Err(e);
+                }
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(Duration::from_millis(500));
+            }
+            Err(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "dial timed out",
+                ));
+            }
+        }
+    }
 }
 
 /// Name of the process listening on `port`, best effort. `listeners` scans
@@ -571,5 +604,48 @@ mod tests {
         assert_eq!(gate.take(4).await, 4);
         gate.grant(u32::MAX).await; // still sane after saturation
         assert_eq!(gate.take(4).await, 4);
+    }
+
+    /// A browser-stream dial connects immediately when the service is up.
+    #[tokio::test]
+    async fn stream_dial_connects_when_service_is_up() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accept = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        let stream = dial_loopback_for_stream(port).await;
+        assert!(stream.is_ok(), "expected immediate connect, got {stream:?}");
+        let _ = accept.await;
+    }
+
+    /// The dial retries across a brief outage: the listener comes up only after
+    /// the first attempts would have been refused, and the dial still connects
+    /// within the retry budget. This is the "backend mid-restart" case that
+    /// otherwise surfaces as "nothing listening on the forwarded port".
+    #[tokio::test]
+    async fn stream_dial_retries_until_listener_is_up() {
+        // Grab a free port, then release it so the first dials are refused.
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        // Bring the listener up only after a delay that outlasts the first
+        // couple of retry backoffs.
+        let listener_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+                .await
+                .unwrap();
+            let _ = listener.accept().await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        });
+
+        let stream = dial_loopback_for_stream(port).await;
+        assert!(
+            stream.is_ok(),
+            "expected the retry to connect once the listener came up, got {stream:?}"
+        );
+        let _ = listener_task.await;
     }
 }

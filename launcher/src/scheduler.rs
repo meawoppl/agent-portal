@@ -11,6 +11,21 @@ use uuid::Uuid;
 const PROMPT_DELAY: Duration = Duration::from_secs(5);
 const CONTINUATION_RESET_SKEW_SECS: i64 = 120;
 
+/// Seconds to wait past a continuation's `reset_at` before firing it.
+///
+/// Usage-limit resets wait `CONTINUATION_RESET_SKEW_SECS`: the reset time Claude
+/// reports is approximate and firing early re-trips the limit. Overload retries
+/// fire with no skew — the backend already encoded the intended (immediate/60s/
+/// 300s) delay in `reset_at`, and the CLI backs off internally, so any extra
+/// wait here would defeat the "retry immediately" intent.
+fn continuation_skew_secs(reason: &str) -> i64 {
+    if reason == shared::CONTINUATION_REASON_OVERLOADED {
+        0
+    } else {
+        CONTINUATION_RESET_SKEW_SECS
+    }
+}
+
 struct ActiveTask {
     config: ScheduledTaskConfig,
     next_fire: Option<DateTime<Utc>>,
@@ -149,7 +164,8 @@ impl Scheduler {
             .iter()
             .filter_map(|c| {
                 DateTime::parse_from_rfc3339(&c.reset_at).ok().map(|dt| {
-                    dt.with_timezone(&Utc) + chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS)
+                    dt.with_timezone(&Utc)
+                        + chrono::Duration::seconds(continuation_skew_secs(&c.reason))
                 })
             })
             .map(|next| {
@@ -169,7 +185,8 @@ impl Scheduler {
             let due = DateTime::parse_from_rfc3339(&c.reset_at)
                 .ok()
                 .map(|dt| {
-                    dt.with_timezone(&Utc) + chrono::Duration::seconds(CONTINUATION_RESET_SKEW_SECS)
+                    dt.with_timezone(&Utc)
+                        + chrono::Duration::seconds(continuation_skew_secs(&c.reason))
                         <= now
                 })
                 .unwrap_or(false);
@@ -542,6 +559,10 @@ mod tests {
     }
 
     fn continuation(reset_at: DateTime<Utc>) -> ContinuationConfig {
+        continuation_with_reason(reset_at, shared::CONTINUATION_REASON_LIMIT)
+    }
+
+    fn continuation_with_reason(reset_at: DateTime<Utc>, reason: &str) -> ContinuationConfig {
         ContinuationConfig {
             id: Uuid::new_v4(),
             session_id: Uuid::new_v4(),
@@ -551,7 +572,33 @@ mod tests {
             session_name: Some("project".to_string()),
             claude_args: vec!["--model".to_string(), "sonnet".to_string()],
             agent_type: shared::AgentType::Claude,
+            reason: reason.to_string(),
         }
+    }
+
+    #[test]
+    fn overloaded_continuation_fires_at_reset_with_no_skew() {
+        let mut scheduler = Scheduler::new();
+        // reset_at is "now": a limit continuation would wait the skew, but an
+        // overload retry must be due immediately.
+        let due = continuation_with_reason(Utc::now(), shared::CONTINUATION_REASON_OVERLOADED);
+        let id = due.id;
+        scheduler.update_continuations(vec![due]);
+        let ready = scheduler.ready_continuations();
+        assert_eq!(ready.len(), 1, "overloaded continuation should fire now");
+        assert_eq!(ready[0].id, id);
+    }
+
+    #[test]
+    fn limit_continuation_still_waits_skew_at_reset() {
+        let mut scheduler = Scheduler::new();
+        // Same "now" reset_at, but a limit continuation must NOT be due yet.
+        scheduler.update_continuations(vec![continuation_with_reason(
+            Utc::now(),
+            shared::CONTINUATION_REASON_LIMIT,
+        )]);
+        assert!(scheduler.ready_continuations().is_empty());
+        assert!(scheduler.next_continuation_duration() > Some(Duration::ZERO));
     }
 
     #[test]

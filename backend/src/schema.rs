@@ -153,6 +153,8 @@ diesel::table! {
         fired_at -> Nullable<Timestamp>,
         dropped_at -> Nullable<Timestamp>,
         cancelled_at -> Nullable<Timestamp>,
+        #[max_length = 32]
+        reason -> Varchar,
     }
 }
 

@@ -17,7 +17,9 @@ use super::types::{
 use crate::components::{
     ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, TurnMetricsHeaderPill,
 };
-use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
+use crate::hooks::{
+    use_client_websocket, use_interrupt_hotkey, use_keyboard_nav, use_sessions, KeyboardNavConfig,
+};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
 use crate::utils;
@@ -171,6 +173,21 @@ pub fn dashboard_page() -> Html {
         Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ShowHelp))
     };
 
+    // Request deletion of a session (shows the confirm modal). Shared by the
+    // rail context menu and the nav-mode `d` shortcut.
+    let on_delete = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |session_id: Uuid| {
+            ui_state.dispatch(DashboardUiAction::RequestDelete(session_id));
+        })
+    };
+
+    // Open a new session (launch dialog). Shared by the nav-mode `n` shortcut.
+    let on_new_session = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ToggleLaunchDialog))
+    };
+
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
@@ -178,9 +195,15 @@ pub fn dashboard_page() -> Html {
         hidden_sessions: effective_hidden_sessions.clone(),
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
-        on_interrupt: focus.on_interrupt.clone(),
         on_show_help,
+        on_new_session,
+        on_delete: on_delete.clone(),
+        on_jump_to_latest: focus.on_jump_to_latest.clone(),
     });
+
+    // Ctrl+C interrupt: a window capture-phase listener so it fires in every
+    // mode (edit, nav, vim NORMAL/INSERT) and can't be swallowed by vim's `c`.
+    use_interrupt_hotkey(focus.on_interrupt.clone());
 
     let close_help = {
         let ui_state = ui_state.clone();
@@ -265,13 +288,6 @@ pub fn dashboard_page() -> Html {
                     ui_state.dispatch(DashboardUiAction::ClearPendingLeave);
                 });
             }
-        })
-    };
-
-    let on_delete = {
-        let ui_state = ui_state.clone();
-        Callback::from(move |session_id: Uuid| {
-            ui_state.dispatch(DashboardUiAction::RequestDelete(session_id));
         })
     };
 
@@ -708,6 +724,7 @@ pub fn dashboard_page() -> Html {
                                                 on_activity={on_activity.clone()}
                                                 current_user_id={current_user_id.map(|id| id.to_string())}
                                                 interrupt_signal={focus.interrupt_signal}
+                                                jump_to_latest_signal={focus.jump_to_latest_signal}
                                             />
                                         </div>
                                     }
@@ -735,6 +752,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "↑↓ or jk = navigate" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
+                                            <span>{ "n = new" }</span>
                                             <span>{ "Enter/Esc = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
@@ -774,7 +792,7 @@ pub fn dashboard_page() -> Html {
                 if let Some(session_id) = ui_state.pending_delete {
                     let session_name = sessions.iter()
                         .find(|s| s.id == session_id)
-                        .map(|s| utils::extract_folder(&s.working_directory))
+                        .map(|s| s.session_name.as_str())
                         .unwrap_or("this session");
 
                     html! {
@@ -817,7 +835,7 @@ pub fn dashboard_page() -> Html {
                 if let Some(session_id) = ui_state.pending_leave {
                     let session_name = sessions.iter()
                         .find(|s| s.id == session_id)
-                        .map(|s| utils::extract_folder(&s.working_directory))
+                        .map(|s| s.session_name.as_str())
                         .unwrap_or("this session");
 
                     html! {

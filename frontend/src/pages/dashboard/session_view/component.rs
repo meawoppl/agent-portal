@@ -65,6 +65,10 @@ pub struct SessionViewProps {
     pub current_user_id: Option<String>,
     #[prop_or(0)]
     pub interrupt_signal: u32,
+    /// Bumped by the dashboard when nav-mode `G` is pressed; the focused session
+    /// jumps its transcript to the newest message and resumes live tailing.
+    #[prop_or(0)]
+    pub jump_to_latest_signal: u32,
 }
 
 fn optimistic_user_message(
@@ -338,6 +342,15 @@ impl Component for SessionView {
             && ctx.props().interrupt_signal > 0
         {
             ctx.link().send_message(SessionViewMsg::Interrupt);
+        }
+
+        // Nav-mode `G` on the focused session: jump to the newest message and
+        // resume live tailing. Same counter-prop pattern as `interrupt_signal`.
+        if ctx.props().focused
+            && ctx.props().jump_to_latest_signal != old_props.jump_to_latest_signal
+            && ctx.props().jump_to_latest_signal > 0
+        {
+            ctx.link().send_message(SessionViewMsg::JumpToLive);
         }
 
         true

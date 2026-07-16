@@ -31,6 +31,13 @@ pub use proxy_tokens::*;
 pub mod endpoints;
 pub use endpoints::*;
 
+/// serde default for continuation `reason` fields: pre-`reason` wire payloads
+/// (older launchers/backends) deserialize as a usage-limit continuation, the
+/// only kind that existed before overload auto-retry.
+pub(crate) fn default_continuation_reason() -> String {
+    CONTINUATION_REASON_LIMIT.to_string()
+}
+
 // Chunked image upload protocol (mixed JSON + binary WS frames)
 pub mod image_upload;
 pub use image_upload::{ImageUploadClientMsg, ImageUploadEndpoint, ImageUploadServerMsg};
@@ -47,9 +54,9 @@ pub mod timezone;
 // API client types and trait
 pub mod api;
 pub use api::{
-    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, InitExtra, ModelUsage,
-    ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse,
-    TaskNotificationExtra, TurnMetrics, TurnMetricsResponse,
+    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ModelUsage, ModelUsageEntry,
+    SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse, TurnMetrics,
+    TurnMetricsResponse,
 };
 
 /// Default backend URL based on build profile.
@@ -410,12 +417,14 @@ impl PortalMessage {
         reset_at: String,
         status: String,
         source_message: String,
+        reason: String,
     ) -> Self {
         Self::with_content(vec![PortalContent::ContinuationPrompt {
             continuation_id,
             reset_at,
             status,
             source_message,
+            reason,
         }])
     }
 
@@ -501,6 +510,11 @@ pub enum PortalContent {
         reset_at: String,
         status: String,
         source_message: String,
+        /// `CONTINUATION_REASON_LIMIT` (default; omitted by older backends) or
+        /// `CONTINUATION_REASON_OVERLOADED` — lets the card render overload
+        /// auto-retry wording instead of the usage-limit wording.
+        #[serde(default = "default_continuation_reason")]
+        reason: String,
     },
     /// Typed event for an inter-agent message. This replaces UI parsing of
     /// the agent-facing `[message from ...]` text prefix for new messages.
@@ -540,12 +554,14 @@ impl std::fmt::Debug for PortalContent {
                 reset_at,
                 status,
                 source_message,
+                reason,
             } => f
                 .debug_struct("ContinuationPrompt")
                 .field("continuation_id", continuation_id)
                 .field("reset_at", reset_at)
                 .field("status", status)
                 .field("source_message", source_message)
+                .field("reason", reason)
                 .finish(),
             Self::AgentMessage {
                 from_agent_type,
@@ -604,6 +620,44 @@ pub struct AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continuation_prompt_reason_defaults_to_limit_on_old_wire() {
+        // Wire-compat: a payload from a pre-`reason` backend omits the field; it
+        // must deserialize as a usage-limit card, not fail or render as overload.
+        let json = r#"{"type":"continuationprompt","continuation_id":"11111111-1111-1111-1111-111111111111","reset_at":"2026-07-16T00:00:00Z","status":"pending","source_message":"hi"}"#;
+        let parsed: PortalContent = serde_json::from_str(json).expect("deserialize");
+        let PortalContent::ContinuationPrompt { reason, .. } = parsed else {
+            panic!("expected ContinuationPrompt");
+        };
+        assert_eq!(reason, CONTINUATION_REASON_LIMIT);
+    }
+
+    #[test]
+    fn continuation_prompt_reason_roundtrips_overloaded() {
+        let msg = PortalMessage::continuation_prompt(
+            uuid::Uuid::nil(),
+            "2026-07-16T00:00:00Z".to_string(),
+            "scheduled".to_string(),
+            "src".to_string(),
+            CONTINUATION_REASON_OVERLOADED.to_string(),
+        );
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let back: PortalMessage = serde_json::from_str(&json).expect("deserialize");
+        let PortalContent::ContinuationPrompt { reason, .. } = &back.content[0] else {
+            panic!("expected ContinuationPrompt");
+        };
+        assert_eq!(reason, CONTINUATION_REASON_OVERLOADED);
+    }
+
+    #[test]
+    fn continuation_config_reason_defaults_to_limit_on_old_wire() {
+        // Older launchers/backends omit `reason` on ContinuationConfig; default
+        // to limit so the launcher keeps applying the usual reset skew.
+        let json = r#"{"id":"11111111-1111-1111-1111-111111111111","session_id":"22222222-2222-2222-2222-222222222222","reset_at":"2026-07-16T00:00:00Z","prompt":"go"}"#;
+        let cfg: ContinuationConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(cfg.reason, CONTINUATION_REASON_LIMIT);
+    }
 
     #[test]
     fn version_is_well_formed() {

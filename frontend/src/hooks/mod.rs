@@ -9,5 +9,5 @@ mod use_sessions;
 
 pub use use_client_websocket::use_client_websocket;
 pub use use_escape::{escape_listener, use_escape, use_escape_capture};
-pub use use_keyboard_nav::{use_keyboard_nav, KeyboardNavConfig};
+pub use use_keyboard_nav::{use_interrupt_hotkey, use_keyboard_nav, KeyboardNavConfig};
 pub use use_sessions::use_sessions;

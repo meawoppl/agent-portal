@@ -1,5 +1,6 @@
 //! Hook for two-mode keyboard navigation (edit mode / nav mode).
 
+use gloo::events::{EventListener, EventListenerOptions, EventListenerPhase};
 use shared::SessionInfo;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -29,6 +30,77 @@ fn focus_active_message_input() {
     }
 }
 
+/// True when there is a live text selection the user is likely trying to copy —
+/// either a document selection (e.g. highlighted transcript text) or a range
+/// inside the focused textarea/input (their selection is separate from the
+/// document selection in most browsers). Terminal-style `Ctrl+C` defers to the
+/// browser's copy in that case instead of firing the interrupt.
+fn has_text_selection() -> bool {
+    let Some(win) = web_sys::window() else {
+        return false;
+    };
+    // Document-level selection (highlighted transcript / page text).
+    if let Ok(Some(sel)) = win.get_selection() {
+        if sel.to_string().length() > 0 {
+            return true;
+        }
+    }
+    // Selection inside the focused textarea/input.
+    let Some(active) = win.document().and_then(|d| d.active_element()) else {
+        return false;
+    };
+    if let Some(ta) = active.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+        if let (Ok(Some(s)), Ok(Some(e))) = (ta.selection_start(), ta.selection_end()) {
+            return s != e;
+        }
+    }
+    if let Some(input) = active.dyn_ref::<web_sys::HtmlInputElement>() {
+        if let (Ok(Some(s)), Ok(Some(e))) = (input.selection_start(), input.selection_end()) {
+            return s != e;
+        }
+    }
+    false
+}
+
+/// Attach a window-level, capture-phase `keydown` listener that fires
+/// `on_interrupt` on `Ctrl+C`, in **every** mode — edit, nav, and vim
+/// NORMAL/INSERT.
+///
+/// Capture phase is essential: it runs before the composer's and vim's own key
+/// handlers, so vim's `c` (the change operator) can't swallow the press and no
+/// mode can shadow the interrupt. Bound to Ctrl specifically (not Cmd) so macOS
+/// `Cmd+C` stays copy, and it defers to the browser's copy whenever there is an
+/// active text selection (so copying transcript/composer text still works).
+#[hook]
+pub fn use_interrupt_hotkey(on_interrupt: Callback<()>) {
+    use_effect_with((), move |_| {
+        let options = EventListenerOptions {
+            phase: EventListenerPhase::Capture,
+            passive: false,
+        };
+        let listener = EventListener::new_with_options(
+            &gloo::utils::document(),
+            "keydown",
+            options,
+            move |event| {
+                let Some(ke) = event.dyn_ref::<KeyboardEvent>() else {
+                    return;
+                };
+                if ke.ctrl_key() && !ke.meta_key() && ke.key().eq_ignore_ascii_case("c") {
+                    // Let the browser copy when there's a selection.
+                    if has_text_selection() {
+                        return;
+                    }
+                    ke.prevent_default();
+                    ke.stop_propagation();
+                    on_interrupt.emit(());
+                }
+            },
+        );
+        move || drop(listener)
+    });
+}
+
 /// Configuration for the keyboard navigation hook.
 pub struct KeyboardNavConfig {
     /// All sessions (sorted in display order)
@@ -41,10 +113,15 @@ pub struct KeyboardNavConfig {
     pub on_select: Callback<usize>,
     /// Callback to activate a session (mark it as having been viewed)
     pub on_activate: Callback<Uuid>,
-    /// Callback when triple-Escape interrupt is triggered
-    pub on_interrupt: Callback<()>,
     /// Callback to open the keyboard-shortcuts help overlay (`?`)
     pub on_show_help: Callback<()>,
+    /// Callback to open a new session (nav-mode `n`)
+    pub on_new_session: Callback<()>,
+    /// Callback to delete a session, given its id (nav-mode `d` on the focused session)
+    pub on_delete: Callback<Uuid>,
+    /// Callback to jump the focused session's transcript to the newest message
+    /// and resume live tailing (nav-mode `G`).
+    pub on_jump_to_latest: Callback<()>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -55,49 +132,58 @@ pub struct UseKeyboardNav {
     pub on_keydown: Callback<KeyboardEvent>,
 }
 
-/// Max time window (ms) for 3 Escape presses to trigger an interrupt.
-const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
-
 /// Hook for managing two-mode keyboard navigation.
+///
+/// `Ctrl`/`Cmd`+`K` is the single mode toggle: it flips between edit mode and
+/// Nav mode from anywhere. It is deliberately the *only* way to switch modes —
+/// Escape no longer enters Nav mode (it kept ejecting people from the composer
+/// mid-type). Session management then uses single-letter nav-mode keys, which
+/// never collide with browser shortcuts.
 ///
 /// Edit Mode (default):
 /// - Typing works normally
-/// - Escape -> Nav Mode
+/// - Ctrl/Cmd+K -> Nav Mode
 /// - Shift+Tab -> next active session (skips hidden)
 ///
 /// Nav Mode:
 /// - Arrow keys / hjkl navigate sessions
-/// - Numbers 1-9 select directly
-/// - Enter/Escape/i -> Edit Mode
+/// - Numbers 1-9 select directly (stays in Nav mode)
+/// - n -> new session (launch dialog)
+/// - d -> delete the focused session (via the confirm modal)
 /// - w -> next waiting session
+/// - Ctrl/Cmd+K -> back to Edit Mode
 ///
 /// `?` opens the keyboard-shortcuts help overlay whenever focus is not in the
 /// message textarea (i.e. in nav mode, or in edit mode with a non-text element
 /// focused).
 ///
-/// Triple-Escape (within 600ms) sends an interrupt to the focused session.
+/// Interrupt (`Ctrl+C`) is handled separately by [`use_interrupt_hotkey`], which
+/// uses a window capture-phase listener so it fires in every mode.
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
     let nav_mode = use_state(|| false);
-    // Track timestamps of recent Escape presses for triple-Escape detection
-    let escape_times = use_mut_ref(Vec::<f64>::new);
 
     let on_keydown = {
         let nav_mode = nav_mode.clone();
-        let escape_times = escape_times.clone();
         let sessions = config.sessions.clone();
         let focused_index = config.focused_index;
         let hidden_sessions = config.hidden_sessions.clone();
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
-        let on_interrupt = config.on_interrupt.clone();
         let on_show_help = config.on_show_help.clone();
+        let on_new_session = config.on_new_session.clone();
+        let on_delete = config.on_delete.clone();
+        let on_jump_to_latest = config.on_jump_to_latest.clone();
         Callback::from(move |e: KeyboardEvent| {
-            // Don't handle keyboard nav when a modal overlay is open. The help
-            // overlay is included so its own keys (Esc / backdrop) win and nav
-            // shortcuts don't fire underneath it.
+            // Don't handle keyboard nav when a modal overlay is open. The launch
+            // dialog, full-page modals, and help overlay are included so their
+            // own keys (Esc / backdrop) win and nav shortcuts don't fire
+            // underneath them.
             if gloo::utils::document()
-                .query_selector(".sched-overlay, .share-dialog-overlay, .help-overlay")
+                .query_selector(
+                    ".sched-overlay, .share-dialog-overlay, .help-overlay, \
+                     .launch-dialog-backdrop, .modal-overlay, .full-page-modal",
+                )
                 .ok()
                 .flatten()
                 .is_some()
@@ -166,6 +252,22 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 return;
             }
 
+            // Ctrl/Cmd+K is the single mode toggle: it flips between edit mode
+            // and Nav mode from anywhere. It is deliberately the *only* way to
+            // switch modes — Escape no longer enters Nav mode (it kept throwing
+            // people out of the composer mid-type). Leaving Nav mode refocuses
+            // the composer so you land ready to type.
+            if (e.ctrl_key() || e.meta_key()) && e.key().eq_ignore_ascii_case("k") {
+                e.prevent_default();
+                if in_nav_mode {
+                    nav_mode.set(false);
+                    focus_active_message_input();
+                } else {
+                    nav_mode.set(true);
+                }
+                return;
+            }
+
             // `?` opens the keyboard-shortcuts help overlay, unless the user is
             // typing into a text field (textarea/input). In nav mode the
             // textarea keeps DOM focus, so allow it explicitly there.
@@ -185,36 +287,10 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 }
             }
 
-            // Track Escape presses for triple-Escape interrupt detection
-            if e.key() == "Escape" {
-                let now = js_sys::Date::now();
-                let mut times = escape_times.borrow_mut();
-                times.push(now);
-                // Keep only presses within the time window
-                times.retain(|&t| now - t <= TRIPLE_ESCAPE_WINDOW_MS);
-                if times.len() >= 3 {
-                    times.clear();
-                    e.prevent_default();
-                    // Return to edit mode and fire interrupt
-                    nav_mode.set(false);
-                    on_interrupt.emit(());
-                    return;
-                }
-            }
-
             if in_nav_mode {
-                // Navigation Mode
+                // Navigation Mode. Ctrl/Cmd+K (handled above) is the only way
+                // back to edit mode — no key here changes the mode.
                 match e.key().as_str() {
-                    "Escape" | "i" => {
-                        // Either key leaves Nav mode AND returns focus to the
-                        // composer (ready to type). Esc is the natural "cycle
-                        // back" key — INSERT →Esc→ NORMAL →Esc→ Nav →Esc→ typing —
-                        // and refocusing on every exit means you can never get
-                        // stranded in Nav mode with nothing focused.
-                        e.prevent_default();
-                        nav_mode.set(false);
-                        focus_active_message_input();
-                    }
                     "ArrowUp" | "ArrowLeft" | "k" | "h" => {
                         e.prevent_default();
                         if let Some(new_idx) = navigate_by_delta(focused_index, -1) {
@@ -233,11 +309,6 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                             on_select.emit(new_idx);
                         }
                     }
-                    "Enter" => {
-                        e.prevent_default();
-                        nav_mode.set(false);
-                        focus_active_message_input();
-                    }
                     "w" => {
                         e.prevent_default();
                         if let Some(new_idx) = navigate_to_next_active(focused_index) {
@@ -247,8 +318,28 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                             on_select.emit(new_idx);
                         }
                     }
-                    "x" => {
-                        // Placeholder for close session
+                    "n" => {
+                        // Open a new session (launch dialog). Stay in Nav mode:
+                        // the modal guard above blocks nav keys while the dialog
+                        // is open, and Ctrl/Cmd+K remains the only mode toggle.
+                        e.prevent_default();
+                        on_new_session.emit(());
+                    }
+                    "d" => {
+                        // Delete the focused session. Routes through the confirm
+                        // modal (RequestDelete), so this is not instantly
+                        // destructive.
+                        e.prevent_default();
+                        if let Some(session) = sessions.get(focused_index) {
+                            on_delete.emit(session.id);
+                        }
+                    }
+                    "G" => {
+                        // Jump the focused session's transcript to the newest
+                        // message and resume live tailing. Stays in nav mode
+                        // (like the other nav keys), matching vim's "go to end".
+                        e.prevent_default();
+                        on_jump_to_latest.emit(());
                     }
                     key => {
                         // Number keys 1-9 select the Nth session *as shown in the
@@ -274,19 +365,17 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                                         on_activate.emit(session.id);
                                     }
                                     on_select.emit(actual_idx);
-                                    nav_mode.set(false);
+                                    // Stay in Nav mode after jumping so rapid
+                                    // switching doesn't need a re-toggle; use
+                                    // Ctrl/Cmd+K to return to the composer.
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                // Edit Mode
-                if e.key().as_str() == "Escape" {
-                    e.prevent_default();
-                    nav_mode.set(true);
-                }
             }
+            // Edit mode has no mode key: Ctrl/Cmd+K (handled above) is the only
+            // way into Nav mode. Escape intentionally does nothing here anymore.
         })
     };
 
