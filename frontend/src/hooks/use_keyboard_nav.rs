@@ -29,6 +29,38 @@ fn focus_active_message_input() {
     }
 }
 
+/// True when there is a live text selection the user is likely trying to copy —
+/// either a document selection (e.g. highlighted transcript text) or a range
+/// inside the focused textarea/input (their selection is separate from the
+/// document selection in most browsers). Terminal-style `Ctrl+C` defers to the
+/// browser's copy in that case instead of firing the interrupt.
+fn has_text_selection() -> bool {
+    let Some(win) = web_sys::window() else {
+        return false;
+    };
+    // Document-level selection (highlighted transcript / page text).
+    if let Ok(Some(sel)) = win.get_selection() {
+        if sel.to_string().length() > 0 {
+            return true;
+        }
+    }
+    // Selection inside the focused textarea/input.
+    let Some(active) = win.document().and_then(|d| d.active_element()) else {
+        return false;
+    };
+    if let Some(ta) = active.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+        if let (Ok(Some(s)), Ok(Some(e))) = (ta.selection_start(), ta.selection_end()) {
+            return s != e;
+        }
+    }
+    if let Some(input) = active.dyn_ref::<web_sys::HtmlInputElement>() {
+        if let (Ok(Some(s)), Ok(Some(e))) = (input.selection_start(), input.selection_end()) {
+            return s != e;
+        }
+    }
+    false
+}
+
 /// Configuration for the keyboard navigation hook.
 pub struct KeyboardNavConfig {
     /// All sessions (sorted in display order)
@@ -59,9 +91,6 @@ pub struct UseKeyboardNav {
     pub on_keydown: Callback<KeyboardEvent>,
 }
 
-/// Max time window (ms) for 3 Escape presses to trigger an interrupt.
-const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
-
 /// Hook for managing two-mode keyboard navigation.
 ///
 /// `Ctrl`/`Cmd`+`K` is the single mode toggle: it flips between edit mode and
@@ -87,16 +116,14 @@ const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
 /// message textarea (i.e. in nav mode, or in edit mode with a non-text element
 /// focused).
 ///
-/// Triple-Escape (within 600ms) sends an interrupt to the focused session.
+/// `Ctrl+C` interrupts the focused session (terminal-style). It defers to the
+/// browser's copy when there is an active text selection.
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
     let nav_mode = use_state(|| false);
-    // Track timestamps of recent Escape presses for triple-Escape detection
-    let escape_times = use_mut_ref(Vec::<f64>::new);
 
     let on_keydown = {
         let nav_mode = nav_mode.clone();
-        let escape_times = escape_times.clone();
         let sessions = config.sessions.clone();
         let focused_index = config.focused_index;
         let hidden_sessions = config.hidden_sessions.clone();
@@ -218,21 +245,18 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 }
             }
 
-            // Track Escape presses for triple-Escape interrupt detection
-            if e.key() == "Escape" {
-                let now = js_sys::Date::now();
-                let mut times = escape_times.borrow_mut();
-                times.push(now);
-                // Keep only presses within the time window
-                times.retain(|&t| now - t <= TRIPLE_ESCAPE_WINDOW_MS);
-                if times.len() >= 3 {
-                    times.clear();
-                    e.prevent_default();
-                    // Return to edit mode and fire interrupt
-                    nav_mode.set(false);
-                    on_interrupt.emit(());
+            // Ctrl+C interrupts the focused session (terminal-style). Bound to
+            // Ctrl specifically (not Cmd) so macOS Cmd+C stays copy. When there
+            // is an active text selection we defer to the browser's copy instead
+            // of interrupting, so selecting transcript/composer text and copying
+            // still works everywhere.
+            if e.ctrl_key() && !e.meta_key() && e.key().eq_ignore_ascii_case("c") {
+                if has_text_selection() {
                     return;
                 }
+                e.prevent_default();
+                on_interrupt.emit(());
+                return;
             }
 
             if in_nav_mode {
