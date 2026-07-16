@@ -906,6 +906,12 @@ use uuid::Uuid;
 3. **Frontend**: Use `use_memo` for expensive computations in Yew
 4. **Backend**: Database connection pool already configured in `db.rs`
 
+## PR Conventions
+
+- **Titles**: describe the change, not the ticket. Don't reference issue/PR numbers — they're noise in the title.
+- **Bodies**: focus on *what* the change does and *why*. Keep it concise — no commit-by-commit play-by-play.
+- **No attribution footer**: don't add "Generated with Claude Code" (or similar) to PR titles or bodies.
+
 ## SHIP Workflow
 
 When the user says **"SHIP"**, execute this workflow:
