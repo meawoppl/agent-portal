@@ -11,7 +11,7 @@ mod permissions;
 mod push;
 mod scheduled_tasks;
 mod sessions;
-mod system_extra;
+mod settings;
 mod users;
 
 pub use auth::*;
@@ -25,7 +25,7 @@ pub use permissions::*;
 pub use push::*;
 pub use scheduled_tasks::*;
 pub use sessions::*;
-pub use system_extra::*;
+pub use settings::*;
 pub use users::*;
 
 #[cfg(test)]
@@ -81,16 +81,29 @@ mod tests {
     #[test]
     fn codex_permission_input_apply_patch_roundtrip() {
         let input = CodexPermissionInput::ApplyPatch {
-            file_changes: serde_json::json!({
-                "/tmp/a.rs": {"kind": "modify"},
-                "/tmp/b.rs": {"kind": "add"},
-            }),
+            file_changes: [
+                (
+                    "/tmp/a.rs".to_string(),
+                    codex_codes::FileChange::Update {
+                        move_path: None,
+                        unified_diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                    },
+                ),
+                (
+                    "/tmp/b.rs".to_string(),
+                    codex_codes::FileChange::Add {
+                        content: "fn b() {}".to_string(),
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
             grant_root: Some("/tmp".to_string()),
             reason: None,
         };
         let json = serde_json::to_value(&input).unwrap();
         assert_eq!(json["tool"], "applyPatch");
-        assert_eq!(json["fileChanges"]["/tmp/a.rs"]["kind"], "modify");
+        assert!(json["fileChanges"].get("/tmp/a.rs").is_some());
         assert_eq!(json["grantRoot"], "/tmp");
 
         let parsed: CodexPermissionInput = serde_json::from_value(json).unwrap();
@@ -121,11 +134,13 @@ mod tests {
         let input = CodexPermissionInput::ExecCommand {
             command: "ls -la".to_string(),
             cwd: "/tmp".to_string(),
-            parsed_cmd: Some(serde_json::json!([{"cmd": "ls"}])),
+            parsed_cmd: Some(vec![codex_codes::ParsedCommand::Unknown {
+                cmd: "ls".to_string(),
+            }]),
         };
         let json = serde_json::to_value(&input).unwrap();
         assert_eq!(json["tool"], "execCommand");
-        assert_eq!(json["parsedCmd"][0]["cmd"], "ls");
+        assert_eq!(json["parsedCmd"].as_array().map(Vec::len), Some(1));
 
         let parsed: CodexPermissionInput = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, input);
@@ -136,7 +151,10 @@ mod tests {
     fn codex_permission_input_permissions_roundtrip() {
         let input = CodexPermissionInput::Permissions {
             cwd: Some("/home/user/project".to_string()),
-            permissions: Some(serde_json::json!({"read": ["/tmp"]})),
+            permissions: Some(codex_codes::RequestPermissionProfile {
+                file_system: None,
+                network: None,
+            }),
             reason: Some("requested by agent".to_string()),
         };
         let json = serde_json::to_value(&input).unwrap();
@@ -164,7 +182,14 @@ mod tests {
     #[test]
     fn codex_permission_input_ask_user_question_roundtrip() {
         let input = CodexPermissionInput::AskUserQuestion {
-            questions: serde_json::json!([{"question": "ok?"}]),
+            questions: vec![codex_codes::ToolRequestUserInputQuestion {
+                header: String::new(),
+                id: String::new(),
+                is_other: None,
+                is_secret: None,
+                options: None,
+                question: "ok?".to_string(),
+            }],
         };
         let json = serde_json::to_value(&input).unwrap();
         assert_eq!(json["tool"], "askUserQuestion");
