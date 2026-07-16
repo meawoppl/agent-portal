@@ -176,8 +176,6 @@ pub fn dashboard_page() -> Html {
         sessions: active_sessions.clone(),
         focused_index: focus.focused_index,
         hidden_sessions: effective_hidden_sessions.clone(),
-        connected_sessions: session_state.connected_sessions.clone(),
-        inactive_hidden: ui_state.inactive_hidden,
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
         on_interrupt: focus.on_interrupt.clone(),
