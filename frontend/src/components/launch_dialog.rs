@@ -11,6 +11,7 @@ use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
 use shared::{AgentInstall, AgentType, DirectoryEntry, LauncherInfo};
+use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
@@ -19,23 +20,62 @@ use yew::prelude::*;
 /// Sentinel value used in the launcher <select> to represent the "connect new host" option.
 const CONNECT_NEW: &str = "__install__";
 
-/// Storage key for the last-used launch directory in localStorage (#1326).
-const LAST_LAUNCH_DIR_STORAGE_KEY: &str = "claude-portal-last-launch-dir";
+/// Storage key for the last-used launcher (machine) in localStorage (#1326).
+const LAST_LAUNCHER_STORAGE_KEY: &str = "claude-portal-last-launcher";
 
-/// Load the last-used launch directory from localStorage. Returns `None` when
-/// nothing is remembered so callers can fall back to the launcher's home (`~`).
-fn load_last_launch_dir() -> Option<String> {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(LAST_LAUNCH_DIR_STORAGE_KEY).ok().flatten())
+/// Storage key for the per-launcher last-used launch directories (#1326): a
+/// JSON object mapping launcher id -> directory. A remembered directory is a
+/// path on a *specific* machine, so it must only ever be applied back to that
+/// machine — keying by launcher id prevents restoring a path onto the wrong
+/// host (or silently falling back to home) on multi-launcher setups.
+const LAST_LAUNCH_DIRS_STORAGE_KEY: &str = "claude-portal-last-launch-dirs";
+
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
+}
+
+/// Load the last-used launcher (machine) id. Returns `None` when nothing is
+/// remembered so callers can fall back to the first connected launcher.
+fn load_last_launcher() -> Option<Uuid> {
+    local_storage()
+        .and_then(|s| s.get_item(LAST_LAUNCHER_STORAGE_KEY).ok().flatten())
+        .and_then(|v| Uuid::parse_str(&v).ok())
+}
+
+/// Persist the last-used launcher (machine) id.
+fn save_last_launcher(launcher_id: Uuid) {
+    if let Some(storage) = local_storage() {
+        let _ = storage.set_item(LAST_LAUNCHER_STORAGE_KEY, &launcher_id.to_string());
+    }
+}
+
+/// Load the whole launcher-id -> directory map (defaults to empty).
+fn load_last_launch_dirs() -> HashMap<String, String> {
+    local_storage()
+        .and_then(|s| s.get_item(LAST_LAUNCH_DIRS_STORAGE_KEY).ok().flatten())
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default()
+}
+
+/// Load the last-used launch directory for a specific launcher (machine).
+/// Returns `None` when nothing is remembered for that machine so callers can
+/// fall back to the launcher's home (`~`).
+fn load_last_launch_dir_for(launcher_id: Uuid) -> Option<String> {
+    load_last_launch_dirs()
+        .remove(&launcher_id.to_string())
         .filter(|v| !v.is_empty())
 }
 
-/// Persist the last-used launch directory to localStorage so reopening the
-/// launch dialog defaults to the directory the user last launched from (#1326).
-fn save_last_launch_dir(dir: &str) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(LAST_LAUNCH_DIR_STORAGE_KEY, dir);
+/// Persist the last-used launch directory for a specific launcher (machine),
+/// so reopening the dialog on that machine defaults to where the user last
+/// launched from *there* (#1326).
+fn save_last_launch_dir_for(launcher_id: Uuid, dir: &str) {
+    let mut dirs = load_last_launch_dirs();
+    dirs.insert(launcher_id.to_string(), dir.to_string());
+    if let Some(storage) = local_storage() {
+        if let Ok(json) = serde_json::to_string(&dirs) {
+            let _ = storage.set_item(LAST_LAUNCH_DIRS_STORAGE_KEY, &json);
+        }
     }
 }
 
@@ -274,10 +314,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // Auto-set to true when no launchers are connected; set by the dropdown sentinel.
     let show_install = use_state(|| false);
     let dir = DirBrowser {
-        // Seed from the last-used launch directory (#1326), falling back to `~`.
-        // The mount effect resolves this against the launcher; if the remembered
-        // directory is gone it falls back to home.
-        path: use_state(|| load_last_launch_dir().unwrap_or_else(|| "~".to_string())),
+        // Default to `~`; the remembered directory is per-launcher (#1326) and
+        // can only be resolved once a launcher is chosen, so the mount effect
+        // seeds the real path via `fetch_initial` after selecting the machine.
+        path: use_state(|| "~".to_string()),
         home_root: use_state(|| None::<String>),
         entries: use_state(Vec::<DirectoryEntry>::new),
         loading: use_state(|| false),
@@ -318,10 +358,14 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     let selection_valid = selected_launcher
                         .is_some_and(|id| data.iter().any(|l| l.launcher_id == id));
                     if !selection_valid {
-                        if let Some(first) = data.first() {
-                            let lid = first.launcher_id;
+                        // Prefer the last-used launcher (machine) if it is still
+                        // connected (#1326); otherwise fall back to the first.
+                        let chosen = load_last_launcher()
+                            .filter(|id| data.iter().any(|l| l.launcher_id == *id))
+                            .or_else(|| data.first().map(|l| l.launcher_id));
+                        if let Some(lid) = chosen {
                             selected_launcher.set(Some(lid));
-                            dir.fetch_initial(lid, load_last_launch_dir());
+                            dir.fetch_initial(lid, load_last_launch_dir_for(lid));
                             probe_agents_for(lid, agent_installs.clone(), probing_agents.clone());
                             show_install.set(false);
                         } else {
@@ -446,7 +490,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 } else if let Ok(id) = select.value().parse::<Uuid>() {
                     show_install.set(false);
                     selected_launcher.set(Some(id));
-                    dir.navigate(Some(id), "~".to_string());
+                    // Switching to a machine re-establishes its home_root and
+                    // restores that machine's remembered directory (#1326).
+                    dir.fetch_initial(id, load_last_launch_dir_for(id));
                     probe_agents_for(id, agent_installs.clone(), probing_agents.clone());
                 }
             }
@@ -525,9 +571,13 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     .await
                 {
                     Ok(resp) if resp.ok() => {
-                        // Remember where we launched from so reopening the
-                        // dialog defaults here next time (#1326).
-                        save_last_launch_dir(&working_dir);
+                        // Remember which machine we launched on, and where on
+                        // that machine, so reopening the dialog defaults back to
+                        // this launcher + directory next time (#1326).
+                        if let Some(lid) = launcher_id {
+                            save_last_launcher(lid);
+                            save_last_launch_dir_for(lid, &working_dir);
+                        }
                         on_launched.emit(());
                         on_close.emit(());
                     }
