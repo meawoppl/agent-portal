@@ -269,7 +269,24 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         // keeps running and stays available in the hidden list).
                         e.prevent_default();
                         if let Some(session) = sessions.get(focused_index) {
+                            let was_hidden = hidden_sessions.contains(&session.id);
                             on_toggle_hidden.emit(session.id);
+                            // When hiding the focused session, advance focus to
+                            // the next visible session — like closing the current
+                            // tab. Otherwise focus stays stranded on the now-hidden
+                            // session (invisible once the hidden group collapses),
+                            // so the next `x` toggles that stale target instead of
+                            // the pill the user is looking at.
+                            if !was_hidden {
+                                if let Some(new_idx) = navigate_by_delta(focused_index, 1) {
+                                    if new_idx != focused_index {
+                                        if let Some(next) = sessions.get(new_idx) {
+                                            on_activate.emit(next.id);
+                                        }
+                                        on_select.emit(new_idx);
+                                    }
+                                }
+                            }
                         }
                     }
                     key => {
