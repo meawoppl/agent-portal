@@ -11,19 +11,20 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# PID file locations
-PID_DIR="/tmp/claude-portal-dev"
-BACKEND_PID_FILE="$PID_DIR/backend.pid"
-
-# Log file locations
-BACKEND_LOG="/tmp/claude-portal-backend.log"
-
 # Network config. Overridable so parallel worktrees don't collide on one port.
 # HOST defaults to dual-stack (::) so IPv6 `localhost` and port-forwards reach
 # the backend — a plain 0.0.0.0 (IPv4-only) bind is missed by forwarders that
 # resolve localhost to ::1.
 PORT="${PORT:-3000}"
 HOST="${HOST:-::}"
+
+# PID file + log locations, keyed by PORT so several instances (one per
+# worktree/branch, on different ports) can run at once without clobbering each
+# other's status/stop tracking. `PORT=3400 ./dev.sh start` runs a second one;
+# `PORT=3400 ./dev.sh stop|status|logs` targets exactly that instance.
+PID_DIR="/tmp/claude-portal-dev"
+BACKEND_PID_FILE="$PID_DIR/backend-$PORT.pid"
+BACKEND_LOG="/tmp/claude-portal-backend-$PORT.log"
 
 log() {
     echo -e "${BLUE}[claude-portal]${NC} $1"
@@ -191,13 +192,24 @@ stop_all() {
         rm -f "$BACKEND_PID_FILE"
     fi
 
-    # Stop database
-    if is_db_running; then
+    # Stop the (shared) database only when no other instances are still using
+    # it — the DB is shared across ports, so tearing it down while another
+    # instance runs would break that instance.
+    local other_live=0
+    for f in "$PID_DIR"/backend-*.pid; do
+        [ -e "$f" ] || continue
+        if kill -0 "$(cat "$f")" 2>/dev/null; then
+            other_live=$((other_live + 1))
+        fi
+    done
+    if [ "$other_live" -gt 0 ]; then
+        warn "Leaving database up — $other_live other backend instance(s) still running."
+    elif is_db_running; then
         docker compose -f docker-compose.test.yml down
         success "Database stopped"
     fi
 
-    success "All services stopped"
+    success "Services stopped (port $PORT)"
 }
 
 # Show status
