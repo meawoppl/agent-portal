@@ -410,8 +410,11 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         &launcher_name,
     );
 
-    let continuation_configs =
-        super::continuations::load_scheduled_continuations(&app_state, launcher_id, user_id);
+    let continuation_configs = super::continuations::load_scheduled_continuations(
+        &app_state.db_pool,
+        launcher_id,
+        user_id,
+    );
     let _ = tx_for_sync.send(ServerToLauncher::ContinuationSync {
         continuations: continuation_configs,
     });

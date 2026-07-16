@@ -171,13 +171,14 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_new_session = config.on_new_session.clone();
         let on_delete = config.on_delete.clone();
         Callback::from(move |e: KeyboardEvent| {
-            // Don't handle keyboard nav when a modal overlay is open. The help
-            // overlay is included so its own keys (Esc / backdrop) win and nav
-            // shortcuts don't fire underneath it.
+            // Don't handle keyboard nav when a modal overlay is open. The launch
+            // dialog, full-page modals, and help overlay are included so their
+            // own keys (Esc / backdrop) win and nav shortcuts don't fire
+            // underneath them.
             if gloo::utils::document()
                 .query_selector(
                     ".sched-overlay, .share-dialog-overlay, .help-overlay, \
-                     .launch-dialog-backdrop, .modal-overlay",
+                     .launch-dialog-backdrop, .modal-overlay, .full-page-modal",
                 )
                 .ok()
                 .flatten()

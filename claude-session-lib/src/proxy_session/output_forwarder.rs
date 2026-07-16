@@ -393,7 +393,7 @@ fn log_claude_output(output: &ClaudeOutput) {
                     }
                     ContentBlock::ServerToolUse(stu) => {
                         tool_count += 1;
-                        let input_preview = format_tool_input_json(&stu.input);
+                        let input_preview = format_named_tool_input(&stu.name, &stu.input);
                         debug!(
                             "← [assistant] server_tool_use: {} {}",
                             stu.name, input_preview
@@ -410,7 +410,7 @@ fn log_claude_output(output: &ClaudeOutput) {
                     }
                     ContentBlock::McpToolUse(mtu) => {
                         tool_count += 1;
-                        let input_preview = format_tool_input_json(&mtu.input);
+                        let input_preview = format_named_tool_input(&mtu.name, &mtu.input);
                         let server = mtu.server_name.as_deref().unwrap_or("?");
                         debug!(
                             "← [assistant] mcp_tool_use: {}::{} {}",
@@ -502,7 +502,8 @@ fn log_claude_output(output: &ClaudeOutput) {
             debug!("← [control_request] id={}", req.request_id);
             match &req.request {
                 ControlRequestPayload::CanUseTool(tool_req) => {
-                    let input_preview = format_tool_input_json(&tool_req.input);
+                    let input_preview =
+                        format_named_tool_input(&tool_req.tool_name, &tool_req.input);
                     debug!("  tool: {} {}", tool_req.tool_name, input_preview);
                 }
                 ControlRequestPayload::HookCallback(_) => {
@@ -553,37 +554,36 @@ fn log_claude_output(output: &ClaudeOutput) {
 
 /// Format tool input for logging
 fn format_tool_input(tool: &ToolUseBlock) -> String {
-    format_tool_input_json(&tool.input)
+    format_named_tool_input(&tool.name, &tool.input)
 }
 
-fn format_tool_input_json(input: &serde_json::Value) -> String {
+fn format_named_tool_input(name: &str, input: &serde_json::Value) -> String {
     use claude_codes::tool_inputs::ToolInput;
 
-    // Try to parse as typed input first
-    if let Ok(typed) = serde_json::from_value::<ToolInput>(input.clone()) {
-        return match typed {
-            ToolInput::Bash(b) => format!("$ {}", truncate(&b.command, 70)),
-            ToolInput::Read(r) => truncate(&r.file_path, 70).to_string(),
-            ToolInput::Edit(e) => truncate(&e.file_path, 70).to_string(),
-            ToolInput::Write(w) => truncate(&w.file_path, 70).to_string(),
-            ToolInput::Glob(g) => format!(
-                "'{}' in {}",
-                truncate(&g.pattern, 40),
-                truncate(g.path.as_deref().unwrap_or("."), 30)
-            ),
-            ToolInput::Grep(g) => format!(
-                "'{}' in {}",
-                truncate(&g.pattern, 40),
-                truncate(g.path.as_deref().unwrap_or("."), 30)
-            ),
-            ToolInput::Task(t) => truncate(&t.description, 60).to_string(),
-            ToolInput::WebFetch(w) => truncate(&w.url, 60).to_string(),
-            ToolInput::WebSearch(w) => truncate(&w.query, 60).to_string(),
-            _ => String::new(),
-        };
+    match ToolInput::from_named_input(name, input.clone()) {
+        ToolInput::Bash(b) => format!("$ {}", truncate(&b.command, 70)),
+        ToolInput::Read(r) => truncate(&r.file_path, 70).to_string(),
+        ToolInput::Edit(e) => truncate(&e.file_path, 70).to_string(),
+        ToolInput::Write(w) => truncate(&w.file_path, 70).to_string(),
+        ToolInput::Glob(g) => format!(
+            "'{}' in {}",
+            truncate(&g.pattern, 40),
+            truncate(g.path.as_deref().unwrap_or("."), 30)
+        ),
+        ToolInput::Grep(g) => format!(
+            "'{}' in {}",
+            truncate(&g.pattern, 40),
+            truncate(g.path.as_deref().unwrap_or("."), 30)
+        ),
+        ToolInput::Task(t) => truncate(&t.description, 60).to_string(),
+        ToolInput::WebFetch(w) => truncate(&w.url, 60).to_string(),
+        ToolInput::WebSearch(w) => truncate(&w.query, 60).to_string(),
+        ToolInput::Unknown(_) => format_unknown_tool_input(input),
+        _ => String::new(),
     }
+}
 
-    // Fallback to manual JSON extraction for unknown tools
+fn format_unknown_tool_input(input: &serde_json::Value) -> String {
     if let Some(obj) = input.as_object() {
         obj.iter()
             .find_map(|(k, v)| v.as_str().map(|s| format!("{}={}", k, truncate(s, 50))))

@@ -111,6 +111,7 @@ mod tests {
             last: codex_codes::TokenUsageBreakdown {
                 input_tokens: 100,
                 cached_input_tokens: 25,
+                cache_write_input_tokens: Some(0),
                 output_tokens: 40,
                 reasoning_output_tokens: 7,
                 total_tokens: 147,
@@ -118,6 +119,7 @@ mod tests {
             total: codex_codes::TokenUsageBreakdown {
                 input_tokens: 300,
                 cached_input_tokens: 75,
+                cache_write_input_tokens: Some(0),
                 output_tokens: 90,
                 reasoning_output_tokens: 17,
                 total_tokens: 407,

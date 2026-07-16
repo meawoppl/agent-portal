@@ -750,6 +750,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "↑↓ or jk = navigate" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
+                                            <span>{ "n = new" }</span>
                                             <span>{ "Enter/Esc = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
@@ -789,7 +790,7 @@ pub fn dashboard_page() -> Html {
                 if let Some(session_id) = ui_state.pending_delete {
                     let session_name = sessions.iter()
                         .find(|s| s.id == session_id)
-                        .map(|s| utils::extract_folder(&s.working_directory))
+                        .map(|s| s.session_name.as_str())
                         .unwrap_or("this session");
 
                     html! {
@@ -832,7 +833,7 @@ pub fn dashboard_page() -> Html {
                 if let Some(session_id) = ui_state.pending_leave {
                     let session_name = sessions.iter()
                         .find(|s| s.id == session_id)
-                        .map(|s| utils::extract_folder(&s.working_directory))
+                        .map(|s| s.session_name.as_str())
                         .unwrap_or("this session");
 
                     html! {

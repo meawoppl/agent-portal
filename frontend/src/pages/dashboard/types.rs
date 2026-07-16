@@ -280,11 +280,7 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
             lines.join("\n")
         }
         C::ApplyPatch { file_changes, .. } => {
-            // `file_changes` is a JSON object keyed by file path — list the paths.
-            let paths: Vec<String> = file_changes
-                .as_object()
-                .map(|m| m.keys().cloned().collect())
-                .unwrap_or_default();
+            let paths: Vec<String> = file_changes.keys().cloned().collect();
             if paths.is_empty() {
                 serde_json::to_string_pretty(file_changes).unwrap_or_default()
             } else {
