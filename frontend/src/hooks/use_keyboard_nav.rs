@@ -119,6 +119,9 @@ pub struct KeyboardNavConfig {
     pub on_new_session: Callback<()>,
     /// Callback to delete a session, given its id (nav-mode `d` on the focused session)
     pub on_delete: Callback<Uuid>,
+    /// Callback to jump the focused session's transcript to the newest message
+    /// and resume live tailing (nav-mode `G`).
+    pub on_jump_to_latest: Callback<()>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -170,6 +173,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_show_help = config.on_show_help.clone();
         let on_new_session = config.on_new_session.clone();
         let on_delete = config.on_delete.clone();
+        let on_jump_to_latest = config.on_jump_to_latest.clone();
         Callback::from(move |e: KeyboardEvent| {
             // Don't handle keyboard nav when a modal overlay is open. The launch
             // dialog, full-page modals, and help overlay are included so their
@@ -329,6 +333,13 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         if let Some(session) = sessions.get(focused_index) {
                             on_delete.emit(session.id);
                         }
+                    }
+                    "G" => {
+                        // Jump the focused session's transcript to the newest
+                        // message and resume live tailing. Stays in nav mode
+                        // (like the other nav keys), matching vim's "go to end".
+                        e.prevent_default();
+                        on_jump_to_latest.emit(());
                     }
                     key => {
                         // Number keys 1-9 select the Nth session *as shown in the

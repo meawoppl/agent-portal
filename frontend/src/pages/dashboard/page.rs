@@ -198,6 +198,7 @@ pub fn dashboard_page() -> Html {
         on_show_help,
         on_new_session,
         on_delete: on_delete.clone(),
+        on_jump_to_latest: focus.on_jump_to_latest.clone(),
     });
 
     // Ctrl+C interrupt: a window capture-phase listener so it fires in every
@@ -723,6 +724,7 @@ pub fn dashboard_page() -> Html {
                                                 on_activity={on_activity.clone()}
                                                 current_user_id={current_user_id.map(|id| id.to_string())}
                                                 interrupt_signal={focus.interrupt_signal}
+                                                jump_to_latest_signal={focus.jump_to_latest_signal}
                                             />
                                         </div>
                                     }
