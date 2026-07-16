@@ -1,5 +1,6 @@
 //! Hook for two-mode keyboard navigation (edit mode / nav mode).
 
+use gloo::events::{EventListener, EventListenerOptions, EventListenerPhase};
 use shared::SessionInfo;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -61,6 +62,45 @@ fn has_text_selection() -> bool {
     false
 }
 
+/// Attach a window-level, capture-phase `keydown` listener that fires
+/// `on_interrupt` on `Ctrl+C`, in **every** mode — edit, nav, and vim
+/// NORMAL/INSERT.
+///
+/// Capture phase is essential: it runs before the composer's and vim's own key
+/// handlers, so vim's `c` (the change operator) can't swallow the press and no
+/// mode can shadow the interrupt. Bound to Ctrl specifically (not Cmd) so macOS
+/// `Cmd+C` stays copy, and it defers to the browser's copy whenever there is an
+/// active text selection (so copying transcript/composer text still works).
+#[hook]
+pub fn use_interrupt_hotkey(on_interrupt: Callback<()>) {
+    use_effect_with((), move |_| {
+        let options = EventListenerOptions {
+            phase: EventListenerPhase::Capture,
+            passive: false,
+        };
+        let listener = EventListener::new_with_options(
+            &gloo::utils::document(),
+            "keydown",
+            options,
+            move |event| {
+                let Some(ke) = event.dyn_ref::<KeyboardEvent>() else {
+                    return;
+                };
+                if ke.ctrl_key() && !ke.meta_key() && ke.key().eq_ignore_ascii_case("c") {
+                    // Let the browser copy when there's a selection.
+                    if has_text_selection() {
+                        return;
+                    }
+                    ke.prevent_default();
+                    ke.stop_propagation();
+                    on_interrupt.emit(());
+                }
+            },
+        );
+        move || drop(listener)
+    });
+}
+
 /// Configuration for the keyboard navigation hook.
 pub struct KeyboardNavConfig {
     /// All sessions (sorted in display order)
@@ -73,8 +113,6 @@ pub struct KeyboardNavConfig {
     pub on_select: Callback<usize>,
     /// Callback to activate a session (mark it as having been viewed)
     pub on_activate: Callback<Uuid>,
-    /// Callback when triple-Escape interrupt is triggered
-    pub on_interrupt: Callback<()>,
     /// Callback to open the keyboard-shortcuts help overlay (`?`)
     pub on_show_help: Callback<()>,
     /// Callback to open a new session (nav-mode `n`)
@@ -116,8 +154,8 @@ pub struct UseKeyboardNav {
 /// message textarea (i.e. in nav mode, or in edit mode with a non-text element
 /// focused).
 ///
-/// `Ctrl+C` interrupts the focused session (terminal-style). It defers to the
-/// browser's copy when there is an active text selection.
+/// Interrupt (`Ctrl+C`) is handled separately by [`use_interrupt_hotkey`], which
+/// uses a window capture-phase listener so it fires in every mode.
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
     let nav_mode = use_state(|| false);
@@ -129,7 +167,6 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let hidden_sessions = config.hidden_sessions.clone();
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
-        let on_interrupt = config.on_interrupt.clone();
         let on_show_help = config.on_show_help.clone();
         let on_new_session = config.on_new_session.clone();
         let on_delete = config.on_delete.clone();
@@ -243,20 +280,6 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     on_show_help.emit(());
                     return;
                 }
-            }
-
-            // Ctrl+C interrupts the focused session (terminal-style). Bound to
-            // Ctrl specifically (not Cmd) so macOS Cmd+C stays copy. When there
-            // is an active text selection we defer to the browser's copy instead
-            // of interrupting, so selecting transcript/composer text and copying
-            // still works everywhere.
-            if e.ctrl_key() && !e.meta_key() && e.key().eq_ignore_ascii_case("c") {
-                if has_text_selection() {
-                    return;
-                }
-                e.prevent_default();
-                on_interrupt.emit(());
-                return;
             }
 
             if in_nav_mode {

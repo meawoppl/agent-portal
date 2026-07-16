@@ -17,7 +17,9 @@ use super::types::{
 use crate::components::{
     ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, TurnMetricsHeaderPill,
 };
-use crate::hooks::{use_client_websocket, use_keyboard_nav, use_sessions, KeyboardNavConfig};
+use crate::hooks::{
+    use_client_websocket, use_interrupt_hotkey, use_keyboard_nav, use_sessions, KeyboardNavConfig,
+};
 use crate::pages::admin::AdminPage;
 use crate::pages::settings::SettingsPage;
 use crate::utils;
@@ -193,11 +195,14 @@ pub fn dashboard_page() -> Html {
         hidden_sessions: effective_hidden_sessions.clone(),
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
-        on_interrupt: focus.on_interrupt.clone(),
         on_show_help,
         on_new_session,
         on_delete: on_delete.clone(),
     });
+
+    // Ctrl+C interrupt: a window capture-phase listener so it fires in every
+    // mode (edit, nav, vim NORMAL/INSERT) and can't be swallowed by vim's `c`.
+    use_interrupt_hotkey(focus.on_interrupt.clone());
 
     let close_help = {
         let ui_state = ui_state.clone();
