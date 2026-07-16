@@ -163,16 +163,39 @@ pub fn dashboard_page() -> Html {
         );
     }
 
+    // Toggle a session's hidden state (persisted to localStorage). Shared by
+    // the rail's "Hide Session" action and the nav-mode `x` shortcut.
+    let on_toggle_hidden = {
+        let session_state = session_state.clone();
+        let ui_state = ui_state.clone();
+        Callback::from(move |session_id: Uuid| {
+            let hidden = !session_state.hidden_sessions.contains(&session_id);
+            let mut set = session_state.hidden_sessions.clone();
+            if hidden {
+                set.insert(session_id);
+            } else {
+                set.remove(&session_id);
+            }
+            save_hidden_sessions(&set);
+            session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
+            // Hiding a session auto-collapses the hidden group so it doesn't
+            // expand in place and leave the user to collapse it manually.
+            if hidden && !ui_state.inactive_hidden {
+                save_inactive_hidden(true);
+                ui_state.dispatch(DashboardUiAction::SetInactiveHidden(true));
+            }
+        })
+    };
+
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
         focused_index: focus.focused_index,
         hidden_sessions: effective_hidden_sessions.clone(),
-        connected_sessions: session_state.connected_sessions.clone(),
-        inactive_hidden: ui_state.inactive_hidden,
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
         on_interrupt: focus.on_interrupt.clone(),
+        on_toggle_hidden: on_toggle_hidden.clone(),
     });
 
     // Modal open callbacks
@@ -404,21 +427,6 @@ pub fn dashboard_page() -> Html {
                     }
                 }
             });
-        })
-    };
-
-    let on_toggle_hidden = {
-        let session_state = session_state.clone();
-        Callback::from(move |session_id: Uuid| {
-            let hidden = !session_state.hidden_sessions.contains(&session_id);
-            let mut set = session_state.hidden_sessions.clone();
-            if hidden {
-                set.insert(session_id);
-            } else {
-                set.remove(&session_id);
-            }
-            save_hidden_sessions(&set);
-            session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
         })
     };
 
@@ -723,6 +731,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "↑↓ or jk = navigate" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
+                                            <span>{ "x = hide" }</span>
                                             <span>{ "Enter/Esc = edit mode" }</span>
                                         </>
                                     }

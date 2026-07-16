@@ -37,16 +37,14 @@ pub struct KeyboardNavConfig {
     pub focused_index: usize,
     /// Set of hidden session IDs
     pub hidden_sessions: HashSet<Uuid>,
-    /// Set of connected session IDs
-    pub connected_sessions: HashSet<Uuid>,
-    /// Whether inactive sessions are hidden
-    pub inactive_hidden: bool,
     /// Callback when session selection changes
     pub on_select: Callback<usize>,
     /// Callback to activate a session (mark it as having been viewed)
     pub on_activate: Callback<Uuid>,
     /// Callback when triple-Escape interrupt is triggered
     pub on_interrupt: Callback<()>,
+    /// Callback to hide/show a session (nav-mode `x` on the focused session)
+    pub on_toggle_hidden: Callback<Uuid>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -72,6 +70,7 @@ const TRIPLE_ESCAPE_WINDOW_MS: f64 = 600.0;
 /// - Numbers 1-9 select directly
 /// - Enter/Escape/i -> Edit Mode
 /// - w -> next waiting session
+/// - x -> hide/show the focused session
 ///
 /// Triple-Escape (within 600ms) sends an interrupt to the focused session.
 #[hook]
@@ -86,11 +85,10 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let sessions = config.sessions.clone();
         let focused_index = config.focused_index;
         let hidden_sessions = config.hidden_sessions.clone();
-        let connected_sessions = config.connected_sessions.clone();
-        let inactive_hidden = config.inactive_hidden;
         let on_select = config.on_select.clone();
         let on_activate = config.on_activate.clone();
         let on_interrupt = config.on_interrupt.clone();
+        let on_toggle_hidden = config.on_toggle_hidden.clone();
         Callback::from(move |e: KeyboardEvent| {
             // Don't handle keyboard nav when a modal overlay is open
             if gloo::utils::document()
@@ -226,40 +224,34 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         }
                     }
                     "x" => {
-                        // Placeholder for close session
+                        // Hide/show the focused session (mirrors the rail's
+                        // "Hide Session" action — non-destructive; the session
+                        // keeps running and stays available in the hidden list).
+                        e.prevent_default();
+                        if let Some(session) = sessions.get(focused_index) {
+                            on_toggle_hidden.emit(session.id);
+                        }
                     }
                     key => {
-                        // Number keys 1-9 for direct selection
+                        // Number keys 1-9 select the Nth session *as shown in the
+                        // rail*. The rail (session_rail.rs) numbers the visible
+                        // sessions in `sessions` (already display-sorted) order,
+                        // hiding manually-hidden and cron/scheduled sessions — so
+                        // we must use the exact same order and filter here, or the
+                        // number won't match the badge the user sees.
                         if let Ok(num) = key.parse::<usize>() {
                             if (1..=9).contains(&num) {
-                                // Build visible session indices in display order
-                                let mut visible_indices: Vec<usize> = Vec::new();
-
-                                // Add active sessions first
-                                for (idx, session) in sessions.iter().enumerate() {
-                                    let is_connected = connected_sessions.contains(&session.id);
-                                    let is_hidden = hidden_sessions.contains(&session.id);
-                                    if is_connected && !is_hidden {
-                                        visible_indices.push(idx);
-                                    }
-                                }
-
-                                // Add inactive sessions if not hidden
-                                if !inactive_hidden {
-                                    for (idx, session) in sessions.iter().enumerate() {
-                                        let is_connected = connected_sessions.contains(&session.id);
-                                        let is_hidden = hidden_sessions.contains(&session.id);
-                                        if !is_connected || is_hidden {
-                                            visible_indices.push(idx);
-                                        }
-                                    }
-                                }
-
-                                // Map display number (1-based) to actual index
-                                let display_idx = num - 1;
-                                if display_idx < visible_indices.len() {
+                                let visible_indices: Vec<usize> = sessions
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, s)| {
+                                        !hidden_sessions.contains(&s.id)
+                                            && s.scheduled_task_id.is_none()
+                                    })
+                                    .map(|(idx, _)| idx)
+                                    .collect();
+                                if let Some(&actual_idx) = visible_indices.get(num - 1) {
                                     e.prevent_default();
-                                    let actual_idx = visible_indices[display_idx];
                                     if let Some(session) = sessions.get(actual_idx) {
                                         on_activate.emit(session.id);
                                     }
