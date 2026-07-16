@@ -15,6 +15,10 @@ NC='\033[0m' # No Color
 # HOST defaults to dual-stack (::) so IPv6 `localhost` and port-forwards reach
 # the backend — a plain 0.0.0.0 (IPv4-only) bind is missed by forwarders that
 # resolve localhost to ::1.
+PORT_EXPLICIT=1
+if [ -z "${PORT+x}" ]; then
+    PORT_EXPLICIT=0
+fi
 PORT="${PORT:-3000}"
 HOST="${HOST:-::}"
 
@@ -40,6 +44,55 @@ error() {
 
 warn() {
     echo -e "${YELLOW}⚠${NC} $1"
+}
+
+port_in_use() {
+    local port="$1"
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    elif command -v ss >/dev/null 2>&1; then
+        ss -ltn "( sport = :$port )" | tail -n +2 | grep -q .
+    else
+        return 1
+    fi
+}
+
+describe_port_owner() {
+    local port="$1"
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"$port" -sTCP:LISTEN || true
+    elif command -v ss >/dev/null 2>&1; then
+        ss -ltnp "( sport = :$port )" || true
+    else
+        echo "No lsof/ss available to identify the listener."
+    fi
+}
+
+choose_available_port() {
+    if ! port_in_use "$PORT"; then
+        return 0
+    fi
+
+    if [ "$PORT_EXPLICIT" -eq 1 ]; then
+        error "PORT=$PORT is already in use."
+        describe_port_owner "$PORT"
+        return 1
+    fi
+
+    local candidate
+    for candidate in $(seq 3001 3099); do
+        if ! port_in_use "$candidate"; then
+            warn "Port $PORT is already in use; using $candidate instead. Set PORT explicitly to require a specific port."
+            PORT="$candidate"
+            BACKEND_PID_FILE="$PID_DIR/backend-$PORT.pid"
+            BACKEND_LOG="/tmp/claude-portal-backend-$PORT.log"
+            return 0
+        fi
+    done
+
+    error "No free dev backend port found in 3000-3099."
+    describe_port_owner 3000
+    return 1
 }
 
 # Ensure PID directory exists
@@ -280,6 +333,7 @@ do_start() {
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
 
+    choose_available_port || exit 1
     start_db || exit 1
     run_migrations || exit 1
     build_frontend || exit 1

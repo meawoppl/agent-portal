@@ -29,6 +29,7 @@ pub async fn list_launchers(
 #[derive(serde::Serialize)]
 pub struct LaunchResponse {
     pub request_id: Uuid,
+    pub session_id: Uuid,
 }
 
 /// POST /api/launch - Request launching a new session
@@ -46,6 +47,15 @@ pub async fn launch_session(
             .ok_or(AppError::NotFound("Launcher not found"))?;
         (launcher.hostname.clone(), launcher.version.clone())
     };
+    if req.create_worktree
+        && !app_state
+            .session_manager
+            .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE)
+    {
+        return Err(AppError::BadRequest(
+            "Selected launcher is too old for git worktree launches. Update agent-portal on that machine and try again.",
+        ));
+    }
 
     // Create a fresh short-lived proxy token for the child process
     let auth_token = mint_launch_token(&app_state, user_id)?;
@@ -122,7 +132,10 @@ pub async fn launch_session(
         request_id, launcher_id, req.working_directory
     );
 
-    Ok(Json(LaunchResponse { request_id }))
+    Ok(Json(LaunchResponse {
+        request_id,
+        session_id,
+    }))
 }
 
 /// Trim a caller-supplied session name, returning `None` when it is absent or
@@ -423,6 +436,7 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
+            capabilities: vec![shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
             cancel: tokio_util::sync::CancellationToken::new(),
             gen: 0,
             last_seen: std::sync::atomic::AtomicU64::new(0),

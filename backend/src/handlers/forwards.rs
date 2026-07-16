@@ -1,6 +1,6 @@
 //! Port-forward registration (docs/PORT_FORWARDING.md): a session has at most
 //! one forwarded port. `session_forwards` holds it; `forward_subdomains` is the
-//! stable label ↔ session lookup the reverse proxy routes by. An agent that
+//! current auto label ↔ session lookup the reverse proxy routes by. An agent that
 //! needs several services fronts them behind its own reverse proxy on the one
 //! forwarded port.
 //!
@@ -18,7 +18,6 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
-use sha2::{Digest, Sha256};
 use tower_cookies::Cookies;
 use tracing::info;
 use uuid::Uuid;
@@ -39,7 +38,7 @@ use crate::AppState;
 const FORWARD_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Length of a subdomain label in hex chars (32 bits). Short by design; the
-/// LUT + collision-retry in [`ensure_subdomain_label`] keeps it unambiguous.
+/// LUT + collision-retry in [`rotate_subdomain_label`] keeps it unambiguous.
 const LABEL_HEX_LEN: usize = 8;
 
 /// Public URL for a forward: `{scheme}://{label}.{domain}/`. Errors when
@@ -79,63 +78,57 @@ fn to_forward_info(
     })
 }
 
-/// The `attempt`-th candidate label for a session: the first [`LABEL_HEX_LEN`]
-/// hex chars of `sha256(session_id || attempt)`. Deterministic, so attempt 0 is
-/// stable across calls; later attempts only come into play on a collision.
-fn label_candidate(session_id: Uuid, attempt: u32) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(session_id.as_bytes());
-    hasher.update(attempt.to_le_bytes());
-    let digest = hasher.finalize();
-    hex::encode(digest)[..LABEL_HEX_LEN].to_string()
+fn label_candidate() -> String {
+    hex::encode(Uuid::new_v4().as_bytes())[..LABEL_HEX_LEN].to_string()
 }
 
-/// Return the session's stable subdomain label, allocating one on first use.
-/// Reuses the existing row if present (so the URL is stable across
-/// close/reopen); otherwise inserts the first candidate label that doesn't
-/// collide with another session's, re-deriving with a counter on conflict.
-pub(crate) fn ensure_subdomain_label(
+/// Allocate a fresh auto subdomain label for this active forward. A new label
+/// is minted on every `forward <port>` registration so a stale service worker,
+/// cookie, or browser cache from a previous local app cannot poison the next
+/// forward for the same agent session. Admin custom-subdomain aliases are
+/// stored separately and continue to route to the session.
+fn rotate_subdomain_label(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
 ) -> Result<String, AppError> {
     use crate::schema::forward_subdomains as fs;
+    use diesel::result::{DatabaseErrorKind, Error as DieselError};
 
-    if let Some(existing) = fs::table
-        .filter(fs::session_id.eq(session_id))
-        .select(fs::label)
-        .first::<String>(conn)
-        .optional()?
-    {
-        return Ok(existing);
-    }
-
-    for attempt in 0u32..256 {
-        let candidate = label_candidate(session_id, attempt);
-        let inserted = diesel::insert_into(fs::table)
+    for _ in 0..256 {
+        let candidate = label_candidate();
+        let result = diesel::insert_into(fs::table)
             .values(&NewForwardSubdomain {
                 label: candidate.clone(),
                 session_id,
             })
-            .on_conflict_do_nothing()
-            .execute(conn)?;
-        if inserted == 1 {
-            return Ok(candidate);
-        }
-        // Nothing inserted: the label collides with another session's, or this
-        // session got a row concurrently. Re-check the session before trying
-        // the next candidate.
-        if let Some(existing) = fs::table
-            .filter(fs::session_id.eq(session_id))
-            .select(fs::label)
-            .first::<String>(conn)
-            .optional()?
-        {
-            return Ok(existing);
+            .on_conflict(fs::session_id)
+            .do_update()
+            .set((
+                fs::label.eq(candidate.clone()),
+                fs::created_at.eq(diesel::dsl::now),
+            ))
+            .execute(conn);
+
+        match result {
+            Ok(_) => return Ok(candidate),
+            // The random auto label collided with another session's label PK.
+            // Retry with a fresh candidate; all other DB errors are real.
+            Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => continue,
+            Err(e) => return Err(e.into()),
         }
     }
     Err(AppError::Internal(
         "could not allocate a forward subdomain".to_string(),
     ))
+}
+
+/// Return the session's current auto subdomain label, allocating one only when
+/// needed by legacy rows that predate the rotate-on-register behavior.
+pub(crate) fn ensure_subdomain_label(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<String, AppError> {
+    existing_label(conn, session_id)?.map_or_else(|| rotate_subdomain_label(conn, session_id), Ok)
 }
 
 /// Map a subdomain label back to its session (the reverse-proxy Host route).
@@ -164,7 +157,7 @@ pub(crate) fn session_for_label(
         .ok_or(AppError::NotFound("forward"))
 }
 
-/// The session's subdomain label, if one has been allocated.
+/// The session's current auto subdomain label, if one has been allocated.
 fn existing_label(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
@@ -304,7 +297,7 @@ pub async fn create_forward(
             .filter(session_forwards::session_id.eq(session_id))
             .select(SessionForward::as_select())
             .first(conn)?;
-        let label = ensure_subdomain_label(conn, session_id)?;
+        let label = rotate_subdomain_label(conn, session_id)?;
         Ok((session, row, label, replaced_port))
     })?;
 
@@ -394,7 +387,7 @@ pub async fn list_forwards(
 
 /// DELETE …/sessions/{id}/forwards — revoke the session's forward (owner only).
 /// Drops the row and tells the proxy to close the port and its live streams.
-/// The subdomain label is kept so a re-forward reuses the same URL.
+/// The next registration rotates to a fresh auto subdomain.
 pub async fn delete_forward(
     State(app_state): State<Arc<AppState>>,
     Path(session_id): Path<Uuid>,
@@ -518,4 +511,18 @@ pub async fn set_forward_public(
     );
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_label_candidates_are_short_lower_hex() {
+        let label = label_candidate();
+        assert_eq!(label.len(), LABEL_HEX_LEN);
+        assert!(label
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    }
 }
