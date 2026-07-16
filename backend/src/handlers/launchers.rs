@@ -51,18 +51,22 @@ pub async fn launch_session(
     let auth_token = mint_launch_token(&app_state, user_id)?;
 
     // A human-chosen name (when supplied) drives both the display name and,
-    // for worktree launches, the worktree branch. Otherwise fall back to the
-    // working directory's basename.
-    let custom_name = normalize_custom_name(req.name.as_deref());
-    let session_name = custom_name
-        .clone()
-        .unwrap_or_else(|| default_session_name(&req.working_directory));
-    // Name the worktree after the chosen name (launcher sanitizes it to a
-    // git-safe branch); with no name the launcher derives a timestamp default.
-    let worktree_branch = if req.create_worktree {
-        custom_name.clone()
-    } else {
-        None
+    // for worktree launches, the worktree branch. With no name we fall back to
+    // the working directory's basename — except for a worktree launch, where we
+    // mint a `session-<timestamp>` branch and use it as the display name too, so
+    // several unnamed worktree sessions of the same repo stay distinguishable in
+    // the rail instead of all collapsing onto the shared repo basename.
+    let (session_name, worktree_branch) = match (
+        normalize_custom_name(req.name.as_deref()),
+        req.create_worktree,
+    ) {
+        (Some(name), true) => (name.clone(), Some(name)),
+        (Some(name), false) => (name, None),
+        (None, true) => {
+            let branch = default_worktree_branch();
+            (branch.clone(), Some(branch))
+        }
+        (None, false) => (default_session_name(&req.working_directory), None),
     };
 
     let request_id = Uuid::new_v4();
@@ -127,6 +131,14 @@ fn normalize_custom_name(name: Option<&str>) -> Option<String> {
     name.map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+/// Timestamped default branch/name for an unnamed worktree launch. Mirrors the
+/// launcher's own fallback format (`session-<YYYYMMDD-HHMMSS>`) so the two paths
+/// stay visually consistent; generating it here lets the display name match the
+/// worktree branch even when the caller supplies no name.
+fn default_worktree_branch() -> String {
+    format!("session-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"))
 }
 
 fn default_session_name(working_directory: &str) -> String {
@@ -489,5 +501,15 @@ mod tests {
             default_session_name("/home/ashley/agent-portal/"),
             "agent-portal"
         );
+    }
+
+    #[test]
+    fn default_worktree_branch_is_timestamped() {
+        let branch = default_worktree_branch();
+        // `session-YYYYMMDD-HHMMSS` — prefix plus a 15-char timestamp.
+        assert!(branch.starts_with("session-"), "got {branch}");
+        let ts = branch.trim_start_matches("session-");
+        assert_eq!(ts.len(), 15, "unexpected timestamp in {branch}");
+        assert!(ts.chars().all(|c| c.is_ascii_digit() || c == '-'));
     }
 }
