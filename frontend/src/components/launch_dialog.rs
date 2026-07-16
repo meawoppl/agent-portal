@@ -324,6 +324,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         error: use_state(|| None::<String>),
     };
     let extra_args = use_state(String::new);
+    // Optional human-chosen session name. Drives the dashboard/nav label and,
+    // when a worktree is created, the worktree branch name.
+    let session_name = use_state(String::new);
     let agent_type = use_state(|| shared::AgentType::Claude);
     // Model selector value — the CLI model argument, or "" for the agent's
     // own default. Reset on agent switch since the catalogs don't overlap.
@@ -332,7 +335,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // Opt-in git worktree: when checked, the launcher creates a worktree from
     // the repo containing the chosen directory and runs the session there.
     let create_worktree = use_state(|| false);
-    let worktree_branch = use_state(String::new);
     let launching = use_state(|| false);
     let error_msg = use_state(|| None::<String>);
     let debounce_handle = use_mut_ref(|| None::<Timeout>);
@@ -414,6 +416,15 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
+    let on_session_name_input = {
+        let session_name = session_name.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                session_name.set(input.value());
+            }
+        })
+    };
+
     let on_agent_type_change = {
         let agent_type = agent_type.clone();
         let model_arg = model_arg.clone();
@@ -453,15 +464,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         Callback::from(move |e: Event| {
             if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
                 create_worktree.set(input.checked());
-            }
-        })
-    };
-
-    let on_worktree_branch_input = {
-        let worktree_branch = worktree_branch.clone();
-        Callback::from(move |e: InputEvent| {
-            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
-                worktree_branch.set(input.value());
             }
         })
     };
@@ -525,11 +527,11 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let dir_path = dir.path.clone();
         let home_root = dir.home_root.clone();
         let extra_args = extra_args.clone();
+        let session_name = session_name.clone();
         let agent_type = agent_type.clone();
         let model_arg = model_arg.clone();
         let skip_permissions = skip_permissions.clone();
         let create_worktree = create_worktree.clone();
-        let worktree_branch = worktree_branch.clone();
         let selected_launcher = selected_launcher.clone();
         let launching = launching.clone();
         let error_msg = error_msg.clone();
@@ -573,12 +575,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             let launcher_id = *selected_launcher;
             let selected_agent_type = *agent_type;
             let want_worktree = *create_worktree;
-            let branch = (*worktree_branch).trim().to_string();
-            let branch = if branch.is_empty() {
-                None
-            } else {
-                Some(branch)
-            };
+            let name = (*session_name).trim().to_string();
+            let name = if name.is_empty() { None } else { Some(name) };
             let launching = launching.clone();
             let error_msg = error_msg.clone();
             let on_close = on_close.clone();
@@ -593,8 +591,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     launcher_id,
                     claude_args,
                     agent_type: selected_agent_type,
+                    name,
                     create_worktree: want_worktree,
-                    worktree_branch: branch,
                 };
 
                 match Request::post("/api/launch")
@@ -897,6 +895,18 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         </div>
                     </div>
 
+                    // Session name — shown in the dashboard/nav. Also names the
+                    // worktree branch when one is created.
+                    <div class="launch-field">
+                        <label>{ "Session name (optional)" }</label>
+                        <input
+                            type="text"
+                            placeholder="defaults to the folder name"
+                            value={(*session_name).clone()}
+                            oninput={on_session_name_input}
+                        />
+                    </div>
+
                     // Extra CLI arguments
                     <div class="launch-field">
                         <label>{ "Extra CLI Arguments (optional)" }</label>
@@ -934,14 +944,14 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     </div>
 
                     if *create_worktree {
-                        <div class="launch-field">
-                            <label>{ "Worktree branch (optional)" }</label>
-                            <input
-                                type="text"
-                                placeholder="defaults to session-<timestamp>"
-                                value={(*worktree_branch).clone()}
-                                oninput={on_worktree_branch_input.clone()}
-                            />
+                        <div class="launch-note">
+                            {
+                                if session_name.trim().is_empty() {
+                                    "Worktree branch will be named session-<timestamp> (set a session name above to name it)".to_string()
+                                } else {
+                                    format!("Worktree branch will be named {}", session_name.trim())
+                                }
+                            }
                         </div>
                     }
 
