@@ -432,9 +432,15 @@ Rule of thumb:
 | On the user's own machine | `http://localhost:<PORT>/` **directly** — no forward |
 | On a remote/different machine | `agent-portal forward <PORT>` (or an SSH tunnel) |
 
-Note the backend binds `HOST` (default `0.0.0.0`, IPv4). If a forwarder resolves
-`localhost` to IPv6 `::1`, it can intermittently miss the backend; bind
-`HOST=::` for dual-stack when a forward must reach it.
+#### "Nothing listening on the forwarded port"
+
+Transient: the local service was down when the request arrived (backend
+mid-restart or finishing a cold build). The proxy dials `127.0.0.1:<PORT>`
+(`session-lib/src/tunnel.rs`) and a refused dial reads as dead. Wait for it to
+come back (`curl -sf http://127.0.0.1:<PORT>/api/health`), then reload.
+
+It is **not** an IPv4/IPv6 bind issue — the dial is a hard-coded `127.0.0.1`
+literal and the default `0.0.0.0` bind accepts it, so `HOST=::` won't help.
 
 ### GitHub CI / Waiting for Checks
 
