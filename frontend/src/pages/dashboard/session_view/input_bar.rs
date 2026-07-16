@@ -135,6 +135,9 @@ pub struct InputBar {
     interim_transcription: Option<String>,
     voice_button_ref: NodeRef,
     was_focused: bool,
+    /// One-shot timer that re-applies the initial focus on the next macrotask
+    /// after the first render (#1373). Held so it is cancelled on unmount.
+    initial_focus_timer: Option<Timeout>,
     /// Whether opt-in vim editing is enabled (read once from localStorage at
     /// create; takes effect for newly opened sessions / after reload).
     vim_enabled: bool,
@@ -167,6 +170,7 @@ impl Component for InputBar {
             interim_transcription: None,
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
+            initial_focus_timer: None,
             vim_enabled: load_vim_mode(),
             vim: Rc::new(RefCell::new(VimState::default())),
         }
@@ -184,7 +188,23 @@ impl Component for InputBar {
 
     fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
         if first_render && ctx.props().focused {
+            // Focus immediately for the common case (switching to an
+            // already-mounted session). On a fresh page load / new session the
+            // focused InputBar mounts with `focused` already true, so the
+            // false→true `changed()` path never runs — this first-render call is
+            // the only shot. A synchronous `.focus()` here can be silently
+            // undone by the browser restoring focus to the document as the page
+            // finishes loading, leaving the composer unfocused (#1373). Re-apply
+            // it on the next macrotask, after that restoration settles. The
+            // textarea node is stable (uncontrolled, held via `NodeRef`), so
+            // this is a genuine post-load focus, not a refocus loop.
             self.focus_textarea();
+            let input_ref = self.input_ref.clone();
+            self.initial_focus_timer = Some(Timeout::new(0, move || {
+                if let Some(input) = input_ref.cast::<HtmlTextAreaElement>() {
+                    let _ = input.focus();
+                }
+            }));
         }
         // Restore textarea content if it was cleared by a re-render (e.g.
         // WS reconnect): the textarea is uncontrolled (we don't pass `value`
