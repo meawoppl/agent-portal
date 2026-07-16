@@ -169,6 +169,7 @@ pub fn dashboard_page() -> Html {
     // the rail's "Hide Session" action and the nav-mode `x` shortcut.
     let on_toggle_hidden = {
         let session_state = session_state.clone();
+        let ui_state = ui_state.clone();
         Callback::from(move |session_id: Uuid| {
             let hidden = !session_state.hidden_sessions.contains(&session_id);
             let mut set = session_state.hidden_sessions.clone();
@@ -179,6 +180,12 @@ pub fn dashboard_page() -> Html {
             }
             save_hidden_sessions(&set);
             session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
+            // Hiding a session auto-collapses the hidden group so it doesn't
+            // expand in place and leave the user to collapse it manually.
+            if hidden && !ui_state.inactive_hidden {
+                save_inactive_hidden(true);
+                ui_state.dispatch(DashboardUiAction::SetInactiveHidden(true));
+            }
         })
     };
 
