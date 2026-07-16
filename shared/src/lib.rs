@@ -47,9 +47,9 @@ pub mod timezone;
 // API client types and trait
 pub mod api;
 pub use api::{
-    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, InitExtra, ModelUsage,
-    ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse,
-    TaskNotificationExtra, TurnMetrics, TurnMetricsResponse,
+    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ModelUsage, ModelUsageEntry,
+    SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse, TurnMetrics,
+    TurnMetricsResponse,
 };
 
 /// Default backend URL based on build profile.

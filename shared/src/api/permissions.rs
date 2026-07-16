@@ -1,5 +1,10 @@
 //! Permission request payload types.
 
+use std::collections::BTreeMap;
+
+use codex_codes::{
+    FileChange, ParsedCommand, RequestPermissionProfile, ToolRequestUserInputQuestion,
+};
 use serde::{Deserialize, Serialize};
 
 /// Typed envelope for a Codex permission request's `input` payload.
@@ -47,13 +52,9 @@ pub enum CodexPermissionInput {
         grant_root: Option<String>,
     },
     /// Codex `applyPatchApproval` — apply-patch approval (0.130+).
-    /// `file_changes` is a JSON object keyed by file path. Typed as `Value`
-    /// here because the upstream `BTreeMap<String, FileChange>` shape is
-    /// rich, evolves with the SDK, and the frontend only enumerates the
-    /// keys for a one-line summary.
     ApplyPatch {
         #[serde(rename = "fileChanges", default)]
-        file_changes: serde_json::Value,
+        file_changes: BTreeMap<String, FileChange>,
         #[serde(rename = "grantRoot", default, skip_serializing_if = "Option::is_none")]
         grant_root: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,7 +67,7 @@ pub enum CodexPermissionInput {
         #[serde(default)]
         cwd: String,
         #[serde(rename = "parsedCmd", default, skip_serializing_if = "Option::is_none")]
-        parsed_cmd: Option<serde_json::Value>,
+        parsed_cmd: Option<Vec<ParsedCommand>>,
     },
     /// Codex `execCommandApproval` (0.130+) — argv-vector command form.
     ExecCommand {
@@ -75,14 +76,14 @@ pub enum CodexPermissionInput {
         #[serde(default)]
         cwd: String,
         #[serde(rename = "parsedCmd", default, skip_serializing_if = "Option::is_none")]
-        parsed_cmd: Option<serde_json::Value>,
+        parsed_cmd: Option<Vec<ParsedCommand>>,
     },
     /// Codex `item/permissions/requestApproval` — broader permission profile.
     Permissions {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        permissions: Option<serde_json::Value>,
+        permissions: Option<RequestPermissionProfile>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
@@ -99,7 +100,7 @@ pub enum CodexPermissionInput {
     /// compatible with Claude's so the frontend keeps a single dispatch.
     AskUserQuestion {
         #[serde(default)]
-        questions: serde_json::Value,
+        questions: Vec<ToolRequestUserInputQuestion>,
     },
 }
 

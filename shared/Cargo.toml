@@ -18,6 +18,9 @@ chrono = { workspace = true, features = ["wasmbind"] }
 # Claude Code types (WASM-compatible, no tokio — inherits types-only from workspace)
 claude-codes = { workspace = true }
 
+# Codex app-server types (WASM-compatible, no tokio — inherits types-only from workspace)
+codex-codes = { workspace = true }
+
 # Typed WebSocket endpoints (core traits only — WASM-safe, no features needed)
 ws-bridge = { workspace = true }
 base64 = "0.22"
