@@ -171,6 +171,21 @@ pub fn dashboard_page() -> Html {
         Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ShowHelp))
     };
 
+    // Request deletion of a session (shows the confirm modal). Shared by the
+    // rail context menu and the nav-mode `d` shortcut.
+    let on_delete = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |session_id: Uuid| {
+            ui_state.dispatch(DashboardUiAction::RequestDelete(session_id));
+        })
+    };
+
+    // Open a new session (launch dialog). Shared by the nav-mode `n` shortcut.
+    let on_new_session = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |()| ui_state.dispatch(DashboardUiAction::ToggleLaunchDialog))
+    };
+
     // Use the keyboard navigation hook
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
@@ -180,6 +195,8 @@ pub fn dashboard_page() -> Html {
         on_activate: focus.on_activate.clone(),
         on_interrupt: focus.on_interrupt.clone(),
         on_show_help,
+        on_new_session,
+        on_delete: on_delete.clone(),
     });
 
     let close_help = {
@@ -265,13 +282,6 @@ pub fn dashboard_page() -> Html {
                     ui_state.dispatch(DashboardUiAction::ClearPendingLeave);
                 });
             }
-        })
-    };
-
-    let on_delete = {
-        let ui_state = ui_state.clone();
-        Callback::from(move |session_id: Uuid| {
-            ui_state.dispatch(DashboardUiAction::RequestDelete(session_id));
         })
     };
 
