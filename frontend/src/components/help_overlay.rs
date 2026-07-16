@@ -93,6 +93,10 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Jump to the next waiting session",
             },
             Shortcut {
+                keys: &["G"],
+                description: "Jump to the latest message (resume live tailing)",
+            },
+            Shortcut {
                 keys: &["n"],
                 description: "New session (open the launch dialog)",
             },

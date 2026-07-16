@@ -11,6 +11,8 @@ pub(super) struct DashboardFocus {
     pub on_activate: Callback<Uuid>,
     pub on_interrupt: Callback<()>,
     pub interrupt_signal: u32,
+    pub on_jump_to_latest: Callback<()>,
+    pub jump_to_latest_signal: u32,
 }
 
 #[hook]
@@ -122,11 +124,26 @@ pub(super) fn use_dashboard_focus(
         })
     };
 
+    // Jump-to-latest signal counter: incremented by nav-mode `G`, passed to the
+    // focused SessionView which self-dispatches `JumpToLive` on the bump. Uses
+    // the same counter-prop pattern as `interrupt_signal` so the dashboard hook
+    // can reach the focused session's message without holding its dispatcher.
+    let jump_to_latest_signal = use_state(|| 0u32);
+
+    let on_jump_to_latest = {
+        let jump_to_latest_signal = jump_to_latest_signal.clone();
+        Callback::from(move |()| {
+            jump_to_latest_signal.set(*jump_to_latest_signal + 1);
+        })
+    };
+
     DashboardFocus {
         focused_index,
         on_select_session,
         on_activate,
         on_interrupt,
         interrupt_signal: *interrupt_signal,
+        on_jump_to_latest,
+        jump_to_latest_signal: *jump_to_latest_signal,
     }
 }
