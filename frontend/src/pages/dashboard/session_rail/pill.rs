@@ -1,4 +1,3 @@
-use crate::utils;
 use shared::SessionInfo;
 use uuid::Uuid;
 use web_sys::MouseEvent;
@@ -91,7 +90,7 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             <span class={view.connection_class}>
                 { view.connection_symbol }
             </span>
-            <span class="pill-name" title={session.session_name.clone()}>
+            <span class="pill-name" title={session.working_directory.clone()}>
                 <span class="pill-folder">{ view.folder }</span>
                 <span class="pill-hostname-row">
                     <span class="pill-hostname">{ &session.hostname }</span>
@@ -206,7 +205,9 @@ impl PillViewModel {
             },
             connection_symbol: if props.is_connected { "●" } else { "○" },
             number_annotation,
-            folder: utils::extract_folder(&session.working_directory).to_string(),
+            // Primary pill label: the human-chosen session name (defaults to
+            // the working directory's basename when none was supplied).
+            folder: session.session_name.clone(),
             version_badge,
             vcs,
             agent_badge,

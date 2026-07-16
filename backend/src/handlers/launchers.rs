@@ -50,6 +50,21 @@ pub async fn launch_session(
     // Create a fresh short-lived proxy token for the child process
     let auth_token = mint_launch_token(&app_state, user_id)?;
 
+    // A human-chosen name (when supplied) drives both the display name and,
+    // for worktree launches, the worktree branch. Otherwise fall back to the
+    // working directory's basename.
+    let custom_name = normalize_custom_name(req.name.as_deref());
+    let session_name = custom_name
+        .clone()
+        .unwrap_or_else(|| default_session_name(&req.working_directory));
+    // Name the worktree after the chosen name (launcher sanitizes it to a
+    // git-safe branch); with no name the launcher derives a timestamp default.
+    let worktree_branch = if req.create_worktree {
+        custom_name.clone()
+    } else {
+        None
+    };
+
     let request_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     create_desired_session(
@@ -58,6 +73,7 @@ pub async fn launch_session(
             session_id,
             user_id,
             working_directory: req.working_directory.clone(),
+            session_name: session_name.clone(),
             hostname,
             launcher_id: Some(launcher_id),
             client_version: Some(version),
@@ -74,13 +90,13 @@ pub async fn launch_session(
         user_id,
         auth_token,
         working_directory: req.working_directory.clone(),
-        session_name: Some(default_session_name(&req.working_directory)),
+        session_name: Some(session_name),
         claude_args: req.claude_args,
         agent_type: req.agent_type,
         scheduled_task_id: None,
         resume_session_id: Some(session_id),
         create_worktree: req.create_worktree,
-        worktree_branch: req.worktree_branch.clone(),
+        worktree_branch,
     };
 
     if !app_state
@@ -105,6 +121,14 @@ pub async fn launch_session(
     Ok(Json(LaunchResponse { request_id }))
 }
 
+/// Trim a caller-supplied session name, returning `None` when it is absent or
+/// blank so callers fall back to the directory-basename default.
+fn normalize_custom_name(name: Option<&str>) -> Option<String> {
+    name.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 fn default_session_name(working_directory: &str) -> String {
     std::path::Path::new(working_directory)
         .file_name()
@@ -118,6 +142,7 @@ pub(crate) struct DesiredSessionDraft {
     session_id: Uuid,
     user_id: Uuid,
     working_directory: String,
+    session_name: String,
     hostname: String,
     launcher_id: Option<Uuid>,
     client_version: Option<String>,
@@ -134,11 +159,10 @@ pub(crate) fn create_desired_session(
     use crate::schema::{session_members, sessions};
     use diesel::prelude::*;
 
-    let session_name = default_session_name(&draft.working_directory);
     let new_session = NewSessionWithId {
         id: draft.session_id,
         user_id: draft.user_id,
-        session_name,
+        session_name: draft.session_name,
         session_key: draft.session_id.to_string(),
         working_directory: draft.working_directory,
         status: SessionStatus::Disconnected.as_str().to_string(),
@@ -442,5 +466,28 @@ mod tests {
             resolve_launch_target(&manager, None, Uuid::new_v4()),
             Err(AppError::NotFound("No connected launchers"))
         ));
+    }
+
+    #[test]
+    fn custom_name_is_trimmed_and_blanks_fall_back() {
+        assert_eq!(
+            normalize_custom_name(Some("  api-refactor  ")),
+            Some("api-refactor".to_string())
+        );
+        assert_eq!(normalize_custom_name(Some("   ")), None);
+        assert_eq!(normalize_custom_name(Some("")), None);
+        assert_eq!(normalize_custom_name(None), None);
+    }
+
+    #[test]
+    fn default_session_name_uses_directory_basename() {
+        assert_eq!(
+            default_session_name("/home/ashley/agent-portal"),
+            "agent-portal"
+        );
+        assert_eq!(
+            default_session_name("/home/ashley/agent-portal/"),
+            "agent-portal"
+        );
     }
 }
