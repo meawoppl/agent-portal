@@ -63,6 +63,21 @@ pub struct InputBarProps {
     pub on_message_sent: Callback<()>,
 }
 
+/// True when the dashboard is in keyboard Nav mode.
+///
+/// Detected from the `nav-mode` class the dashboard puts on
+/// `.session-views-container` (see `page.rs`). We read it from the DOM rather
+/// than thread it as a prop because the composer sits several struct-component
+/// layers below the nav state, and that class is already the rendered source of
+/// truth for the mode.
+fn dashboard_in_nav_mode() -> bool {
+    gloo::utils::document()
+        .query_selector(".session-views-container.nav-mode")
+        .ok()
+        .flatten()
+        .is_some()
+}
+
 /// Auto-resize the textarea to fit its content. Measures the scroll height
 /// with overflow hidden to prevent the scrollbar from narrowing the text
 /// area and causing layout bounce.
@@ -374,6 +389,21 @@ impl Component for InputBar {
         let vim_enabled = self.vim_enabled;
         let vim = self.vim.clone();
         let handle_keydown = link.callback(move |e: KeyboardEvent| {
+            // While the dashboard is in Nav mode the composer must be inert: Nav
+            // owns single-key shortcuts (1-9 to jump panes, hjkl, w, n, d, G).
+            // The textarea keeps DOM focus in Nav mode, so without this a plain
+            // key would either type into the box (vim INSERT / no-vim) or be
+            // eaten by vim NORMAL as a count prefix — either way the pane never
+            // switches. Swallow the browser default and skip vim, but do NOT
+            // stop propagation: the event still bubbles to the dashboard's
+            // `use_keyboard_nav` handler, which performs the navigation. Modifier
+            // chords (Ctrl/Cmd) are left alone so copy/paste, voice (Ctrl+M), and
+            // the Ctrl/Cmd+K mode toggle keep working in Nav mode.
+            if !e.ctrl_key() && !e.meta_key() && dashboard_in_nav_mode() {
+                e.prevent_default();
+                return InputBarMsg::Noop;
+            }
+
             if e.ctrl_key() && e.key().to_lowercase() == "m" {
                 e.prevent_default();
                 return InputBarMsg::ToggleVoice;
