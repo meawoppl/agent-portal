@@ -150,6 +150,14 @@ pub struct InputBar {
     interim_transcription: Option<String>,
     voice_button_ref: NodeRef,
     was_focused: bool,
+    /// Mirror of the `ws_connected` prop from the previous render. The composer
+    /// textarea is `disabled` until the session's socket is up, and `.focus()`
+    /// on a disabled node is a no-op — so on a freshly launched session the
+    /// mount-time focus attempts (see `rendered`) fire while the textarea is
+    /// still disabled and silently do nothing. Tracking the false→true
+    /// transition lets us re-apply focus the moment the socket connects, if
+    /// this bar belongs to the focused session (#1405).
+    was_ws_connected: bool,
     /// One-shot timer that re-applies the initial focus on the next macrotask
     /// after the first render (#1373). Held so it is cancelled on unmount.
     initial_focus_timer: Option<Timeout>,
@@ -186,6 +194,7 @@ impl Component for InputBar {
             interim_transcription: None,
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
+            was_ws_connected: ctx.props().ws_connected,
             initial_focus_timer: None,
             focus_after_render: ctx.props().focused,
             vim_enabled: load_vim_mode(),
@@ -197,7 +206,17 @@ impl Component for InputBar {
         let now_focused = ctx.props().focused;
         let became_focused = now_focused && !self.was_focused;
         self.was_focused = now_focused;
-        if became_focused {
+
+        // A just-launched session mounts with its socket still down, so the
+        // textarea is `disabled` and the mount-time focus (see `rendered`)
+        // no-ops on a disabled node. Re-apply focus when the socket comes up
+        // while this bar is the focused session's, so the composer is ready to
+        // type in without a stray click (#1405).
+        let now_connected = ctx.props().ws_connected;
+        let became_connected = now_connected && !self.was_ws_connected;
+        self.was_ws_connected = now_connected;
+
+        if became_focused || (became_connected && now_focused) {
             self.focus_after_render = true;
         }
         true
