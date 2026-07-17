@@ -39,6 +39,11 @@ pub enum IoCommand {
         request_id: String,
         decision: PermissionDecision,
     },
+    /// Interrupt the agent's in-flight turn. The I/O task serializes this into
+    /// its protocol's cancel form (Claude: a wrapped `control_request`
+    /// interrupt on stdin; Codex: `turn/interrupt`). A no-op when nothing is
+    /// running.
+    Interrupt,
 }
 
 /// Events emitted from the per-agent I/O task back up to `Session<A>`.

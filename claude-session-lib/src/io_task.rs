@@ -125,6 +125,38 @@ fn synthetic_user_echo_value(
     Some(claude_user_echo_value(text.to_string(), session_id))
 }
 
+/// Build the interrupt to write to claude's stdin as a wrapped `control_request`.
+///
+/// TODO(SDK meawoppl/rust-code-agent-sdks#218): `claude_codes::ClaudeInput::interrupt()`
+/// (claude-codes 2.1.161) serializes to a bare `{"subtype":"interrupt"}`, which the
+/// current claude CLI silently ignores (verified against claude 2.1.211 — the in-flight
+/// turn is never cancelled). The CLI's control protocol requires the interrupt wrapped as
+/// a `control_request` with a unique `request_id`, the same envelope as `can_use_tool` /
+/// `initialize`. There's no typed constructor for it today, so hand-build the JSON and
+/// send it as `ClaudeInput::Raw`; revert to `ClaudeInput::interrupt()` once #218 lands.
+fn interrupt_input() -> ClaudeInput {
+    #[derive(serde::Serialize)]
+    struct Request {
+        #[serde(rename = "type")]
+        message_type: &'static str,
+        request_id: String,
+        request: Payload,
+    }
+    #[derive(serde::Serialize)]
+    struct Payload {
+        subtype: &'static str,
+    }
+    let value = serde_json::to_value(Request {
+        message_type: "control_request",
+        request_id: format!("interrupt-{}", uuid::Uuid::new_v4()),
+        request: Payload {
+            subtype: "interrupt",
+        },
+    })
+    .unwrap_or(serde_json::Value::Null);
+    ClaudeInput::Raw(value)
+}
+
 fn plain_input_text(input: &ClaudeInput) -> Option<String> {
     let ClaudeInput::User(user) = input else {
         return None;
@@ -327,6 +359,12 @@ pub(crate) async fn claude_io_task(
                     } => {
                         let response = claude_control_response(&request_id, decision);
                         client.send_control_response(response).await
+                    }
+                    IoCommand::Interrupt => {
+                        // Cancel claude's in-flight turn. Sent as a wrapped
+                        // `control_request` (see `interrupt_input`); a no-op on
+                        // the CLI side when no turn is active.
+                        client.send(&interrupt_input()).await.map(|_| ())
                     }
                 };
                 if let Err(e) = result {
@@ -618,6 +656,21 @@ pub(crate) async fn claude_io_task(
                                             claude_control_response(&request_id, decision);
                                         if let Err(e) =
                                             client.send_control_response(response).await
+                                        {
+                                            let _ = event_tx.send(IoEvent::Error(
+                                                SessionError::Agent(e.to_string()),
+                                            ));
+                                        }
+                                    }
+                                    IoCommand::Interrupt => {
+                                        // Interrupt while waiting to retry a
+                                        // rate-limited turn: abandon the retry
+                                        // and cancel (a no-op on the CLI if the
+                                        // turn isn't running).
+                                        rate_limit_attempts = 0;
+                                        pending_session_limit = None;
+                                        if let Err(e) =
+                                            client.send(&interrupt_input()).await
                                         {
                                             let _ = event_tx.send(IoEvent::Error(
                                                 SessionError::Agent(e.to_string()),
