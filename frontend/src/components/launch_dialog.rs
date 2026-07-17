@@ -1,12 +1,11 @@
 // TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::components::model_select::model_cli_args;
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
-use crate::components::ProxyTokenSetup;
+use crate::components::{ModelSelect, ProxyTokenSetup};
 use crate::hooks::use_escape;
 use crate::utils::{self, FetchError, On401};
-use claude_codes::ClaudeModel;
-use codex_codes::CodexModel;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
@@ -448,11 +447,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     let on_model_change = {
         let model_arg = model_arg.clone();
-        Callback::from(move |e: Event| {
-            if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
-                model_arg.set(select.value());
-            }
-        })
+        Callback::from(move |value: String| model_arg.set(value))
     };
 
     let on_skip_permissions = {
@@ -557,17 +552,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
             // Picker args go first so an explicit --model / -c model=… in the
             // extra-args field still wins (both CLIs take the last occurrence).
-            let mut claude_args: Vec<String> = Vec::new();
-            if !model_arg.is_empty() {
-                match *agent_type {
-                    AgentType::Claude => {
-                        claude_args.extend(["--model".to_string(), (*model_arg).clone()]);
-                    }
-                    AgentType::Codex => {
-                        claude_args.extend(["-c".to_string(), format!("model={}", *model_arg)]);
-                    }
-                }
-            }
+            let mut claude_args: Vec<String> = model_cli_args(*agent_type, &model_arg);
             claude_args.extend((*extra_args).split_whitespace().map(|s| s.to_string()));
             if *skip_permissions {
                 claude_args.extend(
@@ -698,41 +683,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         AgentType::Codex => "Codex",
     };
 
-    // Model catalog options for the selected agent, from the SDK crates'
-    // known-model tables. Values are the exact CLI model arguments.
-    let model_option = |value: &str, label: &str| -> Html {
-        html! {
-            <option value={value.to_string()} selected={*model_arg == value}>
-                { label }
-            </option>
-        }
-    };
-    let model_options: Html = match *agent_type {
-        AgentType::Claude => html! {
-            <>
-                <optgroup label="Aliases — track the newest model">
-                    { for ClaudeModel::known()
-                        .iter()
-                        .filter(|m| m.is_alias())
-                        .map(|m| model_option(m.cli_arg(), m.display_name())) }
-                </optgroup>
-                <optgroup label="Pinned models">
-                    { for ClaudeModel::known()
-                        .iter()
-                        .filter(|m| !m.is_alias())
-                        .map(|m| model_option(m.cli_arg(), m.display_name())) }
-                </optgroup>
-            </>
-        },
-        AgentType::Codex => html! {
-            // CodexAutoReview is hidden from Codex's own picker; mirror that.
-            { for CodexModel::known()
-                .iter()
-                .filter(|m| !matches!(m, CodexModel::CodexAutoReview))
-                .map(|m| model_option(m.cli_arg(), m.display_name())) }
-        },
-    };
-
     // Pre-compute directory listing HTML
     let dir_listing_html = if *dir.loading {
         html! { <div class="dir-loading">{ "Loading..." }</div> }
@@ -859,12 +809,11 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     // codex-codes crates; "" means the agent's own default.
                     <div class="launch-field">
                         <label>{ "Model" }</label>
-                        <select class="launcher-select" onchange={on_model_change}>
-                            <option value="" selected={model_arg.is_empty()}>
-                                { "Agent default" }
-                            </option>
-                            { model_options.clone() }
-                        </select>
+                        <ModelSelect
+                            agent_type={*agent_type}
+                            value={(*model_arg).clone()}
+                            on_change={on_model_change}
+                        />
                     </div>
 
                     // Directory browser
