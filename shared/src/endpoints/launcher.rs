@@ -276,6 +276,12 @@ pub enum ServerToLauncher {
     /// the agent-portal service. Triggered from the dashboard Launchers panel.
     UpdateAndRestart,
 
+    /// Tell the launcher to restart the agent-portal service *without* updating
+    /// the binary — the same graceful restart as `UpdateAndRestart` minus the
+    /// download/replace. Gated behind `LAUNCHER_CAPABILITY_RESTART` so the
+    /// backend never sends this frame to a launcher too old to decode it.
+    Restart,
+
     /// Ask a live launcher to persist a freshly rotated auth token.
     ///
     /// New launchers reply with `LauncherToServer::TokenRefreshAck` after the

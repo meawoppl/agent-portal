@@ -316,6 +316,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             post(handlers::launchers::update_launcher),
         )
         .route(
+            "/api/launchers/{launcher_id}/restart",
+            post(handlers::launchers::restart_launcher),
+        )
+        .route(
             "/api/launchers/{launcher_id}/probe-agents",
             get(handlers::launchers::probe_agents),
         )
