@@ -178,6 +178,7 @@ pub struct UseKeyboardNav {
 /// - n -> new session (launch dialog)
 /// - d -> delete the focused session (via the confirm modal)
 /// - w -> next waiting session
+/// - Enter -> accept the current pane and return to Edit Mode
 /// - Ctrl/Cmd+K -> back to Edit Mode
 ///
 /// `?` opens the keyboard-shortcuts help overlay whenever focus is not in the
@@ -315,8 +316,9 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
             }
 
             if in_nav_mode {
-                // Navigation Mode. Ctrl/Cmd+K (handled above) is the only way
-                // back to edit mode — no key here changes the mode.
+                // Navigation Mode. Ctrl/Cmd+K (handled above) toggles back to
+                // edit mode from anywhere; Enter (below) also returns to edit
+                // mode once you've landed on a pane.
                 match e.key().as_str() {
                     "ArrowUp" | "ArrowLeft" | "h" => {
                         e.prevent_default();
@@ -379,6 +381,16 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         // (like the other nav keys), matching vim's "go to end".
                         e.prevent_default();
                         on_jump_to_latest.emit(());
+                    }
+                    "Enter" => {
+                        // Enter accepts the current pane and drops back to edit
+                        // mode, refocusing the composer — a lighter-weight exit
+                        // than Ctrl/Cmd+K once you've navigated to the pane you
+                        // want. (The composer is inert in nav mode, so this Enter
+                        // never submits a message.)
+                        e.prevent_default();
+                        nav_mode.set(false);
+                        focus_active_message_input();
                     }
                     key => {
                         // Number keys 1-9 select the Nth session *as shown in the

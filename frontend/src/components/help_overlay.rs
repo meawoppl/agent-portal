@@ -109,6 +109,10 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Delete the focused session (with confirmation)",
             },
             Shortcut {
+                keys: &["Enter"],
+                description: "Accept the current pane and return to edit mode",
+            },
+            Shortcut {
                 keys: &["Ctrl/Cmd", "K"],
                 description: "Return to edit mode",
             },

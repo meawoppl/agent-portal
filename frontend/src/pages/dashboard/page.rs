@@ -751,7 +751,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
                                             <span>{ "n = new" }</span>
-                                            <span>{ "Enter/Esc = edit mode" }</span>
+                                            <span>{ "Enter or Ctrl/Cmd+K = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
                                     }
