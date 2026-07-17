@@ -81,8 +81,12 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Move between sessions",
             },
             Shortcut {
-                keys: &["h", "j", "k", "l"],
+                keys: &["h", "l"],
                 description: "Move between sessions (vim keys)",
+            },
+            Shortcut {
+                keys: &["j", "k"],
+                description: "Scroll the focused transcript down / up",
             },
             Shortcut {
                 keys: &["1", "–", "9"],
@@ -103,6 +107,10 @@ const GROUPS: &[ShortcutGroup] = &[
             Shortcut {
                 keys: &["d"],
                 description: "Delete the focused session (with confirmation)",
+            },
+            Shortcut {
+                keys: &["Enter"],
+                description: "Accept the current pane and return to edit mode",
             },
             Shortcut {
                 keys: &["Ctrl/Cmd", "K"],

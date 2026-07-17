@@ -63,6 +63,21 @@ pub struct InputBarProps {
     pub on_message_sent: Callback<()>,
 }
 
+/// True when the dashboard is in keyboard Nav mode.
+///
+/// Detected from the `nav-mode` class the dashboard puts on
+/// `.session-views-container` (see `page.rs`). We read it from the DOM rather
+/// than thread it as a prop because the composer sits several struct-component
+/// layers below the nav state, and that class is already the rendered source of
+/// truth for the mode.
+fn dashboard_in_nav_mode() -> bool {
+    gloo::utils::document()
+        .query_selector(".session-views-container.nav-mode")
+        .ok()
+        .flatten()
+        .is_some()
+}
+
 /// Auto-resize the textarea to fit its content. Measures the scroll height
 /// with overflow hidden to prevent the scrollbar from narrowing the text
 /// area and causing layout bounce.
@@ -138,6 +153,7 @@ pub struct InputBar {
     /// One-shot timer that re-applies the initial focus on the next macrotask
     /// after the first render (#1373). Held so it is cancelled on unmount.
     initial_focus_timer: Option<Timeout>,
+    focus_after_render: bool,
     /// Whether opt-in vim editing is enabled (read once from localStorage at
     /// create; takes effect for newly opened sessions / after reload).
     vim_enabled: bool,
@@ -171,6 +187,7 @@ impl Component for InputBar {
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
             initial_focus_timer: None,
+            focus_after_render: ctx.props().focused,
             vim_enabled: load_vim_mode(),
             vim: Rc::new(RefCell::new(VimState::default())),
         }
@@ -181,13 +198,15 @@ impl Component for InputBar {
         let became_focused = now_focused && !self.was_focused;
         self.was_focused = now_focused;
         if became_focused {
-            self.focus_textarea();
+            self.focus_after_render = true;
         }
         true
     }
 
     fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
-        if first_render && ctx.props().focused {
+        let first_focused_render = first_render && ctx.props().focused;
+        if first_focused_render || self.focus_after_render {
+            self.focus_after_render = false;
             // Focus immediately for the common case (switching to an
             // already-mounted session). On a fresh page load / new session the
             // focused InputBar mounts with `focused` already true, so the
@@ -199,12 +218,14 @@ impl Component for InputBar {
             // textarea node is stable (uncontrolled, held via `NodeRef`), so
             // this is a genuine post-load focus, not a refocus loop.
             self.focus_textarea();
-            let input_ref = self.input_ref.clone();
-            self.initial_focus_timer = Some(Timeout::new(0, move || {
-                if let Some(input) = input_ref.cast::<HtmlTextAreaElement>() {
-                    let _ = input.focus();
-                }
-            }));
+            if first_focused_render {
+                let input_ref = self.input_ref.clone();
+                self.initial_focus_timer = Some(Timeout::new(0, move || {
+                    if let Some(input) = input_ref.cast::<HtmlTextAreaElement>() {
+                        let _ = input.focus();
+                    }
+                }));
+            }
         }
         // Restore textarea content if it was cleared by a re-render (e.g.
         // WS reconnect): the textarea is uncontrolled (we don't pass `value`
@@ -368,6 +389,21 @@ impl Component for InputBar {
         let vim_enabled = self.vim_enabled;
         let vim = self.vim.clone();
         let handle_keydown = link.callback(move |e: KeyboardEvent| {
+            // While the dashboard is in Nav mode the composer must be inert: Nav
+            // owns single-key shortcuts (1-9 to jump panes, hjkl, w, n, d, G).
+            // The textarea keeps DOM focus in Nav mode, so without this a plain
+            // key would either type into the box (vim INSERT / no-vim) or be
+            // eaten by vim NORMAL as a count prefix — either way the pane never
+            // switches. Swallow the browser default and skip vim, but do NOT
+            // stop propagation: the event still bubbles to the dashboard's
+            // `use_keyboard_nav` handler, which performs the navigation. Modifier
+            // chords (Ctrl/Cmd) are left alone so copy/paste, voice (Ctrl+M), and
+            // the Ctrl/Cmd+K mode toggle keep working in Nav mode.
+            if !e.ctrl_key() && !e.meta_key() && dashboard_in_nav_mode() {
+                e.prevent_default();
+                return InputBarMsg::Noop;
+            }
+
             if e.ctrl_key() && e.key().to_lowercase() == "m" {
                 e.prevent_default();
                 return InputBarMsg::ToggleVoice;

@@ -152,6 +152,7 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
+            capabilities: vec![shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
             cancel,
             gen: 0,
             last_seen: std::sync::atomic::AtomicU64::new(0),

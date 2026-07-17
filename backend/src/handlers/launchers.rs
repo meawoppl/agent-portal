@@ -29,6 +29,7 @@ pub async fn list_launchers(
 #[derive(serde::Serialize)]
 pub struct LaunchResponse {
     pub request_id: Uuid,
+    pub session_id: Uuid,
 }
 
 /// POST /api/launch - Request launching a new session
@@ -46,6 +47,15 @@ pub async fn launch_session(
             .ok_or(AppError::NotFound("Launcher not found"))?;
         (launcher.hostname.clone(), launcher.version.clone())
     };
+    if req.create_worktree
+        && !app_state
+            .session_manager
+            .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE)
+    {
+        return Err(AppError::BadRequest(
+            "Selected launcher is too old for git worktree launches. Update agent-portal on that machine and try again.",
+        ));
+    }
 
     // Create a fresh short-lived proxy token for the child process
     let auth_token = mint_launch_token(&app_state, user_id)?;
@@ -122,7 +132,10 @@ pub async fn launch_session(
         request_id, launcher_id, req.working_directory
     );
 
-    Ok(Json(LaunchResponse { request_id }))
+    Ok(Json(LaunchResponse {
+        request_id,
+        session_id,
+    }))
 }
 
 /// Trim a caller-supplied session name, returning `None` when it is absent or
@@ -357,6 +370,53 @@ pub async fn update_launcher(
     Ok(EmptyResponse::OK)
 }
 
+/// POST /api/launchers/:launcher_id/restart - Tell the launcher to restart its
+/// process *without* updating the binary. Gated on
+/// `LAUNCHER_CAPABILITY_RESTART`: launchers too old to decode
+/// `ServerToLauncher::Restart` get a clear 400 instead of a silently-dropped
+/// frame.
+pub async fn restart_launcher(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path(launcher_id): Path<Uuid>,
+) -> Result<EmptyResponse, AppError> {
+    {
+        let launcher = app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .ok_or(AppError::NotFound("Launcher not found"))?;
+        if launcher.user_id != user_id {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    if !app_state
+        .session_manager
+        .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_RESTART)
+    {
+        return Err(AppError::BadRequest(
+            "Launcher too old — update it first, then restart becomes available.",
+        ));
+    }
+
+    // Route through the evicting sender (not a cloned raw sender) so a dead
+    // channel tears the stale connection down instead of lingering.
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, ServerToLauncher::Restart)
+    {
+        warn!(
+            "Launcher {} disconnected while sending restart",
+            launcher_id
+        );
+        return Err(AppError::Internal("Launcher disconnected".to_string()));
+    }
+
+    info!("Sent Restart to launcher {}", launcher_id);
+    Ok(EmptyResponse::OK)
+}
+
 /// GET /api/launchers/:launcher_id/probe-agents - Ask the launcher to (re-)scan
 /// its agent CLIs (`claude`, `codex`) and return install state. The frontend
 /// calls this when the launch dialog opens.
@@ -423,6 +483,7 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
+            capabilities: vec![shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
             cancel: tokio_util::sync::CancellationToken::new(),
             gen: 0,
             last_seen: std::sync::atomic::AtomicU64::new(0),

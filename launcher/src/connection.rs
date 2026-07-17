@@ -96,6 +96,10 @@ pub async fn run_launcher_loop(
                     working_directory: std::env::current_dir()
                         .ok()
                         .map(|p| p.to_string_lossy().to_string()),
+                    capabilities: vec![
+                        shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
+                        shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
+                    ],
                 };
                 if ws_sender.send(register).await.is_err() {
                     warn!("Failed to send registration");
@@ -413,6 +417,26 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
         .collect()
 }
 
+/// Gracefully restart the launcher process. When run under a service manager
+/// (systemd/launchd), sync the unit and ask the manager to restart us (the
+/// manager sends SIGTERM and respawns per the unit's `Restart=`/`KeepAlive`
+/// settings); when unmanaged, exit(0) so an external supervisor respawns.
+/// Shared by the `UpdateAndRestart` (post-download) and `Restart` (no-download)
+/// paths so the restart mechanism lives in exactly one place.
+fn restart_service() {
+    if crate::service::is_installed() {
+        if let Err(e) = crate::service::sync() {
+            error!("Service unit sync failed: {}", e);
+        }
+        if let Err(e) = crate::service::restart() {
+            error!("Service restart failed: {}", e);
+        }
+    } else {
+        info!("Service not installed; exiting so a supervisor can respawn");
+        std::process::exit(0);
+    }
+}
+
 fn list_directory(path: &str, request_id: Uuid) -> LauncherToServer {
     // Resolve ~ to home directory (trailing slash ensures the dir itself is listed,
     // not treated as a filter prefix against its parent)
@@ -686,17 +710,16 @@ async fn handle_message(
                         error!("Update check failed: {}; restarting anyway", e);
                     }
                 }
-                if crate::service::is_installed() {
-                    if let Err(e) = crate::service::sync() {
-                        error!("Service unit sync failed: {}", e);
-                    }
-                    if let Err(e) = crate::service::restart() {
-                        error!("Service restart failed: {}", e);
-                    }
-                } else {
-                    info!("Service not installed; exiting so a supervisor can respawn");
-                    std::process::exit(0);
-                }
+                restart_service();
+            });
+        }
+        ServerToLauncher::Restart => {
+            info!("Received Restart request from dashboard (restart requested via portal)");
+            // Same graceful restart as the post-update path, minus the
+            // download/replace: the service manager (systemd/launchd) respawns
+            // the process, or — when unmanaged — we exit for a supervisor to.
+            tokio::spawn(async move {
+                restart_service();
             });
         }
         ServerToLauncher::TokenRefresh { auth_token } => {

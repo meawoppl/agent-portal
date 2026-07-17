@@ -384,6 +384,7 @@ mod tests {
             hostname: "host1".into(),
             version: Some("1.0".into()),
             working_directory: Some("/home/user/project".into()),
+            capabilities: vec![crate::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LauncherRegister""#));

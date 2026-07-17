@@ -13,6 +13,14 @@ use uuid::Uuid;
 /// placeholder.
 pub const VERSION: &str = env!("PORTAL_VERSION");
 
+/// Launcher capability advertised by versions that honor
+/// `ServerToLauncher::LaunchSession.create_worktree`.
+pub const LAUNCHER_CAPABILITY_CREATE_WORKTREE: &str = "launch.create_worktree";
+
+/// Launcher capability advertised by versions that honor
+/// `ServerToLauncher::Restart` (restart the process without updating the binary).
+pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
+
 /// Split [`VERSION`] into `(major, minor, patch)` numeric components.
 /// `None` on the (impossible-by-construction) malformed string.
 pub fn version_parts() -> Option<(u64, u64, u64)> {
@@ -235,6 +243,9 @@ pub struct LauncherInfo {
     /// Launcher binary version
     #[serde(default)]
     pub version: String,
+    /// Additive feature flags advertised by the launcher at registration.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 /// A single open GitHub pull request associated with a session's repository.

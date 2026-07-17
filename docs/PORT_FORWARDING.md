@@ -21,15 +21,16 @@ long as the session is alive.
 
 ## Design summary
 
-- **One forward per session, on a per-session subdomain**, not path prefixes.
-  Each session gets its own origin: `{label}.{forward domain}`, where `label`
-  is a short opaque hash of the session (not the port). Agent-built apps work
-  unmodified (absolute asset paths, cookies, service workers), and forwarded
-  apps are origin-isolated from the portal and from each other. A session
-  forwards a single port at a time; an agent that needs several services
-  fronts them behind its own reverse proxy on that one port. Because the
-  subdomain identifies the *session*, re-pointing the forward to a different
-  local port keeps the same URL.
+- **One forward per session, on an auto subdomain that rotates per
+  registration**, not path prefixes. Each active forward gets its own origin:
+  `{label}.{forward domain}`, where `label` is a short opaque random value.
+  Agent-built apps work unmodified (absolute asset paths, cookies, service
+  workers), and forwarded apps are origin-isolated from the portal and from
+  each other. A session forwards a single port at a time; an agent that needs
+  several services fronts them behind its own reverse proxy on that one port.
+  Re-registering a forward mints a fresh auto label so stale service workers,
+  cookies, and browser caches from a previous local app cannot poison the next
+  app served by the same session.
 - **One listener.** The backend keeps its single HTTP listener and routes by
   `Host` header. No per-forward port allocation anywhere — which is why the
   CLI takes only a local port, never a remote one.
@@ -59,11 +60,11 @@ browser ──HTTP──▶ backend (Host-routed reverse proxy)
 
 - `label`: either an auto 8-lowercase-hex label (32 bits) or an admin-assigned
   custom label.
-  - **Auto**: allocated per session in the `forward_subdomains` LUT, derived
-    from `sha256(session_id)[..8]`, re-derived with an incrementing counter on
-    the (rare) collision, and stored so the same session always resolves to the
-    same label — stable across close/reopen and independent of which port is
-    forwarded. Doesn't encode the port or leak the raw session UUID.
+  - **Auto**: allocated in the `forward_subdomains` LUT as a random 8-hex
+    label and rotated on every `forward <port>` registration. The current auto
+    label routes to the session's active forward; old auto labels stop
+    resolving after rotation. This avoids cross-app origin state reuse and does
+    not encode the port or leak the raw session UUID.
   - **Custom**: an admin can assign a human-readable alias in the
     `custom_subdomains` table (Admin ▸ Subdomains), which routes to the same
     session *alongside* the auto label. See "Admin custom subdomains" below.
@@ -191,9 +192,9 @@ CREATE TABLE session_forwards (
     UNIQUE (session_id)              -- at most one forward per session
 );
 
--- Subdomain label ↔ session lookup. A short 8-hex label is allocated on first
--- forward (sha256(session_id)[..8], counter-bumped on collision) and kept
--- across close/reopen so the URL stays stable.
+-- Current auto subdomain label ↔ session lookup. A short random 8-hex label
+-- is allocated on each forward registration and atomically replaces the
+-- session's previous auto label.
 CREATE TABLE forward_subdomains (
     label TEXT PRIMARY KEY,
     session_id UUID NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
@@ -202,8 +203,8 @@ CREATE TABLE forward_subdomains (
 ```
 
 Both tables cascade-delete with the session. A `session_forwards` row is
-deleted when the forward is revoked (its `forward_subdomains` label persists so
-a re-forward reuses the same URL); everything dies with the session.
+deleted when the forward is revoked; the next registration replaces the current
+auto label with a fresh origin. Everything dies with the session.
 
 ### Agent-facing API (bearer token or session cookie, same rails as `/api/agent/*`)
 

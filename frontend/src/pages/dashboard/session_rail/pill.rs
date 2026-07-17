@@ -1,17 +1,11 @@
+use crate::utils::extract_folder;
 use shared::SessionInfo;
 use uuid::Uuid;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 
+use super::sorted_prs;
 use super::sparkline::{render_activity_sparkline, ActivityRef};
-use super::{sorted_prs, version_staleness, VersionStaleness};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct VersionBadgeView {
-    class: &'static str,
-    tooltip: String,
-    label: String,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum VcsView {
@@ -27,8 +21,9 @@ struct PillViewModel {
     connection_class: &'static str,
     connection_symbol: &'static str,
     number_annotation: Option<String>,
-    folder: String,
-    version_badge: Option<VersionBadgeView>,
+    session_name: String,
+    repo_label: String,
+    repo_title: String,
     vcs: VcsView,
     agent_badge: Option<(&'static str, &'static str)>,
     hidden_badge: bool,
@@ -90,11 +85,12 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             <span class={view.connection_class}>
                 { view.connection_symbol }
             </span>
-            <span class="pill-name" title={session.working_directory.clone()}>
-                <span class="pill-folder">{ view.folder }</span>
-                <span class="pill-hostname-row">
-                    <span class="pill-hostname">{ &session.hostname }</span>
-                    { render_version_badge(view.version_badge.as_ref()) }
+            <span class="pill-name" title={view.repo_title.clone()}>
+                <span class="pill-session-name" title={session.session_name.clone()}>
+                    { view.session_name }
+                </span>
+                <span class="pill-repo" title={view.repo_title.clone()}>
+                    { view.repo_label }
                 </span>
                 { render_vcs(&view.vcs) }
             </span>
@@ -160,11 +156,7 @@ impl PillViewModel {
             None
         };
 
-        let version_badge = session
-            .client_version
-            .as_ref()
-            .filter(|_| !props.server_version.is_empty())
-            .map(|client_version| version_badge_view(client_version, &props.server_version));
+        let (repo_label, repo_title) = repo_context(session);
 
         let vcs = {
             let prs = sorted_prs(&session.open_prs);
@@ -205,10 +197,9 @@ impl PillViewModel {
             },
             connection_symbol: if props.is_connected { "●" } else { "○" },
             number_annotation,
-            // Primary pill label: the human-chosen session name (defaults to
-            // the working directory's basename when none was supplied).
-            folder: session.session_name.clone(),
-            version_badge,
+            session_name: session.session_name.clone(),
+            repo_label,
+            repo_title,
             vcs,
             agent_badge,
             hidden_badge: props.is_hidden,
@@ -217,17 +208,16 @@ impl PillViewModel {
     }
 }
 
-fn render_version_badge(version_badge: Option<&VersionBadgeView>) -> Html {
-    if let Some(badge) = version_badge {
-        html! {
-            <span class={classes!("pill-version-badge", badge.class)}
-                title={badge.tooltip.clone()}>
-                { &badge.label }
-            </span>
+fn repo_context(session: &SessionInfo) -> (String, String) {
+    if let Some(repo_url) = session.repo_url.as_deref() {
+        let label = repo_label_from_url(repo_url);
+        if !label.is_empty() {
+            return (label, repo_url.to_string());
         }
-    } else {
-        html! {}
     }
+
+    let fallback = extract_folder(&session.working_directory);
+    (fallback.to_string(), session.working_directory.clone())
 }
 
 fn render_vcs(vcs: &VcsView) -> Html {
@@ -248,27 +238,31 @@ fn render_vcs(vcs: &VcsView) -> Html {
     }
 }
 
-fn version_badge_view(client_version: &str, server_version: &str) -> VersionBadgeView {
-    let staleness = version_staleness(client_version, server_version);
-    let (class, tooltip) = match staleness {
-        VersionStaleness::Current => ("version-current", format!("v{client_version} — up to date")),
-        VersionStaleness::PatchBehind => (
-            "version-patch",
-            format!("v{client_version} → v{server_version} (patch update available)"),
-        ),
-        VersionStaleness::MinorBehind => (
-            "version-minor",
-            format!("v{client_version} → v{server_version} (minor update available)"),
-        ),
-        VersionStaleness::MajorBehind => (
-            "version-major",
-            format!("v{client_version} → v{server_version} (major update available)"),
-        ),
+fn repo_label_from_url(repo_url: &str) -> String {
+    let trimmed = repo_url
+        .trim()
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches('/');
+
+    let path = if let Some((_, path)) = trimmed.split_once("://") {
+        path.split_once('/').map(|(_, path)| path).unwrap_or(path)
+    } else if let Some((_, path)) = trimmed.split_once(':') {
+        path
+    } else {
+        trimmed
     };
-    VersionBadgeView {
-        class,
-        tooltip,
-        label: format!("v{client_version}"),
+
+    let parts = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    match parts.as_slice() {
+        [.., owner, repo] => format!("{owner}/{repo}"),
+        _ => path.to_string(),
     }
 }
 
@@ -277,12 +271,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn version_badge_view_reports_patch_update() {
-        let view = version_badge_view("2.12.70", "2.12.73");
+    fn repo_label_from_url_uses_owner_and_repo() {
+        assert_eq!(
+            repo_label_from_url("https://github.com/meawoppl/agent-portal.git"),
+            "meawoppl/agent-portal"
+        );
+        assert_eq!(
+            repo_label_from_url("git@github.com:meawoppl/agent-portal.git"),
+            "meawoppl/agent-portal"
+        );
+    }
 
-        assert_eq!(view.class, "version-patch");
-        assert_eq!(view.label, "v2.12.70");
-        assert!(view.tooltip.contains("patch update available"));
+    #[test]
+    fn repo_label_from_url_strips_query_and_fragment() {
+        assert_eq!(
+            repo_label_from_url("https://github.com/meawoppl/agent-portal.git?tab=readme#main"),
+            "meawoppl/agent-portal"
+        );
     }
 
     #[test]

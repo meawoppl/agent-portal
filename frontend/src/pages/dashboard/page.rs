@@ -340,11 +340,8 @@ pub fn dashboard_page() -> Html {
 
     let on_launch_success = {
         let session_state = session_state.clone();
-        let active_sessions = active_sessions.clone();
-        Callback::from(move |_| {
-            session_state.dispatch(DashboardSessionAction::StoreLaunchSnapshot(
-                active_session_ids(&active_sessions),
-            ));
+        Callback::from(move |session_id: Uuid| {
+            session_state.dispatch(DashboardSessionAction::FocusAndActivate(session_id));
         })
     };
 
@@ -749,11 +746,12 @@ pub fn dashboard_page() -> Html {
                                     html! {
                                         <>
                                             <span class="mode-indicator">{ "NAV" }</span>
-                                            <span>{ "↑↓ or jk = navigate" }</span>
+                                            <span>{ "↑↓ hl = navigate" }</span>
+                                            <span>{ "jk = scroll" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
                                             <span>{ "n = new" }</span>
-                                            <span>{ "Enter/Esc = edit mode" }</span>
+                                            <span>{ "Enter or Ctrl/Cmd+K = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
                                     }

@@ -178,8 +178,24 @@ pub async fn send_agent_message(
         user_id, target_id, outcome.seq, outcome.delivered, outcome.persisted
     );
 
+    let pending_inputs = pending_input_count(&mut conn, target_id).unwrap_or(0);
+
     Ok(Json(SendAgentMessageResponse {
         delivered: outcome.delivered,
+        persisted: outcome.persisted,
         seq: outcome.seq,
+        pending_inputs,
     }))
+}
+
+fn pending_input_count(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<usize, diesel::result::Error> {
+    use crate::schema::pending_inputs;
+    let count: i64 = pending_inputs::table
+        .filter(pending_inputs::session_id.eq(session_id))
+        .count()
+        .get_result(conn)?;
+    Ok(count.max(0) as usize)
 }

@@ -23,6 +23,7 @@ pub struct LauncherConnection {
     pub running_sessions: Vec<Uuid>,
     pub working_directory: Option<String>,
     pub version: String,
+    pub capabilities: Vec<String>,
     pub cancel: CancellationToken,
     /// Stamped by `try_register_launcher`; caller-supplied values are ignored.
     pub gen: u64,
@@ -138,6 +139,7 @@ impl SessionManager {
                 running_sessions: entry.value().running_sessions.len() as u32,
                 working_directory: entry.value().working_directory.clone(),
                 version: entry.value().version.clone(),
+                capabilities: entry.value().capabilities.clone(),
             })
             .collect()
     }
@@ -148,6 +150,13 @@ impl SessionManager {
                 .get(&id)
                 .map(|launcher| launcher.version.clone())
         })
+    }
+
+    pub fn launcher_supports_capability(&self, launcher_id: Uuid, capability: &str) -> bool {
+        self.launchers
+            .get(&launcher_id)
+            .map(|launcher| launcher.capabilities.iter().any(|c| c == capability))
+            .unwrap_or(false)
     }
 
     pub fn send_to_launcher(&self, launcher_id: &Uuid, msg: ServerToLauncher) -> bool {
@@ -234,6 +243,7 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
+            capabilities: vec![shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
             cancel: CancellationToken::new(),
             gen: 0,
             last_seen: std::sync::atomic::AtomicU64::new(0),
@@ -293,6 +303,26 @@ mod tests {
         assert_eq!(mgr.launcher_version(None), None);
     }
 
+    #[test]
+    fn launcher_supports_capability_checks_advertised_flags() {
+        let mgr = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        let launcher_id = Uuid::new_v4();
+
+        mgr.try_register_launcher(launcher_id, make_launcher_connection(user_id, "host1"))
+            .expect("register launcher");
+
+        assert!(mgr.launcher_supports_capability(
+            launcher_id,
+            shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE
+        ));
+        assert!(!mgr.launcher_supports_capability(launcher_id, "missing"));
+        assert!(!mgr.launcher_supports_capability(
+            Uuid::new_v4(),
+            shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE
+        ));
+    }
+
     /// The launcher half of #1256: a launcher reconnect reuses the same
     /// `launcher_id`, so the OLD socket's cleanup (running late, after the
     /// new socket registered) must not remove the NEW registration.
@@ -346,6 +376,7 @@ mod tests {
             running_sessions: Vec::new(),
             working_directory: None,
             version: "test".to_string(),
+            capabilities: vec![shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
             cancel: cancel.clone(),
             gen: 0,
             last_seen: std::sync::atomic::AtomicU64::new(0),
@@ -417,6 +448,7 @@ mod tests {
                         running_sessions: Vec::new(),
                         working_directory: None,
                         version: "test".to_string(),
+                        capabilities: vec![shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string()],
                         cancel: CancellationToken::new(),
                         gen: 0,
                         last_seen: std::sync::atomic::AtomicU64::new(0),

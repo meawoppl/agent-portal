@@ -52,6 +52,9 @@ pub enum LauncherToServer {
         /// Working directory where the launcher process is running
         #[serde(default)]
         working_directory: Option<String>,
+        /// Additive feature flags supported by this launcher binary.
+        #[serde(default)]
+        capabilities: Vec<String>,
     },
 
     /// Result of a launch request
@@ -272,6 +275,12 @@ pub enum ServerToLauncher {
     /// Tell the launcher to pull the latest release, install it, and restart
     /// the agent-portal service. Triggered from the dashboard Launchers panel.
     UpdateAndRestart,
+
+    /// Tell the launcher to restart the agent-portal service *without* updating
+    /// the binary — the same graceful restart as `UpdateAndRestart` minus the
+    /// download/replace. Gated behind `LAUNCHER_CAPABILITY_RESTART` so the
+    /// backend never sends this frame to a launcher too old to decode it.
+    Restart,
 
     /// Ask a live launcher to persist a freshly rotated auth token.
     ///

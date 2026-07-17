@@ -58,7 +58,6 @@ pub(super) enum DashboardSessionAction {
         hidden: bool,
     },
     MessageSent(Uuid),
-    StoreLaunchSnapshot(Vec<Uuid>),
     FocusNewlyLaunched(Vec<Uuid>),
 }
 
@@ -115,9 +114,6 @@ impl Reducible for DashboardSessionState {
                 if !state.awaiting_sessions.remove(&session_id) {
                     return self;
                 }
-            }
-            DashboardSessionAction::StoreLaunchSnapshot(session_ids) => {
-                state.sessions_at_launch = Some(session_ids.into_iter().collect());
             }
             DashboardSessionAction::FocusNewlyLaunched(session_ids) => {
                 let Some(snapshot) = &state.sessions_at_launch else {
@@ -309,10 +305,9 @@ mod tests {
 
     #[test]
     fn focus_newly_launched_uses_snapshot_delta() {
-        let state = reduce(
-            DashboardSessionState::new(HashSet::new()),
-            DashboardSessionAction::StoreLaunchSnapshot(vec![id(1), id(2)]),
-        );
+        let mut initial = DashboardSessionState::new(HashSet::new());
+        initial.sessions_at_launch = Some(HashSet::from_iter([id(1), id(2)]));
+        let state = Rc::new(initial);
 
         let state = state.reduce(DashboardSessionAction::FocusNewlyLaunched(vec![
             id(1),
