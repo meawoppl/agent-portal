@@ -134,7 +134,7 @@ fn dir_entry(is_dir: bool, name: &str, onclick: Option<Callback<MouseEvent>>) ->
     html! {
         <div {class} {onclick}>
             <span class="dir-entry-icon">{ icon }</span>
-            <span class="dir-entry-name">{ name }</span>
+            <span class="dir-entry-name" title={name.to_string()}>{ name }</span>
         </div>
     }
 }

@@ -352,6 +352,7 @@
     border-radius: 8px;
     box-sizing: border-box;
     padding: 2rem;
+    inline-size: min(540px, calc(100vw - 4rem));
     max-width: 540px;
     max-height: calc(100vh - 4rem);
     overflow-y: auto;
@@ -402,6 +403,7 @@
 
 .launch-field {
     margin-bottom: 1rem;
+    min-width: 0;
 }
 
 .launch-field label {
@@ -557,8 +559,11 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--bg-dark);
+    box-sizing: border-box;
+    width: 100%;
     max-height: 240px;
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 @supports (height: 100dvh) {
@@ -575,6 +580,9 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
     padding: 0.4rem 0.75rem;
     cursor: default;
     font-size: 0.9rem;
@@ -599,6 +607,8 @@
 }
 
 .dir-entry-name {
+    flex: 1 1 auto;
+    min-width: 0;
     color: var(--text-primary);
     font-family: 'Courier New', Consolas, monospace;
     font-size: 0.85rem;

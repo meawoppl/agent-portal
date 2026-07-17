@@ -489,6 +489,7 @@
     .launch-dialog {
         max-width: 100%;
         width: 95%;
+        inline-size: min(95vw, calc(100vw - 1rem));
         padding: 1.25rem;
         max-height: 85dvh;
         overflow-y: auto;
