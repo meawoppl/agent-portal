@@ -30,22 +30,24 @@ fn focus_active_message_input() {
     }
 }
 
+/// Look up the focused session's transcript ("text window") element. Prefers the
+/// focused session's pane and falls back to the only one on screen. Shared by the
+/// nav-mode transcript-scroll helpers (`j`/`k` and `gg`).
+fn focused_transcript() -> Option<web_sys::Element> {
+    let doc = web_sys::window().and_then(|w| w.document())?;
+    doc.query_selector(".session-view.focused .session-view-messages")
+        .ok()
+        .flatten()
+        .or_else(|| doc.query_selector(".session-view-messages").ok().flatten())
+}
+
 /// Scroll the focused session's transcript ("text window") by a few lines.
 /// Nav-mode `j`/`k` drive this. Only `scrollTop` is moved here: the transcript's
 /// own scroll listener reconciles live tailing afterwards, so scrolling up pauses
 /// the tail and reveals the "Jump to live" pill, and scrolling back to the bottom
 /// resumes it — the same DOM-only approach vim NORMAL uses for the transcript.
 fn scroll_focused_transcript(down: bool) {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    // Prefer the focused session's pane; fall back to the only one on screen.
-    let Some(messages) = doc
-        .query_selector(".session-view.focused .session-view-messages")
-        .ok()
-        .flatten()
-        .or_else(|| doc.query_selector(".session-view-messages").ok().flatten())
-    else {
+    let Some(messages) = focused_transcript() else {
         return;
     };
     // A few lines per press: brisk enough to read through output without the
@@ -54,6 +56,16 @@ fn scroll_focused_transcript(down: bool) {
     let step = (messages.client_height() / 8).max(60);
     let delta = if down { step } else { -step };
     messages.set_scroll_top(messages.scroll_top() + delta);
+}
+
+/// Jump the focused session's transcript to the very top. Nav-mode `gg` drives
+/// this. Like `k`, moving `scrollTop` off the bottom pauses live tailing and
+/// reveals the "Jump to live" pill (reconciled by the transcript's own scroll
+/// listener) — the counterpart to `G`, which jumps to the latest message.
+fn scroll_focused_transcript_to_top() {
+    if let Some(messages) = focused_transcript() {
+        messages.set_scroll_top(0);
+    }
 }
 
 /// True when there is a live text selection the user is likely trying to copy —
@@ -184,6 +196,7 @@ pub struct UseKeyboardNav {
 /// Nav Mode:
 /// - Arrow keys / `h` / `l` move between sessions
 /// - `j` / `k` scroll the focused session's transcript down / up
+/// - `gg` jumps to the top of the focused transcript (`G` jumps to the latest)
 /// - Numbers 1-9 select directly (stays in Nav mode)
 /// - n -> new session (launch dialog)
 /// - d -> delete the focused session (via the confirm modal)
@@ -200,9 +213,15 @@ pub struct UseKeyboardNav {
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
     let nav_mode = use_state(|| false);
+    // "Pending g" state for the two-press `gg` (jump to top). A first `g` arms it
+    // by parking a short disarm timeout here; a second `g` (while armed) fires and
+    // any other nav-mode key clears it. Held in a ref so arming doesn't re-render.
+    // The `Timeout`'s presence is the armed flag; dropping it cancels the disarm.
+    let pending_g = use_mut_ref(|| None::<gloo::timers::callback::Timeout>);
 
     let on_keydown = {
         let nav_mode = nav_mode.clone();
+        let pending_g = pending_g.clone();
         let sessions = config.sessions.clone();
         let focused_index = config.focused_index;
         let hidden_sessions = config.hidden_sessions.clone();
@@ -329,6 +348,12 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 // Navigation Mode. Ctrl/Cmd+K (handled above) toggles back to
                 // edit mode from anywhere; Enter (below) also returns to edit
                 // mode once you've landed on a pane.
+                //
+                // Disarm any pending `gg` first: a second `g` fires only if the
+                // press right before it was also `g`, so every other key clears
+                // the arm. Capture whether it *was* armed for the `g` arm below.
+                let g_was_armed = pending_g.borrow().is_some();
+                *pending_g.borrow_mut() = None;
                 match e.key().as_str() {
                     "ArrowUp" | "ArrowLeft" | "h" => {
                         e.prevent_default();
@@ -359,6 +384,24 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         // Scroll the focused transcript up.
                         e.prevent_default();
                         scroll_focused_transcript(false);
+                    }
+                    "g" => {
+                        // `gg` (vim): a first `g` arms; a second fires a jump to
+                        // the very top of the focused transcript. Like `k`, that
+                        // pauses live tailing and shows the "Jump to live" pill —
+                        // the counterpart to `G` (jump to latest). Stays in nav
+                        // mode. A lone `g` was previously unbound (fell through the
+                        // digit handler harmlessly), so nothing else regresses.
+                        e.prevent_default();
+                        if g_was_armed {
+                            scroll_focused_transcript_to_top();
+                        } else {
+                            let disarm = pending_g.clone();
+                            *pending_g.borrow_mut() =
+                                Some(gloo::timers::callback::Timeout::new(600, move || {
+                                    *disarm.borrow_mut() = None;
+                                }));
+                        }
                     }
                     "w" => {
                         e.prevent_default();
