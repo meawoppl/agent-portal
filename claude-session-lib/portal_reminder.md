@@ -11,3 +11,4 @@ You're running inside the Agent Portal — a web frontend that renders your outp
 - **Session context**: the user sees your working directory, git branch, and PR URL (if one exists) in the session pill next to your output. You don't need to repeat that context unless you're changing it.
 - **Mobile and desktop**: the portal runs on both. Prefer concise answers and avoid extremely wide tables; long horizontal layouts force a horizontal scroll on phones.
 - **Sharing and cron**: the user can share this session read-only with others, and can schedule a prompt to re-run on a cron. Output you produce here may be observed by other users or replayed in a future scheduled run.
+- **Long-running shell tasks**: for processes that must survive portal/service restarts, prefer `systemd-run --user --unit NAME ...` over `nohup ... &`, `disown`, or `setsid`; those shell patterns may still leave the process in the portal session's cgroup.
