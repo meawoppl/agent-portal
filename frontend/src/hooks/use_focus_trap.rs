@@ -47,16 +47,33 @@ fn focusable_elements(root: &Element) -> Vec<HtmlElement> {
 /// mounted.
 #[hook]
 pub fn use_focus_trap(container: NodeRef) {
-    // Move focus into the modal once, after it mounts.
+    // Move focus into the modal once, after it mounts, and restore it to the
+    // pre-open element when the modal closes. Without the restore, closing the
+    // modal (Cancel / Escape / backdrop) leaves focus on `<body>` — the user
+    // has to click back into the composer to type again (reported on the launch
+    // dialog cancel path, #1384).
     {
         let container = container.clone();
         use_effect_with((), move |_| {
+            let previously_focused = gloo::utils::document()
+                .active_element()
+                .and_then(|el| el.dyn_into::<HtmlElement>().ok());
             if let Some(root) = container.cast::<Element>() {
                 if let Some(first) = focusable_elements(&root).first() {
                     let _ = first.focus();
                 }
             }
-            || ()
+            move || {
+                // Only restore if that element is still in the document (it may
+                // have been removed — e.g. a confirm modal that deleted the
+                // thing its trigger lived in). Refocusing a detached node would
+                // throw / no-op, so guard on `is_connected`.
+                if let Some(el) = previously_focused {
+                    if el.is_connected() {
+                        let _ = el.focus();
+                    }
+                }
+            }
         });
     }
 
