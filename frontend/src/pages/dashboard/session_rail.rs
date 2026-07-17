@@ -109,45 +109,6 @@ mod tests {
     }
 }
 
-/// Semver staleness level for a proxy client relative to the server.
-enum VersionStaleness {
-    /// Same version or no version info available
-    Current,
-    /// Patch version behind (e.g. 1.3.38 vs 1.3.39)
-    PatchBehind,
-    /// Minor version behind (e.g. 1.2.0 vs 1.3.0)
-    MinorBehind,
-    /// Major version behind (e.g. 0.9.0 vs 1.0.0)
-    MajorBehind,
-}
-
-/// Compare a client version against the server version.
-/// Returns the staleness level.
-fn version_staleness(client: &str, server: &str) -> VersionStaleness {
-    let parse = |s: &str| -> Option<(u64, u64, u64)> {
-        let mut parts = s.split('.');
-        let major = parts.next()?.parse().ok()?;
-        let minor = parts.next()?.parse().ok()?;
-        let patch = parts.next()?.parse().ok()?;
-        Some((major, minor, patch))
-    };
-    let Some((cm, cmi, cp)) = parse(client) else {
-        return VersionStaleness::Current;
-    };
-    let Some((sm, smi, sp)) = parse(server) else {
-        return VersionStaleness::Current;
-    };
-    if cm < sm {
-        VersionStaleness::MajorBehind
-    } else if cmi < smi {
-        VersionStaleness::MinorBehind
-    } else if cp < sp {
-        VersionStaleness::PatchBehind
-    } else {
-        VersionStaleness::Current
-    }
-}
-
 fn sorted_prs(prs: &[PrRef]) -> Vec<PrRef> {
     let mut prs = prs.to_vec();
     prs.sort_by_key(|p| p.number);
