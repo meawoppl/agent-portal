@@ -432,6 +432,50 @@
     pointer-events: none;
 }
 
+/* Per-launcher update lifecycle feedback (#710 follow-up) */
+.launcher-update-status td {
+    padding-top: 0;
+}
+.launcher-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    padding: 0.35rem 0 0.6rem;
+}
+.launcher-status--waiting {
+    color: var(--text-secondary);
+}
+.launcher-status--success {
+    color: var(--success);
+    font-weight: 500;
+}
+.launcher-status--warning {
+    color: var(--warning);
+    font-weight: 500;
+}
+.launcher-status--failed {
+    color: var(--error);
+    font-weight: 500;
+}
+
+/* A launcher that has dropped off the list while it self-updates. Dimmed so
+   it reads as transient, but kept visible so the machine doesn't vanish. */
+.launcher-row--phantom {
+    opacity: 0.75;
+}
+.launcher-phantom-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: var(--text-muted);
+    color: white;
+}
+
 /* Token Created Success */
 .token-created-success {
     text-align: center;
