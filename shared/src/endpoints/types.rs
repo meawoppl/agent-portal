@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AgentType, PermissionSuggestion};
+use crate::{AgentType, PermissionSuggestion, SessionMode};
 
 /// A session continuation created for a usage-limit reset (`#231`/`#1260`).
 pub const CONTINUATION_REASON_LIMIT: &str = "limit";
@@ -57,6 +57,10 @@ pub struct ScheduledTaskFields {
     pub agent_type: AgentType,
     #[serde(default = "default_max_runtime_minutes")]
     pub max_runtime_minutes: i32,
+    /// Whether each firing starts fresh or continues the prior conversation.
+    /// Defaults to `Fresh` so payloads from older clients keep today's behavior.
+    #[serde(default)]
+    pub session_mode: SessionMode,
 }
 
 fn default_timezone() -> String {

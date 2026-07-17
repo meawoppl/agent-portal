@@ -33,6 +33,8 @@ pub struct UpdateScheduledTaskRequest {
     pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_runtime_minutes: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_mode: Option<crate::SessionMode>,
 }
 
 /// Info about a scheduled task (returned by list/create endpoints)

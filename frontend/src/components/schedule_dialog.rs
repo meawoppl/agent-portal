@@ -71,6 +71,8 @@ struct TaskForm {
     model_arg: String,
     extra_args: String,
     skip_permissions: bool,
+    /// Fresh session each run vs. continue the prior conversation.
+    session_mode: shared::SessionMode,
 }
 
 #[derive(Clone, PartialEq)]
@@ -196,6 +198,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                     model_arg: model_arg.unwrap_or_default(),
                     extra_args: extra_args.join(" "),
                     skip_permissions: has_skip,
+                    session_mode: task.fields.session_mode,
                 });
                 error_msg.set(None);
                 form_mode.set(Some(FormMode::Edit(task_id)));
@@ -260,6 +263,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                 claude_args: claude_args.clone(),
                                 agent_type,
                                 max_runtime_minutes: data.max_runtime_minutes,
+                                session_mode: data.session_mode,
                             },
                             hostname: host,
                         };
@@ -278,6 +282,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             max_runtime_minutes: Some(data.max_runtime_minutes),
                             claude_args: Some(claude_args.clone()),
                             agent_type: Some(agent_type),
+                            session_mode: Some(data.session_mode),
                             ..Default::default()
                         };
                         Request::patch(&utils::api_url(&format!("/api/scheduled-tasks/{}", id)))
@@ -397,6 +402,15 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         })
     };
 
+    let set_session_mode = |mode: shared::SessionMode| {
+        let form = form.clone();
+        Callback::from(move |_: MouseEvent| {
+            let mut f = (*form).clone();
+            f.session_mode = mode;
+            form.set(f);
+        })
+    };
+
     let on_overlay_click = props.on_close.reform(|_| ());
     let on_dialog_click = Callback::from(|e: MouseEvent| e.stop_propagation());
 
@@ -451,6 +465,9 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                         <code class="sched-task-cron">{ &task.fields.cron_expression }</code>
                                         if task.fields.timezone != "UTC" {
                                             <span class="sched-task-tz">{ &task.fields.timezone }</span>
+                                        }
+                                        if task.fields.session_mode == shared::SessionMode::Continue {
+                                            <span class="sched-task-tz">{ "continue" }</span>
                                         }
                                     </div>
                                     <div class="sched-task-prompt-preview">{ &task.fields.prompt }</div>
@@ -562,6 +579,39 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             on_change={on_model_change}
                                             class=""
                                         />
+                                    </div>
+                                    // Session mode — fresh session each run vs.
+                                    // continue the same conversation (native
+                                    // resume). Works for both claude and codex.
+                                    <div class="sched-field">
+                                        <label>{ "Each run" }</label>
+                                        <div class="sched-mode-toggle">
+                                            <button
+                                                type="button"
+                                                class={classes!(
+                                                    "sched-btn",
+                                                    (form.session_mode == shared::SessionMode::Fresh)
+                                                        .then_some("sched-btn-primary")
+                                                )}
+                                                onclick={set_session_mode(shared::SessionMode::Fresh)}
+                                            >
+                                                { "Fresh session" }
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class={classes!(
+                                                    "sched-btn",
+                                                    (form.session_mode == shared::SessionMode::Continue)
+                                                        .then_some("sched-btn-primary")
+                                                )}
+                                                onclick={set_session_mode(shared::SessionMode::Continue)}
+                                            >
+                                                { "Continue previous" }
+                                            </button>
+                                        </div>
+                                        <span class="sched-hint">
+                                            { "Continue resumes the same conversation each run, accumulating context across firings." }
+                                        </span>
                                     </div>
                                     <div class="sched-field">
                                         <label>{ "Extra CLI Arguments (optional)" }</label>

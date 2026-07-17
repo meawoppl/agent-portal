@@ -36,6 +36,7 @@ fn task_to_fields(t: &ScheduledTask) -> ScheduledTaskFields {
         claude_args: serde_json::from_value(t.claude_args.clone()).unwrap_or_default(),
         agent_type: t.agent_type.parse().unwrap_or(AgentType::Claude),
         max_runtime_minutes: t.max_runtime_minutes,
+        session_mode: t.session_mode.parse().unwrap_or_default(),
     }
 }
 
@@ -193,6 +194,7 @@ pub async fn create_task_handler(
         claude_args: serde_json::to_value(req.fields.claude_args).unwrap_or_default(),
         agent_type: req.fields.agent_type.as_str().to_string(),
         max_runtime_minutes: req.fields.max_runtime_minutes,
+        session_mode: req.fields.session_mode.as_str().to_string(),
     };
 
     let saved: ScheduledTask = diesel::insert_into(scheduled_tasks::table)
@@ -249,6 +251,7 @@ pub async fn update_task_handler(
         agent_type: req.agent_type.map(|at| at.as_str().to_string()),
         enabled: req.enabled,
         max_runtime_minutes: req.max_runtime_minutes,
+        session_mode: req.session_mode.map(|m| m.as_str().to_string()),
     };
 
     let updated: ScheduledTask = diesel::update(
