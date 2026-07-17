@@ -70,7 +70,7 @@ pub fn confirm_modal(props: &ConfirmModalProps) -> Html {
     // control (Cancel, rendered first — the safer default for a destructive
     // action) on open. Enter/Space activate the focused button natively.
     let container = use_node_ref();
-    let trap_keydown = use_focus_trap(container.clone());
+    use_focus_trap(container.clone());
 
     // Escape cancels. Capture-phase so it never reaches the bubble-phase
     // session-interrupt / nav-mode handlers underneath (mirrors the help
@@ -94,7 +94,6 @@ pub fn confirm_modal(props: &ConfirmModalProps) -> Html {
                 ref={container}
                 class={props.style.container_class()}
                 onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
-                onkeydown={trap_keydown}
             >
                 if let Some(title) = &props.title {
                     <h2>{ title }</h2>

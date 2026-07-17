@@ -661,7 +661,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // (a no-op for Enter), so a stray Enter can't launch a half-configured
     // session. To launch you Tab to the Launch button and press Enter/Space.
     let dialog_ref = use_node_ref();
-    let trap_keydown = use_focus_trap(dialog_ref.clone());
+    use_focus_trap(dialog_ref.clone());
     use_escape_capture(true, props.on_close.clone());
 
     // Build breadcrumb segments from current path
@@ -818,7 +818,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 ref={dialog_ref}
                 class="launch-dialog"
                 onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
-                onkeydown={trap_keydown}
             >
                 <h3>{ "Launch Session" }</h3>
 

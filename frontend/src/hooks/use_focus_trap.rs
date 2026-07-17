@@ -4,6 +4,7 @@
 //! cycles Tab / Shift+Tab through only the modal's own controls so focus never
 //! escapes into the dashboard behind it.
 
+use gloo::events::{EventListener, EventListenerOptions, EventListenerPhase};
 use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlElement, Node};
 use yew::prelude::*;
@@ -26,21 +27,26 @@ fn focusable_elements(root: &Element) -> Vec<HtmlElement> {
         .collect()
 }
 
-/// Trap keyboard focus inside `container` while it is mounted.
+/// Trap keyboard focus inside `container` while it is mounted, and move focus
+/// into it on open.
 ///
 /// - On mount, focuses the first focusable descendant. Both modals that use
 ///   this render their intended initial control first (the launch dialog's
 ///   first field; the confirm modal's Cancel button), so "focus the first
 ///   focusable" satisfies the acceptance criteria without extra wiring.
 /// - Tab past the last control wraps to the first; Shift+Tab before the first
-///   wraps to the last. If focus is somehow outside the set, Tab lands on the
-///   first control and Shift+Tab on the last.
+///   wraps to the last. If focus has escaped the modal entirely (e.g. a
+///   re-render swapped out the initially-focused node), the next Tab pulls it
+///   back to the first control and Shift+Tab to the last.
 ///
-/// Returns an `onkeydown` handler to attach to the container element (pass the
-/// same [`NodeRef`]). The handler only acts on Tab, leaving Enter/Escape and
-/// typing to the component.
+/// The Tab handling is a **capture-phase document listener**, not a handler on
+/// the container: a container-scoped `onkeydown` only fires while focus is
+/// already inside it, so it can't recover focus once it has escaped to
+/// `<body>`. Capturing at the document catches Tab wherever focus currently
+/// sits. The listener lives for as long as the modal (this hook's component) is
+/// mounted.
 #[hook]
-pub fn use_focus_trap(container: NodeRef) -> Callback<KeyboardEvent> {
+pub fn use_focus_trap(container: NodeRef) {
     // Move focus into the modal once, after it mounts.
     {
         let container = container.clone();
@@ -54,36 +60,51 @@ pub fn use_focus_trap(container: NodeRef) -> Callback<KeyboardEvent> {
         });
     }
 
-    let container = container.clone();
-    Callback::from(move |e: KeyboardEvent| {
-        if e.key() != "Tab" {
-            return;
-        }
-        let Some(root) = container.cast::<Element>() else {
-            return;
+    // Trap Tab at the document (capture phase) for the modal's lifetime.
+    use_effect_with((), move |_| {
+        let options = EventListenerOptions {
+            phase: EventListenerPhase::Capture,
+            passive: false,
         };
-        let focusables = focusable_elements(&root);
-        let (Some(first), Some(last)) = (focusables.first(), focusables.last()) else {
-            return;
-        };
+        let listener = EventListener::new_with_options(
+            &gloo::utils::document(),
+            "keydown",
+            options,
+            move |event| {
+                let Some(ke) = event.dyn_ref::<web_sys::KeyboardEvent>() else {
+                    return;
+                };
+                if ke.key() != "Tab" {
+                    return;
+                }
+                let Some(root) = container.cast::<Element>() else {
+                    return;
+                };
+                let focusables = focusable_elements(&root);
+                let (Some(first), Some(last)) = (focusables.first(), focusables.last()) else {
+                    return;
+                };
 
-        let active = gloo::utils::document().active_element();
-        let active_in_container = active
-            .as_ref()
-            .map(|a| root.contains(Some(a.unchecked_ref::<Node>())))
-            .unwrap_or(false);
-        let is = |el: &HtmlElement| active.as_ref() == Some(el.unchecked_ref::<Element>());
+                let active = gloo::utils::document().active_element();
+                let active_in_modal = active
+                    .as_ref()
+                    .map(|a| root.contains(Some(a.unchecked_ref::<Node>())))
+                    .unwrap_or(false);
+                let is = |el: &HtmlElement| active.as_ref() == Some(el.unchecked_ref::<Element>());
 
-        if e.shift_key() {
-            // Shift+Tab off the first control (or focus outside the modal) → last.
-            if !active_in_container || is(first) {
-                e.prevent_default();
-                let _ = last.focus();
-            }
-        } else if !active_in_container || is(last) {
-            // Tab off the last control (or focus outside the modal) → first.
-            e.prevent_default();
-            let _ = first.focus();
-        }
-    })
+                if ke.shift_key() {
+                    // Shift+Tab off the first control (or focus outside the modal) → last.
+                    if !active_in_modal || is(first) {
+                        ke.prevent_default();
+                        let _ = last.focus();
+                    }
+                } else if !active_in_modal || is(last) {
+                    // Tab off the last control (or focus outside the modal) → first.
+                    ke.prevent_default();
+                    let _ = first.focus();
+                }
+            },
+        );
+        move || drop(listener)
+    });
 }
