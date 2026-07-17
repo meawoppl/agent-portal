@@ -1,9 +1,11 @@
 // TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::components::model_select::{extract_model_arg, model_cli_args};
 use crate::components::skip_permissions::{
     skip_permissions_args, skip_permissions_label, strip_skip_permissions_args,
 };
+use crate::components::ModelSelect;
 use crate::hooks::use_escape;
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
@@ -65,6 +67,8 @@ struct TaskForm {
     timezone: String,
     prompt: String,
     max_runtime_minutes: i32,
+    /// Selected model CLI arg, or "" for the agent's own default.
+    model_arg: String,
     extra_args: String,
     skip_permissions: bool,
 }
@@ -177,13 +181,20 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
                 let (has_skip, other_args) =
                     strip_skip_permissions_args(&task.fields.claude_args, task.fields.agent_type);
+                // Pull a picker-selectable model out of the remaining args so it
+                // pre-selects in the picker instead of sitting in the extra-args
+                // field (where it would double-apply on save). An unrecognized
+                // model value stays in `extra_args` untouched.
+                let (model_arg, extra_args) =
+                    extract_model_arg(&other_args, task.fields.agent_type);
                 form.set(TaskForm {
                     name: task.fields.name.clone(),
                     cron_expression: task.fields.cron_expression.clone(),
                     timezone: task.fields.timezone.clone(),
                     prompt: task.fields.prompt.clone(),
                     max_runtime_minutes: task.fields.max_runtime_minutes,
-                    extra_args: other_args.join(" "),
+                    model_arg: model_arg.unwrap_or_default(),
+                    extra_args: extra_args.join(" "),
                     skip_permissions: has_skip,
                 });
                 error_msg.set(None);
@@ -221,17 +232,20 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             }
 
             spawn_local(async move {
-                let mut claude_args: Vec<String> = Vec::new();
+                // Picker args go first so an explicit --model / -c model=… typed
+                // into the extra-args field still wins (both CLIs take the last
+                // occurrence).
+                let mut claude_args: Vec<String> = model_cli_args(agent_type, &data.model_arg);
+                let extra = data.extra_args.trim();
+                if !extra.is_empty() {
+                    claude_args.extend(extra.split_whitespace().map(String::from));
+                }
                 if data.skip_permissions {
                     claude_args.extend(
                         skip_permissions_args(agent_type)
                             .iter()
                             .map(|arg| arg.to_string()),
                     );
-                }
-                let extra = data.extra_args.trim();
-                if !extra.is_empty() {
-                    claude_args.extend(extra.split_whitespace().map(String::from));
                 }
 
                 let result = match mode {
@@ -370,6 +384,15 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         Callback::from(move |_: Event| {
             let mut f = (*form).clone();
             f.skip_permissions = !f.skip_permissions;
+            form.set(f);
+        })
+    };
+
+    let on_model_change = {
+        let form = form.clone();
+        Callback::from(move |value: String| {
+            let mut f = (*form).clone();
+            f.model_arg = value;
             form.set(f);
         })
     };
@@ -526,11 +549,25 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             required=true
                                         />
                                     </div>
+                                    // Model picker — catalogs from the
+                                    // claude-codes / codex-codes crates; ""
+                                    // means the agent's own default. The agent
+                                    // is fixed to this session's agent, so
+                                    // there's no agent switch to reset against.
+                                    <div class="sched-field">
+                                        <label>{ "Model" }</label>
+                                        <ModelSelect
+                                            agent_type={session_agent_type}
+                                            value={form.model_arg.clone()}
+                                            on_change={on_model_change}
+                                            class=""
+                                        />
+                                    </div>
                                     <div class="sched-field">
                                         <label>{ "Extra CLI Arguments (optional)" }</label>
                                         <input
                                             type="text"
-                                            placeholder="--model sonnet --verbose"
+                                            placeholder="--verbose"
                                             value={form.extra_args.clone()}
                                             oninput={set_field(|f, v| f.extra_args = v)}
                                         />
