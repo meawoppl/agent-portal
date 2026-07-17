@@ -749,7 +749,7 @@ mod tests {
             SUCCESS_AUTOCLEAR_MS + 1.0,
             Some("2.5.2"),
         );
-        assert!(next.get(&id).is_none(), "succeeded entry should auto-clear");
+        assert!(!next.contains_key(&id), "succeeded entry should auto-clear");
     }
 
     #[test]
