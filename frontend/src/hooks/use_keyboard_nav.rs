@@ -30,6 +30,32 @@ fn focus_active_message_input() {
     }
 }
 
+/// Scroll the focused session's transcript ("text window") by a few lines.
+/// Nav-mode `j`/`k` drive this. Only `scrollTop` is moved here: the transcript's
+/// own scroll listener reconciles live tailing afterwards, so scrolling up pauses
+/// the tail and reveals the "Jump to live" pill, and scrolling back to the bottom
+/// resumes it — the same DOM-only approach vim NORMAL uses for the transcript.
+fn scroll_focused_transcript(down: bool) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    // Prefer the focused session's pane; fall back to the only one on screen.
+    let Some(messages) = doc
+        .query_selector(".session-view.focused .session-view-messages")
+        .ok()
+        .flatten()
+        .or_else(|| doc.query_selector(".session-view-messages").ok().flatten())
+    else {
+        return;
+    };
+    // A few lines per press: brisk enough to read through output without the
+    // overshoot of the half-page (Ctrl-d) jumps, and always past the ~50px
+    // at-bottom threshold so a single `k` reliably leaves live tailing.
+    let step = (messages.client_height() / 8).max(60);
+    let delta = if down { step } else { -step };
+    messages.set_scroll_top(messages.scroll_top() + delta);
+}
+
 /// True when there is a live text selection the user is likely trying to copy —
 /// either a document selection (e.g. highlighted transcript text) or a range
 /// inside the focused textarea/input (their selection is separate from the
@@ -146,7 +172,8 @@ pub struct UseKeyboardNav {
 /// - Shift+Tab -> next active session (skips hidden)
 ///
 /// Nav Mode:
-/// - Arrow keys / hjkl navigate sessions
+/// - Arrow keys / `h` / `l` move between sessions
+/// - `j` / `k` scroll the focused session's transcript down / up
 /// - Numbers 1-9 select directly (stays in Nav mode)
 /// - n -> new session (launch dialog)
 /// - d -> delete the focused session (via the confirm modal)
@@ -293,7 +320,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 // edit mode from anywhere; Enter (below) also returns to edit
                 // mode once you've landed on a pane.
                 match e.key().as_str() {
-                    "ArrowUp" | "ArrowLeft" | "k" | "h" => {
+                    "ArrowUp" | "ArrowLeft" | "h" => {
                         e.prevent_default();
                         if let Some(new_idx) = navigate_by_delta(focused_index, -1) {
                             if let Some(session) = sessions.get(new_idx) {
@@ -302,7 +329,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                             on_select.emit(new_idx);
                         }
                     }
-                    "ArrowDown" | "ArrowRight" | "j" | "l" => {
+                    "ArrowDown" | "ArrowRight" | "l" => {
                         e.prevent_default();
                         if let Some(new_idx) = navigate_by_delta(focused_index, 1) {
                             if let Some(session) = sessions.get(new_idx) {
@@ -310,6 +337,18 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                             }
                             on_select.emit(new_idx);
                         }
+                    }
+                    "j" => {
+                        // Scroll the focused transcript down. Session switching
+                        // moved to the arrows / `h` / `l` so the vim-familiar
+                        // `j`/`k` can scroll the text window instead.
+                        e.prevent_default();
+                        scroll_focused_transcript(true);
+                    }
+                    "k" => {
+                        // Scroll the focused transcript up.
+                        e.prevent_default();
+                        scroll_focused_transcript(false);
                     }
                     "w" => {
                         e.prevent_default();
