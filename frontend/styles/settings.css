@@ -538,6 +538,13 @@
     background: #ff5a72;
 }
 
+/* Keyboard focus ring for the panel-style confirm modal buttons (#1384). */
+.cancel-button:focus-visible,
+.confirm-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 /* Empty State */
 .tokens-section .empty-state,
 .sessions-section .empty-state {

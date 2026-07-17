@@ -1,3 +1,4 @@
+use crate::hooks::{use_escape_capture, use_focus_trap};
 use yew::prelude::*;
 
 /// Visual style of the confirm modal. Each variant maps to an existing CSS
@@ -65,9 +66,36 @@ pub struct ConfirmModalProps {
 
 #[function_component(ConfirmModal)]
 pub fn confirm_modal(props: &ConfirmModalProps) -> Html {
+    // Keyboard access (#1384): trap Tab within the modal and focus its first
+    // control (Cancel, rendered first — the safer default for a destructive
+    // action) on open. Enter/Space activate the focused button natively.
+    let container = use_node_ref();
+    let trap_keydown = use_focus_trap(container.clone());
+
+    // Escape cancels. Capture-phase so it never reaches the bubble-phase
+    // session-interrupt / nav-mode handlers underneath (mirrors the help
+    // overlay). `on_cancel` takes a `MouseEvent`, so synthesize a click for the
+    // keyboard path; the cancel callbacks ignore the event's contents.
+    {
+        let on_cancel = props.on_cancel.clone();
+        use_escape_capture(
+            true,
+            Callback::from(move |()| {
+                if let Ok(ev) = web_sys::MouseEvent::new("click") {
+                    on_cancel.emit(ev);
+                }
+            }),
+        );
+    }
+
     html! {
         <div class="modal-overlay" onclick={props.on_cancel.clone()}>
-            <div class={props.style.container_class()} onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+            <div
+                ref={container}
+                class={props.style.container_class()}
+                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
+                onkeydown={trap_keydown}
+            >
                 if let Some(title) = &props.title {
                     <h2>{ title }</h2>
                 }

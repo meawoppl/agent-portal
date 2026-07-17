@@ -3,7 +3,7 @@
 
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
 use crate::components::ProxyTokenSetup;
-use crate::hooks::use_escape;
+use crate::hooks::{use_escape_capture, use_focus_trap};
 use crate::utils::{self, FetchError, On401};
 use claude_codes::ClaudeModel;
 use codex_codes::CodexModel;
@@ -528,7 +528,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
-    let on_launch = {
+    // Primary action, invoked by the Launch button and by Enter from any
+    // non-button field (#1384). `Callback<()>` so both call sites can fire it.
+    let launch: Callback<()> = {
         let dir_path = dir.path.clone();
         let home_root = dir.home_root.clone();
         let extra_args = extra_args.clone();
@@ -542,7 +544,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let error_msg = error_msg.clone();
         let on_close = props.on_close.clone();
         let on_launched = props.on_launched.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: ()| {
             let working_dir = (*dir_path).clone();
             if working_dir.is_empty() {
                 error_msg.set(Some("Working directory is required".to_string()));
@@ -650,8 +652,17 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         Callback::from(move |_| on_close.emit(()))
     };
 
-    // Close on Escape key
-    use_escape(props.on_close.clone());
+    // Keyboard access (#1384): trap Tab within the dialog and focus its first
+    // field on open. Escape closes it (capture-phase so it doesn't reach the
+    // bubble-phase nav/interrupt handlers underneath).
+    //
+    // Enter activates only the *focused* control (native button/link behavior),
+    // never a dialog-wide submit: opening focus lands on the launcher <select>
+    // (a no-op for Enter), so a stray Enter can't launch a half-configured
+    // session. To launch you Tab to the Launch button and press Enter/Space.
+    let dialog_ref = use_node_ref();
+    let trap_keydown = use_focus_trap(dialog_ref.clone());
+    use_escape_capture(true, props.on_close.clone());
 
     // Build breadcrumb segments from current path
     let path_str = (*dir.path).clone();
@@ -803,7 +814,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     html! {
         <div class="launch-dialog-backdrop" onclick={on_backdrop}>
-            <div class="launch-dialog" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+            <div
+                ref={dialog_ref}
+                class="launch-dialog"
+                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
+                onkeydown={trap_keydown}
+            >
                 <h3>{ "Launch Session" }</h3>
 
                 { launcher_select_html }
@@ -986,7 +1002,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         </button>
                         <button
                             class="launch-button"
-                            onclick={on_launch}
+                            onclick={
+                                let launch = launch.clone();
+                                Callback::from(move |_: MouseEvent| launch.emit(()))
+                            }
                             disabled={*launching}
                         >
                             { if *launching { "Launching..." } else { "Launch" } }
