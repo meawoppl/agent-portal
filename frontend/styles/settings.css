@@ -405,24 +405,11 @@
     min-height: 2.25rem;
     white-space: nowrap;
 }
-/* Secondary "Restart" action: a subdued outline button distinct from the
-   filled primary "Update & Restart", turning red-to-confirm like the primary. */
-.launcher-restart-button.stage-0 {
-    background: transparent;
-    color: var(--text-secondary, #a9b1d6);
-    border: 1px solid #565f89;
-}
-.launcher-restart-button.stage-0:hover:not([disabled]) {
-    background: #565f89;
-    color: white;
-}
-.launcher-restart-button.confirming {
-    background: var(--error);
-    color: white;
-}
-.launcher-restart-button.confirming:hover {
-    background: #ff5a72;
-}
+/* The "Restart" action deliberately shares the .update-button styles below.
+   (An earlier outline variant set its text to var(--text-secondary) #7f849c —
+   the same value .update-button.stage-0 uses as its BACKGROUND, and since the
+   restart button carries both classes the later background rule won: invisible
+   text. Same-color-on-same-color; don't reintroduce per-button color rules.) */
 .update-button.stage-0 {
     background: #7f849c;
 }
