@@ -409,6 +409,7 @@ mod tests {
             agent_type: AgentType::Claude,
             scheduled_task_id: None,
             resume_session_id: None,
+            resume: None,
             create_worktree: false,
             worktree_branch: None,
         };

@@ -102,6 +102,12 @@ pub struct SpawnParams {
     pub agent_type: shared::AgentType,
     pub scheduled_task_id: Option<Uuid>,
     pub resume_session_id: Option<Uuid>,
+    /// Whether `resume_session_id` is an existing session to resume
+    /// (`Some(true)`) or a freshly-assigned id for a brand-new session to
+    /// create (`Some(false)`). `None` (older backend) falls back to the
+    /// historical "any id means resume" behavior. See the field of the same
+    /// name on `ServerToLauncher::LaunchSession` (#1405).
+    pub resume: Option<bool>,
     /// When true, create a git worktree from the repository containing
     /// `working_directory` and run the session inside the new worktree.
     pub create_worktree: bool,
@@ -176,8 +182,17 @@ impl ProcessManager {
             base_dir.to_string_lossy().to_string()
         };
 
+        // A supplied id is resumed only when the backend says it names an
+        // existing session. A brand-new dialog launch supplies its freshly
+        // minted id with `resume: Some(false)` so we create it under that id
+        // (`--session-id`) rather than `--resume`-ing a nonexistent transcript
+        // and rotating to a different id — the rotation changed the id the
+        // dashboard had already focused, dropping composer focus on every new
+        // session (#1405). `None` (older backend) keeps the historical
+        // "any id means resume" behavior. No id at all is always a fresh
+        // session with a random id.
         let (session_id, resume) = match params.resume_session_id {
-            Some(id) => (id, true),
+            Some(id) => (id, params.resume.unwrap_or(true)),
             None => (Uuid::new_v4(), false),
         };
 
