@@ -484,6 +484,7 @@ mod tests {
             claude_args: vec!["--verbose".to_string()],
             agent_type: crate::AgentType::Claude,
             max_runtime_minutes: 30,
+            session_mode: crate::SessionMode::Fresh,
         }
     }
 
@@ -507,7 +508,8 @@ mod tests {
                 "prompt": "Check deps",
                 "claude_args": ["--verbose"],
                 "agent_type": "claude",
-                "max_runtime_minutes": 30
+                "max_runtime_minutes": 30,
+                "session_mode": "fresh"
             }"#,
         )
         .unwrap();
@@ -532,6 +534,8 @@ mod tests {
         assert_eq!(parsed.fields.max_runtime_minutes, 30);
         assert!(parsed.fields.claude_args.is_empty());
         assert_eq!(parsed.fields.agent_type, crate::AgentType::Claude);
+        // Omitted session_mode defaults to Fresh (historical behavior).
+        assert_eq!(parsed.fields.session_mode, crate::SessionMode::Fresh);
     }
 
     /// Pins the ScheduledTaskInfo wire shape, including the always-serialized
@@ -561,6 +565,7 @@ mod tests {
                 "agent_type": "claude",
                 "enabled": true,
                 "max_runtime_minutes": 30,
+                "session_mode": "fresh",
                 "last_session_id": null,
                 "last_run_at": "2026-01-01T00:00:00+00:00",
                 "created_at": "2026-01-01T00:00:00+00:00",

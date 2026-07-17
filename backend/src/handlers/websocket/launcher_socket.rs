@@ -926,6 +926,28 @@ fn handle_launcher_message(
                 return;
             }
 
+            // Continue-mode tasks resume the same conversation on the next
+            // firing, so the session (and, for claude, its on-disk transcript)
+            // must survive completion. Only fresh-mode runs are auto-deleted.
+            let is_continue = {
+                use crate::schema::scheduled_tasks;
+                scheduled_tasks::table
+                    .filter(scheduled_tasks::id.eq(task_id))
+                    .filter(scheduled_tasks::user_id.eq(user_id))
+                    .select(scheduled_tasks::session_mode)
+                    .first::<String>(&mut db_conn)
+                    .ok()
+                    .and_then(|m| m.parse::<shared::SessionMode>().ok())
+                    == Some(shared::SessionMode::Continue)
+            };
+            if is_continue {
+                info!(
+                    "Preserving continue-mode scheduled session {} (task {}) for resume",
+                    session_id, task_id
+                );
+                return;
+            }
+
             if let Err(e) =
                 super::super::helpers::delete_session_with_data(&mut db_conn, &session, true)
             {

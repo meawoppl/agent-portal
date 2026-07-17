@@ -355,6 +355,7 @@ pub struct ScheduledTask {
     pub last_run_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub session_mode: String,
 }
 
 #[derive(Debug, Insertable)]
@@ -370,6 +371,7 @@ pub struct NewScheduledTask {
     pub claude_args: serde_json::Value,
     pub agent_type: String,
     pub max_runtime_minutes: i32,
+    pub session_mode: String,
 }
 
 /// Partial update for a scheduled task. `None` fields are left unchanged
@@ -388,6 +390,7 @@ pub struct ScheduledTaskChangeset {
     pub agent_type: Option<String>,
     pub enabled: Option<bool>,
     pub max_runtime_minutes: Option<i32>,
+    pub session_mode: Option<String>,
 }
 
 // ============================================================================
