@@ -579,6 +579,20 @@ pub(crate) async fn codex_io_task(
                                 let _ = delivered.send(Ok(()));
                             }
                         }
+                        IoCommand::Interrupt => {
+                            // Cancel the in-flight turn. `turn/interrupt` needs
+                            // both thread_id and turn_id; skip if we haven't seen
+                            // a `turn/started` yet (nothing to name/cancel).
+                            if let Some(turn_id) = current_turn_id.clone() {
+                                let params = TurnInterruptParams {
+                                    thread_id: thread_id.clone(),
+                                    turn_id,
+                                };
+                                if let Err(e) = client.turn_interrupt(&params).await {
+                                    tracing::error!("Failed to interrupt Codex turn: {}", e);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -609,6 +623,9 @@ pub(crate) async fn codex_io_task(
                 }
                 Some(IoCommand::Permission { .. }) => {
                     tracing::warn!("Codex approval response with no active turn");
+                }
+                Some(IoCommand::Interrupt) => {
+                    // No active turn — nothing to interrupt.
                 }
                 None => {
                     let _ = event_tx.send(IoEvent::Exited { code: 0 });

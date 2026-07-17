@@ -405,6 +405,7 @@
     min-height: 2.25rem;
     white-space: nowrap;
 }
+
 /* The "Restart" action deliberately shares the .update-button styles below.
    (An earlier outline variant set its text to var(--text-secondary) #7f849c —
    the same value .update-button.stage-0 uses as its BACKGROUND, and since the

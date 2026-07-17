@@ -430,6 +430,19 @@ impl<A: Agent> Session<A> {
         Ok(())
     }
 
+    /// Interrupt the agent's in-flight turn, if any. Sends
+    /// [`IoCommand::Interrupt`]; the per-agent I/O task serializes it into its
+    /// protocol's cancel form. A no-op when the I/O task has stopped or nothing
+    /// is running (the agent ignores an interrupt with no active turn).
+    pub async fn interrupt(&mut self) -> Result<(), SessionError> {
+        if let Some(ref command_tx) = self.command_tx {
+            command_tx
+                .send(IoCommand::Interrupt)
+                .map_err(|_| SessionError::CommunicationError("I/O task closed".to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Drain any queued events to capture a not-yet-consumed
     /// `IoEvent::AgentStarted` pid. `next_event` normally records it, but an
     /// immediate stop/cancel right after spawn can run before `next_event`

@@ -595,12 +595,14 @@ async fn run_shim_connection(
                     Some(WsEvent::Interrupt) => {
                         info!("Sending interrupt to Claude");
                         let mut stdin = claude_stdin.lock().await;
-                        let input = ClaudeInput::interrupt();
-                        if let Ok(json_line) = serde_json::to_string(&input) {
-                            if let Err(e) = write_line(&mut *stdin, &json_line).await {
-                                error!("Failed to write interrupt to claude: {}", e);
-                                break ShimConnectionResult::ClaudeExited;
+                        match interrupt_control_request_line() {
+                            Ok(json_line) => {
+                                if let Err(e) = write_line(&mut *stdin, &json_line).await {
+                                    error!("Failed to write interrupt to claude: {}", e);
+                                    break ShimConnectionResult::ClaudeExited;
+                                }
                             }
+                            Err(e) => error!("Failed to serialize interrupt request: {}", e),
                         }
                     }
                     Some(WsEvent::FileDownloadRequest(request)) => {
@@ -758,6 +760,37 @@ fn extract_user_text(msg: &UserMessage) -> Option<String> {
     }
 }
 
+/// Serialize an interrupt as a wrapped `control_request` line for claude's stdin.
+///
+/// TODO(SDK meawoppl/rust-code-agent-sdks#218): `claude_codes::ClaudeInput::interrupt()`
+/// (claude-codes 2.1.161) serializes to a bare `{"subtype":"interrupt"}`, which the
+/// current claude CLI silently ignores (verified against claude 2.1.211 — the turn is
+/// never cancelled). The CLI's control protocol requires the interrupt wrapped as a
+/// `control_request` with a unique `request_id`, the same envelope used for
+/// `can_use_tool` / `initialize`. `ControlRequestPayload` has no `Interrupt` variant, so
+/// there is no typed way to build this today; we hand-roll the JSON here. Once #218 lands,
+/// delete this and go back to `ClaudeInput::interrupt()`.
+fn interrupt_control_request_line() -> Result<String, serde_json::Error> {
+    #[derive(serde::Serialize)]
+    struct Payload {
+        subtype: &'static str,
+    }
+    #[derive(serde::Serialize)]
+    struct Request {
+        #[serde(rename = "type")]
+        message_type: &'static str,
+        request_id: String,
+        request: Payload,
+    }
+    serde_json::to_string(&Request {
+        message_type: "control_request",
+        request_id: format!("interrupt-{}", uuid::Uuid::new_v4()),
+        request: Payload {
+            subtype: "interrupt",
+        },
+    })
+}
+
 /// Build a ControlResponse from a portal PermissionResponse.
 /// Mirrors the logic in session.rs run_main_loop's permission handling.
 fn build_control_response(perm: &PermissionResponseData) -> ControlResponse {
@@ -789,5 +822,30 @@ fn build_control_response(perm: &PermissionResponseData) -> ControlResponse {
             .clone()
             .unwrap_or_else(|| "User denied".to_string());
         ControlResponse::from_result(&perm.request_id, PermissionResult::deny(reason))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The interrupt must go out as a wrapped `control_request` with a
+    /// `request_id` — the bare `{"subtype":"interrupt"}` form the SDK emits is
+    /// ignored by the CLI (see interrupt_control_request_line docs / SDK #218).
+    #[test]
+    fn interrupt_line_is_wrapped_control_request() {
+        let line = interrupt_control_request_line().expect("serialize interrupt");
+        let v: serde_json::Value = serde_json::from_str(&line).expect("valid json");
+        assert_eq!(v["type"], "control_request");
+        assert_eq!(v["request"]["subtype"], "interrupt");
+        let request_id = v["request_id"].as_str().expect("request_id is a string");
+        assert!(
+            request_id.starts_with("interrupt-"),
+            "request_id should be unique per interrupt, got {request_id}"
+        );
+        // Distinct request_id on each call (unique per interrupt).
+        let line2 = interrupt_control_request_line().expect("serialize interrupt");
+        let v2: serde_json::Value = serde_json::from_str(&line2).unwrap();
+        assert_ne!(v["request_id"], v2["request_id"]);
     }
 }

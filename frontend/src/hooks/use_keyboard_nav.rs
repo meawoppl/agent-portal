@@ -99,6 +99,16 @@ fn has_text_selection() -> bool {
 /// active text selection (so copying transcript/composer text still works).
 #[hook]
 pub fn use_interrupt_hotkey(on_interrupt: Callback<()>) {
+    // Hold the latest callback in a ref, refreshed every render, so the
+    // once-registered listener always invokes the *current* one. Without this,
+    // `use_effect_with((), …)` runs a single time and captures the first
+    // render's `on_interrupt` forever — and that callback's `interrupt_signal`
+    // handle is pinned to its initial value (0). Every Ctrl+C would then set the
+    // signal to the same number (1), so only the first press registers as a
+    // change and every later interrupt is silently dropped.
+    let latest = use_mut_ref(|| on_interrupt.clone());
+    *latest.borrow_mut() = on_interrupt;
+
     use_effect_with((), move |_| {
         let options = EventListenerOptions {
             phase: EventListenerPhase::Capture,
@@ -119,7 +129,7 @@ pub fn use_interrupt_hotkey(on_interrupt: Callback<()>) {
                     }
                     ke.prevent_default();
                     ke.stop_propagation();
-                    on_interrupt.emit(());
+                    latest.borrow().emit(());
                 }
             },
         );

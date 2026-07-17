@@ -141,6 +141,7 @@ pub(super) struct WsReaderChannels {
     pub session_terminated_tx: tokio::sync::oneshot::Sender<()>,
     pub file_upload_tx: mpsc::UnboundedSender<FileUploadEvent>,
     pub file_download_tx: mpsc::UnboundedSender<FileDownloadEvent>,
+    pub interrupt_tx: mpsc::UnboundedSender<()>,
 }
 
 /// Spawn the WebSocket reader task
@@ -160,6 +161,7 @@ pub(super) fn spawn_ws_reader(
         session_terminated_tx,
         file_upload_tx,
         file_download_tx,
+        interrupt_tx,
     } = channels;
     tokio::spawn(async move {
         while let Some(result) = ws_read.recv().await {
@@ -180,6 +182,7 @@ pub(super) fn spawn_ws_reader(
                         &heartbeat,
                         &file_upload_tx,
                         &file_download_tx,
+                        &interrupt_tx,
                     )
                     .await
                     {
@@ -219,6 +222,7 @@ async fn handle_ws_message(
     heartbeat: &session_lib::heartbeat::HeartbeatTracker,
     file_upload_tx: &mpsc::UnboundedSender<FileUploadEvent>,
     file_download_tx: &mpsc::UnboundedSender<FileDownloadEvent>,
+    interrupt_tx: &mpsc::UnboundedSender<()>,
 ) -> WsMessageResult {
     if !matches!(
         proxy_msg,
@@ -351,6 +355,16 @@ async fn handle_ws_message(
                 error!("Failed to send file download request to main loop");
                 return WsMessageResult::Disconnect;
             }
+        }
+        ServerToProxy::Interrupt => {
+            // Cancel the agent's in-flight turn. Routed to the main loop, which
+            // calls `Session::interrupt()`; the per-agent I/O task writes the
+            // protocol's cancel form. Previously unhandled — it fell through to
+            // the catch-all below and was silently dropped, so interrupts never
+            // reached the agent on the launcher path (only the VS Code shim
+            // handled them). A closed channel means the loop is gone anyway.
+            debug!("→ [interrupt]");
+            let _ = interrupt_tx.send(());
         }
         _ => {
             debug!("ws msg: {:?}", proxy_msg);
