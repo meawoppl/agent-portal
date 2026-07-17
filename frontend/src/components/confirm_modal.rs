@@ -104,10 +104,10 @@ pub fn confirm_modal(props: &ConfirmModalProps) -> Html {
                     <p class="modal-warning">{ warning }</p>
                 }
                 <div class={props.style.actions_class()}>
-                    <button class={props.style.cancel_class()} onclick={props.on_cancel.clone()}>
+                    <button type="button" class={props.style.cancel_class()} onclick={props.on_cancel.clone()}>
                         { "Cancel" }
                     </button>
-                    <button class={props.style.confirm_class()} onclick={props.on_confirm.clone()}>
+                    <button type="button" class={props.style.confirm_class()} onclick={props.on_confirm.clone()}>
                         { &props.confirm_label }
                     </button>
                 </div>

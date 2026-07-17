@@ -829,6 +829,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     <ProxyTokenSetup />
                     <div class="launch-actions">
                         <button
+                            type="button"
                             class="launch-button-cancel"
                             onclick={
                                 let on_close = props.on_close.clone();
@@ -992,6 +993,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
                     <div class="launch-actions">
                         <button
+                            type="button"
                             class="launch-button-cancel"
                             onclick={
                                 let on_close = props.on_close.clone();
@@ -1001,6 +1003,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             { "Cancel" }
                         </button>
                         <button
+                            type="button"
                             class="launch-button"
                             onclick={
                                 let launch = launch.clone();
