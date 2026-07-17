@@ -158,11 +158,38 @@ claude-portal --session-name "project-b"
 
 ### Long-Running Tasks
 
-For long-running tasks:
+Agent Portal sessions keep running when you close the browser. For ordinary
+commands:
+
 1. Start the task in your session
 2. Close your browser - the session continues running
 3. Check back later from any device
 4. All history is preserved
+
+Processes that must survive a portal restart need a stronger handoff. Shell
+patterns such as `cmd &`, `disown`, `nohup`, or `setsid` detach from the shell,
+but they usually stay in the same systemd control group as the portal session.
+When the service restarts, systemd can still kill every process in that cgroup.
+
+Use `systemd-run --user` to launch the work under the user manager instead:
+
+```bash
+# One-time setup per user, persistent across reboots.
+sudo loginctl enable-linger "$USER"
+
+# Launch the task in its own user service.
+systemd-run --user --unit my-long-task --description "Agent Portal task" \
+  /path/to/command --flag value
+```
+
+The task then lives in the user manager's cgroup, not the individual portal
+session's cgroup. It keeps running across browser closes, session exits, and
+portal service restarts. Logs go to journald by default:
+
+```bash
+journalctl --user -u my-long-task -f
+systemctl --user stop my-long-task
+```
 
 ### Working Directory
 
