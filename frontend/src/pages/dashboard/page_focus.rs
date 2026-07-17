@@ -114,7 +114,9 @@ pub(super) fn use_dashboard_focus(
         })
     };
 
-    // Interrupt signal counter: incremented by triple-Escape, passed to focused SessionView.
+    // Interrupt signal counter: incremented on each Ctrl+C (see
+    // `use_interrupt_hotkey`), passed to the focused SessionView which fires an
+    // interrupt on every bump.
     let interrupt_signal = use_state(|| 0u32);
 
     let on_interrupt = {
