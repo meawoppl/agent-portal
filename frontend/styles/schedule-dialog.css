@@ -247,6 +247,7 @@
 }
 
 .sched-field input,
+.sched-field select,
 .sched-field textarea {
     background: var(--bg-dark);
     border: 1px solid var(--border);
@@ -281,6 +282,7 @@
 }
 
 .sched-field input:focus,
+.sched-field select:focus,
 .sched-field textarea:focus {
     outline: none;
     border-color: var(--accent);

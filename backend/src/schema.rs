@@ -132,6 +132,8 @@ diesel::table! {
         last_run_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        #[max_length = 16]
+        session_mode -> Varchar,
     }
 }
 

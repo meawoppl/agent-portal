@@ -69,11 +69,11 @@
         max-width: 120px;
     }
 
-    .pill-folder {
+    .pill-session-name {
         font-size: 0.8rem;
     }
 
-    .pill-hostname {
+    .pill-repo {
         font-size: 0.65rem;
     }
 
@@ -106,10 +106,6 @@
 
     .pill-hidden-badge {
         font-size: 0.6rem;
-    }
-
-    .pill-version-badge {
-        font-size: 0.55rem;
     }
 
     .pill-menu-toggle {
@@ -489,6 +485,7 @@
     .launch-dialog {
         max-width: 100%;
         width: 95%;
+        inline-size: min(95vw, calc(100vw - 1rem));
         padding: 1.25rem;
         max-height: 85dvh;
         overflow-y: auto;
@@ -557,7 +554,7 @@
         max-width: 90px;
     }
 
-    .pill-folder {
+    .pill-session-name {
         font-size: 0.75rem;
     }
 

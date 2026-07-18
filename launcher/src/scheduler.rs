@@ -90,6 +90,14 @@ pub struct Scheduler {
     running: HashMap<Uuid, RunningInfo>,
     pending_prompts: Vec<PendingPrompt>,
     continuations: Vec<ContinuationConfig>,
+    /// Last session spawned per task, tracked locally so continue-mode firings
+    /// resume the right conversation even within a single launcher connection.
+    ///
+    /// `ScheduledTaskConfig.last_session_id` only refreshes on `ScheduleSync`
+    /// (task edit / launcher reconnect), so after a run completes the config
+    /// copy is stale until the next sync. This map is updated on every spawn and
+    /// takes precedence, with the config value as the cross-reconnect fallback.
+    last_session_by_task: HashMap<Uuid, Uuid>,
 }
 
 impl Scheduler {
@@ -100,6 +108,7 @@ impl Scheduler {
             running: HashMap::new(),
             pending_prompts: Vec::new(),
             continuations: Vec::new(),
+            last_session_by_task: HashMap::new(),
         }
     }
 
@@ -209,12 +218,26 @@ impl Scheduler {
     }
 
     /// Find and return tasks that are due to fire. Advances next_fire times.
+    ///
+    /// Session-mode decides what a due firing does:
+    /// - `Fresh` (default): launch a brand-new session (`last_session_id: None`).
+    ///   If a prior run is still active, skip this firing (overlap policy).
+    /// - `Continue`: if the task's current session is still active, inject the
+    ///   prompt into it (no new launch). Otherwise relaunch resuming the prior
+    ///   session id when one exists (the agent's native `--resume` / thread
+    ///   resume), or launch fresh on the very first run.
     pub fn fire_due_tasks(&mut self) -> Vec<TaskToFire> {
         let now = Utc::now();
-        let running_task_ids: HashSet<Uuid> = self.running.values().map(|r| r.task_id).collect();
+        // task_id -> session_id of a currently-running run for that task.
+        let active_session_by_task: HashMap<Uuid, Uuid> = self
+            .running
+            .iter()
+            .map(|(session_id, info)| (info.task_id, *session_id))
+            .collect();
 
         let mut to_fire = Vec::new();
         let mut new_pending = Vec::new();
+        let mut new_prompts = Vec::new();
 
         for task in &mut self.tasks {
             let Some(next) = task.next_fire else {
@@ -224,26 +247,70 @@ impl Scheduler {
                 continue;
             }
 
-            if running_task_ids.contains(&task.config.id) {
-                info!(
-                    "Skipping task '{}': previous run still active",
-                    task.config.fields.name
-                );
+            let task_id = task.config.id;
+            let is_continue = task.config.fields.session_mode == shared::SessionMode::Continue;
+            let active_session = active_session_by_task.get(&task_id).copied();
+
+            // Always advance next_fire; whether we launch, inject, or skip below
+            // this firing is consumed either way.
+            let advance = |task: &mut ActiveTask| {
                 task.next_fire = compute_next_fire(
                     &task.config.fields.cron_expression,
                     &task.config.fields.timezone,
                 );
-                continue;
+                if let Some(ref next) = task.next_fire {
+                    info!("Task '{}': next fire at {}", task.config.fields.name, next);
+                }
+            };
+
+            match (is_continue, active_session) {
+                // Continue mode, prior run still active: inject into it instead
+                // of launching a second session.
+                (true, Some(session_id)) => {
+                    info!(
+                        "Continue task '{}': injecting into active session {}",
+                        task.config.fields.name, session_id
+                    );
+                    new_prompts.push(PendingPrompt {
+                        session_id,
+                        task_id,
+                        prompt: task.config.fields.prompt.clone(),
+                        // No spawn delay: the session is already registered.
+                        send_at: Instant::now(),
+                    });
+                    advance(task);
+                    continue;
+                }
+                // Fresh mode with a prior run still active: overlap policy skips.
+                (false, Some(_)) => {
+                    info!(
+                        "Skipping task '{}': previous run still active",
+                        task.config.fields.name
+                    );
+                    advance(task);
+                    continue;
+                }
+                // No active run: launch. Continue mode resumes the prior session
+                // (or launches fresh on the first run); fresh mode always starts
+                // a brand-new session.
+                (_, None) => {}
             }
+
+            let last_session_id = if is_continue {
+                self.last_session_by_task
+                    .get(&task_id)
+                    .copied()
+                    .or(task.config.last_session_id)
+            } else {
+                None
+            };
 
             let request_id = Uuid::new_v4();
             new_pending.push((
                 request_id,
                 PendingLaunch {
-                    kind: PendingLaunchKind::ScheduledTask {
-                        task_id: task.config.id,
-                    },
-                    last_session_id: task.config.last_session_id,
+                    kind: PendingLaunchKind::ScheduledTask { task_id },
+                    last_session_id,
                     prompt: task.config.fields.prompt.clone(),
                 },
             ));
@@ -253,21 +320,22 @@ impl Scheduler {
             });
 
             info!(
-                "Firing task '{}' ({})",
-                task.config.fields.name, task.config.id
+                "Firing task '{}' ({}) [{}{}]",
+                task.config.fields.name,
+                task_id,
+                task.config.fields.session_mode,
+                match last_session_id {
+                    Some(id) => format!(", resuming {id}"),
+                    None => String::new(),
+                }
             );
-            task.next_fire = compute_next_fire(
-                &task.config.fields.cron_expression,
-                &task.config.fields.timezone,
-            );
-            if let Some(ref next) = task.next_fire {
-                info!("Task '{}': next fire at {}", task.config.fields.name, next);
-            }
+            advance(task);
         }
 
         for (request_id, launch) in new_pending {
             self.pending_launches.insert(request_id, launch);
         }
+        self.pending_prompts.extend(new_prompts);
 
         to_fire
     }
@@ -310,6 +378,9 @@ impl Scheduler {
             let PendingLaunchKind::ScheduledTask { task_id } = kind else {
                 return Some(kind);
             };
+            // Remember the session this task just launched so a later
+            // continue-mode firing (within this connection) resumes it.
+            self.last_session_by_task.insert(task_id, session_id);
             self.pending_prompts.push(PendingPrompt {
                 session_id,
                 task_id,
@@ -437,10 +508,16 @@ mod tests {
                 claude_args: vec![],
                 agent_type: AgentType::Claude,
                 max_runtime_minutes: 30,
+                session_mode: shared::SessionMode::Fresh,
             },
             enabled: true,
             last_session_id: None,
         }
+    }
+
+    /// Force a task's `next_fire` into the past so `fire_due_tasks()` sees it due.
+    fn make_due(scheduler: &mut Scheduler) {
+        scheduler.tasks[0].next_fire = Some(Utc::now() - chrono::Duration::seconds(1));
     }
 
     #[test]
@@ -556,6 +633,92 @@ mod tests {
         // Verify running session is tracked
         assert!(scheduler.running.contains_key(&session_id));
         assert_eq!(scheduler.running[&session_id].task_id, task_id);
+    }
+
+    #[test]
+    fn fresh_mode_fires_without_resume() {
+        let mut scheduler = Scheduler::new();
+        let task = make_task("test", "* * * * *"); // Fresh by default
+        scheduler.update_tasks(vec![task]);
+        make_due(&mut scheduler);
+
+        let fired = scheduler.fire_due_tasks();
+        assert_eq!(fired.len(), 1);
+        let info = scheduler
+            .get_pending_launch_info(&fired[0].request_id)
+            .unwrap();
+        // Fresh mode never resumes — a brand-new session each run.
+        assert_eq!(info.last_session_id, None);
+    }
+
+    #[test]
+    fn continue_mode_first_run_launches_fresh() {
+        let mut scheduler = Scheduler::new();
+        let mut task = make_task("test", "* * * * *");
+        task.fields.session_mode = shared::SessionMode::Continue;
+        scheduler.update_tasks(vec![task]);
+        make_due(&mut scheduler);
+
+        let fired = scheduler.fire_due_tasks();
+        assert_eq!(fired.len(), 1);
+        let info = scheduler
+            .get_pending_launch_info(&fired[0].request_id)
+            .unwrap();
+        // No prior session → first run is fresh.
+        assert_eq!(info.last_session_id, None);
+    }
+
+    #[test]
+    fn continue_mode_dead_session_relaunches_with_resume() {
+        let mut scheduler = Scheduler::new();
+        let mut task = make_task("test", "* * * * *");
+        task.fields.session_mode = shared::SessionMode::Continue;
+        scheduler.update_tasks(vec![task]);
+
+        // First run: fires fresh, spawns S1, then S1 exits.
+        make_due(&mut scheduler);
+        let first = scheduler.fire_due_tasks();
+        assert_eq!(first.len(), 1);
+        let s1 = Uuid::new_v4();
+        scheduler.on_session_spawned(first[0].request_id, s1);
+        assert!(scheduler.on_session_exited(&s1).is_some());
+
+        // Second run: prior session is dead → relaunch resuming S1.
+        make_due(&mut scheduler);
+        let second = scheduler.fire_due_tasks();
+        assert_eq!(second.len(), 1);
+        let info = scheduler
+            .get_pending_launch_info(&second[0].request_id)
+            .unwrap();
+        assert_eq!(info.last_session_id, Some(s1));
+    }
+
+    #[test]
+    fn continue_mode_active_session_injects_instead_of_launching() {
+        let mut scheduler = Scheduler::new();
+        let mut task = make_task("test", "* * * * *");
+        task.fields.session_mode = shared::SessionMode::Continue;
+        let task_id = task.id;
+        scheduler.update_tasks(vec![task]);
+
+        // First run spawns S1 and leaves it running.
+        make_due(&mut scheduler);
+        let first = scheduler.fire_due_tasks();
+        let s1 = Uuid::new_v4();
+        scheduler.on_session_spawned(first[0].request_id, s1);
+
+        // Second run while S1 is still active: no new launch, prompt injected.
+        make_due(&mut scheduler);
+        let second = scheduler.fire_due_tasks();
+        assert!(second.is_empty(), "must not launch a second session");
+
+        let ready = scheduler.ready_prompts();
+        assert!(
+            ready
+                .iter()
+                .any(|(sid, tid, _)| *sid == s1 && *tid == task_id),
+            "prompt should be queued for the active session"
+        );
     }
 
     fn continuation(reset_at: DateTime<Utc>) -> ContinuationConfig {

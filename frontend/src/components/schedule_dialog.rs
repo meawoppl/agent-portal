@@ -1,9 +1,11 @@
 // TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::components::model_select::{extract_model_arg, model_cli_args};
 use crate::components::skip_permissions::{
     skip_permissions_args, skip_permissions_label, strip_skip_permissions_args,
 };
+use crate::components::ModelSelect;
 use crate::hooks::use_escape;
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
@@ -65,8 +67,12 @@ struct TaskForm {
     timezone: String,
     prompt: String,
     max_runtime_minutes: i32,
+    /// Selected model CLI arg, or "" for the agent's own default.
+    model_arg: String,
     extra_args: String,
     skip_permissions: bool,
+    /// Fresh session each run vs. continue the prior conversation.
+    session_mode: shared::SessionMode,
 }
 
 #[derive(Clone, PartialEq)]
@@ -177,14 +183,22 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
                 let (has_skip, other_args) =
                     strip_skip_permissions_args(&task.fields.claude_args, task.fields.agent_type);
+                // Pull a picker-selectable model out of the remaining args so it
+                // pre-selects in the picker instead of sitting in the extra-args
+                // field (where it would double-apply on save). An unrecognized
+                // model value stays in `extra_args` untouched.
+                let (model_arg, extra_args) =
+                    extract_model_arg(&other_args, task.fields.agent_type);
                 form.set(TaskForm {
                     name: task.fields.name.clone(),
                     cron_expression: task.fields.cron_expression.clone(),
                     timezone: task.fields.timezone.clone(),
                     prompt: task.fields.prompt.clone(),
                     max_runtime_minutes: task.fields.max_runtime_minutes,
-                    extra_args: other_args.join(" "),
+                    model_arg: model_arg.unwrap_or_default(),
+                    extra_args: extra_args.join(" "),
                     skip_permissions: has_skip,
+                    session_mode: task.fields.session_mode,
                 });
                 error_msg.set(None);
                 form_mode.set(Some(FormMode::Edit(task_id)));
@@ -221,17 +235,20 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             }
 
             spawn_local(async move {
-                let mut claude_args: Vec<String> = Vec::new();
+                // Picker args go first so an explicit --model / -c model=… typed
+                // into the extra-args field still wins (both CLIs take the last
+                // occurrence).
+                let mut claude_args: Vec<String> = model_cli_args(agent_type, &data.model_arg);
+                let extra = data.extra_args.trim();
+                if !extra.is_empty() {
+                    claude_args.extend(extra.split_whitespace().map(String::from));
+                }
                 if data.skip_permissions {
                     claude_args.extend(
                         skip_permissions_args(agent_type)
                             .iter()
                             .map(|arg| arg.to_string()),
                     );
-                }
-                let extra = data.extra_args.trim();
-                if !extra.is_empty() {
-                    claude_args.extend(extra.split_whitespace().map(String::from));
                 }
 
                 let result = match mode {
@@ -246,6 +263,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                 claude_args: claude_args.clone(),
                                 agent_type,
                                 max_runtime_minutes: data.max_runtime_minutes,
+                                session_mode: data.session_mode,
                             },
                             hostname: host,
                         };
@@ -264,6 +282,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             max_runtime_minutes: Some(data.max_runtime_minutes),
                             claude_args: Some(claude_args.clone()),
                             agent_type: Some(agent_type),
+                            session_mode: Some(data.session_mode),
                             ..Default::default()
                         };
                         Request::patch(&utils::api_url(&format!("/api/scheduled-tasks/{}", id)))
@@ -374,6 +393,24 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         })
     };
 
+    let on_model_change = {
+        let form = form.clone();
+        Callback::from(move |value: String| {
+            let mut f = (*form).clone();
+            f.model_arg = value;
+            form.set(f);
+        })
+    };
+
+    let set_session_mode = |mode: shared::SessionMode| {
+        let form = form.clone();
+        Callback::from(move |_: MouseEvent| {
+            let mut f = (*form).clone();
+            f.session_mode = mode;
+            form.set(f);
+        })
+    };
+
     let on_overlay_click = props.on_close.reform(|_| ());
     let on_dialog_click = Callback::from(|e: MouseEvent| e.stop_propagation());
 
@@ -428,6 +465,9 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                         <code class="sched-task-cron">{ &task.fields.cron_expression }</code>
                                         if task.fields.timezone != "UTC" {
                                             <span class="sched-task-tz">{ &task.fields.timezone }</span>
+                                        }
+                                        if task.fields.session_mode == shared::SessionMode::Continue {
+                                            <span class="sched-task-tz">{ "continue" }</span>
                                         }
                                     </div>
                                     <div class="sched-task-prompt-preview">{ &task.fields.prompt }</div>
@@ -526,11 +566,58 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             required=true
                                         />
                                     </div>
+                                    // Model picker — catalogs from the
+                                    // claude-codes / codex-codes crates; ""
+                                    // means the agent's own default. The agent
+                                    // is fixed to this session's agent, so
+                                    // there's no agent switch to reset against.
+                                    <div class="sched-field">
+                                        <label>{ "Model" }</label>
+                                        <ModelSelect
+                                            agent_type={session_agent_type}
+                                            value={form.model_arg.clone()}
+                                            on_change={on_model_change}
+                                            class=""
+                                        />
+                                    </div>
+                                    // Session mode — fresh session each run vs.
+                                    // continue the same conversation (native
+                                    // resume). Works for both claude and codex.
+                                    <div class="sched-field">
+                                        <label>{ "Each run" }</label>
+                                        <div class="sched-mode-toggle">
+                                            <button
+                                                type="button"
+                                                class={classes!(
+                                                    "sched-btn",
+                                                    (form.session_mode == shared::SessionMode::Fresh)
+                                                        .then_some("sched-btn-primary")
+                                                )}
+                                                onclick={set_session_mode(shared::SessionMode::Fresh)}
+                                            >
+                                                { "Fresh session" }
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class={classes!(
+                                                    "sched-btn",
+                                                    (form.session_mode == shared::SessionMode::Continue)
+                                                        .then_some("sched-btn-primary")
+                                                )}
+                                                onclick={set_session_mode(shared::SessionMode::Continue)}
+                                            >
+                                                { "Continue previous" }
+                                            </button>
+                                        </div>
+                                        <span class="sched-hint">
+                                            { "Continue resumes the same conversation each run, accumulating context across firings." }
+                                        </span>
+                                    </div>
                                     <div class="sched-field">
                                         <label>{ "Extra CLI Arguments (optional)" }</label>
                                         <input
                                             type="text"
-                                            placeholder="--model sonnet --verbose"
+                                            placeholder="--verbose"
                                             value={form.extra_args.clone()}
                                             oninput={set_field(|f, v| f.extra_args = v)}
                                         />

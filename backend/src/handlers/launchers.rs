@@ -373,6 +373,53 @@ pub async fn update_launcher(
     Ok(EmptyResponse::OK)
 }
 
+/// POST /api/launchers/:launcher_id/restart - Tell the launcher to restart its
+/// process *without* updating the binary. Gated on
+/// `LAUNCHER_CAPABILITY_RESTART`: launchers too old to decode
+/// `ServerToLauncher::Restart` get a clear 400 instead of a silently-dropped
+/// frame.
+pub async fn restart_launcher(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path(launcher_id): Path<Uuid>,
+) -> Result<EmptyResponse, AppError> {
+    {
+        let launcher = app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .ok_or(AppError::NotFound("Launcher not found"))?;
+        if launcher.user_id != user_id {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    if !app_state
+        .session_manager
+        .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_RESTART)
+    {
+        return Err(AppError::BadRequest(
+            "Launcher too old — update it first, then restart becomes available.",
+        ));
+    }
+
+    // Route through the evicting sender (not a cloned raw sender) so a dead
+    // channel tears the stale connection down instead of lingering.
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, ServerToLauncher::Restart)
+    {
+        warn!(
+            "Launcher {} disconnected while sending restart",
+            launcher_id
+        );
+        return Err(AppError::Internal("Launcher disconnected".to_string()));
+    }
+
+    info!("Sent Restart to launcher {}", launcher_id);
+    Ok(EmptyResponse::OK)
+}
+
 /// GET /api/launchers/:launcher_id/probe-agents - Ask the launcher to (re-)scan
 /// its agent CLIs (`claude`, `codex`) and return install state. The frontend
 /// calls this when the launch dialog opens.

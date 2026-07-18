@@ -748,6 +748,7 @@ pub fn dashboard_page() -> Html {
                                             <span class="mode-indicator">{ "NAV" }</span>
                                             <span>{ "↑↓ hl = navigate" }</span>
                                             <span>{ "jk = scroll" }</span>
+                                            <span>{ "gg = top" }</span>
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
                                             <span>{ "n = new" }</span>

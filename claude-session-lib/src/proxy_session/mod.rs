@@ -316,6 +316,7 @@ struct ConnectionState {
     session_id: Uuid,
     /// Receiver for permission responses from frontend
     perm_rx: mpsc::UnboundedReceiver<PermissionResponseData>,
+    interrupt_rx: mpsc::UnboundedReceiver<()>,
     /// Receiver for output acknowledgments from backend
     ack_rx: mpsc::UnboundedReceiver<u64>,
     /// Sender for Claude output (raw wire JSON) to the output forwarder, which
@@ -762,6 +763,10 @@ async fn run_message_loop<A: Agent>(
     // Channel for session terminated signal (do not reconnect)
     let (session_terminated_tx, session_terminated_rx) = tokio::sync::oneshot::channel::<()>();
 
+    // Interrupt signal: backend `ServerToProxy::Interrupt` → main loop, which
+    // calls `Session::interrupt()` to cancel the agent's in-flight turn.
+    let (interrupt_tx, interrupt_rx) = mpsc::unbounded_channel::<()>();
+
     // Wrap ws_write for sharing
     let ws_write = std::sync::Arc::new(tokio::sync::Mutex::new(ws_write));
 
@@ -806,6 +811,7 @@ async fn run_message_loop<A: Agent>(
             session_terminated_tx,
             file_upload_tx,
             file_download_tx,
+            interrupt_tx,
         },
         heartbeat.clone(),
         tunnel.clone(),
@@ -815,6 +821,7 @@ async fn run_message_loop<A: Agent>(
     let mut conn_state = ConnectionState {
         session_id,
         perm_rx,
+        interrupt_rx,
         ack_rx,
         output_tx,
         ws_write: ws_write.clone(),
@@ -988,6 +995,15 @@ async fn run_main_loop<A: Agent>(
 
             Some(perm_response) = state.perm_rx.recv() => {
                 permission_bridge::handle_permission_response(claude_session, perm_response).await;
+            }
+
+            Some(()) = state.interrupt_rx.recv() => {
+                // Forward a backend interrupt to the agent's I/O task, which
+                // cancels the in-flight turn (Claude: wrapped `control_request`;
+                // Codex: `turn/interrupt`). Harmless when nothing is running.
+                if let Err(e) = claude_session.interrupt().await {
+                    warn!("Failed to forward interrupt to agent: {}", e);
+                }
             }
 
             Some(ack_seq) = state.ack_rx.recv() => {

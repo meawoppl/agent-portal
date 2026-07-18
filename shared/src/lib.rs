@@ -17,6 +17,10 @@ pub const VERSION: &str = env!("PORTAL_VERSION");
 /// `ServerToLauncher::LaunchSession.create_worktree`.
 pub const LAUNCHER_CAPABILITY_CREATE_WORKTREE: &str = "launch.create_worktree";
 
+/// Launcher capability advertised by versions that honor
+/// `ServerToLauncher::Restart` (restart the process without updating the binary).
+pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
+
 /// Split [`VERSION`] into `(major, minor, patch)` numeric components.
 /// `None` on the (impossible-by-construction) malformed string.
 pub fn version_parts() -> Option<(u64, u64, u64)> {
@@ -142,6 +146,52 @@ impl std::str::FromStr for AgentType {
             "claude" => Ok(AgentType::Claude),
             "codex" => Ok(AgentType::Codex),
             other => Err(format!("unknown agent type: {}", other)),
+        }
+    }
+}
+
+/// How a scheduled task treats the conversation across firings.
+///
+/// - `Fresh` (default): each firing launches a brand-new session/conversation,
+///   the historical behavior. The prior run's session is auto-deleted on
+///   completion.
+/// - `Continue`: each firing continues the same conversation, accumulating
+///   context across runs (a standup bot that remembers, a monitor that knows
+///   what it said last time). The session is preserved between runs and resumed
+///   via the agent's native mechanism (`claude --resume` / codex `thread/resume`).
+///
+/// Serializes lowercase and defaults to `Fresh` so older wire payloads that omit
+/// the field keep today's behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionMode {
+    #[default]
+    Fresh,
+    Continue,
+}
+
+impl SessionMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SessionMode::Fresh => "fresh",
+            SessionMode::Continue => "continue",
+        }
+    }
+}
+
+impl std::fmt::Display for SessionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SessionMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "fresh" => Ok(SessionMode::Fresh),
+            "continue" => Ok(SessionMode::Continue),
+            other => Err(format!("unknown session mode: {}", other)),
         }
     }
 }
@@ -627,6 +677,26 @@ pub struct AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_mode_serde_and_default() {
+        // Lowercase wire form round-trips.
+        assert_eq!(
+            serde_json::to_string(&SessionMode::Fresh).unwrap(),
+            r#""fresh""#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMode::Continue).unwrap(),
+            r#""continue""#
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionMode>(r#""continue""#).unwrap(),
+            SessionMode::Continue
+        );
+        // Default is Fresh so omitted/older payloads keep today's behavior.
+        assert_eq!(SessionMode::default(), SessionMode::Fresh);
+        assert_eq!("fresh".parse::<SessionMode>().unwrap(), SessionMode::Fresh);
+    }
 
     #[test]
     fn continuation_prompt_reason_defaults_to_limit_on_old_wire() {

@@ -12,7 +12,7 @@ pub use ws_bridge::WsEndpoint;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AgentType, SendMode};
+    use crate::{AgentType, SendMode, SessionMode};
     use uuid::Uuid;
 
     #[test]
@@ -512,6 +512,7 @@ mod tests {
                     claude_args: vec![],
                     agent_type: AgentType::Claude,
                     max_runtime_minutes: 30,
+                    session_mode: SessionMode::Fresh,
                 },
                 enabled: true,
                 last_session_id: None,
@@ -545,6 +546,7 @@ mod tests {
                 claude_args: vec!["--verbose".into()],
                 agent_type: AgentType::Claude,
                 max_runtime_minutes: 30,
+                session_mode: SessionMode::Continue,
             },
             enabled: true,
             last_session_id: None,
@@ -560,7 +562,8 @@ mod tests {
                 "claude_args": ["--verbose"],
                 "agent_type": "claude",
                 "enabled": true,
-                "max_runtime_minutes": 30
+                "max_runtime_minutes": 30,
+                "session_mode": "continue"
             }"#,
         )
         .unwrap();
@@ -583,6 +586,8 @@ mod tests {
         let parsed: ScheduledTaskConfig = serde_json::from_str(old_wire).unwrap();
         assert_eq!(parsed.fields.name, "nightly audit");
         assert_eq!(parsed.fields.max_runtime_minutes, 30);
+        // Omitted session_mode defaults to Fresh (old-launcher wire compat).
+        assert_eq!(parsed.fields.session_mode, SessionMode::Fresh);
         assert!(parsed.enabled);
         assert_eq!(
             parsed.last_session_id,

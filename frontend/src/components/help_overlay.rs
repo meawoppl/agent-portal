@@ -89,6 +89,10 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Scroll the focused transcript down / up",
             },
             Shortcut {
+                keys: &["g", "g"],
+                description: "Jump to the top of the transcript",
+            },
+            Shortcut {
                 keys: &["1", "–", "9"],
                 description: "Jump directly to a session by number",
             },
