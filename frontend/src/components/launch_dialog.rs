@@ -473,6 +473,19 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
+    // Enter toggles a focused checkbox (#1384). Checkboxes natively toggle on
+    // Space only; wiring Enter to synthesize a click keeps the dialog's "Enter
+    // activates the focused control" model consistent (the change event then
+    // flows through the checkbox's own `onchange`). Space still works natively.
+    let on_checkbox_enter = Callback::from(move |e: KeyboardEvent| {
+        if e.key() == "Enter" {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                e.prevent_default();
+                input.click();
+            }
+        }
+    });
+
     // navigate_to: Yew's Callback<String> is Rc-backed and cheap to clone,
     // replacing the previous Rc<dyn Fn(String)>. Call sites use .emit(path).
     let navigate_to: Callback<String> = {
@@ -956,6 +969,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                                 type="checkbox"
                                 checked={*skip_permissions}
                                 onchange={on_skip_permissions.clone()}
+                                onkeydown={on_checkbox_enter.clone()}
                             />
                             { format!(" {}", skip_permissions_label(*agent_type)) }
                         </label>
@@ -969,6 +983,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                                 type="checkbox"
                                 checked={*create_worktree}
                                 onchange={on_create_worktree.clone()}
+                                onkeydown={on_checkbox_enter.clone()}
                             />
                             { " Create git worktree (requires a git repo)" }
                         </label>
