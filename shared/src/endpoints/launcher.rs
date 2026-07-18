@@ -228,6 +228,17 @@ pub enum ServerToLauncher {
         /// use its local expected-session mapping for backwards compatibility.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resume_session_id: Option<Uuid>,
+        /// Whether `resume_session_id` names an *existing* session to resume
+        /// (`Some(true)`) or a freshly-assigned id for a *brand-new* session to
+        /// create (`Some(false)`). Dialog launches set `Some(false)` so the
+        /// launcher creates the session under the assigned id (`--session-id`)
+        /// instead of trying to `--resume` a nonexistent transcript and
+        /// rotating to a different id — the rotation silently changed the id the
+        /// dashboard had already focused, dropping composer focus on every new
+        /// session (#1405). Absent (`None`, older backend) → the launcher falls
+        /// back to the historical `resume_session_id.is_some()` behavior.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume: Option<bool>,
         /// When true, the launcher creates a git worktree from the repository
         /// that contains `working_directory` and runs the session there.
         /// Additive/opt-in: older launchers ignore it via `#[serde(default)]`.

@@ -141,6 +141,14 @@
     border-color: #ff5a72;
 }
 
+/* Keyboard focus ring for the confirm/delete modal buttons (#1384) so the
+   focused (Cancel-by-default) button is visible without the mouse. */
+.modal-cancel:focus-visible,
+.modal-confirm:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 /* ==========================================================================
    Keyboard Shortcuts Help Overlay (press ?)
    ========================================================================== */

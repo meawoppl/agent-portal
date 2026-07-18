@@ -316,6 +316,7 @@ pub async fn resume_session(
         resume_session_id: Some(session.id),
         // Resuming an existing session: run in its recorded working directory,
         // never create a new worktree.
+        resume: Some(true),
         create_worktree: false,
         worktree_branch: None,
     };

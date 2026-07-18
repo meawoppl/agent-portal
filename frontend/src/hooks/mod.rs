@@ -4,10 +4,12 @@
 
 mod use_client_websocket;
 mod use_escape;
+mod use_focus_trap;
 mod use_keyboard_nav;
 mod use_sessions;
 
 pub use use_client_websocket::use_client_websocket;
 pub use use_escape::{escape_listener, use_escape, use_escape_capture};
+pub use use_focus_trap::use_focus_trap;
 pub use use_keyboard_nav::{use_interrupt_hotkey, use_keyboard_nav, KeyboardNavConfig};
 pub use use_sessions::use_sessions;

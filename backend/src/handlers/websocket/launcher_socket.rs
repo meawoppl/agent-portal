@@ -754,6 +754,8 @@ fn handle_launcher_message(
                         agent_type,
                         scheduled_task_id,
                         resume_session_id: last_session_id,
+                        // Scheduler/continuation relaunch of a prior session.
+                        resume: Some(true),
                         create_worktree: false,
                         worktree_branch: None,
                     };
@@ -1117,6 +1119,8 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             agent_type,
             scheduled_task_id: None,
             resume_session_id: Some(session.id),
+            // Reconcile relaunch of an existing desired session: resume it.
+            resume: Some(true),
             create_worktree: false,
             worktree_branch: None,
         };

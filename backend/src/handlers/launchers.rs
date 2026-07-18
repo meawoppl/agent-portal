@@ -109,6 +109,9 @@ pub async fn launch_session(
         agent_type: req.agent_type,
         scheduled_task_id: None,
         resume_session_id: Some(session_id),
+        // Brand-new session: the id above was just minted, so the launcher must
+        // create it under that id, not `--resume` (and rotate) it (#1405).
+        resume: Some(false),
         create_worktree: req.create_worktree,
         worktree_branch,
     };
