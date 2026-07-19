@@ -1,7 +1,6 @@
 // TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use uuid::Uuid;
 use yew::prelude::*;
 
 /// Convert raw URLs in text to clickable links.
@@ -32,66 +31,6 @@ pub fn linkify_urls(text: &str) -> Html {
     }
 
     html! { <>{ for parts }</> }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum LinkDestination {
-    PortalDownload(String),
-    LiteralAngleText,
-    ExternalOrRelative(String),
-}
-
-pub(super) fn classify_link_destination(href: &str, session_id: Option<Uuid>) -> LinkDestination {
-    if href.starts_with("portal://file/") {
-        let session_id =
-            session_id.expect("portal://file markdown links require a session_id to render");
-        if let Some(download_href) = portal_file_download_href(href, session_id) {
-            LinkDestination::PortalDownload(download_href)
-        } else {
-            LinkDestination::LiteralAngleText
-        }
-    } else if !is_valid_url(href) && !href.starts_with('#') && !href.starts_with('/') {
-        LinkDestination::LiteralAngleText
-    } else {
-        LinkDestination::ExternalOrRelative(href.to_string())
-    }
-}
-
-fn portal_file_download_href(href: &str, session_id: Uuid) -> Option<String> {
-    let path = href.strip_prefix("portal://file/")?;
-    if path.is_empty() {
-        return None;
-    }
-    let encoded = encode_uri_component(path);
-    Some(format!(
-        "/api/sessions/{}/files/pull?path={}",
-        session_id, encoded
-    ))
-}
-
-fn encode_uri_component(input: &str) -> String {
-    let mut encoded = String::with_capacity(input.len());
-    for &byte in input.as_bytes() {
-        match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'!'
-            | b'~'
-            | b'*'
-            | b'\''
-            | b'('
-            | b')' => encoded.push(byte as char),
-            _ => {
-                encoded.push('%');
-                encoded.push_str(&format!("{:02X}", byte));
-            }
-        }
-    }
-    encoded
 }
 
 /// Find the next URL in text, returning (text_before, url, text_after).

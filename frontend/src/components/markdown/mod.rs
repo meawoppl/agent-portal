@@ -4,27 +4,32 @@
 //! Supports: headings, bold, italic, strikethrough, links, code blocks,
 //! inline code, blockquotes, lists, and tables.
 
-use pulldown_cmark::{Event, Options, Parser};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
 mod links;
 mod math;
-mod render;
+mod parser;
+mod renderer;
+mod sanitizer;
 
 pub use links::linkify_urls;
-use math::{extract_math_placeholders, restore_math_in_events};
-use render::render_events;
+use parser::parse_markdown_events;
+use renderer::render_events;
 
 #[cfg(test)]
-use links::{classify_link_destination, find_next_url, is_valid_url, LinkDestination};
+use links::{find_next_url, is_valid_url};
 #[cfg(test)]
-use math::{restore_math, MATH_CLOSE, MATH_OPEN};
+use math::{
+    extract_math_placeholders, restore_math, restore_math_in_events, MATH_CLOSE, MATH_OPEN,
+};
 #[cfg(test)]
-use pulldown_cmark::Tag;
+use pulldown_cmark::{Event, Options, Parser, Tag};
 #[cfg(test)]
-use render::extract_text;
+use renderer::extract_text;
+#[cfg(test)]
+use sanitizer::{classify_link_destination, sanitize_raw_html, LinkDestination};
 
 /// Render markdown text as HTML, with a post-render hook that triggers KaTeX
 /// to render any LaTeX math expressions (`$...$`, `$$...$$`).
@@ -68,20 +73,7 @@ fn markdown_view(props: &MarkdownViewProps) -> Html {
         });
     }
 
-    // Protect math regions ($…$, $$…$$, \(…\), \[…\]) from pulldown-cmark by
-    // replacing them with private-use placeholders BEFORE parsing. Otherwise
-    // pulldown-cmark would interpret `_` inside an equation as emphasis (and
-    // `*`, etc.) which splits the math text across DOM elements and prevents
-    // KaTeX's auto-render from matching the surrounding delimiters.
-    let (pre_processed, math_blocks) = extract_math_placeholders(&props.text);
-
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-
-    let parser = Parser::new_ext(&pre_processed, options);
-    let events: Vec<Event> = parser.collect();
-    let events = restore_math_in_events(events, &math_blocks);
+    let events = parse_markdown_events(&props.text);
 
     html! {
         <span ref={node_ref}>{ render_events(&events, props.session_id) }</span>
@@ -357,6 +349,14 @@ Where:\n\
     }
 
     #[test]
+    fn raw_html_sanitizer_keeps_tags_literal() {
+        assert_eq!(
+            sanitize_raw_html("<script>alert('x')</script>"),
+            "<script>alert('x')</script>"
+        );
+    }
+
+    #[test]
     fn hash_and_absolute_paths_are_regular_links() {
         assert_eq!(
             classify_link_destination("#details", None),
@@ -412,8 +412,10 @@ Where:\n\
     }
 
     #[test]
-    #[should_panic(expected = "portal://file markdown links require a session_id to render")]
-    fn portal_file_markdown_link_without_session_panics() {
-        let _ = classify_link_destination("portal://file/docs/portal_link_rendering.svg", None);
+    fn portal_file_markdown_link_without_session_is_literal_text() {
+        assert_eq!(
+            classify_link_destination("portal://file/docs/portal_link_rendering.svg", None),
+            LinkDestination::LiteralAngleText
+        );
     }
 }

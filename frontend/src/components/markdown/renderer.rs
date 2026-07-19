@@ -4,7 +4,8 @@ use yew::prelude::*;
 
 use crate::components::copy_button::copy_to_clipboard;
 
-use super::links::{classify_link_destination, linkify_urls, LinkDestination};
+use super::links::linkify_urls;
+use super::sanitizer::{classify_link_destination, sanitize_raw_html, LinkDestination};
 
 /// Convert pulldown-cmark events to Yew Html.
 pub(super) fn render_events(events: &[Event], session_id: Option<Uuid>) -> Html {
@@ -39,7 +40,7 @@ fn render_event(events: &[Event], session_id: Option<Uuid>) -> (Html, usize) {
         Event::Rule => (html! { <hr class="md-rule" /> }, 1),
         Event::End(_) => (html! {}, 1),
         Event::Html(html_text) | Event::InlineHtml(html_text) => {
-            (html! { <>{ html_text.to_string() }</> }, 1)
+            (html! { <>{ sanitize_raw_html(html_text) }</> }, 1)
         }
         _ => (html! {}, 1),
     }
