@@ -12,7 +12,7 @@ use codex_codes::{
     AppServerBuilder, ApplyPatchApprovalResponse, AsyncClient as CodexAsyncClient,
     CommandExecutionRequestApprovalResponse, ExecCommandApprovalResponse, ServerMessage,
     ServerRequest, ThreadResumeParams, ThreadStartParams, TurnInterruptParams, TurnStartParams,
-    UserInput,
+    TurnSteerParams, UserInput,
 };
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
@@ -69,6 +69,34 @@ type DeliveryAck = oneshot::Sender<Result<(), String>>;
 /// `PortalContent::AgentMessage` envelope the synthetic echo emits verbatim so
 /// it renders as the provenance card instead of a raw user bubble (#inter-agent).
 type QueuedPrompt = (String, Option<DeliveryAck>, Option<Box<serde_json::Value>>);
+
+/// How a fresh `IoCommand::UserInput` should be delivered, given the current
+/// turn state. Pure decision so the routing can be unit-tested without a live
+/// app-server (there is no mock client harness in this crate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputRouting {
+    /// No turn is running — begin a new `turn/start`.
+    StartTurn,
+    /// A turn is running and its id is known — steer the input into it
+    /// (`turn/steer`) so it lands mid-turn, matching claude's native stdin
+    /// steering. Falls back to `Queue` if the steer request itself fails.
+    Steer,
+    /// A turn is running but we haven't observed its `turn/started` yet, so we
+    /// have no `expectedTurnId` (required, non-empty) to steer against — queue
+    /// the input for the turn-end drain, exactly as before.
+    Queue,
+}
+
+/// Decide how to deliver a user input. `turn/steer` requires a non-empty
+/// `expectedTurnId` for race safety, so steering is only possible once we've
+/// captured the active turn id from its `turn/started` notification.
+fn route_user_input(turn_active: bool, current_turn_id: Option<&str>) -> InputRouting {
+    match (turn_active, current_turn_id) {
+        (false, _) => InputRouting::StartTurn,
+        (true, Some(turn_id)) if !turn_id.is_empty() => InputRouting::Steer,
+        (true, _) => InputRouting::Queue,
+    }
+}
 
 /// Background task for Codex sessions.
 pub(crate) async fn codex_io_task(
@@ -567,14 +595,88 @@ pub(crate) async fn codex_io_task(
                             delivered,
                             display_event,
                         } => {
-                            if !text.is_empty() {
-                                tracing::info!(
-                                    "Queued Codex input received during active turn ({} pending)",
-                                    queued_prompts.len() + 1
-                                );
-                                queued_prompts.push_back((text, delivered, display_event));
-                            } else if let Some(delivered) = delivered {
-                                let _ = delivered.send(Ok(()));
+                            if text.is_empty() {
+                                if let Some(delivered) = delivered {
+                                    let _ = delivered.send(Ok(()));
+                                }
+                            } else {
+                                match route_user_input(true, current_turn_id.as_deref()) {
+                                    // Deliver mid-turn via `turn/steer` so the
+                                    // input joins the ACTIVE turn's pending-input
+                                    // queue (parity with claude, which steers
+                                    // natively through stdin, #1283). This does
+                                    // NOT start a new turn, so `turn_tracker` /
+                                    // `subagent_token_tracker` are untouched — the
+                                    // steered input belongs to the current turn's
+                                    // metrics.
+                                    InputRouting::Steer => {
+                                        // `Steer` is only returned with a known,
+                                        // non-empty turn id.
+                                        let turn_id = current_turn_id
+                                            .clone()
+                                            .expect("Steer routing implies a known turn id");
+                                        match steer_codex_turn(
+                                            &mut client,
+                                            &thread_id,
+                                            &turn_id,
+                                            text.clone(),
+                                        )
+                                        .await
+                                        {
+                                            Ok(resp) => {
+                                                tracing::debug!(
+                                                    "Steered Codex input into active turn {} (steer reported turn {})",
+                                                    turn_id,
+                                                    resp.turn_id
+                                                );
+                                                // Mirror the fresh-input echo so
+                                                // the steered text still renders
+                                                // in the transcript, then resolve
+                                                // the delivery ack.
+                                                emit_user_input_display(
+                                                    &text,
+                                                    display_event,
+                                                    &event_tx,
+                                                );
+                                                if let Some(delivered) = delivered {
+                                                    let _ = delivered.send(Ok(()));
+                                                }
+                                            }
+                                            Err(e) => {
+                                                // Typed steer failure (NoActiveTurn
+                                                // / ExpectedTurnMismatch /
+                                                // ActiveTurnNotSteerable /
+                                                // EmptyInput) or transport error:
+                                                // fall back to the pre-steer queue
+                                                // behavior — byte-identical worst
+                                                // case. The queued input emits its
+                                                // display when it starts a turn at
+                                                // turn end.
+                                                tracing::debug!(
+                                                    "turn/steer into turn {} failed ({}); queueing for turn end ({} pending)",
+                                                    turn_id,
+                                                    e,
+                                                    queued_prompts.len() + 1
+                                                );
+                                                queued_prompts.push_back((
+                                                    text,
+                                                    delivered,
+                                                    display_event,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    // Turn active but no turn id observed yet
+                                    // (`StartTurn` can't occur here — turn_active
+                                    // is true): queue for the turn-end drain.
+                                    InputRouting::Queue | InputRouting::StartTurn => {
+                                        tracing::debug!(
+                                            "Codex input during active turn without a known turn id; queueing ({} pending)",
+                                            queued_prompts.len() + 1
+                                        );
+                                        queued_prompts.push_back((text, delivered, display_event));
+                                    }
+                                }
                             }
                         }
                         IoCommand::Interrupt => {
@@ -642,39 +744,82 @@ async fn start_codex_turn(
     delivered: Option<DeliveryAck>,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) -> bool {
-    // Codex's app-server protocol doesn't echo user input, so the frontend's
-    // optimistic-send pending entry would never clear. Synthesize a transcript
-    // entry here. Skip <system-reminder> wrappers (portal reminder injection)
-    // which shouldn't appear in transcript. The agent always receives `prompt`
-    // (the agent-facing text); only the *display* differs.
-    if !prompt.starts_with("<system-reminder>") {
-        match display_event {
-            // Inter-agent message: emit the typed PortalContent::AgentMessage
-            // event verbatim so it renders as the provenance card (matching the
-            // claude echo-replacement path), not a raw "You" bubble.
-            Some(event) => {
-                let _ = event_tx.send(IoEvent::RawOutput(*event));
-                return start_codex_turn_request(client, thread_id, prompt, delivered, event_tx)
-                    .await;
-            }
-            // Plain user input: synthesize a user echo in a shape that matches
-            // ClaudeOutput::User parse + the frontend's content-based pending-match.
-            None => {
-                let echo = UserEchoEvent::new(prompt);
-                let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&echo)));
-                return start_codex_turn_request(
-                    client,
-                    thread_id,
-                    echo.content,
-                    delivered,
-                    event_tx,
-                )
-                .await;
-            }
+    // Codex's app-server protocol doesn't echo user input, so synthesize the
+    // transcript entry before dispatching the turn. The agent always receives
+    // `prompt` (the agent-facing text); only the *display* differs.
+    emit_user_input_display(&prompt, display_event, event_tx);
+    start_codex_turn_request(client, thread_id, prompt, delivered, event_tx).await
+}
+
+/// Emit the transcript display for a user input — the synthetic echo (plain
+/// input) or the inter-agent provenance card (`display_event`). Codex's
+/// app-server never echoes user input, so without this the frontend's
+/// optimistic-send pending entry would never clear. `<system-reminder>`
+/// wrappers (portal reminder injection) are suppressed so they don't render.
+///
+/// Shared by the fresh-turn (`start_codex_turn`) and mid-turn steer paths so
+/// steered input renders identically to a queued/fresh prompt.
+fn emit_user_input_display(
+    prompt: &str,
+    display_event: Option<Box<serde_json::Value>>,
+    event_tx: &mpsc::UnboundedSender<IoEvent>,
+) {
+    if prompt.starts_with("<system-reminder>") {
+        return;
+    }
+    match display_event {
+        // Inter-agent message: emit the typed PortalContent::AgentMessage event
+        // verbatim so it renders as the provenance card (matching the claude
+        // echo-replacement path), not a raw "You" bubble.
+        Some(event) => {
+            let _ = event_tx.send(IoEvent::RawOutput(*event));
+        }
+        // Plain user input: synthesize a user echo in a shape that matches
+        // ClaudeOutput::User parse + the frontend's content-based pending-match.
+        None => {
+            let echo = UserEchoEvent::new(prompt.to_string());
+            let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&echo)));
         }
     }
+}
 
-    start_codex_turn_request(client, thread_id, prompt, delivered, event_tx).await
+/// Deliver `text` into the ACTIVE turn via `turn/steer`. The steered input
+/// joins the turn's pending-input queue and is incorporated at the next
+/// model-request boundary within the same turn — no new turn is started.
+///
+/// `expected_turn_id` must be the currently-running turn id: the app-server
+/// requires it (non-empty) and rejects a mismatch (`ExpectedTurnMismatch`) for
+/// race safety. Any error — typed steer failure (NoActiveTurn /
+/// ExpectedTurnMismatch / ActiveTurnNotSteerable / EmptyInput) or transport
+/// failure — is returned so the caller can fall back to queueing.
+///
+/// codex-codes 0.143.4 ships typed `TurnSteerParams` / `TurnSteerResponse` and
+/// the `turn/steer` method constant, but no dedicated `AsyncClient::turn_steer`
+/// wrapper, so we go through the public typed `request` escape hatch. This is
+/// fully typed on both ends (no JSON-poking); swap in a wrapper if the SDK adds
+/// one.
+async fn steer_codex_turn(
+    client: &mut CodexAsyncClient,
+    thread_id: &str,
+    expected_turn_id: &str,
+    text: String,
+) -> codex_codes::Result<codex_codes::TurnSteerResponse> {
+    let params = steer_params(thread_id, expected_turn_id, text);
+    client
+        .request(codex_codes::protocol::methods::TURN_STEER, &params)
+        .await
+}
+
+fn steer_params(thread_id: &str, expected_turn_id: &str, text: String) -> TurnSteerParams {
+    TurnSteerParams {
+        input: vec![UserInput::Text {
+            text,
+            text_elements: None,
+        }],
+        thread_id: thread_id.to_string(),
+        expected_turn_id: expected_turn_id.to_string(),
+        client_user_message_id: None,
+    }
 }
 
 async fn start_codex_turn_request(
@@ -1078,5 +1223,42 @@ mod tests {
     #[test]
     fn token_breakdown_total_falls_back_when_total_tokens_missing() {
         assert_eq!(token_breakdown_total(&usage(0, 10, 3, 5, 2)), 20);
+    }
+
+    #[test]
+    fn route_user_input_starts_turn_when_idle() {
+        assert_eq!(route_user_input(false, None), InputRouting::StartTurn);
+        // A stale turn id with no active turn is still a fresh start.
+        assert_eq!(
+            route_user_input(false, Some("turn-1")),
+            InputRouting::StartTurn
+        );
+    }
+
+    #[test]
+    fn route_user_input_steers_active_turn_with_known_id() {
+        assert_eq!(route_user_input(true, Some("turn-1")), InputRouting::Steer);
+    }
+
+    #[test]
+    fn route_user_input_queues_active_turn_without_known_id() {
+        // turn/started not yet observed → no expectedTurnId → can't steer.
+        assert_eq!(route_user_input(true, None), InputRouting::Queue);
+        // An empty turn id is unusable as expectedTurnId (required non-empty).
+        assert_eq!(route_user_input(true, Some("")), InputRouting::Queue);
+    }
+
+    #[test]
+    fn steer_params_sets_expected_turn_id_and_text() {
+        let params = steer_params("thread-1", "turn-7", "hello mid-turn".to_string());
+        assert_eq!(params.thread_id, "thread-1");
+        // expected_turn_id is the race-safety anchor — must be carried through.
+        assert_eq!(params.expected_turn_id, "turn-7");
+        assert!(params.client_user_message_id.is_none());
+        assert_eq!(params.input.len(), 1);
+        match &params.input[0] {
+            UserInput::Text { text, .. } => assert_eq!(text, "hello mid-turn"),
+            other => panic!("expected text input, got {other:?}"),
+        }
     }
 }
