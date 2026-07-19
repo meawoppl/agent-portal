@@ -2,12 +2,13 @@
 
 use chrono::{DateTime, Utc};
 use shared::api::MetricBucket;
+use shared::AgentType;
 
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
 /// currently reports no model or tier; keeping the agent in the key lets the
 /// UI label that shape explicitly without colliding with missing Claude
 /// metadata.
-pub(super) type GroupKey = (String, Option<String>, Option<String>);
+pub(super) type GroupKey = (AgentType, Option<String>, Option<String>);
 
 /// Pure helper: list the distinct (agent, model, tier) groups present in the
 /// bucket list.
@@ -21,7 +22,7 @@ pub(super) fn distinct_pairs(buckets: &[MetricBucket]) -> Vec<GroupKey> {
 
 pub(super) fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
     (
-        bucket.agent_type.clone(),
+        bucket.agent_type,
         bucket.model.clone(),
         bucket.service_tier.clone(),
     )
@@ -34,11 +35,10 @@ pub(super) fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
 /// shows the full model id (no vendor-prefix shortening), keeps the tier's
 /// original case, and adds codex / agent-without-model handling.
 pub(super) fn pair_label(pair: &GroupKey) -> String {
-    let base = match (pair.0.as_str(), pair.1.as_deref()) {
-        ("codex", None) => "Codex".to_string(),
+    let base = match (pair.0, pair.1.as_deref()) {
+        (AgentType::Codex, None) => "Codex".to_string(),
         (_, Some(model)) => model.to_string(),
-        (agent, None) if !agent.is_empty() => format!("{agent} unknown"),
-        _ => "unknown".to_string(),
+        (agent, None) => format!("{agent} unknown"),
     };
     match pair.2.as_deref() {
         Some(t) if !t.is_empty() && !t.eq_ignore_ascii_case("standard") => {

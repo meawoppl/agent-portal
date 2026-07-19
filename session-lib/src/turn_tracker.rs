@@ -14,7 +14,7 @@
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use shared::TurnMetrics;
+use shared::{AgentType, TurnMetrics};
 use uuid::Uuid;
 
 /// Running state of the current turn.
@@ -241,7 +241,7 @@ impl TurnTracker {
 /// `TurnCompleted` frame.
 #[derive(Debug, Clone, Default)]
 pub struct TurnOutcome {
-    pub agent_type: String,
+    pub agent_type: AgentType,
     pub model: Option<String>,
     pub service_tier: Option<String>,
     pub input_tokens: i64,
@@ -276,7 +276,7 @@ mod tests {
 
     fn outcome() -> TurnOutcome {
         TurnOutcome {
-            agent_type: "claude".to_string(),
+            agent_type: AgentType::Claude,
             model: Some("claude-opus-4-7".to_string()),
             service_tier: Some("standard".to_string()),
             input_tokens: 100,
@@ -392,7 +392,7 @@ mod tests {
         tracker.start(t0, Utc::now());
         tracker.record_content_frame(t0 + Duration::from_millis(80));
         let outcome = TurnOutcome {
-            agent_type: "codex".to_string(),
+            agent_type: AgentType::Codex,
             model: None,
             service_tier: None,
             input_tokens: 42,
@@ -408,7 +408,7 @@ mod tests {
         let m = tracker
             .finalize(t0 + Duration::from_millis(400), Utc::now(), outcome)
             .unwrap();
-        assert_eq!(m.agent_type, "codex");
+        assert_eq!(m.agent_type, AgentType::Codex);
         assert!(m.total_cost_usd.is_none());
         assert!(m.model.is_none());
         assert_eq!(m.input_tokens, 42);

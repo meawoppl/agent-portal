@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+use crate::AgentType;
+
 /// Per-model usage / cost breakdown carried by Claude's
 /// `ResultMessage.modelUsage` field.
 pub use claude_codes::io::ModelUsageEntry;
@@ -49,7 +51,7 @@ pub struct TurnMetrics {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_message_id: Option<Uuid>,
 
-    pub agent_type: String,
+    pub agent_type: AgentType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,7 +143,7 @@ pub struct TurnMetricsResponse {
 pub struct MetricBucket {
     /// Bucket start timestamp (UTC). `date_trunc('hour' | 'day', started_at)`.
     pub bucket_start: DateTime<Utc>,
-    pub agent_type: String,
+    pub agent_type: AgentType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

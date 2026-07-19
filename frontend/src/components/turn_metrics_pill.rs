@@ -294,6 +294,7 @@ pub fn turn_metrics_header_pill(props: &TurnMetricsHeaderPillProps) -> Html {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
+    use shared::AgentType;
     use uuid::Uuid;
 
     fn mk(model: Option<&str>, tier: Option<&str>, idx: i64) -> TurnMetrics {
@@ -320,7 +321,7 @@ mod tests {
             is_error: false,
             tool_call_count: 0,
             stream_restarts: 0,
-            agent_type: "claude".to_string(),
+            agent_type: AgentType::Claude,
             model: model.map(|s| s.to_string()),
             service_tier: tier.map(|s| s.to_string()),
             total_cost_usd: Some(0.012),

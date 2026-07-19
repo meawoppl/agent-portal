@@ -287,7 +287,7 @@ mod tests {
             id: None,
             session_id: Uuid::nil(),
             user_message_id: None,
-            agent_type: "claude".to_string(),
+            agent_type: crate::AgentType::Claude,
             model: Some("claude-opus-4-7".to_string()),
             service_tier: Some("standard".to_string()),
             started_at: started,
@@ -326,7 +326,7 @@ mod tests {
             id: None,
             session_id: Uuid::nil(),
             user_message_id: None,
-            agent_type: "claude".to_string(),
+            agent_type: crate::AgentType::Claude,
             model: Some("claude-opus-4-7".to_string()),
             service_tier: None,
             started_at: Utc::now(),
@@ -374,7 +374,7 @@ mod tests {
         counts.insert("max_tokens".to_string(), 1);
         let bucket = MetricBucket {
             bucket_start,
-            agent_type: "claude".to_string(),
+            agent_type: crate::AgentType::Claude,
             model: Some("claude-opus-4-7".to_string()),
             service_tier: Some("standard".to_string()),
             turn_count: 6,
@@ -405,7 +405,7 @@ mod tests {
     fn metric_buckets_response_roundtrip() {
         let bucket = MetricBucket {
             bucket_start: chrono::Utc::now(),
-            agent_type: "codex".to_string(),
+            agent_type: crate::AgentType::Codex,
             model: None,
             service_tier: None,
             turn_count: 3,
@@ -444,7 +444,7 @@ mod tests {
             id: None,
             session_id: Uuid::nil(),
             user_message_id: None,
-            agent_type: "codex".to_string(),
+            agent_type: crate::AgentType::Codex,
             model: None,
             service_tier: None,
             started_at: started,

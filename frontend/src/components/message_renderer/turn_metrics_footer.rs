@@ -234,6 +234,7 @@ pub fn render_turn_metrics_footer(metrics: Option<&TurnMetrics>) -> Html {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use shared::AgentType;
     use uuid::Uuid;
 
     // ---- compact_count ----
@@ -405,7 +406,7 @@ mod tests {
             id: Some(Uuid::nil()),
             session_id: Uuid::nil(),
             user_message_id: None,
-            agent_type: "claude".to_string(),
+            agent_type: AgentType::Claude,
             model: Some("claude-opus-4-7".to_string()),
             service_tier: Some("standard".to_string()),
             started_at: Utc::now(),
@@ -465,7 +466,7 @@ mod tests {
             id: Some(Uuid::nil()),
             session_id: Uuid::nil(),
             user_message_id: None,
-            agent_type: "codex".to_string(),
+            agent_type: AgentType::Codex,
             model: None,
             service_tier: None,
             started_at: Utc::now(),
