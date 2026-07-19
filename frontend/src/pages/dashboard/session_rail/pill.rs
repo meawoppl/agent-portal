@@ -42,6 +42,8 @@ pub(super) struct SessionPillProps {
     pub nav_mode: bool,
     pub server_version: String,
     pub activity_timestamps: ActivityRef,
+    pub is_broadcast_sender: bool,
+    pub is_broadcast_receiver: bool,
     pub render_time: f64,
     pub on_select: Callback<usize>,
     pub on_toggle_menu: Callback<(Uuid, MouseEvent)>,
@@ -142,6 +144,12 @@ impl PillViewModel {
         }
         if props.nav_mode {
             pill_classes.push("nav-mode");
+        }
+        if props.is_broadcast_sender {
+            pill_classes.push("broadcast-sender");
+        }
+        if props.is_broadcast_receiver {
+            pill_classes.push("broadcast-receiver");
         }
         if is_status_disconnected {
             pill_classes.push("status-disconnected");

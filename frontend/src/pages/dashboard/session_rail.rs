@@ -13,10 +13,13 @@ use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
+mod broadcast;
 mod hooks;
 mod menu;
 mod pill;
 mod sparkline;
+use broadcast::{render_broadcasts, RailAxis};
+pub use broadcast::{AgentMessageBroadcast, BroadcastRef};
 use hooks::use_scheduled_task_blocker;
 use menu::SessionRailMenu;
 use pill::SessionPill;
@@ -137,6 +140,9 @@ pub struct SessionRailProps {
     pub nav_mode: bool,
     #[prop_or_default]
     pub activity_timestamps: ActivityRef,
+    #[prop_or_default]
+    pub broadcasts: BroadcastRef,
+    pub rail_position: crate::pages::dashboard::RailPosition,
     /// Server version string for comparing against client versions
     #[prop_or_default]
     pub server_version: String,
@@ -349,6 +355,21 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
 
     let hidden_count = hidden_indices.len();
     let visible_count = visible_indices.len();
+    let mut rendered_session_ids: Vec<Uuid> = visible_indices
+        .iter()
+        .map(|(_, session)| session.id)
+        .collect();
+    if !props.inactive_hidden {
+        rendered_session_ids.extend(hidden_indices.iter().map(|(_, session)| session.id));
+    }
+    let (broadcast_senders, broadcast_receivers) =
+        props.broadcasts.active_session_ids(*render_time);
+    let rail_axis = match props.rail_position {
+        crate::pages::dashboard::RailPosition::Top
+        | crate::pages::dashboard::RailPosition::Bottom => RailAxis::Horizontal,
+        crate::pages::dashboard::RailPosition::Left
+        | crate::pages::dashboard::RailPosition::Right => RailAxis::Vertical,
+    };
 
     // Container with position:relative holds the rail + dropdown.
     // Dropdown uses position:fixed to escape rail overflow clipping.
@@ -382,6 +403,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                             nav_mode={props.nav_mode}
                             server_version={props.server_version.clone()}
                             activity_timestamps={props.activity_timestamps.clone()}
+                            is_broadcast_sender={broadcast_senders.contains(&session.id)}
+                            is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
                             render_time={*render_time}
                             on_select={props.on_select.clone()}
                             on_toggle_menu={on_toggle_pill_menu.clone()}
@@ -428,6 +451,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                                     nav_mode={props.nav_mode}
                                     server_version={props.server_version.clone()}
                                     activity_timestamps={props.activity_timestamps.clone()}
+                                    is_broadcast_sender={broadcast_senders.contains(&session.id)}
+                                    is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
                                     render_time={*render_time}
                                     on_select={props.on_select.clone()}
                                     on_toggle_menu={on_toggle_pill_menu.clone()}
@@ -439,6 +464,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     }
                 }
             </div>
+            { render_broadcasts(&props.broadcasts, &rendered_session_ids, rail_axis, *render_time) }
             <SessionRailMenu
                 session={open_session}
                 position={*menu_pos}

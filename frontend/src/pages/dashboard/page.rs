@@ -8,7 +8,7 @@ use super::page_state::{
     DashboardUiState,
 };
 use super::session_order;
-use super::session_rail::{ActivityRef, SessionRail};
+use super::session_rail::{ActivityRef, AgentMessageBroadcast, BroadcastRef, SessionRail};
 use super::session_view::SessionView;
 use super::types::{
     load_hidden_sessions, load_inactive_hidden, load_rail_position, load_show_cost,
@@ -101,6 +101,7 @@ pub fn dashboard_page() -> Html {
     // Activity buffer: mutations don't trigger page re-renders.
     // SessionRail reads this on its own 100 ms tick instead.
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
+    let agent_message_broadcasts = use_memo((), |_| BroadcastRef::default());
     let spend_animation = use_spend_badge_animation(total_user_spend);
 
     // Get DB-authoritative sessions in a total, deterministic display order
@@ -485,6 +486,19 @@ pub fn dashboard_page() -> Html {
         )
     };
 
+    let on_agent_message = {
+        let broadcasts = (*agent_message_broadcasts).clone();
+        Callback::from(
+            move |(from_session_id, to_session_id, timestamp): (Uuid, Uuid, f64)| {
+                broadcasts.push(AgentMessageBroadcast {
+                    from_session_id,
+                    to_session_id,
+                    timestamp,
+                });
+            },
+        )
+    };
+
     let on_branch_change = {
         let set_sessions = sessions_hook.set_sessions.clone();
         let sessions = sessions.clone();
@@ -702,6 +716,8 @@ pub fn dashboard_page() -> Html {
                         connected_sessions={session_state.connected_sessions.clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
+                        broadcasts={(*agent_message_broadcasts).clone()}
+                        rail_position={ui_state.rail_position}
                         server_version={server_version.clone()}
                         on_select={focus.on_select_session.clone()}
                         on_leave={on_leave.clone()}
@@ -733,6 +749,7 @@ pub fn dashboard_page() -> Html {
                                                 on_message_sent={on_message_sent.clone()}
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
+                                                on_agent_message={on_agent_message.clone()}
                                                 current_user_id={current_user_id.map(|id| id.to_string())}
                                                 interrupt_signal={focus.interrupt_signal}
                                                 jump_to_latest_signal={focus.jump_to_latest_signal}
