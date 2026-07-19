@@ -20,6 +20,7 @@ pub mod skip_permissions;
 pub mod sparkline;
 pub mod time_ago;
 mod tool_renderers;
+pub(crate) mod turn_metrics_display;
 mod turn_metrics_pill;
 mod voice_input;
 

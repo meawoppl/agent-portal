@@ -13,6 +13,7 @@ use web_sys::Element;
 use yew::prelude::*;
 
 use super::sparkline::Sparkline;
+use super::turn_metrics_display::{compact_metric_count, format_compact_model_tier_label};
 
 /// Which metric the sparkline plots. Selectable via the dropdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,36 +75,7 @@ pub(crate) fn pick_most_recent_model_tier(
 /// when present and not `"standard"` (the default tier is never worth
 /// chip space).
 pub(crate) fn format_model_tier_label(model: &Option<String>, tier: &Option<String>) -> String {
-    let short_model = model
-        .as_deref()
-        .map(compact_model_label)
-        .unwrap_or_else(|| "unknown".to_string());
-    match tier.as_deref() {
-        Some(t) if !t.is_empty() && !t.eq_ignore_ascii_case("standard") => {
-            format!("{short_model} {}", t.to_ascii_lowercase())
-        }
-        _ => short_model,
-    }
-}
-
-/// Strip a vendor prefix + trailing dated suffix so a model name fits the
-/// chip. `claude-opus-4-5-20260301` → `opus-4-5`; `gpt-5-mini` → `5-mini`.
-/// Named distinctly from `message_renderer::shorten_model_name` (which
-/// produces display names like "Opus 4.5") to avoid import mix-ups.
-fn compact_model_label(model: &str) -> String {
-    let trimmed = model
-        .strip_prefix("claude-")
-        .or_else(|| model.strip_prefix("gpt-"))
-        .or_else(|| model.strip_prefix("o"))
-        .unwrap_or(model);
-    // Drop a trailing -YYYYMMDD if present (Anthropic dated checkpoints).
-    let mut parts: Vec<&str> = trimmed.split('-').collect();
-    if let Some(last) = parts.last() {
-        if last.len() == 8 && last.chars().all(|c| c.is_ascii_digit()) {
-            parts.pop();
-        }
-    }
-    parts.join("-")
+    format_compact_model_tier_label(model, tier)
 }
 
 /// Filter the buffer to turns that match the chosen (model, tier) pair,
@@ -175,14 +147,6 @@ fn format_current_value(metric: SparklineMetric, value: f64) -> String {
         SparklineMetric::CacheHit => format!("cache {:.0}%", value),
         SparklineMetric::Thinking => format!("{} thinking", compact_metric_count(value)),
         SparklineMetric::Subagent => format!("{} subagent", compact_metric_count(value)),
-    }
-}
-
-fn compact_metric_count(value: f64) -> String {
-    if value < 1000.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{:.1}k", value / 1000.0)
     }
 }
 
@@ -293,6 +257,7 @@ pub fn turn_metrics_header_pill(props: &TurnMetricsHeaderPillProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::turn_metrics_display::compact_model_label;
     use chrono::{TimeZone, Utc};
     use shared::AgentType;
     use uuid::Uuid;

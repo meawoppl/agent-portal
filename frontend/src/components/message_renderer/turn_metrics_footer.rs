@@ -48,89 +48,9 @@
 use shared::TurnMetrics;
 use yew::prelude::*;
 
-/// Compact integer for "2.1k in / 547 out" chips.
-///
-/// Values `< 1000` render as integers; values `≥ 1000` render as a
-/// one-decimal-k abbreviation (`1500` → `"1.5k"`, `1_000_000` → `"1000.0k"`).
-/// We deliberately don't introduce an `M` suffix — a single turn that emits
-/// 1M tokens is so far out of distribution that a long, easy-to-eyeball
-/// `1000.0k` is preferable to an opaque `1.0M`.
-pub fn compact_count(n: i64) -> String {
-    if n < 1000 {
-        n.to_string()
-    } else {
-        format!("{:.1}k", n as f64 / 1000.0)
-    }
-}
-
-/// Tokens-per-second chip text, e.g. `"47.2 tok/s"`.
-///
-/// Returns `None` when `generation_duration_ms` is `None` or `0` — both
-/// happen on error paths (turn aborted before any content frame, Codex
-/// failed-turn frames with missing duration) and rendering "inf tok/s" or
-/// dividing by zero would be misleading.
-pub fn format_tok_per_sec(
-    output_tokens: i64,
-    generation_duration_ms: Option<i64>,
-) -> Option<String> {
-    let gen_ms = generation_duration_ms?;
-    if gen_ms <= 0 {
-        return None;
-    }
-    let tok_per_sec = output_tokens as f64 / (gen_ms as f64 / 1000.0);
-    Some(format!("{:.1} tok/s", tok_per_sec))
-}
-
-/// TTFT chip text, e.g. `"TTFT 1.31s"`. Returns `None` if `ttft_ms` is
-/// `None` (turn errored before any content frame).
-pub fn format_ttft(ttft_ms: Option<i64>) -> Option<String> {
-    let ms = ttft_ms?;
-    Some(format!("TTFT {:.2}s", ms as f64 / 1000.0))
-}
-
-/// Cache-hit-% chip text, e.g. `"cache 84% hit"`.
-///
-/// Denominator is `input + cache_read + cache_creation` — the total prompt
-/// tokens this turn could plausibly have come from cache. Returns `None`
-/// when all three are zero (no prompt at all, or Codex turn that doesn't
-/// expose the cache breakdown — both should hide the chip rather than
-/// render a misleading "0% hit").
-pub fn format_cache_hit(input: i64, cache_read: i64, cache_creation: i64) -> Option<String> {
-    let total = input + cache_read + cache_creation;
-    if total <= 0 {
-        return None;
-    }
-    let pct = (cache_read as f64 / total as f64) * 100.0;
-    Some(format!("cache {:.0}% hit", pct))
-}
-
-/// Max-gap chip text, e.g. `"max gap 1.5s"`.
-///
-/// Only renders when the gap exceeds 1000ms — sub-1s inter-token gaps are
-/// the normal streaming heartbeat and showing them would just clutter every
-/// successful turn's chip strip. The 1000ms threshold matches the eyeball
-/// "I noticed a stall" line for a streaming UI.
-pub fn format_max_gap(max_inter_token_gap_ms: Option<i64>) -> Option<String> {
-    let ms = max_inter_token_gap_ms?;
-    if ms <= 1000 {
-        return None;
-    }
-    Some(format!("max gap {:.1}s", ms as f64 / 1000.0))
-}
-
-/// Cost chip text, e.g. `"$0.014"` for sub-$1 and `"$1.23"` for $1+.
-///
-/// Returns `None` when `total_cost_usd` is `None` — Codex turns don't
-/// surface cost on their wire today, so the chip vanishes naturally for
-/// codex sessions.
-pub fn format_cost(total_cost_usd: Option<f64>) -> Option<String> {
-    let cost = total_cost_usd?;
-    if cost.abs() < 1.0 {
-        Some(format!("${:.3}", cost))
-    } else {
-        Some(format!("${:.2}", cost))
-    }
-}
+use crate::components::turn_metrics_display::{
+    compact_count, format_cache_hit, format_cost, format_max_gap, format_tok_per_sec, format_ttft,
+};
 
 /// Build the full chip list for a `TurnMetrics` row, in render order. Each
 /// `Some(text)` chip becomes one `<span class="turn-metric-chip">` in the

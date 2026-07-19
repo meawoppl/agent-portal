@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use shared::api::MetricBucket;
 use shared::AgentType;
 
+use crate::components::turn_metrics_display::format_agent_model_tier_label;
+
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
 /// currently reports no model or tier; keeping the agent in the key lets the
 /// UI label that shape explicitly without colliding with missing Claude
@@ -35,17 +37,7 @@ pub(super) fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
 /// shows the full model id (no vendor-prefix shortening), keeps the tier's
 /// original case, and adds codex / agent-without-model handling.
 pub(super) fn pair_label(pair: &GroupKey) -> String {
-    let base = match (pair.0, pair.1.as_deref()) {
-        (AgentType::Codex, None) => "Codex".to_string(),
-        (_, Some(model)) => model.to_string(),
-        (agent, None) => format!("{agent} unknown"),
-    };
-    match pair.2.as_deref() {
-        Some(t) if !t.is_empty() && !t.eq_ignore_ascii_case("standard") => {
-            format!("{base} {t}")
-        }
-        _ => base,
-    }
+    format_agent_model_tier_label(pair.0, &pair.1, &pair.2)
 }
 
 /// Pick a stable color from the Tokyo-Night palette. We cycle through a
