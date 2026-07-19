@@ -239,7 +239,8 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
             if gloo::utils::document()
                 .query_selector(
                     ".sched-overlay, .share-dialog-overlay, .help-overlay, \
-                     .launch-dialog-backdrop, .modal-overlay, .full-page-modal",
+                     .launch-dialog-backdrop, .modal-overlay, .full-page-modal, \
+                     .health-timer-overlay",
                 )
                 .ok()
                 .flatten()

@@ -697,6 +697,77 @@
     color: var(--text-primary);
 }
 
+/* Health timer */
+.health-settings-section {
+    max-width: 760px;
+}
+
+.health-settings-card {
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.health-toggle {
+    align-self: flex-start;
+}
+
+.health-setting-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.health-setting-field > span {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.health-minutes-input {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.health-minutes-input input,
+.health-setting-field textarea {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 4px;
+    font: inherit;
+}
+
+.health-minutes-input input {
+    width: 7rem;
+    padding: 0.45rem 0.55rem;
+}
+
+.health-setting-field textarea {
+    width: 100%;
+    max-width: 620px;
+    min-height: 6rem;
+    padding: 0.65rem 0.75rem;
+    resize: vertical;
+    line-height: 1.4;
+}
+
+.health-minutes-input input:focus,
+.health-setting-field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.health-minutes-input span {
+    color: var(--text-secondary);
+}
+
 .sound-event-cards {
     display: flex;
     flex-direction: column;

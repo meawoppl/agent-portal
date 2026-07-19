@@ -1,5 +1,6 @@
 mod appearance_panel;
 mod forwarding_panel;
+mod health_timer_panel;
 mod launchers_panel;
 mod notifications_panel;
 mod performance_panel;
@@ -10,6 +11,7 @@ mod tokens_panel;
 use crate::utils;
 use appearance_panel::AppearancePanel;
 use forwarding_panel::ForwardingPanel;
+use health_timer_panel::HealthTimerPanel;
 use launchers_panel::LaunchersPanel;
 use notifications_panel::NotificationsPanel;
 use performance_panel::PerformancePanel;
@@ -27,6 +29,7 @@ enum SettingsTab {
     Forwarding,
     Sounds,
     Notifications,
+    HealthTimer,
     Performance,
     Appearance,
 }
@@ -70,6 +73,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_forwarding_tab = make_tab_handler(SettingsTab::Forwarding);
     let on_sounds_tab = make_tab_handler(SettingsTab::Sounds);
     let on_notifications_tab = make_tab_handler(SettingsTab::Notifications);
+    let on_health_timer_tab = make_tab_handler(SettingsTab::HealthTimer);
     let on_performance_tab = make_tab_handler(SettingsTab::Performance);
     let on_appearance_tab = make_tab_handler(SettingsTab::Appearance);
 
@@ -132,6 +136,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     { "Notifications" }
                 </button>
                 <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::HealthTimer).then_some("active"))}
+                    onclick={on_health_timer_tab}
+                >
+                    { "Health Timer" }
+                </button>
+                <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Performance).then_some("active"))}
                     onclick={on_performance_tab}
                 >
@@ -160,6 +170,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Notifications {
                     <NotificationsPanel />
+                }
+                if *active_tab == SettingsTab::HealthTimer {
+                    <HealthTimerPanel />
                 }
                 if *active_tab == SettingsTab::Sessions {
                     <SessionsPanel on_sessions_loaded={on_sessions_loaded} />

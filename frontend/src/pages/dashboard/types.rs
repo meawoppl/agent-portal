@@ -22,6 +22,9 @@ pub const SHOW_COST_STORAGE_KEY: &str = "claude-portal-show-cost";
 /// Storage key for session rail orientation in localStorage
 pub const RAIL_ORIENTATION_STORAGE_KEY: &str = "claude-portal-rail-orientation";
 
+/// Storage key for the last actively focused session in localStorage
+pub const LAST_ACTIVE_SESSION_STORAGE_KEY: &str = "claude-portal-last-active-session";
+
 /// Storage key for the opt-in vim editing mode in localStorage
 pub const VIM_MODE_STORAGE_KEY: &str = "claude-portal-vim-mode";
 
@@ -191,6 +194,16 @@ pub fn load_rail_position() -> RailPosition {
 /// Save rail position preference to localStorage.
 pub fn save_rail_position(position: RailPosition) {
     storage_set(RAIL_ORIENTATION_STORAGE_KEY, position.as_str());
+}
+
+/// Load the last actively focused session from localStorage.
+pub fn load_last_active_session() -> Option<Uuid> {
+    storage_get(LAST_ACTIVE_SESSION_STORAGE_KEY).and_then(|value| Uuid::parse_str(&value).ok())
+}
+
+/// Save the last actively focused session to localStorage.
+pub fn save_last_active_session(session_id: Uuid) {
+    storage_set(LAST_ACTIVE_SESSION_STORAGE_KEY, &session_id.to_string());
 }
 
 /// Load hidden session IDs from localStorage
