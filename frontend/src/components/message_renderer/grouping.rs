@@ -3,12 +3,6 @@ use crate::components::agent_frame::{AgentFrame, AgentFrameKind, AgentFrameRegis
 use super::renderers::assistant_label;
 use super::types::{ClaudeMessage, RenderedMessage};
 
-/// Extract the raw created-at ISO string from the typed message sidecar, for
-/// use with the live-updating TimeAgo component.
-pub(super) fn extract_raw_iso(message: &RenderedMessage) -> Option<String> {
-    message.raw_iso().map(str::to_string)
-}
-
 /// Category for a run of consecutive related messages — drives both the
 /// grouping decision (`classify`) and the wrapper style on the rendered
 /// group (`MessageGroupRenderer`).
@@ -90,7 +84,7 @@ impl MessageGroup {
                 }
             },
         };
-        match extract_raw_iso(first) {
+        match first.raw_iso() {
             Some(iso) => yew::virtual_dom::Key::from(format!("{}-{}", prefix, iso)),
             None => yew::virtual_dom::Key::from(format!("{}{}", prefix, index)),
         }
