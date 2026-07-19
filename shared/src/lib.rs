@@ -39,6 +39,10 @@ pub use proxy_tokens::*;
 pub mod endpoints;
 pub use endpoints::*;
 
+// Portal metadata sidecar helpers
+pub mod message_metadata;
+pub use message_metadata::{content_value_or_fallback, created_at_iso};
+
 /// serde default for continuation `reason` fields: pre-`reason` wire payloads
 /// (older launchers/backends) deserialize as a usage-limit continuation, the
 /// only kind that existed before overload auto-retry.

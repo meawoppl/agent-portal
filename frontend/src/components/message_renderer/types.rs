@@ -19,7 +19,7 @@ impl RenderedMessage {
     }
 
     pub fn raw_iso(&self) -> Option<&str> {
-        self.meta.as_ref()?.created_at.as_deref()
+        shared::created_at_iso(self.meta.as_ref())
     }
 
     pub fn delivery(&self) -> Option<&shared::DeliveryMeta> {
@@ -27,7 +27,7 @@ impl RenderedMessage {
     }
 
     pub fn source(&self) -> Option<&shared::MessageSource> {
-        self.meta.as_ref()?.source.as_ref()
+        self.meta.as_ref()?.source()
     }
 }
 

@@ -1,6 +1,6 @@
 use super::dispatch;
 use super::grouping::{
-    extract_raw_iso, thinking_tokens_estimate, visible_group_indices, GroupCategory, MessageGroup,
+    thinking_tokens_estimate, visible_group_indices, GroupCategory, MessageGroup,
 };
 use super::local_timestamp;
 use std::collections::HashMap;
@@ -48,8 +48,8 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         } => {
             let ts = messages
                 .first()
-                .and_then(extract_raw_iso)
-                .and_then(|iso| local_timestamp(&iso));
+                .and_then(|message| message.raw_iso())
+                .and_then(local_timestamp);
 
             // A run of `thinking_tokens` markers collapses to a single compact
             // chip: the `thinking` badge plus an odometer climbing to the run's
@@ -77,7 +77,10 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 };
             }
 
-            let last_iso = messages.last().and_then(extract_raw_iso);
+            let last_iso = messages
+                .last()
+                .and_then(|message| message.raw_iso())
+                .map(str::to_string);
             let wrapper_class = match category {
                 GroupCategory::User => "user-message",
                 GroupCategory::Portal => "portal-message",
@@ -100,7 +103,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                     <div class="message-body grouped-message-body">
                         { for visible.iter().map(|&i| {
                             let message = &messages[i];
-                            let key = extract_raw_iso(message)
+                            let key = message.raw_iso()
                                 .map(|iso| format!("m-{}", iso))
                                 .unwrap_or_else(|| format!("m{}", i));
                             html! { <div {key} class="grouped-message-part">{ dispatch::render_identity_group_part(message, props.agent_type, props.session_id, &props.continuation_statuses, props.on_schedule_continuation.clone()) }</div> }

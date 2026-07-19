@@ -79,8 +79,8 @@ pub(super) fn replay_history(
 
     // Surface the server-assigned `created_at` for the latest row so the
     // frontend can use it directly as its reconnect-replay watermark
-    // without re-parsing the per-message `_created_at` injection below
-    // (closes #784). History is ordered ASC, so `last()` is the newest.
+    // without re-parsing per-message content. History is ordered ASC, so
+    // `last()` is the newest.
     let last_created_at: Option<String> = history
         .last()
         .map(|msg| msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
@@ -92,23 +92,7 @@ pub(super) fn replay_history(
             // rides here — `content` stays raw (no `_`-key injection; see
             // docs/PORTAL_META_SIDECAR.md).
             let meta = Some(msg.portal_meta(user_names.get(&msg.user_id).cloned()));
-            // Fallback when the DB row content isn't valid JSON: wrap the raw
-            // string in a typed envelope so the frontend's `ClaudeMessage`
-            // dispatch still finds a `type` and `content`.
-            #[derive(serde::Serialize)]
-            struct FallbackMessageContent<'a> {
-                #[serde(rename = "type")]
-                message_type: &'a str,
-                content: &'a str,
-            }
-            let content =
-                serde_json::from_str::<serde_json::Value>(&msg.content).unwrap_or_else(|_| {
-                    serde_json::to_value(FallbackMessageContent {
-                        message_type: &msg.role,
-                        content: &msg.content,
-                    })
-                    .unwrap_or(serde_json::Value::Null)
-                });
+            let content = shared::content_value_or_fallback(&msg.role, &msg.content);
             shared::HistoryEntry { content, meta }
         })
         .collect();
