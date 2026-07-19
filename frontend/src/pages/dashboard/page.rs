@@ -514,6 +514,19 @@ pub fn dashboard_page() -> Html {
         .iter()
         .filter(|id| !effective_hidden_sessions.contains(id))
         .count();
+    // SessionView creation starts each session websocket subscription. Keep the
+    // rail order stable, but mount the focused session first so a reload gives
+    // the last-active session the first subscription attempt before background
+    // sessions connect.
+    let session_view_order: Vec<usize> = if active_sessions.is_empty() {
+        Vec::new()
+    } else {
+        let focused_index = focus.focused_index.min(active_sessions.len() - 1);
+        let mut indices = Vec::with_capacity(active_sessions.len());
+        indices.push(focused_index);
+        indices.extend((0..active_sessions.len()).filter(|index| *index != focused_index));
+        indices
+    };
 
     // Update browser tab title
     {
@@ -702,10 +715,11 @@ pub fn dashboard_page() -> Html {
                     // Session views
                     <div class={classes!("session-views-container", if keyboard_nav.nav_mode { Some("nav-mode") } else { None })}>
                         {
-                            active_sessions.iter().enumerate().map(|(index, session)| {
+                            session_view_order.iter().filter_map(|&index| {
+                                let session = active_sessions.get(index)?;
                                 let is_focused = index == focus.focused_index;
                                 let is_activated = session_state.activated_sessions.contains(&session.id);
-                                if is_activated {
+                                Some(if is_activated {
                                     html! {
                                         <div
                                             key={session.id.to_string()}
@@ -732,7 +746,7 @@ pub fn dashboard_page() -> Html {
                                             class="session-view-wrapper hidden"
                                         />
                                     }
-                                }
+                                })
                             }).collect::<Html>()
                         }
                     </div>

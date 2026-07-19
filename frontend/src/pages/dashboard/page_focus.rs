@@ -1,5 +1,6 @@
 use super::page_state::{active_session_ids, DashboardSessionAction, DashboardSessionState};
 use super::session_order;
+use super::types::{load_last_active_session, save_last_active_session};
 use shared::SessionInfo;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -55,29 +56,64 @@ pub(super) fn use_dashboard_focus(
             ),
             move |(sessions, hidden_sessions, is_loading)| {
                 if !*is_loading && !sessions.is_empty() {
-                    // Focus the first non-hidden session by id (falls through to
+                    let visible = |session: &&SessionInfo| !hidden_sessions.contains(&session.id);
+                    let saved_focus = load_last_active_session().and_then(|saved_id| {
+                        sessions
+                            .iter()
+                            .find(|s| s.id == saved_id && !hidden_sessions.contains(&s.id))
+                            .map(|s| s.id)
+                    });
+                    // Prefer the last active session from this browser, then
+                    // fall back to the first non-hidden session by id (then
                     // the first session if all are hidden).
-                    let first_focus = sessions
-                        .iter()
-                        .find(|s| !hidden_sessions.contains(&s.id))
-                        .or_else(|| sessions.first())
-                        .map(|s| s.id);
+                    let focus_id = saved_focus.or_else(|| {
+                        sessions
+                            .iter()
+                            .find(visible)
+                            .or_else(|| sessions.first())
+                            .map(|s| s.id)
+                    });
 
-                    // Activate all non-hidden sessions so they load in background.
-                    let activate_ids = sessions
-                        .iter()
-                        .filter(|s| !hidden_sessions.contains(&s.id))
-                        .map(|s| s.id)
-                        .collect();
+                    let mut activate_ids: Vec<Uuid> = focus_id.into_iter().collect();
+                    activate_ids.extend(
+                        sessions
+                            .iter()
+                            .filter(visible)
+                            .map(|s| s.id)
+                            .filter(|id| Some(*id) != focus_id),
+                    );
+                    if activate_ids.is_empty() {
+                        activate_ids.extend(sessions.iter().map(|s| s.id));
+                    }
 
+                    if let Some(id) = focus_id {
+                        save_last_active_session(id);
+                    }
+
+                    // Activate the preferred session first. The reducer stores
+                    // a set, but the dashboard render also prioritizes the
+                    // focused id so the saved session's websocket starts
+                    // before background sessions on reload.
                     session_state.dispatch(DashboardSessionAction::InitializeFocus {
-                        focus_id: first_focus,
+                        focus_id,
                         activate_ids,
                     });
                 }
                 || ()
             },
         );
+    }
+
+    // Persist focus changes from every path that updates the reducer
+    // (keyboard/rail selection, notification deep link, newly launched session).
+    {
+        let focused_id = session_state.focused_id;
+        use_effect_with(focused_id, move |focused_id| {
+            if let Some(id) = focused_id {
+                save_last_active_session(*id);
+            }
+            || ()
+        });
     }
 
     // Auto-focus newly launched session when it appears in the session list.
@@ -102,6 +138,7 @@ pub(super) fn use_dashboard_focus(
             crate::audio::ensure_audio_context();
             crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
             if let Some(session) = active_sessions.get(index) {
+                save_last_active_session(session.id);
                 session_state.dispatch(DashboardSessionAction::FocusAndActivate(session.id));
             }
         })

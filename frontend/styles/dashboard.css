@@ -103,6 +103,67 @@
     margin: 0;
 }
 
+/* Health timer reminder */
+.health-timer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.68);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease-out;
+}
+
+.health-timer-dialog {
+    width: min(92vw, 460px);
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    text-align: center;
+    animation: scaleIn 0.2s ease-out;
+}
+
+.health-timer-dialog h2 {
+    margin: 0 0 0.75rem;
+    color: var(--text-primary);
+    font-size: 1.25rem;
+}
+
+.health-timer-dialog p {
+    margin: 0 0 1.25rem;
+    color: var(--text-primary);
+    font-size: 1rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.health-timer-confirm {
+    background: var(--accent);
+    border: none;
+    color: #fff;
+    padding: 0.6rem 1.35rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.health-timer-confirm:hover {
+    background: var(--accent-hover);
+}
+
+.health-timer-confirm:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -539,4 +600,3 @@
     color: var(--accent, #7aa2f7);
     font-weight: 600;
 }
-

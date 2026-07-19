@@ -1,5 +1,6 @@
 pub mod audio;
 mod components;
+mod health_timer;
 mod hooks;
 mod pages;
 pub mod utils;
@@ -8,6 +9,7 @@ pub mod utils;
 /// (see `shared::VERSION` / `shared/build.rs`, issue #1096).
 pub const VERSION: &str = shared::VERSION;
 
+use health_timer::HealthTimerReminder;
 use pages::{
     access_denied::AccessDeniedPage, admin::AdminPage, agent_messaging::AgentMessagingPage,
     banned::BannedPage, dashboard::DashboardPage, settings::SettingsPage, splash::SplashPage,
@@ -70,6 +72,7 @@ fn app() -> Html {
     html! {
         <BrowserRouter>
             <Switch<Route> render={switch} />
+            <HealthTimerReminder />
         </BrowserRouter>
     }
 }
