@@ -100,6 +100,7 @@ pub(crate) fn insert_recent_metric(
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
+    use shared::AgentType;
     use uuid::Uuid;
 
     /// Build a minimal `TurnMetrics` with the fields the recent-buffer
@@ -109,7 +110,7 @@ mod tests {
             id,
             session_id: Uuid::nil(),
             user_message_id: None,
-            agent_type: "claude".to_string(),
+            agent_type: AgentType::Claude,
             model: None,
             service_tier: None,
             started_at: Utc.timestamp_opt(started_secs, 0).unwrap(),

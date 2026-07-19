@@ -78,7 +78,7 @@ pub fn handle_turn_metrics_report(
         session_id,
         user_id: owner_id,
         user_message_id: metrics.user_message_id,
-        agent_type: metrics.agent_type.clone(),
+        agent_type: metrics.agent_type.as_str().to_string(),
         model: metrics.model.clone(),
         service_tier: metrics.service_tier.clone(),
         started_at: metrics.started_at,

@@ -462,7 +462,7 @@ pub(crate) async fn claude_io_task(
                             let usage = r.usage.as_ref();
                             let model = current_model.clone();
                             let outcome = TurnOutcome {
-                                agent_type: shared::AgentType::Claude.as_str().to_string(),
+                                agent_type: shared::AgentType::Claude,
                                 model,
                                 service_tier: current_service_tier.clone().or_else(|| {
                                     usage

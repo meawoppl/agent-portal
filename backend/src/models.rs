@@ -557,7 +557,7 @@ impl TurnMetric {
             // session is gone. Freshly inserted rows always carry one.
             session_id: self.session_id.unwrap_or_default(),
             user_message_id: self.user_message_id,
-            agent_type: self.agent_type,
+            agent_type: self.agent_type.parse().unwrap_or(shared::AgentType::Claude),
             model: self.model,
             service_tier: self.service_tier,
             started_at: self.started_at,

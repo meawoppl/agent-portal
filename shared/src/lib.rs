@@ -116,7 +116,9 @@ pub fn is_compaction_boundary(sys: &SystemMessage) -> bool {
 }
 
 /// Which agent CLI backs a session
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentType {
     #[default]
@@ -125,7 +127,7 @@ pub enum AgentType {
 }
 
 impl AgentType {
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(self) -> &'static str {
         match self {
             AgentType::Claude => "claude",
             AgentType::Codex => "codex",
@@ -142,7 +144,7 @@ impl std::fmt::Display for AgentType {
 impl std::str::FromStr for AgentType {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+        match s.trim().to_ascii_lowercase().as_str() {
             "claude" => Ok(AgentType::Claude),
             "codex" => Ok(AgentType::Codex),
             other => Err(format!("unknown agent type: {}", other)),

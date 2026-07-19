@@ -87,7 +87,7 @@ pub fn performance_panel() -> Html {
 mod tests {
     use super::*;
     use chrono::{DateTime, TimeZone, Utc};
-    use shared::api::MetricBucket;
+    use shared::{api::MetricBucket, AgentType};
     use std::collections::BTreeMap;
 
     use super::model::{
@@ -112,7 +112,7 @@ mod tests {
         }
         MetricBucket {
             bucket_start: ts,
-            agent_type: "claude".to_string(),
+            agent_type: AgentType::Claude,
             model: model.map(|s| s.to_string()),
             service_tier: tier.map(|s| s.to_string()),
             turn_count: 1,
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn pair_label_appends_non_standard_tier() {
         let label = pair_label(&(
-            "claude".to_string(),
+            AgentType::Claude,
             Some("claude-opus-4-7".to_string()),
             Some("priority".to_string()),
         ));
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn pair_label_drops_standard_tier() {
         let label = pair_label(&(
-            "claude".to_string(),
+            AgentType::Claude,
             Some("claude-opus-4-7".to_string()),
             Some("standard".to_string()),
         ));
@@ -187,13 +187,13 @@ mod tests {
 
     #[test]
     fn pair_label_codex_when_no_model() {
-        let label = pair_label(&("codex".to_string(), None, None));
+        let label = pair_label(&(AgentType::Codex, None, None));
         assert_eq!(label, "Codex");
     }
 
     #[test]
     fn pair_label_unknown_when_no_claude_model() {
-        let label = pair_label(&("claude".to_string(), None, None));
+        let label = pair_label(&(AgentType::Claude, None, None));
         assert_eq!(label, "claude unknown");
     }
 
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn group_by_key_roundtrips_through_string() {
         let pairs = vec![(
-            "claude".to_string(),
+            AgentType::Claude,
             Some("claude-opus-4-7".to_string()),
             Some("standard".to_string()),
         )];

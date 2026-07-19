@@ -369,9 +369,7 @@ pub(crate) async fn codex_io_task(
                                     .or_else(|| thread_model.clone())
                                     .or_else(|| configured_model_fallback.clone());
                                 let outcome = TurnOutcome {
-                                    agent_type: shared::AgentType::Codex
-                                        .as_str()
-                                        .to_string(),
+                                    agent_type: shared::AgentType::Codex,
                                     model,
                                     service_tier: None,
                                     input_tokens: usage
