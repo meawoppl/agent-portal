@@ -101,7 +101,7 @@ pub(super) fn resolve_focus_index(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::{AgentType, SessionInfo, SessionStatus};
+    use shared::{AgentType, SessionInfo, SessionRole, SessionStatus};
 
     fn session(id: Uuid, dir: &str, host: &str, branch: Option<&str>) -> SessionInfo {
         SessionInfo {
@@ -115,7 +115,7 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
             git_branch: branch.map(|b| b.to_string()),
-            my_role: "owner".to_string(),
+            my_role: SessionRole::Owner,
             hostname: host.to_string(),
             launcher_id: None,
             launcher_version: None,

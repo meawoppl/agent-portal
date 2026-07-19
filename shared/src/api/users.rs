@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::SessionRole;
+
 /// Request to update a user's admin/ban settings (admin endpoint)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateUserRequest {
@@ -44,13 +46,13 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddMemberRequest {
     pub email: String,
-    pub role: String,
+    pub role: SessionRole,
 }
 
 /// Request to update a session member's role
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateMemberRoleRequest {
-    pub role: String,
+    pub role: SessionRole,
 }
 
 /// Response from GET /api/auth/me — the currently authenticated user.

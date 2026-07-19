@@ -5,7 +5,7 @@ use axum::{
 use diesel::prelude::*;
 use serde::Deserialize;
 use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
-use shared::{LauncherInfo, LauncherToServer, ServerToLauncher, SessionStatus};
+use shared::{LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole, SessionStatus};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -214,7 +214,7 @@ pub(crate) fn create_desired_session(
         .values(NewSessionMember {
             session_id: draft.session_id,
             user_id: draft.user_id,
-            role: "owner".to_string(),
+            role: SessionRole::Owner.as_str().to_string(),
         })
         .execute(&mut conn)?;
 

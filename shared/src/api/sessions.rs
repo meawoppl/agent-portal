@@ -4,7 +4,7 @@ use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::SessionInfo;
+use crate::{SessionInfo, SessionRole};
 
 /// Response from GET /api/sessions — sessions visible to the current user.
 ///
@@ -62,7 +62,7 @@ pub struct SessionMemberInfo {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
-    pub role: String,
+    pub role: SessionRole,
     pub created_at: NaiveDateTime,
 }
 

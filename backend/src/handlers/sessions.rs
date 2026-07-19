@@ -8,7 +8,7 @@ use shared::api::{
     AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse, SessionMemberInfo,
     SessionMembersResponse, UpdateMemberRoleRequest,
 };
-use shared::SessionStatus;
+use shared::{SessionRole, SessionStatus};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -23,7 +23,7 @@ use crate::{
 /// Session with the current user's role included.
 ///
 /// Serializes via `#[serde(flatten)]` of the full `Session` row plus a
-/// `my_role` string — this is the on-wire shape consumed by the frontend.
+/// typed `my_role` — this is the on-wire shape consumed by the frontend.
 /// The frontend deserializes the same bytes into `shared::api::SessionsResponse`
 /// (whose `sessions` field is `Vec<shared::SessionInfo>`); `SessionInfo`
 /// silently drops the per-row stats fields it doesn't care about
@@ -33,7 +33,7 @@ use crate::{
 pub struct SessionWithRole {
     #[serde(flatten)]
     pub session: Session,
-    pub my_role: String,
+    pub my_role: SessionRole,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub launcher_version: Option<String>,
 }
@@ -66,7 +66,7 @@ pub async fn list_sessions(
                 .session_manager
                 .launcher_version(session.launcher_id),
             session,
-            my_role: role,
+            my_role: role.parse().unwrap_or(SessionRole::Unknown),
         })
         .collect();
 
@@ -371,8 +371,8 @@ struct UserBasicInfo {
 }
 
 /// Validate a member role supplied by the caller
-fn validate_member_role(role: &str) -> Result<(), AppError> {
-    if role != "editor" && role != "viewer" {
+fn validate_member_role(role: SessionRole) -> Result<(), AppError> {
+    if !role.is_assignable_member_role() {
         return Err(AppError::BadRequest("Invalid role"));
     }
     Ok(())
@@ -410,7 +410,7 @@ pub async fn list_session_members(
             user_id: user.id,
             email: user.email,
             name: user.name,
-            role: member.role,
+            role: member.role.parse().unwrap_or(SessionRole::Unknown),
             created_at: member.created_at,
         })
         .collect();
@@ -427,7 +427,7 @@ pub async fn add_session_member(
     Path(session_id): Path<Uuid>,
     Json(req): Json<AddMemberRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    validate_member_role(&req.role)?;
+    validate_member_role(req.role)?;
 
     let mut conn = app_state.conn()?;
 
@@ -459,7 +459,7 @@ pub async fn add_session_member(
     let new_member = NewSessionMember {
         session_id,
         user_id: target_user_id,
-        role: req.role,
+        role: req.role.as_str().to_string(),
     };
 
     diesel::insert_into(session_members::table)
@@ -487,7 +487,10 @@ pub async fn remove_session_member(
         .optional()?
         .ok_or(AppError::NotFound("Session not found"))?;
 
-    let is_owner = current_membership.role == "owner";
+    let is_owner = current_membership
+        .role
+        .parse::<SessionRole>()
+        .is_ok_and(SessionRole::can_manage_members);
 
     if !is_owner && current_user_id != target_user_id {
         return Err(AppError::Forbidden);
@@ -518,7 +521,7 @@ pub async fn update_session_member_role(
     Path((session_id, target_user_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMemberRoleRequest>,
 ) -> Result<EmptyResponse, AppError> {
-    validate_member_role(&req.role)?;
+    validate_member_role(req.role)?;
 
     let mut conn = app_state.conn()?;
 
@@ -539,7 +542,7 @@ pub async fn update_session_member_role(
             .filter(session_members::session_id.eq(session_id))
             .filter(session_members::user_id.eq(target_user_id)),
     )
-    .set(session_members::role.eq(&req.role))
+    .set(session_members::role.eq(req.role.as_str()))
     .execute(&mut conn)?;
 
     if updated == 0 {

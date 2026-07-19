@@ -1,7 +1,7 @@
 // TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use shared::SessionInfo;
+use shared::{SessionInfo, SessionRole};
 use uuid::Uuid;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::MouseEvent;
@@ -138,7 +138,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         )
     };
 
-    let pause_option = if session.my_role != "viewer" {
+    let pause_option = if session.my_role != SessionRole::Viewer {
         let (pause_label, pause_hint) = if is_paused {
             ("Resume Session", "Restart from saved session")
         } else {
@@ -212,7 +212,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     };
     let short_id = &session.id.to_string()[..8];
 
-    let leave_option = if session.my_role != "owner" {
+    let leave_option = if session.my_role != SessionRole::Owner {
         menu_option(
             classes!("leave"),
             "Leave Session",
@@ -225,7 +225,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
 
     let repo_option = repo_pr_submenu(session);
 
-    let share_option = if session.my_role == "owner" {
+    let share_option = if session.my_role == SessionRole::Owner {
         let on_share = close_then(props.on_close.clone(), {
             let on_share = props.on_share.clone();
             move || on_share.emit(session_id)
@@ -240,7 +240,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         html! {}
     };
 
-    let delete_option = if session.my_role == "owner" {
+    let delete_option = if session.my_role == SessionRole::Owner {
         menu_option(
             classes!("stop"),
             "Delete Session",
@@ -251,7 +251,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         html! {}
     };
 
-    let schedule_option = if session.my_role == "owner" {
+    let schedule_option = if session.my_role == SessionRole::Owner {
         menu_option(
             classes!("schedule"),
             "Schedule Task",
