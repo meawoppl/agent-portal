@@ -91,7 +91,7 @@ pub fn count_up(props: &CountUpProps) -> Html {
     }
 
     let shown = if props.compact {
-        crate::components::message_renderer::turn_metrics_footer::compact_count(*value)
+        crate::components::turn_metrics_display::compact_count(*value)
     } else {
         value.to_string()
     };
