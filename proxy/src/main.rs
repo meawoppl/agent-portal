@@ -23,7 +23,8 @@ use shared::api::{ResolveProxySessionRequest, ResolveProxySessionResponse};
 /// launcher is where heterogeneous (Claude + Codex) dispatch lives.
 type ClaudeSession = Session<ClaudeAgent>;
 use config::{DirectorySession, ProxyConfig, SessionAuth};
-use session::{get_git_branch, ProxySessionConfig};
+use session::ProxySessionConfig;
+use session_lib::git_metadata::get_git_branch;
 use tracing::{info, warn};
 use tracing_subscriber::prelude::*;
 use uuid::Uuid;

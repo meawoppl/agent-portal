@@ -5,12 +5,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use claude_session_lib::proxy_session::{get_git_branch, CodexThreadIdSink};
+use claude_session_lib::proxy_session::CodexThreadIdSink;
 use claude_session_lib::{
     claude_transcript_status, run_connection_loop, ClaudeAgent, LoopResult, PortalInput,
     ProxySessionConfig, TranscriptStatus,
 };
 use codex_session_lib::CodexAgent;
+use session_lib::git_metadata::get_git_branch;
 use session_lib::{Session, SessionConfig};
 use shared::SessionExitReason;
 
