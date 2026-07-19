@@ -148,6 +148,62 @@
     background: rgba(0, 0, 0, 0.2);
 }
 
+/* Per-host section header (opt-in "group rail by host"). Non-interactive
+   label rendered inline among the pills. In the horizontal (top/bottom) rail
+   it reads as a compact chip that precedes each host's pills; in the vertical
+   (left/right) rail it spans the column as a full-width section heading. */
+.session-rail-host-header {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+    padding: 0.15rem 0.5rem;
+    align-self: center;
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.session-rail-host-header .host-header-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.session-rail-host-header .host-header-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    font-size: 0.65rem;
+    font-weight: 600;
+}
+
+/* Vertical rail: host headers become full-width section rows with a subtle
+   top rule so groups read as stacked sections rather than inline chips. */
+.dashboard-body.rail-left .session-rail-host-header,
+.dashboard-body.rail-right .session-rail-host-header {
+    align-self: stretch;
+    width: 100%;
+    justify-content: space-between;
+    padding: 0.35rem 0.25rem 0.15rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.15rem;
+}
+
+/* The first header in a vertical rail shouldn't carry a top rule/margin. */
+.dashboard-body.rail-left .session-rail-host-header:first-child,
+.dashboard-body.rail-right .session-rail-host-header:first-child {
+    border-top: none;
+    margin-top: 0;
+}
+
 .session-pill {
     --pill-visual-height: 2.5rem;
 

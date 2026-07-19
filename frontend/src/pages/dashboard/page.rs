@@ -11,8 +11,8 @@ use super::session_order;
 use super::session_rail::{ActivityRef, AgentMessageBroadcast, BroadcastRef, SessionRail};
 use super::session_view::SessionView;
 use super::types::{
-    load_hidden_sessions, load_inactive_hidden, load_rail_position, load_show_cost,
-    save_hidden_sessions, save_inactive_hidden, save_show_cost,
+    load_group_by_host, load_hidden_sessions, load_inactive_hidden, load_rail_position,
+    load_show_cost, save_hidden_sessions, save_inactive_hidden, save_show_cost,
 };
 use crate::components::{
     ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, TurnMetricsHeaderPill,
@@ -91,6 +91,7 @@ pub fn dashboard_page() -> Html {
             load_inactive_hidden(),
             load_show_cost(),
             load_rail_position(),
+            load_group_by_host(),
         )
     });
     // Focus is tracked by `session_id` (the source of truth), not by array
@@ -132,7 +133,18 @@ pub fn dashboard_page() -> Html {
         // Total, deterministic order keyed down to the unique session id, so
         // the displayed order is a pure function of the session *set* and never
         // depends on the order `/api/sessions` happened to return (issue #1094).
-        sorted.sort_by(session_order::session_display_cmp);
+        //
+        // When the "group rail by host" pref is on we swap in the host-first
+        // comparator. Both are *total* orders over the same vec, and this vec is
+        // the single source of truth for focus resolution, nav-mode numbering,
+        // and `j`/`k` traversal — so the logical order always matches the
+        // visible top-to-bottom rail (grouped when the pref is on). The rail's
+        // host headers are inserted purely visually and carry no display index.
+        if ui_state.group_by_host {
+            sorted.sort_by(session_order::session_display_cmp_grouped);
+        } else {
+            sorted.sort_by(session_order::session_display_cmp);
+        }
         sorted
     };
 
@@ -254,6 +266,7 @@ pub fn dashboard_page() -> Html {
             // localStorage so the dashboard picks up the new value when
             // the user navigates back.
             ui_state.dispatch(DashboardUiAction::SetRailPosition(load_rail_position()));
+            ui_state.dispatch(DashboardUiAction::SetGroupByHost(load_group_by_host()));
             ui_state.dispatch(DashboardUiAction::CloseSettings);
         })
     };
@@ -733,6 +746,7 @@ pub fn dashboard_page() -> Html {
                         awaiting_sessions={session_state.awaiting_sessions.clone()}
                         hidden_sessions={effective_hidden_sessions.clone()}
                         inactive_hidden={ui_state.inactive_hidden}
+                        group_by_host={ui_state.group_by_host}
                         connected_sessions={session_state.connected_sessions.clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
