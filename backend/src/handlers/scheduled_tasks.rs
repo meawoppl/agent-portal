@@ -54,6 +54,14 @@ fn task_to_info(t: ScheduledTask) -> ScheduledTaskInfo {
     }
 }
 
+fn validate_cron_expression(cron_expression: &str) -> Result<(), AppError> {
+    let cron_fields: Vec<&str> = cron_expression.split_whitespace().collect();
+    if cron_fields.len() != 5 {
+        return Err(AppError::BadRequest("Invalid cron expression"));
+    }
+    Ok(())
+}
+
 /// Convert a ScheduledTask model to a ScheduledTaskConfig protocol message.
 pub(crate) fn task_to_config(t: &ScheduledTask) -> ScheduledTaskConfig {
     ScheduledTaskConfig {
@@ -172,11 +180,9 @@ pub async fn create_task_handler(
     CurrentUserId(user_id): CurrentUserId,
     Json(req): Json<CreateScheduledTaskRequest>,
 ) -> Result<Json<ScheduledTaskInfo>, AppError> {
-    // Basic cron validation: must have 5 space-separated fields
-    let cron_fields: Vec<&str> = req.fields.cron_expression.split_whitespace().collect();
-    if cron_fields.len() != 5 {
+    if let Err(err) = validate_cron_expression(&req.fields.cron_expression) {
         warn!("Invalid cron expression: {}", req.fields.cron_expression);
-        return Err(AppError::BadRequest("Invalid cron expression"));
+        return Err(err);
     }
 
     let mut conn = app_state.conn()?;
@@ -228,10 +234,9 @@ pub async fn update_task_handler(
 
     // Validate cron if provided
     if let Some(ref cron) = req.cron_expression {
-        let fields: Vec<&str> = cron.split_whitespace().collect();
-        if fields.len() != 5 {
+        if let Err(err) = validate_cron_expression(cron) {
             warn!("Invalid cron expression in update: {}", cron);
-            return Err(AppError::BadRequest("Invalid cron expression"));
+            return Err(err);
         }
     }
 
@@ -326,4 +331,23 @@ pub async fn list_runs_handler(
         .load(&mut conn)?;
 
     Ok(Json(runs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_cron_validation_is_bad_request() {
+        let err = validate_cron_expression("* * *").unwrap_err();
+        assert!(matches!(
+            err,
+            AppError::BadRequest("Invalid cron expression")
+        ));
+    }
+
+    #[test]
+    fn valid_cron_validation_accepts_five_fields() {
+        validate_cron_expression("*/5 * * * *").unwrap();
+    }
 }
