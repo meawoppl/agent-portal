@@ -1,7 +1,7 @@
 use crate::models::{NewSessionMember, NewSessionWithId};
 use crate::AppState;
 use diesel::prelude::*;
-use shared::{AgentType, SessionStatus};
+use shared::{AgentType, SessionRole, SessionStatus};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -301,7 +301,7 @@ fn create_new_session(
             let new_member = NewSessionMember {
                 session_id: session.id,
                 user_id,
-                role: "owner".to_string(),
+                role: SessionRole::Owner.as_str().to_string(),
             };
             if let Err(e) = diesel::insert_into(session_members::table)
                 .values(&new_member)

@@ -21,7 +21,7 @@ resolver = "2"
 # `major.minor.{git commit count}`, derived at build time by `shared/build.rs`
 # so no PR ever edits a version line (issue #1096). Runtime version =
 # `shared::VERSION`.
-version = "2.13.3"
+version = "2.13.4"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 

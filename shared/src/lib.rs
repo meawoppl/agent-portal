@@ -231,6 +231,61 @@ impl SessionStatus {
     }
 }
 
+/// Current user's role within a shared session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionRole {
+    Owner,
+    Editor,
+    #[default]
+    Viewer,
+    #[serde(other)]
+    Unknown,
+}
+
+impl SessionRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Editor => "editor",
+            Self::Viewer => "viewer",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn can_mutate(self) -> bool {
+        matches!(self, Self::Owner | Self::Editor)
+    }
+
+    pub fn can_manage_members(self) -> bool {
+        matches!(self, Self::Owner)
+    }
+
+    pub fn is_assignable_member_role(self) -> bool {
+        matches!(self, Self::Editor | Self::Viewer)
+    }
+}
+
+impl std::fmt::Display for SessionRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SessionRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "owner" => Ok(Self::Owner),
+            "editor" => Ok(Self::Editor),
+            "viewer" => Ok(Self::Viewer),
+            "unknown" => Ok(Self::Unknown),
+            other => Err(format!("unknown session role: {}", other)),
+        }
+    }
+}
+
 impl SendMode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -323,7 +378,7 @@ pub struct SessionInfo {
     #[serde(default)]
     pub git_branch: Option<String>,
     /// The current user's role in this session (owner, editor, viewer)
-    pub my_role: String,
+    pub my_role: SessionRole,
     /// Hostname of the machine running the session
     #[serde(default)]
     pub hostname: String,
@@ -760,6 +815,34 @@ mod tests {
 
         let replaced: SessionStatus = serde_json::from_str("\"replaced\"").unwrap();
         assert_eq!(replaced, SessionStatus::Replaced);
+    }
+
+    #[test]
+    fn session_role_wire_and_capabilities() {
+        assert_eq!(SessionRole::Owner.as_str(), "owner");
+        assert_eq!(SessionRole::Editor.as_str(), "editor");
+        assert_eq!(SessionRole::Viewer.as_str(), "viewer");
+
+        assert!(SessionRole::Owner.can_manage_members());
+        assert!(SessionRole::Owner.can_mutate());
+        assert!(SessionRole::Editor.can_mutate());
+        assert!(!SessionRole::Editor.can_manage_members());
+        assert!(!SessionRole::Viewer.can_mutate());
+
+        assert!(SessionRole::Editor.is_assignable_member_role());
+        assert!(SessionRole::Viewer.is_assignable_member_role());
+        assert!(!SessionRole::Owner.is_assignable_member_role());
+
+        let json = serde_json::to_string(&SessionRole::Editor).unwrap();
+        assert_eq!(json, "\"editor\"");
+        assert_eq!(
+            serde_json::from_str::<SessionRole>("\"owner\"").unwrap(),
+            SessionRole::Owner
+        );
+        assert_eq!(
+            " viewer ".parse::<SessionRole>().unwrap(),
+            SessionRole::Viewer
+        );
     }
 
     #[test]

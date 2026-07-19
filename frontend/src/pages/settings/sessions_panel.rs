@@ -40,7 +40,7 @@ fn session_row(props: &SessionRowProps) -> Html {
     let project = utils::extract_folder(&session.working_directory);
     let hostname = &session.hostname;
 
-    let is_owner = session.my_role == "owner";
+    let is_owner = session.my_role == shared::SessionRole::Owner;
 
     let short_id = &session.id.to_string()[..8];
 

@@ -6,6 +6,7 @@ use gloo_net::http::Request;
 use shared::api::{
     AddMemberRequest, SessionMemberInfo, SessionMembersResponse, UpdateMemberRoleRequest,
 };
+use shared::SessionRole;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
@@ -24,13 +25,13 @@ pub enum ShareDialogMsg {
     LoadMembers,
     MembersLoaded(Vec<SessionMemberInfo>),
     UpdateEmail(String),
-    UpdateRole(String),
+    UpdateRole(SessionRole),
     AddMember,
     MemberAdded,
     RemoveMember(Uuid),
     MemberRemoved(Uuid),
-    ChangeRole(Uuid, String),
-    RoleChanged(Uuid, String),
+    ChangeRole(Uuid, SessionRole),
+    RoleChanged(Uuid, SessionRole),
     SetError(String),
 }
 
@@ -38,7 +39,7 @@ pub struct ShareDialog {
     members: Vec<SessionMemberInfo>,
     loading: bool,
     email_input: String,
-    new_role: String,
+    new_role: SessionRole,
     error: Option<String>,
     // RAII guard — must be held to keep the Escape listener active
     _escape_listener: Option<EventListener>,
@@ -61,7 +62,7 @@ impl Component for ShareDialog {
             members: Vec::new(),
             loading: true,
             email_input: String::new(),
-            new_role: "viewer".to_string(),
+            new_role: SessionRole::Viewer,
             error: None,
             _escape_listener: Some(listener),
         }
@@ -109,7 +110,7 @@ impl Component for ShareDialog {
                 }
                 let session_id = ctx.props().session_id;
                 let email = self.email_input.trim().to_string();
-                let role = self.new_role.clone();
+                let role = self.new_role;
                 let link = ctx.link().clone();
 
                 spawn_local(async move {
@@ -183,13 +184,13 @@ impl Component for ShareDialog {
             ShareDialogMsg::ChangeRole(user_id, new_role) => {
                 let session_id = ctx.props().session_id;
                 let link = ctx.link().clone();
-                let role = new_role.clone();
+                let role = new_role;
                 spawn_local(async move {
                     let url = utils::api_url(&format!(
                         "/api/sessions/{}/members/{}",
                         session_id, user_id
                     ));
-                    let body = UpdateMemberRoleRequest { role: role.clone() };
+                    let body = UpdateMemberRoleRequest { role };
                     match Request::patch(&url).json(&body).unwrap().send().await {
                         Ok(response) if response.ok() => {
                             link.send_message(ShareDialogMsg::RoleChanged(user_id, role));
@@ -240,7 +241,7 @@ impl Component for ShareDialog {
 
         let on_role_change = ctx.link().callback(|e: Event| {
             let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
-            ShareDialogMsg::UpdateRole(select.value())
+            ShareDialogMsg::UpdateRole(select.value().parse().unwrap_or(SessionRole::Viewer))
         });
 
         let on_add_click = ctx.link().callback(|_| ShareDialogMsg::AddMember);
@@ -283,7 +284,7 @@ impl Component for ShareDialog {
                             oninput={on_email_input}
                             onkeypress={on_keypress}
                         />
-                        <select value={self.new_role.clone()} onchange={on_role_change}>
+                        <select value={self.new_role.as_str()} onchange={on_role_change}>
                             <option value="viewer">{ "Viewer" }</option>
                             <option value="editor">{ "Editor" }</option>
                         </select>
@@ -313,7 +314,7 @@ impl Component for ShareDialog {
 
 impl ShareDialog {
     fn view_member(&self, ctx: &Context<Self>, member: &SessionMemberInfo) -> Html {
-        let is_owner = member.role == "owner";
+        let is_owner = member.role == SessionRole::Owner;
         let user_id = member.user_id;
         let display_name = member
             .name
@@ -329,7 +330,10 @@ impl ShareDialog {
             let link = ctx.link().clone();
             Callback::from(move |e: Event| {
                 let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
-                link.send_message(ShareDialogMsg::ChangeRole(user_id, select.value()));
+                link.send_message(ShareDialogMsg::ChangeRole(
+                    user_id,
+                    select.value().parse().unwrap_or(SessionRole::Viewer),
+                ));
             })
         };
 
@@ -342,9 +346,9 @@ impl ShareDialog {
                     } else {
                         html! {
                             <>
-                                <select class="member-role-select" value={member.role.clone()} onchange={on_role_change}>
-                                    <option value="viewer" selected={member.role == "viewer"}>{ "Viewer" }</option>
-                                    <option value="editor" selected={member.role == "editor"}>{ "Editor" }</option>
+                                <select class="member-role-select" value={member.role.as_str()} onchange={on_role_change}>
+                                    <option value="viewer" selected={member.role == SessionRole::Viewer}>{ "Viewer" }</option>
+                                    <option value="editor" selected={member.role == SessionRole::Editor}>{ "Editor" }</option>
                                 </select>
                                 <button class="member-remove" onclick={on_remove} title="Remove member">
                                     { "×" }

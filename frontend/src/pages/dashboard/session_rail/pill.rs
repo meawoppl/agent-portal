@@ -112,7 +112,7 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             }
             {
                 if let Some(role_class) = view.role_badge_class {
-                    html! { <span class={role_class}>{ &session.my_role }</span> }
+                    html! { <span class={role_class}>{ session.my_role.as_str() }</span> }
                 } else {
                     html! {}
                 }
@@ -181,8 +181,8 @@ impl PillViewModel {
             None
         };
 
-        let role_badge_class = (session.my_role != "owner")
-            .then(|| format!("pill-role-badge role-{}", session.my_role));
+        let role_badge_class = (session.my_role != shared::SessionRole::Owner)
+            .then(|| format!("pill-role-badge role-{}", session.my_role.as_str()));
 
         Self {
             pill_classes,

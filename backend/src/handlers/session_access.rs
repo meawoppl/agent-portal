@@ -17,6 +17,7 @@
 use crate::errors::AppError;
 use crate::AppState;
 use diesel::prelude::*;
+use shared::SessionRole;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -69,7 +70,7 @@ pub fn verify_session_owner(
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(sessions::id.eq(session_id))
         .filter(session_members::user_id.eq(user_id))
-        .filter(session_members::role.eq("owner"))
+        .filter(session_members::role.eq(SessionRole::Owner.as_str()))
         .select(crate::models::Session::as_select())
         .first::<crate::models::Session>(conn)
         .optional()?
@@ -90,7 +91,7 @@ pub fn verify_owner_membership(
     session_members::table
         .filter(session_members::session_id.eq(session_id))
         .filter(session_members::user_id.eq(user_id))
-        .filter(session_members::role.eq("owner"))
+        .filter(session_members::role.eq(SessionRole::Owner.as_str()))
         .select(session_members::user_id)
         .first::<Uuid>(conn)
         .optional()?
@@ -129,8 +130,8 @@ pub fn verify_session_mutator(
         .filter(session_members::user_id.eq(user_id))
         .filter(
             session_members::role
-                .eq("owner")
-                .or(session_members::role.eq("editor")),
+                .eq(SessionRole::Owner.as_str())
+                .or(session_members::role.eq(SessionRole::Editor.as_str())),
         )
         .select(crate::models::Session::as_select())
         .first::<crate::models::Session>(conn)
