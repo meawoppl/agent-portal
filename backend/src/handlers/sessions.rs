@@ -378,6 +378,34 @@ fn validate_member_role(role: SessionRole) -> Result<(), AppError> {
     Ok(())
 }
 
+fn ensure_member_not_existing(member_exists: bool) -> Result<(), AppError> {
+    if member_exists {
+        return Err(AppError::BadRequest("User is already a member"));
+    }
+    Ok(())
+}
+
+fn ensure_owner_not_self_removal(
+    is_owner: bool,
+    current_user_id: Uuid,
+    target_user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_owner && current_user_id == target_user_id {
+        return Err(AppError::BadRequest("Owner cannot remove themselves"));
+    }
+    Ok(())
+}
+
+fn ensure_not_self_role_change(
+    current_user_id: Uuid,
+    target_user_id: Uuid,
+) -> Result<(), AppError> {
+    if current_user_id == target_user_id {
+        return Err(AppError::BadRequest("Cannot change own role"));
+    }
+    Ok(())
+}
+
 /// List all members of a session
 pub async fn list_session_members(
     State(app_state): State<Arc<AppState>>,
@@ -452,9 +480,7 @@ pub async fn add_session_member(
         .first::<SessionMember>(&mut conn)
         .optional()?;
 
-    if existing.is_some() {
-        return Err(AppError::BadRequest("User is already a member"));
-    }
+    ensure_member_not_existing(existing.is_some())?;
 
     let new_member = NewSessionMember {
         session_id,
@@ -496,9 +522,7 @@ pub async fn remove_session_member(
         return Err(AppError::Forbidden);
     }
 
-    if is_owner && current_user_id == target_user_id {
-        return Err(AppError::BadRequest("Owner cannot remove themselves"));
-    }
+    ensure_owner_not_self_removal(is_owner, current_user_id, target_user_id)?;
 
     let deleted = diesel::delete(
         session_members::table
@@ -533,9 +557,7 @@ pub async fn update_session_member_role(
         current_user_id,
     )?;
 
-    if current_user_id == target_user_id {
-        return Err(AppError::BadRequest("Cannot change own role"));
-    }
+    ensure_not_self_role_change(current_user_id, target_user_id)?;
 
     let updated = diesel::update(
         session_members::table
@@ -550,4 +572,44 @@ pub async fn update_session_member_role(
     }
 
     Ok(EmptyResponse::OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_member_role_validation_is_bad_request() {
+        let err = validate_member_role(SessionRole::Owner).unwrap_err();
+        assert!(matches!(err, AppError::BadRequest("Invalid role")));
+    }
+
+    #[test]
+    fn duplicate_member_validation_is_bad_request() {
+        let err = ensure_member_not_existing(true).unwrap_err();
+        assert!(matches!(
+            err,
+            AppError::BadRequest("User is already a member")
+        ));
+    }
+
+    #[test]
+    fn owner_self_removal_validation_is_bad_request() {
+        let user_id = Uuid::nil();
+        let err = ensure_owner_not_self_removal(true, user_id, user_id).unwrap_err();
+        assert!(matches!(
+            err,
+            AppError::BadRequest("Owner cannot remove themselves")
+        ));
+    }
+
+    #[test]
+    fn self_role_change_validation_is_bad_request() {
+        let user_id = Uuid::nil();
+        let err = ensure_not_self_role_change(user_id, user_id).unwrap_err();
+        assert!(matches!(
+            err,
+            AppError::BadRequest("Cannot change own role")
+        ));
+    }
 }
