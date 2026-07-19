@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::session::{
-    ack_portal_input, connect_to_backend, get_git_branch, register_session, wiggum_prompt, Backoff,
+    ack_portal_input, connect_to_backend, register_session, wiggum_prompt, Backoff,
     PermissionResponseData, ProxySessionConfig, SharedWsWrite, WsEvent,
 };
 use anyhow::Result;
@@ -24,6 +24,7 @@ use claude_codes::io::{
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
 use claude_session_lib::claude_cli_args;
+use session_lib::git_metadata::get_git_branch;
 use session_lib::output_buffer::PendingOutputBuffer;
 use shared::ProxyToServer;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

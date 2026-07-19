@@ -24,6 +24,7 @@ pub mod adapter;
 pub mod agent;
 pub mod buffer;
 pub mod error;
+pub mod git_metadata;
 pub mod heartbeat;
 pub mod io;
 pub mod output_buffer;
