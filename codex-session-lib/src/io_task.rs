@@ -98,6 +98,95 @@ fn route_user_input(turn_active: bool, current_turn_id: Option<&str>) -> InputRo
     }
 }
 
+/// Mutable driver state for a Codex session's I/O loop, gathered out of the
+/// select-loop so the turn / queue / approval bookkeeping has pure,
+/// unit-testable transition methods (issue #917). The loop keeps only channel
+/// recv, effect execution, and app-server I/O; every decision about *whether a
+/// turn is active*, *how to route a fresh input*, *which approval-response
+/// shape a request expects*, and *what to drain at turn end* lives here.
+///
+/// Deliberately excludes the metrics/token trackers (`TurnTracker`,
+/// `CodexSubagentTokenTracker`, the usage latches): those are already cohesive
+/// structs and their updates are interleaved with app-server reads, so folding
+/// them in would not add testability.
+#[derive(Default)]
+struct CodexIoState {
+    /// Whether a turn is currently being driven (a `turn/start` has been
+    /// dispatched and its `turn/completed` not yet observed).
+    turn_active: bool,
+    /// The active turn's id, captured from `turn/started`; required (non-empty)
+    /// to steer or interrupt. `None` until observed; cleared on `turn/completed`.
+    current_turn_id: Option<String>,
+    /// User prompts that arrived while a turn was active but un-steerable;
+    /// drained one-per-turn-end in FIFO order.
+    queued_prompts: VecDeque<QueuedPrompt>,
+    /// Per-request approval-response shape, latched when the server→client
+    /// approval request arrives and consumed when the user's decision returns.
+    pending_approval_kinds: HashMap<String, CodexApprovalResponseKind>,
+}
+
+impl CodexIoState {
+    fn turn_active(&self) -> bool {
+        self.turn_active
+    }
+
+    fn set_turn_active(&mut self, active: bool) {
+        self.turn_active = active;
+    }
+
+    fn current_turn_id(&self) -> Option<&str> {
+        self.current_turn_id.as_deref()
+    }
+
+    /// Latch the active turn id from any notification that names a turn
+    /// (`turn/started` and every later turn-scoped frame).
+    fn set_turn_id(&mut self, turn_id: &str) {
+        self.current_turn_id = Some(turn_id.to_string());
+    }
+
+    /// Clear the active turn id at `turn/completed`.
+    fn clear_turn_id(&mut self) {
+        self.current_turn_id = None;
+    }
+
+    /// Decide how to deliver a fresh user input given the current turn state.
+    fn route_input(&self) -> InputRouting {
+        route_user_input(self.turn_active, self.current_turn_id.as_deref())
+    }
+
+    /// Queue a prompt for the next turn-end drain (a turn is active but
+    /// un-steerable, or a `turn/steer` attempt failed).
+    fn queue_prompt(&mut self, prompt: QueuedPrompt) {
+        self.queued_prompts.push_back(prompt);
+    }
+
+    /// Count of prompts currently queued (for log messages).
+    fn queued_len(&self) -> usize {
+        self.queued_prompts.len()
+    }
+
+    /// A turn ended: mark idle and hand back the next queued prompt to start,
+    /// if any. Pops at most one — the remainder wait for the next turn end,
+    /// exactly as the pre-extraction loop did.
+    fn on_turn_ended(&mut self) -> Option<QueuedPrompt> {
+        self.turn_active = false;
+        self.queued_prompts.pop_front()
+    }
+
+    /// Latch the approval-response shape for a server→client approval request.
+    fn record_approval_request(&mut self, request_id: String, kind: CodexApprovalResponseKind) {
+        self.pending_approval_kinds.insert(request_id, kind);
+    }
+
+    /// Consume the approval-response shape for a request id, defaulting to the
+    /// v2 accept/decline family when the request was never latched.
+    fn take_approval_kind(&mut self, request_id: &str) -> CodexApprovalResponseKind {
+        self.pending_approval_kinds
+            .remove(request_id)
+            .unwrap_or(CodexApprovalResponseKind::AcceptDecline)
+    }
+}
+
 /// Background task for Codex sessions.
 pub(crate) async fn codex_io_task(
     config: SessionConfig,
@@ -244,14 +333,13 @@ pub(crate) async fn codex_io_task(
         &thread_id,
     ))));
 
-    let mut turn_active = false;
-    let mut queued_prompts: VecDeque<QueuedPrompt> = VecDeque::new();
-    // Track the turn currently being driven so we can name it on
-    // `turn/interrupt` requests (codex-codes 0.129.3 made both
-    // `thread_id` and `turn_id` required on `TurnInterruptParams`).
-    // Set when a `turn/started` notification arrives; cleared when
-    // `turn/completed` arrives.
-    let mut current_turn_id: Option<String> = None;
+    // Turn/queue/approval bookkeeping, gathered into a state struct with pure
+    // transition methods (issue #917). `current_turn_id` tracks the turn being
+    // driven so we can name it on `turn/interrupt` requests (codex-codes
+    // 0.129.3 made both `thread_id` and `turn_id` required on
+    // `TurnInterruptParams`): set when a `turn/started` notification arrives,
+    // cleared when `turn/completed` arrives.
+    let mut state = CodexIoState::default();
     let mut latest_token_usage: Option<(String, CodexUsageEvent)> = None;
     // Per-turn metrics tracker. `start`ed inside `start_codex_turn`,
     // updated as `ItemStarted` / `ItemCompleted` notifications come in,
@@ -262,18 +350,16 @@ pub(crate) async fn codex_io_task(
     let mut current_turn_usage: Option<codex_codes::TokenUsageBreakdown> = None;
     let mut current_turn_model: Option<String> = None;
     let mut subagent_token_tracker = CodexSubagentTokenTracker::new(thread_id.clone());
-    let mut pending_approval_response_kinds: HashMap<String, CodexApprovalResponseKind> =
-        HashMap::new();
 
     loop {
-        if turn_active {
+        if state.turn_active() {
             // Turn is active: drain server messages AND accept approval responses.
             tokio::select! {
                 result = client.next_message() => {
                     match result {
                         Ok(Some(msg)) => {
                             if let Some((request_id, kind)) = approval_response_kind(&msg) {
-                                pending_approval_response_kinds.insert(request_id, kind);
+                                state.record_approval_request(request_id, kind);
                             }
 
                             // Peek for turn lifecycle so we can name the
@@ -283,7 +369,7 @@ pub(crate) async fn codex_io_task(
                             // because it consumes the message.
                             if let codex_codes::ServerMessage::Notification(notif) = &msg {
                                 if let codex_codes::Notification::TurnStarted(p) = notif {
-                                    current_turn_id = Some(p.turn.id.clone());
+                                    state.set_turn_id(&p.turn.id);
                                     current_turn_model = thread_model.clone();
                                     subagent_token_tracker.start_parent_turn();
                                 }
@@ -294,8 +380,8 @@ pub(crate) async fn codex_io_task(
                                     );
                                 }
                                 if let codex_codes::Notification::ModelRerouted(p) = notif {
-                                    let matches_current_turn = current_turn_id
-                                        .as_deref()
+                                    let matches_current_turn = state
+                                        .current_turn_id()
                                         .is_some_and(|turn_id| turn_id == p.turn_id);
                                     if p.thread_id == thread_id && matches_current_turn {
                                         current_turn_model =
@@ -310,8 +396,8 @@ pub(crate) async fn codex_io_task(
                                     notif
                                 {
                                     let is_current_main_turn = p.thread_id == thread_id
-                                        && current_turn_id
-                                            .as_deref()
+                                        && state
+                                            .current_turn_id()
                                             .is_some_and(|turn_id| turn_id == p.turn_id);
                                     if is_current_main_turn {
                                         latest_token_usage = Some((
@@ -365,10 +451,10 @@ pub(crate) async fn codex_io_task(
                                     }
                                 }
                                 if let Some(turn_id) = notif.turn_id() {
-                                    current_turn_id = Some(turn_id.to_string());
+                                    state.set_turn_id(turn_id);
                                 }
                                 if matches!(notif, codex_codes::Notification::TurnCompleted(_)) {
-                                    current_turn_id = None;
+                                    state.clear_turn_id();
                                 }
                             }
 
@@ -464,13 +550,14 @@ pub(crate) async fn codex_io_task(
                                     latest_usage_for_msg,
                                 );
                             if turn_ended {
-                                turn_active = false;
+                                // Turn ended: `on_turn_ended` marks the state
+                                // idle and drains at most one queued prompt.
                                 if let Some((prompt, delivered, display_event)) =
-                                    queued_prompts.pop_front()
+                                    state.on_turn_ended()
                                 {
                                     turn_tracker
                                         .start(Instant::now(), chrono::Utc::now());
-                                    turn_active = start_codex_turn(
+                                    let started = start_codex_turn(
                                         &mut client,
                                         &thread_id,
                                         prompt,
@@ -479,6 +566,7 @@ pub(crate) async fn codex_io_task(
                                         &event_tx,
                                     )
                                     .await;
+                                    state.set_turn_active(started);
                                 }
                             }
                             if !ok {
@@ -555,7 +643,10 @@ pub(crate) async fn codex_io_task(
 
                             let interrupt_params = TurnInterruptParams {
                                 thread_id: thread_id.clone(),
-                                turn_id: current_turn_id.clone().unwrap_or_default(),
+                                turn_id: state
+                                    .current_turn_id()
+                                    .unwrap_or_default()
+                                    .to_string(),
                             };
                             if let Err(e) = client.turn_interrupt(&interrupt_params).await {
                                 tracing::error!(
@@ -563,7 +654,7 @@ pub(crate) async fn codex_io_task(
                                      \u{2014} forcing turn_active=false to unwedge",
                                     e
                                 );
-                                turn_active = false;
+                                state.set_turn_active(false);
                             }
                             continue;
                         }
@@ -582,9 +673,7 @@ pub(crate) async fn codex_io_task(
                             decision,
                         } => {
                             let rid = parse_request_id(&request_id);
-                            let kind = pending_approval_response_kinds
-                                .remove(&request_id)
-                                .unwrap_or(CodexApprovalResponseKind::AcceptDecline);
+                            let kind = state.take_approval_kind(&request_id);
                             let result = codex_approval_result(&decision, kind);
                             if let Err(e) = client.respond(rid, &result).await {
                                 tracing::error!("Failed to send Codex approval: {}", e);
@@ -600,7 +689,7 @@ pub(crate) async fn codex_io_task(
                                     let _ = delivered.send(Ok(()));
                                 }
                             } else {
-                                match route_user_input(true, current_turn_id.as_deref()) {
+                                match state.route_input() {
                                     // Deliver mid-turn via `turn/steer` so the
                                     // input joins the ACTIVE turn's pending-input
                                     // queue (parity with claude, which steers
@@ -612,9 +701,10 @@ pub(crate) async fn codex_io_task(
                                     InputRouting::Steer => {
                                         // `Steer` is only returned with a known,
                                         // non-empty turn id.
-                                        let turn_id = current_turn_id
-                                            .clone()
-                                            .expect("Steer routing implies a known turn id");
+                                        let turn_id = state
+                                            .current_turn_id()
+                                            .expect("Steer routing implies a known turn id")
+                                            .to_string();
                                         match steer_codex_turn(
                                             &mut client,
                                             &thread_id,
@@ -656,9 +746,9 @@ pub(crate) async fn codex_io_task(
                                                     "turn/steer into turn {} failed ({}); queueing for turn end ({} pending)",
                                                     turn_id,
                                                     e,
-                                                    queued_prompts.len() + 1
+                                                    state.queued_len() + 1
                                                 );
-                                                queued_prompts.push_back((
+                                                state.queue_prompt((
                                                     text,
                                                     delivered,
                                                     display_event,
@@ -672,9 +762,9 @@ pub(crate) async fn codex_io_task(
                                     InputRouting::Queue | InputRouting::StartTurn => {
                                         tracing::debug!(
                                             "Codex input during active turn without a known turn id; queueing ({} pending)",
-                                            queued_prompts.len() + 1
+                                            state.queued_len() + 1
                                         );
-                                        queued_prompts.push_back((text, delivered, display_event));
+                                        state.queue_prompt((text, delivered, display_event));
                                     }
                                 }
                             }
@@ -683,10 +773,10 @@ pub(crate) async fn codex_io_task(
                             // Cancel the in-flight turn. `turn/interrupt` needs
                             // both thread_id and turn_id; skip if we haven't seen
                             // a `turn/started` yet (nothing to name/cancel).
-                            if let Some(turn_id) = current_turn_id.clone() {
+                            if let Some(turn_id) = state.current_turn_id() {
                                 let params = TurnInterruptParams {
                                     thread_id: thread_id.clone(),
-                                    turn_id,
+                                    turn_id: turn_id.to_string(),
                                 };
                                 if let Err(e) = client.turn_interrupt(&params).await {
                                     tracing::error!("Failed to interrupt Codex turn: {}", e);
@@ -711,7 +801,7 @@ pub(crate) async fn codex_io_task(
                         continue;
                     }
                     turn_tracker.start(Instant::now(), chrono::Utc::now());
-                    turn_active = start_codex_turn(
+                    let started = start_codex_turn(
                         &mut client,
                         &thread_id,
                         text,
@@ -720,6 +810,7 @@ pub(crate) async fn codex_io_task(
                         &event_tx,
                     )
                     .await;
+                    state.set_turn_active(started);
                 }
                 Some(IoCommand::Permission { .. }) => {
                     tracing::warn!("Codex approval response with no active turn");
@@ -1246,6 +1337,97 @@ mod tests {
         assert_eq!(route_user_input(true, None), InputRouting::Queue);
         // An empty turn id is unusable as expectedTurnId (required non-empty).
         assert_eq!(route_user_input(true, Some("")), InputRouting::Queue);
+    }
+
+    fn queued_prompt(text: &str) -> QueuedPrompt {
+        (text.to_string(), None, None)
+    }
+
+    #[test]
+    fn state_route_input_mirrors_route_user_input() {
+        let mut state = CodexIoState::default();
+        // Idle → start.
+        assert_eq!(state.route_input(), InputRouting::StartTurn);
+        // Active but no observed turn id → queue.
+        state.set_turn_active(true);
+        assert_eq!(state.route_input(), InputRouting::Queue);
+        // Active with a known, non-empty turn id → steer.
+        state.set_turn_id("turn-1");
+        assert_eq!(state.route_input(), InputRouting::Steer);
+        // Empty turn id is unusable as expectedTurnId → queue.
+        state.set_turn_id("");
+        assert_eq!(state.route_input(), InputRouting::Queue);
+    }
+
+    #[test]
+    fn state_clear_turn_id_forces_queue_until_next_turn_started() {
+        let mut state = CodexIoState::default();
+        state.set_turn_active(true);
+        state.set_turn_id("turn-1");
+        assert_eq!(state.route_input(), InputRouting::Steer);
+        // turn/completed clears the id; a still-active follow-on turn with no
+        // observed id must queue rather than steer against a stale id.
+        state.clear_turn_id();
+        assert_eq!(state.current_turn_id(), None);
+        assert_eq!(state.route_input(), InputRouting::Queue);
+    }
+
+    #[test]
+    fn state_take_approval_kind_consumes_latched_kind_then_defaults() {
+        let mut state = CodexIoState::default();
+        state.record_approval_request(
+            "7".to_string(),
+            CodexApprovalResponseKind::ExecApprovedDenied,
+        );
+        // First take returns the latched kind and consumes it.
+        assert_eq!(
+            state.take_approval_kind("7"),
+            CodexApprovalResponseKind::ExecApprovedDenied
+        );
+        // Second take (or an unknown id) defaults to the v2 accept/decline family.
+        assert_eq!(
+            state.take_approval_kind("7"),
+            CodexApprovalResponseKind::AcceptDecline
+        );
+        assert_eq!(
+            state.take_approval_kind("never-seen"),
+            CodexApprovalResponseKind::AcceptDecline
+        );
+    }
+
+    #[test]
+    fn state_steer_failure_then_turn_end_drains_queue_exactly_once() {
+        // Reproduces the interleaving that was previously untestable: a turn is
+        // active, a `turn/steer` attempt fails so the input is queued, then the
+        // turn ends. The queued prompt must drain exactly once — and a second,
+        // still-queued prompt waits for the *next* turn end.
+        let mut state = CodexIoState::default();
+        state.set_turn_active(true);
+        state.set_turn_id("turn-1");
+
+        // Two steer attempts fail and fall back to the queue.
+        state.queue_prompt(queued_prompt("first"));
+        state.queue_prompt(queued_prompt("second"));
+        assert_eq!(state.queued_len(), 2);
+
+        // First turn end drains exactly one (FIFO) and marks idle.
+        let drained = state.on_turn_ended().expect("first prompt drains");
+        assert_eq!(drained.0, "first");
+        assert!(!state.turn_active());
+        assert_eq!(state.queued_len(), 1);
+
+        // The just-drained prompt starts a new turn; the second stays queued.
+        state.set_turn_active(true);
+        // A redundant turn-end (no new turn started meanwhile) must not
+        // double-drain: it hands back the one remaining prompt, once.
+        let drained = state.on_turn_ended().expect("second prompt drains");
+        assert_eq!(drained.0, "second");
+        assert_eq!(state.queued_len(), 0);
+
+        // Nothing left to drain.
+        state.set_turn_active(true);
+        assert!(state.on_turn_ended().is_none());
+        assert!(!state.turn_active());
     }
 
     #[test]
