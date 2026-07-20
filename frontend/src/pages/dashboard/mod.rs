@@ -13,7 +13,7 @@ mod page_spend;
 mod page_state;
 mod permission_dialog;
 mod session_order;
-mod session_rail;
+pub(crate) mod session_rail;
 mod session_view;
 mod types;
 
