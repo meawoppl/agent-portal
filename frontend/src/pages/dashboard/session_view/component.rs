@@ -991,17 +991,22 @@ impl SessionView {
             ));
         }
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
-            // Live task events: the `created_at` field isn't part of the
-            // live wire envelope, so the panel falls back to `Date.now()`
-            // — see `derive_task_events` for the two paths.
-            for ev in derive_task_events(&claude_msg, "", true) {
+            // Live task events use the server-assigned row timestamp when the
+            // backend supplied it, falling back to browser time only for
+            // pre-metadata/error frames.
+            for ev in derive_task_events(&claude_msg, output.raw_iso().unwrap_or_default(), true) {
                 self.dispatch_tasks(TasksInbound::Live(ev));
             }
         }
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
+        let activity_ts = output
+            .raw_iso()
+            .map(js_sys::Date::parse)
+            .filter(|ts| ts.is_finite())
+            .unwrap_or_else(js_sys::Date::now);
         ctx.props()
             .on_activity
-            .emit((ctx.props().session.id, tag, js_sys::Date::now()));
+            .emit((ctx.props().session.id, tag, activity_ts));
         reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
 
         push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
