@@ -12,7 +12,7 @@ pub const VERSION: &str = shared::VERSION;
 use health_timer::HealthTimerReminder;
 use pages::{
     access_denied::AccessDeniedPage, admin::AdminPage, banned::BannedPage,
-    dashboard::DashboardPage, settings::SettingsPage, splash::SplashPage,
+    dashboard::DashboardPage, demo::DemoPage, settings::SettingsPage, splash::SplashPage,
 };
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -23,6 +23,8 @@ pub enum Route {
     Home,
     #[at("/dashboard")]
     Dashboard,
+    #[at("/demo")]
+    Demo,
     #[at("/settings")]
     Settings,
     #[at("/admin")]
@@ -57,6 +59,7 @@ fn switch(routes: Route) -> Html {
     match routes {
         Route::Home => html! { <SplashPage /> },
         Route::Dashboard => html! { <DashboardPage /> },
+        Route::Demo => html! { <DemoPage /> },
         Route::Settings => html! { <SettingsRoute /> },
         Route::Admin => html! { <AdminRoute /> },
         Route::Banned => html! { <BannedPage /> },

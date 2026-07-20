@@ -1,0 +1,56 @@
+/* Frontend-only UI demo harness. It composes the production rail and message
+   renderers with fixture data, so these rules only frame the harness chrome. */
+
+.demo-portal-page {
+    background:
+        linear-gradient(180deg, rgba(122, 162, 247, 0.08), transparent 16rem),
+        var(--bg-dark);
+}
+
+.demo-portal-header {
+    border-bottom-color: rgba(122, 162, 247, 0.28);
+}
+
+.demo-playback-chip {
+    border: 1px solid rgba(187, 154, 247, 0.45);
+    border-radius: 999px;
+    color: #c0caf5;
+    background: rgba(187, 154, 247, 0.14);
+    font-family: monospace;
+    font-size: 0.78rem;
+    padding: 0.25rem 0.65rem;
+}
+
+.demo-dashboard-body {
+    min-height: 0;
+}
+
+.demo-session-views {
+    min-height: 0;
+}
+
+.demo-session-view {
+    min-height: 0;
+}
+
+.demo-input-preview {
+    pointer-events: none;
+}
+
+.demo-input-preview .message-input {
+    min-height: 2.5rem;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+    .demo-portal-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .demo-portal-header .header-actions {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+}
