@@ -18,6 +18,9 @@ enum VcsView {
 struct PillViewModel {
     pill_classes: Vec<&'static str>,
     watermark_class: &'static str,
+    /// Compact model version (e.g. `"4.8"`) rendered as a faint watermark next
+    /// to the agent logo, or `None` when the session has no known model yet.
+    model_watermark: Option<String>,
     connection_class: &'static str,
     connection_symbol: &'static str,
     number_annotation: Option<String>,
@@ -77,6 +80,13 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             data-index={props.index.to_string()}
         >
             <span class={view.watermark_class} aria-hidden="true" />
+            {
+                if let Some(model) = &view.model_watermark {
+                    html! { <span class="pill-model-watermark" aria-hidden="true">{ model }</span> }
+                } else {
+                    html! {}
+                }
+            }
             {
                 if let Some(num) = &view.number_annotation {
                     html! { <span class="pill-number">{ num }</span> }
@@ -198,6 +208,10 @@ impl PillViewModel {
                 shared::AgentType::Claude => "pill-watermark claude",
                 shared::AgentType::Codex => "pill-watermark codex",
             },
+            model_watermark: session
+                .last_model
+                .as_deref()
+                .and_then(shared::compact_model_version),
             connection_class: if props.is_connected {
                 "pill-status connected"
             } else {

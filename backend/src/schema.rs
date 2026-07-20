@@ -222,6 +222,8 @@ diesel::table! {
         launch_lease_until -> Nullable<Timestamp>,
         open_prs -> Jsonb,
         archived_at -> Nullable<Timestamp>,
+        #[max_length = 128]
+        last_model -> Nullable<Varchar>,
     }
 }
 

@@ -63,6 +63,10 @@ pub mod fmt;
 // Timezone canonicalization (abbreviation -> IANA) shared across crates
 pub mod timezone;
 
+// Compact model-version extraction for the session-pill watermark
+pub mod model_version;
+pub use model_version::compact_model_version;
+
 // API client types and trait
 pub mod api;
 pub use api::{
@@ -424,6 +428,14 @@ pub struct SessionInfo {
     /// Arguments used when launching the agent CLI.
     #[serde(default)]
     pub claude_args: Vec<String>,
+    /// Most recently observed model id for this session (last turn wins), e.g.
+    /// `"claude-opus-4-8"`. Populated from `sessions.last_model` on the wire;
+    /// the rail renders a compact version of it (see
+    /// [`compact_model_version`]) as a watermark on the pill. `None` until the
+    /// session has completed a turn with a known model. `#[serde(default)]`
+    /// keeps older proxies/clients wire-compatible.
+    #[serde(default)]
+    pub last_model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
