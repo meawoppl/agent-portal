@@ -355,12 +355,16 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
 
     let hidden_count = hidden_indices.len();
     let visible_count = visible_indices.len();
-    let mut rendered_session_ids: Vec<Uuid> = visible_indices
+    let mut rendered_sessions: Vec<(Uuid, shared::AgentType)> = visible_indices
         .iter()
-        .map(|(_, session)| session.id)
+        .map(|(_, session)| (session.id, session.agent_type))
         .collect();
     if !props.inactive_hidden {
-        rendered_session_ids.extend(hidden_indices.iter().map(|(_, session)| session.id));
+        rendered_sessions.extend(
+            hidden_indices
+                .iter()
+                .map(|(_, session)| (session.id, session.agent_type)),
+        );
     }
     let (broadcast_senders, broadcast_receivers) =
         props.broadcasts.active_session_ids(*render_time);
@@ -464,7 +468,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     }
                 }
             </div>
-            { render_broadcasts(&props.broadcasts, &rendered_session_ids, rail_axis, *render_time) }
+            { render_broadcasts(&props.broadcasts, &rendered_sessions, rail_axis, *render_time) }
             <SessionRailMenu
                 session={open_session}
                 position={*menu_pos}

@@ -211,72 +211,119 @@
     background: rgba(122, 162, 247, 0.18);
 }
 
-.session-pill.broadcast-sender,
-.session-pill.broadcast-receiver {
-    overflow: visible;
+.pill-broadcast-effect {
+    position: absolute;
+    inset: 3px 6px;
+    border-radius: 16px;
+    pointer-events: none;
+    z-index: 1;
 }
 
-.session-pill.broadcast-sender::before,
-.session-pill.broadcast-receiver::before {
-    content: "";
+.pill-broadcast-strand,
+.pill-broadcast-core {
     position: absolute;
-    top: -8px;
-    right: 18px;
-    width: 14px;
-    height: 14px;
-    border-top: 2px solid #bb9af7;
-    border-left: 2px solid #bb9af7;
-    border-radius: 50% 0 0 0;
-    transform: rotate(45deg);
+    left: 50%;
+    top: 50%;
+    display: block;
     opacity: 0;
     pointer-events: none;
-    z-index: 4;
-    animation: agent-antenna-pop 900ms ease-out;
 }
 
-.session-pill.broadcast-receiver::before {
-    border-top-color: #7dcfff;
-    border-left-color: #7dcfff;
+.pill-broadcast-strand {
+    width: 46px;
+    height: 1px;
+    transform-origin: center;
+    background: linear-gradient(90deg, transparent, rgba(187, 154, 247, 0.95), transparent);
+    box-shadow: 0 0 9px rgba(187, 154, 247, 0.65);
 }
 
-.session-pill.broadcast-sender::after,
-.session-pill.broadcast-receiver::after {
-    content: "";
-    position: absolute;
-    top: -11px;
-    right: 13px;
-    width: 24px;
-    height: 24px;
-    border: 1px solid rgba(187, 154, 247, 0.65);
-    border-radius: 50%;
-    opacity: 0;
-    pointer-events: none;
-    z-index: 3;
-    animation: agent-radio-ring 900ms ease-out;
+.pill-broadcast-core {
+    width: 28px;
+    height: 18px;
+    margin-left: -14px;
+    margin-top: -9px;
+    border: 1px solid rgba(187, 154, 247, 0.82);
+    border-radius: 4px;
+    background: rgba(26, 27, 38, 0.72);
+    box-shadow:
+        inset 0 0 8px rgba(187, 154, 247, 0.24),
+        0 0 14px rgba(187, 154, 247, 0.42);
 }
 
-.session-pill.broadcast-receiver::after {
-    border-color: rgba(125, 207, 255, 0.65);
+.strand-left-top {
+    --strand-shift: 45px;
+
+    margin-left: -68px;
+    margin-top: -13px;
+    transform: rotate(8deg) scaleX(0.25);
+}
+
+.strand-left-bottom {
+    --strand-shift: 45px;
+
+    margin-left: -68px;
+    margin-top: 12px;
+    transform: rotate(-8deg) scaleX(0.25);
+}
+
+.strand-right-top {
+    --strand-shift: -45px;
+
+    margin-left: 22px;
+    margin-top: -13px;
+    transform: rotate(-8deg) scaleX(0.25);
+}
+
+.strand-right-bottom {
+    --strand-shift: -45px;
+
+    margin-left: 22px;
+    margin-top: 12px;
+    transform: rotate(8deg) scaleX(0.25);
+}
+
+.session-pill.broadcast-sender .pill-broadcast-strand {
+    animation: pill-strands-gather 980ms cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+}
+
+.session-pill.broadcast-sender .pill-broadcast-core {
+    animation: pill-core-gather 980ms cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+}
+
+.session-pill.broadcast-receiver .pill-broadcast-strand {
+    background: linear-gradient(90deg, transparent, rgba(125, 207, 255, 0.95), transparent);
+    box-shadow: 0 0 9px rgba(125, 207, 255, 0.62);
+    animation: pill-strands-release 980ms cubic-bezier(0.25, 0.8, 0.25, 1) 520ms forwards;
+}
+
+.session-pill.broadcast-receiver .pill-broadcast-core {
+    border-color: rgba(125, 207, 255, 0.85);
+    box-shadow:
+        inset 0 0 8px rgba(125, 207, 255, 0.22),
+        0 0 14px rgba(125, 207, 255, 0.36);
+    animation: pill-core-release 980ms cubic-bezier(0.25, 0.8, 0.25, 1) 520ms forwards;
 }
 
 .agent-broadcast-layer {
     position: absolute;
     pointer-events: none;
-    z-index: 5;
+    z-index: 6;
 }
 
 .agent-broadcast-layer.horizontal {
     left: 0;
     right: 0;
-    top: 0.65rem;
-    height: 20px;
+    top: 50%;
+    height: 34px;
+    transform: translateY(-50%);
 }
 
 .agent-broadcast-layer.vertical {
     top: 0;
     bottom: 0;
-    left: 0.65rem;
-    width: 20px;
+    left: 50%;
+    width: 34px;
+    transform: translateX(-50%);
 }
 
 .agent-broadcast-path {
@@ -288,30 +335,74 @@
 
 .agent-broadcast-layer.horizontal .agent-broadcast-path {
     top: 0;
-    height: 20px;
-    border-top: 1px dashed rgba(187, 154, 247, 0.55);
+    height: 34px;
 }
 
 .agent-broadcast-layer.vertical .agent-broadcast-path {
     left: 0;
-    width: 20px;
-    border-left: 1px dashed rgba(187, 154, 247, 0.55);
+    width: 34px;
 }
 
 .agent-broadcast-packet {
     position: absolute;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 18px;
+    border: 1px solid rgba(187, 154, 247, 0.9);
+    border-radius: 4px;
+    background: rgba(26, 27, 38, 0.9);
+    box-shadow:
+        inset 0 0 8px rgba(187, 154, 247, 0.2),
+        0 0 18px rgba(187, 154, 247, 0.58);
+}
+
+.agent-broadcast-packet::before,
+.agent-broadcast-packet::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 18px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(187, 154, 247, 0.9));
+    opacity: 0;
+    transform: translateY(-50%) scaleX(0.25);
+    animation: packet-strand-pulse 1.35s ease-out forwards;
+}
+
+.agent-broadcast-packet::before {
+    right: 100%;
+    transform-origin: right center;
+}
+
+.agent-broadcast-packet::after {
+    left: 100%;
+    transform-origin: left center;
+    rotate: 180deg;
+}
+
+.agent-broadcast-packet-logo {
+    width: 12px;
+    height: 12px;
     display: block;
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
-    background: #bb9af7;
-    box-shadow: 0 0 10px rgba(187, 154, 247, 0.85);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    filter: drop-shadow(0 0 4px rgba(192, 202, 245, 0.45));
+}
+
+.agent-broadcast-packet.claude .agent-broadcast-packet-logo {
+    background-image: url('/anthropic-mark.svg');
+}
+
+.agent-broadcast-packet.codex .agent-broadcast-packet-logo {
+    background-image: url('/openai-mark.png');
 }
 
 .agent-broadcast-layer.horizontal .agent-broadcast-packet {
-    top: -5px;
+    top: 8px;
     left: 0;
-    animation: agent-packet-x 1.05s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+    animation: agent-packet-x 1.35s cubic-bezier(0.2, 0.75, 0.18, 1) forwards;
 }
 
 .agent-broadcast-layer.horizontal .agent-broadcast-path.reverse .agent-broadcast-packet {
@@ -320,38 +411,56 @@
 
 .agent-broadcast-layer.vertical .agent-broadcast-packet {
     top: 0;
-    left: -4px;
-    animation: agent-packet-y 1.05s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+    left: 4px;
+    animation: agent-packet-y 1.35s cubic-bezier(0.2, 0.75, 0.18, 1) forwards;
 }
 
 .agent-broadcast-layer.vertical .agent-broadcast-path.reverse .agent-broadcast-packet {
     animation-name: agent-packet-y-reverse;
 }
 
-@keyframes agent-antenna-pop {
+@keyframes pill-strands-gather {
     0% {
         opacity: 0;
-        transform: rotate(45deg) scale(0.7);
+        translate: 0 0;
+        scale: 0.4 1;
     }
-    20%,
-    65% {
+    22% {
         opacity: 1;
-        transform: rotate(45deg) scale(1);
+        scale: 1 1;
+    }
+    58% {
+        opacity: 0.9;
+        translate: var(--strand-shift) 0;
+        scale: 0.35 1;
     }
     100% {
         opacity: 0;
-        transform: rotate(45deg) scale(0.85);
+        translate: var(--strand-shift) 0;
+        scale: 0.1 1;
     }
 }
 
-@keyframes agent-radio-ring {
+@keyframes pill-strands-release {
     0% {
-        opacity: 0.8;
-        transform: scale(0.35);
+        opacity: 0;
+        translate: var(--strand-shift) 0;
+        scale: 0.1 1;
+    }
+    24% {
+        opacity: 0.95;
+        translate: var(--strand-shift) 0;
+        scale: 0.35 1;
+    }
+    70% {
+        opacity: 1;
+        translate: 0 0;
+        scale: 1 1;
     }
     100% {
         opacity: 0;
-        transform: scale(1.4);
+        translate: 0 0;
+        scale: 0.25 1;
     }
 }
 
@@ -369,33 +478,134 @@
     }
 }
 
+@keyframes pill-core-gather {
+    0% {
+        opacity: 0;
+        scale: 0.72;
+    }
+    26%,
+    58% {
+        opacity: 1;
+        scale: 1;
+    }
+    100% {
+        opacity: 0;
+        scale: 0.65;
+    }
+}
+
+@keyframes pill-core-release {
+    0% {
+        opacity: 0;
+        scale: 0.65;
+    }
+    20%,
+    62% {
+        opacity: 1;
+        scale: 1;
+    }
+    100% {
+        opacity: 0;
+        scale: 1.2;
+    }
+}
+
+@keyframes packet-strand-pulse {
+    0%,
+    14% {
+        opacity: 0;
+        scale: 0.2 1;
+    }
+    32%,
+    68% {
+        opacity: 0.8;
+        scale: 1 1;
+    }
+    100% {
+        opacity: 0;
+        scale: 0.15 1;
+    }
+}
+
 @keyframes agent-packet-x {
-    from { left: 0; }
-    to { left: calc(100% - 8px); }
+    0% {
+        left: 0;
+        opacity: 0;
+        scale: 0.68;
+    }
+    16%,
+    82% {
+        opacity: 1;
+        scale: 1;
+    }
+    100% {
+        left: calc(100% - 26px);
+        opacity: 0;
+        scale: 0.82;
+    }
 }
 
 @keyframes agent-packet-x-reverse {
-    from { left: calc(100% - 8px); }
-    to { left: 0; }
+    0% {
+        left: calc(100% - 26px);
+        opacity: 0;
+        scale: 0.68;
+    }
+    16%,
+    82% {
+        opacity: 1;
+        scale: 1;
+    }
+    100% {
+        left: 0;
+        opacity: 0;
+        scale: 0.82;
+    }
 }
 
 @keyframes agent-packet-y {
-    from { top: 0; }
-    to { top: calc(100% - 8px); }
+    0% {
+        top: 0;
+        opacity: 0;
+        scale: 0.68;
+    }
+    16%,
+    82% {
+        opacity: 1;
+        scale: 1;
+    }
+    100% {
+        top: calc(100% - 18px);
+        opacity: 0;
+        scale: 0.82;
+    }
 }
 
 @keyframes agent-packet-y-reverse {
-    from { top: calc(100% - 8px); }
-    to { top: 0; }
+    0% {
+        top: calc(100% - 18px);
+        opacity: 0;
+        scale: 0.68;
+    }
+    16%,
+    82% {
+        opacity: 1;
+        scale: 1;
+    }
+    100% {
+        top: 0;
+        opacity: 0;
+        scale: 0.82;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .session-pill.broadcast-sender::before,
-    .session-pill.broadcast-receiver::before,
-    .session-pill.broadcast-sender::after,
-    .session-pill.broadcast-receiver::after,
+    .pill-broadcast-strand,
+    .pill-broadcast-core,
     .agent-broadcast-path,
-    .agent-broadcast-packet {
+    .agent-broadcast-packet,
+    .agent-broadcast-packet::before,
+    .agent-broadcast-packet::after {
         animation: none;
     }
 
