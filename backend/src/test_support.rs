@@ -12,11 +12,62 @@
 //! parallelism.
 
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use tower_cookies::Key;
 
+use crate::config::MobileAppLinksConfig;
 use crate::db::DbPool;
+use crate::handlers::images::ImageStore;
+use crate::handlers::websocket::SessionManager;
+use crate::AppState;
+
+/// Build the canonical test [`AppState`] wired to `pool`.
+///
+/// WHY this exists: every DB-gated test module used to hand-write the full
+/// ~20-field `AppState { .. }` literal (unit tests in `auth.rs` /
+/// `handlers/auth.rs`, plus the integration harness in `tests/harness.rs`).
+/// That made **every new `AppState` field a change to every one of those
+/// literals** — during the push work three fields landed in a single day
+/// (`notifications`, `vapid_public_key`, and the VAPID transport rework), and
+/// each meant editing four identical literals plus eating the resulting rebase
+/// conflicts across parallel PRs. Centralizing construction here means a new
+/// field is one default in one place; call sites that don't care never change.
+///
+/// The defaults are the canonical *unit-test* configuration (dev mode off, no
+/// OAuth, a tiny in-memory image store, every optional `None`). Call sites that
+/// need something different mutate the returned struct before `Arc`-wrapping —
+/// e.g. `let mut s = test_app_state(pool); s.dev_mode = true;`. That direct-
+/// mutation override is deliberate: it needs no builder scaffolding and, unlike
+/// a literal, names only the fields a given test actually cares about.
+pub fn test_app_state(pool: DbPool) -> AppState {
+    AppState {
+        dev_mode: false,
+        db_pool: pool,
+        session_manager: SessionManager::new(),
+        oauth_basic_client: None,
+        device_flow_store: None,
+        public_url: "http://localhost:3000".to_string(),
+        cookie_key: Key::generate(),
+        jwt_secret: "test-secret-key-at-least-32-bytes".to_string(),
+        app_title: "Agent Portal Test".to_string(),
+        splash_text: None,
+        allowed_email_domain: None,
+        allowed_emails: None,
+        message_retention_count: 100,
+        message_retention_days: 30,
+        session_max_age_days: 14,
+        max_image_mb: 10,
+        image_store: ImageStore::new(1024 * 1024, Duration::from_secs(60)),
+        forward_domain: None,
+        archive: None,
+        notifications: crate::push::channel().0,
+        vapid_public_key: None,
+        mobile_app_links: MobileAppLinksConfig::default(),
+    }
+}
 
 /// Max connections the shared test pool may open.
 ///

@@ -150,14 +150,10 @@ impl FromRequestParts<Arc<AppState>> for CurrentUserId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handlers::images::ImageStore;
     use crate::handlers::proxy_tokens::{issue_proxy_token_with_type, TokenPersist};
-    use crate::handlers::websocket::SessionManager;
     use crate::models::NewUser;
     use crate::schema::{proxy_auth_tokens, users};
     use axum::http::{header::AUTHORIZATION, HeaderValue};
-    use std::time::Duration;
-    use tower_cookies::cookie::Key;
     use tower_cookies::Cookie;
 
     fn user(disabled: bool) -> User {
@@ -189,33 +185,6 @@ mod tests {
             reject_disabled_user(user(true)),
             Err(AppError::Forbidden)
         ));
-    }
-
-    fn test_state(pool: crate::db::DbPool) -> AppState {
-        AppState {
-            dev_mode: false,
-            db_pool: pool,
-            session_manager: SessionManager::new(),
-            oauth_basic_client: None,
-            device_flow_store: None,
-            public_url: "http://localhost:3000".to_string(),
-            cookie_key: Key::generate(),
-            jwt_secret: "test-secret-key-at-least-32-bytes".to_string(),
-            app_title: "Agent Portal Test".to_string(),
-            splash_text: None,
-            allowed_email_domain: None,
-            allowed_emails: None,
-            message_retention_count: 100,
-            message_retention_days: 30,
-            session_max_age_days: 14,
-            max_image_mb: 10,
-            image_store: ImageStore::new(1024 * 1024, Duration::from_secs(60)),
-            forward_domain: None,
-            archive: None,
-            notifications: crate::push::channel().0,
-            vapid_public_key: None,
-            mobile_app_links: crate::config::MobileAppLinksConfig::default(),
-        }
     }
 
     fn insert_user(conn: &mut PgConnection, disabled: bool) -> User {
@@ -284,7 +253,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let mut conn = app_state.conn().expect("conn");
         let user = insert_user(&mut conn, false);
         let cookies = signed_cookie(&app_state, user.id);
@@ -298,7 +267,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let mut conn = app_state.conn().expect("conn");
         let user = insert_user(&mut conn, true);
         let cookies = signed_cookie(&app_state, user.id);
@@ -314,7 +283,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let cookies = Cookies::default();
 
         assert!(matches!(
@@ -328,7 +297,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let mut conn = app_state.conn().expect("conn");
         let user = insert_user(&mut conn, false);
         let (_row_id, token) = issue_mobile_token(&app_state, &mut conn, user.id);
@@ -344,7 +313,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let mut conn = app_state.conn().expect("conn");
         let user = insert_user(&mut conn, false);
         let (row_id, token) = issue_mobile_token(&app_state, &mut conn, user.id);
@@ -367,7 +336,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let mut conn = app_state.conn().expect("conn");
         let user = insert_user(&mut conn, false);
         let (row_id, token) = issue_mobile_token(&app_state, &mut conn, user.id);
@@ -388,7 +357,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let mut conn = app_state.conn().expect("conn");
         let user = insert_user(&mut conn, true);
         let (_row_id, token) = issue_mobile_token(&app_state, &mut conn, user.id);
@@ -405,7 +374,7 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        let app_state = test_state(pool);
+        let app_state = crate::test_support::test_app_state(pool);
         let mut conn = app_state.conn().expect("conn");
         let user = insert_user(&mut conn, false);
         let cookies = signed_cookie(&app_state, user.id);

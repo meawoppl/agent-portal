@@ -23,7 +23,12 @@ pub mod push;
 pub mod routes;
 pub mod schema;
 
-#[cfg(test)]
+// Visible to the crate's own `#[cfg(test)]` modules AND to the separate
+// integration-test binaries (e.g. `tests/harness.rs`), which link the lib
+// *without* `cfg(test)`. The `test-support` feature is enabled only via the
+// crate's self dev-dependency in `Cargo.toml`, so this module is never
+// compiled into `cargo build`/release binaries.
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
 use crate::db::DbPool;
