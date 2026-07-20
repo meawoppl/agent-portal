@@ -40,6 +40,7 @@ pub enum ClaudeMessage {
     Error(shared::AnthropicError),
     Portal(PortalMessage),
     RateLimitEvent(shared::RateLimitEvent),
+    ToolProgress(shared::ToolProgressMessage),
     OptimisticUser(OptimisticUserMessage),
     Unknown,
 }
@@ -65,9 +66,10 @@ impl ClaudeMessage {
                 shared::ClaudeOutput::Result(msg) => Self::Result(msg),
                 shared::ClaudeOutput::Error(msg) => Self::Error(msg),
                 shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
+                shared::ClaudeOutput::ToolProgress(msg) => Self::ToolProgress(msg),
                 // Wildcard: control frames plus the 2.1.160 wire additions
-                // (stream_event, tool_progress, transcript variants, …) that
-                // have no dedicated renderer yet.
+                // (stream_event, transcript variants, …) that have no
+                // dedicated renderer yet.
                 _ => Self::Unknown,
             });
         }
@@ -90,9 +92,10 @@ impl<'de> Deserialize<'de> for ClaudeMessage {
                 shared::ClaudeOutput::Result(msg) => Self::Result(msg),
                 shared::ClaudeOutput::Error(msg) => Self::Error(msg),
                 shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
+                shared::ClaudeOutput::ToolProgress(msg) => Self::ToolProgress(msg),
                 // Wildcard: control frames plus the 2.1.160 wire additions
-                // (stream_event, tool_progress, transcript variants, …) that
-                // have no dedicated renderer yet.
+                // (stream_event, transcript variants, …) that have no
+                // dedicated renderer yet.
                 _ => Self::Unknown,
             });
         }

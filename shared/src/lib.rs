@@ -96,7 +96,8 @@ pub use claude_codes::io::{
 pub use claude_codes::io::{
     AnthropicError, AssistantMessage, AssistantUsage, MessageContent, RateLimitEvent,
     ResultMessage, ServerToolUse, SystemMessage, SystemSubtype, TaskNotificationMessage,
-    TaskProgressMessage, TaskStartedMessage, TaskStatus, TaskType, TaskUsage, UserMessage,
+    TaskProgressMessage, TaskStartedMessage, TaskStatus, TaskType, TaskUsage, ToolProgressMessage,
+    UserMessage,
 };
 pub use claude_codes::CacheCreationDetails;
 pub use claude_codes::ClaudeOutput;

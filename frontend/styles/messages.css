@@ -1228,6 +1228,51 @@
     margin-right: 0.35rem;
 }
 
+/* ==========================================================================
+   Tool Progress Message
+   ========================================================================== */
+
+.tool-progress-message {
+    border-left: 3px solid #bb9af7;
+    background: rgba(187, 154, 247, 0.05);
+}
+
+.tool-progress-message .message-header {
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.message-type-badge.tool-progress {
+    background: rgba(187, 154, 247, 0.2);
+    color: #bb9af7;
+}
+
+.tool-progress-inline {
+    align-items: center;
+    color: var(--text-secondary);
+    display: inline-flex;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.tool-progress-tool {
+    color: #bb9af7;
+    font-weight: 600;
+}
+
+.tool-progress-detail::before {
+    color: var(--text-muted);
+    content: "·";
+    margin-right: 0.35rem;
+}
+
+.tool-progress-detail.monospace {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+}
+
 .utilization-row {
     display: flex;
     align-items: center;

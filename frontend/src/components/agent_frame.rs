@@ -30,6 +30,7 @@ pub enum AgentFrameKind {
     ClaudeUser,
     ClaudeError,
     ClaudeRateLimitEvent,
+    ClaudeToolProgress,
     Portal,
     OptimisticUser,
     CodexThreadStarted,
@@ -106,6 +107,7 @@ impl FrameRenderer {
             | AgentFrameKind::ClaudeUser
             | AgentFrameKind::ClaudeError
             | AgentFrameKind::ClaudeRateLimitEvent
+            | AgentFrameKind::ClaudeToolProgress
             | AgentFrameKind::Portal
             | AgentFrameKind::OptimisticUser => Self::Claude,
             AgentFrameKind::CodexThreadStarted
@@ -138,6 +140,7 @@ impl ClaudeMessage {
             Self::Error(_) => AgentFrameKind::ClaudeError,
             Self::Portal(_) => AgentFrameKind::Portal,
             Self::RateLimitEvent(_) => AgentFrameKind::ClaudeRateLimitEvent,
+            Self::ToolProgress(_) => AgentFrameKind::ClaudeToolProgress,
             Self::OptimisticUser(_) => AgentFrameKind::OptimisticUser,
             Self::Unknown => AgentFrameKind::RawJson,
         }
@@ -229,6 +232,28 @@ mod tests {
         );
 
         assert_eq!(frame.kind(), AgentFrameKind::OptimisticUser);
+        assert_eq!(
+            AgentFrameRegistry::renderer_for(&frame),
+            FrameRenderer::Claude
+        );
+    }
+
+    #[test]
+    fn parses_claude_tool_progress_frame_to_claude_renderer() {
+        let frame = parse_for(
+            shared::AgentType::Claude,
+            serde_json::json!({
+                "type": "tool_progress",
+                "tool_use_id": "toolu_011pEiJk5V6SMz5Lv5u4broE-heartbeat-0",
+                "tool_name": "Bash",
+                "parent_tool_use_id": "toolu_011pEiJk5V6SMz5Lv5u4broE",
+                "elapsed_time_seconds": 30.0,
+                "uuid": "5ee5161f-f634-4187-be5a-6a58fac0935d",
+                "session_id": "e5cf12a9-db74-4a5a-b103-75ab55a10ccc"
+            }),
+        );
+
+        assert_eq!(frame.kind(), AgentFrameKind::ClaudeToolProgress);
         assert_eq!(
             AgentFrameRegistry::renderer_for(&frame),
             FrameRenderer::Claude

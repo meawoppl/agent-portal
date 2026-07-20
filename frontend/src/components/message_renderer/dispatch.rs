@@ -87,6 +87,9 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             AgentFrame::Claude(ClaudeMessage::RateLimitEvent(msg)) => {
                 renderers::render_rate_limit_event(&msg, ctx.timestamp)
             }
+            AgentFrame::Claude(ClaudeMessage::ToolProgress(msg)) => {
+                renderers::render_tool_progress_message(&msg, ctx.timestamp)
+            }
             AgentFrame::Claude(ClaudeMessage::Unknown)
             | AgentFrame::Codex(_)
             | AgentFrame::RawJson => render_raw_json(json),

@@ -329,6 +329,42 @@ pub fn render_rate_limit_event(msg: &shared::RateLimitEvent, timestamp: Option<&
     }
 }
 
+pub fn render_tool_progress_message(
+    msg: &shared::ToolProgressMessage,
+    timestamp: Option<&str>,
+) -> Html {
+    let elapsed_ms = (msg.elapsed_time_seconds.max(0.0) * 1000.0).round() as u64;
+    let elapsed = format_duration(elapsed_ms);
+    let tooltip = format!(
+        "{} has been running for {}",
+        msg.tool_name,
+        format_duration(elapsed_ms)
+    );
+
+    html! {
+        <div class="claude-message tool-progress-message">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
+                <span class="message-type-badge tool-progress">{ "Tool Progress" }</span>
+                <span class="tool-progress-inline" title={tooltip}>
+                    <span class="tool-progress-tool">{ &msg.tool_name }</span>
+                    <span class="tool-progress-detail">{ elapsed }</span>
+                    if let Some(parent_id) = &msg.parent_tool_use_id {
+                        <span class="tool-progress-detail monospace" title={parent_id.clone()}>
+                            { format!("parent {}", shared::fmt::truncate_str(parent_id, 18)) }
+                        </span>
+                    }
+                    if let Some(task_id) = &msg.task_id {
+                        <span class="tool-progress-detail monospace" title={task_id.clone()}>
+                            { format!("task {}", shared::fmt::truncate_str(task_id, 18)) }
+                        </span>
+                    }
+                </span>
+                <CopyButton text={msg.tool_use_id.clone()} title="Copy tool use ID" />
+            </div>
+        </div>
+    }
+}
+
 const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
     "image/png",
     "image/jpeg",
