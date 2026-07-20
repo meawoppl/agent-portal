@@ -208,56 +208,192 @@ fn plain_user_echo_text(output: &ClaudeOutput) -> Option<String> {
     saw_text.then_some(text)
 }
 
-fn should_drop_claude_user_echo(
-    output: &ClaudeOutput,
-    pending_echo_drops: &mut VecDeque<EchoDropMarker>,
-) -> bool {
-    let Some(echoed_text) = plain_user_echo_text(output) else {
-        return false;
-    };
-
-    if is_system_reminder_text(&echoed_text) {
-        tracing::debug!("Dropping system-reminder user echo from transcript");
-        return true;
-    }
-
-    if echoed_text.trim().is_empty() {
-        tracing::debug!("Dropping empty user echo from transcript");
-        return true;
-    }
-
-    if let Some(marker) = pending_echo_drops.pop_front() {
-        if marker.expected_text != echoed_text {
-            tracing::warn!(
-                "Dropping Claude user echo with mismatched text; expected={}, echoed={}",
-                truncate_for_log(&marker.expected_text),
-                truncate_for_log(&echoed_text)
-            );
-        }
-        return true;
-    }
-
-    false
-}
-
-fn clear_stale_echo_markers_at_turn_boundary(pending_echo_drops: &mut VecDeque<EchoDropMarker>) {
-    let count = pending_echo_drops.len();
-    if count == 0 {
-        return;
-    }
-    pending_echo_drops.clear();
-    tracing::warn!(
-        "Cleared {} pending Claude user echo drop marker(s) at turn boundary",
-        count
-    );
-}
-
 fn truncate_for_log(text: &str) -> String {
     const LIMIT: usize = 120;
     if text.chars().count() <= LIMIT {
         return text.to_string();
     }
     format!("{}...", text.chars().take(LIMIT).collect::<String>())
+}
+
+// Detector for the upstream-429 turn shape. When Anthropic's API rate-limits a
+// request, `claude --print` doesn't fail — it streams an assistant message
+// whose first text block starts with this prefix, then emits a Result with
+// is_error=true. We retry that turn for the user with full-jitter exponential
+// backoff.
+const RATE_LIMIT_TEXT_PREFIX: &str = "API Error: Server is temporarily limiting requests";
+const MAX_RATE_LIMIT_RETRIES: u32 = 30;
+const RATE_LIMIT_BACKOFF_CAP_SECS: u64 = 60;
+
+/// Decision produced at a rate-limited turn's error terminator. The RNG-drawn
+/// backoff delay is intentionally left to the caller (the state machine stays
+/// deterministic); it only reports the backoff *window* to draw from.
+#[derive(Debug)]
+enum RateLimitDecision {
+    /// No prior input to re-issue — do nothing.
+    NoInput,
+    /// Retry budget exhausted after `attempts` consecutive rate-limited turns;
+    /// the caller surfaces the give-up notice. The counter has been reset.
+    GiveUp { attempts: u32 },
+    /// Re-issue `input` after a full-jitter backoff drawn from `[0, exp_cap]`
+    /// seconds; `attempt`/`max` are for the user-facing retry notice.
+    Retry {
+        input: Box<ClaudeInput>,
+        exp_cap: u64,
+        attempt: u32,
+        max: u32,
+    },
+}
+
+/// Mutable driver state for a Claude session's I/O loop, gathered out of the
+/// select-loop so the rate-limit retry machine and the stdin-echo-drop
+/// bookkeeping have pure, unit-testable transition methods (issue #917). The
+/// loop keeps only channel recv, effect execution, and claude-client I/O.
+///
+/// Deliberately excludes the metrics/token trackers (`TurnTracker`, the
+/// subagent rollup, model/tier latches): those are already cohesive and their
+/// updates are interleaved with client reads, so folding them in would not add
+/// testability.
+#[derive(Default)]
+struct ClaudeIoState {
+    /// The most recent user input we sent — kept so we can re-issue it on a
+    /// rate-limited turn without bothering the user.
+    last_input: Option<ClaudeInput>,
+    /// Consecutive rate-limited turns. Reset on success, on fresh user input,
+    /// and after a max-out give-up.
+    rate_limit_attempts: u32,
+    /// Set while an assistant frame in the current turn matched the rate-limit
+    /// text prefix. Latched until the turn's Result frame so we can classify the
+    /// whole turn on its terminator.
+    current_turn_was_rate_limited: bool,
+    /// Parsed `(reset_at_rfc3339, source_message)` when the current turn hit the
+    /// weekly session limit; consumed on the error terminator.
+    pending_session_limit: Option<(String, String)>,
+    /// FIFO markers for CLI stdin echoes we expect to drop from the transcript
+    /// (claude re-emits each user message we send it as a `user` frame).
+    pending_echo_drops: VecDeque<EchoDropMarker>,
+}
+
+impl ClaudeIoState {
+    fn set_last_input(&mut self, input: ClaudeInput) {
+        self.last_input = Some(input);
+    }
+
+    fn current_turn_was_rate_limited(&self) -> bool {
+        self.current_turn_was_rate_limited
+    }
+
+    fn has_pending_session_limit(&self) -> bool {
+        self.pending_session_limit.is_some()
+    }
+
+    /// An assistant frame's first text block matched the upstream-429 prefix.
+    fn note_rate_limited_turn(&mut self) {
+        self.current_turn_was_rate_limited = true;
+    }
+
+    /// An assistant frame carried a parseable weekly-session-limit banner.
+    fn note_session_limit(&mut self, reset_at: String, source_message: String) {
+        self.pending_session_limit = Some((reset_at, source_message));
+    }
+
+    /// Clear the per-turn retry/limit latches. Shared by fresh user input, a
+    /// successful (non-error) Result, and retry cancellation (a new command
+    /// arriving mid-backoff) — all of which reset the same three fields.
+    fn reset_turn_retry_state(&mut self) {
+        self.rate_limit_attempts = 0;
+        self.current_turn_was_rate_limited = false;
+        self.pending_session_limit = None;
+    }
+
+    /// Consume the pending session-limit banner (emitted once on the error
+    /// terminator).
+    fn take_session_limit(&mut self) -> Option<(String, String)> {
+        self.pending_session_limit.take()
+    }
+
+    /// Decide what to do at a rate-limited turn's error terminator. Only called
+    /// when the turn's error Result was rate-limited; clears the per-turn
+    /// rate-limit latch, then advances the retry budget.
+    fn on_rate_limit_terminator(&mut self) -> RateLimitDecision {
+        self.current_turn_was_rate_limited = false;
+        let Some(input) = self.last_input.clone() else {
+            return RateLimitDecision::NoInput;
+        };
+        if self.rate_limit_attempts >= MAX_RATE_LIMIT_RETRIES {
+            let attempts = self.rate_limit_attempts;
+            self.rate_limit_attempts = 0;
+            return RateLimitDecision::GiveUp { attempts };
+        }
+        self.rate_limit_attempts += 1;
+        // Full-jitter exponential backoff:
+        //   delay ∈ [0, min(cap, 2^attempt)] seconds.
+        // attempt=1 -> [0,2]; 2 -> [0,4]; 3 -> [0,8]; 4 -> [0,16]; the cap
+        // saturates by attempt 5 but we max-out before that.
+        let exp_cap = 2u64
+            .saturating_pow(self.rate_limit_attempts)
+            .min(RATE_LIMIT_BACKOFF_CAP_SECS);
+        RateLimitDecision::Retry {
+            input: Box::new(input),
+            exp_cap,
+            attempt: self.rate_limit_attempts,
+            max: MAX_RATE_LIMIT_RETRIES,
+        }
+    }
+
+    /// Record that we sent `text` on stdin — claude will echo it back as a
+    /// `user` frame we must drop from the transcript.
+    fn push_echo_drop(&mut self, expected_text: String) {
+        self.pending_echo_drops
+            .push_back(EchoDropMarker { expected_text });
+    }
+
+    /// Whether an inbound `user` frame is a CLI echo of stdin we should drop.
+    /// Consumes the matching pending marker (FIFO); unconditional drops
+    /// (system-reminders, empty) don't consume a marker.
+    fn should_drop_user_echo(&mut self, output: &ClaudeOutput) -> bool {
+        let Some(echoed_text) = plain_user_echo_text(output) else {
+            return false;
+        };
+
+        if is_system_reminder_text(&echoed_text) {
+            tracing::debug!("Dropping system-reminder user echo from transcript");
+            return true;
+        }
+
+        if echoed_text.trim().is_empty() {
+            tracing::debug!("Dropping empty user echo from transcript");
+            return true;
+        }
+
+        if let Some(marker) = self.pending_echo_drops.pop_front() {
+            if marker.expected_text != echoed_text {
+                tracing::warn!(
+                    "Dropping Claude user echo with mismatched text; expected={}, echoed={}",
+                    truncate_for_log(&marker.expected_text),
+                    truncate_for_log(&echoed_text)
+                );
+            }
+            return true;
+        }
+
+        false
+    }
+
+    /// Drop any echo markers that never matched by the turn boundary — the CLI
+    /// coalesced/omitted the echo, so a stale marker would wrongly swallow the
+    /// next real user frame.
+    fn clear_stale_echo_markers(&mut self) {
+        let count = self.pending_echo_drops.len();
+        if count == 0 {
+            return;
+        }
+        self.pending_echo_drops.clear();
+        tracing::warn!(
+            "Cleared {} pending Claude user echo drop marker(s) at turn boundary",
+            count
+        );
+    }
 }
 
 /// Background task that owns the Claude process and handles all I/O.
@@ -274,29 +410,12 @@ pub(crate) async fn claude_io_task(
     mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
     event_tx: mpsc::UnboundedSender<IoEvent>,
 ) {
-    // Detector for the upstream-429 turn shape. When Anthropic's API rate-
-    // limits a request, `claude --print` doesn't fail — it streams an
-    // assistant message whose first text block starts with this prefix, then
-    // emits a Result with is_error=true. We retry that turn for the user
-    // with full-jitter exponential backoff.
-    const RATE_LIMIT_TEXT_PREFIX: &str = "API Error: Server is temporarily limiting requests";
-    const MAX_RATE_LIMIT_RETRIES: u32 = 30;
-    const RATE_LIMIT_BACKOFF_CAP_SECS: u64 = 60;
-
     // Take stderr so we can read it if Claude exits unexpectedly.
     let mut stderr_reader = client.take_stderr();
 
-    // The most recent user input we sent — kept so we can re-issue it on
-    // a rate-limited turn without bothering the user.
-    let mut last_input: Option<ClaudeInput> = None;
-    // Consecutive rate-limited turns. Resets on success, on a new user
-    // input, and after a max-out give-up.
-    let mut rate_limit_attempts: u32 = 0;
-    // Set while an assistant frame in the current turn matched the
-    // rate-limit text prefix. Latched until the turn's Result frame so we
-    // can classify the whole turn on its terminator.
-    let mut current_turn_was_rate_limited = false;
-    let mut pending_session_limit: Option<(String, String)> = None;
+    // Rate-limit retry machine + stdin-echo-drop bookkeeping, gathered into a
+    // state struct with pure transition methods (issue #917).
+    let mut state = ClaudeIoState::default();
 
     // Per-turn performance metrics tracker. `start`ed on each user input,
     // `record_content_frame`d on assistant/text frames, finalized on
@@ -316,7 +435,6 @@ pub(crate) async fn claude_io_task(
     // first turn starts land outside every turn window.
     let mut subagent_rollup = claude_codes::SubagentUsageRollup::default();
     let mut subagent_tokens_at_turn_start: i64 = 0;
-    let mut pending_echo_drops: VecDeque<EchoDropMarker> = VecDeque::new();
 
     loop {
         tokio::select! {
@@ -329,9 +447,7 @@ pub(crate) async fn claude_io_task(
                         display_event,
                     } => {
                         // Each fresh user input gets its own retry budget.
-                        rate_limit_attempts = 0;
-                        current_turn_was_rate_limited = false;
-                        pending_session_limit = None;
+                        state.reset_turn_retry_state();
                         subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
                         // Begin per-turn metrics capture. Wall-clock UTC is
                         // chrono::Utc::now(); the monotonic instant is the
@@ -344,12 +460,12 @@ pub(crate) async fn claude_io_task(
                             delivered,
                             display_event,
                             event_tx: &event_tx,
-                            pending_echo_drops: &mut pending_echo_drops,
+                            pending_echo_drops: &mut state.pending_echo_drops,
                             synthesize_visible_echo: true,
                         })
                         .await;
                         if let Ok(input) = &r {
-                            last_input = Some(input.clone());
+                            state.set_last_input(input.clone());
                         }
                         r.map(|_| ())
                     }
@@ -376,7 +492,7 @@ pub(crate) async fn claude_io_task(
             result = client.receive() => {
                 match result {
                     Ok(output) => {
-                        if should_drop_claude_user_echo(&output, &mut pending_echo_drops) {
+                        if state.should_drop_user_echo(&output) {
                             continue;
                         }
 
@@ -435,19 +551,16 @@ pub(crate) async fn claude_io_task(
                                     });
                                 if let Some(text) = first_text {
                                     if text.starts_with(RATE_LIMIT_TEXT_PREFIX) {
-                                        current_turn_was_rate_limited = true;
+                                        state.note_rate_limited_turn();
                                     }
                                     if let Some(reset_at) = parse_session_limit_reset(text) {
-                                        pending_session_limit =
-                                            Some((reset_at, text.to_string()));
+                                        state.note_session_limit(reset_at, text.to_string());
                                     }
                                 }
                             }
                             ClaudeOutput::Result(r) if !r.is_error => {
                                 // Successful turn — clear consecutive-failure state.
-                                rate_limit_attempts = 0;
-                                current_turn_was_rate_limited = false;
-                                pending_session_limit = None;
+                                state.reset_turn_retry_state();
                             }
                             _ => {}
                         }
@@ -458,7 +571,7 @@ pub(crate) async fn claude_io_task(
                         // turn (which will get its own row when `start` runs
                         // again).
                         if let ClaudeOutput::Result(ref r) = output {
-                            clear_stale_echo_markers_at_turn_boundary(&mut pending_echo_drops);
+                            state.clear_stale_echo_markers();
                             let usage = r.usage.as_ref();
                             let model = current_model.clone();
                             let outcome = TurnOutcome {
@@ -510,14 +623,12 @@ pub(crate) async fn claude_io_task(
                             }
                         }
 
-                        let is_rate_limit_terminator = matches!(
-                            &output,
-                            ClaudeOutput::Result(r) if r.is_error
-                        ) && current_turn_was_rate_limited;
-                        let is_session_limit_terminator = matches!(
-                            &output,
-                            ClaudeOutput::Result(r) if r.is_error
-                        ) && pending_session_limit.is_some();
+                        let terminator_is_error =
+                            matches!(&output, ClaudeOutput::Result(r) if r.is_error);
+                        let is_rate_limit_terminator =
+                            terminator_is_error && state.current_turn_was_rate_limited();
+                        let is_session_limit_terminator =
+                            terminator_is_error && state.has_pending_session_limit();
 
                         // Classify the frame into neutral decisions here (the
                         // boundary that keeps `Session` free of `ClaudeOutput`)
@@ -538,7 +649,7 @@ pub(crate) async fn claude_io_task(
                         }
 
                         if is_session_limit_terminator {
-                            if let Some((reset_at, source_message)) = pending_session_limit.take() {
+                            if let Some((reset_at, source_message)) = state.take_session_limit() {
                                 let _ = event_tx.send(IoEvent::SessionLimitReached {
                                     session_id,
                                     reset_at,
@@ -552,39 +663,39 @@ pub(crate) async fn claude_io_task(
                             continue;
                         }
 
-                        current_turn_was_rate_limited = false;
-                        let Some(input) = last_input.clone() else {
-                            continue;
-                        };
-
-                        if rate_limit_attempts >= MAX_RATE_LIMIT_RETRIES {
-                            let _ = event_tx.send(IoEvent::RawOutput(
-                                PortalMessage::text(format!(
-                                    "Rate-limited by upstream API {} times in a row \u{2014} not retrying. Send your message again to try once more.",
-                                    rate_limit_attempts
-                                ))
-                                .to_json(),
-                            ));
-                            rate_limit_attempts = 0;
-                            continue;
-                        }
-
-                        rate_limit_attempts += 1;
-                        // Full-jitter exponential backoff:
-                        //   delay ∈ [0, min(cap, 2^attempt)] seconds.
-                        // attempt=1 -> [0,2]; 2 -> [0,4]; 3 -> [0,8]; 4 -> [0,16];
-                        // the cap saturates by attempt 5 but we max-out before that.
-                        let exp_cap = 2u64
-                            .saturating_pow(rate_limit_attempts)
-                            .min(RATE_LIMIT_BACKOFF_CAP_SECS);
-                        let delay_secs = {
-                            let mut rng = rand::thread_rng();
-                            rng.gen_range(0.0..=exp_cap as f64)
+                        // Advance the retry machine on the rate-limited error
+                        // terminator; the loop executes the resulting effect.
+                        let (input, delay_secs, attempt, max) = match state
+                            .on_rate_limit_terminator()
+                        {
+                            RateLimitDecision::NoInput => continue,
+                            RateLimitDecision::GiveUp { attempts } => {
+                                let _ = event_tx.send(IoEvent::RawOutput(
+                                    PortalMessage::text(format!(
+                                        "Rate-limited by upstream API {} times in a row \u{2014} not retrying. Send your message again to try once more.",
+                                        attempts
+                                    ))
+                                    .to_json(),
+                                ));
+                                continue;
+                            }
+                            RateLimitDecision::Retry {
+                                input,
+                                exp_cap,
+                                attempt,
+                                max,
+                            } => {
+                                let delay_secs = {
+                                    let mut rng = rand::thread_rng();
+                                    rng.gen_range(0.0..=exp_cap as f64)
+                                };
+                                (input, delay_secs, attempt, max)
+                            }
                         };
                         let _ = event_tx.send(IoEvent::RawOutput(
                             PortalMessage::text(format!(
                                 "Rate-limited by upstream API. Retrying in {:.1}s (attempt {}/{}).",
-                                delay_secs, rate_limit_attempts, MAX_RATE_LIMIT_RETRIES
+                                delay_secs, attempt, max
                             ))
                             .to_json(),
                         ));
@@ -607,9 +718,7 @@ pub(crate) async fn claude_io_task(
                                         SessionError::Agent(e.to_string()),
                                     ));
                                 } else if let Some(expected_text) = plain_input_text(&input) {
-                                    pending_echo_drops.push_back(EchoDropMarker {
-                                        expected_text,
-                                    });
+                                    state.push_echo_drop(expected_text);
                                 }
                             }
                             Some(cmd) = command_rx.recv() => {
@@ -621,9 +730,10 @@ pub(crate) async fn claude_io_task(
                                     } => {
                                         // User typed something while we were waiting
                                         // — honor that, abandon the retry, and reset
-                                        // the budget for the new prompt.
-                                        rate_limit_attempts = 0;
-                                        pending_session_limit = None;
+                                        // the budget for the new prompt. (The
+                                        // rate-limit latch was already cleared by
+                                        // `on_rate_limit_terminator`.)
+                                        state.reset_turn_retry_state();
                                         subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
                                         turn_tracker.start(Instant::now(), chrono::Utc::now());
                                         let r = send_claude_user_input(ClaudeUserInputSend {
@@ -633,13 +743,13 @@ pub(crate) async fn claude_io_task(
                                             delivered,
                                             display_event,
                                             event_tx: &event_tx,
-                                            pending_echo_drops: &mut pending_echo_drops,
+                                            pending_echo_drops: &mut state.pending_echo_drops,
                                             synthesize_visible_echo: true,
                                         })
                                         .await;
                                         match r {
                                             Ok(new_input) => {
-                                                last_input = Some(new_input);
+                                                state.set_last_input(new_input);
                                             }
                                             Err(e) => {
                                                 let _ = event_tx.send(IoEvent::Error(
@@ -667,8 +777,7 @@ pub(crate) async fn claude_io_task(
                                         // rate-limited turn: abandon the retry
                                         // and cancel (a no-op on the CLI if the
                                         // turn isn't running).
-                                        rate_limit_attempts = 0;
-                                        pending_session_limit = None;
+                                        state.reset_turn_retry_state();
                                         if let Err(e) =
                                             client.send(&interrupt_input()).await
                                         {
@@ -1020,98 +1129,72 @@ mod tests {
         assert!(synthetic_user_echo_value("   \n\t", None, Uuid::nil()).is_none());
     }
 
+    fn state_with_drops(texts: &[&str]) -> ClaudeIoState {
+        ClaudeIoState {
+            pending_echo_drops: texts
+                .iter()
+                .map(|t| EchoDropMarker {
+                    expected_text: t.to_string(),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn pending_echo_drop_markers_are_fifo() {
-        let mut pending = VecDeque::from([
-            EchoDropMarker {
-                expected_text: "first".to_string(),
-            },
-            EchoDropMarker {
-                expected_text: "second".to_string(),
-            },
-        ]);
+        let mut state = state_with_drops(&["first", "second"]);
 
-        assert!(should_drop_claude_user_echo(
-            &text_user_output("first"),
-            &mut pending
-        ));
-        assert_eq!(pending.len(), 1);
-        assert!(should_drop_claude_user_echo(
-            &text_user_output("second"),
-            &mut pending
-        ));
-        assert!(pending.is_empty());
+        assert!(state.should_drop_user_echo(&text_user_output("first")));
+        assert_eq!(state.pending_echo_drops.len(), 1);
+        assert!(state.should_drop_user_echo(&text_user_output("second")));
+        assert!(state.pending_echo_drops.is_empty());
     }
 
     #[test]
     fn pending_echo_marker_drops_mismatched_plain_echo_but_not_future_frames() {
-        let mut pending = VecDeque::from([EchoDropMarker {
-            expected_text: "expected".to_string(),
-        }]);
+        let mut state = state_with_drops(&["expected"]);
 
-        assert!(should_drop_claude_user_echo(
-            &text_user_output("changed by cli"),
-            &mut pending
-        ));
-        assert!(pending.is_empty());
-        assert!(!should_drop_claude_user_echo(
-            &text_user_output("future legitimate user frame"),
-            &mut pending
-        ));
+        assert!(state.should_drop_user_echo(&text_user_output("changed by cli")));
+        assert!(state.pending_echo_drops.is_empty());
+        assert!(!state.should_drop_user_echo(&text_user_output("future legitimate user frame")));
     }
 
     #[test]
     fn stale_echo_markers_clear_at_turn_boundary() {
-        let mut pending = VecDeque::from([EchoDropMarker {
-            expected_text: "never echoed".to_string(),
-        }]);
-        clear_stale_echo_markers_at_turn_boundary(&mut pending);
-        assert!(pending.is_empty());
+        let mut state = state_with_drops(&["never echoed"]);
+        state.clear_stale_echo_markers();
+        assert!(state.pending_echo_drops.is_empty());
     }
 
     #[test]
     fn system_reminder_and_empty_user_echoes_drop_without_marker() {
-        let mut pending = VecDeque::new();
-        assert!(should_drop_claude_user_echo(
-            &text_user_output("<system-reminder>hidden</system-reminder>"),
-            &mut pending
-        ));
-        assert!(should_drop_claude_user_echo(
-            &text_user_output(" \n\t "),
-            &mut pending
-        ));
+        let mut state = ClaudeIoState::default();
+        assert!(state.should_drop_user_echo(&text_user_output(
+            "<system-reminder>hidden</system-reminder>"
+        )));
+        assert!(state.should_drop_user_echo(&text_user_output(" \n\t ")));
     }
 
     #[test]
     fn unconditional_echo_drops_do_not_consume_pending_marker() {
-        let mut pending = VecDeque::from([EchoDropMarker {
-            expected_text: "real prompt".to_string(),
-        }]);
+        let mut state = state_with_drops(&["real prompt"]);
 
-        assert!(should_drop_claude_user_echo(
-            &text_user_output(" \n\t "),
-            &mut pending
-        ));
-        assert_eq!(pending.len(), 1);
+        assert!(state.should_drop_user_echo(&text_user_output(" \n\t ")));
+        assert_eq!(state.pending_echo_drops.len(), 1);
 
-        assert!(should_drop_claude_user_echo(
-            &text_user_output("<system-reminder>hidden</system-reminder>"),
-            &mut pending
-        ));
-        assert_eq!(pending.len(), 1);
+        assert!(state.should_drop_user_echo(&text_user_output(
+            "<system-reminder>hidden</system-reminder>"
+        )));
+        assert_eq!(state.pending_echo_drops.len(), 1);
 
-        assert!(should_drop_claude_user_echo(
-            &text_user_output("real prompt"),
-            &mut pending
-        ));
-        assert!(pending.is_empty());
+        assert!(state.should_drop_user_echo(&text_user_output("real prompt")));
+        assert!(state.pending_echo_drops.is_empty());
     }
 
     #[test]
     fn structured_user_frames_are_not_plain_echoes() {
-        let mut pending = VecDeque::from([EchoDropMarker {
-            expected_text: "next prompt".to_string(),
-        }]);
+        let mut state = state_with_drops(&["next prompt"]);
         let tool_result = user_output_with_content(serde_json::json!([
             {
                 "type": "tool_result",
@@ -1119,12 +1202,114 @@ mod tests {
                 "content": "ok"
             }
         ]));
-        assert!(!should_drop_claude_user_echo(&tool_result, &mut pending));
-        assert_eq!(pending.len(), 1);
+        assert!(!state.should_drop_user_echo(&tool_result));
+        assert_eq!(state.pending_echo_drops.len(), 1);
 
         let no_blocks = user_output_with_content(serde_json::json!([]));
-        assert!(!should_drop_claude_user_echo(&no_blocks, &mut pending));
-        assert_eq!(pending.len(), 1);
+        assert!(!state.should_drop_user_echo(&no_blocks));
+        assert_eq!(state.pending_echo_drops.len(), 1);
+    }
+
+    #[test]
+    fn rate_limit_retry_counter_advances_then_resets_on_fresh_input() {
+        // The retry machine, previously buried in the select-loop, is now a
+        // pure transition. A fresh user input must reset the retry budget.
+        let mut state = ClaudeIoState::default();
+        state.set_last_input(ClaudeInput::user_message(
+            "do the thing".to_string(),
+            Uuid::nil(),
+        ));
+
+        // First rate-limited terminator → attempt 1, backoff window [0, 2].
+        state.note_rate_limited_turn();
+        match state.on_rate_limit_terminator() {
+            RateLimitDecision::Retry {
+                exp_cap,
+                attempt,
+                max,
+                ..
+            } => {
+                assert_eq!(attempt, 1);
+                assert_eq!(exp_cap, 2);
+                assert_eq!(max, MAX_RATE_LIMIT_RETRIES);
+            }
+            other => panic!("expected Retry, got {other:?}"),
+        }
+        // The latch was cleared by the terminator.
+        assert!(!state.current_turn_was_rate_limited());
+
+        // Second consecutive rate-limited terminator → attempt 2, window [0, 4].
+        state.note_rate_limited_turn();
+        match state.on_rate_limit_terminator() {
+            RateLimitDecision::Retry {
+                exp_cap, attempt, ..
+            } => {
+                assert_eq!(attempt, 2);
+                assert_eq!(exp_cap, 4);
+            }
+            other => panic!("expected Retry, got {other:?}"),
+        }
+
+        // A fresh user input resets the budget: the next rate-limited
+        // terminator restarts at attempt 1.
+        state.reset_turn_retry_state();
+        state.note_rate_limited_turn();
+        match state.on_rate_limit_terminator() {
+            RateLimitDecision::Retry { attempt, .. } => assert_eq!(attempt, 1),
+            other => panic!("expected Retry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rate_limit_terminator_without_prior_input_does_nothing() {
+        let mut state = ClaudeIoState::default();
+        assert!(matches!(
+            state.on_rate_limit_terminator(),
+            RateLimitDecision::NoInput
+        ));
+    }
+
+    #[test]
+    fn rate_limit_gives_up_after_max_retries_then_resets_counter() {
+        let mut state = ClaudeIoState::default();
+        state.set_last_input(ClaudeInput::user_message(
+            "retry me".to_string(),
+            Uuid::nil(),
+        ));
+
+        // Exhaust the budget: attempts climb from 1 to MAX.
+        for _ in 0..MAX_RATE_LIMIT_RETRIES {
+            assert!(matches!(
+                state.on_rate_limit_terminator(),
+                RateLimitDecision::Retry { .. }
+            ));
+        }
+        // Now at the cap → give up, reporting the attempt count, and reset.
+        match state.on_rate_limit_terminator() {
+            RateLimitDecision::GiveUp { attempts } => {
+                assert_eq!(attempts, MAX_RATE_LIMIT_RETRIES);
+            }
+            other => panic!("expected GiveUp, got {other:?}"),
+        }
+        // Counter reset: a subsequent terminator retries from attempt 1 again.
+        match state.on_rate_limit_terminator() {
+            RateLimitDecision::Retry { attempt, .. } => assert_eq!(attempt, 1),
+            other => panic!("expected Retry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn successful_result_clears_session_limit_and_rate_limit_latches() {
+        let mut state = ClaudeIoState::default();
+        state.note_rate_limited_turn();
+        state.note_session_limit("2026-01-01T00:00:00Z".to_string(), "banner".to_string());
+        assert!(state.current_turn_was_rate_limited());
+        assert!(state.has_pending_session_limit());
+
+        state.reset_turn_retry_state();
+        assert!(!state.current_turn_was_rate_limited());
+        assert!(!state.has_pending_session_limit());
+        assert!(state.take_session_limit().is_none());
     }
 
     #[test]
