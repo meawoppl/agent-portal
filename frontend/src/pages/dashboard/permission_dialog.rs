@@ -36,14 +36,29 @@ pub struct PermissionDialogProps {
     pub on_confirm: Callback<()>,
     /// Callback when user selects and confirms an option by index (for click)
     pub on_select_and_confirm: Callback<usize>,
-    /// Callback when user submits all answers (sends HashMap of question->answer)
-    pub on_submit_answers: Callback<QuestionAnswers>,
+    /// Callback when the user requests submit (button click or Enter). The
+    /// handler owns the answer state, so it assembles the answers and runs the
+    /// empty-multi-select confirm gate — this is a bare "submit requested"
+    /// signal.
+    pub on_submit: Callback<()>,
     /// Callback when user selects an answer for a specific question
     /// (question_index, answer)
     pub on_set_answer: Callback<(usize, String)>,
     /// Callback to toggle a multi-select option for a specific question
     /// (question_index, option_index)
     pub on_toggle_option: Callback<(usize, usize)>,
+    /// AskUserQuestion: whether Submit is enabled (all single-select questions
+    /// answered). Multi-select questions never disable it — empties are guarded
+    /// by [`Self::submit_warning`] instead.
+    #[prop_or(true)]
+    pub submit_enabled: bool,
+    /// AskUserQuestion: when `Some`, the two-step confirm is active — render
+    /// this amber warning near Submit and relabel the button "Submit anyway".
+    #[prop_or_default]
+    pub submit_warning: Option<String>,
+    /// AskUserQuestion: fully-resolved submit-button label from the handler.
+    #[prop_or_default]
+    pub submit_button_label: String,
 }
 
 /// Permission dialog component - handles both regular permissions and AskUserQuestion
@@ -227,47 +242,21 @@ fn custom_answer_input(props: &CustomAnswerInputProps) -> Html {
 }
 
 fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuestionInput) -> Html {
-    let total_questions = parsed.questions.len();
-    let answers_count = props.question_answers.len();
-
-    // Check if all questions have been answered
-    let all_answered = answers_count >= total_questions;
-
-    // For keyboard navigation, we don't use the standard up/down since we have multiple questions
-    let on_submit = props.on_submit_answers.clone();
-    let answers_for_submit = props.question_answers.clone();
-
+    // Enter submits — but only when Submit is enabled (all single-select
+    // questions answered). The handler runs the empty-multi-select confirm gate
+    // on the emitted signal, exactly like the button, so Enter and click share
+    // the two-step behavior.
+    let submit_enabled = props.submit_enabled;
+    let on_submit_key = props.on_submit.clone();
     let onkeydown = Callback::from(move |e: KeyboardEvent| {
-        // Only handle Enter to submit when all answered
-        if e.key() == "Enter" && answers_for_submit.len() >= total_questions {
+        if e.key() == "Enter" && submit_enabled {
             e.prevent_default();
-            on_submit.emit(answers_for_submit.clone());
+            on_submit_key.emit(());
         }
     });
 
-    // Prepare submit button callback
-    let on_submit_click = props.on_submit_answers.clone();
-    let answers_for_button = props.question_answers.clone();
-    let submit_onclick = Callback::from(move |_| {
-        on_submit_click.emit(answers_for_button.clone());
-    });
-    let button_text = if all_answered {
-        format!(
-            "Submit {} Answer{}",
-            answers_count,
-            if answers_count == 1 { "" } else { "s" }
-        )
-    } else {
-        format!(
-            "Answer {} more question{}",
-            total_questions - answers_count,
-            if total_questions - answers_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        )
-    };
+    let on_submit_click = props.on_submit.clone();
+    let submit_onclick = Callback::from(move |_| on_submit_click.emit(()));
 
     html! {
         <div
@@ -397,41 +386,30 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                                     </div>
                                 }
                             } }
-                            {
-                                // For multi-select questions, show a "Set Answer" button
-                                if is_multi && !multi_selected.is_empty() {
-                                    let options_clone = q.options.clone();
-                                    let multi_select_clone = multi_selected.clone();
-                                    let on_set_answer = props.on_set_answer.clone();
-                                    let onclick = Callback::from(move |_| {
-                                        // Build comma-separated answer from selected indices
-                                        let answer: String = multi_select_clone
-                                            .iter()
-                                            .filter_map(|&idx| options_clone.get(idx).map(|o| o.label.clone()))
-                                            .collect::<Vec<_>>()
-                                            .join(", ");
-                                        on_set_answer.emit((q_idx, answer));
-                                    });
-                                    html! {
-                                        <button class="set-answer-btn" {onclick}>
-                                            { "Set Answer" }
-                                        </button>
-                                    }
-                                } else {
-                                    html! {}
-                                }
-                            }
                         </div>
                     }
                 }).collect::<Html>()
             }
             <div class="question-submit-section">
+                {
+                    // Two-step confirm: amber warning naming the empty
+                    // multi-select question(s). A second Submit proceeds.
+                    if let Some(warning) = &props.submit_warning {
+                        html! {
+                            <div class="question-submit-warning">
+                                { warning }
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
                 <button
                     class="submit-all-answers"
                     onclick={submit_onclick}
-                    disabled={!all_answered}
+                    disabled={!props.submit_enabled}
                 >
-                    { button_text }
+                    { &props.submit_button_label }
                 </button>
                 <div class="question-hint">
                     { "Click options to answer each question, then submit" }

@@ -12,7 +12,10 @@ use std::collections::{HashMap, HashSet};
 use yew::prelude::*;
 
 use crate::pages::dashboard::permission_dialog::PermissionDialog;
-use crate::pages::dashboard::types::{parse_ask_user_question, PendingPermission, QuestionAnswers};
+use crate::pages::dashboard::types::{
+    parse_ask_user_question, AskUserQuestion, AskUserQuestionInput, PendingPermission,
+    QuestionAnswers,
+};
 
 /// Typed answer the handler emits to the parent. The parent translates each
 /// variant into a `ClientToServer::PermissionResponse` frame; keeping the
@@ -75,8 +78,10 @@ pub enum PermissionHandlerMsg {
     SetQuestionAnswer(usize, String),
     /// Toggle a multi-select option for AskUserQuestion.
     ToggleQuestionOption(usize, usize),
-    /// Submit the AskUserQuestion form.
-    SubmitAllAnswers(QuestionAnswers),
+    /// User asked to submit the AskUserQuestion form (button click or Enter).
+    /// The handler assembles the answers from its own state and runs the
+    /// empty-multi-select confirm gate before dispatching.
+    RequestSubmit,
 }
 
 pub struct PermissionHandler {
@@ -84,6 +89,14 @@ pub struct PermissionHandler {
     selected: usize,
     multi_select_options: HashMap<usize, HashSet<usize>>,
     question_answers: QuestionAnswers,
+    /// Two-step submit guard for AskUserQuestion: `true` once the user has
+    /// clicked Submit with one or more multi-select questions left empty and
+    /// been shown the confirm warning. The next Submit then proceeds with the
+    /// empty selection(s). Any selection change resets this to `false`, so the
+    /// warning re-evaluates fresh (an empty multi-select is a legitimate final
+    /// answer — this only guards against an accidental skip, it is not
+    /// validation).
+    submit_confirm_pending: bool,
     dialog_ref: NodeRef,
     /// Focus the dialog container exactly once when it appears, never on the
     /// re-renders that typing triggers. Without this gate, `rendered()` called
@@ -110,6 +123,7 @@ impl Component for PermissionHandler {
             selected: 0,
             multi_select_options: HashMap::new(),
             question_answers: QuestionAnswers::new(),
+            submit_confirm_pending: false,
             dialog_ref: NodeRef::default(),
             needs_focus: false,
         }
@@ -145,6 +159,7 @@ impl Component for PermissionHandler {
                 self.selected = 0;
                 self.question_answers.clear();
                 self.multi_select_options.clear();
+                self.submit_confirm_pending = false;
                 // A dialog just appeared — grab keyboard-nav focus once on the
                 // next render (consumed in `rendered`), not on every keystroke.
                 self.needs_focus = true;
@@ -173,6 +188,10 @@ impl Component for PermissionHandler {
                 true
             }
             PermissionHandlerMsg::SetQuestionAnswer(question_idx, answer) => {
+                // Any selection change re-arms the submit gate — a warned-about
+                // empty question that the user just typed an "Other" answer for
+                // must not still submit-anyway on the next click.
+                self.submit_confirm_pending = false;
                 let keep_multi_select = should_keep_multi_select_options(
                     self.request.as_ref(),
                     question_idx,
@@ -193,14 +212,17 @@ impl Component for PermissionHandler {
                 true
             }
             PermissionHandlerMsg::ToggleQuestionOption(question_idx, option_idx) => {
+                // Ticking or un-ticking any box re-arms the submit gate so the
+                // warning clears and the next Submit re-evaluates fresh.
+                self.submit_confirm_pending = false;
                 let options = self.multi_select_options.entry(question_idx).or_default();
                 if !options.insert(option_idx) {
                     options.remove(&option_idx);
                 }
                 true
             }
-            PermissionHandlerMsg::SubmitAllAnswers(answers) => {
-                self.dispatch_response(ctx, PermissionResponseKind::AnswerQuestions(answers));
+            PermissionHandlerMsg::RequestSubmit => {
+                self.request_submit(ctx);
                 true
             }
         }
@@ -216,12 +238,17 @@ impl Component for PermissionHandler {
         let on_select_down = link.callback(|_| PermissionHandlerMsg::SelectDown);
         let on_confirm = link.callback(|_| PermissionHandlerMsg::Confirm);
         let on_select_and_confirm = link.callback(PermissionHandlerMsg::SelectAndConfirm);
-        let on_submit_answers = link.callback(PermissionHandlerMsg::SubmitAllAnswers);
+        let on_submit = link.callback(|_| PermissionHandlerMsg::RequestSubmit);
         let on_set_answer =
             link.callback(|(q_idx, answer)| PermissionHandlerMsg::SetQuestionAnswer(q_idx, answer));
         let on_toggle_option = link.callback(|(q_idx, opt_idx)| {
             PermissionHandlerMsg::ToggleQuestionOption(q_idx, opt_idx)
         });
+
+        // Submit-button state for AskUserQuestion. Computed here (not in the
+        // dialog) so the tested gate/assembly helpers stay the single source of
+        // truth; other dialog kinds ignore these and get harmless defaults.
+        let (submit_enabled, submit_warning, submit_button_label) = self.submit_button_state(perm);
 
         html! {
             <PermissionDialog
@@ -230,11 +257,14 @@ impl Component for PermissionHandler {
                 multi_select_options={self.multi_select_options.clone()}
                 question_answers={self.question_answers.clone()}
                 dialog_ref={self.dialog_ref.clone()}
+                {submit_enabled}
+                {submit_warning}
+                {submit_button_label}
                 {on_select_up}
                 {on_select_down}
                 {on_confirm}
                 {on_select_and_confirm}
-                {on_submit_answers}
+                {on_submit}
                 {on_set_answer}
                 {on_toggle_option}
             />
@@ -257,11 +287,9 @@ impl PermissionHandler {
             return;
         };
         if perm.tool_name == "AskUserQuestion" {
-            if !self.question_answers.is_empty() {
-                let answers = self.question_answers.clone();
-                ctx.link()
-                    .send_message(PermissionHandlerMsg::SubmitAllAnswers(answers));
-            }
+            // Route through the same gated submit path the button/Enter use so
+            // the empty-multi-select confirm applies uniformly.
+            ctx.link().send_message(PermissionHandlerMsg::RequestSubmit);
             return;
         }
 
@@ -280,9 +308,87 @@ impl PermissionHandler {
         };
         self.multi_select_options.clear();
         self.question_answers.clear();
+        self.submit_confirm_pending = false;
         ctx.props().on_response.emit((perm.request_id, kind));
         ctx.props().on_pending_changed.emit(false);
         ctx.props().on_refocus_input.emit(());
+    }
+
+    /// Handle a submit request for an AskUserQuestion dialog: assemble the
+    /// answers from the live tick/answer state and run the empty-multi-select
+    /// confirm gate before dispatching.
+    fn request_submit(&mut self, ctx: &Context<Self>) {
+        let Some(perm) = self.request.as_ref() else {
+            return;
+        };
+        let Some(parsed) = parse_ask_user_question(&perm.input) else {
+            return;
+        };
+        // Single-select questions are still hard-required; the button is
+        // disabled until they're answered, but guard here too.
+        if !all_single_select_answered(&parsed, &self.question_answers) {
+            return;
+        }
+        let empties = empty_multi_select_questions(
+            &parsed,
+            &self.multi_select_options,
+            &self.question_answers,
+        );
+        match evaluate_submit_gate(&empties, self.submit_confirm_pending) {
+            SubmitGate::Confirm(_) => {
+                // First click with empties: arm the warning, don't submit yet.
+                self.submit_confirm_pending = true;
+            }
+            SubmitGate::Submit => {
+                let answers =
+                    assemble_answers(&parsed, &self.multi_select_options, &self.question_answers);
+                self.dispatch_response(ctx, PermissionResponseKind::AnswerQuestions(answers));
+            }
+        }
+    }
+
+    /// Compute `(submit_enabled, submit_warning, button_label)` for the submit
+    /// button. Non-AskUserQuestion dialogs get harmless defaults (they don't
+    /// render a submit button).
+    fn submit_button_state(&self, perm: &PendingPermission) -> (bool, Option<String>, String) {
+        if perm.tool_name != "AskUserQuestion" {
+            return (true, None, String::new());
+        }
+        let Some(parsed) = parse_ask_user_question(&perm.input) else {
+            return (true, None, String::new());
+        };
+
+        let enabled = all_single_select_answered(&parsed, &self.question_answers);
+        let warning = if self.submit_confirm_pending {
+            let empties = empty_multi_select_questions(
+                &parsed,
+                &self.multi_select_options,
+                &self.question_answers,
+            );
+            format_empty_warning(&empties)
+        } else {
+            None
+        };
+
+        let label = if !enabled {
+            let remaining = parsed
+                .questions
+                .iter()
+                .enumerate()
+                .filter(|(q_idx, q)| !q.multi_select && !self.question_answers.contains_key(q_idx))
+                .count();
+            format!(
+                "Answer {remaining} more question{}",
+                if remaining == 1 { "" } else { "s" }
+            )
+        } else if warning.is_some() {
+            "Submit anyway".to_string()
+        } else {
+            let total = parsed.questions.len();
+            format!("Submit {total} Answer{}", if total == 1 { "" } else { "s" })
+        };
+
+        (enabled, warning, label)
     }
 }
 
@@ -361,6 +467,126 @@ fn should_keep_multi_select_options(
         .filter(|part| !part.is_empty())
         .collect();
     selected_labels == answer_labels
+}
+
+/// Comma-join the ticked option labels of a multi-select question in option
+/// order (stable, readable). Empty when nothing is ticked.
+fn joined_ticks(question: &AskUserQuestion, ticks: Option<&HashSet<usize>>) -> String {
+    let Some(ticks) = ticks else {
+        return String::new();
+    };
+    question
+        .options
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| ticks.contains(idx))
+        .map(|(_, opt)| opt.label.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Assemble the final per-question answer map at submit time.
+///
+/// Single-select answers come straight from `answers` (set by clicking an
+/// option or typing the "Other" field). Multi-select answers are derived live
+/// from the current tick state — the comma-joined ticked labels — or, when
+/// nothing is ticked, the typed "Other" text. A multi-select with neither
+/// yields an empty-string answer, which is a legitimate final answer.
+fn assemble_answers(
+    parsed: &AskUserQuestionInput,
+    ticks: &HashMap<usize, HashSet<usize>>,
+    answers: &QuestionAnswers,
+) -> QuestionAnswers {
+    let mut out = QuestionAnswers::new();
+    for (q_idx, question) in parsed.questions.iter().enumerate() {
+        if question.multi_select {
+            let joined = joined_ticks(question, ticks.get(&q_idx));
+            if !joined.is_empty() {
+                out.insert(q_idx, joined);
+            } else if let Some(custom) = answers.get(&q_idx).filter(|a| !a.trim().is_empty()) {
+                out.insert(q_idx, custom.clone());
+            } else {
+                out.insert(q_idx, String::new());
+            }
+        } else if let Some(answer) = answers.get(&q_idx) {
+            out.insert(q_idx, answer.clone());
+        }
+    }
+    out
+}
+
+/// Zero-based indices of multi-select questions with no answer at all: nothing
+/// ticked and no non-blank "Other" text. These are the questions the submit
+/// confirm gate warns about. Returned in question order.
+fn empty_multi_select_questions(
+    parsed: &AskUserQuestionInput,
+    ticks: &HashMap<usize, HashSet<usize>>,
+    answers: &QuestionAnswers,
+) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (q_idx, question) in parsed.questions.iter().enumerate() {
+        let has_custom = answers
+            .get(&q_idx)
+            .map(|a| !a.trim().is_empty())
+            .unwrap_or(false);
+        if question.multi_select
+            && joined_ticks(question, ticks.get(&q_idx)).is_empty()
+            && !has_custom
+        {
+            out.push(q_idx);
+        }
+    }
+    out
+}
+
+/// Whether every single-select question has an answer. Multi-select questions
+/// never block submit (an empty multi-select is legitimate; the confirm gate
+/// guards it instead), so they're always treated as answerable here. This keeps
+/// single-select behavior unchanged from before the two-step gate.
+fn all_single_select_answered(parsed: &AskUserQuestionInput, answers: &QuestionAnswers) -> bool {
+    parsed
+        .questions
+        .iter()
+        .enumerate()
+        .all(|(q_idx, question)| question.multi_select || answers.contains_key(&q_idx))
+}
+
+/// Outcome of the two-step submit gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SubmitGate {
+    /// Proceed: dispatch the assembled answers.
+    Submit,
+    /// Hold: show the confirm warning naming these zero-based question indices
+    /// and require a second Submit click.
+    Confirm(Vec<usize>),
+}
+
+/// Pure gate decision. With no empty multi-selects, or once the user has
+/// already been warned (`confirmed`), submit proceeds. Otherwise hold and warn
+/// about the empty questions so an accidental skip needs a deliberate second
+/// click to go through.
+fn evaluate_submit_gate(empties: &[usize], confirmed: bool) -> SubmitGate {
+    if empties.is_empty() || confirmed {
+        SubmitGate::Submit
+    } else {
+        SubmitGate::Confirm(empties.to_vec())
+    }
+}
+
+/// Build the amber confirm-warning copy for the empty multi-select questions.
+/// Question numbers are 1-based to match how the stacked list reads to a user.
+/// `None` when there's nothing to warn about.
+fn format_empty_warning(empties: &[usize]) -> Option<String> {
+    let nums: Vec<String> = empties.iter().map(|idx| format!("#{}", idx + 1)).collect();
+    match nums.as_slice() {
+        [] => None,
+        [only] => Some(format!("Nothing selected for question {only}")),
+        [head @ .., last] => Some(format!(
+            "Nothing selected for questions {} and {}",
+            head.join(", "),
+            last
+        )),
+    }
 }
 
 /// Pure helper: compute the next selected index when the user presses
@@ -743,5 +969,190 @@ mod tests {
             answers_obj.get("headerless?").and_then(|v| v.as_str()),
             Some("x")
         );
+    }
+
+    // --- multi-select submit gate ---
+
+    /// Build a parsed AskUserQuestionInput from `(multi_select, num_options)`
+    /// specs. Uses JSON round-trip so the `multiSelect` rename is exercised.
+    fn mk_parsed(specs: &[(bool, usize)]) -> AskUserQuestionInput {
+        let questions: Vec<serde_json::Value> = specs
+            .iter()
+            .map(|(multi, n)| {
+                serde_json::json!({
+                    "question": "Q?",
+                    "multiSelect": multi,
+                    "options": (0..*n)
+                        .map(|i| serde_json::json!({ "label": format!("opt-{i}") }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({ "questions": questions })).unwrap()
+    }
+
+    fn ticks(pairs: &[(usize, &[usize])]) -> HashMap<usize, HashSet<usize>> {
+        pairs
+            .iter()
+            .map(|(q, opts)| (*q, opts.iter().copied().collect()))
+            .collect()
+    }
+
+    // evaluate_submit_gate
+
+    #[test]
+    fn gate_no_empties_submits_immediately() {
+        assert_eq!(evaluate_submit_gate(&[], false), SubmitGate::Submit);
+    }
+
+    #[test]
+    fn gate_empties_first_click_warns_with_indices() {
+        // First click (not yet confirmed) holds and names the empty questions.
+        assert_eq!(
+            evaluate_submit_gate(&[1, 2], false),
+            SubmitGate::Confirm(vec![1, 2])
+        );
+    }
+
+    #[test]
+    fn gate_empties_second_click_submits() {
+        // Once confirmed, the same empties go through.
+        assert_eq!(evaluate_submit_gate(&[1, 2], true), SubmitGate::Submit);
+    }
+
+    #[test]
+    fn gate_re_arms_when_confirmed_cleared() {
+        // A selection change resets `confirmed` to false; the gate must warn
+        // again rather than silently submit.
+        assert_eq!(
+            evaluate_submit_gate(&[1], false),
+            SubmitGate::Confirm(vec![1])
+        );
+    }
+
+    // format_empty_warning
+
+    #[test]
+    fn warning_none_when_no_empties() {
+        assert_eq!(format_empty_warning(&[]), None);
+    }
+
+    #[test]
+    fn warning_single_question_uses_one_based_number() {
+        assert_eq!(
+            format_empty_warning(&[1]).as_deref(),
+            Some("Nothing selected for question #2")
+        );
+    }
+
+    #[test]
+    fn warning_two_questions_joined_with_and() {
+        assert_eq!(
+            format_empty_warning(&[1, 2]).as_deref(),
+            Some("Nothing selected for questions #2 and #3")
+        );
+    }
+
+    #[test]
+    fn warning_three_questions_oxford_free_list() {
+        assert_eq!(
+            format_empty_warning(&[1, 2, 3]).as_deref(),
+            Some("Nothing selected for questions #2, #3 and #4")
+        );
+    }
+
+    // empty_multi_select_questions
+
+    #[test]
+    fn empties_ignores_single_select_and_ticked_multi() {
+        // q0 single-select (never counts), q1 multi empty, q2 multi ticked.
+        let parsed = mk_parsed(&[(false, 2), (true, 3), (true, 3)]);
+        let selected = ticks(&[(2, &[0])]);
+        let answers = QuestionAnswers::new();
+        assert_eq!(
+            empty_multi_select_questions(&parsed, &selected, &answers),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn empties_counts_multi_with_only_blank_custom_text() {
+        let parsed = mk_parsed(&[(true, 2)]);
+        let selected = HashMap::new();
+        let mut answers = QuestionAnswers::new();
+        answers.insert(0, "   ".to_string());
+        assert_eq!(
+            empty_multi_select_questions(&parsed, &selected, &answers),
+            vec![0]
+        );
+    }
+
+    #[test]
+    fn empties_excludes_multi_with_custom_other_text() {
+        // A typed "Other" answer (no ticks) is a real answer — not empty.
+        let parsed = mk_parsed(&[(true, 2)]);
+        let selected = HashMap::new();
+        let mut answers = QuestionAnswers::new();
+        answers.insert(0, "custom".to_string());
+        assert!(empty_multi_select_questions(&parsed, &selected, &answers).is_empty());
+    }
+
+    // assemble_answers
+
+    #[test]
+    fn assemble_joins_ticked_multi_select_in_option_order() {
+        let parsed = mk_parsed(&[(true, 3)]);
+        // Insertion order reversed to prove the output follows option order.
+        let selected = ticks(&[(0, &[2, 0])]);
+        let answers = QuestionAnswers::new();
+        let out = assemble_answers(&parsed, &selected, &answers);
+        assert_eq!(out.get(&0).map(String::as_str), Some("opt-0, opt-2"));
+    }
+
+    #[test]
+    fn assemble_empty_multi_select_yields_empty_string() {
+        let parsed = mk_parsed(&[(true, 2)]);
+        let out = assemble_answers(&parsed, &HashMap::new(), &QuestionAnswers::new());
+        assert_eq!(out.get(&0).map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn assemble_multi_select_custom_text_wins_when_no_ticks() {
+        let parsed = mk_parsed(&[(true, 2)]);
+        let mut answers = QuestionAnswers::new();
+        answers.insert(0, "typed thing".to_string());
+        let out = assemble_answers(&parsed, &HashMap::new(), &answers);
+        assert_eq!(out.get(&0).map(String::as_str), Some("typed thing"));
+    }
+
+    #[test]
+    fn assemble_passes_through_single_select_answer() {
+        let parsed = mk_parsed(&[(false, 2)]);
+        let mut answers = QuestionAnswers::new();
+        answers.insert(0, "opt-1".to_string());
+        let out = assemble_answers(&parsed, &HashMap::new(), &answers);
+        assert_eq!(out.get(&0).map(String::as_str), Some("opt-1"));
+    }
+
+    // all_single_select_answered
+
+    #[test]
+    fn single_select_gates_submit_until_answered() {
+        let parsed = mk_parsed(&[(false, 2), (true, 2)]);
+        // Single-select q0 unanswered → submit disabled.
+        assert!(!all_single_select_answered(
+            &parsed,
+            &QuestionAnswers::new()
+        ));
+        // Answer it → enabled (the empty multi q1 does not block).
+        let mut answers = QuestionAnswers::new();
+        answers.insert(0, "opt-0".to_string());
+        assert!(all_single_select_answered(&parsed, &answers));
+    }
+
+    #[test]
+    fn all_multi_select_is_always_answerable() {
+        let parsed = mk_parsed(&[(true, 2), (true, 3)]);
+        assert!(all_single_select_answered(&parsed, &QuestionAnswers::new()));
     }
 }
