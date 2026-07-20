@@ -330,23 +330,6 @@
     cursor: not-allowed;
 }
 
-.ask-user-question .set-answer-btn {
-    margin-top: 0.5rem;
-    padding: 0.4rem 0.8rem;
-    background: rgba(122, 162, 247, 0.3);
-    color: var(--accent);
-    border: 1px solid var(--accent);
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.ask-user-question .set-answer-btn:hover {
-    background: rgba(122, 162, 247, 0.5);
-}
-
 .ask-user-question .question-submit-section {
     margin-top: 1rem;
     padding-top: 0.75rem;
@@ -389,6 +372,19 @@
     font-size: 0.75rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
+}
+
+/* Two-step submit confirm: amber warning naming empty multi-select
+   question(s). Shown above the Submit button (relabeled "Submit anyway"). */
+.ask-user-question .question-submit-warning {
+    margin-bottom: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--warning);
+    border-radius: 4px;
+    background: rgba(224, 175, 104, 0.12);
+    color: var(--warning);
+    font-size: 0.8rem;
+    font-weight: 500;
 }
 
 /* ==========================================================================
