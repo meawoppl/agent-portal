@@ -21,16 +21,11 @@ use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::db::DbConnection;
+use crate::markers::PUSH_DISPATCH_FAILED;
 use crate::models::PushSubscription;
 use crate::push::transport::{PushTransport, SendOutcome};
 use crate::push::{ConfiguredTransport, NotificationEvent};
 use crate::AppState;
-
-/// Stable log marker for a real (non-dead-endpoint) delivery failure. Alert on
-/// this: a recurring burst right after a deploy usually means a transport
-/// misconfiguration, mirroring the `PENDING_INPUT_PERSIST_FAILED` convention
-/// (CLAUDE.md "Schema-drift alerting").
-const PUSH_DISPATCH_FAILED: &str = "PUSH_DISPATCH_FAILED";
 
 /// Spawn the dispatcher task. Consumes the receiver end of the notification
 /// channel; runs until the channel closes (backend shutdown).

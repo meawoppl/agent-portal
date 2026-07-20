@@ -248,15 +248,32 @@ To avoid it:
 - **Don't restore partial/mismatched DB snapshots** (a snapshot of the migrations table without the corresponding columns produces exactly this drift).
 - **Symptom → fix:** a `column "…" does not exist` at runtime on a table whose migration *is* recorded means recorded-but-not-applied drift. Fix by applying the column directly (`ALTER TABLE … ADD COLUMN IF NOT EXISTS …` matching the migration's `up.sql`); the migrations table already records it, so future restarts stay consistent.
 
-### Schema-drift alerting
+### Operational log markers
 
-DB write failures on the input path are **swallowed** (logged, then delivery continues) so a transient DB hiccup never drops a live message. The downside is drift can hide in the logs. Both write paths emit a stable marker — alert on it:
+Some failures are deliberately **logged-and-continued** rather than propagated —
+dropping a durable message or crashing a background sweep would be worse than the
+failure itself. Each such site emits a **stable SCREAMING_SNAKE marker** as the
+first token of its log line so you can alert on the substring.
 
-```
-PENDING_INPUT_PERSIST_FAILED   # pending_inputs INSERT failed (web + agent paths)
-```
+**`backend/src/markers.rs` is the single source of truth.** Every marker is a
+`pub const &str` there (value == name), each emit site references the const (so a
+rename is compile-time and repo-wide), and a unit test enforces uniqueness +
+naming + that each const is wired to an emit site. **New alertable
+logged-and-continue failure? Add a const in `markers.rs` (with the doc treatment)
+and a row here.**
 
-A recurring `PENDING_INPUT_PERSIST_FAILED` right after a deploy almost always means schema drift (a migration recorded-but-not-applied) — see above. A one-off is likely a transient DB blip.
+| Marker | Emitted by (when) | Recurring burst means | Action |
+|--------|-------------------|-----------------------|--------|
+| `PENDING_INPUT_PERSIST_FAILED` | Input enqueue (`input_queue.rs`) when the `pending_inputs` row can't be written — INSERT failed *or* no DB connection (web + agent paths) | Schema drift after a deploy (migration recorded-but-not-applied); every INSERT fails and inputs sent while a proxy bounces can be lost | Diff live schema vs. latest migration (`\d pending_inputs`); `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` the missing column |
+| `INPUT_SEQ_BUMP_FAILED` | Input enqueue when bumping `sessions.input_seq` fails (falls back to seq `1`) | Same schema-drift / DB-degradation signal, scoped to `input_seq`; replay ordering unreliable for affected sessions | Same as above — reconcile schema drift / check DB health |
+| `PUSH_DISPATCH_FAILED` | Push dispatcher (`push/dispatcher.rs`) on any swallowed delivery-path failure | Systemic push fault — VAPID/APNs/FCM misconfig or credential expiry, or DB problem resolving recipients; users stop getting pushes | Verify push credentials (`PORTAL_VAPID_*`/`PORTAL_APNS_*`/`PORTAL_FCM_*`) + DB health; a low trickle of dead endpoints is normal |
+| `SESSION_ARCHIVE_FAILED` | Archive sweep (`background.rs`) when archiving one session fails | Archive backend unhealthy (bad `PORTAL_SESSION_ARCHIVE_*`, S3 creds/permissions, full local root); retention held, hot DB grows | Check archive-backend reachability, credentials/permissions, and config |
+| `ARCHIVE_SWEEP_FAILED` | Archive sweep task returning an error before processing any sessions (e.g. no DB connection) | Persistent DB/archive-subsystem problem; nothing archived, retention globally held | Check DB-pool health + archive backend; sweep self-recovers |
+| `RETENTION_TRIM_HELD` | Retention cleanup (`background.rs`) when it holds sessions' trims because their pre-trim archive didn't succeed | An archive outage is silently blocking retention; watch hot-DB size (expect alongside the archive markers) | Treat a rising count as an archive incident; retention drains once archiving succeeds (empty when archive disabled — normal) |
+
+A recurring `PENDING_INPUT_PERSIST_FAILED` right after a deploy almost always
+means schema drift (a migration recorded-but-not-applied) — see above. A one-off
+of any marker is usually a transient DB/network blip.
 
 ### Adding a New API Endpoint
 
