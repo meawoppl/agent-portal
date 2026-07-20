@@ -12,10 +12,37 @@ use crate::db::DbPool;
 use crate::models::{NewMessage, NewSessionContinuation, Session, SessionContinuation};
 use crate::AppState;
 
-const STATUS_PENDING: &str = "pending";
-const STATUS_SCHEDULED: &str = "scheduled";
-const STATUS_FIRED: &str = "fired";
-const STATUS_DROPPED: &str = "dropped";
+/// Lifecycle state stored in `session_continuations.status`.
+///
+/// Backend-local: the column never crosses the wire as a typed value — the
+/// `ServerToClient::ContinuationStatus` notification carries a broader string
+/// set (it also emits a transient `"failed"` that is never persisted). The
+/// wire/DB string is [`ContinuationStatus::as_str`], so stored values stay
+/// byte-identical while interior branches match on the enum exhaustively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContinuationStatus {
+    Pending,
+    Scheduled,
+    Fired,
+    Dropped,
+}
+
+impl ContinuationStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            ContinuationStatus::Pending => "pending",
+            ContinuationStatus::Scheduled => "scheduled",
+            ContinuationStatus::Fired => "fired",
+            ContinuationStatus::Dropped => "dropped",
+        }
+    }
+}
+
+impl std::fmt::Display for ContinuationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 /// Rolling window used to cap overload auto-retries per session. Counting prior
 /// `overloaded` continuation rows in this window is the whole cap mechanism, so
@@ -89,7 +116,7 @@ pub fn handle_session_limit_reached(
         launcher_id,
         reset_at,
         prompt: fields.prompt,
-        status: STATUS_PENDING.to_string(),
+        status: ContinuationStatus::Pending.as_str().to_string(),
         source_message: Some(fields.source_message),
         reason: CONTINUATION_REASON_LIMIT.to_string(),
     };
@@ -158,10 +185,10 @@ pub fn schedule_limit_continuation(
             .filter(session_continuations::id.eq(continuation_id))
             .filter(session_continuations::session_id.eq(session_id))
             .filter(session_continuations::user_id.eq(user_id))
-            .filter(session_continuations::status.eq(STATUS_PENDING)),
+            .filter(session_continuations::status.eq(ContinuationStatus::Pending.as_str())),
     )
     .set((
-        session_continuations::status.eq(STATUS_SCHEDULED),
+        session_continuations::status.eq(ContinuationStatus::Scheduled.as_str()),
         session_continuations::scheduled_at.eq(diesel::dsl::now),
         session_continuations::updated_at.eq(diesel::dsl::now),
     ))
@@ -189,7 +216,7 @@ pub fn schedule_limit_continuation(
         &session_id.to_string(),
         ServerToClient::ContinuationStatus {
             continuation_id,
-            status: STATUS_SCHEDULED.to_string(),
+            status: ContinuationStatus::Scheduled.as_str().to_string(),
             message: Some("Continuation scheduled".to_string()),
         },
     );
@@ -214,7 +241,7 @@ pub fn mark_continuation_fired(
         user_id,
         continuation_id,
         session_id,
-        STATUS_FIRED,
+        ContinuationStatus::Fired,
         None,
     );
 }
@@ -233,7 +260,7 @@ pub fn mark_continuation_dropped(
         user_id,
         continuation_id,
         session_id,
-        STATUS_DROPPED,
+        ContinuationStatus::Dropped,
         Some(reason),
     );
 }
@@ -244,7 +271,7 @@ fn update_terminal_status(
     user_id: Uuid,
     continuation_id: Uuid,
     session_id: Uuid,
-    status: &str,
+    status: ContinuationStatus,
     reason: Option<String>,
 ) {
     let Ok(mut conn) = app_state.db_pool.get() else {
@@ -260,15 +287,15 @@ fn update_terminal_status(
             .filter(session_continuations::launcher_id.eq(launcher_id)),
     )
     .set((
-        session_continuations::status.eq(status),
+        session_continuations::status.eq(status.as_str()),
         session_continuations::last_error.eq(reason.clone()),
         session_continuations::updated_at.eq(diesel::dsl::now),
-        session_continuations::fired_at.eq(if status == STATUS_FIRED {
+        session_continuations::fired_at.eq(if status == ContinuationStatus::Fired {
             Some(chrono::Utc::now().naive_utc())
         } else {
             None
         }),
-        session_continuations::dropped_at.eq(if status == STATUS_DROPPED {
+        session_continuations::dropped_at.eq(if status == ContinuationStatus::Dropped {
             Some(chrono::Utc::now().naive_utc())
         } else {
             None
@@ -282,12 +309,12 @@ fn update_terminal_status(
                 &session_id.to_string(),
                 ServerToClient::ContinuationStatus {
                     continuation_id,
-                    status: status.to_string(),
+                    status: status.as_str().to_string(),
                     message: reason.clone(),
                 },
             );
 
-            if status == STATUS_DROPPED {
+            if status == ContinuationStatus::Dropped {
                 if let Ok(session) = sessions::table.find(session_id).first::<Session>(&mut conn) {
                     let portal = PortalMessage::text(
                         "Continuation was not sent because the local Claude process was no longer running when the session limit reset."
@@ -350,7 +377,7 @@ pub fn load_scheduled_continuations(
         .inner_join(sessions::table.on(sessions::id.eq(session_continuations::session_id)))
         .filter(session_continuations::launcher_id.eq(launcher_id))
         .filter(session_continuations::user_id.eq(user_id))
-        .filter(session_continuations::status.eq(STATUS_SCHEDULED))
+        .filter(session_continuations::status.eq(ContinuationStatus::Scheduled.as_str()))
         .order(session_continuations::reset_at.asc())
         .select((SessionContinuation::as_select(), Session::as_select()))
         .load::<(SessionContinuation, Session)>(&mut conn)
@@ -539,7 +566,7 @@ pub fn schedule_overloaded_retry(
         launcher_id,
         reset_at,
         prompt,
-        status: STATUS_SCHEDULED.to_string(),
+        status: ContinuationStatus::Scheduled.as_str().to_string(),
         source_message: Some(source_message),
         reason: CONTINUATION_REASON_OVERLOADED.to_string(),
     };
@@ -708,7 +735,7 @@ mod tests {
             launcher_id: Uuid::new_v4(),
             reset_at: Utc::now(),
             prompt: "retry".to_string(),
-            status: STATUS_SCHEDULED.to_string(),
+            status: ContinuationStatus::Scheduled.as_str().to_string(),
             source_message: None,
             reason: CONTINUATION_REASON_OVERLOADED.to_string(),
         };

@@ -19,10 +19,12 @@ const CONTINUATION_RESET_SKEW_SECS: i64 = 120;
 /// 300s) delay in `reset_at`, and the CLI backs off internally, so any extra
 /// wait here would defeat the "retry immediately" intent.
 fn continuation_skew_secs(reason: &str) -> i64 {
-    if reason == shared::CONTINUATION_REASON_OVERLOADED {
-        0
-    } else {
-        CONTINUATION_RESET_SKEW_SECS
+    match shared::ContinuationReason::from_wire(reason) {
+        Some(shared::ContinuationReason::Overloaded) => 0,
+        // `Limit` and any legacy/unknown reason wait the full skew — matches the
+        // historical `else` default (see `ContinuationReason`'s unknown-value
+        // policy).
+        Some(shared::ContinuationReason::Limit) | None => CONTINUATION_RESET_SKEW_SECS,
     }
 }
 

@@ -14,8 +14,7 @@ use serde::Serialize;
 use crate::models::PushSubscription;
 use crate::push::transport::{PushError, PushTransport, SendOutcome};
 use crate::push::{ApnsTransportConfig, PushPayload};
-
-const APNS_PLATFORM: &str = "apns";
+use shared::api::PushPlatform;
 
 #[derive(Debug, Serialize)]
 struct ApnsCustomData<'a> {
@@ -54,7 +53,9 @@ impl ApnsTransport {
         sub: &'a PushSubscription,
         payload: &'a PushPayload,
     ) -> Result<a2::request::payload::Payload<'a>, PushError> {
-        if sub.platform != APNS_PLATFORM {
+        // Reject non-APNs rows (and any legacy/unknown platform) before building
+        // the payload. `platform_kind()` is the typed read boundary.
+        if sub.platform_kind() != Some(PushPlatform::Apns) {
             return Err(PushError::Transport(format!(
                 "ApnsTransport cannot deliver to platform {:?} (subscription {})",
                 sub.platform, sub.id
@@ -208,7 +209,7 @@ jDwmlD1Gg0yJt1e38djFwsxsfr5q2hv0Rj9fTEqAPr8H7mGm0wKxZ7iQ
             bundle_id: "io.txcl.agentportal".to_string(),
         };
         let payload = payload();
-        let sub = sub(APNS_PLATFORM);
+        let sub = sub(PushPlatform::Apns.as_wire());
         let notification = transport
             .build_payload(&sub, &payload)
             .expect("payload builds");
