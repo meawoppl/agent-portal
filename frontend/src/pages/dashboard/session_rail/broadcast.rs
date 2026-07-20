@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use shared::AgentType;
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -36,6 +37,7 @@ pub(super) struct BroadcastView {
     pub start_pct: f64,
     pub end_pct: f64,
     pub reverse: bool,
+    pub agent_type: AgentType,
 }
 
 #[derive(Clone)]
@@ -60,7 +62,21 @@ impl BroadcastRef {
         (senders, receivers)
     }
 
+    #[cfg(test)]
     pub(super) fn view_for(&self, rendered_session_ids: &[Uuid], now: f64) -> Vec<BroadcastView> {
+        let rendered_sessions: Vec<_> = rendered_session_ids
+            .iter()
+            .map(|id| (*id, AgentType::Claude))
+            .collect();
+        self.view_for_sessions(&rendered_sessions, now)
+    }
+
+    pub(super) fn view_for_sessions(
+        &self,
+        rendered_sessions: &[(Uuid, AgentType)],
+        now: f64,
+    ) -> Vec<BroadcastView> {
+        let rendered_session_ids: Vec<Uuid> = rendered_sessions.iter().map(|(id, _)| *id).collect();
         if rendered_session_ids.len() < 2 {
             return Vec::new();
         }
@@ -89,6 +105,10 @@ impl BroadcastRef {
                     start_pct: from_pct.min(to_pct),
                     end_pct: from_pct.max(to_pct),
                     reverse: from_pct > to_pct,
+                    agent_type: rendered_sessions
+                        .get(from_idx)
+                        .map(|(_, agent_type)| *agent_type)
+                        .unwrap_or_default(),
                 })
             })
             .collect()
@@ -109,11 +129,11 @@ impl Default for BroadcastRef {
 
 pub(super) fn render_broadcasts(
     broadcasts: &BroadcastRef,
-    rendered_session_ids: &[Uuid],
+    rendered_sessions: &[(Uuid, AgentType)],
     axis: RailAxis,
     render_time: f64,
 ) -> Html {
-    let views = broadcasts.view_for(rendered_session_ids, render_time);
+    let views = broadcasts.view_for_sessions(rendered_sessions, render_time);
     if views.is_empty() {
         return html! {};
     }
@@ -130,13 +150,19 @@ pub(super) fn render_broadcasts(
                         format!("top: {:.2}%; height: {:.2}%;", view.start_pct, span)
                     }
                 };
+                let packet_class = match view.agent_type {
+                    AgentType::Claude => "claude",
+                    AgentType::Codex => "codex",
+                };
                 html! {
                     <span
                         key={format!("{}-{}-{:.0}", view.from_session_id, view.to_session_id, view.timestamp)}
                         class={classes!("agent-broadcast-path", view.reverse.then_some("reverse"))}
                         {style}
                     >
-                        <span class="agent-broadcast-packet" />
+                        <span class={classes!("agent-broadcast-packet", packet_class)}>
+                            <span class="agent-broadcast-packet-logo" />
+                        </span>
                     </span>
                 }
             }) }
@@ -190,6 +216,28 @@ mod tests {
         let view = events.view_for(&[id(1), id(2), id(3)], 1_200.0);
         assert_eq!(view.len(), 1);
         assert!(view[0].reverse);
+    }
+
+    #[test]
+    fn broadcast_view_uses_sender_agent_type_for_packet_logo() {
+        let events = BroadcastRef::default();
+        events.push(AgentMessageBroadcast {
+            from_session_id: id(2),
+            to_session_id: id(1),
+            timestamp: 1_000.0,
+        });
+
+        let view = events.view_for_sessions(
+            &[
+                (id(1), AgentType::Claude),
+                (id(2), AgentType::Codex),
+                (id(3), AgentType::Claude),
+            ],
+            1_200.0,
+        );
+
+        assert_eq!(view.len(), 1);
+        assert_eq!(view[0].agent_type, AgentType::Codex);
     }
 
     #[test]

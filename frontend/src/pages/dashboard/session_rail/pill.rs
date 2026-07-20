@@ -77,6 +77,13 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             data-index={props.index.to_string()}
         >
             <span class={view.watermark_class} aria-hidden="true" />
+            <span class="pill-broadcast-effect" aria-hidden="true">
+                <span class="pill-broadcast-strand strand-left-top" />
+                <span class="pill-broadcast-strand strand-left-bottom" />
+                <span class="pill-broadcast-strand strand-right-top" />
+                <span class="pill-broadcast-strand strand-right-bottom" />
+                <span class="pill-broadcast-core" />
+            </span>
             {
                 if let Some(num) = &view.number_annotation {
                     html! { <span class="pill-number">{ num }</span> }
