@@ -127,6 +127,7 @@ mod tests {
             scheduled_task_id: None,
             paused: false,
             claude_args: Vec::new(),
+            last_model: None,
         }
     }
 

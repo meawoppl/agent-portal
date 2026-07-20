@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN last_model VARCHAR(128);

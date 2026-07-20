@@ -55,15 +55,16 @@ pub fn handle_turn_metrics_report(
     // Resolve the session's owner so the metric carries its own ownership.
     // `turn_metrics.user_id` is what the Performance queries filter on, which
     // lets a row outlive its session (`session_id` is `ON DELETE SET NULL`)
-    // and still be attributed to the right user.
-    let owner_id: Uuid = {
+    // and still be attributed to the right user. We fetch `last_model` in the
+    // same round-trip so we can change-gate the write below.
+    let (owner_id, stored_model): (Uuid, Option<String>) = {
         use crate::schema::sessions;
         match sessions::table
             .find(session_id)
-            .select(sessions::user_id)
-            .first::<Uuid>(&mut conn)
+            .select((sessions::user_id, sessions::last_model))
+            .first::<(Uuid, Option<String>)>(&mut conn)
         {
-            Ok(uid) => uid,
+            Ok(row) => row,
             Err(e) => {
                 error!(
                     "Failed to resolve owner for session {} (turn metrics insert): {}",
@@ -73,6 +74,32 @@ pub fn handle_turn_metrics_report(
             }
         }
     };
+
+    // Record the session's most recent model so the dashboard rail can render
+    // a compact model watermark on the pill. Last observed wins, but we only
+    // write when the value actually changes (a Fable 5 session that falls back
+    // to Opus 4.8 flips the stored id) — an unchanged model writes nothing,
+    // keeping this off the hot path for the common every-turn case. The live
+    // flip on already-open dashboards rides the existing per-turn
+    // `ServerToClient::TurnMetrics` fanout below (which carries `model`); this
+    // write is what a fresh page load / `/api/sessions` poll reads back.
+    if should_persist_model(stored_model.as_deref(), metrics.model.as_deref()) {
+        use crate::schema::sessions;
+        if let Err(e) = diesel::update(sessions::table.find(session_id))
+            .set(sessions::last_model.eq(&metrics.model))
+            .execute(&mut conn)
+        {
+            error!(
+                "Failed to update sessions.last_model for session {}: {}",
+                session_id, e
+            );
+        } else {
+            info!(
+                "Updated sessions.last_model for session {}: {:?} -> {:?}",
+                session_id, stored_model, metrics.model
+            );
+        }
+    }
 
     let new_row = NewTurnMetric {
         session_id,
@@ -160,8 +187,60 @@ pub fn handle_turn_metrics_report(
     }
 }
 
-// No unit tests here — the persist/broadcast round-trip needs a real
-// Postgres connection (no in-process Diesel sqlite fallback is set up in
-// this repo). The `TurnTracker` finalize path is exercised via
-// `session_lib::turn_tracker` unit tests; the wire shape is exercised via
-// `shared::api::tests::turn_metrics_*_roundtrip`.
+/// Whether an observed model warrants an `UPDATE` of `sessions.last_model`.
+///
+/// Gates the write so an already-open dashboard doesn't take a redundant DB
+/// write on every identical turn, and a `None`/unknown observation never
+/// clears a previously-known value:
+///   * `observed = Some(m)` and `m != stored`  → write (model changed)
+///   * `observed = Some(m)` and `m == stored`  → skip (unchanged)
+///   * `observed = None`                        → skip (don't clobber)
+///
+/// Pure so the changed-vs-unchanged decision is unit-testable without a live
+/// Postgres connection (the persist/broadcast round-trip itself still needs
+/// one — see below).
+fn should_persist_model(stored: Option<&str>, observed: Option<&str>) -> bool {
+    match observed {
+        Some(m) => stored != Some(m),
+        None => false,
+    }
+}
+
+// The persist/broadcast round-trip needs a real Postgres connection (no
+// in-process Diesel sqlite fallback is set up in this repo). The `TurnTracker`
+// finalize path is exercised via `session_lib::turn_tracker` unit tests; the
+// wire shape is exercised via `shared::api::tests::turn_metrics_*_roundtrip`.
+#[cfg(test)]
+mod tests {
+    use super::should_persist_model;
+
+    #[test]
+    fn writes_when_model_changes() {
+        // Fable 5 → Opus 4.8 fallback: the stored id must be replaced.
+        assert!(should_persist_model(
+            Some("claude-fable-5"),
+            Some("claude-opus-4-8")
+        ));
+    }
+
+    #[test]
+    fn writes_first_observation_from_null() {
+        assert!(should_persist_model(None, Some("claude-opus-4-8")));
+    }
+
+    #[test]
+    fn skips_when_model_unchanged() {
+        // The common every-turn case: no redundant write.
+        assert!(!should_persist_model(
+            Some("claude-opus-4-8"),
+            Some("claude-opus-4-8")
+        ));
+    }
+
+    #[test]
+    fn skips_when_observation_absent() {
+        // A None observation never clears a previously-known model.
+        assert!(!should_persist_model(Some("claude-opus-4-8"), None));
+        assert!(!should_persist_model(None, None));
+    }
+}

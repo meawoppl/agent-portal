@@ -26,7 +26,7 @@ use crate::utils;
 use gloo_net::http::Request;
 use serde::Deserialize;
 use shared::SessionInfo;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
@@ -107,8 +107,28 @@ pub fn dashboard_page() -> Html {
     // Get DB-authoritative sessions in a total, deterministic display order
     // (see `session_order`). A disconnected, unpaused session is
     // desired-running and should stay visible while the launcher reconciles it.
+    // Live model overlay for the pill's model watermark. The dashboard already
+    // receives every session's per-turn `TurnMetrics` (which carries `model`)
+    // on the user channel, so a mid-session model change — e.g. a Fable 5
+    // session falling back to Opus 4.8 — flips the pill's watermark instantly,
+    // before the next `/api/sessions` poll reads the persisted `last_model`
+    // back. Latest turn wins: the buffer is ordered oldest→newest, so a plain
+    // `collect` lets later entries overwrite earlier ones per session.
+    let live_models: HashMap<Uuid, String> = ws_hook
+        .recent_turn_metrics
+        .iter()
+        .filter_map(|m| m.model.clone().map(|model| (m.session_id, model)))
+        .collect();
+
     let active_sessions: Vec<SessionInfo> = {
         let mut sorted: Vec<SessionInfo> = sessions.to_vec();
+        // Overlay the live model onto the polled row so the watermark reflects
+        // the current turn without waiting for the poll to catch up.
+        for session in sorted.iter_mut() {
+            if let Some(model) = live_models.get(&session.id) {
+                session.last_model = Some(model.clone());
+            }
+        }
         // Total, deterministic order keyed down to the unique session id, so
         // the displayed order is a pure function of the session *set* and never
         // depends on the order `/api/sessions` happened to return (issue #1094).

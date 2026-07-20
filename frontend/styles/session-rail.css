@@ -189,6 +189,26 @@
 .pill-watermark.claude { background-image: url('/anthropic-mark.svg'); }
 .pill-watermark.codex  { background-image: url('/openai-mark.png'); }
 
+/* Model-version watermark — the session's compact model number (e.g. "4.8")
+   rendered in the same faint grey/opacity treatment as the agent logo, anchored
+   to the pill's bottom-right corner (opposite the left-anchored logo). Sits at
+   z-index 0 behind the foreground text (same as the logo), so it never collides
+   with the pill name/branch at any rail width — the text always paints on top.
+   Bottom offset clears the 5px activity sparkline. */
+.pill-model-watermark {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    pointer-events: none;
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-family: monospace;
+    line-height: 1;
+    color: var(--text-primary);
+    opacity: 0.22;
+    z-index: 0;
+}
+
 .session-pill:hover {
     border-color: var(--accent);
     background: rgba(122, 162, 247, 0.1);

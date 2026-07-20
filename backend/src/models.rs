@@ -70,6 +70,12 @@ pub struct Session {
     /// `None` = never; the sweep re-archives when `last_activity` advances
     /// past this.
     pub archived_at: Option<NaiveDateTime>,
+    /// Most recently observed model id for this session (last turn wins), e.g.
+    /// `"claude-opus-4-8"`. Written from the per-turn metrics path when it
+    /// changes so the dashboard rail can render a compact model watermark on
+    /// the session pill. `None` until the first turn with a known model. See
+    /// `handlers::websocket::turn_metrics`.
+    pub last_model: Option<String>,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)
