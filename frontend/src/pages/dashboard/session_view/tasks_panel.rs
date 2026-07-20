@@ -72,8 +72,8 @@ impl TaskEntry {
 #[derive(Debug, Clone)]
 pub enum TaskEvent {
     /// New task announced via `system.task_started`. `started_at` is the
-    /// row's server-assigned `created_at` (history replay) or
-    /// `js_sys::Date::now()` (live).
+    /// row's server-assigned `created_at` when present, falling back to
+    /// `js_sys::Date::now()` only for live frames without metadata.
     Started {
         task_id: String,
         tool_use_id: String,
@@ -95,9 +95,10 @@ pub enum TaskEvent {
         fallback_started_at: f64,
     },
     /// Terminal status via `system.task_notification`. `completed_at` is
-    /// the row's `created_at` (history) or `Date.now()` (live). When the
-    /// notification arrives before any matching `Started`, the panel
-    /// inserts a placeholder so the row still shows up.
+    /// the row's `created_at` when present, falling back to `Date.now()` only
+    /// for live frames without metadata. When the notification arrives before
+    /// any matching `Started`, the panel inserts a placeholder so the row
+    /// still shows up.
     Notification {
         task_id: String,
         summary: String,
@@ -523,27 +524,24 @@ fn format_secs(secs: u64) -> String {
 
 /// Derive zero or more typed [`TaskEvent`]s from a parsed `ClaudeOutput`.
 ///
-/// Used by both the live `WsEvent::Output` path (with `live == true`, in
-/// which case `created_at_iso` is ignored and timestamps fall back to
-/// `js_sys::Date::now()`) and the REST `LoadHistory` replay path (with
-/// `live == false`, parsing the row's server-assigned `created_at` so
-/// elapsed-time labels reflect when the event actually happened rather
-/// than when the browser hydrated it).
+/// Used by both the live `WsEvent::Output` path and the REST `LoadHistory`
+/// replay path. When the caller supplies the row's server-assigned
+/// `created_at`, elapsed-time labels reflect when the event actually happened
+/// rather than when the browser received or hydrated it.
 pub(super) fn derive_task_events(
     claude_msg: &shared::ClaudeOutput,
     created_at_iso: &str,
     live: bool,
 ) -> Vec<TaskEvent> {
     let resolve_ts = || -> f64 {
+        let parsed = js_sys::Date::parse(created_at_iso);
+        if parsed.is_finite() {
+            return parsed;
+        }
         if live {
             js_sys::Date::now()
         } else {
-            let ts = js_sys::Date::parse(created_at_iso);
-            if ts.is_finite() {
-                ts
-            } else {
-                0.0
-            }
+            0.0
         }
     };
 
