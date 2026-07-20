@@ -62,6 +62,8 @@ pub struct SessionViewProps {
     #[prop_or_default]
     pub on_activity: Callback<(Uuid, ActivityTag, f64)>,
     #[prop_or_default]
+    pub on_agent_message: Callback<(Uuid, Uuid, f64)>,
+    #[prop_or_default]
     pub current_user_id: Option<String>,
     #[prop_or(0)]
     pub interrupt_signal: u32,
@@ -981,6 +983,13 @@ impl SessionView {
 
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: RenderedMessage) -> bool {
         let tag = classify_output_msg_type(&output.content);
+        if let Some(shared::MessageSource::Agent { session_id, .. }) = output.source() {
+            ctx.props().on_agent_message.emit((
+                *session_id,
+                ctx.props().session.id,
+                js_sys::Date::now(),
+            ));
+        }
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
             // Live task events: the `created_at` field isn't part of the
             // live wire envelope, so the panel falls back to `Date.now()`
