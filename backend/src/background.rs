@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::db::DbPool;
 use crate::handlers;
 use crate::handlers::websocket::SessionManager;
+use crate::markers::{ARCHIVE_SWEEP_FAILED, RETENTION_TRIM_HELD, SESSION_ARCHIVE_FAILED};
 use crate::models;
 use crate::schema;
 use crate::AppState;
@@ -133,7 +134,7 @@ pub async fn run_archive_sweep(app_state: Arc<AppState>) {
                 );
             }
         }
-        Ok(Err(e)) => tracing::error!("ARCHIVE_SWEEP_FAILED: {e}"),
+        Ok(Err(e)) => tracing::error!("{ARCHIVE_SWEEP_FAILED}: {e}"),
         Err(e) => tracing::error!("archive sweep task panicked: {e}"),
     }
 }
@@ -475,7 +476,7 @@ fn ensure_session_archived(
         }
         Err(e) => {
             runtime.stats.record_failure(&e.to_string());
-            tracing::error!("SESSION_ARCHIVE_FAILED session={}: {e}", session.id);
+            tracing::error!("{SESSION_ARCHIVE_FAILED} session={}: {e}", session.id);
             false
         }
     }
@@ -646,7 +647,7 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
         // Stable marker aligned with SESSION_ARCHIVE_FAILED: alert on this to
         // catch an archive outage that is silently blocking retention.
         tracing::warn!(
-            "RETENTION_TRIM_HELD {} sessions pending archive",
+            "{RETENTION_TRIM_HELD} {} sessions pending archive",
             held_ids.len()
         );
     }

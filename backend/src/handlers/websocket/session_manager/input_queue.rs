@@ -18,6 +18,8 @@ use shared::{SendMode, ServerToProxy};
 use tracing::error;
 use uuid::Uuid;
 
+use crate::markers::{INPUT_SEQ_BUMP_FAILED, PENDING_INPUT_PERSIST_FAILED};
+
 use crate::db::DbPool;
 use crate::models::NewPendingInput;
 
@@ -61,7 +63,7 @@ impl SessionManager {
                 {
                     Ok(s) => s,
                     Err(e) => {
-                        error!("INPUT_SEQ_BUMP_FAILED session={}: {}", session_id, e);
+                        error!("{INPUT_SEQ_BUMP_FAILED} session={}: {}", session_id, e);
                         1
                     }
                 };
@@ -79,14 +81,20 @@ impl SessionManager {
                 {
                     Ok(_) => persisted = true,
                     Err(e) => {
-                        error!("PENDING_INPUT_PERSIST_FAILED session={}: {}", session_id, e)
+                        error!(
+                            "{PENDING_INPUT_PERSIST_FAILED} session={}: {}",
+                            session_id, e
+                        )
                     }
                 }
                 next_seq
             }
             Err(e) => {
+                // No DB connection ⇒ the pending-input row is never written and
+                // the sequence is never assigned: same durable-loss outcome as a
+                // failed INSERT, so it carries the same marker (see markers.rs).
                 error!(
-                    "Failed to get DB connection to enqueue input for session {}: {}",
+                    "{PENDING_INPUT_PERSIST_FAILED} no DB connection to enqueue input for session {}: {}",
                     session_id, e
                 );
                 0
