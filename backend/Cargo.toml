@@ -94,7 +94,17 @@ memory-serve = "2.1"
 [lints]
 workspace = true
 
+[features]
+# Exposes `test_support` (shared test pool + canonical `AppState` builder) to
+# consumers that link the lib without `cfg(test)` — i.e. the integration-test
+# binaries under `tests/`. Off by default, so `cargo build`/release never
+# compiles the test scaffolding; only the self dev-dependency below turns it on.
+test-support = []
+
 [dev-dependencies]
+# Self dev-dependency: enables `test-support` on our own lib for the duration of
+# the test build (`cargo test`/`--all-targets`) without leaking it into release.
+backend = { path = ".", features = ["test-support"] }
 ws-bridge = { workspace = true, features = ["native-client"] }
 uuid = { workspace = true }
 tempfile = "3"

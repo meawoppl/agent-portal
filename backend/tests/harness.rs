@@ -15,10 +15,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use backend::config::ServerConfig;
 use backend::handlers::device_flow::DeviceFlowStore;
-use backend::handlers::images::ImageStore;
-use backend::handlers::websocket::SessionManager;
+use backend::test_support::test_app_state;
 use backend::AppState;
 use shared::endpoints::SessionEndpoint;
 use shared::{AgentType, ProxyToServer, RegisterFields, ServerToProxy};
@@ -50,41 +48,16 @@ fn test_pool() -> backend::db::DbPool {
 }
 
 /// Boot the backend (dev mode) on an ephemeral port; returns its address.
-/// Mirrors `backend::run`'s state construction, minus the background tasks.
+/// Uses the shared canonical [`test_app_state`] builder (see
+/// `backend::test_support`) with dev mode enabled so the `/ws/session` register
+/// path resolves the seeded dev user without a real auth token. No dispatcher
+/// is spawned, so notification emits are silently no-ops.
 async fn spawn_test_app() -> SocketAddr {
-    let pool = test_pool();
+    let mut state = test_app_state(test_pool());
+    state.dev_mode = true;
+    state.device_flow_store = Some(DeviceFlowStore::default());
 
-    let config = ServerConfig::from_env(true).expect("parse server config");
-    let oauth = backend::config::build_google_oauth_client(true).expect("oauth client");
-
-    let state = Arc::new(AppState {
-        dev_mode: true,
-        db_pool: pool,
-        session_manager: SessionManager::new(),
-        oauth_basic_client: oauth,
-        device_flow_store: Some(DeviceFlowStore::default()),
-        public_url: config.public_url,
-        cookie_key: config.cookie_key,
-        jwt_secret: config.jwt_secret,
-        app_title: config.app_title,
-        splash_text: config.splash_text,
-        allowed_email_domain: config.allowed_email_domain,
-        allowed_emails: config.allowed_emails,
-        message_retention_count: config.message_retention_count,
-        message_retention_days: config.message_retention_days,
-        session_max_age_days: config.session_max_age_days,
-        max_image_mb: config.max_image_mb,
-        image_store: ImageStore::new(config.image_store_max_bytes, config.image_store_ttl),
-        forward_domain: config.forward_domain,
-        archive: None,
-        // No dispatcher is spawned in the harness; the receiver drops
-        // immediately, so emits are silently no-ops (see NotificationSender).
-        notifications: backend::push::channel().0,
-        vapid_public_key: config.vapid_public_key,
-        mobile_app_links: config.mobile_app_links,
-    });
-
-    let app = backend::routes::build_router(state);
+    let app = backend::routes::build_router(Arc::new(state));
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind ephemeral port");
@@ -316,36 +289,13 @@ async fn archive_sweep_persists_and_is_idempotent() {
 /// archive runtime and a 1-day age-retention window. Used by the held-trim
 /// test to drive `background::run_retention_cleanup` directly.
 fn retention_test_state(archive: Option<Arc<backend::archive::ArchiveRuntime>>) -> Arc<AppState> {
-    let mut config = ServerConfig::from_env(true).expect("parse server config");
+    let mut state = test_app_state(test_pool());
     // A short age window so backdated messages are trim-eligible; a high
     // per-session cap so only the age path (not truncation) is exercised.
-    config.message_retention_days = 1;
-    config.message_retention_count = 100_000;
-    let oauth = backend::config::build_google_oauth_client(true).expect("oauth client");
-    Arc::new(AppState {
-        dev_mode: true,
-        db_pool: test_pool(),
-        session_manager: SessionManager::new(),
-        oauth_basic_client: oauth,
-        device_flow_store: Some(DeviceFlowStore::default()),
-        public_url: config.public_url,
-        cookie_key: config.cookie_key,
-        jwt_secret: config.jwt_secret,
-        app_title: config.app_title,
-        splash_text: config.splash_text,
-        allowed_email_domain: config.allowed_email_domain,
-        allowed_emails: config.allowed_emails,
-        message_retention_count: config.message_retention_count,
-        message_retention_days: config.message_retention_days,
-        session_max_age_days: config.session_max_age_days,
-        max_image_mb: config.max_image_mb,
-        image_store: ImageStore::new(config.image_store_max_bytes, config.image_store_ttl),
-        forward_domain: config.forward_domain,
-        archive,
-        notifications: backend::push::channel().0,
-        vapid_public_key: config.vapid_public_key,
-        mobile_app_links: config.mobile_app_links,
-    })
+    state.message_retention_days = 1;
+    state.message_retention_count = 100_000;
+    state.archive = archive;
+    Arc::new(state)
 }
 
 /// #1258 phase 2: retention holds the message trim for a session whose

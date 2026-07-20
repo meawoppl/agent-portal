@@ -596,13 +596,9 @@ fn encode_query_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handlers::images::ImageStore;
-    use crate::handlers::websocket::SessionManager;
     use crate::models::{NewUser, ProxyAuthToken};
     use crate::schema::{proxy_auth_tokens, users};
     use axum::http::{header::AUTHORIZATION, HeaderValue};
-    use std::time::Duration;
-    use tower_cookies::cookie::Key;
 
     #[test]
     fn auth_user_error_preserves_forbidden_and_database_errors() {
@@ -662,30 +658,7 @@ mod tests {
     }
 
     fn test_state(pool: crate::db::DbPool) -> Arc<AppState> {
-        Arc::new(AppState {
-            dev_mode: false,
-            db_pool: pool,
-            session_manager: SessionManager::new(),
-            oauth_basic_client: None,
-            device_flow_store: None,
-            public_url: "http://localhost:3000".to_string(),
-            cookie_key: Key::generate(),
-            jwt_secret: "test-secret-key-at-least-32-bytes".to_string(),
-            app_title: "Agent Portal Test".to_string(),
-            splash_text: None,
-            allowed_email_domain: None,
-            allowed_emails: None,
-            message_retention_count: 100,
-            message_retention_days: 30,
-            session_max_age_days: 14,
-            max_image_mb: 10,
-            image_store: ImageStore::new(1024 * 1024, Duration::from_secs(60)),
-            forward_domain: None,
-            archive: None,
-            notifications: crate::push::channel().0,
-            vapid_public_key: None,
-            mobile_app_links: crate::config::MobileAppLinksConfig::default(),
-        })
+        Arc::new(crate::test_support::test_app_state(pool))
     }
 
     fn insert_user(conn: &mut diesel::PgConnection) -> User {
