@@ -128,6 +128,78 @@ fn repo_pr_menu_hint(repo_url: Option<&str>, pr_count: usize) -> &'static str {
     }
 }
 
+/// Render one contiguous run of pills (visible or hidden section) into the rail,
+/// optionally prefixed with per-host header rows.
+///
+/// `entries` is the slice of `(index_in_sorted_sessions, session)` pairs to
+/// render; `number_offset` is the nav-mode display-number base for the first
+/// pill in this run. When `props.group_by_host` is on, a non-focusable header
+/// row is emitted before the first pill of each new host group. Headers carry
+/// **no** `data-index` or `display_number`, so keyboard numbering / `j`/`k`
+/// traversal skip them entirely and stay aligned with the sorted session vec.
+///
+/// Headers and pills are pushed as *flat siblings* into one keyed list (never
+/// nested in fragments) so Yew's keyed reconciliation still preserves each pill
+/// instance across reorders — the same guarantee the ungrouped rail relies on.
+/// With `group_by_host` off, the emitted list is exactly the keyed pills, i.e.
+/// identical to the pre-grouping render path.
+fn render_pill_section(
+    props: &SessionRailProps,
+    entries: &[(usize, &SessionInfo)],
+    number_offset: usize,
+    broadcast_active_ids: (&[Uuid], &[Uuid]),
+    render_time: f64,
+    on_toggle_menu: &Callback<(Uuid, MouseEvent)>,
+    section_key: &str,
+) -> Html {
+    let (broadcast_senders, broadcast_receivers) = broadcast_active_ids;
+    let mut nodes: Vec<Html> = Vec::with_capacity(entries.len());
+    let mut prev_label: Option<String> = None;
+    for (display_idx, (index, session)) in entries.iter().enumerate() {
+        if props.group_by_host {
+            let label = super::session_order::host_group_label(session);
+            if prev_label.as_deref() != Some(label.as_str()) {
+                prev_label = Some(label.clone());
+                let count = entries
+                    .iter()
+                    .filter(|(_, s)| super::session_order::host_group_label(s) == label)
+                    .count();
+                nodes.push(html! {
+                    <div
+                        key={format!("{section_key}-host-{label}")}
+                        class="session-rail-host-header"
+                        title={format!("{label} — {count} session(s)")}
+                    >
+                        <span class="host-header-name">{ label }</span>
+                        <span class="host-header-count">{ count }</span>
+                    </div>
+                });
+            }
+        }
+        nodes.push(html! {
+            <SessionPill
+                key={session.id.to_string()}
+                index={*index}
+                display_number={Some(number_offset + display_idx)}
+                session={(*session).clone()}
+                is_focused={*index == props.focused_index}
+                is_awaiting={props.awaiting_sessions.contains(&session.id)}
+                is_hidden={props.hidden_sessions.contains(&session.id)}
+                is_connected={props.connected_sessions.contains(&session.id)}
+                nav_mode={props.nav_mode}
+                server_version={props.server_version.clone()}
+                activity_timestamps={props.activity_timestamps.clone()}
+                is_broadcast_sender={broadcast_senders.contains(&session.id)}
+                is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
+                render_time={render_time}
+                on_select={props.on_select.clone()}
+                on_toggle_menu={on_toggle_menu.clone()}
+            />
+        });
+    }
+    nodes.into_iter().collect::<Html>()
+}
+
 /// Props for the SessionRail component
 #[derive(Properties, PartialEq)]
 pub struct SessionRailProps {
@@ -136,6 +208,10 @@ pub struct SessionRailProps {
     pub awaiting_sessions: HashSet<Uuid>,
     pub hidden_sessions: HashSet<Uuid>,
     pub inactive_hidden: bool,
+    /// Opt-in: render per-host section headers between pill groups. The order
+    /// itself is grouped upstream (see `page.rs`); this flag only controls the
+    /// visual header rows so the rail stays in lockstep with nav numbering.
+    pub group_by_host: bool,
     pub connected_sessions: HashSet<Uuid>,
     pub nav_mode: bool,
     #[prop_or_default]
@@ -393,28 +469,17 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     html! {
         <div class="session-rail-container" onclick={on_container_click}>
             <div class="session-rail" ref={rail_ref} onwheel={on_wheel}>
-                { visible_indices.iter().enumerate().map(|(display_idx, (index, session))| {
-                    html! {
-                        <SessionPill
-                            key={session.id.to_string()}
-                            index={*index}
-                            display_number={Some(display_idx)}
-                            session={(*session).clone()}
-                            is_focused={*index == props.focused_index}
-                            is_awaiting={props.awaiting_sessions.contains(&session.id)}
-                            is_hidden={props.hidden_sessions.contains(&session.id)}
-                            is_connected={props.connected_sessions.contains(&session.id)}
-                            nav_mode={props.nav_mode}
-                            server_version={props.server_version.clone()}
-                            activity_timestamps={props.activity_timestamps.clone()}
-                            is_broadcast_sender={broadcast_senders.contains(&session.id)}
-                            is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
-                            render_time={*render_time}
-                            on_select={props.on_select.clone()}
-                            on_toggle_menu={on_toggle_pill_menu.clone()}
-                        />
-                    }
-                }).collect::<Html>() }
+                {
+                    render_pill_section(
+                        props,
+                        &visible_indices,
+                        0,
+                        (&broadcast_senders, &broadcast_receivers),
+                        *render_time,
+                        &on_toggle_pill_menu,
+                        "visible",
+                    )
+                }
 
                 {
                     if hidden_count > 0 {
@@ -441,28 +506,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
 
                 {
                     if !props.inactive_hidden {
-                        hidden_indices.iter().enumerate().map(|(display_idx, (index, session))| {
-                            html! {
-                                <SessionPill
-                                    key={session.id.to_string()}
-                                    index={*index}
-                                    display_number={Some(visible_count + display_idx)}
-                                    session={(*session).clone()}
-                                    is_focused={*index == props.focused_index}
-                                    is_awaiting={props.awaiting_sessions.contains(&session.id)}
-                                    is_hidden={props.hidden_sessions.contains(&session.id)}
-                                    is_connected={props.connected_sessions.contains(&session.id)}
-                                    nav_mode={props.nav_mode}
-                                    server_version={props.server_version.clone()}
-                                    activity_timestamps={props.activity_timestamps.clone()}
-                                    is_broadcast_sender={broadcast_senders.contains(&session.id)}
-                                    is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
-                                    render_time={*render_time}
-                                    on_select={props.on_select.clone()}
-                                    on_toggle_menu={on_toggle_pill_menu.clone()}
-                                />
-                            }
-                        }).collect::<Html>()
+                        render_pill_section(
+                            props,
+                            &hidden_indices,
+                            visible_count,
+                            (&broadcast_senders, &broadcast_receivers),
+                            *render_time,
+                            &on_toggle_pill_menu,
+                            "hidden",
+                        )
                     } else {
                         html! {}
                     }

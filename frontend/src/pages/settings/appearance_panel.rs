@@ -1,5 +1,6 @@
 use crate::pages::dashboard::{
-    load_rail_position, load_vim_mode, save_rail_position, save_vim_mode, RailPosition,
+    load_group_by_host, load_rail_position, load_vim_mode, save_group_by_host, save_rail_position,
+    save_vim_mode, RailPosition,
 };
 use yew::prelude::*;
 
@@ -14,6 +15,17 @@ const ALL_POSITIONS: &[(RailPosition, &str)] = &[
 pub fn appearance_panel() -> Html {
     let position = use_state(load_rail_position);
     let vim_enabled = use_state(load_vim_mode);
+    let group_by_host = use_state(load_group_by_host);
+
+    let on_toggle_group_by_host = {
+        let group_by_host = group_by_host.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            let enabled = input.checked();
+            save_group_by_host(enabled);
+            group_by_host.set(enabled);
+        })
+    };
 
     let on_toggle_vim = {
         let vim_enabled = vim_enabled.clone();
@@ -61,6 +73,24 @@ pub fn appearance_panel() -> Html {
                         }
                     })}
                 </div>
+            </div>
+
+            <div class="appearance-setting">
+                <h3>{ "Group session rail by host" }</h3>
+                <p class="setting-description">
+                    { "Split the session rail into sections by the machine each \
+                       session runs on. Sections are ordered alphabetically by \
+                       hostname; sessions with no hostname group under \
+                       \"unknown host\". Off by default." }
+                </p>
+                <label class="toggle-label">
+                    <input
+                        type="checkbox"
+                        checked={*group_by_host}
+                        onchange={on_toggle_group_by_host}
+                    />
+                    <span>{ if *group_by_host { "Enabled" } else { "Disabled" } }</span>
+                </label>
             </div>
 
             <div class="appearance-setting">

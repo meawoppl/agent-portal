@@ -156,12 +156,19 @@ pub(super) struct DashboardUiState {
     pub inactive_hidden: bool,
     pub show_cost: bool,
     pub rail_position: RailPosition,
+    /// Opt-in: group the session rail's pills into per-host sections.
+    pub group_by_host: bool,
     pub pending_leave: Option<Uuid>,
     pub pending_delete: Option<Uuid>,
 }
 
 impl DashboardUiState {
-    pub fn new(inactive_hidden: bool, show_cost: bool, rail_position: RailPosition) -> Self {
+    pub fn new(
+        inactive_hidden: bool,
+        show_cost: bool,
+        rail_position: RailPosition,
+        group_by_host: bool,
+    ) -> Self {
         Self {
             show_launch_dialog: false,
             show_admin: false,
@@ -170,6 +177,7 @@ impl DashboardUiState {
             inactive_hidden,
             show_cost,
             rail_position,
+            group_by_host,
             pending_leave: None,
             pending_delete: None,
         }
@@ -189,6 +197,7 @@ pub(super) enum DashboardUiAction {
     SetInactiveHidden(bool),
     SetShowCost(bool),
     SetRailPosition(RailPosition),
+    SetGroupByHost(bool),
     RequestLeave(Uuid),
     ClearPendingLeave,
     RequestDelete(Uuid),
@@ -234,6 +243,9 @@ impl Reducible for DashboardUiState {
             }
             DashboardUiAction::SetRailPosition(position) => {
                 state.rail_position = position;
+            }
+            DashboardUiAction::SetGroupByHost(enabled) => {
+                state.group_by_host = enabled;
             }
             DashboardUiAction::RequestLeave(session_id) => {
                 state.pending_leave = Some(session_id);
@@ -353,7 +365,7 @@ mod tests {
 
     #[test]
     fn ui_reducer_controls_modal_visibility() {
-        let state = DashboardUiState::new(false, false, RailPosition::Top);
+        let state = DashboardUiState::new(false, false, RailPosition::Top, false);
         let state = reduce_ui(state, DashboardUiAction::ToggleLaunchDialog);
         assert!(state.show_launch_dialog);
 
@@ -378,19 +390,21 @@ mod tests {
 
     #[test]
     fn ui_reducer_tracks_preferences() {
-        let state = DashboardUiState::new(false, false, RailPosition::Top);
+        let state = DashboardUiState::new(false, false, RailPosition::Top, false);
         let state = reduce_ui(state, DashboardUiAction::SetInactiveHidden(true));
         let state = state.reduce(DashboardUiAction::SetShowCost(true));
         let state = state.reduce(DashboardUiAction::SetRailPosition(RailPosition::Left));
+        let state = state.reduce(DashboardUiAction::SetGroupByHost(true));
 
         assert!(state.inactive_hidden);
         assert!(state.show_cost);
         assert_eq!(state.rail_position, RailPosition::Left);
+        assert!(state.group_by_host);
     }
 
     #[test]
     fn ui_reducer_tracks_pending_confirmations() {
-        let state = DashboardUiState::new(false, false, RailPosition::Top);
+        let state = DashboardUiState::new(false, false, RailPosition::Top, false);
         let state = reduce_ui(state, DashboardUiAction::RequestLeave(id(1)));
         let state = state.reduce(DashboardUiAction::RequestDelete(id(2)));
 

@@ -25,6 +25,9 @@ pub const RAIL_ORIENTATION_STORAGE_KEY: &str = "claude-portal-rail-orientation";
 /// Storage key for the last actively focused session in localStorage
 pub const LAST_ACTIVE_SESSION_STORAGE_KEY: &str = "claude-portal-last-active-session";
 
+/// Storage key for the opt-in "group session rail by host" preference.
+pub const SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY: &str = "claude-portal-session-rail-group-by-host";
+
 /// Storage key for the opt-in vim editing mode in localStorage
 pub const VIM_MODE_STORAGE_KEY: &str = "claude-portal-vim-mode";
 
@@ -182,6 +185,16 @@ impl RailPosition {
             Self::Right => "rail-right",
         }
     }
+}
+
+/// Load the "group session rail by host" preference (default: off).
+pub fn load_group_by_host() -> bool {
+    load_bool_pref(SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY)
+}
+
+/// Save the "group session rail by host" preference to localStorage.
+pub fn save_group_by_host(enabled: bool) {
+    save_bool_pref(SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY, enabled);
 }
 
 /// Load rail position preference from localStorage (default: top).
