@@ -23,7 +23,7 @@ pub use transport::{LogTransport, PushError, PushTransport, SendOutcome};
 pub use webpush::WebPushTransport;
 
 use crate::models::PushSubscription;
-use shared::api::{NotificationContentDetail, NotificationPrefs};
+use shared::api::{NotificationContentDetail, NotificationPrefs, PushPlatform};
 use std::path::PathBuf;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
@@ -121,20 +121,33 @@ impl PushTransport for ConfiguredTransport {
                 webpush,
                 apns,
                 fcm,
-            } => match sub.platform.as_str() {
-                "webpush" => match webpush {
+            } => match sub.platform_kind() {
+                // Exhaustive over the closed `PushPlatform` set: adding a
+                // transport variant upstream forces a compile error here rather
+                // than silently routing to the log fallback.
+                Some(PushPlatform::Webpush) => match webpush {
                     Some(t) => t.send(sub, payload).await,
                     None => log.send(sub, payload).await,
                 },
-                "apns" => match apns {
+                Some(PushPlatform::Apns) => match apns {
                     Some(t) => t.send(sub, payload).await,
                     None => log.send(sub, payload).await,
                 },
-                "fcm" => match fcm {
+                Some(PushPlatform::Fcm) => match fcm {
                     Some(t) => t.send(sub, payload).await,
                     None => log.send(sub, payload).await,
                 },
-                _ => log.send(sub, payload).await,
+                // Legacy/corrupt platform string (see
+                // `PushSubscription::platform_kind`): skip-with-log, matching the
+                // historical fallthrough-to-log behavior.
+                None => {
+                    tracing::warn!(
+                        "push subscription {} has unknown platform {:?}; routing to log transport",
+                        sub.id,
+                        sub.platform
+                    );
+                    log.send(sub, payload).await
+                }
             },
         }
     }

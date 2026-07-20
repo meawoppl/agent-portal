@@ -3,12 +3,66 @@ use uuid::Uuid;
 
 use crate::{AgentType, PermissionSuggestion, SessionMode};
 
+/// Why a session continuation was created.
+///
+/// Stored in `session_continuations.reason` and carried on the wire in
+/// [`ContinuationConfig::reason`] (backend → launcher), so this enum lives in
+/// `shared`. The launcher uses it to decide the reset skew (see
+/// [`ContinuationConfig::reason`]).
+///
+/// The wire/DB representation is the snake-case string emitted by
+/// [`ContinuationReason::as_wire`] — the same values serde produces — so the
+/// column and JSON stay in lockstep.
+///
+/// **Unknown-value policy:** [`ContinuationReason::from_wire`] returns `None`
+/// for an unrecognized string rather than panicking. Consumers treat an unknown
+/// reason as the neutral `Limit` default (the historical fallthrough), so a
+/// legacy or newer-launcher value never breaks scheduling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuationReason {
+    /// A usage-limit reset (`#231`/`#1260`). Waits the full reset skew.
+    Limit,
+    /// Auto-retry of a turn a transient 529 overload killed. Fires immediately
+    /// (no reset skew) — the CLI already backs off internally, so the portal
+    /// adds no further delay.
+    Overloaded,
+}
+
+impl ContinuationReason {
+    /// The wire/DB string for this reason — identical to the serde encoding, so
+    /// the `session_continuations.reason` column stays in lockstep with JSON.
+    pub const fn as_wire(self) -> &'static str {
+        match self {
+            ContinuationReason::Limit => "limit",
+            ContinuationReason::Overloaded => "overloaded",
+        }
+    }
+
+    /// Parse a stored/wire reason string. Returns `None` for an unrecognized
+    /// value so callers can apply the `Limit`-default fallthrough (see the type
+    /// doc's unknown-value policy) rather than panicking on legacy/corrupt data.
+    pub fn from_wire(s: &str) -> Option<Self> {
+        match s {
+            "limit" => Some(ContinuationReason::Limit),
+            "overloaded" => Some(ContinuationReason::Overloaded),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ContinuationReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_wire())
+    }
+}
+
 /// A session continuation created for a usage-limit reset (`#231`/`#1260`).
-pub const CONTINUATION_REASON_LIMIT: &str = "limit";
+pub const CONTINUATION_REASON_LIMIT: &str = ContinuationReason::Limit.as_wire();
 /// A session continuation created to auto-retry a turn that a transient 529
 /// overload killed. Fires immediately (no reset skew) — the CLI already backs
 /// off internally, so the portal adds no further delay.
-pub const CONTINUATION_REASON_OVERLOADED: &str = "overloaded";
+pub const CONTINUATION_REASON_OVERLOADED: &str = ContinuationReason::Overloaded.as_wire();
 
 /// Fields for session registration (shared by proxy and web client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,4 +303,48 @@ pub struct FileDownloadResponseFields {
     pub data_base64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod continuation_reason_tests {
+    use super::*;
+
+    #[test]
+    fn as_wire_and_serde_agree() {
+        for reason in [ContinuationReason::Limit, ContinuationReason::Overloaded] {
+            // The wire string, the serde encoding, and Display must all match.
+            assert_eq!(serde_json::to_value(reason).unwrap(), reason.as_wire());
+            assert_eq!(reason.to_string(), reason.as_wire());
+        }
+    }
+
+    #[test]
+    fn from_wire_round_trips_every_variant() {
+        for reason in [ContinuationReason::Limit, ContinuationReason::Overloaded] {
+            assert_eq!(
+                ContinuationReason::from_wire(reason.as_wire()),
+                Some(reason)
+            );
+        }
+    }
+
+    #[test]
+    fn from_wire_returns_none_for_unknown() {
+        // Unknown-value policy: never panic, hand back None so callers apply the
+        // Limit-default fallthrough.
+        assert_eq!(ContinuationReason::from_wire("bogus"), None);
+        assert_eq!(ContinuationReason::from_wire(""), None);
+    }
+
+    #[test]
+    fn legacy_consts_match_enum_wire() {
+        assert_eq!(
+            CONTINUATION_REASON_LIMIT,
+            ContinuationReason::Limit.as_wire()
+        );
+        assert_eq!(
+            CONTINUATION_REASON_OVERLOADED,
+            ContinuationReason::Overloaded.as_wire()
+        );
+    }
 }

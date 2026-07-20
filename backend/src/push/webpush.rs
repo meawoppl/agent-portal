@@ -24,11 +24,7 @@ use web_push::{
 use crate::models::PushSubscription;
 use crate::push::transport::{PushError, PushTransport, SendOutcome};
 use crate::push::PushPayload;
-
-/// The `platform` column value for browser Web Push subscriptions. APNs/FCM
-/// rows carry different values and are handled by native transports (C7); this
-/// transport skips them with a clear error rather than mis-sending.
-const WEBPUSH_PLATFORM: &str = "webpush";
+use shared::api::PushPlatform;
 
 /// Time-to-live handed to the push service: how long it should retain the
 /// notification for an offline device before dropping it. One day matches the
@@ -77,7 +73,10 @@ impl WebPushTransport {
         sub: &PushSubscription,
         payload: &PushPayload,
     ) -> Result<WebPushMessage, PushError> {
-        if sub.platform != WEBPUSH_PLATFORM {
+        // Web Push only handles browser subscriptions; APNs/FCM rows (and any
+        // legacy/unknown platform string) are rejected before we build a
+        // message. `platform_kind()` is the typed read boundary.
+        if sub.platform_kind() != Some(PushPlatform::Webpush) {
             return Err(PushError::Transport(format!(
                 "WebPushTransport cannot deliver to platform {:?} (subscription {}); \
                  native APNs/FCM is C7",

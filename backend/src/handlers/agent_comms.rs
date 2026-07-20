@@ -20,6 +20,7 @@ use uuid::Uuid;
 use shared::api::{
     AgentSessionInfo, AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse,
 };
+use shared::SessionStatus;
 
 use crate::errors::AppError;
 use crate::models::Session;
@@ -68,7 +69,7 @@ pub async fn list_agent_sessions(
     let rows: Vec<Session> = sessions::table
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(session_members::user_id.eq(user_id))
-        .filter(sessions::status.ne("replaced"))
+        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
         .filter(sessions::scheduled_task_id.is_null())
         .select(Session::as_select())
         .order(sessions::last_activity.desc())

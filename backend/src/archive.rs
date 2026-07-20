@@ -604,7 +604,7 @@ mod tests {
             owner_name: None,
             session_name: "s".into(),
             agent_type: "claude".into(),
-            status: "disconnected".into(),
+            status: shared::SessionStatus::Disconnected.as_str().into(),
             working_directory: "/w".into(),
             hostname: "h".into(),
             git_branch: None,

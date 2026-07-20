@@ -230,6 +230,24 @@ pub struct PushSubscription {
     pub disabled_at: Option<DateTime<Utc>>,
 }
 
+impl PushSubscription {
+    /// Parse the stored `platform` string into the typed [`PushPlatform`].
+    ///
+    /// This is the single read-side conversion boundary for the `platform`
+    /// column: interior code (transport dispatch, per-transport guards) matches
+    /// on the returned enum rather than re-parsing the raw string, so a typo can
+    /// no longer silently miss.
+    ///
+    /// **Unknown-value policy:** returns `None` for a value that is not one of
+    /// the known platforms. Rows are only ever written from a typed
+    /// [`PushPlatform`], so `None` means legacy/corrupt data; callers
+    /// skip-with-log (fall through to the log transport) rather than panicking —
+    /// matching the historical fallthrough behavior.
+    pub fn platform_kind(&self) -> Option<shared::api::PushPlatform> {
+        shared::api::PushPlatform::from_wire(&self.platform)
+    }
+}
+
 #[derive(Debug, Insertable)]
 #[diesel(table_name = crate::schema::push_subscriptions)]
 pub struct NewPushSubscription {
@@ -672,5 +690,36 @@ mod tests {
         assert!(meta.source.is_some());
         // Delivery is frontend-owned — the backend never sets it.
         assert!(meta.delivery.is_none());
+    }
+
+    fn push_sub(platform: &str) -> PushSubscription {
+        PushSubscription {
+            id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            platform: platform.to_string(),
+            endpoint_or_token: "e".to_string(),
+            p256dh: None,
+            auth: None,
+            device_label: None,
+            created_at: chrono::Utc::now(),
+            last_success_at: None,
+            disabled_at: None,
+        }
+    }
+
+    #[test]
+    fn platform_kind_parses_every_known_platform() {
+        use shared::api::PushPlatform;
+        for p in [PushPlatform::Webpush, PushPlatform::Apns, PushPlatform::Fcm] {
+            assert_eq!(push_sub(p.as_wire()).platform_kind(), Some(p));
+        }
+    }
+
+    #[test]
+    fn platform_kind_returns_none_for_legacy_or_corrupt_value() {
+        // Unknown-value policy: never panic — hand back None so the dispatcher
+        // skips-with-log rather than mis-routing a legacy/corrupt row.
+        assert_eq!(push_sub("mms").platform_kind(), None);
+        assert_eq!(push_sub("").platform_kind(), None);
     }
 }

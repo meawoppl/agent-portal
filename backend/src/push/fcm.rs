@@ -15,8 +15,8 @@ use tokio::sync::Mutex;
 use crate::models::PushSubscription;
 use crate::push::transport::{PushError, PushTransport, SendOutcome};
 use crate::push::{FcmTransportConfig, PushPayload};
+use shared::api::PushPlatform;
 
-const FCM_PLATFORM: &str = "fcm";
 const FCM_SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 const FCM_TOKEN_REFRESH_SLOP: Duration = Duration::from_secs(60);
 
@@ -139,7 +139,9 @@ impl FcmTransport {
         sub: &PushSubscription,
         payload: &PushPayload,
     ) -> Result<FcmRequest, PushError> {
-        if sub.platform != FCM_PLATFORM {
+        // Reject non-FCM rows (and any legacy/unknown platform) before building
+        // the request. `platform_kind()` is the typed read boundary.
+        if sub.platform_kind() != Some(PushPlatform::Fcm) {
             return Err(PushError::Transport(format!(
                 "FcmTransport cannot deliver to platform {:?} (subscription {})",
                 sub.platform, sub.id
@@ -302,8 +304,8 @@ mod tests {
     #[test]
     fn fcm_request_serializes_typed_payload_and_collapse_key() {
         let payload = payload();
-        let request =
-            FcmTransport::build_request(&sub(FCM_PLATFORM), &payload).expect("request builds");
+        let request = FcmTransport::build_request(&sub(PushPlatform::Fcm.as_wire()), &payload)
+            .expect("request builds");
         let json = serde_json::to_value(&request).expect("serialize");
         assert_eq!(json["message"]["token"], "fcm-registration-token");
         assert_eq!(json["message"]["notification"]["title"], payload.title);
