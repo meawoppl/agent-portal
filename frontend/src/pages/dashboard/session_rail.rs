@@ -468,7 +468,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
 
     html! {
         <div class="session-rail-container" onclick={on_container_click}>
-            <div class="session-rail" ref={rail_ref} onwheel={on_wheel}>
+            <div class="session-rail" ref={rail_ref.clone()} onwheel={on_wheel}>
                 {
                     render_pill_section(
                         props,
@@ -520,7 +520,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     }
                 }
             </div>
-            { render_broadcasts(&props.broadcasts, &rendered_sessions, rail_axis, *render_time) }
+            { render_broadcasts(&props.broadcasts, &rail_ref, &rendered_sessions, rail_axis, *render_time) }
             <SessionRailMenu
                 session={open_session}
                 position={*menu_pos}
