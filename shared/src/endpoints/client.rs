@@ -327,4 +327,19 @@ pub enum ServerToClient {
     /// `GET /api/sessions/{id}/forwards` — the frame carries no payload so
     /// there is exactly one source of truth (docs/PORT_FORWARDING.md).
     ForwardsChanged { session_id: Uuid },
+
+    /// Ephemeral live tool-progress heartbeat, fanned out from
+    /// `ProxyToServer::ToolProgress`. Purely a live-status signal: never
+    /// persisted, never part of `HistoryBatch`, so it carries no `created_at`
+    /// / `PortalMeta`. The frontend keys a per-session "active tool" strip by
+    /// the running tool's id (derived from `parent_tool_use_id` / `tool_use_id`)
+    /// and clears the entry when the tool's result arrives or the turn ends. A
+    /// client that never sees it (offline during the tool call) loses nothing.
+    ToolProgress {
+        tool_use_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_use_id: Option<String>,
+        tool_name: String,
+        elapsed_time_seconds: f64,
+    },
 }

@@ -269,6 +269,23 @@ impl<A: Agent> Session<A> {
                             self.buffer.push(value.clone());
                             return Some(SessionEvent::RawOutput(value));
                         }
+                        // Ephemeral tool-progress heartbeat: forward it as a
+                        // live-status side-channel event WITHOUT buffering, so
+                        // it is never persisted or replayed. See
+                        // `AgentOutput::ToolProgress`.
+                        AgentOutput::ToolProgress {
+                            tool_use_id,
+                            parent_tool_use_id,
+                            tool_name,
+                            elapsed_time_seconds,
+                        } => {
+                            return Some(SessionEvent::ToolProgress {
+                                tool_use_id,
+                                parent_tool_use_id,
+                                tool_name,
+                                elapsed_time_seconds,
+                            });
+                        }
                         // Internal ack / nothing for the consumer — skip it and
                         // let the outer loop pull the next event.
                         AgentOutput::Noop => {}

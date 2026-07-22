@@ -463,6 +463,129 @@ fn pending_client_msg_id(pending: &RenderedMessage) -> Option<uuid::Uuid> {
     pending.delivery().map(|delivery| delivery.client_msg_id)
 }
 
+// --- Ephemeral tool-progress ("active tool" strip) ------------------------
+//
+// Live heartbeats for long-running tools arrive on the non-persisted
+// `WsEvent::ToolProgress` side-channel (see `websocket.rs`) roughly every 30s.
+// The view holds an ordered list of currently-running tools and renders a
+// trailing status strip ("Bash running — 1m 30s"). We deliberately keep this
+// OUT of the memoized message-render pipeline: folding a per-heartbeat-changing
+// map into `MessageRenderer` props would re-render the whole transcript every
+// 30s. A trailing strip re-renders only itself — the framework's grain.
+
+/// One currently-running tool tracked for the live "active tool" strip.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ActiveToolProgress {
+    /// Correlation key = the running tool's id (see [`running_tool_key`]).
+    pub key: String,
+    pub tool_name: String,
+    pub elapsed_seconds: f64,
+}
+
+/// Derive the correlation key for a heartbeat: the *running* tool's id.
+///
+/// Claude's `tool_progress` frame carries `tool_use_id` = `<base>-heartbeat-N`
+/// and, in production, `parent_tool_use_id` = the base tool id. The base id is
+/// what the eventual `tool_result` block carries, so keying on it lets us clear
+/// the entry when the tool finishes. Prefer `parent_tool_use_id`; otherwise
+/// strip the `-heartbeat-N` suffix from `tool_use_id` (older/edge wire shapes
+/// where the parent is absent); fall back to `tool_use_id` verbatim.
+pub(crate) fn running_tool_key(tool_use_id: &str, parent_tool_use_id: Option<&str>) -> String {
+    if let Some(parent) = parent_tool_use_id.filter(|p| !p.is_empty()) {
+        return parent.to_string();
+    }
+    match tool_use_id.rsplit_once("-heartbeat-") {
+        Some((base, _)) if !base.is_empty() => base.to_string(),
+        _ => tool_use_id.to_string(),
+    }
+}
+
+/// Upsert a heartbeat into the ordered active-tool list: refresh the elapsed
+/// time of an existing entry in place (preserving display order) or append a
+/// new one. Order-preserving so the strip doesn't reshuffle every 30s.
+pub(crate) fn upsert_tool_progress(
+    list: &mut Vec<ActiveToolProgress>,
+    key: String,
+    tool_name: String,
+    elapsed_seconds: f64,
+) {
+    if let Some(existing) = list.iter_mut().find(|t| t.key == key) {
+        existing.tool_name = tool_name;
+        existing.elapsed_seconds = elapsed_seconds;
+    } else {
+        list.push(ActiveToolProgress {
+            key,
+            tool_name,
+            elapsed_seconds,
+        });
+    }
+}
+
+/// Prune finished tools from the active-tool list given a freshly-arrived
+/// output message. A turn terminator (`result`) means nothing is running, so
+/// the whole list clears; otherwise any tool whose id appears as a
+/// `tool_result` in the message is done and its entry is dropped. Returns
+/// whether anything changed (so the caller can skip a re-render).
+pub(crate) fn clear_completed_tools(list: &mut Vec<ActiveToolProgress>, content: &str) -> bool {
+    if list.is_empty() {
+        return false;
+    }
+    let Ok(output) = serde_json::from_str::<shared::ClaudeOutput>(content) else {
+        return false;
+    };
+    match output {
+        // Turn over → nothing is running anymore.
+        shared::ClaudeOutput::Result(_) => {
+            list.clear();
+            true
+        }
+        shared::ClaudeOutput::User(user) => {
+            let finished = tool_result_ids(&user.message.content);
+            prune_keys(list, &finished)
+        }
+        shared::ClaudeOutput::Assistant(asst) => {
+            let finished = tool_result_ids(&asst.message.content);
+            prune_keys(list, &finished)
+        }
+        _ => false,
+    }
+}
+
+fn tool_result_ids(blocks: &[shared::ContentBlock]) -> Vec<String> {
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            shared::ContentBlock::ToolResult(tr) => Some(tr.tool_use_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn prune_keys(list: &mut Vec<ActiveToolProgress>, finished: &[String]) -> bool {
+    if finished.is_empty() {
+        return false;
+    }
+    let before = list.len();
+    list.retain(|t| !finished.contains(&t.key));
+    list.len() != before
+}
+
+/// Format an elapsed-seconds count as a compact human duration: `45s`,
+/// `1m 30s`, `1h 05m` (seconds dropped past an hour to stay short).
+pub(crate) fn format_tool_elapsed(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let secs = total % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes:02}m")
+    } else if minutes > 0 {
+        format!("{minutes}m {secs:02}s")
+    } else {
+        format!("{secs}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -957,5 +1080,127 @@ mod tests {
             ),
             ActivityTag::Error
         );
+    }
+
+    // --- tool-progress ("active tool" strip) ---
+
+    #[test]
+    fn running_tool_key_prefers_parent_then_strips_heartbeat_suffix() {
+        // Production shape: parent is the base tool id → key on it.
+        assert_eq!(
+            running_tool_key("toolu_01abc-heartbeat-3", Some("toolu_01abc")),
+            "toolu_01abc"
+        );
+        // No parent → strip the -heartbeat-N suffix from tool_use_id.
+        assert_eq!(
+            running_tool_key("toolu_01abc-heartbeat-0", None),
+            "toolu_01abc"
+        );
+        // Empty parent is treated as absent.
+        assert_eq!(
+            running_tool_key("toolu_01abc-heartbeat-0", Some("")),
+            "toolu_01abc"
+        );
+        // No suffix and no parent → verbatim.
+        assert_eq!(running_tool_key("toolu_01abc", None), "toolu_01abc");
+    }
+
+    #[test]
+    fn upsert_tool_progress_refreshes_in_place_preserving_order() {
+        let mut list = Vec::new();
+        upsert_tool_progress(&mut list, "a".into(), "Bash".into(), 30.0);
+        upsert_tool_progress(&mut list, "b".into(), "Read".into(), 30.0);
+        // Refresh "a": elapsed updates, order stays [a, b].
+        upsert_tool_progress(&mut list, "a".into(), "Bash".into(), 60.0);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].key, "a");
+        assert_eq!(list[0].elapsed_seconds, 60.0);
+        assert_eq!(list[1].key, "b");
+    }
+
+    #[test]
+    fn clear_completed_tools_drops_matching_tool_result() {
+        let mut list = vec![
+            ActiveToolProgress {
+                key: "toolu_01".into(),
+                tool_name: "Bash".into(),
+                elapsed_seconds: 90.0,
+            },
+            ActiveToolProgress {
+                key: "toolu_02".into(),
+                tool_name: "Read".into(),
+                elapsed_seconds: 30.0,
+            },
+        ];
+        let user_result = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01",
+                    "content": "done",
+                }]
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+        })
+        .to_string();
+        assert!(clear_completed_tools(&mut list, &user_result));
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].key, "toolu_02");
+    }
+
+    #[test]
+    fn clear_completed_tools_clears_all_on_turn_result() {
+        let mut list = vec![ActiveToolProgress {
+            key: "toolu_01".into(),
+            tool_name: "Bash".into(),
+            elapsed_seconds: 90.0,
+        }];
+        let result = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 100,
+            "duration_api_ms": 80,
+            "num_turns": 1,
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "total_cost_usd": 0.0,
+        })
+        .to_string();
+        assert!(clear_completed_tools(&mut list, &result));
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn clear_completed_tools_is_noop_for_unrelated_message() {
+        let mut list = vec![ActiveToolProgress {
+            key: "toolu_01".into(),
+            tool_name: "Bash".into(),
+            elapsed_seconds: 90.0,
+        }];
+        let assistant = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "role": "assistant",
+                "model": "claude-sonnet-4-5",
+                "content": [{"type": "text", "text": "still working"}],
+            },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+        })
+        .to_string();
+        assert!(!clear_completed_tools(&mut list, &assistant));
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn format_tool_elapsed_shapes() {
+        assert_eq!(format_tool_elapsed(0.0), "0s");
+        assert_eq!(format_tool_elapsed(45.0), "45s");
+        assert_eq!(format_tool_elapsed(90.0), "1m 30s");
+        assert_eq!(format_tool_elapsed(3725.0), "1h 02m");
+        // Negative guards to zero rather than panicking.
+        assert_eq!(format_tool_elapsed(-5.0), "0s");
     }
 }

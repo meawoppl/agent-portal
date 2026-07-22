@@ -26,8 +26,10 @@ use yew::prelude::*;
 
 use super::forward_chips::ForwardChips;
 use super::helpers::{
-    autoscroll_transition, classify_output_msg_type, enrich_codex_file_change_permission,
-    is_claude_awaiting, reconcile_pending_sends, update_pending_send_delivery, ActivityTag,
+    autoscroll_transition, classify_output_msg_type, clear_completed_tools,
+    enrich_codex_file_change_permission, format_tool_elapsed, is_claude_awaiting,
+    reconcile_pending_sends, running_tool_key, update_pending_send_delivery, upsert_tool_progress,
+    ActiveToolProgress, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -253,6 +255,12 @@ pub struct SessionView {
     /// counter would buy nothing.
     turn_metrics: Vec<TurnMetrics>,
     continuation_statuses: HashMap<Uuid, String>,
+    /// Currently-running tools, fed by the ephemeral `WsEvent::ToolProgress`
+    /// heartbeat side-channel and rendered as a trailing "active tool" status
+    /// strip. Never persisted; pruned when a tool's result arrives or the turn
+    /// ends. Kept out of the memoized message-render props on purpose (see the
+    /// `helpers` tool-progress section).
+    active_tools: Vec<ActiveToolProgress>,
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
@@ -331,6 +339,7 @@ impl Component for SessionView {
             pending_sends: Vec::new(),
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
+            active_tools: Vec::new(),
             forwards_refresh: 0,
         }
     }
@@ -662,6 +671,7 @@ impl Component for SessionView {
                         { for self.pending_sends.iter().enumerate().map(|(i, message)| {
                             html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                         })}
+                        { self.render_active_tools() }
                     </div>
                     if !is_tailing {
                         <button
@@ -782,6 +792,18 @@ impl SessionView {
                 true
             }
             WsEvent::UploadResult(fields) => self.handle_upload_result(fields),
+            WsEvent::ToolProgress {
+                tool_use_id,
+                parent_tool_use_id,
+                tool_name,
+                elapsed_time_seconds,
+            } => {
+                // Ephemeral live status: refresh the running-tool strip. Never
+                // touches `messages` (no persistence, no replay watermark).
+                let key = running_tool_key(&tool_use_id, parent_tool_use_id.as_deref());
+                upsert_tool_progress(&mut self.active_tools, key, tool_name, elapsed_time_seconds);
+                true
+            }
         }
     }
 
@@ -1009,8 +1031,40 @@ impl SessionView {
             .emit((ctx.props().session.id, tag, activity_ts));
         reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
 
+        // Retire any active-tool strip entries this message completes: a
+        // tool_result for the running tool, or a turn `result` that ends the
+        // turn entirely. (The live heartbeat side-channel only adds entries.)
+        clear_completed_tools(&mut self.active_tools, &output.content);
+
         push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
         true
+    }
+
+    /// Trailing "active tool" strip: one live pill per currently-running tool,
+    /// showing "{tool} running — {elapsed}" and refreshed by the ephemeral
+    /// `WsEvent::ToolProgress` heartbeats. Renders nothing when idle. Lives at
+    /// the transcript tail rather than mutating historical tool cards so it
+    /// stays outside the memoized message-render pipeline (see the `helpers`
+    /// tool-progress section for the rationale).
+    fn render_active_tools(&self) -> Html {
+        if self.active_tools.is_empty() {
+            return html! {};
+        }
+        html! {
+            <div class="active-tool-strip">
+                { for self.active_tools.iter().map(|tool| {
+                    html! {
+                        <div class="active-tool-pill" key={tool.key.clone()}>
+                            <span class="active-tool-spinner" />
+                            <span class="active-tool-name">{ tool.tool_name.clone() }</span>
+                            <span class="active-tool-status">
+                                { format!("running — {}", format_tool_elapsed(tool.elapsed_seconds)) }
+                            </span>
+                        </div>
+                    }
+                }) }
+            </div>
+        }
     }
 
     fn handle_ws_error(&mut self, ctx: &Context<Self>, err: String) -> bool {

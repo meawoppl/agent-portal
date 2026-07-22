@@ -55,6 +55,15 @@ pub enum WsEvent {
     /// Terminal outcome of a file upload (#939 phase 4). The view gates the
     /// prompt referencing the file on this.
     UploadResult(shared::FileUploadResultFields),
+    /// Ephemeral live tool-progress heartbeat (`ServerToClient::ToolProgress`).
+    /// Drives the per-session "active tool" strip; never persisted, so it is
+    /// not part of `Output`/`HistoryBatch` and carries no timestamp.
+    ToolProgress {
+        tool_use_id: String,
+        parent_tool_use_id: Option<String>,
+        tool_name: String,
+        elapsed_time_seconds: f64,
+    },
 }
 
 /// Connect to WebSocket and start receiving messages.
@@ -229,6 +238,19 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         }
         ServerToClient::ForwardsChanged { session_id: _ } => {
             on_event.emit(WsEvent::ForwardsChanged);
+        }
+        ServerToClient::ToolProgress {
+            tool_use_id,
+            parent_tool_use_id,
+            tool_name,
+            elapsed_time_seconds,
+        } => {
+            on_event.emit(WsEvent::ToolProgress {
+                tool_use_id,
+                parent_tool_use_id,
+                tool_name,
+                elapsed_time_seconds,
+            });
         }
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
@@ -594,6 +616,7 @@ mod tests {
             WsEvent::InputProgress { .. } => "InputProgress",
             WsEvent::ForwardsChanged => "ForwardsChanged",
             WsEvent::UploadResult(_) => "UploadResult",
+            WsEvent::ToolProgress { .. } => "ToolProgress",
         }
     }
 }
