@@ -136,6 +136,20 @@ pub enum SessionEvent {
     /// proxy can persist it. See `IoEvent::CodexThreadId`.
     CodexThreadId(String),
 
+    /// Ephemeral tool-progress heartbeat for a long-running tool call.
+    ///
+    /// Deliberately NOT buffered into the replay buffer by `Session` (unlike
+    /// `RawOutput`): heartbeats are live-status only and must never be
+    /// persisted or replayed. The proxy forwards this on a typed side-channel
+    /// (`ProxyToServer::ToolProgress`), mirroring how `TurnMetricsReady`
+    /// bypasses the output buffer. See `crate::adapter::AgentOutput::ToolProgress`.
+    ToolProgress {
+        tool_use_id: String,
+        parent_tool_use_id: Option<String>,
+        tool_name: String,
+        elapsed_time_seconds: f64,
+    },
+
     /// Claude reported a hard session limit with a reset time.
     SessionLimitReached {
         session_id: uuid::Uuid,

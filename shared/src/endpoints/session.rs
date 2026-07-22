@@ -125,6 +125,30 @@ pub enum ProxyToServer {
     /// hot-path frames that fly orders of magnitude more often.
     TurnMetricsReport(Box<TurnMetrics>),
 
+    /// Ephemeral tool-progress heartbeat from Claude for a long-running tool
+    /// call (`ClaudeOutput::ToolProgress`, emitted every ~30s while the tool
+    /// runs). Deliberately a typed side-channel — NOT `SequencedOutput`: it is
+    /// never buffered, never persisted (a 20-minute Bash call would otherwise
+    /// write ~40 noise rows into `messages` and blow retention), and never
+    /// replayed. The backend fans it out to the session's web clients as
+    /// `ServerToClient::ToolProgress` to drive a live "running — Xs" status;
+    /// if no client is listening it simply evaporates. See the classifier
+    /// (`session_lib::adapter::ClaudeAdapter`) and the frontend active-tool
+    /// strip for the two ends of this path.
+    ToolProgress {
+        session_id: Uuid,
+        /// The heartbeat's own id (`<tool_use_id>-heartbeat-N`).
+        tool_use_id: String,
+        /// The running tool's id, when Claude sets it. In production this is
+        /// the base tool id (the heartbeat id minus the `-heartbeat-N`
+        /// suffix); `None` for the top-level agent in some wire shapes. The
+        /// frontend derives its correlation key from this plus `tool_use_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_use_id: Option<String>,
+        tool_name: String,
+        elapsed_time_seconds: f64,
+    },
+
     /// Claude reported a hard session limit with a reset time. The backend
     /// persists a one-shot continuation candidate and asks the user whether
     /// to schedule it.

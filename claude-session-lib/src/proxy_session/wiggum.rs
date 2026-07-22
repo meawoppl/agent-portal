@@ -341,6 +341,13 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 "SessionLimitReached should be handled before calling handle_session_event_with_wiggum"
             );
         }
+        Some(SessionEvent::ToolProgress { .. }) => {
+            // Handled in run_main_loop (session_event::handle_next_event) before
+            // calling this function — forwarded as a typed side-channel.
+            unreachable!(
+                "ToolProgress should be handled before calling handle_session_event_with_wiggum"
+            );
+        }
         Some(SessionEvent::Error(e)) => {
             let err_msg = e.to_string();
             error!("Session error: {}", err_msg);

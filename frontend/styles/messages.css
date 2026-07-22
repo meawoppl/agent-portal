@@ -1482,3 +1482,52 @@
     background: rgba(122, 162, 247, 0.25);
     text-decoration: underline;
 }
+
+/* ==========================================================================
+   Active-tool strip (ephemeral tool_progress heartbeats)
+
+   A live status line at the transcript tail — one pill per currently-running
+   tool, showing "running — 1m 30s", refreshed as tool_progress heartbeats
+   arrive (~30s). Never persisted; cleared when the tool result arrives or the
+   turn ends. Deliberately separate from historical tool cards so it stays out
+   of the memoized message-render pipeline.
+   ========================================================================== */
+
+.active-tool-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.25rem 0.1rem 0.1rem;
+}
+
+.active-tool-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    background: rgba(122, 162, 247, 0.08);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+}
+
+.active-tool-spinner {
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 2px solid rgba(122, 162, 247, 0.35);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+.active-tool-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.active-tool-status {
+    color: var(--text-muted);
+}

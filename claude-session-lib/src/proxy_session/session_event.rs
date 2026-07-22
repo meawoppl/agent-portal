@@ -96,6 +96,34 @@ pub(super) async fn handle_next_event<A: Agent>(
         return None;
     }
 
+    // Ephemeral tool-progress heartbeat: forward as a typed side-channel,
+    // mirroring `TurnMetricsReport` above. Deliberately bypasses the output
+    // buffer — heartbeats are live-status only and must never be persisted or
+    // replayed. The backend fans it out to web clients (never to the DB).
+    if let Some(SessionEvent::ToolProgress {
+        tool_use_id,
+        parent_tool_use_id,
+        tool_name,
+        elapsed_time_seconds,
+    }) = event
+    {
+        let msg = ProxyToServer::ToolProgress {
+            session_id: state.session_id,
+            tool_use_id,
+            parent_tool_use_id,
+            tool_name,
+            elapsed_time_seconds,
+        };
+        let mut ws = state.ws_write.lock().await;
+        if ws.send(msg).await.is_err() {
+            error!("Failed to send tool-progress heartbeat");
+            return Some(ConnectionResult::Disconnected(
+                state.connection_start.elapsed(),
+            ));
+        }
+        return None;
+    }
+
     // Codex app-server thread id: hand it to the persistence sink (the proxy's
     // ProxyConfig writer) so the next resume of this session can call
     // `thread/resume` with it. Emitted once per spawn by codex-session-lib.

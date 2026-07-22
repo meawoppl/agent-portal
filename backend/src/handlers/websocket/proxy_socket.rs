@@ -414,6 +414,29 @@ fn handle_proxy_message(
                 *metrics,
             );
         }
+        ProxyToServer::ToolProgress {
+            session_id: _,
+            tool_use_id,
+            parent_tool_use_id,
+            tool_name,
+            elapsed_time_seconds,
+        } => {
+            // Ephemeral live-status heartbeat: fan out to the session's web
+            // clients only — deliberately NO DB write (unlike SequencedOutput).
+            // A 20-minute tool call emits ~40 of these; persisting them would
+            // bloat retention. If no client is connected it simply evaporates.
+            if let Some(key) = session_key {
+                session_manager.broadcast_to_web_clients(
+                    key,
+                    shared::ServerToClient::ToolProgress {
+                        tool_use_id,
+                        parent_tool_use_id,
+                        tool_name,
+                        elapsed_time_seconds,
+                    },
+                );
+            }
+        }
         ProxyToServer::SessionLimitReached(fields) => {
             handle_session_limit_reached(
                 app_state,

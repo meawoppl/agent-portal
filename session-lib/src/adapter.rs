@@ -40,6 +40,25 @@ pub enum AgentOutput {
     },
     /// Fatal "conversation not found" → maps to `SessionEvent::SessionNotFound`.
     NotFound,
+    /// An ephemeral tool-progress heartbeat (Claude's `tool_progress` frame).
+    ///
+    /// A distinct outcome from `Visible` on purpose: heartbeats are pure
+    /// live-status and must NOT be buffered or persisted (a long-running tool
+    /// emits one every ~30s — a 20-minute Bash call would otherwise write ~40
+    /// junk rows into `messages` and render ~40 "Unrecognized Message" cards).
+    /// `Session` maps this to `SessionEvent::ToolProgress` without touching the
+    /// replay buffer; the proxy forwards it on a typed side-channel that the
+    /// backend fans out to web clients (never to the DB). Codex has no analogue
+    /// today, so only `ClaudeAdapter` produces it.
+    ToolProgress {
+        /// The heartbeat's own id (`<tool_use_id>-heartbeat-N`).
+        tool_use_id: String,
+        /// The running tool's id when Claude provides it (see the wire docs on
+        /// `shared::ProxyToServer::ToolProgress`).
+        parent_tool_use_id: Option<String>,
+        tool_name: String,
+        elapsed_time_seconds: f64,
+    },
     /// Internal ack / nothing for the consumer — `Session` skips it.
     Noop,
 }
@@ -155,6 +174,16 @@ impl AgentOutputClassifier for ClaudeAdapter {
             }
             // Control responses are CLI acks — internal, the consumer skips.
             ClaudeOutput::ControlResponse(_) => vec![AgentOutput::Noop],
+            // Tool-progress heartbeat → ephemeral live status, never persisted.
+            // Handled explicitly (not via the `Visible` fall-through) so a
+            // long-running tool's ~30s heartbeats don't flood `messages` /
+            // render as "Unrecognized Message" cards. See `AgentOutput::ToolProgress`.
+            ClaudeOutput::ToolProgress(tp) => vec![AgentOutput::ToolProgress {
+                tool_use_id: tp.tool_use_id,
+                parent_tool_use_id: tp.parent_tool_use_id,
+                tool_name: tp.tool_name,
+                elapsed_time_seconds: tp.elapsed_time_seconds,
+            }],
             // Everything else (System, User, Assistant, Error, RateLimitEvent)
             // is user-visible.
             _ => vec![AgentOutput::Visible(raw)],
@@ -321,6 +350,43 @@ mod tests {
         });
         let mut adapter = ClaudeAdapter;
         assert_eq!(adapter.classify(raw), vec![AgentOutput::Noop]);
+    }
+
+    #[test]
+    fn classify_tool_progress_is_ephemeral_not_visible() {
+        // The production heartbeat shape: a `-heartbeat-N` tool_use_id with the
+        // running tool's base id in `parent_tool_use_id`, arriving every ~30s.
+        let raw = json!({
+            "type": "tool_progress",
+            "tool_name": "Bash",
+            "elapsed_time_seconds": 30.0,
+            "parent_tool_use_id": "toolu_01abc",
+            "tool_use_id": "toolu_01abc-heartbeat-0",
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "uuid": "01890000-0000-7000-8000-000000000002"
+        });
+        let mut adapter = ClaudeAdapter;
+        let out = adapter.classify(raw);
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            AgentOutput::ToolProgress {
+                tool_use_id,
+                parent_tool_use_id,
+                tool_name,
+                elapsed_time_seconds,
+            } => {
+                assert_eq!(tool_use_id, "toolu_01abc-heartbeat-0");
+                assert_eq!(parent_tool_use_id.as_deref(), Some("toolu_01abc"));
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(*elapsed_time_seconds, 30.0);
+            }
+            other => panic!("expected ToolProgress, got {other:?}"),
+        }
+        // The critical invariant: a heartbeat is NOT a Visible/persisted frame.
+        assert!(
+            !matches!(&out[0], AgentOutput::Visible(_)),
+            "tool_progress must never classify as Visible — it would be persisted"
+        );
     }
 
     #[test]
