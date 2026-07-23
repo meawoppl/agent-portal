@@ -23,8 +23,9 @@ pub use assistant::{
     render_assistant_message, render_assistant_message_content, render_content_blocks,
 };
 pub(crate) use portal::{
-    portal_text, render_agent_message_body, render_agent_message_from_source,
-    render_portal_message, render_portal_message_content,
+    agent_message_event_from_agent_facing_text, portal_text, render_agent_message_body,
+    render_agent_message_event, render_agent_message_from_source, render_portal_message,
+    render_portal_message_content,
 };
 pub use system::render_system_message;
 
@@ -111,6 +112,10 @@ pub fn render_user_message(
             </div>
         }
     } else if !text_content.is_empty() {
+        if let Some(event) = agent_message_event_from_agent_facing_text(&text_content) {
+            return render_agent_message_event(&event, timestamp, session_id);
+        }
+
         html! {
             <div class={format!("claude-message user-message{}", pending_class)}>
                 <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
