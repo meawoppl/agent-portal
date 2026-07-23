@@ -87,6 +87,24 @@ jobs:
       - name: Build frontend
         run: cd frontend && trunk build
 
+  build-viewer-frontend:
+    name: Build Viewer Frontend (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: "viewer-frontend"
+          targets: wasm32-unknown-unknown
+          trunk: "true"
+
+      - name: Build viewer frontend
+        run: cd viewer-frontend && trunk build
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
