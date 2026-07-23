@@ -34,8 +34,6 @@ pub struct SessionWithRole {
     #[serde(flatten)]
     pub session: Session,
     pub my_role: SessionRole,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub launcher_version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,12 +59,21 @@ pub async fn list_sessions(
 
     let sessions_with_role = results
         .into_iter()
-        .map(|(session, role)| SessionWithRole {
-            launcher_version: app_state
+        .map(|(mut session, role)| {
+            // `Session::launcher_version` (the DB column added in #1454) holds
+            // the launcher version captured at session-create time. This wire
+            // shape has always exposed the *live* launcher version, so replace
+            // the flattened value with the currently-connected one. Carrying
+            // both a flattened and a separate explicit `launcher_version` field
+            // produced a duplicate JSON key that failed frontend deserialization
+            // (emptying the whole session list) whenever a launcher was online.
+            session.launcher_version = app_state
                 .session_manager
-                .launcher_version(session.launcher_id),
-            session,
-            my_role: role.parse().unwrap_or(SessionRole::Unknown),
+                .launcher_version(session.launcher_id);
+            SessionWithRole {
+                session,
+                my_role: role.parse().unwrap_or(SessionRole::Unknown),
+            }
         })
         .collect();
 
