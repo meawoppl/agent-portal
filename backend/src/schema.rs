@@ -224,6 +224,8 @@ diesel::table! {
         archived_at -> Nullable<Timestamp>,
         #[max_length = 128]
         last_model -> Nullable<Varchar>,
+        #[max_length = 32]
+        launcher_version -> Nullable<Varchar>,
     }
 }
 

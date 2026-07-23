@@ -76,6 +76,10 @@ pub struct Session {
     /// the session pill. `None` until the first turn with a known model. See
     /// `handlers::websocket::turn_metrics`.
     pub last_model: Option<String>,
+    /// Version reported by the launcher that spawned this session, captured
+    /// at session-create time (see `NewSessionWithId::launcher_version`).
+    /// `None` for proxy-direct (non-launcher) sessions.
+    pub launcher_version: Option<String>,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)
@@ -97,6 +101,16 @@ pub struct NewSessionWithId {
     pub scheduled_task_id: Option<Uuid>,
     pub paused: bool,
     pub claude_args: serde_json::Value,
+    /// The launcher's self-reported version at the moment this session was
+    /// created, resolved from the in-memory launcher registry
+    /// (`LauncherConnection.version`). Captured here — alongside `launcher_id`
+    /// — because the registry entry is gone by the time the archival sweep
+    /// runs, so the session row is the only durable carrier for launcher
+    /// provenance. Semantics: **last-known-at-launch**. If the launcher later
+    /// auto-updates and restarts mid-session, this value is *not* refreshed;
+    /// it records the version that actually spawned the proxy. `None` for
+    /// non-launcher sessions or if the launcher is somehow not in the registry.
+    pub launcher_version: Option<String>,
 }
 
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]

@@ -344,6 +344,7 @@ mod tests {
                 scheduled_task_id: None,
                 paused: false,
                 claude_args: serde_json::Value::Array(vec![]),
+                launcher_version: None,
             })
             .execute(&mut conn)
             .expect("insert session");

@@ -278,6 +278,45 @@ pub struct SessionArchiveManifest {
     /// contract [`ARCHIVE_SCHEMA_VERSION`] guards, so it is **not** bumped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<Vec<MediaEntry>>,
+
+    // --- Provenance (all additive within schema v1) ---
+    //
+    // These follow the same additive-compat contract as `media` above:
+    // each is `#[serde(default, skip_serializing_if = …)]`, so a manifest
+    // written before the field existed deserializes to the empty value and
+    // a manifest without the datum re-serializes byte-identically (key
+    // omitted). No existing field or the object layout changes, so
+    // [`ARCHIVE_SCHEMA_VERSION`] is **not** bumped.
+    /// The launcher that spawned this session (`sessions.launcher_id`), or
+    /// `None` for proxy-direct sessions. Pairs with `launcher_version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher_id: Option<Uuid>,
+    /// The launcher's self-reported version at launch time
+    /// (`sessions.launcher_version`), captured when the session row was
+    /// created. **Last-known-at-launch**: a mid-session launcher
+    /// auto-update does not refresh it. `None` for non-launcher sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher_version: Option<String>,
+    /// The scheduled (cron) task that spawned this session
+    /// (`sessions.scheduled_task_id`), linking an archived session back to
+    /// the automation that created it. `None` for interactively-launched
+    /// sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_task_id: Option<Uuid>,
+    /// Extra CLI arguments the agent binary was launched with
+    /// (`sessions.claude_args`), e.g. `["--model", "opus"]`. Reveals model
+    /// pinning and other launch-time behavior knobs. These are agent CLI
+    /// flags only — portal auth travels via a separate proxy token, never
+    /// here — so they carry no transport/auth secrets. Empty (and thus
+    /// omitted) for sessions launched with no extra args.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claude_args: Vec<String>,
+    /// `shared::VERSION` of the backend that performed this archive write.
+    /// **Per-write**: a re-archive by a newer backend stamps the newer
+    /// version, so this records who last wrote the object, not who first
+    /// created the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_by_version: Option<String>,
 }
 
 /// One archived media blob referenced from a manifest. The bytes live at
@@ -768,6 +807,11 @@ mod tests {
             turns: ArchiveTurnStats::default(),
             transcript: None,
             media: None,
+            launcher_id: None,
+            launcher_version: None,
+            scheduled_task_id: None,
+            claude_args: Vec::new(),
+            archived_by_version: None,
         }
     }
 
@@ -1109,6 +1153,71 @@ mod tests {
         assert!(value.as_object_mut().unwrap().remove("media").is_none());
         let parsed: SessionArchiveManifest = serde_json::from_value(value).unwrap();
         assert_eq!(parsed.media, None);
+    }
+
+    #[test]
+    fn manifest_provenance_fields_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = ArchiveStore::Local(LocalArchiveStore {
+            root: tmp.path().to_path_buf(),
+        });
+        let (u, s) = (Uuid::from_u128(4), Uuid::from_u128(5));
+        let mut manifest = manifest(u, s);
+        manifest.launcher_id = Some(Uuid::from_u128(6));
+        manifest.launcher_version = Some("2.13.42".into());
+        manifest.scheduled_task_id = Some(Uuid::from_u128(7));
+        manifest.claude_args = vec!["--model".into(), "opus".into()];
+        manifest.archived_by_version = Some("2.13.99".into());
+        let bundle = SessionArchiveBundle {
+            manifest: manifest.clone(),
+            transcript_ndjson: None,
+        };
+        store.put_session_archive(&bundle).unwrap();
+        let got = store.get_session_manifest(u, s).unwrap().expect("manifest");
+        assert_eq!(got, manifest);
+    }
+
+    #[test]
+    fn old_manifest_without_provenance_fields_parses() {
+        // A manifest written before the provenance fields existed must still
+        // deserialize (each is additive/optional → empty default), and a
+        // manifest with none of them set must omit every key (byte-compat).
+        let u = Uuid::from_u128(1);
+        let s = Uuid::from_u128(2);
+        let m = manifest(u, s);
+        let json = serde_json::to_string(&m).unwrap();
+        for key in [
+            "launcher_id",
+            "launcher_version",
+            "scheduled_task_id",
+            "claude_args",
+            "archived_by_version",
+        ] {
+            assert!(
+                !json.contains(&format!("\"{key}\"")),
+                "provenance-less manifest must omit `{key}`: {json}"
+            );
+        }
+
+        // Simulate an old writer: strip the keys entirely and confirm the
+        // manifest still round-trips to empty defaults.
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = value.as_object_mut().unwrap();
+        for key in [
+            "launcher_id",
+            "launcher_version",
+            "scheduled_task_id",
+            "claude_args",
+            "archived_by_version",
+        ] {
+            assert!(obj.remove(key).is_none());
+        }
+        let parsed: SessionArchiveManifest = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.launcher_id, None);
+        assert_eq!(parsed.launcher_version, None);
+        assert_eq!(parsed.scheduled_task_id, None);
+        assert!(parsed.claude_args.is_empty());
+        assert_eq!(parsed.archived_by_version, None);
     }
 
     fn walk(dir: &Path) -> Vec<PathBuf> {
