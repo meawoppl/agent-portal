@@ -20,6 +20,12 @@ def rust_files():
     for path in ROOT.rglob("*.rs"):
         if any(part in SKIP_DIRS for part in path.parts):
             continue
+        # Whole-file test modules: a `foo_tests.rs` file (declared behind
+        # `#[cfg(test)] mod foo_tests;` in its parent) or anything under a
+        # `tests/` integration dir carries no in-file cfg(test) wrapper for
+        # the brace tracker to see, but is test code all the same.
+        if path.name.endswith("_tests.rs") or "tests" in path.parts:
+            continue
         yield path
 
 

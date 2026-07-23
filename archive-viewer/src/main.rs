@@ -19,6 +19,7 @@ mod summarize;
 mod table;
 
 #[cfg(test)]
+#[cfg(test)]
 mod fixture_tests;
 
 use std::path::PathBuf;
