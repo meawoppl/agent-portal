@@ -367,12 +367,25 @@ struct ImageViewerProps {
 #[function_component(ImageViewer)]
 fn image_viewer(props: &ImageViewerProps) -> Html {
     let expanded = use_state(|| false);
+    // The bytes behind a served-image URL are TTL/LRU-bounded, so a persisted
+    // transcript row can outlive them. When the <img> fails to load, degrade to
+    // a "media expired" placeholder rather than a broken image icon.
+    let failed = use_state(|| false);
 
     // Close lightbox on Escape key (capture phase so it doesn't trigger nav mode)
     {
         let expanded = expanded.clone();
         use_escape_capture(*expanded, Callback::from(move |()| expanded.set(false)));
     }
+
+    if *failed {
+        return render_media_expired(props.filename.as_deref(), "image");
+    }
+
+    let on_error = {
+        let failed = failed.clone();
+        Callback::from(move |_: Event| failed.set(true))
+    };
 
     let on_thumb_click = {
         let expanded = expanded.clone();
@@ -401,7 +414,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     html! {
         <>
             <div class="tool-result-image" onclick={on_thumb_click}>
-                <img src={props.src.clone()} alt="Tool result image" />
+                <img src={props.src.clone()} alt="Tool result image" onerror={on_error} />
             </div>
             if *expanded {
                 <div class="image-lightbox" onclick={on_close.clone()}>
@@ -423,6 +436,74 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                 </div>
             }
         </>
+    }
+}
+
+const ALLOWED_VIDEO_MEDIA_TYPES: &[&str] = &["video/mp4", "video/webm"];
+
+/// Render a video shown via `agent-portal show`. `url` is always a served-media
+/// URL (`/api/media/{id}`); the bytes are TTL/size-bounded, so `VideoViewer`
+/// degrades to a placeholder when the URL 404s.
+pub(super) fn render_video_source(media_type: &str, url: &str, filename: Option<String>) -> Html {
+    if !ALLOWED_VIDEO_MEDIA_TYPES.contains(&media_type) {
+        return html! {
+            <pre class="tool-result-content">
+                { format!("[unsupported video type: {media_type}]") }
+            </pre>
+        };
+    }
+    html! {
+        <VideoViewer src={url.to_string()} {filename} />
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct VideoViewerProps {
+    pub src: String,
+    #[prop_or_default]
+    pub filename: Option<String>,
+}
+
+#[function_component(VideoViewer)]
+fn video_viewer(props: &VideoViewerProps) -> Html {
+    let failed = use_state(|| false);
+
+    if *failed {
+        return render_media_expired(props.filename.as_deref(), "video");
+    }
+
+    let on_error = {
+        let failed = failed.clone();
+        Callback::from(move |_: Event| failed.set(true))
+    };
+
+    // Use the `src` attribute directly (not a child `<source>`) so the media
+    // element's own `error` event fires on a 404 — that's what drives the
+    // "media expired" fallback when the bounded store has dropped the blob.
+    html! {
+        <div class="tool-result-video">
+            <video
+                controls=true
+                preload="metadata"
+                src={props.src.clone()}
+                onerror={on_error}
+            />
+        </div>
+    }
+}
+
+/// Dark-theme-friendly placeholder shown when a served media blob has been
+/// evicted/expired from its bounded store (the transcript row outlives it).
+fn render_media_expired(filename: Option<&str>, kind: &str) -> Html {
+    let label = match filename {
+        Some(name) => format!("media expired: {name}"),
+        None => format!("{kind} expired"),
+    };
+    html! {
+        <div class="media-expired">
+            <span class="media-expired-icon">{ "\u{26a0}\u{fe0f}" }</span>
+            <span class="media-expired-label">{ label }</span>
+        </div>
     }
 }
 

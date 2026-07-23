@@ -61,6 +61,13 @@ pub fn test_app_state(pool: DbPool) -> AppState {
         session_max_age_days: 14,
         max_image_mb: 10,
         image_store: ImageStore::new(1024 * 1024, Duration::from_secs(60)),
+        max_video_mb: 100,
+        media_store: crate::handlers::media_store::MediaStore::new(
+            std::env::temp_dir().join(format!("agent-portal-media-test-{}", uuid::Uuid::new_v4())),
+            1024 * 1024,
+            Duration::from_secs(60),
+        )
+        .expect("create test media store"),
         forward_domain: None,
         archive: None,
         notifications: crate::push::channel().0,

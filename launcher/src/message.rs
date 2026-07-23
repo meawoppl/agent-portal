@@ -36,7 +36,7 @@ pub(crate) fn sender_session_id() -> Option<String> {
 }
 
 /// Resolve the HTTP API base URL and auth token from the launcher config.
-fn api_base() -> Result<(String, String)> {
+pub(crate) fn api_base() -> Result<(String, String)> {
     let config = crate::config::load_config();
     let token = config
         .auth_token

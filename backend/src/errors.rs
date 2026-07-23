@@ -10,6 +10,10 @@ pub enum AppError {
     Unauthorized,
     Forbidden,
     BadRequest(&'static str),
+    /// A request payload exceeded a configured cap (413). Carries a dynamic
+    /// caller-facing message (e.g. the size and limit) because the CLI surfaces
+    /// the response body verbatim.
+    PayloadTooLarge(String),
     Conflict(&'static str),
     NotFound(&'static str),
     BadGateway(&'static str),
@@ -49,6 +53,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden"),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, *msg),
+            AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg.as_str()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, *msg),
             AppError::NotFound(what) => (StatusCode::NOT_FOUND, *what),
             AppError::BadGateway(msg) => (StatusCode::BAD_GATEWAY, *msg),

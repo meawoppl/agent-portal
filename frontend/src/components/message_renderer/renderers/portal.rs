@@ -1,5 +1,5 @@
 use super::super::types::PortalMessage;
-use super::render_image_source;
+use super::{render_image_source, render_video_source};
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
 use std::collections::HashMap;
@@ -78,6 +78,24 @@ fn render_portal_content(
                 <>
                     { render_portal_image_header(file_path.as_deref(), *file_size) }
                     { render_image_source(&source, filename) }
+                </>
+            }
+        }
+        shared::PortalContent::Video {
+            media_type,
+            data,
+            file_path,
+            file_size,
+            ..
+        } => {
+            let filename = file_path
+                .as_deref()
+                .and_then(|p| p.rsplit('/').next())
+                .map(|s| s.to_string());
+            html! {
+                <>
+                    { render_portal_image_header(file_path.as_deref(), *file_size) }
+                    { render_video_source(media_type, data, filename) }
                 </>
             }
         }

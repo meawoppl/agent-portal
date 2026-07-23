@@ -5,6 +5,7 @@
 mod config;
 mod connection;
 mod forward;
+mod media;
 mod message;
 mod pastebin;
 mod path_policy;
@@ -72,6 +73,12 @@ enum Command {
     Message {
         #[command(subcommand)]
         action: MessageAction,
+    },
+    /// Display an image or video to the user in this session's transcript.
+    #[command(alias = "display")]
+    Show {
+        /// Path to the media file (png, jpg, gif, webp, svg, mp4, webm).
+        file: String,
     },
     /// Expose a local HTTP port through the portal for the user's browser.
     ///
@@ -253,6 +260,9 @@ async fn main() -> anyhow::Result<()> {
                     message::send(&agent_id, &message).await
                 }
             };
+        }
+        Some(Command::Show { file }) => {
+            return media::show(&file).await;
         }
         Some(Command::Forward { target }) => {
             return match target.as_str() {

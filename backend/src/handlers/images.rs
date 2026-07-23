@@ -166,6 +166,38 @@ impl ImageStore {
         Some(id)
     }
 
+    /// Store raw image bytes, returning the UUID key. Used by the
+    /// `agent-portal show` media endpoint, which receives the file bytes
+    /// directly over HTTP (no base64 hop). `user_id`/`session_id` gate
+    /// `serve_image` the same way as [`Self::store_base64`].
+    pub fn store_bytes(
+        &self,
+        content_type: &str,
+        data: Vec<u8>,
+        user_id: Uuid,
+        session_id: Option<Uuid>,
+    ) -> Uuid {
+        let id = Uuid::new_v4();
+        debug!(
+            "Stored image {} ({}, {} bytes, user={}, session={:?})",
+            id,
+            content_type,
+            data.len(),
+            user_id,
+            session_id,
+        );
+        self.images.insert(
+            id,
+            Arc::new(StoredImage {
+                content_type: content_type.to_string(),
+                data,
+                user_id,
+                session_id,
+            }),
+        );
+        id
+    }
+
     /// Begin a chunked upload. Reserves an entry in the pending map and
     /// fails up front if `expected_bytes` already exceeds the limit.
     ///
@@ -329,7 +361,11 @@ pub async fn serve_image(
 /// need the full `Session` row here, just the membership check. Any DB error
 /// is treated as "not a member" (deny by default) since the only signal we
 /// emit to the client is the 404 above.
-fn user_is_session_member(db_pool: &crate::db::DbPool, session_id: Uuid, user_id: Uuid) -> bool {
+pub(crate) fn user_is_session_member(
+    db_pool: &crate::db::DbPool,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> bool {
     use crate::schema::session_members;
 
     let mut conn = match db_pool.get() {
