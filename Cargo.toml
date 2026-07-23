@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "shared",
+    "archive-format",
     "backend",
     "frontend",
     "proxy",

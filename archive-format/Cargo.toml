@@ -1,0 +1,26 @@
+[package]
+name = "archive-format"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# Native-only crate: the on-disk/on-S3 format for long-term session archives
+# (#1258), shared by the backend (writer) and a standalone archive/history
+# viewer (reader) so the viewer never has to link the backend crate. NOT in
+# `shared/` — it uses `object_store`/`tokio`/`std::fs`, none of which are
+# WASM-compatible.
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+zstd = "0.13"
+object_store = { version = "0.14.0", features = ["aws"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

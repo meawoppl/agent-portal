@@ -8,6 +8,9 @@ authors.workspace = true
 # Shared types
 shared = { path = "../shared" }
 
+# Long-term session archive format + read-side store (#1258)
+archive-format = { path = "../archive-format" }
+
 # Async runtime
 tokio = { workspace = true }
 tokio-util = { workspace = true }
