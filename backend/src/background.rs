@@ -301,6 +301,13 @@ fn archive_one_session(
     }
     turns.models = models_seen.into_iter().collect();
 
+    // Media section: which write-through blobs survive in the archive for this
+    // session (#1450 durability). Best-effort and truthful — it lists only
+    // blobs whose archive sidecar is present, so a media whose write-through
+    // failed (or predates the feature) is simply omitted and the sweep never
+    // fails on it. `None` when media archiving is disabled or none survived.
+    let media = collect_session_media(runtime, session.user_id, session.id, &merged_lines);
+
     let archived_at = chrono::Utc::now().naive_utc();
     let transcripts_enabled = runtime.config.transcripts && !merged_lines.is_empty();
 
@@ -352,6 +359,7 @@ fn archive_one_session(
             total_cost_usd: session.total_cost_usd,
             turns,
             transcript: transcript_info,
+            media,
         },
         transcript_ndjson,
     };
@@ -364,6 +372,84 @@ fn archive_one_session(
     runtime.store.put_session_archive(&bundle)?;
     runtime.stats.record_success(bytes);
     Ok(())
+}
+
+/// Build the manifest's media section by scanning the transcript for
+/// `agent-portal show` blobs and keeping those that survive in the archive.
+///
+/// The media_id → session mapping has no dedicated table — #1450 embeds the
+/// served URL (`/api/images/{id}` / `/api/media/{id}`) in the portal transcript
+/// row — so the transcript *is* the source of truth for what the session
+/// referenced. For each referenced blob we consult the archive's sidecar
+/// ([`ArchivedMediaMeta`]): present means the write-through succeeded and the
+/// bytes are durable, so we emit an authoritative [`MediaEntry`] from it;
+/// absent means we omit it (write-through failed, was disabled, or the blob
+/// predates the feature). Returns `None` when media archiving is off or nothing
+/// survived, so the manifest field stays absent in those cases.
+fn collect_session_media(
+    runtime: &crate::archive::ArchiveRuntime,
+    user_id: uuid::Uuid,
+    session_id: uuid::Uuid,
+    lines: &[crate::archive::ArchiveMessageLine],
+) -> Option<Vec<crate::archive::MediaEntry>> {
+    use crate::archive::{media_key, MediaEntry};
+    use shared::{PortalContent, PortalMessage};
+
+    if !runtime.config.media {
+        return None;
+    }
+
+    // Preserve first-seen order while de-duplicating repeated references.
+    let mut seen: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+    let mut entries: Vec<MediaEntry> = Vec::new();
+
+    for line in lines {
+        let Ok(portal) = serde_json::from_value::<PortalMessage>(line.content.clone()) else {
+            continue;
+        };
+        for content in &portal.content {
+            let (kind, data) = match content {
+                PortalContent::Image { data, .. } => ("image", data),
+                PortalContent::Video { data, .. } => ("video", data),
+                _ => continue,
+            };
+            let Some(media_id) = parse_media_id(data, kind) else {
+                continue;
+            };
+            if !seen.insert(media_id) {
+                continue;
+            }
+            // Include only blobs the archive actually holds (sidecar present).
+            match runtime.store.get_media_meta(user_id, session_id, media_id) {
+                Ok(Some(meta)) => entries.push(MediaEntry {
+                    media_id,
+                    kind: meta.kind,
+                    content_type: meta.content_type,
+                    bytes: meta.bytes,
+                    object_key: media_key(user_id, session_id, media_id),
+                    uploaded_at: meta.uploaded_at,
+                }),
+                Ok(None) => {}
+                Err(e) => tracing::warn!(
+                    "Archive media manifest: sidecar read failed for {media_id}: {e}"
+                ),
+            }
+        }
+    }
+
+    (!entries.is_empty()).then_some(entries)
+}
+
+/// Extract the media id from a served URL (`/api/images/{id}` for `kind`
+/// `"image"`, `/api/media/{id}` for `"video"`); `None` if it isn't a served-url
+/// reference of that kind.
+fn parse_media_id(data: &str, kind: &str) -> Option<uuid::Uuid> {
+    let prefix = match kind {
+        "image" => "/api/images/",
+        "video" => "/api/media/",
+        _ => return None,
+    };
+    data.strip_prefix(prefix)?.parse().ok()
 }
 
 /// Archive every session whose messages the retention trim is about to

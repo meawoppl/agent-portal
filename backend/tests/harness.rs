@@ -217,6 +217,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
             root: tmp.path().to_path_buf(),
         },
         transcripts: true,
+        media: true,
     })
     .expect("local archive runtime");
 
@@ -389,6 +390,7 @@ async fn retention_holds_trim_when_archive_fails() {
             root: bad_root.path().to_path_buf(),
         },
         transcripts: true,
+        media: true,
     })
     .expect("runtime (construction succeeds; writes fail)");
     backend::background::run_retention_cleanup(retention_test_state(Some(Arc::new(broken)))).await;
@@ -406,6 +408,7 @@ async fn retention_holds_trim_when_archive_fails() {
             root: good_root.path().to_path_buf(),
         },
         transcripts: true,
+        media: true,
     })
     .expect("working runtime");
     backend::background::run_retention_cleanup(retention_test_state(Some(Arc::new(working)))).await;
@@ -496,6 +499,7 @@ async fn rearchive_after_trim_merges_transcript() {
             root: tmp.path().to_path_buf(),
         },
         transcripts: true,
+        media: true,
     })
     .expect("local archive runtime");
 

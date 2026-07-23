@@ -105,6 +105,23 @@ impl MediaStore {
         user_id: Uuid,
         session_id: Option<Uuid>,
     ) -> std::io::Result<Uuid> {
+        let id = Uuid::new_v4();
+        self.store_bytes_with_id(id, content_type, data, user_id, session_id)?;
+        Ok(id)
+    }
+
+    /// Persist `data` under a caller-supplied id. Used by the archive
+    /// read-through to re-warm the store under the media's original id (so the
+    /// same `/api/media/{id}` URL — and its Range serving — resolves again)
+    /// after its live entry was evicted.
+    pub fn store_bytes_with_id(
+        &self,
+        id: Uuid,
+        content_type: &str,
+        data: &[u8],
+        user_id: Uuid,
+        session_id: Option<Uuid>,
+    ) -> std::io::Result<()> {
         let size = data.len() as u64;
         if size > self.inner.max_bytes {
             return Err(std::io::Error::other(
@@ -115,7 +132,6 @@ impl MediaStore {
         self.sweep_expired();
         self.evict_until_fits(size);
 
-        let id = Uuid::new_v4();
         let path = self.inner.root.join(id.to_string());
         std::fs::write(&path, data)?;
 
@@ -135,7 +151,7 @@ impl MediaStore {
             "Stored media {} ({}, {} bytes, user={}, session={:?})",
             id, content_type, size, user_id, session_id
         );
-        Ok(id)
+        Ok(())
     }
 
     /// Fetch metadata for `id`, or `None` if it never existed, has expired past
@@ -259,10 +275,22 @@ pub async fn serve_media(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Response, AppError> {
-    let meta = app_state
-        .media_store
-        .get(&id)
-        .ok_or(AppError::NotFound("Media not found"))?;
+    let meta = match app_state.media_store.get(&id) {
+        Some(meta) => meta,
+        None => {
+            // Live copy evicted/expired: try the durable archive (#1450 media
+            // is ephemeral). Re-warms the on-disk store under the same id, so
+            // Range serving below is unchanged.
+            let state = app_state.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::handlers::media_archive::readthrough_media(&state, id)
+            })
+            .await
+            .ok()
+            .flatten()
+            .ok_or(AppError::NotFound("Media not found"))?
+        }
+    };
 
     if meta.user_id != current_user_id {
         let allowed = match meta.session_id {

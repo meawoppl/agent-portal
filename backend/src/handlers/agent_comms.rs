@@ -277,7 +277,7 @@ pub async fn show_media(
     // Store bytes; build the typed portal content referencing the served URL.
     // The media is bound to the caller + target session so `serve_image` /
     // `serve_media` gate fetches by ownership/membership (#786 pattern).
-    let portal = match kind {
+    let (portal, media_id) = match kind {
         MediaKind::Image => {
             let id = app_state.image_store.store_bytes(
                 &content_type,
@@ -285,27 +285,56 @@ pub async fn show_media(
                 user_id,
                 Some(target_id),
             );
-            PortalMessage::with_content(vec![PortalContent::Image {
-                media_type: content_type.clone(),
-                data: format!("/api/images/{id}"),
-                file_path: filename.clone(),
-                file_size: Some(file_size),
-                source_type: Some("url".to_string()),
-            }])
+            (
+                PortalMessage::with_content(vec![PortalContent::Image {
+                    media_type: content_type.clone(),
+                    data: format!("/api/images/{id}"),
+                    file_path: filename.clone(),
+                    file_size: Some(file_size),
+                    source_type: Some("url".to_string()),
+                }]),
+                id,
+            )
         }
         MediaKind::Video => {
             let id = app_state
                 .media_store
                 .store_bytes(&content_type, &body, user_id, Some(target_id))
                 .map_err(|e| AppError::Internal(format!("store video: {e}")))?;
-            PortalMessage::video_with_info(
-                content_type.clone(),
-                format!("/api/media/{id}"),
-                filename.clone(),
-                Some(file_size),
+            (
+                PortalMessage::video_with_info(
+                    content_type.clone(),
+                    format!("/api/media/{id}"),
+                    filename.clone(),
+                    Some(file_size),
+                ),
+                id,
             )
         }
     };
+
+    // Write-through to the durable archive (best-effort, never fails the
+    // upload). The served stores above are TTL/size-bounded, so without this
+    // the archived transcript would show only a "media expired" placeholder
+    // once the blob is evicted. Media is keyed under the session *owner* to
+    // match the manifest/transcript layout. Gated by PORTAL_SESSION_ARCHIVE_MEDIA.
+    if let Some(runtime) = &app_state.archive {
+        if runtime.config.media {
+            let runtime = runtime.clone();
+            let media = crate::handlers::media_archive::MediaWriteThrough {
+                owner_user_id: session.user_id,
+                session_id: target_id,
+                media_id,
+                kind,
+                content_type: content_type.clone(),
+                filename: filename.clone(),
+                bytes: body.to_vec(),
+            };
+            tokio::task::spawn_blocking(move || {
+                crate::handlers::media_archive::write_through(&runtime, media);
+            });
+        }
+    }
 
     let content_json = portal.to_json();
     let agent_type = AgentType::from_str(&session.agent_type).unwrap_or_default();

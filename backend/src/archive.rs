@@ -91,6 +91,12 @@ pub struct ArchiveConfig {
     /// When false, only manifests are archived (metadata/rollup mode);
     /// transcripts stay subject to normal DB retention.
     pub transcripts: bool,
+    /// When true (the default whenever the archive is enabled), media shown via
+    /// `agent-portal show` is written through to the archive at upload time and
+    /// read back through on a served-store miss (#1450 blobs are ephemeral —
+    /// TTL/size bounded — so an archived transcript otherwise permanently shows
+    /// "media expired"). Gates both the write-through and the read-through.
+    pub media: bool,
 }
 
 /// Parse archive settings from the environment. Fail-fast: partial or
@@ -163,9 +169,22 @@ pub fn archive_config_from_env() -> Result<Option<ArchiveConfig>, String> {
             ))
         }
     };
+    let media = match std::env::var("PORTAL_SESSION_ARCHIVE_MEDIA")
+        .unwrap_or_else(|_| "true".to_string())
+        .as_str()
+    {
+        "true" => true,
+        "false" => false,
+        other => {
+            return Err(format!(
+                "PORTAL_SESSION_ARCHIVE_MEDIA must be `true` or `false`, got `{other}`"
+            ))
+        }
+    };
     Ok(Some(ArchiveConfig {
         backend,
         transcripts,
+        media,
     }))
 }
 
@@ -246,6 +265,52 @@ pub struct SessionArchiveManifest {
     pub turns: ArchiveTurnStats,
     /// Present iff transcript archival is enabled and messages existed.
     pub transcript: Option<ArchiveTranscriptInfo>,
+    /// Media blobs (`agent-portal show`) whose bytes were written through to
+    /// the archive for this session, one entry per surviving blob.
+    ///
+    /// **Schema-compat (why this stays v1):** the field is additive and
+    /// optional — `#[serde(default, skip_serializing_if = "Option::is_none")]`
+    /// means an old manifest written before this field existed deserializes
+    /// with `media == None`, and a manifest with no media re-serializes
+    /// byte-identically to the old shape (the key is omitted). Neither the
+    /// object layout nor any existing field changes, so external viewers that
+    /// don't know the field are unaffected. That is exactly the additive-change
+    /// contract [`ARCHIVE_SCHEMA_VERSION`] guards, so it is **not** bumped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<Vec<MediaEntry>>,
+}
+
+/// One archived media blob referenced from a manifest. The bytes live at
+/// [`media_key`]; `bytes`/`content_type`/`uploaded_at` are copied from the
+/// blob's sidecar ([`ArchivedMediaMeta`]), which is the authoritative record
+/// that the blob exists in the archive.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MediaEntry {
+    pub media_id: Uuid,
+    /// `"image"` or `"video"`.
+    pub kind: String,
+    pub content_type: String,
+    pub bytes: u64,
+    pub object_key: String,
+    pub uploaded_at: NaiveDateTime,
+}
+
+/// Sidecar record stored next to each written-through media blob
+/// (`{media_key}.meta.json`). It carries the content type and original
+/// filename so a read-through fetch can set response headers **before** the
+/// session's manifest exists (write-through happens at upload time; the
+/// manifest is only written at the much-later archive sweep). Writing the
+/// bytes first and the sidecar last means "sidecar present" implies
+/// "bytes complete" — the same ordering invariant as transcript-then-manifest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArchivedMediaMeta {
+    pub media_id: Uuid,
+    pub kind: String,
+    pub content_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    pub bytes: u64,
+    pub uploaded_at: NaiveDateTime,
 }
 
 /// One transcript line, serialized as NDJSON. `content` is the raw stored
@@ -282,6 +347,18 @@ pub fn manifest_key(user_id: Uuid, session_id: Uuid) -> String {
 
 pub fn transcript_key(user_id: Uuid, session_id: Uuid) -> String {
     format!("v1/users/{user_id}/sessions/{session_id}/messages.ndjson.zst")
+}
+
+/// Key for a media blob's raw bytes. Co-located under the session prefix (like
+/// the manifest/transcript) so a session's whole archive lives at one prefix.
+/// `media_id` is the served id from `/api/images/{id}` or `/api/media/{id}`.
+pub fn media_key(user_id: Uuid, session_id: Uuid, media_id: Uuid) -> String {
+    format!("v1/users/{user_id}/sessions/{session_id}/media/{media_id}")
+}
+
+/// Key for a media blob's JSON sidecar ([`ArchivedMediaMeta`]).
+pub fn media_meta_key(user_id: Uuid, session_id: Uuid, media_id: Uuid) -> String {
+    format!("v1/users/{user_id}/sessions/{session_id}/media/{media_id}.meta.json")
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +500,77 @@ impl ArchiveStore {
             },
         };
         parse_transcript_ndjson(&zstd::decode_all(raw.as_slice())?).map(Some)
+    }
+
+    /// Write a raw object at `key` (overwrites; deterministic keys make this
+    /// idempotent). Backend-dispatched; used by the media write-through.
+    pub fn put_object(&self, key: &str, bytes: Vec<u8>) -> std::io::Result<()> {
+        match self {
+            Self::Local(store) => store.write_atomic(key, &bytes),
+            Self::Object(store) => store.put_bytes(key, bytes),
+        }
+    }
+
+    /// Read a raw object at `key`, or `None` if it does not exist.
+    pub fn get_object(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
+        match self {
+            Self::Local(store) => match std::fs::read(store.object_path(key)) {
+                Ok(bytes) => Ok(Some(bytes)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
+            },
+            Self::Object(store) => store.get_bytes(key),
+        }
+    }
+
+    /// Write a media blob and its sidecar. Bytes first, sidecar last — so a
+    /// present sidecar implies the bytes are complete (mirrors
+    /// transcript-then-manifest).
+    pub fn put_media(
+        &self,
+        user_id: Uuid,
+        session_id: Uuid,
+        meta: &ArchivedMediaMeta,
+        bytes: &[u8],
+    ) -> std::io::Result<()> {
+        self.put_object(
+            &media_key(user_id, session_id, meta.media_id),
+            bytes.to_vec(),
+        )?;
+        let meta_json = serde_json::to_vec(meta)?;
+        self.put_object(
+            &media_meta_key(user_id, session_id, meta.media_id),
+            meta_json,
+        )
+    }
+
+    /// Read a media blob's sidecar, or `None` if it was never written through.
+    /// Sidecar presence is the archive's record that the blob's bytes exist.
+    pub fn get_media_meta(
+        &self,
+        user_id: Uuid,
+        session_id: Uuid,
+        media_id: Uuid,
+    ) -> std::io::Result<Option<ArchivedMediaMeta>> {
+        match self.get_object(&media_meta_key(user_id, session_id, media_id))? {
+            Some(bytes) => Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("corrupt media sidecar for {media_id}: {e}"),
+                )
+            })?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Read a media blob's raw bytes, or `None` if absent.
+    pub fn get_media_bytes(
+        &self,
+        user_id: Uuid,
+        session_id: Uuid,
+        media_id: Uuid,
+    ) -> std::io::Result<Option<Vec<u8>>> {
+        self.get_object(&media_key(user_id, session_id, media_id))
     }
 }
 
@@ -619,6 +767,7 @@ mod tests {
             total_cost_usd: 0.5,
             turns: ArchiveTurnStats::default(),
             transcript: None,
+            media: None,
         }
     }
 
@@ -799,6 +948,7 @@ mod tests {
                 "PORTAL_SESSION_ARCHIVE_LOCAL_ROOT",
                 "PORTAL_SESSION_ARCHIVE_COMPRESS",
                 "PORTAL_SESSION_ARCHIVE_TRANSCRIPTS",
+                "PORTAL_SESSION_ARCHIVE_MEDIA",
                 "PORTAL_SESSION_ARCHIVE_S3_BUCKET",
                 "PORTAL_SESSION_ARCHIVE_S3_PREFIX",
             ] {
@@ -822,6 +972,20 @@ mod tests {
             "local backend"
         );
         assert!(cfg.transcripts, "transcripts default on when enabled");
+        assert!(cfg.media, "media write-through defaults on when enabled");
+
+        // The media knob must be a strict bool, not silently coerced.
+        std::env::set_var("PORTAL_SESSION_ARCHIVE_MEDIA", "false");
+        assert!(
+            !archive_config_from_env().unwrap().unwrap().media,
+            "media=false disables write-through"
+        );
+        std::env::set_var("PORTAL_SESSION_ARCHIVE_MEDIA", "bogus");
+        assert!(
+            archive_config_from_env().is_err(),
+            "non-bool media knob fails fast"
+        );
+        std::env::remove_var("PORTAL_SESSION_ARCHIVE_MEDIA");
 
         // The removed compression knob must be rejected, not ignored.
         std::env::set_var("PORTAL_SESSION_ARCHIVE_COMPRESS", "none");
@@ -851,6 +1015,100 @@ mod tests {
         std::env::set_var("PORTAL_SESSION_ARCHIVE_BACKEND", "bogus");
         assert!(archive_config_from_env().is_err());
         clear();
+    }
+
+    fn media_meta(media_id: Uuid) -> ArchivedMediaMeta {
+        ArchivedMediaMeta {
+            media_id,
+            kind: "image".into(),
+            content_type: "image/png".into(),
+            filename: Some("plot.png".into()),
+            bytes: 5,
+            uploaded_at: chrono::NaiveDate::from_ymd_opt(2026, 7, 11)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        }
+    }
+
+    #[test]
+    fn media_roundtrip_local_and_object() {
+        // Local backend.
+        let tmp = tempfile::tempdir().unwrap();
+        let local = ArchiveStore::Local(LocalArchiveStore {
+            root: tmp.path().to_path_buf(),
+        });
+        // Object (S3) backend via the in-memory store.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let object = ArchiveStore::Object(ObjectArchiveStore {
+            store: std::sync::Arc::new(object_store::memory::InMemory::new()),
+            prefix: Some("portal-archive".into()),
+            handle: rt.handle().clone(),
+        });
+
+        for store in [&local, &object] {
+            let (u, s, m) = (Uuid::from_u128(7), Uuid::from_u128(9), Uuid::from_u128(42));
+            // Missing reads before any write.
+            assert!(store.get_media_meta(u, s, m).unwrap().is_none());
+            assert!(store.get_media_bytes(u, s, m).unwrap().is_none());
+
+            let meta = media_meta(m);
+            store.put_media(u, s, &meta, b"hello").unwrap();
+            // Idempotent overwrite with deterministic key.
+            store.put_media(u, s, &meta, b"hello").unwrap();
+
+            assert_eq!(store.get_media_bytes(u, s, m).unwrap().unwrap(), b"hello");
+            assert_eq!(store.get_media_meta(u, s, m).unwrap().unwrap(), meta);
+        }
+    }
+
+    #[test]
+    fn manifest_media_section_roundtrips() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = ArchiveStore::Local(LocalArchiveStore {
+            root: tmp.path().to_path_buf(),
+        });
+        let (u, s) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let m = Uuid::from_u128(3);
+        let mut manifest = manifest(u, s);
+        manifest.media = Some(vec![MediaEntry {
+            media_id: m,
+            kind: "video".into(),
+            content_type: "video/mp4".into(),
+            bytes: 123,
+            object_key: media_key(u, s, m),
+            uploaded_at: manifest.created_at,
+        }]);
+        let bundle = SessionArchiveBundle {
+            manifest: manifest.clone(),
+            transcript_ndjson: None,
+        };
+        store.put_session_archive(&bundle).unwrap();
+        let got = store.get_session_manifest(u, s).unwrap().expect("manifest");
+        assert_eq!(got, manifest);
+        assert_eq!(got.media.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn old_manifest_without_media_field_parses() {
+        // A manifest serialized before the `media` field existed must still
+        // deserialize (additive optional field → defaults to None), and a
+        // media-less manifest must not emit the key (byte-compat).
+        let u = Uuid::from_u128(1);
+        let s = Uuid::from_u128(2);
+        let m = manifest(u, s);
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(
+            !json.contains("\"media\""),
+            "media-less manifest must omit the key: {json}"
+        );
+
+        // Hand-build a manifest JSON object with the `media` key entirely
+        // absent (simulating an old writer) and confirm it round-trips.
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(value.as_object_mut().unwrap().remove("media").is_none());
+        let parsed: SessionArchiveManifest = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.media, None);
     }
 
     fn walk(dir: &Path) -> Vec<PathBuf> {

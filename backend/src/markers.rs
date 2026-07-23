@@ -110,6 +110,24 @@ pub const ARCHIVE_SWEEP_FAILED: &str = "ARCHIVE_SWEEP_FAILED";
 ///   succeeds. (An empty held set when archiving is disabled is normal.)
 pub const RETENTION_TRIM_HELD: &str = "RETENTION_TRIM_HELD";
 
+/// Emitted when writing an `agent-portal show` media blob through to the
+/// session archive fails (`handlers/media_archive.rs`). Write-through is
+/// best-effort and deliberately never fails the upload itself — the blob is
+/// still stored in the live (TTL/size-bounded) served store and shown now — so
+/// the only durable consequence is that this blob will read as "media expired"
+/// once the served copy is evicted and the session is backed up.
+///
+/// - **Recurring burst:** the archive backend is unhealthy (bad
+///   `PORTAL_SESSION_ARCHIVE_*` config, S3 creds/permissions, full/unwritable
+///   local root) — the same fault class as [`SESSION_ARCHIVE_FAILED`], seen
+///   here first because write-through runs at upload time, well ahead of the
+///   sweep. Media uploaded during the outage won't survive in backups.
+/// - **One-off:** a transient backend hiccup on a single upload.
+/// - **Action:** on a burst, check archive-backend reachability, credentials/
+///   permissions, and the `PORTAL_SESSION_ARCHIVE_*` settings (same triage as
+///   `SESSION_ARCHIVE_FAILED`).
+pub const MEDIA_ARCHIVE_FAILED: &str = "MEDIA_ARCHIVE_FAILED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +142,7 @@ mod tests {
         SESSION_ARCHIVE_FAILED,
         ARCHIVE_SWEEP_FAILED,
         RETENTION_TRIM_HELD,
+        MEDIA_ARCHIVE_FAILED,
     ];
 
     #[test]
@@ -165,6 +184,7 @@ mod tests {
             include_str!("background.rs"),
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),
+            include_str!("handlers/media_archive.rs"),
         ];
         for m in ALL_MARKERS {
             let referenced = sources.iter().any(|s| s.contains(m));

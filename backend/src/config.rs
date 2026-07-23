@@ -407,8 +407,9 @@ impl ServerConfig {
                     ),
                 };
                 tracing::info!(
-                    "Session archive enabled: {backend} (zstd transcripts: {})",
-                    cfg.transcripts
+                    "Session archive enabled: {backend} (zstd transcripts: {}, media: {})",
+                    cfg.transcripts,
+                    cfg.media
                 );
             }
             None => {
