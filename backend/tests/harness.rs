@@ -181,6 +181,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
             scheduled_task_id: None,
             paused: false,
             claude_args: serde_json::Value::Array(vec![]),
+            launcher_version: None,
         })
         .execute(&mut conn)
         .expect("insert session");
@@ -345,6 +346,7 @@ async fn retention_holds_trim_when_archive_fails() {
             scheduled_task_id: None,
             paused: false,
             claude_args: serde_json::Value::Array(vec![]),
+            launcher_version: None,
         })
         .execute(&mut conn)
         .expect("insert session");
@@ -467,6 +469,7 @@ async fn rearchive_after_trim_merges_transcript() {
             scheduled_task_id: None,
             paused: false,
             claude_args: serde_json::Value::Array(vec![]),
+            launcher_version: None,
         })
         .execute(&mut conn)
         .expect("insert session");

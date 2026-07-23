@@ -218,7 +218,16 @@ pub fn register_or_update_session(
             );
         }
 
-        create_new_session(&mut conn, requesting_user_id, params)
+        // Resolve the launcher's live version from the in-memory registry
+        // *now*, at create time — it's the only moment the connection is
+        // guaranteed present. It won't be available at archive time (the
+        // registry entry is long gone), so we persist it onto the row. See
+        // `NewSessionWithId::launcher_version` for the last-known-at-launch
+        // semantics.
+        let launcher_version = app_state
+            .session_manager
+            .launcher_version(params.launcher_id);
+        create_new_session(&mut conn, requesting_user_id, params, launcher_version)
     };
 
     // Bind the auth token to the session it just registered, and revoke any
@@ -271,6 +280,7 @@ fn create_new_session(
     conn: &mut diesel::PgConnection,
     user_id: Uuid,
     params: &RegistrationParams,
+    launcher_version: Option<String>,
 ) -> RegistrationResult {
     use crate::schema::{session_members, sessions};
 
@@ -291,6 +301,7 @@ fn create_new_session(
         paused: false,
         claude_args: serde_json::to_value(params.claude_args)
             .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+        launcher_version,
     };
 
     match diesel::insert_into(sessions::table)
@@ -514,5 +525,66 @@ mod tests {
                 "SESSION_NOT_FOUND_ERROR (`{SESSION_NOT_FOUND_ERROR}`) leaks rejection cause via substring `{forbidden}`"
             );
         }
+    }
+
+    /// The launcher-version capture wiring end-to-end at the DB layer: a
+    /// session created with a `launcher_version` must read back with it
+    /// intact (migration + schema + model round-trip), so the value is
+    /// durable for the archive sweep that runs long after the launcher's
+    /// in-memory registry entry is gone. Skips when no test DB is available.
+    #[test]
+    fn launcher_version_persists_on_session_row() {
+        use crate::models::{NewSessionWithId, NewUser, Session, User};
+        use crate::schema::{sessions, users};
+
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+
+        let nonce = Uuid::new_v4();
+        let user = diesel::insert_into(users::table)
+            .values(&NewUser {
+                google_id: format!("test_launcher_version_{nonce}"),
+                email: format!("test_launcher_version_{nonce}@example.invalid"),
+                name: Some("Launcher Version Test".to_string()),
+                avatar_url: None,
+            })
+            .get_result::<User>(&mut conn)
+            .expect("insert test user");
+
+        let session_id = Uuid::new_v4();
+        let created = diesel::insert_into(sessions::table)
+            .values(&NewSessionWithId {
+                id: session_id,
+                user_id: user.id,
+                session_name: format!("launcher-version-{session_id}"),
+                session_key: session_id.to_string(),
+                working_directory: "/tmp".to_string(),
+                status: SessionStatus::Active.as_str().to_string(),
+                git_branch: None,
+                client_version: None,
+                hostname: "test-host".to_string(),
+                launcher_id: Some(Uuid::new_v4()),
+                agent_type: "claude".to_string(),
+                repo_url: None,
+                scheduled_task_id: None,
+                paused: false,
+                claude_args: serde_json::Value::Array(Vec::new()),
+                launcher_version: Some("2.13.42".to_string()),
+            })
+            .get_result::<Session>(&mut conn)
+            .expect("insert session");
+
+        assert_eq!(created.launcher_version.as_deref(), Some("2.13.42"));
+
+        let fetched = sessions::table
+            .find(session_id)
+            .first::<Session>(&mut conn)
+            .expect("fetch session");
+        assert_eq!(fetched.launcher_version.as_deref(), Some("2.13.42"));
+
+        let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
+        let _ = diesel::delete(users::table.find(user.id)).execute(&mut conn);
     }
 }

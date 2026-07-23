@@ -360,6 +360,15 @@ fn archive_one_session(
             turns,
             transcript: transcript_info,
             media,
+            launcher_id: session.launcher_id,
+            launcher_version: session.launcher_version.clone(),
+            scheduled_task_id: session.scheduled_task_id,
+            // `claude_args` is stored as a JSONB string array; recover it as
+            // Vec<String>, tolerating a malformed/absent value as empty.
+            claude_args: serde_json::from_value(session.claude_args.clone()).unwrap_or_default(),
+            // Per-write provenance: whichever backend runs this sweep stamps
+            // its own version, so a re-archive reflects the newer writer.
+            archived_by_version: Some(shared::VERSION.to_string()),
         },
         transcript_ndjson,
     };

@@ -323,6 +323,7 @@ mod db_tests {
             scheduled_task_id: None,
             paused: false,
             claude_args: serde_json::Value::Array(Vec::new()),
+            launcher_version: None,
         };
         diesel::insert_into(sessions::table)
             .values(&new_session)

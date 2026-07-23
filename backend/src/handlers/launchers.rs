@@ -204,6 +204,12 @@ pub(crate) fn create_desired_session(
         paused: false,
         claude_args: serde_json::to_value(&draft.claude_args)
             .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+        // Stamp the launcher's live version now — the registry entry that
+        // holds it is gone by archive time (see
+        // `NewSessionWithId::launcher_version`).
+        launcher_version: app_state
+            .session_manager
+            .launcher_version(draft.launcher_id),
     };
 
     diesel::insert_into(sessions::table)
