@@ -3,6 +3,7 @@ members = [
     "shared",
     "backend",
     "frontend",
+    "viewer-frontend",
     "proxy",
     "session-lib",
     "claude-session-lib",
