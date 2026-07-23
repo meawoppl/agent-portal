@@ -78,6 +78,7 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             onclick={on_click}
             key={session.id.to_string()}
             data-index={props.index.to_string()}
+            data-session-id={session.id.to_string()}
         >
             <span class={view.watermark_class} aria-hidden="true" />
             <span class="pill-broadcast-effect" aria-hidden="true">
