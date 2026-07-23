@@ -218,6 +218,36 @@ pub(crate) fn agent_message_event(msg: &PortalMessage) -> Option<AgentMessageEve
     })
 }
 
+pub(crate) fn agent_message_event_from_agent_facing_text(text: &str) -> Option<AgentMessageEvent> {
+    let text = text.trim_start();
+    let rest = text.strip_prefix("[message from ")?;
+    let (header, body) = rest.split_once("]\n")?;
+    let mut parts = header.split_whitespace();
+    let from_agent_type = parts.next()?.to_string();
+    let from_session_id = parts.next()?.to_string();
+    if parts.next().is_some() || from_session_id.parse::<Uuid>().is_err() {
+        return None;
+    }
+
+    let text = strip_agent_message_reminder(body).trim_end().to_string();
+    if text.is_empty() {
+        return None;
+    }
+
+    Some(AgentMessageEvent {
+        from_agent_type,
+        from_session_id,
+        text,
+    })
+}
+
+fn strip_agent_message_reminder(body: &str) -> &str {
+    body.split_once("\n\n<system-reminder>")
+        .or_else(|| body.split_once("\n<system-reminder>"))
+        .map(|(message, _)| message)
+        .unwrap_or(body)
+}
+
 pub(crate) fn render_agent_message_event(
     event: &AgentMessageEvent,
     timestamp: Option<&str>,
@@ -412,5 +442,33 @@ mod tests {
         };
 
         assert!(agent_message_event(&msg).is_none());
+    }
+
+    #[test]
+    fn agent_message_event_from_agent_facing_text_strips_reminder() {
+        let event = agent_message_event_from_agent_facing_text(
+            "[message from codex e2d342f5-68c6-4134-a5d8-63cb4afcee9e]\n\
+Will do.\n\n\
+<system-reminder>\n\
+This message came from another agent.\n\
+</system-reminder>",
+        )
+        .expect("event");
+
+        assert_eq!(event.from_agent_type, "codex");
+        assert_eq!(
+            event.from_session_id,
+            "e2d342f5-68c6-4134-a5d8-63cb4afcee9e"
+        );
+        assert_eq!(event.text, "Will do.");
+    }
+
+    #[test]
+    fn agent_message_event_from_agent_facing_text_rejects_malformed_header() {
+        assert!(agent_message_event_from_agent_facing_text("[message from codex]\nhi").is_none());
+        assert!(
+            agent_message_event_from_agent_facing_text("[message from codex not-a-uuid]\nhi")
+                .is_none()
+        );
     }
 }
