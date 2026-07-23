@@ -8,6 +8,11 @@ authors.workspace = true
 # binary that reads back session archives written by the backend's archival
 # sweep. It links only the `archive-format` crate (the shared read/write
 # format), never the backend, so it stays a small, self-contained CLI.
+#
+# The `serve` subcommand adds a loopback-only HTTP server that exposes the
+# archive over a small JSON API and embeds the `viewer-frontend` WASM UI
+# (via `memory-serve`, exactly as the backend embeds `frontend/dist`). See
+# `build.rs` for why the embed tolerates a missing `viewer-frontend/dist`.
 
 [[bin]]
 name = "portal-archive"
@@ -21,12 +26,24 @@ clap = { version = "4.5", features = ["derive", "env"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The S3 read path blocks on a captured tokio runtime handle, so the binary
-# needs a runtime even though it is otherwise synchronous.
+# needs a runtime even though it is otherwise synchronous. `serve` also runs an
+# async axum server on it.
 tokio = { workspace = true }
 uuid = { workspace = true }
 
+# `serve` subcommand: loopback HTTP server + embedded WASM UI.
+axum = { workspace = true }
+tokio-util = { workspace = true }
+memory-serve = "2.1"
+
+[build-dependencies]
+memory-serve = "2.1"
+
 [dev-dependencies]
 tempfile = "3"
+# `serve` integration tests drive the router via `ServiceExt::oneshot` (a real
+# request/response cycle, no TCP bind).
+tower = { workspace = true }
 
 [lints]
 workspace = true
