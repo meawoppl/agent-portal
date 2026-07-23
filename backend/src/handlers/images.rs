@@ -150,6 +150,29 @@ impl ImageStore {
         id
     }
 
+    /// Insert bytes under a caller-supplied id, returning the stored entry.
+    /// Used by the archive read-through to re-warm the cache under the media's
+    /// original id (so the same `/api/images/{id}` URL resolves again) after
+    /// its live entry was evicted. `store_bytes` mints a fresh id and so can't
+    /// be used to restore a specific one.
+    pub fn insert_with_id(
+        &self,
+        id: Uuid,
+        content_type: &str,
+        data: Vec<u8>,
+        user_id: Uuid,
+        session_id: Option<Uuid>,
+    ) -> Arc<StoredImage> {
+        let stored = Arc::new(StoredImage {
+            content_type: content_type.to_string(),
+            data,
+            user_id,
+            session_id,
+        });
+        self.images.insert(id, stored.clone());
+        stored
+    }
+
     /// Fetch a stored image by id, or `None` if it was never stored, has
     /// expired past its TTL, or has been evicted to stay under the byte cap.
     pub fn get(&self, id: &Uuid) -> Option<Arc<StoredImage>> {
@@ -174,10 +197,21 @@ pub async fn serve_image(
     CurrentUserId(current_user_id): CurrentUserId,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let image = app_state
-        .image_store
-        .get(&id)
-        .ok_or(AppError::NotFound("Image not found"))?;
+    let image = match app_state.image_store.get(&id) {
+        Some(image) => image,
+        None => {
+            // Live copy evicted/expired: try the durable archive (#1450 media
+            // is ephemeral). Re-warms the store under the same id on hit.
+            let state = app_state.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::handlers::media_archive::readthrough_image(&state, id)
+            })
+            .await
+            .ok()
+            .flatten()
+            .ok_or(AppError::NotFound("Image not found"))?
+        }
+    };
 
     if image.user_id != current_user_id {
         // Inserter is someone else — fall back to session-member sharing if
