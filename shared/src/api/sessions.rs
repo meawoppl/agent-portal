@@ -152,6 +152,20 @@ pub struct SendAgentMessageResponse {
     pub pending_inputs: usize,
 }
 
+/// Response for `POST /api/agent/sessions/{id}/media` — the `agent-portal show`
+/// CLI displays media in a session's transcript.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShowMediaResponse {
+    /// The recipient session's display name, for the CLI confirmation line.
+    pub session_name: String,
+    /// The stored media's declared content type (e.g. `image/png`, `video/mp4`).
+    pub content_type: String,
+    /// True if the backend durably persisted the transcript row (so it replays
+    /// on reconnect). Broadcast to any live web clients is best-effort.
+    #[serde(default)]
+    pub persisted: bool,
+}
+
 #[cfg(test)]
 mod agent_session_wire_tests {
     use super::*;

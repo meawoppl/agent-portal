@@ -2,7 +2,6 @@
 
 mod git_metadata;
 mod heartbeat_watchdog;
-mod image_uploader;
 mod input_delivery;
 mod output_forwarder;
 mod permission_bridge;
@@ -461,8 +460,8 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     };
 
     // Register with backend and wait for acknowledgment
-    let max_image_mb = match register_session(&mut conn, &config_with_branch).await {
-        Ok(mb) => mb,
+    match register_session(&mut conn, &config_with_branch).await {
+        Ok(()) => {}
         Err(RegisterError::Transient(duration)) => return ConnectionResult::Disconnected(duration),
         Err(RegisterError::Rejected) => return ConnectionResult::RegistrationRejected,
     };
@@ -608,7 +607,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     }
 
     // Run the message loop - split connection for concurrent read/write
-    run_message_loop(session, &config_with_branch, conn, max_image_mb).await
+    run_message_loop(session, &config_with_branch, conn).await
 }
 
 /// Connect to the backend WebSocket
@@ -635,11 +634,10 @@ pub async fn connect_to_backend(
 }
 
 /// Register session with the backend and wait for acknowledgment.
-/// On success, returns the backend-provided max_image_mb.
 pub async fn register_session(
     conn: &mut NativeConnection,
     config: &ProxySessionConfig,
-) -> Result<u32, RegisterError> {
+) -> Result<(), RegisterError> {
     info!("Registering session...");
 
     let hostname = hostname_or_unknown();
@@ -675,10 +673,13 @@ pub async fn register_session(
                     success,
                     session_id: _,
                     error,
-                    max_image_mb,
+                    // `max_image_mb` is still sent by the backend but no longer
+                    // consumed here — the Read-triggered image path it capped
+                    // was replaced by `agent-portal show` (see output_forwarder).
+                    max_image_mb: _,
                     retryable,
                 }) => {
-                    return Some((success, error, max_image_mb, retryable));
+                    return Some((success, error, retryable));
                 }
                 Ok(_) => continue,
                 Err(_) => return None,
@@ -689,11 +690,11 @@ pub async fn register_session(
     .await;
 
     match ack_timeout {
-        Ok(Some((true, _, max_image_mb, _))) => {
-            info!("Session registered (max_image_mb: {})", max_image_mb);
-            Ok(max_image_mb)
+        Ok(Some((true, _, _))) => {
+            info!("Session registered");
+            Ok(())
         }
-        Ok(Some((false, error, _, retryable))) => {
+        Ok(Some((false, error, retryable))) => {
             let err_msg = error.as_deref().unwrap_or("Unknown error");
             if retryable {
                 // Transient infrastructure failure (DB blip mid-deploy) —
@@ -730,7 +731,6 @@ async fn run_message_loop<A: Agent>(
     session: &mut SessionState<'_, A>,
     config: &ProxySessionConfig,
     conn: NativeConnection,
-    max_image_mb: u32,
 ) -> ConnectionResult {
     let connection_start = Instant::now();
     let session_id = config.session_id;
@@ -789,12 +789,9 @@ async fn run_message_loop<A: Agent>(
         output_rx,
         ws_write.clone(),
         session_id,
-        config.backend_url.clone(),
-        config.auth_token.clone(),
         config.working_directory.clone(),
         git_metadata.clone(),
         session.output_buffer.clone(),
-        max_image_mb,
         config.agent_type,
     );
 

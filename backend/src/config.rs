@@ -154,6 +154,10 @@ pub struct ServerConfig {
     pub max_image_mb: u32,
     pub image_store_max_bytes: u64,
     pub image_store_ttl: std::time::Duration,
+    /// Per-file cap for videos shown via `agent-portal show` (default 100 MB).
+    pub max_video_mb: u32,
+    /// Total-byte cap for the on-disk media (video) store (default 1 GiB).
+    pub media_store_max_bytes: u64,
     /// Authority (host, optionally `:port`) under which per-forward subdomains
     /// are served (docs/PORT_FORWARDING.md). `None` = forwarding disabled.
     pub forward_domain: Option<String>,
@@ -312,6 +316,17 @@ impl ServerConfig {
         let image_store_max_bytes = image_store_max_mb.saturating_mul(1024 * 1024);
         let image_store_ttl = std::time::Duration::from_secs(image_store_ttl_secs);
 
+        // Video caps for `agent-portal show`. The per-file cap defaults higher
+        // than images (video is inherently larger); the on-disk store cap bounds
+        // total footprint. Videos reuse `image_store_ttl` for per-entry expiry.
+        let max_video_mb: u32 = parse_or(&mut errors, "PORTAL_MAX_VIDEO_MB", 100);
+        let media_store_max_mb: u64 = parse_or(
+            &mut errors,
+            "PORTAL_MEDIA_STORE_MAX_MB",
+            handlers::media_store::DEFAULT_MEDIA_STORE_MAX_BYTES / (1024 * 1024),
+        );
+        let media_store_max_bytes = media_store_max_mb.saturating_mul(1024 * 1024);
+
         tracing::info!(
             "Message retention: max {} messages/session, {} days",
             message_retention_count,
@@ -322,6 +337,11 @@ impl ServerConfig {
             session_max_age_days
         );
         tracing::info!("Max image size: {} MB", max_image_mb);
+        tracing::info!(
+            "Max video size: {} MB, media store cap: {} MB",
+            max_video_mb,
+            media_store_max_mb
+        );
         tracing::info!(
             "Image store cap: {} MB total, {}s TTL per entry",
             image_store_max_mb,
@@ -437,6 +457,8 @@ impl ServerConfig {
             max_image_mb,
             image_store_max_bytes,
             image_store_ttl,
+            max_video_mb,
+            media_store_max_bytes,
             forward_domain,
             archive,
             vapid_public_key,

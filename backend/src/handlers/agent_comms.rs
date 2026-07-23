@@ -5,22 +5,26 @@
 //! proxy token (programmatic/agent callers), and is scoped to a single user —
 //! you can only see and message your own sessions.
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
-    http::HeaderMap,
+    body::Bytes,
+    extract::{Path, Query, State},
+    http::{header, HeaderMap},
     Json,
 };
 use diesel::prelude::*;
 use tower_cookies::Cookies;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use shared::api::{
     AgentSessionInfo, AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse,
+    ShowMediaResponse,
 };
-use shared::SessionStatus;
+use shared::media::MediaKind;
+use shared::{AgentType, PortalContent, PortalMessage, ServerToClient, SessionStatus};
 
 use crate::errors::AppError;
 use crate::models::Session;
@@ -186,6 +190,172 @@ pub async fn send_agent_message(
         persisted: outcome.persisted,
         seq: outcome.seq,
         pending_inputs,
+    }))
+}
+
+/// Query for `POST /api/agent/sessions/{id}/media`.
+#[derive(serde::Deserialize)]
+pub struct ShowMediaQuery {
+    /// Original filename, shown in the transcript entry (e.g. `plot.png`).
+    #[serde(default)]
+    filename: Option<String>,
+}
+
+/// POST /api/agent/sessions/{id}/media — display an image or video in a
+/// session's transcript (`agent-portal show <file>`). The raw file bytes are
+/// the request body; the declared content type rides in the `Content-Type`
+/// header and the original name in `?filename=`. Images go to the in-memory
+/// [`ImageStore`](crate::handlers::images::ImageStore); videos go to the
+/// on-disk [`MediaStore`](crate::handlers::media_store::MediaStore). A typed
+/// `portal` message is persisted (so it replays on reconnect) and broadcast to
+/// any live web clients.
+///
+/// Auth mirrors `send_agent_message`: dual cookie/Bearer, same-user, and the
+/// caller must be a member of the target session.
+pub async fn show_media(
+    State(app_state): State<Arc<AppState>>,
+    Path(target_id): Path<Uuid>,
+    Query(query): Query<ShowMediaQuery>,
+    headers: HeaderMap,
+    cookies: Cookies,
+    body: Bytes,
+) -> Result<Json<ShowMediaResponse>, AppError> {
+    let user_id = resolve_user(&app_state, &headers, &cookies)?;
+
+    // Declared content type, minus any `; charset=` suffix.
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or(s).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or(AppError::BadRequest("missing Content-Type header"))?;
+
+    let kind = shared::media::media_kind(&content_type)
+        .ok_or(AppError::BadRequest("unsupported media type"))?;
+
+    if body.is_empty() {
+        return Err(AppError::BadRequest("empty media body"));
+    }
+
+    // Per-kind size cap.
+    let cap_mb = match kind {
+        MediaKind::Image => app_state.max_image_mb,
+        MediaKind::Video => app_state.max_video_mb,
+    };
+    if body.len() as u64 > cap_mb as u64 * 1024 * 1024 {
+        return Err(AppError::PayloadTooLarge(format!(
+            "{:.1} MB exceeds the {} MB limit for {}",
+            body.len() as f64 / (1024.0 * 1024.0),
+            cap_mb,
+            match kind {
+                MediaKind::Image => "images",
+                MediaKind::Video => "videos",
+            },
+        )));
+    }
+
+    let mut conn = app_state.conn()?;
+    use crate::schema::{session_members, sessions};
+
+    // Authorize: the caller must be a member of the target session.
+    let session: Session = sessions::table
+        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+        .filter(sessions::id.eq(target_id))
+        .filter(session_members::user_id.eq(user_id))
+        .select(Session::as_select())
+        .first(&mut conn)
+        .map_err(|_| AppError::NotFound("session"))?;
+
+    let filename = query
+        .filename
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let file_size = body.len() as u64;
+
+    // Store bytes; build the typed portal content referencing the served URL.
+    // The media is bound to the caller + target session so `serve_image` /
+    // `serve_media` gate fetches by ownership/membership (#786 pattern).
+    let portal = match kind {
+        MediaKind::Image => {
+            let id = app_state.image_store.store_bytes(
+                &content_type,
+                body.to_vec(),
+                user_id,
+                Some(target_id),
+            );
+            PortalMessage::with_content(vec![PortalContent::Image {
+                media_type: content_type.clone(),
+                data: format!("/api/images/{id}"),
+                file_path: filename.clone(),
+                file_size: Some(file_size),
+                source_type: Some("url".to_string()),
+            }])
+        }
+        MediaKind::Video => {
+            let id = app_state
+                .media_store
+                .store_bytes(&content_type, &body, user_id, Some(target_id))
+                .map_err(|e| AppError::Internal(format!("store video: {e}")))?;
+            PortalMessage::video_with_info(
+                content_type.clone(),
+                format!("/api/media/{id}"),
+                filename.clone(),
+                Some(file_size),
+            )
+        }
+    };
+
+    let content_json = portal.to_json();
+    let agent_type = AgentType::from_str(&session.agent_type).unwrap_or_default();
+
+    // Persist the transcript row (durability + reconnect replay). Broadcast is
+    // best-effort; persistence is the guarantee.
+    let mut persisted = false;
+    let mut meta: Option<shared::PortalMeta> = None;
+    {
+        use crate::schema::messages;
+        let new_message = crate::models::NewMessage {
+            session_id: target_id,
+            role: shared::MessageRole::Portal.to_string(),
+            content: content_json.to_string(),
+            user_id: session.user_id,
+            agent_type: session.agent_type.clone(),
+            provenance_kind: None,
+            provenance_session_id: None,
+            provenance_agent_type: None,
+        };
+        match diesel::insert_into(messages::table)
+            .values(&new_message)
+            .get_result::<crate::models::Message>(&mut conn)
+        {
+            Ok(inserted) => {
+                persisted = true;
+                meta = Some(inserted.portal_meta(None));
+            }
+            Err(e) => error!("Failed to persist show-media message: {}", e),
+        }
+    }
+
+    app_state.session_manager.broadcast_to_web_clients(
+        &session.session_key,
+        ServerToClient::AgentOutput {
+            content: content_json,
+            agent_type,
+            meta,
+        },
+    );
+
+    info!(
+        "show_media: user {} -> session {} ({}, {} bytes, persisted={})",
+        user_id, target_id, content_type, file_size, persisted
+    );
+
+    Ok(Json(ShowMediaResponse {
+        session_name: session.session_name,
+        content_type,
+        persisted,
     }))
 }
 

@@ -43,6 +43,9 @@ pub use endpoints::*;
 pub mod message_metadata;
 pub use message_metadata::{content_value_or_fallback, created_at_iso};
 
+// Media-type policy shared by the `agent-portal show` CLI and backend
+pub mod media;
+
 /// serde default for continuation `reason` fields: pre-`reason` wire payloads
 /// (older launchers/backends) deserialize as a usage-limit continuation, the
 /// only kind that existed before overload auto-retry.
@@ -535,6 +538,24 @@ impl PortalMessage {
         }])
     }
 
+    /// Build a portal message carrying a video served from a backend media URL
+    /// (`agent-portal show <file.mp4>`). `data` is the served-media URL path
+    /// (e.g. `/api/media/{id}`); `source_type` is always `"url"`.
+    pub fn video_with_info(
+        media_type: String,
+        url: String,
+        file_path: Option<String>,
+        file_size: Option<u64>,
+    ) -> Self {
+        Self::with_content(vec![PortalContent::Video {
+            media_type,
+            data: url,
+            file_path,
+            file_size,
+            source_type: Some("url".to_string()),
+        }])
+    }
+
     /// Build a collapsible "portal features reminder" message — same envelope
     /// as text/image portal messages, rendered with a header bar and a
     /// click-to-expand body on the frontend.
@@ -623,6 +644,22 @@ pub enum PortalContent {
         #[serde(default)]
         source_type: Option<String>,
     },
+    /// A video displayed inline in the transcript via `agent-portal show
+    /// <file>`. Unlike images, video bytes are never inlined as base64 — `data`
+    /// is always a served-media URL (`/api/media/{id}`), so `source_type` is
+    /// `"url"`. The frontend renders a `<video controls>` element and degrades
+    /// to a "media expired" placeholder when the URL 404s (the store is bounded
+    /// by TTL/size, so the transcript row can outlive the bytes).
+    Video {
+        media_type: String,
+        data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_size: Option<u64>,
+        #[serde(default)]
+        source_type: Option<String>,
+    },
     /// Collapsible "portal features reminder" emitted at session start and
     /// after compaction boundaries. The body is markdown — rendered through
     /// the same pipeline as text portal messages — and lives behind a
@@ -670,6 +707,20 @@ impl std::fmt::Debug for PortalContent {
                 .debug_struct("Image")
                 .field("media_type", media_type)
                 .field("data", &format_args!("<{} bytes>", data.len()))
+                .field("file_path", file_path)
+                .field("file_size", file_size)
+                .field("source_type", source_type)
+                .finish(),
+            Self::Video {
+                media_type,
+                data,
+                file_path,
+                file_size,
+                source_type,
+            } => f
+                .debug_struct("Video")
+                .field("media_type", media_type)
+                .field("data", data)
                 .field("file_path", file_path)
                 .field("file_size", file_size)
                 .field("source_type", source_type)

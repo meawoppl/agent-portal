@@ -11,6 +11,7 @@ pub mod forwards;
 pub mod helpers;
 pub mod images;
 pub mod launchers;
+pub mod media_store;
 pub mod messages;
 pub mod mobile_links;
 pub mod privacy;

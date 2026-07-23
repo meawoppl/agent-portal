@@ -1,10 +1,15 @@
 //! Output forwarder task: forwards Claude outputs to WebSocket with sequencing.
 //!
-//! Also handles metadata refresh triggering and image extraction.
+//! Also handles git-metadata refresh triggering.
+//!
+//! NOTE (media display): the proxy used to detect a Claude `Read` of an image
+//! file and synthesize an inline portal image message from the tool result.
+//! That implicit, Claude-only path was replaced by the explicit, agent-agnostic
+//! `agent-portal show <file>` CLI (which uploads directly to the backend and
+//! works for images *and* video, for both Claude and Codex). The Read-trigger
+//! logic — and the chunked `/ws/session/upload` uploader it fed — were removed
+//! here; media now flows entirely through `POST /api/agent/sessions/{id}/media`.
 
-use std::collections::HashMap;
-
-use base64::Engine;
 use claude_codes::io::{ContentBlock, ControlRequestPayload, ToolUseBlock};
 use claude_codes::ClaudeOutput;
 use shared::{AgentType, ProxyToServer};
@@ -17,44 +22,30 @@ use session_lib::output_buffer::PendingOutputBuffer;
 use super::git_metadata::{
     check_and_send_branch_update, claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
 };
-use super::image_uploader::upload_image;
 use super::{format_duration, truncate, SharedWsWrite};
-
-/// Images at or above this raw-byte size get sent via the chunked upload
-/// stream (`/ws/session/upload`) instead of inlined as base64 on the main
-/// session socket. Below it, the small-image fast path keeps a single
-/// round trip.
-const CHUNK_UPLOAD_THRESHOLD_BYTES: usize = 1024 * 1024;
 
 /// Spawn the output forwarder task
 ///
 /// Forwards Claude outputs to WebSocket with sequence numbers for reliable delivery.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_output_forwarder(
     mut output_rx: mpsc::UnboundedReceiver<serde_json::Value>,
     ws_write: SharedWsWrite,
     session_id: Uuid,
-    backend_url: String,
-    auth_token: Option<String>,
     working_directory: String,
     git_metadata: GitMetadataState,
     output_buffer: std::sync::Arc<tokio::sync::Mutex<PendingOutputBuffer>>,
-    max_image_mb: u32,
     agent_type: AgentType,
 ) -> tokio::task::JoinHandle<()> {
-    let max_bytes = max_image_mb as usize * 1024 * 1024;
     tokio::spawn(async move {
         let mut git_refresh = GitRefreshTrigger::default();
-        // Track Read tool calls on image files: tool_use_id → file_path
-        let mut image_read_map: HashMap<String, String> = HashMap::new();
 
         while let Some(value) = output_rx.recv().await {
             // `Session` is now agent-neutral and forwards raw wire JSON. Re-parse
             // it to `ClaudeOutput` here, ONCE, at the Claude proxy edge; all
-            // the typed side-effects (logging, git-signal, image extraction)
-            // hang off this `Option`. Malformed / non-Claude frames skip the
-            // typed work and are forwarded verbatim — never dropped or
-            // rewritten (#1165 item 2, slice 1).
+            // the typed side-effects (logging, git-signal) hang off this
+            // `Option`. Malformed / non-Claude frames skip the typed work and
+            // are forwarded verbatim — never dropped or rewritten (#1165 item 2,
+            // slice 1).
             let parsed = super::parse_visible_claude_output(&value);
 
             // Branch/PR update from the PREVIOUS message's git command (deferred
@@ -69,26 +60,16 @@ pub fn spawn_output_forwarder(
                 .await;
             }
 
-            let (content, image_items) = if let Some(ref output) = parsed {
+            if let Some(ref output) = parsed {
                 log_claude_output(output);
 
                 // Is THIS message a git-related bash command (for next iteration)?
                 if claude_output_has_git_signal(output) {
                     git_refresh.mark_git_signal();
                 }
+            }
 
-                // Track Read tool calls on image files from assistant messages.
-                track_image_reads(output, &mut image_read_map);
-
-                // Image work items from user-message tool results (raw bytes for
-                // large images, base64 for small ones).
-                let image_items = extract_image_work_items(output, &mut image_read_map, max_bytes);
-
-                (value.clone(), image_items)
-            } else {
-                // Malformed / non-Claude frame: forward verbatim, no typed work.
-                (value.clone(), Vec::new())
-            };
+            let content = value;
 
             // Add to buffer and get sequence number
             let seq = {
@@ -110,213 +91,9 @@ pub fn spawn_output_forwarder(
                     break;
                 }
             }
-
-            // Resolve each image item into a portal message — uploading
-            // large images out-of-band first so the on-wire payload stays
-            // small — then send them after the main output.
-            let mut send_failed = false;
-            for item in image_items {
-                let portal_msg = match item {
-                    ImageWorkItem::Inline(msg) => msg,
-                    ImageWorkItem::TooLarge(msg) => msg,
-                    ImageWorkItem::Upload {
-                        file_path,
-                        file_size,
-                        media_type,
-                        bytes,
-                    } => {
-                        let result = match auth_token.as_deref() {
-                            Some(token) => {
-                                upload_image(
-                                    &backend_url,
-                                    session_id,
-                                    token,
-                                    &media_type,
-                                    Some(&file_path),
-                                    &bytes,
-                                )
-                                .await
-                            }
-                            None => Err(anyhow::anyhow!("no auth token available for upload")),
-                        };
-                        match result {
-                            Ok(url) => shared::PortalMessage::with_content(vec![
-                                shared::PortalContent::Image {
-                                    media_type,
-                                    data: url,
-                                    file_path: Some(file_path),
-                                    file_size: Some(file_size),
-                                    source_type: Some("url".to_string()),
-                                },
-                            ]),
-                            Err(e) => {
-                                warn!("Chunked image upload failed: {}", e);
-                                shared::PortalMessage::text(format!("Image upload failed: {}", e))
-                            }
-                        }
-                    }
-                };
-
-                let portal_content = portal_msg.to_json();
-                let portal_seq = {
-                    let mut buf = output_buffer.lock().await;
-                    buf.push(portal_content.clone())
-                };
-                let portal_ws_msg = ProxyToServer::SequencedOutput {
-                    seq: portal_seq,
-                    content: portal_content,
-                    agent_type,
-                };
-                let mut ws = ws_write.lock().await;
-                if ws.send(portal_ws_msg).await.is_err() {
-                    error!("Failed to send image portal message");
-                    send_failed = true;
-                    break;
-                }
-            }
-            if send_failed {
-                break;
-            }
         }
         debug!("Output forwarder ended - channel closed");
     })
-}
-
-/// One unit of image work surfaced from a user-message tool result.
-enum ImageWorkItem {
-    /// Small image: data is already base64-encoded and ready to inline.
-    Inline(shared::PortalMessage),
-    /// Large image: raw bytes need to go through the chunked upload stream.
-    Upload {
-        file_path: String,
-        file_size: u64,
-        media_type: String,
-        bytes: Vec<u8>,
-    },
-    /// Image exceeded the hard cap; this is a textual rejection notice.
-    TooLarge(shared::PortalMessage),
-}
-
-/// Return the MIME type for a supported image extension, or None.
-fn image_mime_type(path: &str) -> Option<&'static str> {
-    let lower = path.to_lowercase();
-    if lower.ends_with(".svg") {
-        Some("image/svg+xml")
-    } else if lower.ends_with(".png") {
-        Some("image/png")
-    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-        Some("image/jpeg")
-    } else if lower.ends_with(".gif") {
-        Some("image/gif")
-    } else if lower.ends_with(".webp") {
-        Some("image/webp")
-    } else {
-        None
-    }
-}
-
-/// Track Read tool calls on image files from assistant messages.
-/// Stores tool_use_id → file_path for later correlation with tool results.
-fn track_image_reads(output: &ClaudeOutput, image_read_map: &mut HashMap<String, String>) {
-    let blocks = match output {
-        ClaudeOutput::Assistant(asst) => &asst.message.content,
-        _ => return,
-    };
-
-    for block in blocks {
-        if let ContentBlock::ToolUse(tu) = block {
-            if let Some(claude_codes::tool_inputs::ToolInput::Read(read_input)) = tu.typed_input() {
-                if image_mime_type(&read_input.file_path).is_some() {
-                    debug!(
-                        "Tracking image Read: tool_use_id={} path={}",
-                        tu.id, read_input.file_path
-                    );
-                    image_read_map.insert(tu.id.clone(), read_input.file_path.clone());
-                }
-            }
-        }
-    }
-}
-
-/// Check user messages for tool results that correspond to tracked image
-/// reads. Reads each matching file from disk and classifies it for
-/// downstream delivery: inline base64 for small images, chunked upload
-/// for large ones, or a textual rejection if it exceeds the backend cap.
-fn extract_image_work_items(
-    output: &ClaudeOutput,
-    image_read_map: &mut HashMap<String, String>,
-    max_image_bytes: usize,
-) -> Vec<ImageWorkItem> {
-    let blocks = match output {
-        ClaudeOutput::User(user) => &user.message.content,
-        _ => return Vec::new(),
-    };
-
-    let mut items = Vec::new();
-
-    for block in blocks {
-        if let ContentBlock::ToolResult(tr) = block {
-            if let Some(file_path) = image_read_map.remove(&tr.tool_use_id) {
-                if tr.is_error.unwrap_or(false) {
-                    continue;
-                }
-
-                let mime = image_mime_type(&file_path).unwrap_or("image/png");
-
-                match std::fs::read(&file_path) {
-                    Ok(data) => {
-                        let file_size = data.len() as u64;
-                        if data.len() > max_image_bytes {
-                            let size_mb = data.len() as f64 / (1024.0 * 1024.0);
-                            let limit_mb = max_image_bytes as f64 / (1024.0 * 1024.0);
-                            warn!(
-                                "Image {} too large ({:.1} MB > {:.0} MB cap), skipping",
-                                file_path, size_mb, limit_mb
-                            );
-                            items.push(ImageWorkItem::TooLarge(shared::PortalMessage::text(
-                                format!(
-                                    "Image too large to display: **{:.1} MB** (limit is {:.0} MB)",
-                                    size_mb, limit_mb
-                                ),
-                            )));
-                        } else if data.len() >= CHUNK_UPLOAD_THRESHOLD_BYTES {
-                            debug!(
-                                "Queueing chunked upload for {} ({} bytes)",
-                                file_path,
-                                data.len()
-                            );
-                            items.push(ImageWorkItem::Upload {
-                                file_path: file_path.clone(),
-                                file_size,
-                                media_type: mime.to_string(),
-                                bytes: data,
-                            });
-                        } else {
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
-                            debug!(
-                                "Inlining image portal message for {} ({} bytes)",
-                                file_path,
-                                data.len()
-                            );
-                            items.push(ImageWorkItem::Inline(
-                                shared::PortalMessage::image_with_info(
-                                    mime.to_string(),
-                                    encoded,
-                                    Some(file_path.clone()),
-                                    Some(file_size),
-                                ),
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to read image file {}: {}", file_path, e);
-                    }
-                }
-            }
-        }
-    }
-
-    items
 }
 
 /// Log detailed information about Claude output

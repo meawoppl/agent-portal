@@ -81,6 +81,10 @@ pub struct AppState {
     pub max_image_mb: u32,
     /// In-memory image store for serving images via HTTP instead of WebSocket
     pub image_store: handlers::images::ImageStore,
+    /// Per-file cap (MB) for videos shown via `agent-portal show`.
+    pub max_video_mb: u32,
+    /// Disk-backed store for serving videos shown via `agent-portal show`.
+    pub media_store: handlers::media_store::MediaStore,
     /// Authority under which per-forward subdomains are served
     /// (docs/PORT_FORWARDING.md). `None` = forwarding disabled.
     pub forward_domain: Option<String>,
@@ -186,6 +190,13 @@ pub async fn run() -> anyhow::Result<()> {
             config.image_store_max_bytes,
             config.image_store_ttl,
         ),
+        max_video_mb: config.max_video_mb,
+        media_store: handlers::media_store::MediaStore::new(
+            std::env::temp_dir().join("agent-portal-media"),
+            config.media_store_max_bytes,
+            config.image_store_ttl,
+        )
+        .map_err(|e| anyhow::anyhow!("failed to init media store: {e}"))?,
         forward_domain: config.forward_domain,
         archive: match config.archive {
             Some(cfg) => Some(Arc::new(
@@ -205,6 +216,14 @@ pub async fn run() -> anyhow::Result<()> {
     let app = routes::build_router(app_state.clone());
 
     // Spawn background maintenance tasks
+    background::spawn_periodic(
+        "media store sweep task (every 5 minutes)",
+        Duration::from_secs(300),
+        app_state.clone(),
+        |state| async move {
+            state.media_store.sweep();
+        },
+    );
     background::spawn_periodic(
         "user spend broadcast task (every 30 seconds)",
         Duration::from_secs(30),

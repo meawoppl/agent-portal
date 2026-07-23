@@ -349,6 +349,43 @@
     display: block;
 }
 
+/* Video shown via `agent-portal show`. Sizing mirrors `.tool-result-image`
+   so images and videos read as one family in the transcript. */
+.tool-result-video {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0.5rem auto;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    background: #000;
+}
+
+.tool-result-video video {
+    max-width: 100%;
+    max-height: 600px;
+    display: block;
+}
+
+/* Placeholder when a served media blob has expired/been evicted from its
+   bounded store (the persisted transcript row can outlive the bytes). */
+.media-expired {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.5rem 0;
+    padding: 0.4rem 0.7rem;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.media-expired-icon {
+    font-style: normal;
+}
+
 /* Image lightbox overlay */
 .image-lightbox {
     position: fixed;
