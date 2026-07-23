@@ -1,0 +1,227 @@
+/* Archive-viewer chrome. Reuses the portal's Tokyo-Night theme variables from
+   base.css (--bg-dark, --accent, etc.) so the browser and transcript surfaces
+   match the live app; the transcript message bodies come entirely from the
+   portal's own messages.css / tool styles. */
+
+body {
+    margin: 0;
+    background: var(--bg-dark, #1a1b26);
+    color: var(--text, #c0caf5);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.viewer-root {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+.viewer-header h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+    color: var(--text-bright, #c0caf5);
+}
+
+.viewer-nav {
+    margin-bottom: 1rem;
+}
+
+.viewer-nav a,
+.viewer-empty a {
+    color: var(--accent, #7aa2f7);
+    text-decoration: none;
+}
+
+.viewer-nav a:hover,
+.viewer-empty a:hover {
+    text-decoration: underline;
+}
+
+/* --- Rollup strip --- */
+.viewer-rollup {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+.rollup-tile {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-darker, #16161e);
+    border: 1px solid var(--border, #292e42);
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem;
+    min-width: 6rem;
+}
+
+.rollup-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--text-bright, #c0caf5);
+}
+
+.rollup-label {
+    font-size: 0.75rem;
+    color: var(--text-dim, #7f849c);
+}
+
+.rollup-user .rollup-value {
+    color: var(--accent, #7aa2f7);
+}
+
+/* --- Filters --- */
+.viewer-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    align-items: flex-end;
+}
+
+.viewer-filters label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.75rem;
+    color: var(--text-dim, #7f849c);
+    gap: 0.25rem;
+}
+
+.viewer-filters select,
+.viewer-filters input {
+    background: var(--bg-darker, #16161e);
+    color: var(--text, #c0caf5);
+    border: 1px solid var(--border, #292e42);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+.viewer-filter-search input {
+    min-width: 12rem;
+}
+
+/* --- Session table --- */
+.viewer-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.viewer-table th,
+.viewer-table td {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--border, #292e42);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 22ch;
+}
+
+.viewer-table th {
+    color: var(--text-dim, #7f849c);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    background: var(--bg-dark, #1a1b26);
+}
+
+.viewer-table th.num,
+.viewer-table td.num {
+    text-align: right;
+}
+
+.viewer-row {
+    cursor: pointer;
+}
+
+.viewer-row:hover {
+    background: var(--bg-highlight, #1f2335);
+}
+
+.cell-name a {
+    color: var(--accent, #7aa2f7);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.cell-date {
+    color: var(--text-dim, #7f849c);
+}
+
+.cell-models {
+    color: var(--text-dim, #7f849c);
+    font-size: 0.78rem;
+}
+
+/* --- Manifest header card --- */
+.viewer-manifest-card {
+    background: var(--bg-darker, #16161e);
+    border: 1px solid var(--border, #292e42);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.viewer-manifest-card h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.1rem;
+    color: var(--text-bright, #c0caf5);
+}
+
+.manifest-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.4rem 1.5rem;
+}
+
+.manifest-field {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+}
+
+.manifest-key {
+    color: var(--text-dim, #7f849c);
+    min-width: 6rem;
+}
+
+.manifest-val {
+    color: var(--text, #c0caf5);
+    word-break: break-word;
+}
+
+.manifest-provenance {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.provenance-chip {
+    font-size: 0.72rem;
+    color: var(--text-dim, #7f849c);
+    background: var(--bg-dark, #1a1b26);
+    border: 1px solid var(--border, #292e42);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+}
+
+/* --- Loading / error / empty states --- */
+.viewer-loading,
+.viewer-empty {
+    color: var(--text-dim, #7f849c);
+    padding: 1.5rem 0;
+    text-align: center;
+}
+
+.viewer-error {
+    color: var(--error, #f7768e);
+    background: rgba(247, 118, 142, 0.08);
+    border: 1px solid var(--error, #f7768e);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+}
