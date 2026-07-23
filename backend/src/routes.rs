@@ -305,10 +305,6 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(handlers::websocket::handle_session_websocket),
         )
         .route(
-            shared::ImageUploadEndpoint::PATH,
-            get(handlers::websocket::handle_image_upload_websocket),
-        )
-        .route(
             shared::ClientEndpoint::PATH,
             get(handlers::websocket::handle_web_client_websocket),
         )

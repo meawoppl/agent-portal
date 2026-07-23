@@ -192,6 +192,17 @@ pub enum ServerToProxy {
         session_id: Uuid,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// Deprecated: no current proxy consumes this. It capped the
+        /// Read-triggered inline-image path, which was replaced by the
+        /// explicit `agent-portal show` CLI (that path enforces
+        /// `PORTAL_MAX_IMAGE_MB` backend-side on the upload route instead).
+        ///
+        /// The field is retained purely for wire compatibility: older proxies
+        /// deserialize `RegisterAck` without `#[serde(default)]` on this field,
+        /// so dropping it would make their registration ack fail to decode and
+        /// wedge them in a reconnect loop. The backend keeps populating it from
+        /// the still-live `max_image_mb` config (which the user-upload paths
+        /// continue to enforce).
         max_image_mb: u32,
         /// On failure: whether the proxy should reconnect with backoff
         /// (transient infrastructure error) instead of treating the

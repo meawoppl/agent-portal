@@ -53,10 +53,6 @@ pub(crate) fn default_continuation_reason() -> String {
     CONTINUATION_REASON_LIMIT.to_string()
 }
 
-// Chunked image upload protocol (mixed JSON + binary WS frames)
-pub mod image_upload;
-pub use image_upload::{ImageUploadClientMsg, ImageUploadEndpoint, ImageUploadServerMsg};
-
 // Protocol constants shared between backend and proxy
 pub mod protocol;
 
