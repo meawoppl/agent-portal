@@ -1,5 +1,4 @@
 mod continuations;
-mod image_upload_socket;
 pub mod launcher_socket;
 mod message_handlers;
 mod permissions;
@@ -34,13 +33,6 @@ pub async fn handle_session_websocket(
     State(app_state): State<Arc<AppState>>,
 ) -> Response {
     ws.on_upgrade(|socket| proxy_socket::handle_session_socket(socket, app_state))
-}
-
-pub async fn handle_image_upload_websocket(
-    ws: WebSocketUpgrade,
-    State(app_state): State<Arc<AppState>>,
-) -> Response {
-    ws.on_upgrade(|socket| image_upload_socket::handle_image_upload_socket(socket, app_state))
 }
 
 pub async fn handle_launcher_websocket(

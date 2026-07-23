@@ -15,7 +15,6 @@ use axum::{
     response::IntoResponse,
 };
 use base64::Engine;
-use dashmap::DashMap;
 use diesel::prelude::*;
 use mini_moka::sync::Cache;
 use std::sync::Arc;
@@ -50,49 +49,6 @@ pub struct StoredImage {
     pub session_id: Option<Uuid>,
 }
 
-/// An upload-in-progress: bytes accumulated so far, expected total, and limit.
-struct PendingUpload {
-    content_type: String,
-    expected_bytes: u64,
-    max_bytes: u64,
-    buffer: Vec<u8>,
-    user_id: Uuid,
-    session_id: Option<Uuid>,
-}
-
-/// Errors that can occur while accumulating a chunked upload.
-#[derive(Debug)]
-pub enum UploadError {
-    UnknownUpload,
-    SizeExceedsLimit { limit_bytes: u64 },
-    OffsetMismatch { expected: u64, got: u64 },
-    SizeMismatch { expected: u64, got: u64 },
-}
-
-impl std::fmt::Display for UploadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownUpload => write!(f, "unknown upload_id"),
-            Self::SizeExceedsLimit { limit_bytes } => {
-                let mb = *limit_bytes as f64 / (1024.0 * 1024.0);
-                write!(f, "upload exceeds size limit of {:.0} MB", mb)
-            }
-            Self::OffsetMismatch { expected, got } => {
-                write!(
-                    f,
-                    "chunk offset mismatch: expected {}, got {}",
-                    expected, got
-                )
-            }
-            Self::SizeMismatch { expected, got } => write!(
-                f,
-                "upload size mismatch: expected {} bytes, got {}",
-                expected, got
-            ),
-        }
-    }
-}
-
 /// In-memory image store with TTL + byte-cap LRU eviction.
 ///
 /// Backed by `mini_moka::sync::Cache<Uuid, Arc<StoredImage>>` with a weigher
@@ -103,7 +59,6 @@ impl std::fmt::Display for UploadError {
 #[derive(Clone)]
 pub struct ImageStore {
     images: Cache<Uuid, Arc<StoredImage>>,
-    pending: Arc<DashMap<Uuid, PendingUpload>>,
 }
 
 impl ImageStore {
@@ -118,10 +73,7 @@ impl ImageStore {
             })
             .time_to_live(ttl)
             .build();
-        Self {
-            images,
-            pending: Arc::new(DashMap::new()),
-        }
+        Self { images }
     }
 
     /// Build a store with the project defaults.
@@ -196,108 +148,6 @@ impl ImageStore {
             }),
         );
         id
-    }
-
-    /// Begin a chunked upload. Reserves an entry in the pending map and
-    /// fails up front if `expected_bytes` already exceeds the limit.
-    ///
-    /// `user_id` is the inserting user (validated via the proxy auth token);
-    /// `session_id` lets other session members read the finalized image.
-    pub fn start_upload(
-        &self,
-        upload_id: Uuid,
-        content_type: &str,
-        expected_bytes: u64,
-        max_bytes: u64,
-        user_id: Uuid,
-        session_id: Option<Uuid>,
-    ) -> Result<(), UploadError> {
-        if expected_bytes > max_bytes {
-            return Err(UploadError::SizeExceedsLimit {
-                limit_bytes: max_bytes,
-            });
-        }
-        self.pending.insert(
-            upload_id,
-            PendingUpload {
-                content_type: content_type.to_string(),
-                expected_bytes,
-                max_bytes,
-                buffer: Vec::with_capacity(expected_bytes as usize),
-                user_id,
-                session_id,
-            },
-        );
-        Ok(())
-    }
-
-    /// Append a chunk at the given offset. Chunks must arrive in order
-    /// (offset must equal `buffer.len()`); we enforce that to keep the
-    /// accumulator a simple `Vec<u8>` without sparse reassembly.
-    pub fn append_chunk(
-        &self,
-        upload_id: Uuid,
-        offset: u64,
-        data: &[u8],
-    ) -> Result<(), UploadError> {
-        let mut entry = self
-            .pending
-            .get_mut(&upload_id)
-            .ok_or(UploadError::UnknownUpload)?;
-        let pending = entry.value_mut();
-        if pending.buffer.len() as u64 != offset {
-            return Err(UploadError::OffsetMismatch {
-                expected: pending.buffer.len() as u64,
-                got: offset,
-            });
-        }
-        let new_len = pending.buffer.len() as u64 + data.len() as u64;
-        if new_len > pending.max_bytes {
-            return Err(UploadError::SizeExceedsLimit {
-                limit_bytes: pending.max_bytes,
-            });
-        }
-        pending.buffer.extend_from_slice(data);
-        Ok(())
-    }
-
-    /// Finalize an upload, moving the accumulated bytes into the served
-    /// image store and returning the assigned image id.
-    pub fn finalize_upload(&self, upload_id: Uuid) -> Result<Uuid, UploadError> {
-        let (_, pending) = self
-            .pending
-            .remove(&upload_id)
-            .ok_or(UploadError::UnknownUpload)?;
-        let actual = pending.buffer.len() as u64;
-        if actual != pending.expected_bytes {
-            return Err(UploadError::SizeMismatch {
-                expected: pending.expected_bytes,
-                got: actual,
-            });
-        }
-        let id = Uuid::new_v4();
-        debug!(
-            "Stored image {} via chunked upload {} ({}, {} bytes, user={}, session={:?})",
-            id, upload_id, pending.content_type, actual, pending.user_id, pending.session_id,
-        );
-        self.images.insert(
-            id,
-            Arc::new(StoredImage {
-                content_type: pending.content_type,
-                data: pending.buffer,
-                user_id: pending.user_id,
-                session_id: pending.session_id,
-            }),
-        );
-        Ok(id)
-    }
-
-    /// Drop a pending upload without finalizing — used when the connection
-    /// drops mid-stream or the client cancels.
-    pub fn abort_upload(&self, upload_id: Uuid) {
-        if self.pending.remove(&upload_id).is_some() {
-            warn!("Aborted in-progress image upload {}", upload_id);
-        }
     }
 
     /// Fetch a stored image by id, or `None` if it was never stored, has
@@ -508,33 +358,5 @@ mod tests {
         let fetched = store.get(&id).expect("present");
         assert_eq!(fetched.user_id, owner);
         assert_eq!(fetched.session_id, Some(session));
-    }
-
-    #[test]
-    fn finalize_upload_carries_owner_and_session() {
-        // Chunked-upload path: user/session are captured at start_upload and
-        // must end up on the StoredImage at finalize_upload (same ownership
-        // check applies — issue #786).
-        let store = ImageStore::with_defaults();
-        let owner = Uuid::new_v4();
-        let session = Uuid::new_v4();
-        let upload_id = Uuid::new_v4();
-        let payload = b"hello";
-        store
-            .start_upload(
-                upload_id,
-                "image/png",
-                payload.len() as u64,
-                1024 * 1024,
-                owner,
-                Some(session),
-            )
-            .expect("start ok");
-        store.append_chunk(upload_id, 0, payload).expect("chunk ok");
-        let id = store.finalize_upload(upload_id).expect("finalize ok");
-        let fetched = store.get(&id).expect("present");
-        assert_eq!(fetched.user_id, owner);
-        assert_eq!(fetched.session_id, Some(session));
-        assert_eq!(fetched.data, payload);
     }
 }

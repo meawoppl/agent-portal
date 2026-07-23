@@ -247,6 +247,9 @@ fn handle_proxy_message(
                 success: result.success,
                 session_id: claude_session_id,
                 error: result.error,
+                // Deprecated wire field: no current proxy consumes it, but old
+                // proxies deserialize `RegisterAck` without a serde default here
+                // and would wedge on a missing field, so we keep sending it.
                 max_image_mb: app_state.max_image_mb,
                 retryable: result.retryable,
             });
