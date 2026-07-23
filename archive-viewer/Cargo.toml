@@ -1,0 +1,32 @@
+[package]
+name = "archive-viewer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# Standalone archive/history viewer (#1288). Produces the `portal-archive`
+# binary that reads back session archives written by the backend's archival
+# sweep. It links only the `archive-format` crate (the shared read/write
+# format), never the backend, so it stays a small, self-contained CLI.
+
+[[bin]]
+name = "portal-archive"
+path = "src/main.rs"
+
+[dependencies]
+archive-format = { path = "../archive-format" }
+anyhow = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The S3 read path blocks on a captured tokio runtime handle, so the binary
+# needs a runtime even though it is otherwise synchronous.
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

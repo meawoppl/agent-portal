@@ -262,6 +262,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "archive-viewer"
+version = "2.13.10"
+dependencies = [
+ "anyhow",
+ "archive-format",
+ "chrono",
+ "clap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
