@@ -32,15 +32,19 @@
 //! transport/auth material (tokens, cookies, secrets) is never part of
 //! session content and must never be added to manifests.
 
-use chrono::NaiveDateTime;
-use object_store::ObjectStoreExt as _;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use uuid::Uuid;
+// ---------------------------------------------------------------------------
+// Format + store layer — moved to the `archive-format` crate (#1288) so the
+// standalone archive viewer reads archives without linking the backend.
+// Re-exported here so every existing `crate::archive::X` path keeps working.
+// ---------------------------------------------------------------------------
 
-/// Bump when the manifest shape or object layout changes incompatibly.
-pub const ARCHIVE_SCHEMA_VERSION: u32 = 1;
+pub use archive_format::{
+    archive_config_from_env, manifest_key, media_key, media_meta_key, merge_transcript_lines,
+    read_transcript, transcript_key, zstd_decode, zstd_encode, ArchiveBackendConfig, ArchiveConfig,
+    ArchiveMessageLine, ArchiveStore, ArchiveTokenTotals, ArchiveTranscriptInfo, ArchiveTurnStats,
+    ArchivedMediaMeta, LocalArchiveStore, MediaEntry, ObjectArchiveStore, SessionArchiveBundle,
+    SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION, TRANSCRIPT_COMPRESSION,
+};
 
 /// How often the archival sweep runs.
 pub const ARCHIVE_SWEEP_INTERVAL_SECS: u64 = 300;
@@ -52,353 +56,6 @@ pub const ARCHIVE_IDLE_SECS: i64 = 3600;
 
 /// Sessions archived per sweep tick, so one sweep can't monopolize the DB.
 pub const ARCHIVE_SWEEP_BATCH: i64 = 25;
-
-/// zstd level for transcript bodies. Archival is write-once/read-rare and
-/// runs on the blocking pool, so a higher-than-default level is a good
-/// trade: noticeably smaller objects for a little more CPU.
-const ZSTD_LEVEL: i32 = 9;
-
-/// The manifest's `transcript.compression` value. Fixed — transcripts are
-/// always zstd; the field exists so external viewers stay self-describing
-/// if a future schema version ever changes the codec.
-pub const TRANSCRIPT_COMPRESSION: &str = "zstd";
-
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-/// Which object store the archive writes to.
-#[derive(Debug, Clone)]
-pub enum ArchiveBackendConfig {
-    Local {
-        root: PathBuf,
-    },
-    /// S3-compatible object storage. Credentials, region, and endpoint
-    /// come from the standard `AWS_*` environment variables (validated at
-    /// startup when the store is built).
-    S3 {
-        bucket: String,
-        /// Optional key prefix inside the bucket (no trailing slash).
-        prefix: Option<String>,
-    },
-}
-
-/// Validated archive configuration. `None` anywhere upstream means the
-/// feature is disabled (the default, including on hosted deployments).
-#[derive(Debug, Clone)]
-pub struct ArchiveConfig {
-    pub backend: ArchiveBackendConfig,
-    /// When false, only manifests are archived (metadata/rollup mode);
-    /// transcripts stay subject to normal DB retention.
-    pub transcripts: bool,
-    /// When true (the default whenever the archive is enabled), media shown via
-    /// `agent-portal show` is written through to the archive at upload time and
-    /// read back through on a served-store miss (#1450 blobs are ephemeral —
-    /// TTL/size bounded — so an archived transcript otherwise permanently shows
-    /// "media expired"). Gates both the write-through and the read-through.
-    pub media: bool,
-}
-
-/// Parse archive settings from the environment. Fail-fast: partial or
-/// contradictory config is an error at startup, not a silent fallback.
-pub fn archive_config_from_env() -> Result<Option<ArchiveConfig>, String> {
-    if std::env::var("PORTAL_SESSION_ARCHIVE_COMPRESS").is_ok() {
-        return Err(
-            "PORTAL_SESSION_ARCHIVE_COMPRESS has been removed; transcripts are \
-             always zstd-compressed — unset it"
-                .to_string(),
-        );
-    }
-    let backend =
-        std::env::var("PORTAL_SESSION_ARCHIVE_BACKEND").unwrap_or_else(|_| "disabled".to_string());
-    let backend = match backend.as_str() {
-        "disabled" => return Ok(None),
-        "local" => {
-            let root = std::env::var("PORTAL_SESSION_ARCHIVE_LOCAL_ROOT").map_err(|_| {
-                "PORTAL_SESSION_ARCHIVE_BACKEND=local requires \
-                 PORTAL_SESSION_ARCHIVE_LOCAL_ROOT to be set"
-                    .to_string()
-            })?;
-            if root.trim().is_empty() {
-                return Err("PORTAL_SESSION_ARCHIVE_LOCAL_ROOT must not be empty".to_string());
-            }
-            ArchiveBackendConfig::Local {
-                root: PathBuf::from(root),
-            }
-        }
-        "s3" => {
-            let bucket = std::env::var("PORTAL_SESSION_ARCHIVE_S3_BUCKET").map_err(|_| {
-                "PORTAL_SESSION_ARCHIVE_BACKEND=s3 requires \
-                 PORTAL_SESSION_ARCHIVE_S3_BUCKET to be set"
-                    .to_string()
-            })?;
-            if bucket.trim().is_empty() {
-                return Err("PORTAL_SESSION_ARCHIVE_S3_BUCKET must not be empty".to_string());
-            }
-            let prefix = match std::env::var("PORTAL_SESSION_ARCHIVE_S3_PREFIX") {
-                Ok(p) => {
-                    let p = p.trim().trim_matches('/').to_string();
-                    if p.is_empty() {
-                        return Err(
-                            "PORTAL_SESSION_ARCHIVE_S3_PREFIX must not be empty (unset it \
-                             to archive at the bucket root)"
-                                .to_string(),
-                        );
-                    }
-                    Some(p)
-                }
-                Err(_) => None,
-            };
-            ArchiveBackendConfig::S3 { bucket, prefix }
-        }
-        other => {
-            return Err(format!(
-                "PORTAL_SESSION_ARCHIVE_BACKEND must be `disabled`, `local`, or `s3`, got `{other}`"
-            ))
-        }
-    };
-    let transcripts = match std::env::var("PORTAL_SESSION_ARCHIVE_TRANSCRIPTS")
-        .unwrap_or_else(|_| "true".to_string())
-        .as_str()
-    {
-        "true" => true,
-        "false" => false,
-        other => {
-            return Err(format!(
-                "PORTAL_SESSION_ARCHIVE_TRANSCRIPTS must be `true` or `false`, got `{other}`"
-            ))
-        }
-    };
-    let media = match std::env::var("PORTAL_SESSION_ARCHIVE_MEDIA")
-        .unwrap_or_else(|_| "true".to_string())
-        .as_str()
-    {
-        "true" => true,
-        "false" => false,
-        other => {
-            return Err(format!(
-                "PORTAL_SESSION_ARCHIVE_MEDIA must be `true` or `false`, got `{other}`"
-            ))
-        }
-    };
-    Ok(Some(ArchiveConfig {
-        backend,
-        transcripts,
-        media,
-    }))
-}
-
-// ---------------------------------------------------------------------------
-// Manifest / bundle types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-pub struct ArchiveTokenTotals {
-    pub input: i64,
-    pub output: i64,
-    pub cache_creation: i64,
-    pub cache_read: i64,
-    pub thinking: i64,
-    pub subagent: i64,
-}
-
-/// Turn-level aggregates for the manifest, sourced from `turn_metrics`.
-///
-/// Known v1 gaps, documented deliberately: **rate-limit event counts and
-/// reconnect counts have no durable DB source today** (limit events are
-/// transient wire frames; reconnects live only in logs), so they cannot
-/// appear in manifests until something persists them. `errored` counts
-/// turns with `is_error`, which subsumes limit-terminated turns.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-pub struct ArchiveTurnStats {
-    pub count: i64,
-    pub errored: i64,
-    /// Stop-reason histogram (BTreeMap for deterministic serialization).
-    pub stop_reasons: BTreeMap<String, i64>,
-    /// Distinct models observed, sorted.
-    pub models: Vec<String>,
-    /// Service-tier histogram (e.g. "standard" / "priority").
-    pub service_tiers: BTreeMap<String, i64>,
-    /// Total tool invocations across all turns.
-    pub tool_calls: i64,
-    /// Total stream restarts (auto-retried turns) across all turns.
-    pub stream_restarts: i64,
-    /// Sum of per-turn wall-clock durations, milliseconds.
-    pub total_duration_ms: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ArchiveTranscriptInfo {
-    pub object_key: String,
-    pub compression: String,
-    pub message_count: i64,
-    pub bytes: u64,
-}
-
-/// The per-session archive manifest (schema v1). Analytics and admin
-/// surfaces read this; they must never need the transcript body.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionArchiveManifest {
-    pub schema_version: u32,
-    pub session_id: Uuid,
-    pub user_id: Uuid,
-    /// Raw email deliberately included for admin reporting (see module
-    /// docs on the trust model).
-    pub owner_email: String,
-    pub owner_name: Option<String>,
-    pub session_name: String,
-    pub agent_type: String,
-    pub status: String,
-    pub working_directory: String,
-    pub hostname: String,
-    pub git_branch: Option<String>,
-    pub repo_url: Option<String>,
-    pub pr_url: Option<String>,
-    pub client_version: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub last_activity: NaiveDateTime,
-    pub archived_at: NaiveDateTime,
-    /// Message-count histogram by role (user/assistant/...).
-    pub message_counts: BTreeMap<String, i64>,
-    pub tokens: ArchiveTokenTotals,
-    pub total_cost_usd: f64,
-    pub turns: ArchiveTurnStats,
-    /// Present iff transcript archival is enabled and messages existed.
-    pub transcript: Option<ArchiveTranscriptInfo>,
-    /// Media blobs (`agent-portal show`) whose bytes were written through to
-    /// the archive for this session, one entry per surviving blob.
-    ///
-    /// **Schema-compat (why this stays v1):** the field is additive and
-    /// optional — `#[serde(default, skip_serializing_if = "Option::is_none")]`
-    /// means an old manifest written before this field existed deserializes
-    /// with `media == None`, and a manifest with no media re-serializes
-    /// byte-identically to the old shape (the key is omitted). Neither the
-    /// object layout nor any existing field changes, so external viewers that
-    /// don't know the field are unaffected. That is exactly the additive-change
-    /// contract [`ARCHIVE_SCHEMA_VERSION`] guards, so it is **not** bumped.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub media: Option<Vec<MediaEntry>>,
-
-    // --- Provenance (all additive within schema v1) ---
-    //
-    // These follow the same additive-compat contract as `media` above:
-    // each is `#[serde(default, skip_serializing_if = …)]`, so a manifest
-    // written before the field existed deserializes to the empty value and
-    // a manifest without the datum re-serializes byte-identically (key
-    // omitted). No existing field or the object layout changes, so
-    // [`ARCHIVE_SCHEMA_VERSION`] is **not** bumped.
-    /// The launcher that spawned this session (`sessions.launcher_id`), or
-    /// `None` for proxy-direct sessions. Pairs with `launcher_version`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub launcher_id: Option<Uuid>,
-    /// The launcher's self-reported version at launch time
-    /// (`sessions.launcher_version`), captured when the session row was
-    /// created. **Last-known-at-launch**: a mid-session launcher
-    /// auto-update does not refresh it. `None` for non-launcher sessions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub launcher_version: Option<String>,
-    /// The scheduled (cron) task that spawned this session
-    /// (`sessions.scheduled_task_id`), linking an archived session back to
-    /// the automation that created it. `None` for interactively-launched
-    /// sessions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scheduled_task_id: Option<Uuid>,
-    /// Extra CLI arguments the agent binary was launched with
-    /// (`sessions.claude_args`), e.g. `["--model", "opus"]`. Reveals model
-    /// pinning and other launch-time behavior knobs. These are agent CLI
-    /// flags only — portal auth travels via a separate proxy token, never
-    /// here — so they carry no transport/auth secrets. Empty (and thus
-    /// omitted) for sessions launched with no extra args.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub claude_args: Vec<String>,
-    /// `shared::VERSION` of the backend that performed this archive write.
-    /// **Per-write**: a re-archive by a newer backend stamps the newer
-    /// version, so this records who last wrote the object, not who first
-    /// created the session.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub archived_by_version: Option<String>,
-}
-
-/// One archived media blob referenced from a manifest. The bytes live at
-/// [`media_key`]; `bytes`/`content_type`/`uploaded_at` are copied from the
-/// blob's sidecar ([`ArchivedMediaMeta`]), which is the authoritative record
-/// that the blob exists in the archive.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MediaEntry {
-    pub media_id: Uuid,
-    /// `"image"` or `"video"`.
-    pub kind: String,
-    pub content_type: String,
-    pub bytes: u64,
-    pub object_key: String,
-    pub uploaded_at: NaiveDateTime,
-}
-
-/// Sidecar record stored next to each written-through media blob
-/// (`{media_key}.meta.json`). It carries the content type and original
-/// filename so a read-through fetch can set response headers **before** the
-/// session's manifest exists (write-through happens at upload time; the
-/// manifest is only written at the much-later archive sweep). Writing the
-/// bytes first and the sidecar last means "sidecar present" implies
-/// "bytes complete" — the same ordering invariant as transcript-then-manifest.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ArchivedMediaMeta {
-    pub media_id: Uuid,
-    pub kind: String,
-    pub content_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filename: Option<String>,
-    pub bytes: u64,
-    pub uploaded_at: NaiveDateTime,
-}
-
-/// One transcript line, serialized as NDJSON. `content` is the raw stored
-/// message JSON, embedded as a JSON value so the archive round-trips the
-/// wire content byte-for-byte semantically.
-///
-/// `id` is the message row's UUID — the merge key that lets a re-archive
-/// UNION the existing archived transcript with whatever remains in the hot
-/// DB (phase 2 trims hot messages after archival; a later re-archive must
-/// never shrink the archived transcript).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArchiveMessageLine {
-    pub id: Uuid,
-    pub role: String,
-    pub created_at: NaiveDateTime,
-    pub agent_type: String,
-    pub content: serde_json::Value,
-}
-
-/// Everything needed to write one session's archive.
-pub struct SessionArchiveBundle {
-    pub manifest: SessionArchiveManifest,
-    /// NDJSON transcript body (uncompressed); `None` in metadata-only mode.
-    pub transcript_ndjson: Option<Vec<u8>>,
-}
-
-// ---------------------------------------------------------------------------
-// Object keys
-// ---------------------------------------------------------------------------
-
-pub fn manifest_key(user_id: Uuid, session_id: Uuid) -> String {
-    format!("v1/users/{user_id}/sessions/{session_id}/manifest.json")
-}
-
-pub fn transcript_key(user_id: Uuid, session_id: Uuid) -> String {
-    format!("v1/users/{user_id}/sessions/{session_id}/messages.ndjson.zst")
-}
-
-/// Key for a media blob's raw bytes. Co-located under the session prefix (like
-/// the manifest/transcript) so a session's whole archive lives at one prefix.
-/// `media_id` is the served id from `/api/images/{id}` or `/api/media/{id}`.
-pub fn media_key(user_id: Uuid, session_id: Uuid, media_id: Uuid) -> String {
-    format!("v1/users/{user_id}/sessions/{session_id}/media/{media_id}")
-}
-
-/// Key for a media blob's JSON sidecar ([`ArchivedMediaMeta`]).
-pub fn media_meta_key(user_id: Uuid, session_id: Uuid, media_id: Uuid) -> String {
-    format!("v1/users/{user_id}/sessions/{session_id}/media/{media_id}.meta.json")
-}
 
 // ---------------------------------------------------------------------------
 // Store
@@ -452,331 +109,12 @@ impl ArchiveStats {
     }
 }
 
-/// Union an existing archived transcript with the messages currently in the
-/// hot DB, keyed by message id (#1258 phase 2). Retention may have trimmed
-/// hot rows that only exist in the archive, and the DB may hold rows newer
-/// than the archive — the merge keeps both, ordered by `created_at` (id as
-/// a deterministic tiebreaker). A re-archive can therefore never shrink an
-/// archived transcript.
-pub fn merge_transcript_lines(
-    existing: Vec<ArchiveMessageLine>,
-    current: Vec<ArchiveMessageLine>,
-) -> Vec<ArchiveMessageLine> {
-    let mut by_id: BTreeMap<Uuid, ArchiveMessageLine> = BTreeMap::new();
-    for line in existing {
-        by_id.insert(line.id, line);
-    }
-    // Current DB rows win on id collision (content is immutable in
-    // practice; this just prefers the freshest serialization).
-    for line in current {
-        by_id.insert(line.id, line);
-    }
-    let mut merged: Vec<ArchiveMessageLine> = by_id.into_values().collect();
-    merged.sort_by_key(|line| (line.created_at, line.id));
-    merged
-}
-
-/// Typed archive store. An enum (not a trait object) so backends stay a
-/// closed, compiler-checked set.
-pub enum ArchiveStore {
-    Local(LocalArchiveStore),
-    /// S3-compatible object storage in production; any `ObjectStore`
-    /// implementation (e.g. in-memory) in tests.
-    Object(ObjectArchiveStore),
-}
-
-impl ArchiveStore {
-    pub fn from_config(config: &ArchiveConfig) -> Result<Self, String> {
-        match &config.backend {
-            ArchiveBackendConfig::Local { root } => {
-                Ok(Self::Local(LocalArchiveStore { root: root.clone() }))
-            }
-            ArchiveBackendConfig::S3 { bucket, prefix } => Ok(Self::Object(
-                ObjectArchiveStore::s3_from_env(bucket, prefix.clone())?,
-            )),
-        }
-    }
-
-    /// Write a session's archive: transcript first, manifest last — a
-    /// manifest's existence implies its transcript object is complete.
-    pub fn put_session_archive(&self, bundle: &SessionArchiveBundle) -> std::io::Result<()> {
-        match self {
-            Self::Local(store) => store.put_session_archive(bundle),
-            Self::Object(store) => store.put_session_archive(bundle),
-        }
-    }
-
-    pub fn get_session_manifest(
-        &self,
-        user_id: Uuid,
-        session_id: Uuid,
-    ) -> std::io::Result<Option<SessionArchiveManifest>> {
-        match self {
-            Self::Local(store) => store.get_session_manifest(user_id, session_id),
-            Self::Object(store) => store.get_session_manifest(user_id, session_id),
-        }
-    }
-
-    /// Read an archived transcript's lines, or `None` if no transcript
-    /// object exists yet. Used by the merge-on-rearchive path.
-    pub fn read_transcript_lines(
-        &self,
-        user_id: Uuid,
-        session_id: Uuid,
-    ) -> std::io::Result<Option<Vec<ArchiveMessageLine>>> {
-        let raw = match self {
-            Self::Local(store) => {
-                match std::fs::read(store.object_path(&transcript_key(user_id, session_id))) {
-                    Ok(bytes) => bytes,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                    Err(e) => return Err(e),
-                }
-            }
-            Self::Object(store) => match store.get_bytes(&transcript_key(user_id, session_id)) {
-                Ok(Some(bytes)) => bytes,
-                Ok(None) => return Ok(None),
-                Err(e) => return Err(e),
-            },
-        };
-        parse_transcript_ndjson(&zstd::decode_all(raw.as_slice())?).map(Some)
-    }
-
-    /// Write a raw object at `key` (overwrites; deterministic keys make this
-    /// idempotent). Backend-dispatched; used by the media write-through.
-    pub fn put_object(&self, key: &str, bytes: Vec<u8>) -> std::io::Result<()> {
-        match self {
-            Self::Local(store) => store.write_atomic(key, &bytes),
-            Self::Object(store) => store.put_bytes(key, bytes),
-        }
-    }
-
-    /// Read a raw object at `key`, or `None` if it does not exist.
-    pub fn get_object(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
-        match self {
-            Self::Local(store) => match std::fs::read(store.object_path(key)) {
-                Ok(bytes) => Ok(Some(bytes)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(e) => Err(e),
-            },
-            Self::Object(store) => store.get_bytes(key),
-        }
-    }
-
-    /// Write a media blob and its sidecar. Bytes first, sidecar last — so a
-    /// present sidecar implies the bytes are complete (mirrors
-    /// transcript-then-manifest).
-    pub fn put_media(
-        &self,
-        user_id: Uuid,
-        session_id: Uuid,
-        meta: &ArchivedMediaMeta,
-        bytes: &[u8],
-    ) -> std::io::Result<()> {
-        self.put_object(
-            &media_key(user_id, session_id, meta.media_id),
-            bytes.to_vec(),
-        )?;
-        let meta_json = serde_json::to_vec(meta)?;
-        self.put_object(
-            &media_meta_key(user_id, session_id, meta.media_id),
-            meta_json,
-        )
-    }
-
-    /// Read a media blob's sidecar, or `None` if it was never written through.
-    /// Sidecar presence is the archive's record that the blob's bytes exist.
-    pub fn get_media_meta(
-        &self,
-        user_id: Uuid,
-        session_id: Uuid,
-        media_id: Uuid,
-    ) -> std::io::Result<Option<ArchivedMediaMeta>> {
-        match self.get_object(&media_meta_key(user_id, session_id, media_id))? {
-            Some(bytes) => Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("corrupt media sidecar for {media_id}: {e}"),
-                )
-            })?)),
-            None => Ok(None),
-        }
-    }
-
-    /// Read a media blob's raw bytes, or `None` if absent.
-    pub fn get_media_bytes(
-        &self,
-        user_id: Uuid,
-        session_id: Uuid,
-        media_id: Uuid,
-    ) -> std::io::Result<Option<Vec<u8>>> {
-        self.get_object(&media_key(user_id, session_id, media_id))
-    }
-}
-
-/// S3-compatible (or any `object_store`) backend. Store methods are sync —
-/// they run on the blocking pool alongside the DB work — so each call
-/// blocks on the async client via the captured runtime handle.
-pub struct ObjectArchiveStore {
-    store: std::sync::Arc<dyn object_store::ObjectStore>,
-    /// Key prefix inside the bucket (no trailing slash).
-    prefix: Option<String>,
-    handle: tokio::runtime::Handle,
-}
-
-impl ObjectArchiveStore {
-    /// Build against S3. Bucket/prefix come from portal config; region,
-    /// credentials, and custom endpoints come from the standard `AWS_*`
-    /// environment variables (`object_store`'s `from_env`).
-    fn s3_from_env(bucket: &str, prefix: Option<String>) -> Result<Self, String> {
-        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
-            "archive S3 store must be constructed inside the tokio runtime".to_string()
-        })?;
-        let s3 = object_store::aws::AmazonS3Builder::from_env()
-            .with_bucket_name(bucket)
-            .build()
-            .map_err(|e| format!("invalid S3 archive configuration: {e}"))?;
-        Ok(Self {
-            store: std::sync::Arc::new(s3),
-            prefix,
-            handle,
-        })
-    }
-
-    fn object_path(&self, key: &str) -> object_store::path::Path {
-        match &self.prefix {
-            Some(prefix) => object_store::path::Path::from(format!("{prefix}/{key}")),
-            None => object_store::path::Path::from(key),
-        }
-    }
-
-    fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> std::io::Result<()> {
-        let path = self.object_path(key);
-        self.handle
-            .block_on(self.store.put(&path, bytes.into()))
-            .map(|_| ())
-            .map_err(std::io::Error::from)
-    }
-
-    fn get_bytes(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
-        let path = self.object_path(key);
-        let result = self
-            .handle
-            .block_on(async { self.store.get(&path).await?.bytes().await });
-        match result {
-            Ok(bytes) => Ok(Some(bytes.to_vec())),
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(std::io::Error::from(e)),
-        }
-    }
-
-    fn put_session_archive(&self, bundle: &SessionArchiveBundle) -> std::io::Result<()> {
-        let m = &bundle.manifest;
-        if let Some(ndjson) = &bundle.transcript_ndjson {
-            let body = zstd::encode_all(ndjson.as_slice(), ZSTD_LEVEL)?;
-            self.put_bytes(&transcript_key(m.user_id, m.session_id), body)?;
-        }
-        let manifest_json = serde_json::to_vec_pretty(&bundle.manifest)?;
-        self.put_bytes(&manifest_key(m.user_id, m.session_id), manifest_json)
-    }
-
-    fn get_session_manifest(
-        &self,
-        user_id: Uuid,
-        session_id: Uuid,
-    ) -> std::io::Result<Option<SessionArchiveManifest>> {
-        match self.get_bytes(&manifest_key(user_id, session_id))? {
-            Some(bytes) => Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("corrupt manifest for session {session_id}: {e}"),
-                )
-            })?)),
-            None => Ok(None),
-        }
-    }
-}
-
-/// Local-filesystem backend. Objects are plain files under `root`; writes
-/// are atomic (temp file in the destination directory + rename).
-pub struct LocalArchiveStore {
-    root: PathBuf,
-}
-
-impl LocalArchiveStore {
-    fn object_path(&self, key: &str) -> PathBuf {
-        // Keys are built exclusively by `manifest_key`/`transcript_key`
-        // from UUIDs and fixed literals — no user-controlled segments.
-        self.root.join(key)
-    }
-
-    fn write_atomic(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
-        let path = self.object_path(key);
-        let dir = path.parent().expect("object keys always have a parent");
-        std::fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!(
-            ".{}.tmp",
-            path.file_name()
-                .expect("object keys always have a file name")
-                .to_string_lossy()
-        ));
-        std::fs::write(&tmp, bytes)?;
-        std::fs::rename(&tmp, &path)
-    }
-
-    fn put_session_archive(&self, bundle: &SessionArchiveBundle) -> std::io::Result<()> {
-        let m = &bundle.manifest;
-        if let Some(ndjson) = &bundle.transcript_ndjson {
-            let body = zstd::encode_all(ndjson.as_slice(), ZSTD_LEVEL)?;
-            self.write_atomic(&transcript_key(m.user_id, m.session_id), &body)?;
-        }
-        let manifest_json = serde_json::to_vec_pretty(&bundle.manifest)?;
-        self.write_atomic(&manifest_key(m.user_id, m.session_id), &manifest_json)
-    }
-
-    fn get_session_manifest(
-        &self,
-        user_id: Uuid,
-        session_id: Uuid,
-    ) -> std::io::Result<Option<SessionArchiveManifest>> {
-        let path = self.object_path(&manifest_key(user_id, session_id));
-        match std::fs::read(&path) {
-            Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("corrupt manifest at {}: {e}", path.display()),
-                )
-            })?)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-}
-
-/// Decompress + parse an archived transcript (test/inspection helper).
-pub fn read_transcript(
-    root: &Path,
-    user_id: Uuid,
-    session_id: Uuid,
-) -> std::io::Result<Vec<ArchiveMessageLine>> {
-    let raw = std::fs::read(root.join(transcript_key(user_id, session_id)))?;
-    parse_transcript_ndjson(&zstd::decode_all(raw.as_slice())?)
-}
-
-fn parse_transcript_ndjson(ndjson: &[u8]) -> std::io::Result<Vec<ArchiveMessageLine>> {
-    String::from_utf8_lossy(ndjson)
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| {
-            serde_json::from_str(l).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad line: {e}"))
-            })
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use uuid::Uuid;
 
     fn manifest(user_id: Uuid, session_id: Uuid) -> SessionArchiveManifest {
         let t = chrono::NaiveDate::from_ymd_opt(2026, 7, 11)
@@ -859,9 +197,7 @@ mod tests {
     #[test]
     fn local_roundtrip_and_idempotent_overwrite() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = ArchiveStore::Local(LocalArchiveStore {
-            root: tmp.path().to_path_buf(),
-        });
+        let store = ArchiveStore::Local(LocalArchiveStore::new(tmp.path().to_path_buf()));
         let (u, s) = (Uuid::from_u128(7), Uuid::from_u128(9));
         let (m, bundle) = bundle_with_one_line(u, s);
 
@@ -897,11 +233,11 @@ mod tests {
     #[test]
     fn object_store_roundtrip_and_missing_reads() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let store = ArchiveStore::Object(ObjectArchiveStore {
-            store: std::sync::Arc::new(object_store::memory::InMemory::new()),
-            prefix: Some("portal-archive".into()),
-            handle: rt.handle().clone(),
-        });
+        let store = ArchiveStore::Object(ObjectArchiveStore::new(
+            std::sync::Arc::new(object_store::memory::InMemory::new()),
+            Some("portal-archive".into()),
+            rt.handle().clone(),
+        ));
         let (u, s) = (Uuid::from_u128(7), Uuid::from_u128(9));
 
         assert!(store.get_session_manifest(u, s).unwrap().is_none());
@@ -973,9 +309,7 @@ mod tests {
     #[test]
     fn missing_manifest_reads_as_none() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = ArchiveStore::Local(LocalArchiveStore {
-            root: tmp.path().to_path_buf(),
-        });
+        let store = ArchiveStore::Local(LocalArchiveStore::new(tmp.path().to_path_buf()));
         assert!(store
             .get_session_manifest(Uuid::from_u128(1), Uuid::from_u128(2))
             .unwrap()
@@ -1079,16 +413,14 @@ mod tests {
     fn media_roundtrip_local_and_object() {
         // Local backend.
         let tmp = tempfile::tempdir().unwrap();
-        let local = ArchiveStore::Local(LocalArchiveStore {
-            root: tmp.path().to_path_buf(),
-        });
+        let local = ArchiveStore::Local(LocalArchiveStore::new(tmp.path().to_path_buf()));
         // Object (S3) backend via the in-memory store.
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let object = ArchiveStore::Object(ObjectArchiveStore {
-            store: std::sync::Arc::new(object_store::memory::InMemory::new()),
-            prefix: Some("portal-archive".into()),
-            handle: rt.handle().clone(),
-        });
+        let object = ArchiveStore::Object(ObjectArchiveStore::new(
+            std::sync::Arc::new(object_store::memory::InMemory::new()),
+            Some("portal-archive".into()),
+            rt.handle().clone(),
+        ));
 
         for store in [&local, &object] {
             let (u, s, m) = (Uuid::from_u128(7), Uuid::from_u128(9), Uuid::from_u128(42));
@@ -1109,9 +441,7 @@ mod tests {
     #[test]
     fn manifest_media_section_roundtrips() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = ArchiveStore::Local(LocalArchiveStore {
-            root: tmp.path().to_path_buf(),
-        });
+        let store = ArchiveStore::Local(LocalArchiveStore::new(tmp.path().to_path_buf()));
         let (u, s) = (Uuid::from_u128(1), Uuid::from_u128(2));
         let m = Uuid::from_u128(3);
         let mut manifest = manifest(u, s);
@@ -1158,9 +488,7 @@ mod tests {
     #[test]
     fn manifest_provenance_fields_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = ArchiveStore::Local(LocalArchiveStore {
-            root: tmp.path().to_path_buf(),
-        });
+        let store = ArchiveStore::Local(LocalArchiveStore::new(tmp.path().to_path_buf()));
         let (u, s) = (Uuid::from_u128(4), Uuid::from_u128(5));
         let mut manifest = manifest(u, s);
         manifest.launcher_id = Some(Uuid::from_u128(6));

@@ -248,6 +248,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c"
 
 [[package]]
+name = "archive-format"
+version = "2.13.10"
+dependencies = [
+ "chrono",
+ "object_store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -509,6 +523,7 @@ version = "2.13.10"
 dependencies = [
  "a2",
  "anyhow",
+ "archive-format",
  "axum",
  "backend",
  "base64 0.22.1",
