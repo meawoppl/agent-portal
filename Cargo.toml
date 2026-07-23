@@ -5,6 +5,7 @@ members = [
     "archive-viewer",
     "backend",
     "frontend",
+    "viewer-frontend",
     "proxy",
     "session-lib",
     "claude-session-lib",

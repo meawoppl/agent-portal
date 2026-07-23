@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Portal — Archive Viewer</title>
+    <meta name="theme-color" content="#1a1b26" />
+    <meta name="description" content="Read-only viewer for archived Agent Portal sessions." />
+
+    <!-- KaTeX for rendering LaTeX math in messages (DOM-level auto-render, same
+         as the live portal). Optional; transcripts render fine without it. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+          integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
+            integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+            integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"></script>
+
+    <style>
+        #loading {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; background: #1a1b26; color: #7f849c;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.95rem; gap: 1.2rem;
+        }
+        .spinner {
+            width: 36px; height: 36px; border: 3px solid #292e42; border-top-color: #7aa2f7;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+
+    <link data-trunk rel="rust" data-wasm-opt="z" />
+
+    <!-- Reuse the portal's real stylesheets so archived transcripts look like
+         the live app. Referenced from ../frontend/styles/ (single source of
+         truth) rather than duplicated. base.css carries the Tokyo-Night theme
+         variables the message renderers depend on. -->
+    <link data-trunk rel="css" href="../frontend/styles/base.css" />
+    <link data-trunk rel="css" href="../frontend/styles/components.css" />
+    <link data-trunk rel="css" href="../frontend/styles/messages.css" />
+    <link data-trunk rel="css" href="../frontend/styles/markdown.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/base.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/askuserquestion.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/bash.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/diff.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/exitplanmode.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/read.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/search.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/task.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/todowrite.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/webfetch.css" />
+    <link data-trunk rel="css" href="../frontend/styles/tools/websearch.css" />
+
+    <!-- Viewer-only chrome (browser table, filters, manifest card). -->
+    <link data-trunk rel="css" href="styles/viewer.css" />
+
+    <!-- Same KaTeX bootstrap helper the live portal uses. -->
+    <link data-trunk rel="copy-file" href="../frontend/katex-helper.js" />
+    <script defer src="/katex-helper.js"></script>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>Loading&hellip;</p>
+    </div>
+</body>
+</html>

@@ -25,6 +25,7 @@ target
 
 # Frontend build artifacts
 frontend/dist/
+viewer-frontend/dist/
 
 # Database
 *.db

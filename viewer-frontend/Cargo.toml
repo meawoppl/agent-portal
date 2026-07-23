@@ -1,0 +1,56 @@
+[package]
+name = "viewer-frontend"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# Standalone archive-viewer WASM app (#1288, PR 3a). A second Yew app that
+# renders archived transcripts with the *real* portal renderers by linking the
+# `frontend` crate as an rlib through its `viewer_api` facade. It is a workspace
+# member like `frontend` — both are Yew apps that also compile on the host
+# target (web-sys/js-sys are no-op stubs natively), so `cargo build/clippy
+# --workspace` covers it and `trunk build` produces the WASM bundle. The
+# `portal-archive serve` subcommand (PR 3b) embeds this crate's `dist/` and
+# serves the JSON API it fetches.
+
+[[bin]]
+name = "viewer-frontend"
+path = "src/main.rs"
+
+[dependencies]
+# Shared, WASM-compatible portal types (SessionArchiveManifest is redefined
+# locally against the pinned JSON contract; shared gives us PortalMeta /
+# AgentType used by the renderer facade).
+shared = { path = "../shared" }
+
+# The portal frontend, linked as an rlib purely for its presentation-only
+# `viewer_api` facade (RenderedMessage / group_messages / MessageGroupRenderer).
+frontend = { path = "../frontend" }
+
+# Yew framework
+yew = { workspace = true }
+yew-router = { workspace = true }
+
+# WASM bindings
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+
+# Web APIs — just what the viewer touches (location for hash routing).
+web-sys = { workspace = true, features = ["Window", "Location"] }
+
+# HTTP fetch
+gloo-net = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+uuid = { workspace = true }
+chrono = { workspace = true, features = ["wasmbind"] }
+
+# Logging in WASM
+wasm-logger = "0.2"
+log = "0.4"
+
+[lints]
+workspace = true

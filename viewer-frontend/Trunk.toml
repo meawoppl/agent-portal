@@ -1,0 +1,4 @@
+[build]
+# Assets are served at root. The `portal-archive serve` subcommand (PR 3b)
+# embeds this dist/ and serves the JSON API from the same origin.
+public_url = "/"
