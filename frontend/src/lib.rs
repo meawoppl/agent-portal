@@ -5,6 +5,68 @@ mod hooks;
 mod pages;
 pub mod utils;
 
+/// Curated, presentation-only facade for reusing the portal's message
+/// renderers from a second WASM app — specifically the standalone archive
+/// viewer (#1288), which links this crate as an rlib to render archived
+/// transcripts with the real renderer family instead of reimplementing two
+/// agent protocols.
+///
+/// Recipe for a read-only transcript view:
+/// 1. Build a [`viewer_api::RenderedMessage`] per archived line:
+///    `RenderedMessage::new(raw_content_json_string, Some(portal_meta))` —
+///    `content` is the stored wire JSON exactly as archived; `meta` carries
+///    `created_at` for timestamps.
+/// 2. `group_messages(&messages, agent_type, current_user_id)` →
+///    [`viewer_api::MessageGroup`]s.
+/// 3. Render each with [`viewer_api::MessageGroupRenderer`]. All live-session
+///    props (`turn_metrics`, `continuation_statuses`,
+///    `on_schedule_continuation`) are `#[prop_or_default]` and no-op when
+///    omitted, so a viewer passes only `group`, `session_id`, `agent_type`.
+///
+/// The consuming app must also include the portal's message CSS (see
+/// `frontend/styles/` — notably `messages.css` and the renderer styles) for
+/// the output to look like the portal.
+///
+/// Additions to this facade must remain presentation-only: no live-session,
+/// WebSocket, or auth types may pass through this surface.
+pub mod viewer_api {
+    pub use crate::components::message_renderer::{
+        group_is_turn_terminator, group_messages, thinking_chip_starts, GroupCategory,
+        MessageGroup, MessageGroupRenderer, MessageGroupRendererProps, RenderedMessage,
+    };
+
+    /// Compile-level guarantee that the facade is sufficient for an external
+    /// read-only viewer: constructs messages, groups them, and builds the
+    /// renderer props exactly the way the archive viewer will — using only
+    /// items re-exported above (no live-session machinery).
+    #[cfg(test)]
+    mod facade_sufficiency {
+        use super::*;
+
+        #[test]
+        fn archived_lines_group_and_props_build_without_live_state() {
+            let messages = vec![
+                RenderedMessage::new(r#"{"type":"user","content":"hello"}"#.to_string(), None),
+                RenderedMessage::new(
+                    r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#
+                        .to_string(),
+                    None,
+                ),
+            ];
+
+            let groups = group_messages(&messages, shared::AgentType::Claude, None);
+            assert!(!groups.is_empty());
+
+            // Props must build with ONLY the presentation-required fields —
+            // every live-session prop defaults.
+            let _props = ::yew::props!(MessageGroupRendererProps {
+                group: groups[0].clone(),
+                session_id: uuid::Uuid::nil(),
+            });
+        }
+    }
+}
+
 /// Application version — derived at build time from the git commit count
 /// (see `shared::VERSION` / `shared/build.rs`, issue #1096).
 pub const VERSION: &str = shared::VERSION;
