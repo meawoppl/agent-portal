@@ -11,12 +11,14 @@ use uuid::Uuid;
 use yew::prelude::*;
 
 use dispatch::FrameRenderContext;
-pub use group_renderer::MessageGroupRenderer;
+pub use group_renderer::{MessageGroupRenderer, MessageGroupRendererProps};
 #[cfg(test)]
 use grouping::classify;
-pub use grouping::{group_is_turn_terminator, group_messages, thinking_chip_starts};
 #[cfg(test)]
-use grouping::{visible_group_indices, GroupCategory, MessageGroup};
+use grouping::visible_group_indices;
+pub use grouping::{
+    group_is_turn_terminator, group_messages, thinking_chip_starts, GroupCategory, MessageGroup,
+};
 
 /// Format an already-extracted `PortalMeta.created_at` ISO string as local time.
 /// Takes an already-extracted `PortalMeta.created_at` value rather than raw
