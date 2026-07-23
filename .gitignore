@@ -44,3 +44,4 @@ screenlog.*
 /*.patch
 parsing-dump/
 /image.png
+builds/

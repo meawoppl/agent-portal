@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 790" font-family="system-ui, -apple-system, sans-serif">
+  <!-- transparent background for dark portal theme -->
+  <text x="450" y="34" text-anchor="middle" fill="#c0caf5" font-size="18" font-weight="700">Ingredient Venn — laundry detergents</text>
+  <text x="450" y="56" text-anchor="middle" fill="#565f89" font-size="13">Dropps 4-in-1 Plus Oxi pods (Free &amp; Clear)  vs  all® free clear liquid (current label)</text>
+
+  <!-- circles -->
+  <circle cx="330" cy="400" r="280" fill="#7aa2f7" fill-opacity="0.09" stroke="#7aa2f7" stroke-width="2"/>
+  <circle cx="665" cy="400" r="205" fill="#9ece6a" fill-opacity="0.09" stroke="#9ece6a" stroke-width="2"/>
+
+  <!-- circle labels -->
+  <text x="215" y="145" text-anchor="middle" fill="#7aa2f7" font-size="15" font-weight="700">DROPPS 4-in-1 (22)</text>
+  <text x="745" y="215" text-anchor="middle" fill="#9ece6a" font-size="15" font-weight="700">all free clear (8)</text>
+
+  <!-- ===== Dropps-only ===== -->
+  <g font-size="12.5" fill="#a9b1d6">
+    <text x="150" y="205" fill="#7aa2f7" font-size="11" font-weight="700">SURFACTANTS &amp; SOAP</text>
+    <text x="150" y="223">alkyl glucoside</text>
+    <text x="150" y="240">MEA-LAS</text>
+    <text x="150" y="257">MEA-cocoate (soap) †</text>
+
+    <text x="138" y="284" fill="#7aa2f7" font-size="11" font-weight="700">SOLVENTS</text>
+    <text x="138" y="302">glycerin</text>
+    <text x="138" y="319">propylene glycol</text>
+
+    <text x="130" y="346" fill="#7aa2f7" font-size="11" font-weight="700">ENZYMES</text>
+    <text x="130" y="364">subtilisin (protein stains)</text>
+    <text x="130" y="381">amylase (starches)</text>
+    <text x="130" y="398">lipase (oils)</text>
+    <text x="130" y="415">pectate lyase (produce)</text>
+    <text x="130" y="432">mannanase (gums)</text>
+
+    <text x="134" y="459" fill="#7aa2f7" font-size="11" font-weight="700">FABRIC &amp; ODOR CARE</text>
+    <text x="134" y="477">nonionic polyester (soil release)</text>
+    <text x="134" y="494">zinc ricinoleate (odor)</text>
+    <text x="134" y="511">wheat-protein/silicone quat</text>
+
+    <text x="150" y="538" fill="#7aa2f7" font-size="11" font-weight="700">CHELANT · STABILIZERS · SAFETY</text>
+    <text x="150" y="556">GLDA chelant †</text>
+    <text x="150" y="573">citric acid · sodium sulfite</text>
+    <text x="150" y="590">denatonium benzoate (bitterant)</text>
+    <text x="150" y="607">polyvinyl alcohol (pod film)</text>
+  </g>
+
+  <!-- ===== Shared (intersection) ===== -->
+  <g font-size="12.5" fill="#7dcfff" text-anchor="middle">
+    <text x="527" y="352" font-size="11" font-weight="700" fill="#7dcfff">SHARED</text>
+    <text x="527" y="374">water</text>
+    <text x="527" y="396">sodium laureth</text>
+    <text x="527" y="411">sulfate</text>
+    <text x="527" y="433">alcohol</text>
+    <text x="527" y="448">ethoxylates *</text>
+  </g>
+
+  <!-- ===== All-only ===== -->
+  <g font-size="12.5" fill="#a9b1d6">
+    <text x="628" y="330" fill="#9ece6a" font-size="11" font-weight="700">BUILDER</text>
+    <text x="628" y="348">sodium carbonate</text>
+    <text x="628" y="375" fill="#9ece6a" font-size="11" font-weight="700">CHELANT &amp; SOAP</text>
+    <text x="628" y="393">MGDA chelant †</text>
+    <text x="628" y="410">sodium C8-18 soap †</text>
+    <text x="628" y="437" fill="#9ece6a" font-size="11" font-weight="700">POLYMER &amp; PRESERVATIVE</text>
+    <text x="628" y="455">sodium polyacrylate</text>
+    <text x="628" y="472">benzisothiazolinone</text>
+  </g>
+
+  <!-- footnotes -->
+  <g font-size="11.5" fill="#565f89">
+    <text x="60" y="712">* same molecule class, different chain length: Dropps uses C12-14, all uses C12-15 ethoxylated alcohols — functionally interchangeable nonionics.</text>
+    <text x="60" y="730">† cross-product functional analogs, different molecules: MEA-cocoate ↔ sodium C8-18 soap; GLDA ↔ MGDA (both aminocarboxylate chelants).</text>
+    <text x="60" y="748">EWG's Free &amp; Clear entry also lists "fragrance" — Dropps markets it perfume-free; likely carryover from the scented variant, excluded above.</text>
+    <text x="60" y="766">"all" list = current official label (8 ingredients, CAS-verified). Older label revisions also listed Fluorescent Brightener 28 and sodium chloride.</text>
+  </g>
+</svg>

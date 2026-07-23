@@ -171,7 +171,7 @@ fn render_pill_section(
                         title={format!("{label} — {count} session(s)")}
                     >
                         <span class="host-header-name">{ label }</span>
-                        <span class="host-header-count">{ count }</span>
+                        <span class="host-header-count">{ format!("({count})") }</span>
                     </div>
                 });
             }
