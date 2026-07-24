@@ -397,3 +397,82 @@ async fn history_per_session_endpoints_enforce_visibility() {
     let resp = get(&f, None, "/api/history/sessions").await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
+
+/// Close = archive-then-delete: DELETE `/api/sessions/{id}` on a session the
+/// sweep never archived must take a final snapshot first, so the transcript
+/// stays readable in History after the hot rows are gone.
+#[tokio::test]
+async fn close_session_takes_final_archive_before_delete() {
+    let Some(pool) = test_pool() else { return };
+    let f = build_fixture(pool);
+    let mut conn = f.state.db_pool.get().expect("conn");
+
+    // A live, never-archived session with one hot message row.
+    let session_id = Uuid::new_v4();
+    diesel::insert_into(backend::schema::sessions::table)
+        .values(NewSessionWithId {
+            id: session_id,
+            user_id: f.owner_id,
+            session_name: "closing time".to_string(),
+            session_key: format!("close-test-{session_id}"),
+            working_directory: "/repo".to_string(),
+            status: "disconnected".to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "host-1".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(vec![]),
+            launcher_version: None,
+        })
+        .execute(&mut conn)
+        .expect("insert session");
+    diesel::insert_into(backend::schema::messages::table)
+        .values(backend::models::NewMessage {
+            session_id,
+            role: "user".to_string(),
+            content: r#"{"type":"user","content":"remember me"}"#.to_string(),
+            user_id: f.owner_id,
+            agent_type: "claude".to_string(),
+            provenance_kind: None,
+            provenance_session_id: None,
+            provenance_agent_type: None,
+        })
+        .execute(&mut conn)
+        .expect("insert message");
+
+    // Close it.
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/sessions/{session_id}"))
+        .header(header::AUTHORIZATION, &f.owner_auth)
+        .body(Body::empty())
+        .unwrap();
+    let resp = backend::routes::build_router(f.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // Hot row is gone…
+    use backend::schema::sessions;
+    let remaining: i64 = sessions::table
+        .filter(sessions::id.eq(session_id))
+        .count()
+        .get_result(&mut conn)
+        .expect("count");
+    assert_eq!(remaining, 0);
+
+    // …but the final archive snapshot survives and serves the transcript.
+    let uri = format!("/api/history/sessions/{}/{session_id}/messages", f.owner_id);
+    let resp = get(&f, Some(&f.owner_auth), &uri).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.contains("remember me"), "archived transcript: {text}");
+}

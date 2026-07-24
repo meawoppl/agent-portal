@@ -170,7 +170,7 @@ pub async fn list_history_sessions(
         .iter()
         .filter(|r| row_visible(r, &user, &live_member_ids) && filters.matches(r))
         .collect();
-    kept.sort_by(|a, b| b.manifest.last_activity.cmp(&a.manifest.last_activity));
+    kept.sort_by_key(|r| std::cmp::Reverse(r.manifest.last_activity));
 
     Ok(Json(HistorySessionsResponse {
         sessions: kept.into_iter().map(session_summary).collect(),

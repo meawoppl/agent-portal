@@ -13,6 +13,9 @@ pub struct DashboardBootstrap {
     pub current_user_id: Option<Uuid>,
     pub app_title: String,
     pub server_version: String,
+    /// Whether the long-term session archive is enabled — drives the
+    /// close-session copy (history preserved vs. permanently removed).
+    pub archive_enabled: bool,
 }
 
 /// Fetch current-user and app configuration data for the dashboard shell.
@@ -22,6 +25,7 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
     let current_user_id = use_state(|| None::<Uuid>);
     let app_title = use_state(|| "Agent Portal".to_string());
     let server_version = use_state(String::new);
+    let archive_enabled = use_state(|| false);
 
     {
         let is_admin = is_admin.clone();
@@ -41,6 +45,7 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
     {
         let app_title = app_title.clone();
         let server_version = server_version.clone();
+        let archive_enabled = archive_enabled.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
                 if let Ok(config) =
@@ -48,6 +53,7 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
                 {
                     app_title.set(config.app_title);
                     server_version.set(config.server_version);
+                    archive_enabled.set(config.archive_enabled);
                 }
             });
             || ()
@@ -59,5 +65,6 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
         current_user_id: *current_user_id,
         app_title: (*app_title).clone(),
         server_version: (*server_version).clone(),
+        archive_enabled: *archive_enabled,
     }
 }

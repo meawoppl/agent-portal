@@ -165,7 +165,7 @@ fn matches_uuid_prefix(id: Uuid, prefix: &str) -> bool {
 /// Apply filters and sort by `last_activity` descending (most recent first).
 pub fn filter_and_sort(rows: Vec<FlatRow>, filters: &Filters) -> Vec<FlatRow> {
     let mut kept: Vec<FlatRow> = rows.into_iter().filter(|r| filters.matches(r)).collect();
-    kept.sort_by(|a, b| b.manifest.last_activity.cmp(&a.manifest.last_activity));
+    kept.sort_by_key(|r| std::cmp::Reverse(r.manifest.last_activity));
     kept
 }
 
@@ -193,8 +193,10 @@ pub fn parse_date_arg(input: &str, end_of_day: bool) -> Result<NaiveDateTime, St
 
 /// Manifest builders for reader tests, shared so every consumer (this crate,
 /// the CLI, the backend harness) constructs fixtures the same way. Enabled by
-/// the `test-support` feature (or this crate's own tests).
+/// the `test-support` feature (or this crate's own tests). Fixture-only code:
+/// the unwraps are on compile-time-constant dates.
 #[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::unwrap_used)]
 pub mod test_support {
     use std::collections::BTreeMap;
 

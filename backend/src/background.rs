@@ -576,8 +576,9 @@ fn archive_retention_candidates(
 
 /// Archive `session` if its archive is missing or stale, updating
 /// `archived_at` on success. Returns whether the session now has a fresh
-/// archive. Shared by the sweep and the retention gates (#1258 phase 2).
-fn ensure_session_archived(
+/// archive. Shared by the sweep, the retention gates (#1258 phase 2), and
+/// the close-session handler's final pre-delete archive.
+pub(crate) fn ensure_session_archived(
     conn: &mut diesel::PgConnection,
     runtime: &crate::archive::ArchiveRuntime,
     session: &models::Session,
