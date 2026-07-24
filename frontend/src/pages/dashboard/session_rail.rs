@@ -281,18 +281,24 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     // immediate rather than fighting CSS scroll-behavior: smooth.
     let on_wheel = {
         let rail_ref = rail_ref.clone();
+        let horizontal_rail = matches!(
+            props.rail_position,
+            crate::pages::dashboard::RailPosition::Top
+                | crate::pages::dashboard::RailPosition::Bottom
+        );
         Callback::from(move |e: WheelEvent| {
+            if !horizontal_rail {
+                return;
+            }
             if let Some(rail) = rail_ref.cast::<HtmlElement>() {
                 // This handler maps the wheel onto the rail's HORIZONTAL scroll,
                 // so a plain vertical scroll-wheel drives the top/bottom rail.
-                // The left/right rail scrolls *vertically* (`overflow-y: auto`)
-                // and has no horizontal overflow — there we must NOT intercept,
-                // or `prevent_default` kills the native vertical scroll while we
-                // only nudge `scroll_left` (a no-op), leaving the pills unscroll-
-                // able. The component doesn't know its orientation, so gate on
-                // the axis that actually overflows.
+                // The left/right rail scrolls vertically (`overflow-y: auto`);
+                // never infer orientation from `scroll_width`, because pill
+                // padding, host headers, and fixed-position menu geometry can
+                // produce a few pixels of horizontal overflow in vertical mode.
                 if rail.scroll_width() <= rail.client_width() {
-                    return; // vertical rail (or nothing to scroll) — let native scroll run
+                    return; // nothing to scroll — let native scroll run
                 }
                 let dx = e.delta_x();
                 let dy = e.delta_y();
