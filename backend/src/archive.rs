@@ -40,10 +40,11 @@
 
 pub use archive_format::{
     archive_config_from_env, manifest_key, media_key, media_meta_key, merge_transcript_lines,
-    read_transcript, transcript_key, zstd_decode, zstd_encode, ArchiveBackendConfig, ArchiveConfig,
-    ArchiveMessageLine, ArchiveStore, ArchiveTokenTotals, ArchiveTranscriptInfo, ArchiveTurnStats,
-    ArchivedMediaMeta, LocalArchiveStore, MediaEntry, ObjectArchiveStore, SessionArchiveBundle,
-    SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION, TRANSCRIPT_COMPRESSION,
+    read_transcript, scan, transcript_key, zstd_decode, zstd_encode, ArchiveBackendConfig,
+    ArchiveConfig, ArchiveMemberEntry, ArchiveMessageLine, ArchiveStore, ArchiveTokenTotals,
+    ArchiveTranscriptInfo, ArchiveTurnStats, ArchivedMediaMeta, LocalArchiveStore, MediaEntry,
+    ObjectArchiveStore, SessionArchiveBundle, SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION,
+    TRANSCRIPT_COMPRESSION,
 };
 
 /// How often the archival sweep runs.
@@ -61,11 +62,19 @@ pub const ARCHIVE_SWEEP_BATCH: i64 = 25;
 // Store
 // ---------------------------------------------------------------------------
 
+/// How long a `/api/history` manifest scan is served from cache before
+/// rescanning. Bounds S3 list/GET cost while keeping a local archive
+/// effectively live; per-session reads (manifest/messages/media) never cache.
+pub const HISTORY_SCAN_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Store plus the settings the archival sweep needs at write time.
 pub struct ArchiveRuntime {
     pub store: ArchiveStore,
     pub config: ArchiveConfig,
     pub stats: ArchiveStats,
+    /// `/api/history` scan cache: the flattened manifest rows and when they
+    /// were collected. Shared across requests; see [`HISTORY_SCAN_TTL`].
+    scan_cache: std::sync::Mutex<Option<(std::time::Instant, std::sync::Arc<Vec<scan::FlatRow>>)>>,
 }
 
 impl ArchiveRuntime {
@@ -79,7 +88,30 @@ impl ArchiveRuntime {
             store: ArchiveStore::from_config(&config)?,
             config,
             stats: ArchiveStats::default(),
+            scan_cache: std::sync::Mutex::new(None),
         })
+    }
+
+    /// Return the flattened manifest rows, rescanning if the cache is empty
+    /// or older than [`HISTORY_SCAN_TTL`]. **Blocking** (the S3 backend
+    /// blocks on its captured runtime handle) — call on the blocking pool.
+    pub fn scan_rows(&self) -> std::io::Result<std::sync::Arc<Vec<scan::FlatRow>>> {
+        if let Some((at, rows)) = self
+            .scan_cache
+            .lock()
+            .expect("scan cache lock poisoned")
+            .as_ref()
+        {
+            if at.elapsed() < HISTORY_SCAN_TTL {
+                return Ok(rows.clone());
+            }
+        }
+        let rows = std::sync::Arc::new(scan::collect_rows(&self.store, &mut |w| {
+            tracing::warn!("history archive scan: {w}");
+        })?);
+        *self.scan_cache.lock().expect("scan cache lock poisoned") =
+            Some((std::time::Instant::now(), rows.clone()));
+        Ok(rows)
     }
 }
 
@@ -150,6 +182,7 @@ mod tests {
             scheduled_task_id: None,
             claude_args: Vec::new(),
             archived_by_version: None,
+            members: None,
         }
     }
 

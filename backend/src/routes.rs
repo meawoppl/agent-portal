@@ -224,6 +224,24 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         )
         // Serve videos shown via `agent-portal show`, with HTTP Range support.
         .route("/api/media/{id}", get(handlers::media_store::serve_media))
+        // Session-history browser over the long-term archive. Visibility
+        // (owner / shared / admin) is enforced in each handler.
+        .route(
+            "/api/history/sessions",
+            get(handlers::history::list_history_sessions),
+        )
+        .route(
+            "/api/history/sessions/{user}/{session}/manifest",
+            get(handlers::history::get_history_manifest),
+        )
+        .route(
+            "/api/history/sessions/{user}/{session}/messages",
+            get(handlers::history::get_history_messages),
+        )
+        .route(
+            "/api/history/media/{user}/{session}/{media_id}",
+            get(handlers::history::get_history_media),
+        )
         .route(
             "/api/metrics/recent",
             get(handlers::turn_metrics::list_recent_user_turn_metrics),

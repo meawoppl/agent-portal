@@ -254,6 +254,18 @@ pub fn dashboard_page() -> Html {
         Callback::from(move |_| ui_state.dispatch(DashboardUiAction::ShowSettings))
     };
 
+    // Separate `use_navigator` handle: the one above is moved into the
+    // deep-link effect closure.
+    let history_navigator = use_navigator();
+    let go_to_history = {
+        let navigator = history_navigator;
+        Callback::from(move |_| {
+            if let Some(navigator) = &navigator {
+                navigator.push(&crate::Route::History);
+            }
+        })
+    };
+
     let close_admin = {
         let ui_state = ui_state.clone();
         Callback::from(move |_: ()| ui_state.dispatch(DashboardUiAction::CloseAdmin))
@@ -693,6 +705,9 @@ pub fn dashboard_page() -> Html {
                             html! {}
                         }
                     }
+                    <button class="header-button" onclick={go_to_history.clone()}>
+                        { "History" }
+                    </button>
                     <button class="header-button" onclick={go_to_settings.clone()}>
                         { "Settings" }
                     </button>

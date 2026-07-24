@@ -14,7 +14,6 @@ mod export;
 mod list;
 mod rollup;
 mod rows;
-mod serve;
 mod summarize;
 mod table;
 
@@ -75,13 +74,6 @@ enum Command {
     Export(ExportArgs),
     /// Print a readable transcript digest for one session.
     Cat(CatArgs),
-    /// Serve the archive over a loopback-only HTTP API + embedded web viewer.
-    ///
-    /// SECURITY: no authentication. This is an operator tool over
-    /// operator-controlled archive data; it binds to 127.0.0.1 only, by design.
-    /// Anyone who can reach the port can read every archived session. Do not
-    /// expose it (no port-forward, no reverse proxy, no 0.0.0.0 bind).
-    Serve(serve::ServeArgs),
 }
 
 #[derive(ClapArgs, Debug)]
@@ -155,7 +147,6 @@ async fn run() -> Result<()> {
         Command::Rollup(a) => run_rollup(&store, a),
         Command::Export(a) => run_export(&store, a),
         Command::Cat(a) => run_cat(&store, a),
-        Command::Serve(a) => serve::run(store, a).await,
     }
 }
 
