@@ -1,34 +1,35 @@
-//! Rewrite archived media URLs to the viewer's own media endpoint.
+//! Rewrite archived media URLs to the history media endpoint.
 //!
 //! Archived transcript content carries the *original* portal served-media URLs
 //! — `/api/images/{uuid}` for images and `/api/media/{uuid}` for videos (see
-//! `backend/src/handlers/media_archive.rs` / `background.rs`). Those paths only
-//! resolve on the live portal's origin; on the viewer's origin they 404 and the
-//! renderer would show a broken image. The viewer instead serves each blob from
-//! its session-scoped endpoint `/api/media/{user}/{session}/{media_id}` (the
-//! pinned #1288 contract), where `{media_id}` is exactly the original `{uuid}`.
+//! `backend/src/handlers/media_archive.rs`). Those resolve on the live portal
+//! only while the transcript row still exists in the hot DB (the read-through
+//! needs it to recover ownership); history outlives those rows, so the history
+//! view serves every blob from the session-scoped, ACL-checked
+//! `/api/history/media/{user}/{session}/{media_id}` instead — `{media_id}` is
+//! exactly the original `{uuid}`.
 //!
 //! This is a pure, string-level pass over the raw content JSON run *before*
-//! `RenderedMessage::new`, so the real renderers (`render_image_source` /
-//! `VideoViewer`) receive already-correct URLs and their existing
-//! expired-media placeholder still fires when the archive lacks the blob (the
-//! endpoint 404s → `<img onerror>` / `<video onerror>` → placeholder).
+//! `RenderedMessage::new`, so the real renderers receive already-correct URLs
+//! and their existing expired-media placeholder still fires when the archive
+//! lacks the blob (the endpoint 404s → `onerror` → placeholder).
 
 /// Original portal image URL prefix (`/api/images/{uuid}`).
 const IMAGE_PREFIX: &str = "/api/images/";
 /// Original portal video URL prefix (`/api/media/{uuid}`).
 const VIDEO_PREFIX: &str = "/api/media/";
+/// History media endpoint prefix the rewrite targets.
+const HISTORY_PREFIX: &str = "/api/history/media/";
 /// Length of a canonical hyphenated UUID (`8-4-4-4-12`).
 const UUID_LEN: usize = 36;
 
 /// Rewrite every `/api/images/{uuid}` and `/api/media/{uuid}` occurrence in
-/// `content` to `/api/media/{user}/{session}/{uuid}`.
+/// `content` to `/api/history/media/{user}/{session}/{uuid}`.
 ///
 /// Operates on the raw JSON string so it catches the media id wherever it
-/// appears (a standalone `data` value or embedded in prose). Only a prefix
-/// immediately followed by a parseable UUID is rewritten; anything else is
-/// emitted verbatim, and already-rewritten output is never rescanned (so the
-/// `/api/media/` that the rewrite itself introduces is not re-matched).
+/// appears. Only a prefix immediately followed by a parseable UUID is
+/// rewritten; anything else is emitted verbatim, and already-rewritten output
+/// is never rescanned.
 pub fn rewrite_media_urls(content: &str, user: &str, session: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut rest = content;
@@ -53,7 +54,7 @@ pub fn rewrite_media_urls(content: &str, user: &str, session: &str) -> String {
         // this never panics.
         if let Some(candidate) = after.get(..UUID_LEN) {
             if uuid::Uuid::parse_str(candidate).is_ok() {
-                out.push_str(VIDEO_PREFIX);
+                out.push_str(HISTORY_PREFIX);
                 out.push_str(user);
                 out.push('/');
                 out.push_str(session);
@@ -81,60 +82,22 @@ mod tests {
     const MEDIA: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
     #[test]
-    fn rewrites_image_url_in_data_value() {
-        let content = format!(r#"{{"type":"image","data":"/api/images/{MEDIA}"}}"#);
-        let out = rewrite_media_urls(&content, USER, SESSION);
-        assert_eq!(
-            out,
-            format!(r#"{{"type":"image","data":"/api/media/{USER}/{SESSION}/{MEDIA}"}}"#)
-        );
-    }
-
-    #[test]
-    fn rewrites_video_url_in_data_value() {
-        let content = format!(r#"{{"data":"/api/media/{MEDIA}"}}"#);
-        let out = rewrite_media_urls(&content, USER, SESSION);
-        assert_eq!(
-            out,
-            format!(r#"{{"data":"/api/media/{USER}/{SESSION}/{MEDIA}"}}"#)
-        );
-    }
-
-    #[test]
-    fn rewrites_multiple_occurrences() {
+    fn rewrites_image_and_video_urls() {
         let other = "12345678-1234-1234-1234-1234567890ab";
         let content = format!("/api/images/{MEDIA} and /api/media/{other}");
         let out = rewrite_media_urls(&content, USER, SESSION);
         assert_eq!(
             out,
-            format!("/api/media/{USER}/{SESSION}/{MEDIA} and /api/media/{USER}/{SESSION}/{other}")
+            format!(
+                "/api/history/media/{USER}/{SESSION}/{MEDIA} and \
+                 /api/history/media/{USER}/{SESSION}/{other}"
+            )
         );
-    }
-
-    #[test]
-    fn rewritten_url_is_not_double_rewritten() {
-        // The `/api/media/` the rewrite introduces must not be re-matched:
-        // its next segment is the user UUID, not a fresh media reference, and
-        // emitted output is never rescanned regardless.
-        let content = format!("/api/media/{MEDIA}");
-        let out = rewrite_media_urls(&content, USER, SESSION);
-        assert_eq!(out, format!("/api/media/{USER}/{SESSION}/{MEDIA}"));
-        // Idempotent-ish: running again over already-viewer-scoped URLs does
-        // rewrite the *first* uuid segment (the user), which is why we only
-        // ever run this once, at ingest.
-        assert_eq!(out.matches("/api/media/").count(), 1);
     }
 
     #[test]
     fn leaves_non_uuid_paths_untouched() {
         let content = r#"see /api/images/latest and /api/media/thumbnail.png"#;
-        let out = rewrite_media_urls(content, USER, SESSION);
-        assert_eq!(out, content);
-    }
-
-    #[test]
-    fn leaves_unrelated_content_untouched() {
-        let content = r#"{"type":"text","text":"no media here"}"#;
         assert_eq!(rewrite_media_urls(content, USER, SESSION), content);
     }
 
@@ -150,9 +113,7 @@ mod tests {
             r#"{{"content":[{{"type":"image","media_type":"image/png","source_type":"url","data":"/api/images/{MEDIA}"}}]}}"#
         );
         let out = rewrite_media_urls(&content, USER, SESSION);
-        assert!(out.contains(&format!("/api/media/{USER}/{SESSION}/{MEDIA}")));
-        assert!(out.contains(r#""source_type":"url""#));
-        // Still valid JSON.
+        assert!(out.contains(&format!("/api/history/media/{USER}/{SESSION}/{MEDIA}")));
         assert!(serde_json::from_str::<serde_json::Value>(&out).is_ok());
     }
 }

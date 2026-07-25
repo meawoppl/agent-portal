@@ -235,7 +235,7 @@ impl MediaStore {
 /// is absent/malformed (caller then serves the whole file). Returns
 /// `Some(Err(()))` when the range is syntactically valid but unsatisfiable.
 #[allow(clippy::type_complexity)]
-fn parse_range(headers: &HeaderMap, total: u64) -> Option<Result<(u64, u64), ()>> {
+pub(crate) fn parse_range(headers: &HeaderMap, total: u64) -> Option<Result<(u64, u64), ()>> {
     let raw = headers.get(header::RANGE)?.to_str().ok()?;
     let spec = raw.strip_prefix("bytes=")?;
     // Only a single range is supported; reject multi-range specs.

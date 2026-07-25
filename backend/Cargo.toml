@@ -108,6 +108,7 @@ test-support = []
 # Self dev-dependency: enables `test-support` on our own lib for the duration of
 # the test build (`cargo test`/`--all-targets`) without leaking it into release.
 backend = { path = ".", features = ["test-support"] }
+archive-format = { path = "../archive-format", features = ["test-support"] }
 ws-bridge = { workspace = true, features = ["native-client"] }
 uuid = { workspace = true }
 tempfile = "3"

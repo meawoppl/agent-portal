@@ -182,17 +182,45 @@ fn archive_one_session(
     session: &models::Session,
 ) -> anyhow::Result<()> {
     use crate::archive::{
-        transcript_key, ArchiveMessageLine, ArchiveTokenTotals, ArchiveTranscriptInfo,
-        ArchiveTurnStats, SessionArchiveBundle, SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION,
+        transcript_key, ArchiveMemberEntry, ArchiveMessageLine, ArchiveTokenTotals,
+        ArchiveTranscriptInfo, ArchiveTurnStats, SessionArchiveBundle, SessionArchiveManifest,
+        ARCHIVE_SCHEMA_VERSION,
     };
     use diesel::prelude::*;
-    use schema::{messages, turn_metrics, users};
+    use schema::{messages, session_members, turn_metrics, users};
     use std::collections::BTreeMap;
 
     let (owner_email, owner_name): (String, Option<String>) = users::table
         .find(session.user_id)
         .select((users::email, users::name))
         .first(conn)?;
+
+    // Membership snapshot for the manifest: visibility ("shared with me")
+    // must survive the eventual deletion of the hot DB rows, so the archive
+    // is the durable record. Refreshed on every re-archive.
+    let member_rows: Vec<(uuid::Uuid, String, String)> = session_members::table
+        .inner_join(users::table.on(users::id.eq(session_members::user_id)))
+        .filter(session_members::session_id.eq(session.id))
+        .select((
+            session_members::user_id,
+            users::email,
+            session_members::role,
+        ))
+        .load(conn)?;
+    let members = if member_rows.is_empty() {
+        None
+    } else {
+        Some(
+            member_rows
+                .into_iter()
+                .map(|(user_id, email, role)| ArchiveMemberEntry {
+                    user_id,
+                    email,
+                    role,
+                })
+                .collect(),
+        )
+    };
 
     // Transcript rows, oldest first. Note: hot-DB retention may already
     // have trimmed old messages; the archive preserves what remains (phase
@@ -369,6 +397,7 @@ fn archive_one_session(
             // Per-write provenance: whichever backend runs this sweep stamps
             // its own version, so a re-archive reflects the newer writer.
             archived_by_version: Some(shared::VERSION.to_string()),
+            members,
         },
         transcript_ndjson,
     };
@@ -547,8 +576,9 @@ fn archive_retention_candidates(
 
 /// Archive `session` if its archive is missing or stale, updating
 /// `archived_at` on success. Returns whether the session now has a fresh
-/// archive. Shared by the sweep and the retention gates (#1258 phase 2).
-fn ensure_session_archived(
+/// archive. Shared by the sweep, the retention gates (#1258 phase 2), and
+/// the close-session handler's final pre-delete archive.
+pub(crate) fn ensure_session_archived(
     conn: &mut diesel::PgConnection,
     runtime: &crate::archive::ArchiveRuntime,
     session: &models::Session,

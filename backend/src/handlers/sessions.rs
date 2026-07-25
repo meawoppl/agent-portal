@@ -196,6 +196,35 @@ pub async fn delete_session(
         current_user_id,
     )?;
 
+    // Close = archive-then-delete. When the archive is enabled, take a final
+    // snapshot before destroying the hot rows so the session stays readable in
+    // History even if the sweep never got to it (closed before the idle
+    // window). Archive failure aborts the close — the same no-data-loss
+    // invariant as retention's held trims (`RETENTION_TRIM_HELD`) — so an
+    // archive outage never silently discards history. Runs on the blocking
+    // pool: the object store blocks on a captured runtime handle.
+    if let Some(runtime) = app_state.archive.clone() {
+        let archive_session = session.clone();
+        let pool = app_state.db_pool.clone();
+        let archived = tokio::task::spawn_blocking(move || {
+            let mut conn = pool
+                .get()
+                .map_err(|e| AppError::Internal(format!("db pool: {e}")))?;
+            Ok::<bool, AppError>(crate::background::ensure_session_archived(
+                &mut conn,
+                &runtime,
+                &archive_session,
+            ))
+        })
+        .await
+        .map_err(|e| AppError::Internal(format!("archive task failed: {e}")))??;
+        if !archived {
+            return Err(AppError::ServiceUnavailable(
+                "history archive is unavailable; session was not closed - try again",
+            ));
+        }
+    }
+
     app_state.session_manager.disconnect_session(session_id);
     app_state.session_manager.stop_session_on_launcher(
         session_id,

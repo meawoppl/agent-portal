@@ -37,6 +37,7 @@
 //! transport/auth material (tokens, cookies, secrets) is never part of
 //! session content and must never be added to manifests.
 
+pub mod scan;
 pub mod store;
 pub use store::*;
 
@@ -198,6 +199,27 @@ pub struct SessionArchiveManifest {
     /// created the session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_by_version: Option<String>,
+    /// Session membership (`session_members` joined to `users`) captured at
+    /// archive time, so visibility ("shared with me") survives the eventual
+    /// deletion of the hot DB rows. Same additive-compat contract as `media`:
+    /// pre-field manifests deserialize to `None` (owner + admin visibility
+    /// only) and [`ARCHIVE_SCHEMA_VERSION`] is **not** bumped. **Per-write**:
+    /// a re-archive refreshes the list, but a share granted after the final
+    /// archive of an idle session is only reflected once `last_activity`
+    /// advances and the sweep re-archives — readers that can also see the hot
+    /// DB should union live membership on top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<ArchiveMemberEntry>>,
+}
+
+/// One session member captured into the manifest at archive time. `role`
+/// mirrors `session_members.role` (`owner` / `editor` / `viewer`); the email
+/// is included for the same admin-reporting reason as `owner_email`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArchiveMemberEntry {
+    pub user_id: Uuid,
+    pub email: String,
+    pub role: String,
 }
 
 /// One archived media blob referenced from a manifest. The bytes live at
@@ -360,7 +382,28 @@ mod tests {
             scheduled_task_id: None,
             claude_args: Vec::new(),
             archived_by_version: None,
+            members: None,
         }
+    }
+
+    /// Additive-compat: a manifest written before `members` existed still
+    /// parses (`members == None`), and one carrying members round-trips.
+    #[test]
+    fn old_manifest_without_members_parses_and_new_roundtrips() {
+        let mut m = manifest(Uuid::from_u128(1), Uuid::from_u128(2));
+        let mut json: serde_json::Value = serde_json::to_value(&m).unwrap();
+        json.as_object_mut().unwrap().remove("members");
+        let parsed: SessionArchiveManifest = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.members, None);
+
+        m.members = Some(vec![ArchiveMemberEntry {
+            user_id: Uuid::from_u128(9),
+            email: "shared@x.io".into(),
+            role: "viewer".into(),
+        }]);
+        let back: SessionArchiveManifest =
+            serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
+        assert_eq!(back.members, m.members);
     }
 
     #[test]
