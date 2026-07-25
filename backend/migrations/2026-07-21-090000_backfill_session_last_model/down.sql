@@ -1,0 +1,3 @@
+-- Data-only backfill. Intentionally no-op on rollback: clearing
+-- sessions.last_model would destroy model observations written after this
+-- migration ran.
