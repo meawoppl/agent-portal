@@ -706,9 +706,21 @@ pub fn dashboard_page() -> Html {
                             html! {}
                         }
                     }
-                    <button class="header-button" onclick={go_to_history.clone()}>
-                        { "History" }
-                    </button>
+                    // History reads from the long-term archive; when archiving
+                    // is disabled the page can only 404, so hide the entry
+                    // rather than lead the user to a confusing error. (Config's
+                    // `archive_enabled` comes from `/api/config`.)
+                    {
+                        if archive_enabled {
+                            html! {
+                                <button class="header-button" onclick={go_to_history.clone()}>
+                                    { "History" }
+                                </button>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
                     <button class="header-button" onclick={go_to_settings.clone()}>
                         { "Settings" }
                     </button>
