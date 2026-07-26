@@ -40,6 +40,15 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Duplex pipe capacity between the relay and hyper.
 const PIPE_CAPACITY: usize = 64 * 1024;
 
+/// Whether a proxy connection last heard from at `last_seen` (epoch secs) has
+/// been silent long enough — relative to `now` — that `open_tunnel` should
+/// treat it as gone rather than wait `OPEN_TIMEOUT` on a reply that can't come.
+/// Mirrors the liveness sweeper's deadline exactly, so a live, recently-
+/// heartbeating proxy is never mis-flagged. Pure for unit testing.
+fn connection_silent_too_long(last_seen: u64, now: u64) -> bool {
+    now.saturating_sub(last_seen) > super::liveness::PROXY_LIVENESS_DEADLINE_SECS
+}
+
 /// Frames routed from the proxy socket into a stream's relay task.
 pub enum TunnelIn {
     Opened,
@@ -164,7 +173,26 @@ impl SessionManager {
         // lookup — sender and gen live in the same entry, so they can't
         // disagree.
         let (proxy_tx, gen): (ProxySender, u64) = match self.sessions.get(session_key) {
-            Some(conn) => (conn.sender.clone(), conn.gen),
+            Some(conn) => {
+                // Fast-fail a registered-but-silent connection. A proxy
+                // heartbeats every 1s, so silence past the liveness deadline
+                // means the transport is gone and the sweeper simply hasn't
+                // evicted it yet (it runs every `LIVENESS_SWEEP_INTERVAL_SECS`).
+                // Without this the open below would wait the full `OPEN_TIMEOUT`
+                // for a reply that can never come — a 10s hang surfacing as the
+                // ambiguous `agent-unreachable`. Reusing the sweeper's own
+                // deadline means we never mis-flag a live, recently-
+                // heartbeating proxy.
+                let last_seen = conn.last_seen.load(std::sync::atomic::Ordering::Relaxed);
+                if connection_silent_too_long(last_seen, super::liveness::epoch_secs()) {
+                    debug!(
+                        "open_tunnel: session {} silent since {} — treating as offline",
+                        session_key, last_seen
+                    );
+                    return Err(TunnelError::NotConnected);
+                }
+                (conn.sender.clone(), conn.gen)
+            }
             None => return Err(TunnelError::NotConnected),
         };
 
@@ -384,5 +412,48 @@ mod tests {
         // The newer connection's stream and the other session are untouched.
         assert!(new_rx.try_recv().is_err());
         assert!(other_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn connection_silent_too_long_matches_the_liveness_deadline() {
+        let deadline = super::super::liveness::PROXY_LIVENESS_DEADLINE_SECS;
+        let now = 1_000_000u64;
+        // Just heard / within the deadline → live.
+        assert!(!connection_silent_too_long(now, now));
+        assert!(!connection_silent_too_long(now - deadline, now));
+        // One second past the deadline → stale.
+        assert!(connection_silent_too_long(now - deadline - 1, now));
+        // A future/garbage last_seen saturates to zero elapsed → never stale.
+        assert!(!connection_silent_too_long(now + 100, now));
+    }
+
+    #[tokio::test]
+    async fn open_tunnel_reports_offline_for_a_silent_registered_session() {
+        use crate::handlers::websocket::conn_channel;
+        use shared::ServerToProxy;
+        use std::sync::atomic::Ordering;
+
+        let mgr = SessionManager::new();
+        let (tx, _rx) = conn_channel::<ServerToProxy>(64);
+        mgr.register_session(
+            "k".to_string(),
+            tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+
+        // Backdate the connection well past the liveness deadline — a
+        // registered-but-dead transport the sweeper hasn't evicted yet.
+        if let Some(conn) = mgr.sessions.get("k") {
+            let stale = super::super::liveness::epoch_secs()
+                .saturating_sub(super::super::liveness::PROXY_LIVENESS_DEADLINE_SECS + 5);
+            conn.last_seen.store(stale, Ordering::Relaxed);
+        }
+
+        // Fast-fails as NotConnected (→ agent-offline) instead of hanging the
+        // full OPEN_TIMEOUT waiting for a reply that can never arrive.
+        assert!(matches!(
+            mgr.open_tunnel("k", 8080).await,
+            Err(TunnelError::NotConnected)
+        ));
     }
 }
