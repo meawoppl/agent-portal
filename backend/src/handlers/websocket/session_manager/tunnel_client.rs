@@ -6,7 +6,7 @@
 //! the tunnel frames. The reverse-proxy handler hands the other end to a
 //! hyper HTTP/1.1 client — hyper never knows it isn't a TCP socket.
 //!
-//! Flow control mirrors the proxy side (`session_lib::tunnel`): 256 KiB
+//! Flow control mirrors the proxy side (`session_lib::tunnel`): a 64 KiB
 //! credit per direction, ≤16 KiB `TunnelData` frames, window re-granted as
 //! bytes drain into the pipe. The outgoing path is the session's unbounded
 //! `ProxySender`, so per-stream credit is what bounds queued tunnel bytes:
@@ -19,7 +19,8 @@ use std::time::Duration;
 use base64::Engine;
 use dashmap::DashMap;
 use shared::{
-    ServerToProxy, TunnelCloseFields, TunnelDataFields, TunnelOpenFields, TunnelWindowFields,
+    ServerToProxy, TunnelCloseFields, TunnelDataFields, TunnelOpenFields, TunnelRefuseReason,
+    TunnelWindowFields,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex, Notify};
@@ -30,8 +31,10 @@ use super::{ProxySender, SessionManager};
 
 /// Max decoded bytes per `TunnelData` frame (spec).
 pub const MAX_CHUNK: usize = 16 * 1024;
-/// Initial per-stream, per-direction flow-control window (spec).
-pub const INITIAL_WINDOW: u32 = 256 * 1024;
+/// Initial per-stream, per-direction flow-control window. Must match the proxy
+/// side (`session_lib::tunnel::INITIAL_WINDOW`) — both ends seed their credit
+/// from it.
+pub const INITIAL_WINDOW: u32 = 64 * 1024;
 /// How long to wait for the proxy's `TunnelOpened`/`TunnelRefused`.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Duplex pipe capacity between the relay and hyper.
@@ -40,7 +43,7 @@ const PIPE_CAPACITY: usize = 64 * 1024;
 /// Frames routed from the proxy socket into a stream's relay task.
 pub enum TunnelIn {
     Opened,
-    Refused(String),
+    Refused(TunnelRefuseReason),
     Data(Vec<u8>),
     Window(u32),
     Close,
@@ -71,7 +74,7 @@ pub enum TunnelError {
     #[error("session proxy is not connected")]
     NotConnected,
     #[error("proxy refused the stream: {0}")]
-    Refused(String),
+    Refused(TunnelRefuseReason),
     #[error("timed out waiting for the proxy to open the stream")]
     OpenTimeout,
     #[error("stream closed while opening")]
@@ -193,9 +196,9 @@ impl SessionManager {
         let verdict = tokio::time::timeout(OPEN_TIMEOUT, relay_rx.recv()).await;
         match verdict {
             Ok(Some(TunnelIn::Opened)) => {}
-            Ok(Some(TunnelIn::Refused(error))) => {
+            Ok(Some(TunnelIn::Refused(reason))) => {
                 self.tunnel_streams.remove(&stream_id);
-                return Err(TunnelError::Refused(error));
+                return Err(TunnelError::Refused(reason));
             }
             Ok(_) => {
                 self.tunnel_streams.remove(&stream_id);

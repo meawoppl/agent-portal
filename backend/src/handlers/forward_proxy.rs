@@ -431,8 +431,31 @@ fn filtered_cookie_header(headers: &HeaderMap) -> Option<String> {
     (!kept.is_empty()).then(|| kept.join("; "))
 }
 
-fn plain_status(status: StatusCode, msg: &'static str) -> Response {
-    (status, msg).into_response()
+fn plain_status(status: StatusCode, msg: impl Into<String>) -> Response {
+    (status, msg.into()).into_response()
+}
+
+/// Feed a real routing outcome into the port-health cache and nudge web
+/// clients if `listening` actually flipped. This is what keeps the forward
+/// chip in step with what requests truly experience between the proxy's 10s
+/// background probes — the chip and the reverse proxy now share one source of
+/// truth instead of drifting.
+fn note_reachability(
+    app_state: &AppState,
+    session_key: &str,
+    session_id: Uuid,
+    port: u16,
+    listening: bool,
+) {
+    if app_state
+        .session_manager
+        .note_forward_reachability(session_id, port, listening)
+    {
+        app_state.session_manager.broadcast_to_web_clients(
+            &session_key.to_string(),
+            shared::ServerToClient::ForwardsChanged { session_id },
+        );
+    }
 }
 
 /// Reverse-proxy one request through a fresh tunnel stream.
@@ -451,19 +474,33 @@ async fn proxy_request(
         .open_tunnel(session_key, port)
         .await
     {
-        Ok(stream) => stream,
+        Ok(stream) => {
+            note_reachability(app_state, session_key, session_id, port, true);
+            stream
+        }
         Err(TunnelError::NotConnected) => {
             return plain_status(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "the agent for this session is offline",
             )
         }
-        Err(TunnelError::Refused(e)) => {
-            warn!("Tunnel refused for {}:{}: {}", session_id, port, e);
-            return plain_status(
-                StatusCode::BAD_GATEWAY,
-                "nothing is listening on the forwarded port",
-            );
+        Err(TunnelError::Refused(reason)) => {
+            use shared::TunnelRefuseReason::*;
+            warn!("Tunnel refused for {}:{}: {}", session_id, port, reason);
+            // Only a genuine "nothing listening" reflects on port health; a
+            // stream-limit or revocation refusal says nothing about the local
+            // service, so it must not tint the chip red.
+            let status = match reason {
+                NoListener => {
+                    note_reachability(app_state, session_key, session_id, port, false);
+                    StatusCode::BAD_GATEWAY
+                }
+                // Momentary saturation, not an error — a retry usually works.
+                StreamLimit => StatusCode::SERVICE_UNAVAILABLE,
+                NotForwarded => StatusCode::NOT_FOUND,
+                Protocol => StatusCode::BAD_GATEWAY,
+            };
+            return plain_status(status, reason.to_string());
         }
         Err(TunnelError::OpenTimeout) | Err(TunnelError::ClosedEarly) => {
             return plain_status(StatusCode::GATEWAY_TIMEOUT, "forward open timed out")

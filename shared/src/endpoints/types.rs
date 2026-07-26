@@ -254,11 +254,41 @@ pub struct TunnelStreamFields {
     pub stream_id: Uuid,
 }
 
+/// Why the proxy could not open a tunnel stream. The backend maps this to the
+/// right HTTP status and decides whether it reflects on port health — only
+/// `NoListener` means the local service is actually down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TunnelRefuseReason {
+    /// The loopback dial to `127.0.0.1:{port}` failed (connection refused or
+    /// timed out) — nothing is serving there right now.
+    NoListener,
+    /// The proxy has hit its concurrent-stream cap for this connection; the
+    /// port is fine, the tunnel is momentarily saturated.
+    StreamLimit,
+    /// The port is not in the proxy's forward allowlist (revoked/re-pointed).
+    NotForwarded,
+    /// Protocol misuse (duplicate stream id, oversize frame) — should not
+    /// happen in normal operation.
+    Protocol,
+}
+
+impl std::fmt::Display for TunnelRefuseReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::NoListener => "nothing is listening on the forwarded port",
+            Self::StreamLimit => "the forward is at its concurrent-connection limit",
+            Self::NotForwarded => "this port is not forwarded",
+            Self::Protocol => "forward protocol error",
+        };
+        f.write_str(s)
+    }
+}
+
 /// The proxy could not (or refused to) dial a stream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelRefusedFields {
     pub stream_id: Uuid,
-    pub error: String,
+    pub reason: TunnelRefuseReason,
 }
 
 /// Add/remove a port in the proxy's forward allowlist.

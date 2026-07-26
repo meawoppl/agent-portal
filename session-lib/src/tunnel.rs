@@ -28,7 +28,8 @@ use std::time::Duration;
 use base64::Engine;
 use shared::{
     ForwardStatusFields, ProxyToServer, ServerToProxy, TunnelCloseFields, TunnelDataFields,
-    TunnelOpenFields, TunnelRefusedFields, TunnelStreamFields, TunnelWindowFields,
+    TunnelOpenFields, TunnelRefuseReason, TunnelRefusedFields, TunnelStreamFields,
+    TunnelWindowFields,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -43,21 +44,31 @@ pub type TunnelWsWrite = Arc<Mutex<ws_bridge::WsSender<ProxyToServer>>>;
 
 /// Max decoded bytes per `TunnelData` frame.
 pub const MAX_CHUNK: usize = 16 * 1024;
-/// Initial per-stream, per-direction flow-control window.
-pub const INITIAL_WINDOW: u32 = 256 * 1024;
-/// Max concurrent streams per session connection.
-pub const MAX_STREAMS: usize = 64;
-/// How long a probe/stream dial to loopback may take before it is refused.
+/// Initial per-stream, per-direction flow-control window. Kept small so the
+/// worst-case buffered bytes (`MAX_STREAMS × INITIAL_WINDOW` per direction)
+/// stay bounded even with a high stream cap; loopback/WS latency is low enough
+/// that a 64 KiB window saturates a single stream easily.
+pub const INITIAL_WINDOW: u32 = 64 * 1024;
+/// Max concurrent streams per session connection. A browser loading a
+/// resource-heavy page over HTTP/2 multiplexes many requests at once, each of
+/// which becomes one stream, so this is generous; the per-stream window keeps
+/// the aggregate memory bound flat (256 × 64 KiB = 16 MiB per direction).
+pub const MAX_STREAMS: usize = 256;
+/// How long a single dial to loopback may take before it is treated as a
+/// timeout (service hung, not down).
 const DIAL_TIMEOUT: Duration = Duration::from_secs(2);
-/// How long a *browser-stream* dial keeps retrying loopback before giving up.
-/// A refused dial usually just means the local service is momentarily down —
-/// mid-restart, or finishing a build — so we back off and retry within this
-/// budget instead of instantly reporting the port dead (which surfaces as
-/// "nothing listening on the forwarded port"). A genuinely dead port still
-/// fails within the budget rather than hanging the browser indefinitely. The
-/// background health probe (`probe_tick`) does NOT retry — it must reflect the
-/// true, current liveness for the frontend's forward chip.
+/// How long a *browser-stream* dial keeps retrying a *refused* loopback before
+/// giving up. A refusal usually just means the local service is momentarily
+/// down — mid-restart, or finishing a build — so [`connect_loopback`] backs
+/// off and retries within this budget instead of instantly reporting the port
+/// dead. A dial that *times out* is never retried (repeating a multi-second
+/// hang would only stall the browser).
 const STREAM_DIAL_RETRY_BUDGET: Duration = Duration::from_secs(8);
+/// Retry budget for the background health probe and the registration probe.
+/// Short: a small grace absorbs a momentary refusal (so the chip doesn't flap
+/// red on a blip) without the probe lingering for seconds on a genuinely dead
+/// port. Real traffic outcomes correct the chip faster than a probe anyway.
+const PROBE_DIAL_BUDGET: Duration = Duration::from_millis(1500);
 /// Cadence of the background port-health probe. A loopback dial is
 /// microseconds of work, so this can be frequent — it drives the green/red
 /// liveness tint on the frontend's forward chip.
@@ -90,12 +101,13 @@ pub struct TunnelManager {
     ws: TunnelWsWrite,
     allowed: Mutex<HashSet<u16>>,
     streams: Mutex<HashMap<Uuid, StreamHandle>>,
-    /// Last probe verdict per allowlisted port (`(listening, process name)`);
-    /// the background prober reports a `ForwardStatus` only when a port's
-    /// verdict *changes* (the registration-time probe seeds it), so steady
-    /// state costs no frames. The process name is part of the verdict so an
-    /// app swap on the same port re-reports.
-    last_health: Mutex<HashMap<u16, (bool, Option<String>)>>,
+    /// Last reported `listening` verdict per allowlisted port; the background
+    /// prober reports a `ForwardStatus` only when this flips (the
+    /// registration-time probe seeds it), so steady state costs no frames.
+    /// Process name is display-only and rides the frame but does not trigger a
+    /// report on its own — that name flickering (best-effort resolution) was a
+    /// source of spurious churn.
+    last_health: Mutex<HashMap<u16, bool>>,
     prober: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -133,12 +145,10 @@ impl TunnelManager {
             .await
             .retain(|port, _| ports.contains(port));
         for port in ports {
-            let (listening, error) =
-                match tokio::time::timeout(DIAL_TIMEOUT, dial_loopback(port)).await {
-                    Ok(Ok(_)) => (true, None),
-                    Ok(Err(e)) => (false, Some(e.to_string())),
-                    Err(_) => (false, Some("probe dial timed out".to_string())),
-                };
+            let (listening, error) = match connect_loopback(port, PROBE_DIAL_BUDGET).await {
+                Ok(_) => (true, None),
+                Err(e) => (false, Some(e.to_string())),
+            };
             let process = if listening {
                 process_on_port(port).await
             } else {
@@ -151,10 +161,9 @@ impl TunnelManager {
                 self.last_health.lock().await.remove(&port);
                 continue;
             }
-            let verdict = (listening, process.clone());
             let changed = {
                 let mut health = self.last_health.lock().await;
-                health.insert(port, verdict.clone()) != Some(verdict)
+                health.insert(port, listening) != Some(listening)
             };
             if changed {
                 info!(
@@ -184,12 +193,10 @@ impl TunnelManager {
                 let mgr = self.clone();
                 let port = f.port;
                 tokio::spawn(async move {
-                    let (listening, error) =
-                        match tokio::time::timeout(DIAL_TIMEOUT, dial_loopback(port)).await {
-                            Ok(Ok(_)) => (true, None),
-                            Ok(Err(e)) => (false, Some(e.to_string())),
-                            Err(_) => (false, Some("probe dial timed out".to_string())),
-                        };
+                    let (listening, error) = match connect_loopback(port, PROBE_DIAL_BUDGET).await {
+                        Ok(_) => (true, None),
+                        Err(e) => (false, Some(e.to_string())),
+                    };
                     let process = if listening {
                         process_on_port(port).await
                     } else {
@@ -201,10 +208,7 @@ impl TunnelManager {
                         return;
                     }
                     // Seed the background prober so it only reports changes.
-                    mgr.last_health
-                        .lock()
-                        .await
-                        .insert(port, (listening, process.clone()));
+                    mgr.last_health.lock().await.insert(port, listening);
                     mgr.send(ProxyToServer::ForwardStatus(ForwardStatusFields {
                         port,
                         listening,
@@ -305,16 +309,15 @@ impl TunnelManager {
     }
 
     async fn open_stream(self: &Arc<Self>, open: &TunnelOpenFields) {
-        let refuse = |error: String| {
+        let refuse = |reason: TunnelRefuseReason| {
             ProxyToServer::TunnelRefused(TunnelRefusedFields {
                 stream_id: open.stream_id,
-                error,
+                reason,
             })
         };
 
         if !self.allowed.lock().await.contains(&open.port) {
-            self.send(refuse(format!("port {} is not forwarded", open.port)))
-                .await;
+            self.send(refuse(TunnelRefuseReason::NotForwarded)).await;
             return;
         }
         // Register the inbox before the dial so ordered frames can't miss it.
@@ -324,13 +327,16 @@ impl TunnelManager {
             let mut streams = self.streams.lock().await;
             if streams.len() >= MAX_STREAMS {
                 drop(streams);
-                self.send(refuse(format!("stream limit ({MAX_STREAMS}) reached")))
-                    .await;
+                warn!(
+                    "Tunnel stream limit ({}) reached; refusing stream {}",
+                    MAX_STREAMS, open.stream_id
+                );
+                self.send(refuse(TunnelRefuseReason::StreamLimit)).await;
                 return;
             }
             if streams.contains_key(&open.stream_id) {
                 drop(streams);
-                self.send(refuse("duplicate stream id".to_string())).await;
+                self.send(refuse(TunnelRefuseReason::Protocol)).await;
                 return;
             }
             streams.insert(
@@ -347,13 +353,14 @@ impl TunnelManager {
         let stream_id = open.stream_id;
         let port = open.port;
         tokio::spawn(async move {
-            let tcp = match dial_loopback_for_stream(port).await {
+            let tcp = match connect_loopback(port, STREAM_DIAL_RETRY_BUDGET).await {
                 Ok(tcp) => tcp,
                 Err(e) => {
                     mgr.remove_stream(stream_id).await;
+                    warn!("Tunnel dial to port {} refused: {}", port, e);
                     mgr.send(ProxyToServer::TunnelRefused(TunnelRefusedFields {
                         stream_id,
-                        error: e.to_string(),
+                        reason: TunnelRefuseReason::NoListener,
                     }))
                     .await;
                     return;
@@ -380,27 +387,20 @@ impl TunnelManager {
     }
 }
 
-/// The proxy only ever dials loopback — hard-coded, not configurable.
-async fn dial_loopback(port: u16) -> std::io::Result<TcpStream> {
-    TcpStream::connect(("127.0.0.1", port)).await
-}
-
-/// Dial loopback for a browser stream, retrying while the local service is
-/// momentarily unavailable so a forward self-heals across a quick backend
-/// restart instead of reporting the port dead. Each attempt is bounded by
-/// `DIAL_TIMEOUT`; a *refused* dial backs off briefly and retries until
-/// `STREAM_DIAL_RETRY_BUDGET` elapses. A dial that *times out* (the service is
-/// hung, not down) is not retried — repeating a multi-second hang would only
-/// stall the browser — so it fails immediately.
-async fn dial_loopback_for_stream(port: u16) -> std::io::Result<TcpStream> {
-    let deadline = Instant::now() + STREAM_DIAL_RETRY_BUDGET;
+/// Dial loopback (`127.0.0.1:{port}` — hard-coded, not configurable), the one
+/// dial used by *both* real browser streams and the health probe so the two
+/// can never disagree on what "up" means. Each attempt is bounded by
+/// `DIAL_TIMEOUT`; a *refused* dial backs off and retries until `budget`
+/// elapses (the local service is likely mid-restart), while a dial that *times
+/// out* (hung, not down) fails immediately without retry. A zero `budget`
+/// means a single attempt.
+async fn connect_loopback(port: u16, budget: Duration) -> std::io::Result<TcpStream> {
+    let deadline = Instant::now() + budget;
     let mut backoff = Duration::from_millis(100);
     loop {
-        match tokio::time::timeout(DIAL_TIMEOUT, dial_loopback(port)).await {
+        match tokio::time::timeout(DIAL_TIMEOUT, TcpStream::connect(("127.0.0.1", port))).await {
             Ok(Ok(tcp)) => return Ok(tcp),
             Ok(Err(e)) => {
-                // Refused (or similar) — the service is likely mid-restart.
-                // Back off and retry until the budget runs out.
                 if Instant::now() + backoff >= deadline {
                     return Err(e);
                 }
@@ -614,7 +614,7 @@ mod tests {
         let accept = tokio::spawn(async move {
             let _ = listener.accept().await;
         });
-        let stream = dial_loopback_for_stream(port).await;
+        let stream = connect_loopback(port, STREAM_DIAL_RETRY_BUDGET).await;
         assert!(stream.is_ok(), "expected immediate connect, got {stream:?}");
         let _ = accept.await;
     }
@@ -641,7 +641,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         });
 
-        let stream = dial_loopback_for_stream(port).await;
+        let stream = connect_loopback(port, STREAM_DIAL_RETRY_BUDGET).await;
         assert!(
             stream.is_ok(),
             "expected the retry to connect once the listener came up, got {stream:?}"
