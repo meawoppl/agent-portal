@@ -11,8 +11,10 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForwardInfo {
     pub port: u16,
-    /// Fully-formed public URL (`{scheme}://{label}.{domain}/`). The auto
-    /// label rotates on each registration to avoid stale browser origin state.
+    /// Fully-formed public URL (`{scheme}://{label}.{domain}/`). Stable for a
+    /// given port: re-registering the same port keeps the URL; the label only
+    /// rotates when the port changes (a different local service), to shed stale
+    /// browser origin state.
     pub url: String,
     /// Registration time, RFC 3339.
     pub created_at: String,

@@ -82,11 +82,13 @@ fn label_candidate() -> String {
     hex::encode(Uuid::new_v4().as_bytes())[..LABEL_HEX_LEN].to_string()
 }
 
-/// Allocate a fresh auto subdomain label for this active forward. A new label
-/// is minted on every `forward <port>` registration so a stale service worker,
-/// cookie, or browser cache from a previous local app cannot poison the next
-/// forward for the same agent session. Admin custom-subdomain aliases are
-/// stored separately and continue to route to the session.
+/// Mint a *fresh* auto subdomain label for this session's forward, replacing
+/// any existing one. Called only when the forward's port **changes** (a
+/// different local service), so a stale service worker, cookie, or browser
+/// cache from the previous app cannot poison the new URL. Same-port
+/// re-registration instead reuses the existing label via
+/// [`ensure_subdomain_label`] (idempotent — see `create_forward`). Admin
+/// custom-subdomain aliases are stored separately and continue to route.
 fn rotate_subdomain_label(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
@@ -297,7 +299,19 @@ pub async fn create_forward(
             .filter(session_forwards::session_id.eq(session_id))
             .select(SessionForward::as_select())
             .first(conn)?;
-        let label = rotate_subdomain_label(conn, session_id)?;
+        // Label policy: mint a *fresh* label only when the port actually
+        // changed — a different local service, so a stale service worker /
+        // cookie / cache from the old app must not poison the new URL. A
+        // same-port re-registration (or the first registration) is
+        // idempotent: keep the existing URL. Re-running `forward <port>` is
+        // exactly what an agent does while troubleshooting, and rotating the
+        // hostname out from under a tab the user still has open was its own
+        // failure mode (the retired URL just timed out) — #1476.
+        let label = if replaced_port.is_some() {
+            rotate_subdomain_label(conn, session_id)?
+        } else {
+            ensure_subdomain_label(conn, session_id)?
+        };
         Ok((session, row, label, replaced_port))
     })?;
 
