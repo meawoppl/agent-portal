@@ -27,7 +27,7 @@ use yew::prelude::*;
 use super::forward_chips::ForwardChips;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools,
-    enrich_codex_file_change_permission, format_tool_elapsed, is_claude_awaiting,
+    enrich_codex_file_change_permission, format_tool_elapsed, is_claude_awaiting, parse_iso_ms_utc,
     reconcile_pending_sends, running_tool_key, update_pending_send_delivery, upsert_tool_progress,
     ActiveToolProgress, ActivityTag,
 };
@@ -920,7 +920,7 @@ impl SessionView {
                     self.dispatch_tasks(TasksInbound::Replay(ev));
                 }
             }
-            let ts_ms = js_sys::Date::parse(&msg.created_at);
+            let ts_ms = parse_iso_ms_utc(&msg.created_at);
             if ts_ms.is_finite() {
                 ctx.props().on_activity.emit((session_id, tag, ts_ms));
             }
@@ -1023,7 +1023,7 @@ impl SessionView {
         crate::audio::play_sound(crate::audio::SoundEvent::Activity);
         let activity_ts = output
             .raw_iso()
-            .map(js_sys::Date::parse)
+            .map(parse_iso_ms_utc)
             .filter(|ts| ts.is_finite())
             .unwrap_or_else(js_sys::Date::now);
         ctx.props()
