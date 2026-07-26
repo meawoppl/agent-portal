@@ -1,8 +1,10 @@
 # Port Forwarding: Agent-Served HTTP Through the Portal
 
-Status: **spec / not implemented**. This is the remaining half of issue
-[#689](https://github.com/meawoppl/agent-portal/issues/689) — the download half
-shipped as [PORTAL_FILE_DOWNLOADS.md](PORTAL_FILE_DOWNLOADS.md).
+Status: **shipped** (issue
+[#689](https://github.com/meawoppl/agent-portal/issues/689); the download half
+is [PORTAL_FILE_DOWNLOADS.md](PORTAL_FILE_DOWNLOADS.md)). The sections below
+describe the design as built. A July 2026 re-seam hardened the failure paths —
+see [Failure legibility & the error taxonomy](#failure-legibility--the-error-taxonomy).
 
 ## Goal
 
@@ -346,6 +348,54 @@ Response rewriting is limited to headers:
   the app's own (mis)behavior and scoping it is not our job.
 
 No HTML/URL body rewriting, ever — origin isolation makes it unnecessary.
+
+## Failure legibility & the error taxonomy
+
+The July 2026 re-seam made "why did this forward fail?" answerable by
+construction. The rickety part was never the happy path — it was that many
+distinct failures collapsed into one opaque string (`forward open timed out`,
+`nothing is listening`) that reached only the user's browser, leaving the agent
+that caused it debugging blind.
+
+**One taxonomy.** Every failure maps to exactly one `shared::api::ForwardError`
+variant, each carrying a stable kebab `code`, an HTTP status, a `title`, and an
+actionable `detail`. The backend funnels *every* forward-origin failure through
+one renderer (`forward_proxy::forward_error`), which emits: the mapped status, a
+small dark HTML page (`title` + `detail`), and the `code` in an
+`x-portal-forward-error` header so a client can branch without scraping prose.
+Codes: `not-configured`, `unavailable`, `unknown-forward`, `revoked`,
+`auth-required`, `session-expired`, `agent-offline`, `agent-unreachable`,
+`open-interrupted`, `no-listener`, `at-capacity`, `not-forwarded`, `bad-origin`,
+`protocol-fault`, `bad-request`.
+
+**The old opaque cases, de-collapsed.** `forward open timed out` now splits into
+`agent-offline` (no proxy connected), `agent-unreachable` (registered but
+silent — see below), and `open-interrupted` (tunnel tore down mid-open). Tunnel
+refusals split into `no-listener` / `at-capacity` / `not-forwarded` /
+`protocol-fault`.
+
+**Liveness fast-fail.** `open_tunnel` checks the connection's `last_seen`
+against `PROXY_LIVENESS_DEADLINE_SECS` before sending `TunnelOpen`. A proxy
+whose transport is gone but whose registry entry the sweeper hasn't yet evicted
+fails instantly as `agent-offline` instead of hanging the full `OPEN_TIMEOUT`.
+
+**Agent-visible failures.** Recent per-session failures (typed code + port +
+time, newest first, capped) are recorded at the tunnel-open failure site and
+returned by `GET …/forwards` in `recent_failures`; `agent-portal forward list`
+prints them. The agent now sees the same verdict the browser saw (#1476).
+
+**Idempotent registration.** `forward <port>` returns the *same* URL for the
+same session and port; the subdomain label rotates only when the port changes.
+Re-running `forward` while debugging no longer retires a URL the user still has
+open (#1476).
+
+**Deferred: data-plane pooling.** Replacing the hand-rolled per-request
+`http1::handshake` with a pooled `hyper_util` client over a tunnel connector is
+tracked in [#1468](https://github.com/meawoppl/agent-portal/issues/1468). It
+carries a real wrinkle (preserving the typed `ForwardError` through the pooling
+client) and touches the WebSocket-upgrade path, and CI exercises none of the
+live forward path — so it must land behind a conformance test **and** a live
+upgrade/concurrency smoke test, not on green CI alone.
 
 ## Security model
 
