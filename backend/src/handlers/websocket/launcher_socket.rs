@@ -1138,15 +1138,42 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
     }
 }
 
+/// Consecutive failed launches after which reconcile gives up and auto-pauses
+/// the session instead of relaunching it forever. With the exponential backoff
+/// below this is reached after the delay has already stretched to the 15-min
+/// cap, so a genuinely-transient flap has had ample chance to recover first.
+const LAUNCH_CRASHLOOP_GIVEUP: i32 = 10;
+
+/// Whether an exit reason counts as a *launch failure* that should accrue
+/// backoff (and, past [`LAUNCH_CRASHLOOP_GIVEUP`], auto-pause). `Completed`
+/// resets; `Stopped` is a clean intentional exit. Everything else is a failure
+/// — crucially including `Error` / `RegistrationRejected`, which a bad-auth 401
+/// often surfaces as and which previously accrued nothing, letting a
+/// permanently-unauthed session relaunch forever.
+fn exit_is_launch_failure(reason: shared::SessionExitReason) -> bool {
+    use shared::SessionExitReason::*;
+    matches!(
+        reason,
+        CrashedEarly | ResumeTargetMissing | Error | RegistrationRejected
+    )
+}
+
+/// Whether a session with this many consecutive failed launches should be
+/// given up on (auto-paused) rather than retried again. Pure for unit testing.
+fn crashloop_give_up(failure_count: i32) -> bool {
+    failure_count >= LAUNCH_CRASHLOOP_GIVEUP
+}
+
 /// Adjust a session's launch-backoff state from why its proxy exited.
 ///
-/// `CrashedEarly` / `ResumeTargetMissing` bump `launch_failure_count` (so
-/// `launch_backoff` throttles the next relaunch); a healthy `Completed` run
-/// resets it. Other reasons are neutral. This is the counterpart to the
-/// launch-failure bump in the `LaunchSessionResult` handler — together they make
-/// `launch_failure_count` reflect *runtime* health, not just whether the spawn
-/// itself succeeded, which is why the reset moved off registration (a crash loop
-/// registers every time). See the crash-loop investigation.
+/// A healthy `Completed` run resets `launch_failure_count`; `Stopped` is
+/// neutral; every other reason ([`exit_is_launch_failure`]) bumps the counter
+/// so `launch_backoff` throttles the next relaunch. Once the counter reaches
+/// [`LAUNCH_CRASHLOOP_GIVEUP`] the session is **auto-paused** (`paused = true`),
+/// which drops it from the reconcile desired-set so it stops relaunching — the
+/// hard give-up that stops a permanently-failing session (e.g. bad host
+/// credentials) from flooding logs/DB forever. This is the counterpart to the
+/// launch-failure bump in the `LaunchSessionResult` handler.
 fn record_exit_for_backoff(
     conn: &mut diesel::PgConnection,
     session_id: Uuid,
@@ -1154,29 +1181,71 @@ fn record_exit_for_backoff(
 ) {
     use crate::schema::sessions;
     use diesel::prelude::*;
-    use shared::SessionExitReason::*;
+    use shared::SessionExitReason::Completed;
 
-    let result = match reason {
-        CrashedEarly | ResumeTargetMissing => diesel::update(sessions::table.find(session_id))
-            .set((
-                sessions::launch_failure_count.eq(sessions::launch_failure_count + 1),
-                sessions::last_launch_attempt_at.eq(diesel::dsl::now),
-                sessions::updated_at.eq(diesel::dsl::now),
-            ))
-            .execute(conn),
-        Completed => diesel::update(sessions::table.find(session_id))
+    if matches!(reason, Completed) {
+        if let Err(e) = diesel::update(sessions::table.find(session_id))
             .set((
                 sessions::launch_failure_count.eq(0),
                 sessions::updated_at.eq(diesel::dsl::now),
             ))
-            .execute(conn),
-        RegistrationRejected | Stopped | Error => Ok(0),
+            .execute(conn)
+        {
+            warn!(
+                "Failed to reset launch backoff for session {}: {}",
+                session_id, e
+            );
+        }
+        return;
+    }
+    if !exit_is_launch_failure(reason) {
+        return; // Stopped: an intentional exit, not a failure.
+    }
+
+    // Bump the failure counter and read back the new value in one round-trip.
+    let bumped = diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::launch_failure_count.eq(sessions::launch_failure_count + 1),
+            sessions::last_launch_attempt_at.eq(diesel::dsl::now),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .returning(sessions::launch_failure_count)
+        .get_result::<i32>(conn)
+        .optional();
+    let count = match bumped {
+        Ok(Some(count)) => count,
+        Ok(None) => return, // row deleted out from under us
+        Err(e) => {
+            warn!(
+                "Failed to record exit backoff for session {}: {}",
+                session_id, e
+            );
+            return;
+        }
     };
-    if let Err(e) = result {
-        warn!(
-            "Failed to record exit backoff for session {}: {}",
-            session_id, e
-        );
+
+    if crashloop_give_up(count) {
+        // Give up: park the session so reconcile stops relaunching it. Idempotent
+        // — once paused it isn't relaunched, so no further exits accrue.
+        match diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::paused.eq(true),
+                sessions::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(conn)
+        {
+            Ok(_) => warn!(
+                "{} session {} auto-paused after {} consecutive failed launches (last exit: {:?})",
+                crate::markers::SESSION_LAUNCH_CRASHLOOP_PAUSED,
+                session_id,
+                count,
+                reason
+            ),
+            Err(e) => warn!(
+                "Failed to auto-pause crash-looping session {}: {}",
+                session_id, e
+            ),
+        }
     }
 }
 
@@ -1210,7 +1279,8 @@ fn get_dev_user_id(app_state: &AppState) -> Uuid {
 #[cfg(test)]
 mod tests {
     use super::{
-        launch_backoff, launcher_token_needs_refresh, recent_refresh_cutoff, token_grace_expires_at,
+        crashloop_give_up, exit_is_launch_failure, launch_backoff, launcher_token_needs_refresh,
+        recent_refresh_cutoff, token_grace_expires_at, LAUNCH_CRASHLOOP_GIVEUP,
     };
 
     #[test]
@@ -1238,6 +1308,27 @@ mod tests {
         // cap rather than overflowing the left-shift.
         assert_eq!(launch_backoff(1000).num_seconds(), 900);
         assert_eq!(launch_backoff(i32::MAX).num_seconds(), 900);
+    }
+
+    #[test]
+    fn launch_failure_covers_all_fast_fail_exits() {
+        use shared::SessionExitReason::*;
+        // A bad-auth 401 can surface as any of these; all must accrue backoff.
+        assert!(exit_is_launch_failure(CrashedEarly));
+        assert!(exit_is_launch_failure(ResumeTargetMissing));
+        assert!(exit_is_launch_failure(Error));
+        assert!(exit_is_launch_failure(RegistrationRejected));
+        // Healthy or intentional exits do not.
+        assert!(!exit_is_launch_failure(Completed));
+        assert!(!exit_is_launch_failure(Stopped));
+    }
+
+    #[test]
+    fn crashloop_give_up_triggers_at_the_threshold() {
+        assert!(!crashloop_give_up(0));
+        assert!(!crashloop_give_up(LAUNCH_CRASHLOOP_GIVEUP - 1));
+        assert!(crashloop_give_up(LAUNCH_CRASHLOOP_GIVEUP));
+        assert!(crashloop_give_up(LAUNCH_CRASHLOOP_GIVEUP + 5));
     }
 
     #[test]
