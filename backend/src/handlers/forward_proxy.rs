@@ -534,6 +534,12 @@ async fn proxy_request(
             if ferr == ForwardError::NoListener {
                 note_reachability(app_state, session_key, session_id, port, false);
             }
+            // Surface it to the owning agent (visible on its next `forwards`
+            // poll) so a failure the browser hit isn't invisible to the agent
+            // that caused it (#1476).
+            app_state
+                .session_manager
+                .record_forward_failure(session_id, port, ferr);
             warn!(
                 "Tunnel open failed for {}:{}: {} ({})",
                 session_id,
