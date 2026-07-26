@@ -128,6 +128,23 @@ pub const RETENTION_TRIM_HELD: &str = "RETENTION_TRIM_HELD";
 ///   `SESSION_ARCHIVE_FAILED`).
 pub const MEDIA_ARCHIVE_FAILED: &str = "MEDIA_ARCHIVE_FAILED";
 
+/// Emitted when a session is **auto-paused after crash-looping** — it failed to
+/// launch `LAUNCH_CRASHLOOP_GIVEUP` times in a row, so reconcile gives up
+/// relaunching it (sets `paused = true`) instead of retrying forever. The most
+/// common cause is invalid/expired agent credentials on the launcher host (a
+/// `401 Invalid authentication credentials` from the `claude` binary), which
+/// makes every launch fail in seconds.
+///
+/// - **Recurring / many distinct sessions:** a host-wide credential or config
+///   problem (expired Claude login, wrong env) — every session on that launcher
+///   will park.
+/// - **One-off:** a single mis-provisioned session; it stays paused until a
+///   human fixes the cause and resumes it.
+/// - **Action:** fix the credentials/config on the launcher host, then resume
+///   the paused session(s). Until then, auto-pause is the desired outcome — it
+///   is what stops the log/DB flood.
+pub const SESSION_LAUNCH_CRASHLOOP_PAUSED: &str = "SESSION_LAUNCH_CRASHLOOP_PAUSED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +160,7 @@ mod tests {
         ARCHIVE_SWEEP_FAILED,
         RETENTION_TRIM_HELD,
         MEDIA_ARCHIVE_FAILED,
+        SESSION_LAUNCH_CRASHLOOP_PAUSED,
     ];
 
     #[test]
@@ -185,6 +203,7 @@ mod tests {
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),
             include_str!("handlers/media_archive.rs"),
+            include_str!("handlers/websocket/launcher_socket.rs"),
         ];
         for m in ALL_MARKERS {
             let referenced = sources.iter().any(|s| s.contains(m));
