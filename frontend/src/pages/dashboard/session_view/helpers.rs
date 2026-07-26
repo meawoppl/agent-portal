@@ -261,6 +261,36 @@ pub(super) fn is_claude_awaiting(
         .is_some_and(|t| t == ActivityTag::Result)
 }
 
+/// Parse a server ISO timestamp to epoch-ms, treating a timezone-less string
+/// as UTC.
+///
+/// The backend serializes message `created_at` as a *naive* datetime (e.g.
+/// `2026-05-17T12:34:56.789`, no offset — see `backend/handlers/messages.rs`).
+/// `js_sys::Date::parse` reads a date-time form without an offset as *local*
+/// time, so on a browser west of UTC the event lands hours in the future
+/// relative to `js_sys::Date::now()`. That pushed sparkline ticks far past the
+/// 100% right edge (`left: ~8000%`) — invisibly off the pill. Appending `Z`
+/// when the string carries no timezone pins it to UTC so it lines up with
+/// `Date::now()`. Returns `NaN` when unparseable (callers check `is_finite`).
+pub(super) fn parse_iso_ms_utc(iso: &str) -> f64 {
+    js_sys::Date::parse(&normalize_iso_utc(iso))
+}
+
+/// Append a `Z` when an ISO timestamp carries no timezone designator, so it is
+/// read as UTC rather than local time. A designator is a `Z` or a `+`/`-`
+/// offset in the time portion (after `T`); date hyphens don't count. Pure so
+/// the timezone decision is unit-testable without a browser `Date`.
+fn normalize_iso_utc(iso: &str) -> std::borrow::Cow<'_, str> {
+    let has_tz = iso
+        .split_once('T')
+        .is_some_and(|(_, time)| time.contains(['Z', '+', '-']));
+    if has_tz {
+        std::borrow::Cow::Borrowed(iso)
+    } else {
+        std::borrow::Cow::Owned(format!("{iso}Z"))
+    }
+}
+
 /// Derive the [`ActivityTag`] used by `on_activity` / `CheckAwaiting` from a
 /// raw wire JSON string. Centralizes the parse-and-classify dance previously
 /// duplicated between `LoadHistory` (REST replay) and `handle_received_output`
@@ -589,6 +619,37 @@ pub(crate) fn format_tool_elapsed(seconds: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_iso_utc_appends_z_only_when_no_timezone() {
+        // Naive (the backend's message created_at shape) → pinned to UTC.
+        assert_eq!(
+            normalize_iso_utc("2026-05-17T12:34:56.789"),
+            "2026-05-17T12:34:56.789Z"
+        );
+        assert_eq!(
+            normalize_iso_utc("2026-05-17T12:34:56"),
+            "2026-05-17T12:34:56Z"
+        );
+        // Already zoned → untouched (Z or explicit offset).
+        assert_eq!(
+            normalize_iso_utc("2026-05-17T12:34:56Z"),
+            "2026-05-17T12:34:56Z"
+        );
+        assert_eq!(
+            normalize_iso_utc("2026-05-17T12:34:56+00:00"),
+            "2026-05-17T12:34:56+00:00"
+        );
+        assert_eq!(
+            normalize_iso_utc("2026-05-17T12:34:56-05:00"),
+            "2026-05-17T12:34:56-05:00"
+        );
+        // Date hyphens must not be mistaken for an offset.
+        assert_eq!(
+            normalize_iso_utc("2026-05-17T00:00:00"),
+            "2026-05-17T00:00:00Z"
+        );
+    }
 
     fn pending(content: &str) -> RenderedMessage {
         RenderedMessage::new(format!(r#"{{"type":"user","content":"{content}"}}"#), None)
