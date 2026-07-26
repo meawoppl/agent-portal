@@ -292,6 +292,9 @@ fn log_claude_output(output: &ClaudeOutput) {
                 ControlRequestPayload::Initialize(_) => {
                     debug!("  initialize");
                 }
+                ControlRequestPayload::Interrupt => {
+                    debug!("  interrupt");
+                }
             }
         }
         ClaudeOutput::ControlResponse(resp) => {

@@ -479,6 +479,10 @@ mod tests {
             structured_output: None,
             deferred_tool_use: None,
             origin: None,
+            // 2.1.163/2.1.164 additions — also absent here.
+            request_sent_wall_ms: None,
+            user_message_uuid: None,
+            fast_mode_disabled_reason: None,
         }
     }
 
