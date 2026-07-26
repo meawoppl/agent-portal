@@ -1,52 +1,52 @@
-/* Archive-viewer chrome. Reuses the portal's Tokyo-Night theme variables from
-   base.css (--bg-dark, --accent, etc.) so the browser and transcript surfaces
-   match the live app; the transcript message bodies come entirely from the
-   portal's own messages.css / tool styles. */
+/* Session-history browser (/history). Ported from the standalone archive
+   viewer; scoped under .history-root so nothing leaks into the dashboard.
+   The transcript message bodies come entirely from the portal's own
+   messages.css / tool styles. */
 
-body {
-    margin: 0;
-    background: var(--bg-dark, #1a1b26);
-    color: var(--text, #c0caf5);
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
-
-.viewer-root {
+.history-root {
     max-width: 1200px;
     margin: 0 auto;
     padding: 1.5rem;
 }
 
-.viewer-header h1 {
+.history-root .history-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.history-root .history-header h1 {
     font-size: 1.25rem;
     font-weight: 600;
     margin: 0 0 1rem;
     color: var(--text-bright, #c0caf5);
 }
 
-.viewer-nav {
+.history-root .history-nav {
     margin-bottom: 1rem;
 }
 
-.viewer-nav a,
-.viewer-empty a {
+.history-root .history-nav a,
+.history-root .history-empty a {
     color: var(--accent, #7aa2f7);
     text-decoration: none;
 }
 
-.viewer-nav a:hover,
-.viewer-empty a:hover {
+.history-root .history-nav a:hover,
+.history-root .history-empty a:hover {
     text-decoration: underline;
 }
 
-/* --- Rollup strip --- */
-.viewer-rollup {
+/* --- Stats strip --- */
+.history-root .history-rollup {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
     margin-bottom: 1.25rem;
 }
 
-.rollup-tile {
+.history-root .rollup-tile {
     display: flex;
     flex-direction: column;
     background: var(--bg-darker, #16161e);
@@ -56,23 +56,23 @@ body {
     min-width: 6rem;
 }
 
-.rollup-value {
+.history-root .rollup-value {
     font-size: 1.2rem;
     font-weight: 700;
     color: var(--text-bright, #c0caf5);
 }
 
-.rollup-label {
+.history-root .rollup-label {
     font-size: 0.75rem;
     color: var(--text-dim, #7f849c);
 }
 
-.rollup-user .rollup-value {
+.history-root .rollup-user .rollup-value {
     color: var(--accent, #7aa2f7);
 }
 
 /* --- Filters --- */
-.viewer-filters {
+.history-root .history-filters {
     display: flex;
     flex-wrap: wrap;
     gap: 1rem;
@@ -80,7 +80,7 @@ body {
     align-items: flex-end;
 }
 
-.viewer-filters label {
+.history-root .history-filters label {
     display: flex;
     flex-direction: column;
     font-size: 0.75rem;
@@ -88,8 +88,8 @@ body {
     gap: 0.25rem;
 }
 
-.viewer-filters select,
-.viewer-filters input {
+.history-root .history-filters select,
+.history-root .history-filters input {
     background: var(--bg-darker, #16161e);
     color: var(--text, #c0caf5);
     border: 1px solid var(--border, #292e42);
@@ -98,19 +98,19 @@ body {
     font-size: 0.85rem;
 }
 
-.viewer-filter-search input {
+.history-root .history-filter-search input {
     min-width: 12rem;
 }
 
 /* --- Session table --- */
-.viewer-table {
+.history-root .history-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.85rem;
 }
 
-.viewer-table th,
-.viewer-table td {
+.history-root .history-table th,
+.history-root .history-table td {
     text-align: left;
     padding: 0.5rem 0.6rem;
     border-bottom: 1px solid var(--border, #292e42);
@@ -120,7 +120,7 @@ body {
     max-width: 22ch;
 }
 
-.viewer-table th {
+.history-root .history-table th {
     color: var(--text-dim, #7f849c);
     font-weight: 600;
     position: sticky;
@@ -128,36 +128,36 @@ body {
     background: var(--bg-dark, #1a1b26);
 }
 
-.viewer-table th.num,
-.viewer-table td.num {
+.history-root .history-table th.num,
+.history-root .history-table td.num {
     text-align: right;
 }
 
-.viewer-row {
+.history-root .history-row {
     cursor: pointer;
 }
 
-.viewer-row:hover {
+.history-root .history-row:hover {
     background: var(--bg-highlight, #1f2335);
 }
 
-.cell-name a {
+.history-root .cell-name a {
     color: var(--accent, #7aa2f7);
     text-decoration: none;
     font-weight: 600;
 }
 
-.cell-date {
+.history-root .cell-date {
     color: var(--text-dim, #7f849c);
 }
 
-.cell-models {
+.history-root .cell-models {
     color: var(--text-dim, #7f849c);
     font-size: 0.78rem;
 }
 
 /* --- Manifest header card --- */
-.viewer-manifest-card {
+.history-root .history-manifest-card {
     background: var(--bg-darker, #16161e);
     border: 1px solid var(--border, #292e42);
     border-radius: 10px;
@@ -165,42 +165,42 @@ body {
     margin-bottom: 1.5rem;
 }
 
-.viewer-manifest-card h2 {
+.history-root .history-manifest-card h2 {
     margin: 0 0 0.75rem;
     font-size: 1.1rem;
     color: var(--text-bright, #c0caf5);
 }
 
-.manifest-grid {
+.history-root .manifest-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 0.4rem 1.5rem;
 }
 
-.manifest-field {
+.history-root .manifest-field {
     display: flex;
     gap: 0.5rem;
     font-size: 0.82rem;
 }
 
-.manifest-key {
+.history-root .manifest-key {
     color: var(--text-dim, #7f849c);
     min-width: 6rem;
 }
 
-.manifest-val {
+.history-root .manifest-val {
     color: var(--text, #c0caf5);
     word-break: break-word;
 }
 
-.manifest-provenance {
+.history-root .manifest-provenance {
     margin-top: 0.75rem;
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
 }
 
-.provenance-chip {
+.history-root .provenance-chip {
     font-size: 0.72rem;
     color: var(--text-dim, #7f849c);
     background: var(--bg-dark, #1a1b26);
@@ -210,14 +210,14 @@ body {
 }
 
 /* --- Loading / error / empty states --- */
-.viewer-loading,
-.viewer-empty {
+.history-root .history-loading,
+.history-root .history-empty {
     color: var(--text-dim, #7f849c);
     padding: 1.5rem 0;
     text-align: center;
 }
 
-.viewer-error {
+.history-root .history-error {
     color: var(--error, #f7768e);
     background: rgba(247, 118, 142, 0.08);
     border: 1px solid var(--error, #f7768e);

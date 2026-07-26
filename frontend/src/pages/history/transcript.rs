@@ -1,74 +1,85 @@
-//! Transcript view (`#/session/{user}/{session}`): manifest header card plus
-//! the archived messages rendered with the real portal renderers.
+//! History transcript view (`/history/{user}/{session}`): manifest header
+//! card plus the archived messages rendered with the real portal renderers.
 
 use std::str::FromStr;
 
-use frontend::viewer_api::{group_messages, MessageGroupRenderer, RenderedMessage};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
+use yew_router::prelude::*;
 
-use crate::api::{self, FetchError, Manifest, MessageLine};
-use crate::media_rewrite::rewrite_media_urls;
+use shared::api::{HistoryManifest, HistoryMessageLine};
 
-type Load<T> = Option<Result<T, FetchError>>;
+use super::fetch::{self, fetch_json, Load};
+use super::media_rewrite::rewrite_media_urls;
+use crate::components::message_renderer::{group_messages, MessageGroupRenderer, RenderedMessage};
+use crate::Route;
 
 #[derive(Properties, PartialEq)]
-pub struct TranscriptProps {
+pub struct HistoryTranscriptProps {
     pub user: String,
     pub session: String,
 }
 
-#[function_component(TranscriptView)]
-pub fn transcript_view(props: &TranscriptProps) -> Html {
-    let manifest = use_state(|| None as Load<Manifest>);
-    let messages = use_state(|| None as Load<Vec<MessageLine>>);
+#[function_component(HistoryTranscriptPage)]
+pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
+    let manifest = use_state(|| None as Load<HistoryManifest>);
+    let messages = use_state(|| None as Load<Vec<HistoryMessageLine>>);
 
     {
         let manifest = manifest.clone();
         let messages = messages.clone();
         let user = props.user.clone();
         let session = props.session.clone();
-        use_effect_with((user.clone(), session.clone()), move |(user, session)| {
-            let path = format!("/api/sessions/{user}/{session}/manifest");
+        use_effect_with((user, session), move |(user, session)| {
+            let path = format!("/api/history/sessions/{user}/{session}/manifest");
             {
                 let manifest = manifest.clone();
                 spawn_local(async move {
-                    manifest.set(Some(api::fetch_json::<Manifest>(&path).await));
+                    manifest.set(Some(fetch_json::<HistoryManifest>(&path).await));
                 });
             }
             {
                 let (user, session) = (user.clone(), session.clone());
                 spawn_local(async move {
-                    messages.set(Some(api::fetch_messages(&user, &session).await));
+                    messages.set(Some(fetch::fetch_messages(&user, &session).await));
                 });
             }
             || ()
         });
     }
 
-    // Agent type governs grouping; fall back to Claude if the manifest is not
-    // (yet) loaded or carries an unknown value.
+    // Agent type governs grouping: prefer the manifest, fall back to the
+    // first archived line's own agent_type (so a Codex transcript renders
+    // correctly even while the manifest is in flight or failed).
     let agent_type = match &*manifest {
         Some(Ok(m)) => shared::AgentType::from_str(&m.agent_type).unwrap_or_default(),
-        _ => shared::AgentType::default(),
+        _ => match &*messages {
+            Some(Ok(lines)) => lines
+                .first()
+                .and_then(|l| shared::AgentType::from_str(&l.agent_type).ok())
+                .unwrap_or_default(),
+            _ => shared::AgentType::default(),
+        },
     };
     let session_id = Uuid::from_str(&props.session).unwrap_or(Uuid::nil());
 
     html! {
-        <div class="viewer-root viewer-transcript">
-            <nav class="viewer-nav"><a href="#/">{ "← All sessions" }</a></nav>
+        <div class="history-root history-transcript">
+            <nav class="history-nav">
+                <Link<Route> to={Route::History}>{ "← All sessions" }</Link<Route>>
+            </nav>
             { header_card(&manifest) }
             { transcript_body(&messages, &props.user, &props.session, agent_type, session_id) }
         </div>
     }
 }
 
-fn header_card(manifest: &Load<Manifest>) -> Html {
+fn header_card(manifest: &Load<HistoryManifest>) -> Html {
     match manifest {
-        None => html! { <div class="viewer-loading">{ "Loading manifest…" }</div> },
+        None => html! { <div class="history-loading">{ "Loading manifest…" }</div> },
         Some(Err(e)) => html! {
-            <div class="viewer-error">{ format!("Could not load manifest: {e}") }</div>
+            <div class="history-error">{ format!("Could not load manifest: {e}") }</div>
         },
         Some(Ok(m)) => {
             let name = if m.session_name.is_empty() {
@@ -77,7 +88,7 @@ fn header_card(manifest: &Load<Manifest>) -> Html {
                 m.session_name.clone()
             };
             html! {
-                <div class="viewer-manifest-card">
+                <div class="history-manifest-card">
                     <h2>{ name }</h2>
                     <div class="manifest-grid">
                         { field("Agent", &m.agent_type) }
@@ -96,7 +107,6 @@ fn header_card(manifest: &Load<Manifest>) -> Html {
                     </div>
                     <div class="manifest-provenance">
                         { provenance("launcher", &m.launcher_version) }
-                        { provenance("client", &m.client_version) }
                         { provenance("archiver", &m.archived_by_version) }
                     </div>
                 </div>
@@ -105,7 +115,7 @@ fn header_card(manifest: &Load<Manifest>) -> Html {
     }
 }
 
-fn owner(m: &Manifest) -> String {
+fn owner(m: &HistoryManifest) -> String {
     match &m.owner_name {
         Some(n) if !n.is_empty() => format!("{n} <{}>", m.owner_email),
         _ => m.owner_email.clone(),
@@ -141,19 +151,19 @@ fn provenance(label: &str, version: &Option<String>) -> Html {
 }
 
 fn transcript_body(
-    messages: &Load<Vec<MessageLine>>,
+    messages: &Load<Vec<HistoryMessageLine>>,
     user: &str,
     session: &str,
     agent_type: shared::AgentType,
     session_id: Uuid,
 ) -> Html {
     match messages {
-        None => html! { <div class="viewer-loading">{ "Loading transcript…" }</div> },
+        None => html! { <div class="history-loading">{ "Loading transcript…" }</div> },
         Some(Err(e)) => html! {
-            <div class="viewer-error">{ format!("Could not load transcript: {e}") }</div>
+            <div class="history-error">{ format!("Could not load transcript: {e}") }</div>
         },
         Some(Ok(lines)) if lines.is_empty() => html! {
-            <div class="viewer-empty">{ "This session has no archived messages." }</div>
+            <div class="history-empty">{ "This session has no archived messages." }</div>
         },
         Some(Ok(lines)) => {
             let rendered: Vec<RenderedMessage> = lines
@@ -174,9 +184,9 @@ fn transcript_body(
 
 /// Build a `RenderedMessage` from one archived line: serialize the stored
 /// content back to its wire JSON string, rewrite archived media URLs to the
-/// viewer's session-scoped endpoint, and attach the row timestamp so the
-/// renderers show real times.
-fn to_rendered(line: &MessageLine, user: &str, session: &str) -> RenderedMessage {
+/// history media endpoint, and attach the row timestamp so the renderers show
+/// real times.
+fn to_rendered(line: &HistoryMessageLine, user: &str, session: &str) -> RenderedMessage {
     let raw = serde_json::to_string(&line.content).unwrap_or_else(|_| "{}".to_string());
     let content = rewrite_media_urls(&raw, user, session);
     let meta = shared::PortalMeta {

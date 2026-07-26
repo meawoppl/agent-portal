@@ -8,7 +8,7 @@ use archive_format::{
     ArchiveMessageLine, ArchiveStore, ArchivedMediaMeta, LocalArchiveStore, SessionArchiveBundle,
 };
 use chrono::{NaiveDate, NaiveDateTime};
-use serde_json::json;
+use serde::Serialize;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -50,6 +50,48 @@ fn msg(role: &str, day_of_month: u32, content: serde_json::Value) -> ArchiveMess
     }
 }
 
+fn text_value(text: &str) -> serde_json::Value {
+    serde_json::Value::String(text.to_string())
+}
+
+#[derive(Serialize)]
+struct AssistantFixture {
+    content: Vec<AssistantFixtureBlock>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AssistantFixtureBlock {
+    Thinking {
+        thinking: &'static str,
+    },
+    Text {
+        text: &'static str,
+    },
+    ToolUse {
+        name: &'static str,
+        input: std::collections::BTreeMap<&'static str, &'static str>,
+    },
+}
+
+fn assistant_fixture_value() -> serde_json::Value {
+    serde_json::to_value(AssistantFixture {
+        content: vec![
+            AssistantFixtureBlock::Thinking {
+                thinking: "hidden reasoning",
+            },
+            AssistantFixtureBlock::Text {
+                text: "starting the refactor",
+            },
+            AssistantFixtureBlock::ToolUse {
+                name: "Edit",
+                input: std::collections::BTreeMap::new(),
+            },
+        ],
+    })
+    .unwrap()
+}
+
 /// Build the fixture archive and return the tempdir (kept alive) + store.
 fn build_fixture() -> (TempDir, ArchiveStore) {
     let dir = tempfile::tempdir().unwrap();
@@ -83,17 +125,9 @@ fn build_fixture() -> (TempDir, ArchiveStore) {
         .put_session_archive(&SessionArchiveBundle {
             manifest: a1,
             transcript_ndjson: Some(ndjson(&[
-                msg("user", 14, json!("please refactor the rail")),
-                msg(
-                    "assistant",
-                    14,
-                    json!({"content": [
-                        {"type": "thinking", "thinking": "hidden reasoning"},
-                        {"type": "text", "text": "starting the refactor"},
-                        {"type": "tool_use", "name": "Edit", "input": {}},
-                    ]}),
-                ),
-                msg("user", 14, json!("thanks")),
+                msg("user", 14, text_value("please refactor the rail")),
+                msg("assistant", 14, assistant_fixture_value()),
+                msg("user", 14, text_value("thanks")),
             ])),
         })
         .unwrap();
@@ -129,7 +163,7 @@ fn build_fixture() -> (TempDir, ArchiveStore) {
     store
         .put_session_archive(&SessionArchiveBundle {
             manifest: a2,
-            transcript_ndjson: Some(ndjson(&[msg("user", 12, json!("update the docs"))])),
+            transcript_ndjson: Some(ndjson(&[msg("user", 12, text_value("update the docs"))])),
         })
         .unwrap();
 
@@ -150,7 +184,7 @@ fn build_fixture() -> (TempDir, ArchiveStore) {
     store
         .put_session_archive(&SessionArchiveBundle {
             manifest: b1,
-            transcript_ndjson: Some(ndjson(&[msg("user", 13, json!("spike a codex flow"))])),
+            transcript_ndjson: Some(ndjson(&[msg("user", 13, text_value("spike a codex flow"))])),
         })
         .unwrap();
 

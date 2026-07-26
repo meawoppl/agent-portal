@@ -792,6 +792,11 @@ pub struct AppConfig {
     /// displaying this text as the heading. Set via SPLASH_TEXT env var.
     #[serde(default)]
     pub splash_text: Option<String>,
+    /// Whether the long-term session archive is enabled
+    /// (`PORTAL_SESSION_ARCHIVE_BACKEND`). Drives history-aware UI copy:
+    /// closing a session preserves archived history only when this is true.
+    #[serde(default)]
+    pub archive_enabled: bool,
 }
 
 #[cfg(test)]

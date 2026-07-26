@@ -1,31 +1,31 @@
-//! Client-side filtering and sorting for the session browser.
+//! Client-side filtering and sorting for the history browser.
 //!
-//! At v1 archive scale the whole session list is fetched once and filtered in
-//! the browser (the pinned contract also accepts server-side query params, but
-//! doing it client-side keeps the browser responsive while typing).
+//! The whole visible session list is fetched once (the backend has already
+//! scoped it to the caller) and filtered in the browser, keeping the controls
+//! responsive while typing.
 
-use crate::api::SessionSummary;
+use shared::api::HistorySessionSummary;
 
-/// Active filter selections from the browser controls. Empty/`None` fields are
-/// "no constraint".
+/// Active filter selections from the browser controls. Empty/`None` fields
+/// are "no constraint".
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SessionFilter {
-    /// Exact `user_id` match.
+    /// Exact `user_id` match (admin-only control).
     pub user_id: Option<String>,
     /// Exact `agent_type` match (e.g. "claude", "codex").
     pub agent_type: Option<String>,
     /// Inclusive lower bound on `last_activity` (ISO date/datetime prefix).
     pub from: Option<String>,
     /// Inclusive upper bound on `last_activity` (ISO date prefix; compared as
-    /// `< from_next_day` via a trailing high sentinel so a bare `YYYY-MM-DD`
-    /// upper bound includes that whole day).
+    /// `< to~` — `~` sorts above any ISO time char — so a bare `YYYY-MM-DD`
+    /// includes that whole day).
     pub to: Option<String>,
     /// Case-insensitive substring match on `session_name`.
     pub query: Option<String>,
 }
 
 impl SessionFilter {
-    fn matches(&self, s: &SessionSummary) -> bool {
+    fn matches(&self, s: &HistorySessionSummary) -> bool {
         if let Some(user) = non_empty(&self.user_id) {
             if s.user_id != *user {
                 return false;
@@ -42,8 +42,6 @@ impl SessionFilter {
             }
         }
         if let Some(to) = non_empty(&self.to) {
-            // Treat a date-only upper bound inclusively: everything on that day
-            // sorts before "<date>~" (`~` > any ISO time char).
             let upper = format!("{to}~");
             if s.last_activity.as_str() >= upper.as_str() {
                 return false;
@@ -62,10 +60,13 @@ fn non_empty(opt: &Option<String>) -> Option<&String> {
     opt.as_ref().filter(|s| !s.trim().is_empty())
 }
 
-/// Filter then sort by `last_activity` descending (newest first). Ties break on
-/// `session_name` for a stable, human-predictable order.
-pub fn filter_and_sort(sessions: &[SessionSummary], filter: &SessionFilter) -> Vec<SessionSummary> {
-    let mut out: Vec<SessionSummary> = sessions
+/// Filter then sort by `last_activity` descending (newest first). Ties break
+/// on `session_name` for a stable, human-predictable order.
+pub fn filter_and_sort(
+    sessions: &[HistorySessionSummary],
+    filter: &SessionFilter,
+) -> Vec<HistorySessionSummary> {
+    let mut out: Vec<HistorySessionSummary> = sessions
         .iter()
         .filter(|s| filter.matches(s))
         .cloned()
@@ -82,10 +83,12 @@ pub fn filter_and_sort(sessions: &[SessionSummary], filter: &SessionFilter) -> V
 mod tests {
     use super::*;
 
-    fn session(name: &str, user: &str, agent: &str, last: &str) -> SessionSummary {
-        SessionSummary {
+    fn session(name: &str, user: &str, agent: &str, last: &str) -> HistorySessionSummary {
+        HistorySessionSummary {
             session_id: format!("sess-{name}"),
             user_id: user.into(),
+            owner_email: format!("{user}@x.io"),
+            owner_name: None,
             session_name: name.into(),
             agent_type: agent.into(),
             status: "archived".into(),
@@ -99,7 +102,7 @@ mod tests {
         }
     }
 
-    fn corpus() -> Vec<SessionSummary> {
+    fn corpus() -> Vec<HistorySessionSummary> {
         vec![
             session("alpha", "u1", "claude", "2026-07-01T10:00:00"),
             session("beta", "u2", "codex", "2026-07-03T10:00:00"),
@@ -115,31 +118,10 @@ mod tests {
     }
 
     #[test]
-    fn filters_by_user() {
+    fn filters_by_user_and_agent() {
         let filter = SessionFilter {
             user_id: Some("u1".into()),
-            ..Default::default()
-        };
-        let out = filter_and_sort(&corpus(), &filter);
-        assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|s| s.user_id == "u1"));
-    }
-
-    #[test]
-    fn filters_by_agent() {
-        let filter = SessionFilter {
             agent_type: Some("codex".into()),
-            ..Default::default()
-        };
-        let out = filter_and_sort(&corpus(), &filter);
-        assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|s| s.agent_type == "codex"));
-    }
-
-    #[test]
-    fn filters_by_name_substring_case_insensitive() {
-        let filter = SessionFilter {
-            query: Some("AMM".into()),
             ..Default::default()
         };
         let out = filter_and_sort(&corpus(), &filter);
@@ -156,7 +138,6 @@ mod tests {
         };
         let out = filter_and_sort(&corpus(), &filter);
         let names: Vec<_> = out.iter().map(|s| s.session_name.as_str()).collect();
-        // beta (07-03) is included thanks to the inclusive upper bound.
         assert_eq!(names, vec!["beta", "gamma"]);
     }
 

@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal-mobile"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "agent-portal-mobile-status-notification",
  "reqwest 0.12.28",
@@ -267,16 +267,12 @@ version = "2.13.10"
 dependencies = [
  "anyhow",
  "archive-format",
- "axum",
  "chrono",
  "clap",
- "memory-serve",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-util",
- "tower",
  "uuid",
 ]
 
@@ -538,7 +534,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "a2",
  "anyhow",
@@ -1040,7 +1036,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1071,7 +1067,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1135,7 +1131,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -2318,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5224,7 +5220,7 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portal-auth"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "anyhow",
  "colored",
@@ -5239,7 +5235,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "anyhow",
  "hex",
@@ -6365,7 +6361,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6442,7 +6438,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.13.10"
+version = "2.13.11"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -8007,26 +8003,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "viewer-frontend"
-version = "2.13.10"
-dependencies = [
- "chrono",
- "frontend",
- "gloo-net 0.6.0",
- "log",
- "serde",
- "serde_json",
- "shared",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-logger",
- "web-sys",
- "yew",
- "yew-router",
-]
 
 [[package]]
 name = "vswhom"

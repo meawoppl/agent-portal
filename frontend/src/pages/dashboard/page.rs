@@ -65,6 +65,7 @@ pub fn dashboard_page() -> Html {
     let current_user_id = bootstrap.current_user_id;
     let app_title = bootstrap.app_title;
     let server_version = bootstrap.server_version;
+    let archive_enabled = bootstrap.archive_enabled;
 
     // Push-driven session refresh: the backend broadcasts
     // `ServerToClient::LaunchSessionResult` the moment the launcher's
@@ -252,6 +253,18 @@ pub fn dashboard_page() -> Html {
     let go_to_settings = {
         let ui_state = ui_state.clone();
         Callback::from(move |_| ui_state.dispatch(DashboardUiAction::ShowSettings))
+    };
+
+    // Separate `use_navigator` handle: the one above is moved into the
+    // deep-link effect closure.
+    let history_navigator = use_navigator();
+    let go_to_history = {
+        let navigator = history_navigator;
+        Callback::from(move |_| {
+            if let Some(navigator) = &navigator {
+                navigator.push(&crate::Route::History);
+            }
+        })
     };
 
     let close_admin = {
@@ -693,6 +706,9 @@ pub fn dashboard_page() -> Html {
                             html! {}
                         }
                     }
+                    <button class="header-button" onclick={go_to_history.clone()}>
+                        { "History" }
+                    </button>
                     <button class="header-button" onclick={go_to_settings.clone()}>
                         { "Settings" }
                     </button>
@@ -851,20 +867,27 @@ pub fn dashboard_page() -> Html {
                 </>
             }
 
-            // Delete confirmation modal
+            // Close confirmation modal. With the archive enabled a close is
+            // archive-then-delete (the transcript stays readable in History);
+            // without it, the old permanent-delete warning still applies.
             {
                 if let Some(session_id) = ui_state.pending_delete {
                     let session_name = sessions.iter()
                         .find(|s| s.id == session_id)
                         .map(|s| s.session_name.as_str())
                         .unwrap_or("this session");
+                    let warning = if archive_enabled {
+                        "The session is removed from your dashboard; its transcript stays available in History."
+                    } else {
+                        "History archiving is disabled: all message history and session metadata will be permanently removed."
+                    };
 
                     html! {
                         <ConfirmModal
-                            title="Delete Session?"
-                            message={format!("Are you sure you want to delete \"{}\"?", session_name)}
-                            warning="All message history and session metadata will be permanently removed."
-                            confirm_label="Delete"
+                            title="Close Session?"
+                            message={format!("Are you sure you want to close \"{}\"?", session_name)}
+                            {warning}
+                            confirm_label="Close"
                             style={ConfirmModalStyle::Danger}
                             on_confirm={on_confirm_delete.clone()}
                             on_cancel={on_cancel_delete.clone()}

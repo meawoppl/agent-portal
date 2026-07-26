@@ -152,6 +152,7 @@
    label rendered inline among the pills. In the horizontal (top/bottom) rail
    it reads as a compact chip that precedes each host's pills; in the vertical
    (left/right) rail it spans the column as a full-width section heading. */
+
 /* A thin, small-text section header sitting in the sliver of space above each
    host's pills: muted uppercase hostname plus a plain "(n)" parenthetical —
    deliberately not a chip/badge, so it reads as a label, not a control. */

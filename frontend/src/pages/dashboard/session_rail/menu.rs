@@ -243,8 +243,8 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     let delete_option = if session.my_role == SessionRole::Owner {
         menu_option(
             classes!("stop"),
-            "Delete Session",
-            "Remove history and metadata",
+            "Close Session",
+            "Remove from dashboard",
             on_delete,
         )
     } else {

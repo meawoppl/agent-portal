@@ -10,6 +10,10 @@ authors.workspace = true
 # `shared/` — it uses `object_store`/`tokio`/`std::fs`, none of which are
 # WASM-compatible.
 
+[features]
+# Expose `scan::test_support` manifest builders to downstream reader tests.
+test-support = []
+
 [dependencies]
 chrono = { workspace = true }
 serde = { workspace = true }
