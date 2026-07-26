@@ -100,10 +100,18 @@ pub async fn list() -> Result<()> {
     let data: SessionForwardsResponse = resp.json().await.context("malformed response")?;
     if data.forwards.is_empty() {
         println!("No active forwards.");
-        return Ok(());
+    } else {
+        for f in &data.forwards {
+            println!(":{}  {}", f.port, f.url);
+        }
     }
-    for f in &data.forwards {
-        println!(":{}  {}", f.port, f.url);
+    // Recent failures go to stderr (diagnostic) so they don't pollute the URL
+    // list on stdout, but the agent still sees what the browser hit (#1476).
+    if !data.recent_failures.is_empty() {
+        eprintln!("\nrecent forward failures (newest first):");
+        for fail in &data.recent_failures {
+            eprintln!("  {}  :{}  {}", fail.at, fail.port, fail.code);
+        }
     }
     Ok(())
 }

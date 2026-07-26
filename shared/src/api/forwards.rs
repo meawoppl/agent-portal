@@ -127,11 +127,29 @@ pub struct CreateForwardResponse {
     pub probe_error: Option<String>,
 }
 
+/// A recent forward failure, surfaced back to the owning agent so it can see
+/// what the browser saw instead of debugging blind (docs/PORT_FORWARDING.md,
+/// #1476). Newest first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForwardFailure {
+    /// Stable [`ForwardError`] code (e.g. `no-listener`, `agent-offline`).
+    pub code: String,
+    /// The port the failed request targeted.
+    pub port: u16,
+    /// When it happened, RFC 3339.
+    pub at: String,
+}
+
 /// Response for `GET …/forwards`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionForwardsResponse {
     #[serde(default)]
     pub forwards: Vec<ForwardInfo>,
+    /// Recent failures routing to this session's forward, newest first — the
+    /// agent-visible half of the error taxonomy (#1476). Empty when there have
+    /// been none since the backend last (re)started.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_failures: Vec<ForwardFailure>,
 }
 
 /// The single taxonomy of forward failures (docs/PORT_FORWARDING.md).

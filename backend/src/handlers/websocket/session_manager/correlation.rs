@@ -2,11 +2,44 @@
 //! oneshot for a request id, the launcher socket completes it when the
 //! matching response frame arrives.
 
+use shared::api::ForwardError;
 use shared::{FileDownloadResponseFields, ForwardStatusFields, LauncherToServer};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use super::{ForwardHealth, SessionManager};
+
+/// How many recent forward failures to retain per session for the
+/// agent-visible readout (#1476). Small — the goal is "what just went wrong",
+/// not an audit log.
+const MAX_FORWARD_FAILURES: usize = 10;
+
+impl SessionManager {
+    /// Record a forward-routing failure for `session_id` so the owning agent
+    /// can see it on its next `GET …/forwards` poll (docs/PORT_FORWARDING.md,
+    /// #1476). Newest first, capped at [`MAX_FORWARD_FAILURES`].
+    pub fn record_forward_failure(&self, session_id: Uuid, port: u16, err: ForwardError) {
+        let now = super::liveness::epoch_secs() as i64;
+        let mut entry = self.forward_failures.entry(session_id).or_default();
+        entry.push_front((now, err, port));
+        entry.truncate(MAX_FORWARD_FAILURES);
+    }
+
+    /// The recent forward failures for `session_id`, newest first — `(epoch
+    /// secs, error, port)`. Empty when there have been none since startup.
+    pub fn recent_forward_failures(&self, session_id: Uuid) -> Vec<(i64, ForwardError, u16)> {
+        self.forward_failures
+            .get(&session_id)
+            .map(|e| e.value().iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Drop the recorded failures for a session (e.g. on a fresh successful
+    /// registration) so a stale error doesn't linger in the agent readout.
+    pub fn clear_forward_failures(&self, session_id: Uuid) {
+        self.forward_failures.remove(&session_id);
+    }
+}
 
 impl SessionManager {
     pub fn register_dir_request(&self, request_id: Uuid) -> oneshot::Receiver<LauncherToServer> {

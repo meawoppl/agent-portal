@@ -23,7 +23,8 @@ use tracing::info;
 use uuid::Uuid;
 
 use shared::api::{
-    CreateForwardRequest, CreateForwardResponse, ForwardInfo, SessionForwardsResponse,
+    CreateForwardRequest, CreateForwardResponse, ForwardFailure, ForwardInfo,
+    SessionForwardsResponse,
 };
 use shared::{ForwardPortFields, ServerToClient, ServerToProxy};
 
@@ -383,7 +384,10 @@ pub async fn list_forwards(
     member_session(&mut conn, session_id, user_id)?;
 
     if app_state.forward_domain.is_none() {
-        return Ok(Json(SessionForwardsResponse { forwards: vec![] }));
+        return Ok(Json(SessionForwardsResponse {
+            forwards: vec![],
+            recent_failures: vec![],
+        }));
     }
 
     use crate::schema::session_forwards;
@@ -396,7 +400,27 @@ pub async fn list_forwards(
         (Some(row), Some(label)) => vec![to_forward_info(&app_state, &row, &label)?],
         _ => vec![],
     };
-    Ok(Json(SessionForwardsResponse { forwards }))
+    Ok(Json(SessionForwardsResponse {
+        forwards,
+        recent_failures: recent_failures(&app_state, session_id),
+    }))
+}
+
+/// The session's recent forward failures as wire [`ForwardFailure`]s (newest
+/// first), for the agent-visible readout (#1476).
+fn recent_failures(app_state: &AppState, session_id: Uuid) -> Vec<ForwardFailure> {
+    app_state
+        .session_manager
+        .recent_forward_failures(session_id)
+        .into_iter()
+        .filter_map(|(epoch, err, port)| {
+            DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| ForwardFailure {
+                code: err.code().to_string(),
+                port,
+                at: at.to_rfc3339(),
+            })
+        })
+        .collect()
 }
 
 /// DELETE …/sessions/{id}/forwards — revoke the session's forward (owner only).

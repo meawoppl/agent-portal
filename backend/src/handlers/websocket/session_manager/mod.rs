@@ -13,6 +13,7 @@
 //! block.
 
 use dashmap::{DashMap, DashSet};
+use shared::api::ForwardError;
 use shared::{
     FileDownloadResponseFields, ForwardStatusFields, LauncherToServer, ServerToClient,
     ServerToProxy,
@@ -117,6 +118,10 @@ pub struct ProxyConnection {
     pub last_seen: std::sync::atomic::AtomicU64,
 }
 
+/// Recent forward-routing failures for one session: `(epoch secs, error,
+/// port)`, newest first, capped. Surfaced to the owning agent (#1476).
+type ForwardFailureLog = VecDeque<(i64, ForwardError, u16)>;
+
 /// Latest probe verdict for a forwarded port, as reported by the proxy's
 /// background health check (docs/PORT_FORWARDING.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +160,11 @@ pub struct SessionManager {
     /// In-memory only — unknown after a backend restart until the next
     /// probe report.
     forward_health: Arc<DashMap<(Uuid, u16), ForwardHealth>>,
+    /// Recent forward-routing failures per session (newest first, capped),
+    /// surfaced back to the owning agent via `GET …/forwards` so a failure the
+    /// browser hit is visible to the agent that caused it instead of debugging
+    /// blind (docs/PORT_FORWARDING.md, #1476). In-memory only.
+    forward_failures: Arc<DashMap<Uuid, ForwardFailureLog>>,
     /// Live backend tunnel streams (docs/PORT_FORWARDING.md), keyed by
     /// stream id; the reverse proxy opens them, proxy sockets feed them.
     tunnel_streams: TunnelStreamMap,
@@ -194,6 +204,7 @@ impl Default for SessionManager {
             pending_file_downloads: Arc::new(DashMap::new()),
             pending_forward_status: Arc::new(DashMap::new()),
             forward_health: Arc::new(DashMap::new()),
+            forward_failures: Arc::new(DashMap::new()),
             tunnel_streams: Arc::new(DashMap::new()),
             pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
