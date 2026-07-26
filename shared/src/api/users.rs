@@ -159,6 +159,18 @@ pub struct AdminStats {
     /// Total cache read tokens across all sessions
     #[serde(default)]
     pub total_cache_read_tokens: i64,
+    /// Total thinking tokens, summed from `turn_metrics` (the only source —
+    /// thinking is not tracked on the session row). Thinking is billed *within*
+    /// output, so this is a breakdown of `total_output_tokens`, not additive to
+    /// it. Covers only retained turn-metrics rows.
+    #[serde(default)]
+    pub total_thinking_tokens: i64,
+    /// Total sub-agent (Task/sidechain) tokens, summed from `turn_metrics`.
+    /// Reported separately from the main turn; `0` for Claude today (its wire
+    /// protocol surfaces no sub-agent field). Covers only retained
+    /// turn-metrics rows.
+    #[serde(default)]
+    pub total_subagent_tokens: i64,
 }
 
 /// One row in the admin sessions table.
