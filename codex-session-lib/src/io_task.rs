@@ -33,6 +33,16 @@ enum CodexApprovalResponseKind {
     ApplyPatchApprovedDenied,
 }
 
+/// The rejection message Codex 0.143.5+ requires on a `denied` approval
+/// response — the user's deny comment when they left one, else a neutral
+/// default so the wire frame is never empty.
+fn rejection_text(decision: &PermissionDecision) -> String {
+    decision
+        .reason
+        .clone()
+        .unwrap_or_else(|| "Denied by user".to_string())
+}
+
 /// Map a neutral [`PermissionDecision`] to Codex's approval response. Codex's
 /// v2 command/file-change requests use `accept` / `decline`; older v1
 /// exec/apply-patch requests use `approved` / `denied`.
@@ -50,14 +60,14 @@ fn codex_approval_result(
         CodexApprovalResponseKind::ExecApprovedDenied if decision.allow => {
             serde_json::to_value(ExecCommandApprovalResponse::approved())
         }
-        CodexApprovalResponseKind::ExecApprovedDenied => {
-            serde_json::to_value(ExecCommandApprovalResponse::denied())
-        }
+        CodexApprovalResponseKind::ExecApprovedDenied => serde_json::to_value(
+            ExecCommandApprovalResponse::denied(rejection_text(decision)),
+        ),
         CodexApprovalResponseKind::ApplyPatchApprovedDenied if decision.allow => {
             serde_json::to_value(ApplyPatchApprovalResponse::approved())
         }
         CodexApprovalResponseKind::ApplyPatchApprovedDenied => {
-            serde_json::to_value(ApplyPatchApprovalResponse::denied())
+            serde_json::to_value(ApplyPatchApprovalResponse::denied(rejection_text(decision)))
         }
     };
     result.unwrap_or(serde_json::Value::Null)
@@ -1135,9 +1145,15 @@ mod tests {
         let exec_approved =
             codex_approval_result(&approve, CodexApprovalResponseKind::ExecApprovedDenied);
         assert_eq!(exec_approved["decision"], serde_json::json!("approved"));
+        // Codex 0.143.5+ denies carry a rejection message:
+        // `{"decision":{"denied":{"rejection":...}}}`. With no user comment,
+        // `rejection_text` supplies the neutral default.
         let exec_denied =
             codex_approval_result(&deny, CodexApprovalResponseKind::ExecApprovedDenied);
-        assert_eq!(exec_denied["decision"], serde_json::json!("denied"));
+        assert_eq!(
+            exec_denied["decision"],
+            serde_json::json!({ "denied": { "rejection": "Denied by user" } })
+        );
 
         let patch_approved = codex_approval_result(
             &approve,
@@ -1146,7 +1162,25 @@ mod tests {
         assert_eq!(patch_approved["decision"], serde_json::json!("approved"));
         let patch_denied =
             codex_approval_result(&deny, CodexApprovalResponseKind::ApplyPatchApprovedDenied);
-        assert_eq!(patch_denied["decision"], serde_json::json!("denied"));
+        assert_eq!(
+            patch_denied["decision"],
+            serde_json::json!({ "denied": { "rejection": "Denied by user" } })
+        );
+
+        // A user's deny comment flows through as the rejection text.
+        let deny_with_reason = PermissionDecision {
+            allow: false,
+            reason: Some("looks unsafe".to_string()),
+            ..Default::default()
+        };
+        let exec_denied_reason = codex_approval_result(
+            &deny_with_reason,
+            CodexApprovalResponseKind::ExecApprovedDenied,
+        );
+        assert_eq!(
+            exec_denied_reason["decision"],
+            serde_json::json!({ "denied": { "rejection": "looks unsafe" } })
+        );
     }
 
     #[test]
