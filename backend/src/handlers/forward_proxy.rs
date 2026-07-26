@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 use crate::errors::AppError;
 use crate::AppState;
+use shared::api::ForwardError;
 
 /// Handoff token TTL (portal origin → forward origin redirect).
 const HANDOFF_TTL_SECS: i64 = 60;
@@ -247,11 +248,11 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
     let (session_id, port, session_key) = {
         let mut conn = match app_state.conn() {
             Ok(conn) => conn,
-            Err(_) => return plain_status(StatusCode::SERVICE_UNAVAILABLE, "database unavailable"),
+            Err(_) => return forward_error(ForwardError::Unavailable),
         };
         let session_id = match crate::handlers::forwards::session_for_label(&mut conn, &label) {
             Ok(id) => id,
-            Err(_) => return plain_status(StatusCode::NOT_FOUND, "no such forward"),
+            Err(_) => return forward_error(ForwardError::UnknownForward),
         };
 
         if req.uri().path() == "/__portal/auth" {
@@ -262,7 +263,7 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
         // forward" (which would masquerade as revocation/auth weirdness).
         let forward = match crate::handlers::forwards::active_forward(&mut conn, session_id) {
             Ok(forward) => forward,
-            Err(_) => return plain_status(StatusCode::SERVICE_UNAVAILABLE, "database unavailable"),
+            Err(_) => return forward_error(ForwardError::Unavailable),
         };
 
         // A *public* forward serves with no auth. Otherwise (private or
@@ -281,9 +282,7 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
             }
             match forward {
                 Some((port, _)) => port,
-                None => {
-                    return plain_status(StatusCode::NOT_FOUND, "this forward has been revoked")
-                }
+                None => return forward_error(ForwardError::Revoked),
             }
         };
 
@@ -294,7 +293,7 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
             .first::<String>(&mut conn)
         {
             Ok(key) => key,
-            Err(_) => return plain_status(StatusCode::NOT_FOUND, "session not found"),
+            Err(_) => return forward_error(ForwardError::UnknownForward),
         };
         (session_id, port, session_key)
     };
@@ -325,7 +324,7 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, req: &Request) -> Respons
         .map(|t| verify_token(app_state, t, AUD_HANDOFF, session_id))
         .unwrap_or(false);
     if !valid {
-        return plain_status(StatusCode::FORBIDDEN, "invalid or expired forward token");
+        return forward_error(ForwardError::AuthRequired);
     }
 
     let cookie_jwt = mint_token(app_state, AUD_COOKIE, session_id, COOKIE_TTL_SECS);
@@ -347,7 +346,7 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, req: &Request) -> Respons
 /// XHR/WS so API calls fail loudly instead of redirecting into HTML.
 fn unauthenticated_response(app_state: &AppState, session_id: Uuid, req: &Request) -> Response {
     if !should_redirect_for_forward_auth(req.method(), req.headers()) {
-        return plain_status(StatusCode::UNAUTHORIZED, "forward session expired");
+        return forward_error(ForwardError::SessionExpired);
     }
     let next = req
         .uri()
@@ -431,8 +430,59 @@ fn filtered_cookie_header(headers: &HeaderMap) -> Option<String> {
     (!kept.is_empty()).then(|| kept.join("; "))
 }
 
-fn plain_status(status: StatusCode, msg: impl Into<String>) -> Response {
-    (status, msg.into()).into_response()
+/// Render a [`ForwardError`] as the forward-origin HTTP response — the one and
+/// only place a forward failure becomes user-visible. Every failure path
+/// funnels here, so none can escape as a bare, cause-free string. Emits the
+/// mapped status, the stable `code` in `x-portal-forward-error` (so a client or
+/// agent can branch without scraping prose), and a small self-contained page.
+fn forward_error(err: ForwardError) -> Response {
+    let status = StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let mut response =
+        (status, axum::response::Html(render_forward_error_html(err))).into_response();
+    if let Ok(code) = HeaderValue::from_str(err.code()) {
+        response
+            .headers_mut()
+            .insert("x-portal-forward-error", code);
+    }
+    response
+}
+
+/// Self-contained dark error page. All fields are static taxonomy strings (no
+/// user input), so no escaping is required.
+fn render_forward_error_html(err: ForwardError) -> String {
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<title>{title}</title><style>\
+html{{color-scheme:dark}}\
+body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;\
+background:#1a1b26;color:#c0caf5;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}}\
+main{{max-width:32rem;padding:2rem;text-align:center}}\
+h1{{font-size:1.4rem;margin:0 0 .75rem;color:#f7768e}}\
+p{{margin:0 0 1rem;color:#a9b1d6}}\
+code{{font:13px ui-monospace,monospace;color:#565f89}}\
+</style></head><body><main>\
+<h1>{title}</h1><p>{detail}</p><code>error: {code}</code></main></body></html>",
+        title = err.title(),
+        detail = err.detail(),
+        code = err.code(),
+    )
+}
+
+/// Map a backend [`TunnelError`] to its forward-facing [`ForwardError`], so the
+/// data-plane failure vocabulary and the user-facing taxonomy stay in lockstep.
+fn tunnel_error_to_forward(e: &crate::handlers::websocket::TunnelError) -> ForwardError {
+    use crate::handlers::websocket::TunnelError as Te;
+    use shared::TunnelRefuseReason as R;
+    match e {
+        Te::NotConnected => ForwardError::AgentOffline,
+        Te::Refused(R::NoListener) => ForwardError::NoListener,
+        Te::Refused(R::StreamLimit) => ForwardError::AtCapacity,
+        Te::Refused(R::NotForwarded) => ForwardError::NotForwarded,
+        Te::Refused(R::Protocol) => ForwardError::ProtocolFault,
+        Te::OpenTimeout => ForwardError::AgentUnreachable,
+        Te::ClosedEarly => ForwardError::OpenInterrupted,
+    }
 }
 
 /// Feed a real routing outcome into the port-health cache and nudge web
@@ -467,8 +517,6 @@ async fn proxy_request(
     label: &str,
     req: Request,
 ) -> Response {
-    use crate::handlers::websocket::TunnelError;
-
     let stream = match app_state
         .session_manager
         .open_tunnel(session_key, port)
@@ -478,32 +526,22 @@ async fn proxy_request(
             note_reachability(app_state, session_key, session_id, port, true);
             stream
         }
-        Err(TunnelError::NotConnected) => {
-            return plain_status(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "the agent for this session is offline",
-            )
-        }
-        Err(TunnelError::Refused(reason)) => {
-            use shared::TunnelRefuseReason::*;
-            warn!("Tunnel refused for {}:{}: {}", session_id, port, reason);
+        Err(e) => {
+            let ferr = tunnel_error_to_forward(&e);
             // Only a genuine "nothing listening" reflects on port health; a
-            // stream-limit or revocation refusal says nothing about the local
-            // service, so it must not tint the chip red.
-            let status = match reason {
-                NoListener => {
-                    note_reachability(app_state, session_key, session_id, port, false);
-                    StatusCode::BAD_GATEWAY
-                }
-                // Momentary saturation, not an error — a retry usually works.
-                StreamLimit => StatusCode::SERVICE_UNAVAILABLE,
-                NotForwarded => StatusCode::NOT_FOUND,
-                Protocol => StatusCode::BAD_GATEWAY,
-            };
-            return plain_status(status, reason.to_string());
-        }
-        Err(TunnelError::OpenTimeout) | Err(TunnelError::ClosedEarly) => {
-            return plain_status(StatusCode::GATEWAY_TIMEOUT, "forward open timed out")
+            // stream-limit, revocation, or transport failure says nothing about
+            // the local service, so it must not tint the chip red.
+            if ferr == ForwardError::NoListener {
+                note_reachability(app_state, session_key, session_id, port, false);
+            }
+            warn!(
+                "Tunnel open failed for {}:{}: {} ({})",
+                session_id,
+                port,
+                e,
+                ferr.code()
+            );
+            return forward_error(ferr);
         }
     };
 
@@ -512,7 +550,7 @@ async fn proxy_request(
         Ok(pair) => pair,
         Err(e) => {
             warn!("Tunnel HTTP handshake failed: {}", e);
-            return plain_status(StatusCode::BAD_GATEWAY, "upstream handshake failed");
+            return forward_error(ForwardError::BadOrigin);
         }
     };
     // `with_upgrades` keeps the connection driver alive after a 101 so the
@@ -539,14 +577,17 @@ async fn proxy_request(
 
     let upstream_req = match build_upstream_request(req, port, is_upgrade) {
         Ok(r) => r,
-        Err(msg) => return plain_status(StatusCode::BAD_REQUEST, msg),
+        Err(msg) => {
+            warn!("Bad forward request: {}", msg);
+            return forward_error(ForwardError::BadRequest);
+        }
     };
 
     let mut upstream_resp = match sender.send_request(upstream_req).await {
         Ok(resp) => resp,
         Err(e) => {
             warn!("Tunnel upstream request failed: {}", e);
-            return plain_status(StatusCode::BAD_GATEWAY, "upstream request failed");
+            return forward_error(ForwardError::BadOrigin);
         }
     };
 
@@ -564,10 +605,7 @@ async fn proxy_request(
         // send a dangling protocol switch.
         (None, true) => {
             warn!("Upstream returned 101 to a non-upgrade request; refusing");
-            plain_status(
-                StatusCode::BAD_GATEWAY,
-                "unexpected upstream protocol switch",
-            )
+            forward_error(ForwardError::BadOrigin)
         }
         // Normal response (browser wanted an upgrade or not; upstream said no).
         (_, false) => {
@@ -694,7 +732,7 @@ fn build_downstream_response(
     let mut response = Response::builder().status(parts.status);
     let headers = match response.headers_mut() {
         Some(h) => h,
-        None => return plain_status(StatusCode::BAD_GATEWAY, "bad upstream response"),
+        None => return forward_error(ForwardError::BadOrigin),
     };
 
     // Prefer reconstructing the origin from the request's own Host so the
@@ -760,7 +798,7 @@ fn build_downstream_response(
 
     match response.body(Body::new(body)) {
         Ok(r) => r,
-        Err(_) => plain_status(StatusCode::BAD_GATEWAY, "bad upstream response"),
+        Err(_) => forward_error(ForwardError::BadOrigin),
     }
 }
 
