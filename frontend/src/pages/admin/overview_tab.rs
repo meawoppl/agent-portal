@@ -72,6 +72,30 @@ pub fn admin_overview_tab(props: &AdminOverviewTabProps) -> Html {
                         label="Output Tokens"
                         value={utils::format_token_count(s.total_output_tokens)}
                     />
+                    <StatCard
+                        label="Thinking Tokens"
+                        value={utils::format_token_count(s.total_thinking_tokens)}
+                        subvalue={Some("within output".to_string())}
+                    />
+                    <StatCard
+                        label="Sub-agent Tokens"
+                        value={utils::format_token_count(s.total_subagent_tokens)}
+                        subvalue={Some("within output".to_string())}
+                    />
+                    <StatCard
+                        label="Total Integrated Tokens"
+                        value={utils::format_token_count(
+                            s.total_input_tokens
+                                + s.total_output_tokens
+                                + s.total_cache_creation_tokens
+                                + s.total_cache_read_tokens,
+                        )}
+                        subvalue={Some(format!(
+                            "{} cache read, {} cache write",
+                            utils::format_token_count(s.total_cache_read_tokens),
+                            utils::format_token_count(s.total_cache_creation_tokens),
+                        ))}
+                    />
                 </div>
             </div>
         }

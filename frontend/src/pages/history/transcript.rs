@@ -103,6 +103,8 @@ fn header_card(manifest: &Load<HistoryManifest>) -> Html {
                         { field("Last activity", &m.last_activity) }
                         { field("Archived", &m.archived_at) }
                         { field("Tokens", &m.tokens.total().to_string()) }
+                        { field("Thinking", &m.tokens.thinking.to_string()) }
+                        { field("Sub-agent", &m.tokens.subagent.to_string()) }
                         { field("Cost", &format!("${:.4}", m.total_cost_usd)) }
                     </div>
                     <div class="manifest-provenance">

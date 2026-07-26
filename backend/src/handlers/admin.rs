@@ -93,6 +93,16 @@ struct DeletedCostStats {
     sum_cache_read_tokens: i64,
 }
 
+/// Thinking + sub-agent token sums, which live only on `turn_metrics` (they
+/// are not tracked on the session row — see `AdminStats` field docs).
+#[derive(QueryableByName)]
+struct TurnTokenStats {
+    #[diesel(sql_type = BigInt)]
+    sum_thinking_tokens: i64,
+    #[diesel(sql_type = BigInt)]
+    sum_subagent_tokens: i64,
+}
+
 pub async fn get_stats(
     State(app_state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -141,6 +151,18 @@ pub async fn get_stats(
     .get_result(&mut conn)
     .map_err(|e| admin_db_query("Failed to query deleted session stats", e))?;
 
+    // Query 4: thinking + sub-agent tokens — sourced from turn_metrics, the
+    // only place they are recorded (they are not on the session row). Covers
+    // retained turn-metrics rows only.
+    let turn_token_stats: TurnTokenStats = diesel::sql_query(
+        "SELECT \
+         COALESCE(SUM(thinking_tokens), 0)::bigint as sum_thinking_tokens, \
+         COALESCE(SUM(subagent_tokens), 0)::bigint as sum_subagent_tokens \
+         FROM turn_metrics",
+    )
+    .get_result(&mut conn)
+    .map_err(|e| admin_db_query("Failed to query turn-metrics token stats", e))?;
+
     // Get connected client counts from session manager (no DB query needed)
     let connected_proxy_clients = app_state.session_manager.sessions.len();
     let connected_web_clients: usize = app_state
@@ -165,6 +187,8 @@ pub async fn get_stats(
             + deleted_stats.sum_cache_creation_tokens,
         total_cache_read_tokens: session_stats.sum_cache_read_tokens
             + deleted_stats.sum_cache_read_tokens,
+        total_thinking_tokens: turn_token_stats.sum_thinking_tokens,
+        total_subagent_tokens: turn_token_stats.sum_subagent_tokens,
     }))
 }
 
