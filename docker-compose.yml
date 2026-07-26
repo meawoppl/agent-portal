@@ -40,6 +40,14 @@ services:
       # APP_TITLE: "Agent Portal"           # Header text shown in the dashboard
       # ALLOWED_EMAIL_DOMAIN: "company.com" # Restrict logins to one domain
       # ALLOWED_EMAILS: "a@b.com,c@d.com"  # Whitelist specific email addresses
+      # --- Session history archive (powers the /history viewer) ---
+      # Unset = OFF: History returns 404. "local" needs a persistent volume at
+      # the root below (see the `volumes:` mount example); "s3" needs a bucket
+      # plus AWS_* credentials. See .env.example for the full reference.
+      # PORTAL_SESSION_ARCHIVE_BACKEND: "local"
+      # PORTAL_SESSION_ARCHIVE_LOCAL_ROOT: "/data/archive"
+      # PORTAL_SESSION_ARCHIVE_S3_BUCKET: "my-portal-archive"
+      # PORTAL_SESSION_ARCHIVE_S3_PREFIX: "prod"
       HOST: "0.0.0.0"
       PORT: "3000"
       # RUST_LOG: "info"

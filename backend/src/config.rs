@@ -412,9 +412,10 @@ impl ServerConfig {
                     cfg.media
                 );
             }
-            None => {
-                tracing::info!("Session archive disabled (PORTAL_SESSION_ARCHIVE_BACKEND unset)")
-            }
+            None => tracing::info!(
+                "Session archive disabled (PORTAL_SESSION_ARCHIVE_BACKEND unset) — the History \
+                 viewer will be hidden and /api/history/* will 404 until it is set"
+            ),
         }
 
         // VAPID private key for Web Push (mobile-apps plan §8.3). Only the
