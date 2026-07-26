@@ -118,6 +118,10 @@ pub struct ProxyConnection {
     pub last_seen: std::sync::atomic::AtomicU64,
 }
 
+/// Recent forward-routing failures for one session: `(epoch secs, error,
+/// port)`, newest first, capped. Surfaced to the owning agent (#1476).
+type ForwardFailureLog = VecDeque<(i64, ForwardError, u16)>;
+
 /// Latest probe verdict for a forwarded port, as reported by the proxy's
 /// background health check (docs/PORT_FORWARDING.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,7 +164,7 @@ pub struct SessionManager {
     /// surfaced back to the owning agent via `GET …/forwards` so a failure the
     /// browser hit is visible to the agent that caused it instead of debugging
     /// blind (docs/PORT_FORWARDING.md, #1476). In-memory only.
-    forward_failures: Arc<DashMap<Uuid, std::collections::VecDeque<(i64, ForwardError, u16)>>>,
+    forward_failures: Arc<DashMap<Uuid, ForwardFailureLog>>,
     /// Live backend tunnel streams (docs/PORT_FORWARDING.md), keyed by
     /// stream id; the reverse proxy opens them, proxy sockets feed them.
     tunnel_streams: TunnelStreamMap,
