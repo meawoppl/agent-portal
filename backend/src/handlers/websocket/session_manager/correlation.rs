@@ -98,9 +98,10 @@ impl SessionManager {
     }
 
     /// Record a probe verdict for `(session, port)`. Returns `true` when the
-    /// stored health *changed* — the caller broadcasts `ForwardsChanged` so
-    /// chips refetch and re-tint. The process name is part of the verdict so
-    /// an app swap on the same port also nudges clients.
+    /// `listening` bit *changed* — the caller broadcasts `ForwardsChanged` so
+    /// chips refetch and re-tint. The process name is stored for the tooltip
+    /// but does NOT by itself count as a change: its best-effort resolution
+    /// flickers, and re-broadcasting on every flicker was needless churn.
     pub fn update_forward_health(
         &self,
         session_id: Uuid,
@@ -108,10 +109,33 @@ impl SessionManager {
         listening: bool,
         process: Option<String>,
     ) -> bool {
-        let verdict = ForwardHealth { listening, process };
-        self.forward_health
-            .insert((session_id, port), verdict.clone())
-            != Some(verdict)
+        let prev = self
+            .forward_health
+            .insert((session_id, port), ForwardHealth { listening, process });
+        prev.map(|p| p.listening) != Some(listening)
+    }
+
+    /// Record the *actual* reachability observed while routing a real request
+    /// (a tunnel stream opened, or was refused because nothing was listening).
+    /// This is the ground-truth signal that keeps the chip honest between
+    /// 10s background probes; it preserves any process name already resolved
+    /// by the probe. Returns `true` when `listening` changed.
+    pub fn note_forward_reachability(&self, session_id: Uuid, port: u16, listening: bool) -> bool {
+        use dashmap::mapref::entry::Entry;
+        match self.forward_health.entry((session_id, port)) {
+            Entry::Occupied(mut e) => {
+                let changed = e.get().listening != listening;
+                e.get_mut().listening = listening;
+                changed
+            }
+            Entry::Vacant(e) => {
+                e.insert(ForwardHealth {
+                    listening,
+                    process: None,
+                });
+                true
+            }
+        }
     }
 
     /// The last reported health for `(session, port)`, if the proxy has
@@ -198,10 +222,11 @@ mod tests {
         assert_eq!(mgr.forward_health(session, 9000), health(true, py()));
         assert_eq!(mgr.forward_health(session, 8000), health(false, None));
 
-        // Change-detection: same verdict again is not a change; a listening
-        // flip or an app swap on the same port is.
+        // Change-detection keys on `listening` only: the same listening bit is
+        // not a change even if the best-effort process name flickers
+        // (de-noised); a listening flip is.
         assert!(!mgr.update_forward_health(session, 9000, true, py()));
-        assert!(mgr.update_forward_health(session, 9000, true, Some("vite".to_string())));
+        assert!(!mgr.update_forward_health(session, 9000, true, Some("vite".to_string())));
         assert!(mgr.update_forward_health(session, 9000, false, None));
 
         // Forgetting drops only the named pair.
@@ -234,5 +259,45 @@ mod tests {
         );
         // Nothing left for `a` → nothing removed → caller skips the broadcast.
         assert_eq!(mgr.forget_forward_health_for_session(a), 0);
+    }
+
+    #[test]
+    fn routing_feedback_flips_listening_but_keeps_process_name() {
+        // Real request outcomes keep the chip honest between probes, without
+        // clobbering the process name the probe resolved.
+        let mgr = SessionManager::default();
+        let session = Uuid::new_v4();
+
+        // Probe resolved a listener + name.
+        assert!(mgr.update_forward_health(session, 3000, true, Some("vite".to_string())));
+        // A request confirms it's still up: no change, name preserved.
+        assert!(!mgr.note_forward_reachability(session, 3000, true));
+        assert_eq!(
+            mgr.forward_health(session, 3000),
+            Some(ForwardHealth {
+                listening: true,
+                process: Some("vite".to_string())
+            })
+        );
+        // A request finds it down: change reported, name preserved for the
+        // tooltip until the next probe refreshes it.
+        assert!(mgr.note_forward_reachability(session, 3000, false));
+        assert_eq!(
+            mgr.forward_health(session, 3000),
+            Some(ForwardHealth {
+                listening: false,
+                process: Some("vite".to_string())
+            })
+        );
+
+        // First observation for an unprobed port seeds a nameless verdict.
+        assert!(mgr.note_forward_reachability(session, 4000, true));
+        assert_eq!(
+            mgr.forward_health(session, 4000),
+            Some(ForwardHealth {
+                listening: true,
+                process: None
+            })
+        );
     }
 }

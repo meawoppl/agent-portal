@@ -498,7 +498,7 @@ fn handle_proxy_message(
             session_manager.tunnel_in(f.stream_id, super::TunnelIn::Opened);
         }
         ProxyToServer::TunnelRefused(f) => {
-            session_manager.tunnel_in(f.stream_id, super::TunnelIn::Refused(f.error));
+            session_manager.tunnel_in(f.stream_id, super::TunnelIn::Refused(f.reason));
         }
         ProxyToServer::TunnelData(f) => {
             session_manager.tunnel_data_in(&f);
