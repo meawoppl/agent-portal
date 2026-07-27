@@ -4,9 +4,10 @@
 //! in a heavy JS editor (which would violate the WASM constraints of the
 //! frontend). Two modes exist:
 //!
-//! - **NORMAL** — motions (`h j k l`, `w b e`, `0 $`, `gg G`), edits (`x`,
-//!   `r` replace, `~` toggle-case, `dd`/`dw`/`D`/`C`/`cc`/`S`, `i a o O A I`),
-//!   operators (`d`/`c`/`y`) over motions and text objects (`iw`/`aw`,
+//! - **NORMAL** — motions (`h j k l`, `w b e`, `0 $`, `f/F/t/T` find-char,
+//!   `gg G`), edits (`x`, `r` replace, `~` toggle-case,
+//!   `dd`/`dw`/`D`/`C`/`cc`/`S`, `i a o O A I`), operators (`d`/`c`/`y`) over
+//!   motions (including `dt.`/`cf)`/`yT,`) and text objects (`iw`/`aw`,
 //!   `i(`/`a(`, `i"`…), paste (`p`/`P`), undo (`u`), and page scrolling of the
 //!   conversation (`Ctrl-d/u/f/b`, `gg`, `G`).
 //! - **INSERT** — typing inserts normally; `Esc` returns to NORMAL.
@@ -66,6 +67,20 @@ enum Op {
     Yank,
 }
 
+/// A find-character motion (`f`/`F`/`t`/`T`), which needs one more keystroke —
+/// the target character — before it can resolve.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FindKind {
+    /// `f` — forward, landing *on* the char.
+    Find,
+    /// `t` — forward, landing just *before* the char (till).
+    Till,
+    /// `F` — backward, landing *on* the char.
+    FindBack,
+    /// `T` — backward, landing just *after* the char (till).
+    TillBack,
+}
+
 /// The multi-key sequence state machine. Only one of these is ever pending
 /// between keystrokes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -82,6 +97,14 @@ enum Pending {
     Replace,
     /// `g` seen — awaiting a second `g` (for `gg`).
     GPrefix,
+    /// A find-character motion (`f`/`F`/`t`/`T`) is awaiting its target char.
+    /// `op` is set when the motion follows an operator (`dt`, `cf`, `yT`, …);
+    /// `None` for a bare cursor motion. `count` selects the Nth occurrence.
+    Find {
+        op: Option<Op>,
+        kind: FindKind,
+        count: usize,
+    },
 }
 
 /// The yank/delete register. Charwise holds a fragment; linewise holds whole
@@ -200,6 +223,17 @@ pub fn handle_key(
 
     let key = event.key();
 
+    // A lone modifier keydown (the Shift pressed to type `)` in `dt)`, say)
+    // fires *before* the "real" character. Ignore these outright so a pending
+    // multi-key command (`r`, `f`/`t`, …) waits for the actual char instead of
+    // being cancelled by the modifier press.
+    if matches!(
+        key.as_str(),
+        "Shift" | "Control" | "Alt" | "AltGraph" | "Meta" | "CapsLock"
+    ) {
+        return VimHandled::Passthrough;
+    }
+
     match state.mode {
         VimMode::Insert => {
             // In INSERT, leave all Ctrl chords (copy/paste/voice) untouched.
@@ -262,6 +296,9 @@ fn handle_normal(
     match state.pending {
         Pending::Replace => return resolve_replace(state, textarea, event, key, &text, cursor),
         Pending::GPrefix => return resolve_g(state, textarea, event, key),
+        Pending::Find { op, kind, count } => {
+            return resolve_find(state, textarea, event, key, &text, cursor, op, kind, count);
+        }
         Pending::TextObject { op, around } => {
             return resolve_text_object(state, textarea, event, key, &text, cursor, (op, around));
         }
@@ -347,6 +384,12 @@ fn handle_normal(
         "d" => set_operator(state, event, Op::Delete),
         "c" => set_operator(state, event, Op::Change),
         "y" => set_operator(state, event, Op::Yank),
+
+        // Find-character motions (await the target char) --------------------
+        "f" => set_find(state, event, None, FindKind::Find),
+        "F" => set_find(state, event, None, FindKind::FindBack),
+        "t" => set_find(state, event, None, FindKind::Till),
+        "T" => set_find(state, event, None, FindKind::TillBack),
 
         // Replace / toggle-case --------------------------------------------
         "r" => {
@@ -457,6 +500,67 @@ fn set_operator(state: &mut VimState, event: &KeyboardEvent, op: Op) -> VimHandl
     VimHandled::Consumed { rerender: false }
 }
 
+/// Arm a find-character motion (`f`/`F`/`t`/`T`), optionally under an operator.
+/// The pending count is consumed now so it selects the Nth occurrence (`2fx`).
+fn set_find(
+    state: &mut VimState,
+    event: &KeyboardEvent,
+    op: Option<Op>,
+    kind: FindKind,
+) -> VimHandled {
+    let count = state.take_count();
+    state.pending = Pending::Find { op, kind, count };
+    event.prevent_default();
+    VimHandled::Consumed { rerender: false }
+}
+
+/// Resolve a find-character motion once its target char arrives. As a bare
+/// motion it moves the block caret; under an operator it deletes/changes/yanks
+/// the spanned range. A missing char (`Esc`, non-printable) or no match on the
+/// line cancels with the buffer untouched — matching vim.
+#[allow(clippy::too_many_arguments)]
+fn resolve_find(
+    state: &mut VimState,
+    textarea: &HtmlTextAreaElement,
+    event: &KeyboardEvent,
+    key: &str,
+    text: &[char],
+    cursor: usize,
+    op: Option<Op>,
+    kind: FindKind,
+    count: usize,
+) -> VimHandled {
+    state.clear_pending();
+    event.prevent_default();
+
+    // The target: exactly one printable char. Esc / multi-char keys cancel.
+    let ch = {
+        let mut it = key.chars();
+        match (it.next(), it.next()) {
+            (Some(c), None) if key != "Escape" => Some(c),
+            _ => None,
+        }
+    };
+
+    let matched = ch.and_then(|c| find_char_match(text, cursor, c, kind, count));
+    let Some(m) = matched else {
+        // No char or no match on the line — leave everything as-is.
+        place_block(textarea, text, cursor);
+        return VimHandled::Consumed { rerender: false };
+    };
+
+    match op {
+        None => {
+            place_block(textarea, text, find_motion_target(m, kind));
+            VimHandled::Consumed { rerender: false }
+        }
+        Some(op) => {
+            let (start, end) = find_operator_range(cursor, m, kind);
+            edit_range(state, textarea, event, text, op, start, end)
+        }
+    }
+}
+
 fn resolve_operator(
     state: &mut VimState,
     textarea: &HtmlTextAreaElement,
@@ -478,6 +582,12 @@ fn resolve_operator(
             event.prevent_default();
             return VimHandled::Consumed { rerender: false };
         }
+        // Find-character motions as operator targets (`dt.`, `cf)`, `yT,`, …):
+        // capture the kind and wait for the target char.
+        "f" => return set_find(state, event, Some(op), FindKind::Find),
+        "F" => return set_find(state, event, Some(op), FindKind::FindBack),
+        "t" => return set_find(state, event, Some(op), FindKind::Till),
+        "T" => return set_find(state, event, Some(op), FindKind::TillBack),
         _ => {}
     }
 
@@ -1003,6 +1113,70 @@ fn operator_motion_range(key: &str, text: &[char], cursor: usize) -> Option<(usi
         "l" => (cursor, (cursor + 1).min(n)),
         _ => return None,
     })
+}
+
+/// Char index of the `count`-th occurrence of `ch` from the cursor, searching
+/// only the current line, in the direction implied by `kind`. Forward search
+/// starts one cell past the cursor; backward search starts one cell before.
+/// `None` if there aren't `count` occurrences on the line.
+fn find_char_match(
+    text: &[char],
+    cursor: usize,
+    ch: char,
+    kind: FindKind,
+    count: usize,
+) -> Option<usize> {
+    let forward = matches!(kind, FindKind::Find | FindKind::Till);
+    let mut found = 0;
+    if forward {
+        let le = line_end(text, cursor);
+        let mut i = cursor + 1;
+        while i < le {
+            if text[i] == ch {
+                found += 1;
+                if found == count {
+                    return Some(i);
+                }
+            }
+            i += 1;
+        }
+    } else {
+        let ls = line_start(text, cursor);
+        let mut i = cursor;
+        while i > ls {
+            i -= 1;
+            if text[i] == ch {
+                found += 1;
+                if found == count {
+                    return Some(i);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Where a *bare* find motion parks the caret given the matched char index `m`.
+/// `f`/`F` land on the char; `t`/`T` stop one cell short of it.
+fn find_motion_target(m: usize, kind: FindKind) -> usize {
+    match kind {
+        FindKind::Find | FindKind::FindBack => m,
+        FindKind::Till => m.saturating_sub(1),
+        FindKind::TillBack => m + 1,
+    }
+}
+
+/// Charwise `[start, end)` an operator spans for a find motion to matched char
+/// index `m`. Forward motions (`f`/`t`) are *inclusive* of the landing cell, so
+/// `df` covers the char and `dt` stops before it; backward motions run up to
+/// (not including) the cursor cell.
+fn find_operator_range(cursor: usize, m: usize, kind: FindKind) -> (usize, usize) {
+    match kind {
+        FindKind::Find => (cursor, m + 1),
+        FindKind::Till => (cursor, m),
+        FindKind::FindBack => (m, cursor),
+        FindKind::TillBack => (m + 1, cursor),
+    }
 }
 
 /// Text-object selectors and their delimiter geometry.
@@ -1550,6 +1724,84 @@ mod tests {
         assert_eq!(operator_motion_range("w", &t, 0), Some((0, 4)));
         assert_eq!(operator_motion_range("$", &t, 0), Some((0, 7)));
         assert_eq!(operator_motion_range("e", &t, 0), Some((0, 3)));
+    }
+
+    // --- find-character motions (f/F/t/T) ---
+
+    #[test]
+    fn find_char_forward_and_backward() {
+        let t = chars("a.b.c");
+        // forward from 0: first '.' at 1, second '.' at 3
+        assert_eq!(find_char_match(&t, 0, '.', FindKind::Find, 1), Some(1));
+        assert_eq!(find_char_match(&t, 0, '.', FindKind::Find, 2), Some(3));
+        // backward from end: first '.' going left is at 3
+        assert_eq!(find_char_match(&t, 4, '.', FindKind::FindBack, 1), Some(3));
+        assert_eq!(find_char_match(&t, 4, '.', FindKind::FindBack, 2), Some(1));
+    }
+
+    #[test]
+    fn find_char_is_line_local() {
+        let t = chars("ab\nx.y");
+        // searching forward from line 1's start must not cross into line 2
+        assert_eq!(find_char_match(&t, 0, '.', FindKind::Find, 1), None);
+        // but within line 2 it finds it
+        assert_eq!(find_char_match(&t, 3, '.', FindKind::Find, 1), Some(4));
+    }
+
+    #[test]
+    fn find_char_excludes_cursor_cell() {
+        // `f` on the char under the cursor must skip it and find the *next* one.
+        let t = chars(".a.");
+        assert_eq!(find_char_match(&t, 0, '.', FindKind::Find, 1), Some(2));
+        assert_eq!(find_char_match(&t, 0, '.', FindKind::Find, 2), None);
+    }
+
+    #[test]
+    fn find_motion_targets() {
+        // matched char at index 5
+        assert_eq!(find_motion_target(5, FindKind::Find), 5);
+        assert_eq!(find_motion_target(5, FindKind::Till), 4);
+        assert_eq!(find_motion_target(5, FindKind::FindBack), 5);
+        assert_eq!(find_motion_target(5, FindKind::TillBack), 6);
+    }
+
+    /// `dt.` deletes up to (not including) the '.'; `df.` includes it.
+    #[test]
+    fn find_operator_ranges_forward() {
+        let t = chars("foo.bar");
+        // cursor at 0, match '.' at 3
+        let m = find_char_match(&t, 0, '.', FindKind::Till, 1).unwrap();
+        let (s0, e0) = find_operator_range(0, m, FindKind::Till);
+        let (v, _) = remove_range(&t, s0, e0);
+        assert_eq!(s(&v), ".bar"); // dt. leaves the '.'
+
+        let m = find_char_match(&t, 0, '.', FindKind::Find, 1).unwrap();
+        let (s1, e1) = find_operator_range(0, m, FindKind::Find);
+        let (v, _) = remove_range(&t, s1, e1);
+        assert_eq!(s(&v), "bar"); // df. eats the '.'
+    }
+
+    /// `dT`/`dF` delete backward from the cursor.
+    #[test]
+    fn find_operator_ranges_backward() {
+        let t = chars("foo.bar");
+        // cursor at 6 (the trailing 'r'), match '.' at 3
+        let m = find_char_match(&t, 6, '.', FindKind::FindBack, 1).unwrap();
+        assert_eq!(m, 3);
+        let (s0, e0) = find_operator_range(6, m, FindKind::FindBack);
+        let (v, _) = remove_range(&t, s0, e0);
+        assert_eq!(s(&v), "foor"); // dF. removes ".ba"
+
+        let (s1, e1) = find_operator_range(6, m, FindKind::TillBack);
+        let (v, _) = remove_range(&t, s1, e1);
+        assert_eq!(s(&v), "foo.r"); // dT. removes "ba", keeps the '.'
+    }
+
+    #[test]
+    fn find_char_no_match_returns_none() {
+        let t = chars("hello");
+        assert_eq!(find_char_match(&t, 0, 'z', FindKind::Find, 1), None);
+        assert_eq!(find_char_match(&t, 4, 'z', FindKind::FindBack, 1), None);
     }
 
     // --- replace / toggle-case ---
