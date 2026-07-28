@@ -14,8 +14,8 @@ agent-portal is a web-based proxy system for Claude Code sessions built with:
 
 We maintain **[meawoppl/rust-code-agent-sdks](https://github.com/meawoppl/rust-claude-codes)** — a workspace containing two Rust crates for parsing code agent CLI output:
 
-- **`claude-codes`** (v2.1.165) — Types for Claude Code's JSON protocol (`ClaudeOutput`, `ResultMessage`, `UsageInfo`, `RateLimitEvent`, etc.). Used by the proxy to deserialize Claude's stdout.
-- **`codex-codes`** (v0.143.6) — Types for OpenAI Codex CLI's JSONL protocol (`ThreadEvent`, `ThreadItem`, `Usage`, etc.). Phase 1 integration complete (AgentType, DB schema); see [docs/CODEX_SUPPORT.md](docs/CODEX_SUPPORT.md) for the full plan.
+- **`claude-codes`** (v2.1.166) — Types for Claude Code's JSON protocol (`ClaudeOutput`, `ResultMessage`, `UsageInfo`, `RateLimitEvent`, etc.). Used by the proxy to deserialize Claude's stdout.
+- **`codex-codes`** (v0.145.0) — Types for OpenAI Codex CLI's JSONL protocol (`ThreadEvent`, `ThreadItem`, `Usage`, etc.). Phase 1 integration complete (AgentType, DB schema); see [docs/CODEX_SUPPORT.md](docs/CODEX_SUPPORT.md) for the full plan.
 
 ## Architecture Quick Reference
 
