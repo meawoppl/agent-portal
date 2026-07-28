@@ -18,7 +18,6 @@ mod schedule_dialog;
 mod share_dialog;
 pub mod skip_permissions;
 pub mod sparkline;
-pub mod time_ago;
 mod tool_renderers;
 pub(crate) mod turn_metrics_display;
 mod turn_metrics_pill;

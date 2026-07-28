@@ -12,7 +12,6 @@ pub(crate) struct FrameRenderContext<'a> {
     pub agent_type: shared::AgentType,
     pub session_id: Uuid,
     pub timestamp: Option<&'a str>,
-    pub raw_iso: Option<&'a str>,
     pub current_user_id: Option<&'a str>,
     pub turn_metrics: Option<&'a shared::TurnMetrics>,
     pub continuation_statuses: &'a HashMap<Uuid, String>,
@@ -48,12 +47,7 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
                 renderers::render_system_message(&msg, ctx.timestamp)
             }
             AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
-                renderers::render_assistant_message(
-                    &msg,
-                    ctx.timestamp,
-                    ctx.raw_iso,
-                    ctx.session_id,
-                )
+                renderers::render_assistant_message(&msg, ctx.timestamp, ctx.session_id)
             }
             AgentFrame::Claude(ClaudeMessage::Result(msg)) => {
                 renderers::render_result_message(&msg, ctx.turn_metrics)
