@@ -68,7 +68,6 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
         agent_type: props.agent_type,
         session_id: props.session_id,
         timestamp: ts.as_deref(),
-        raw_iso,
         current_user_id: props.current_user_id.as_deref(),
         turn_metrics: props.turn_metrics.as_ref(),
         continuation_statuses: &props.continuation_statuses,

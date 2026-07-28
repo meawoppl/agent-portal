@@ -8,7 +8,6 @@ use super::tools::{
 use crate::components::copy_button::CopyButton;
 use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown_for_session;
-use crate::components::time_ago::TimeAgo;
 use crate::components::tool_renderers::render_tool_use;
 use shared::{AssistantMessage, AssistantUsage as UsageInfo};
 use shared::{Citation, ContentBlock, ToolResultContent};
@@ -101,7 +100,6 @@ fn content_blocks_to_text(blocks: &[ContentBlock]) -> String {
 pub fn render_assistant_message(
     msg: &AssistantMessage,
     timestamp: Option<&str>,
-    raw_iso: Option<&str>,
     session_id: Uuid,
 ) -> Html {
     let blocks = msg.message.content.clone();
@@ -142,11 +140,6 @@ pub fn render_assistant_message(
                 }
             </div>
             <div class="message-body">{ render_assistant_message_content(msg, session_id).unwrap_or_default() }</div>
-            if let Some(iso) = raw_iso {
-                <div class="message-footer">
-                    <TimeAgo iso={iso.to_string()} />
-                </div>
-            }
         </div>
     }
 }

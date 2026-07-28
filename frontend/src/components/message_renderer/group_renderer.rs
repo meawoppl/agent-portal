@@ -77,10 +77,6 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 };
             }
 
-            let last_iso = messages
-                .last()
-                .and_then(|message| message.raw_iso())
-                .map(str::to_string);
             let wrapper_class = match category {
                 GroupCategory::User => "user-message",
                 GroupCategory::Portal => "portal-message",
@@ -130,11 +126,6 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                     <div class="message-body grouped-message-body">
                         { for parts.into_iter() }
                     </div>
-                    if let Some(iso) = last_iso {
-                        <div class="message-footer">
-                            <crate::components::time_ago::TimeAgo iso={iso} />
-                        </div>
-                    }
                 </div>
             }
         }

@@ -51,15 +51,6 @@
    left-justified. On assistant headers the usage-badge has its own
    margin-left:auto and naturally pushes itself to the right. */
 
-/* Live-updating "X minutes ago" label */
-.time-ago {
-    color: var(--text-muted);
-    font-size: 0.65rem;
-    cursor: help;
-    white-space: nowrap;
-    opacity: 0.6;
-}
-
 .claude-message .message-body {
     padding: 0.5rem 1rem;
 }
@@ -72,14 +63,6 @@
 
 .grouped-message-part {
     min-width: 0;
-}
-
-/* Footer row for unobtrusive metadata (e.g. time-ago) */
-.claude-message .message-footer {
-    display: flex;
-    justify-content: flex-end;
-    padding: 0.15rem 1rem 0.35rem;
-    line-height: 1;
 }
 
 /* Message Type Badges */
