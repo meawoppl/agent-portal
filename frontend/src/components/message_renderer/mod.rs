@@ -218,6 +218,39 @@ mod tests {
         .to_string()
     }
 
+    /// A plain-text user message (the Claude echo shape) carrying `text`.
+    fn user_text_message(text: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{ "type": "text", "text": text }] },
+            "session_id": "01890000-0000-7000-8000-000000000001",
+        })
+        .to_string()
+    }
+
+    /// A claude-echoed inter-agent message (`[message from …]`, no provenance
+    /// metadata) must render as its own "Message from …" card, so `classify`
+    /// keeps it out of the User group (returns `None` → `Single`). Ordinary
+    /// prose still groups as User. Regression: grouped inter-agent messages
+    /// were rendering their raw `[message from …]` / system-reminder wrapper.
+    #[test]
+    fn inter_agent_user_text_is_not_grouped() {
+        let sid = "e2d342f5-68c6-4134-a5d8-63cb4afcee9e";
+        let interagent = user_text_message(&format!(
+            "[message from codex {sid}]\nExactly.\n\n<system-reminder> reply to that agent </system-reminder>"
+        ));
+        assert!(
+            classify(&rendered(&interagent), shared::AgentType::Claude, None).is_none(),
+            "inter-agent message must render as a Single card, not group"
+        );
+
+        let prose = user_text_message("just some ordinary prose");
+        assert_eq!(
+            classify(&rendered(&prose), shared::AgentType::Claude, None).map(|i| i.category),
+            Some(GroupCategory::User),
+        );
+    }
+
     /// A tool-result user message coming from a Claude session MUST classify
     /// into the assistant group — otherwise serial Read tool uses don't roll
     /// together with their preceding assistant turn.
