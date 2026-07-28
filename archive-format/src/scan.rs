@@ -1,7 +1,7 @@
 //! Archive scanning: manifest collection, flattening, and filtering.
 //!
-//! Shared by every archive reader (the `portal-archive` CLI and the backend's
-//! `/api/history` endpoints): everything downstream works off a
+//! Used by the backend's `/api/history` endpoints (the archive reader):
+//! everything downstream works off a
 //! `Vec<FlatRow>` gathered here. Collection is manifest-only — transcripts are
 //! never read to build a row — and degrades gracefully: a corrupt manifest or
 //! an unreadable user prefix is reported through the caller's `warn` sink and

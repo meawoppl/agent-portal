@@ -2,7 +2,6 @@
 members = [
     "shared",
     "archive-format",
-    "archive-viewer",
     "backend",
     "frontend",
     "proxy",
