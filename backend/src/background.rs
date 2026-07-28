@@ -20,16 +20,24 @@ use crate::AppState;
 pub fn spawn_periodic<F, Fut>(name: &str, period: Duration, state: Arc<AppState>, f: F)
 where
     F: Fn(Arc<AppState>) -> Fut + Send + 'static,
-    Fut: Future<Output = ()> + Send,
+    Fut: Future<Output = ()> + Send + 'static,
 {
+    let name = name.to_string();
+    tracing::info!("Started {name}");
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(period);
         loop {
             interval.tick().await;
-            f(state.clone()).await;
+            // Run each tick in its own task so a panic surfaces as a JoinError
+            // we log and recover from, rather than aborting this loop for the
+            // rest of the process lifetime (#1487). Without this, one panicking
+            // tick silently retires a maintenance loop — no error line, and
+            // /api/health stays 200.
+            if let Err(e) = tokio::spawn(f(state.clone())).await {
+                tracing::error!("Background task '{name}' tick panicked: {e}");
+            }
         }
     });
-    tracing::info!("Started {}", name);
 }
 
 /// Deferred stale session cleanup: wait for proxies to reconnect before
@@ -739,125 +747,140 @@ pub async fn purge_expired_device_codes(app_state: Arc<AppState>) {
 
 /// Run retention cleanup: delete old messages and truncate per-session counts
 pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
-    use handlers::retention::{run_retention_cleanup, RetentionConfig};
+    use handlers::retention::RetentionConfig;
 
     let session_ids = app_state.session_manager.drain_pending_truncations();
-
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for retention cleanup");
-        return;
-    };
-
+    let db_pool = app_state.db_pool.clone();
+    let archive = app_state.archive.clone();
     let config = RetentionConfig::new(
         app_state.message_retention_count,
         app_state.message_retention_days,
     );
 
-    // #1258 phase 2: capture messages into the archive BEFORE the trim
-    // deletes them from the hot DB. Archive-first is the invariant — a
-    // session whose pre-trim archive FAILS this cycle has its trim HELD
-    // (excluded from both delete paths below) and retried next cycle, so an
-    // archive outage that coincides with a retention cycle never loses the
-    // unarchived delta. Trade-off: the hot DB keeps growing for those
-    // sessions until the archive recovers, which is the correct failure mode
-    // (data preserved over a bounded space cost). This mirrors the held
-    // semantics of run_session_age_cleanup. When archiving is DISABLED the
-    // held set is empty and trims run exactly as before — running retention
-    // without an archive is the operator's explicit choice.
-    let held_ids: std::collections::HashSet<uuid::Uuid> = match &app_state.archive {
-        Some(runtime) => archive_retention_candidates(&mut conn, runtime, &config),
-        None => std::collections::HashSet::new(),
-    };
-    if !held_ids.is_empty() {
-        // Stable marker aligned with SESSION_ARCHIVE_FAILED: alert on this to
-        // catch an archive outage that is silently blocking retention.
-        tracing::warn!(
-            "{RETENTION_TRIM_HELD} {} sessions pending archive",
-            held_ids.len()
-        );
-    }
+    // Everything below is blocking work — synchronous Diesel queries plus, with
+    // an object-store archive, `block_on` reads inside
+    // archive_retention_candidates. It MUST run on the blocking pool: those
+    // reads panic ("Cannot start a runtime from within a runtime") when driven
+    // from an async runtime worker, which silently killed this loop before
+    // #1487 (the sweep at run_archive_sweep already uses spawn_blocking).
+    let result = tokio::task::spawn_blocking(move || {
+        let mut conn = db_pool.get()?;
 
-    let (age_deleted, count_deleted) =
-        run_retention_cleanup(&mut conn, session_ids, config, &held_ids);
+        // #1258 phase 2: capture messages into the archive BEFORE the trim
+        // deletes them from the hot DB. Archive-first is the invariant — a
+        // session whose pre-trim archive FAILS this cycle has its trim HELD
+        // (excluded from both delete paths below) and retried next cycle, so an
+        // archive outage that coincides with a retention cycle never loses the
+        // unarchived delta. Trade-off: the hot DB keeps growing for those
+        // sessions until the archive recovers, which is the correct failure
+        // mode (data preserved over a bounded space cost). This mirrors the
+        // held semantics of run_session_age_cleanup. When archiving is DISABLED
+        // the held set is empty and trims run exactly as before — running
+        // retention without an archive is the operator's explicit choice.
+        let held_ids: std::collections::HashSet<uuid::Uuid> = match &archive {
+            Some(runtime) => archive_retention_candidates(&mut conn, runtime, &config),
+            None => std::collections::HashSet::new(),
+        };
+        if !held_ids.is_empty() {
+            // Stable marker aligned with SESSION_ARCHIVE_FAILED: alert on this
+            // to catch an archive outage that is silently blocking retention.
+            tracing::warn!(
+                "{RETENTION_TRIM_HELD} {} sessions pending archive",
+                held_ids.len()
+            );
+        }
 
-    if age_deleted > 0 || count_deleted > 0 {
-        tracing::info!(
-            "Retention cleanup complete: {} old, {} over-limit",
-            age_deleted,
-            count_deleted
-        );
+        let (age_deleted, count_deleted) =
+            handlers::retention::run_retention_cleanup(&mut conn, session_ids, config, &held_ids);
+        Ok::<(usize, usize), anyhow::Error>((age_deleted, count_deleted))
+    })
+    .await;
+
+    match result {
+        Ok(Ok((age_deleted, count_deleted))) => {
+            if age_deleted > 0 || count_deleted > 0 {
+                tracing::info!(
+                    "Retention cleanup complete: {} old, {} over-limit",
+                    age_deleted,
+                    count_deleted
+                );
+            }
+        }
+        Ok(Err(e)) => tracing::error!("Failed to get DB connection for retention cleanup: {e}"),
+        Err(e) => tracing::error!("Retention cleanup task panicked: {e}"),
     }
 }
 
 /// Delete sessions whose last_activity is older than SESSION_MAX_AGE_DAYS
 pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
-    use diesel::prelude::*;
-    use handlers::helpers::delete_session_with_data;
-
     let max_days = app_state.session_max_age_days;
     if max_days == 0 {
         return;
     }
+    let db_pool = app_state.db_pool.clone();
+    let archive = app_state.archive.clone();
 
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for session age cleanup");
-        return;
-    };
+    // Blocking work on the blocking pool: Diesel queries plus, with an
+    // object-store archive, the same `block_on` reads inside
+    // ensure_session_archived that would panic on an async runtime worker
+    // (#1487, the twin of the retention path above).
+    let result = tokio::task::spawn_blocking(move || {
+        use diesel::prelude::*;
+        use handlers::helpers::delete_session_with_data;
 
-    // Set a 5-second timeout for cleanup queries
-    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
-        tracing::warn!(
-            "Failed to set statement_timeout for session age cleanup: {}",
-            e
-        );
-    }
+        let mut conn = db_pool.get()?;
 
-    let cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(i64::from(max_days));
-
-    let old_sessions: Vec<models::Session> = match schema::sessions::table
-        .filter(schema::sessions::last_activity.lt(cutoff))
-        .load(&mut conn)
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("Failed to query old sessions: {}", e);
-            return;
+        // Set a 5-second timeout for cleanup queries
+        if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn)
+        {
+            tracing::warn!("Failed to set statement_timeout for session age cleanup: {e}");
         }
-    };
 
-    if old_sessions.is_empty() {
-        return;
-    }
+        let cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(i64::from(max_days));
+        let old_sessions: Vec<models::Session> = schema::sessions::table
+            .filter(schema::sessions::last_activity.lt(cutoff))
+            .load(&mut conn)?;
 
-    let mut deleted = 0;
-    let mut held = 0;
-    for session in &old_sessions {
-        // #1258 phase 2: when archiving is enabled, an eligible session is
-        // only deleted once it has a fresh archive; on archive failure the
-        // deletion is HELD (retried next cycle) and the failure recorded —
-        // retention can never silently destroy the last copy.
-        if let Some(runtime) = &app_state.archive {
-            if !ensure_session_archived(&mut conn, runtime, session) {
-                held += 1;
-                continue;
+        let mut deleted = 0;
+        let mut held = 0;
+        for session in &old_sessions {
+            // #1258 phase 2: when archiving is enabled, an eligible session is
+            // only deleted once it has a fresh archive; on archive failure the
+            // deletion is HELD (retried next cycle) and the failure recorded —
+            // retention can never silently destroy the last copy.
+            if let Some(runtime) = &archive {
+                if !ensure_session_archived(&mut conn, runtime, session) {
+                    held += 1;
+                    continue;
+                }
+            }
+            match delete_session_with_data(&mut conn, session, true) {
+                Ok(_) => deleted += 1,
+                Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
             }
         }
-        match delete_session_with_data(&mut conn, session, true) {
-            Ok(_) => deleted += 1,
-            Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
-        }
-    }
+        Ok::<(usize, usize), anyhow::Error>((deleted, held))
+    })
+    .await;
 
-    tracing::info!(
-        "Session age cleanup: deleted {} sessions older than {} days{}",
-        deleted,
-        max_days,
-        if held > 0 {
-            format!(" ({held} held pending archive)")
-        } else {
-            String::new()
+    match result {
+        Ok(Ok((deleted, held))) => {
+            if deleted > 0 || held > 0 {
+                tracing::info!(
+                    "Session age cleanup: deleted {} sessions older than {} days{}",
+                    deleted,
+                    max_days,
+                    if held > 0 {
+                        format!(" ({held} held pending archive)")
+                    } else {
+                        String::new()
+                    }
+                );
+            }
         }
-    );
+        Ok(Err(e)) => tracing::error!("Session age cleanup query failed: {e}"),
+        Err(e) => tracing::error!("Session age cleanup task panicked: {e}"),
+    }
 }
 
 /// Delete proxy auth tokens whose expiration is more than 7 days in the past.
