@@ -886,6 +886,14 @@
     opacity: 0.6;
 }
 
+/* When a thinking block leads its group part, the grouped body's flex `gap`
+   already separates it from the block above — its own top margin then
+   double-counts into unusual headroom above the "THINKING" label. Drop the
+   redundant top margin in that leading position only. */
+.grouped-message-part > .thinking-block:first-child {
+    margin-top: 0;
+}
+
 .thinking-label {
     font-size: 0.7rem;
     text-transform: uppercase;

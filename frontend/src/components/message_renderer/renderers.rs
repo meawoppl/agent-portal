@@ -84,7 +84,7 @@ pub fn render_optimistic_user_message(
                 { render_delivery_progress(delivery) }
                 <CopyButton text={msg.content.clone()} title="Copy message" />
             </div>
-            <div class="message-body">{ render_optimistic_user_message_content(msg, session_id) }</div>
+            <div class="message-body">{ render_optimistic_user_message_content(msg, session_id).unwrap_or_default() }</div>
         </div>
     }
 }
@@ -108,7 +108,7 @@ pub fn render_user_message(
     if has_tool_results {
         html! {
             <div class="claude-message user-message tool-result-message">
-                <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
+                <div class="message-body">{ render_user_message_content(msg, session_id).unwrap_or_default() }</div>
             </div>
         }
     } else if !text_content.is_empty() {
@@ -126,7 +126,7 @@ pub fn render_user_message(
                     { render_delivery_progress(delivery) }
                     <CopyButton text={text_content.clone()} title="Copy message" />
                 </div>
-                <div class="message-body">{ render_user_message_content(msg, session_id) }</div>
+                <div class="message-body">{ render_user_message_content(msg, session_id).unwrap_or_default() }</div>
             </div>
         }
     } else {
@@ -137,16 +137,21 @@ pub fn render_user_message(
 pub fn render_optimistic_user_message_content(
     msg: &OptimisticUserMessage,
     session_id: Uuid,
-) -> Html {
-    html! {
-        <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&msg.content), session_id) }</div>
-    }
+) -> Option<Html> {
+    (!msg.content.trim().is_empty()).then(|| {
+        html! {
+            <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&msg.content), session_id) }</div>
+        }
+    })
 }
 
-pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) -> Html {
+/// Render a user message's body, returning `None` when it produces nothing
+/// (empty text, or a tool-result envelope whose results are all empty) so
+/// callers can drop the surrounding wrapper/card rather than emit a blank one.
+pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) -> Option<Html> {
     if let Some(Ok(input)) = msg.tool_use_result_as::<shared::AskUserQuestionInput>() {
         if has_askuserquestion_answers(&input) {
-            return render_askuserquestion_result(&input);
+            return Some(render_askuserquestion_result(&input));
         }
     }
 
@@ -155,11 +160,11 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
     if has_tool_results {
         render_content_blocks(&msg.message.content, session_id)
     } else if text_content.is_empty() {
-        html! {}
+        None
     } else {
-        html! {
+        Some(html! {
             <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
-        }
+        })
     }
 }
 

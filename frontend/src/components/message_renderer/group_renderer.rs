@@ -89,7 +89,34 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 GroupCategory::Thinking => "assistant-message",
             };
             let visible = visible_group_indices(*category, messages);
-            let visible_count = visible.len();
+            // Render each member first, dropping the ones that produce nothing
+            // (empty assistant/user bodies, empty tool results, etc.) so we
+            // never emit an empty `grouped-message-part` — a zero-height flex
+            // item that the body's `gap` still spaces into a blank row.
+            let parts: Vec<Html> = visible
+                .iter()
+                .filter_map(|&i| {
+                    let message = &messages[i];
+                    let content = dispatch::render_identity_group_part(
+                        message,
+                        props.agent_type,
+                        props.session_id,
+                        &props.continuation_statuses,
+                        props.on_schedule_continuation.clone(),
+                    )?;
+                    let key = message
+                        .raw_iso()
+                        .map(|iso| format!("m-{}", iso))
+                        .unwrap_or_else(|| format!("m{}", i));
+                    Some(html! { <div {key} class="grouped-message-part">{ content }</div> })
+                })
+                .collect();
+            // Every member rendered empty → collapse the whole group card
+            // rather than show a header over an empty body.
+            if parts.is_empty() {
+                return html! {};
+            }
+            let visible_count = parts.len();
             html! {
                 <div class={classes!("claude-message", wrapper_class)}>
                     <div class="message-header" title={ts.unwrap_or_default()}>
@@ -101,13 +128,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                         }
                     </div>
                     <div class="message-body grouped-message-body">
-                        { for visible.iter().map(|&i| {
-                            let message = &messages[i];
-                            let key = message.raw_iso()
-                                .map(|iso| format!("m-{}", iso))
-                                .unwrap_or_else(|| format!("m{}", i));
-                            html! { <div {key} class="grouped-message-part">{ dispatch::render_identity_group_part(message, props.agent_type, props.session_id, &props.continuation_statuses, props.on_schedule_continuation.clone()) }</div> }
-                        })}
+                        { for parts.into_iter() }
                     </div>
                     if let Some(iso) = last_iso {
                         <div class="message-footer">

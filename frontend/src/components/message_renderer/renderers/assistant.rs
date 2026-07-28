@@ -141,7 +141,7 @@ pub fn render_assistant_message(
                     }
                 }
             </div>
-            <div class="message-body">{ render_assistant_message_content(msg, session_id) }</div>
+            <div class="message-body">{ render_assistant_message_content(msg, session_id).unwrap_or_default() }</div>
             if let Some(iso) = raw_iso {
                 <div class="message-footer">
                     <TimeAgo iso={iso.to_string()} />
@@ -151,114 +151,112 @@ pub fn render_assistant_message(
     }
 }
 
-pub fn render_assistant_message_content(msg: &AssistantMessage, session_id: Uuid) -> Html {
-    let blocks = msg.message.content.clone();
-    render_content_blocks(&blocks, session_id)
+pub fn render_assistant_message_content(msg: &AssistantMessage, session_id: Uuid) -> Option<Html> {
+    render_content_blocks(&msg.message.content, session_id)
 }
 
-pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Html {
-    html! {
-        <>
-            {
-                blocks.iter().map(|block| {
-                    match block {
-                        ContentBlock::Text(t) => {
-                            html! {
-                                <div class="assistant-text">
-                                    { render_markdown_for_session(&t.text, session_id) }
-                                    { render_citations(&t.citations) }
-                                </div>
-                            }
-                        }
-                        ContentBlock::ToolUse(tu) => {
-                            render_tool_use(&tu.name, &tu.input)
-                        }
-                        ContentBlock::ToolResult(tr) => {
-                            let class = if tr.is_error.unwrap_or(false) { "tool-result error" } else { "tool-result" };
-                            match &tr.content {
-                                Some(ToolResultContent::Text(s)) => {
-                                    html! {
-                                        <div class={class}>
-                                            <ExpandableText full_text={s.clone()} max_len={500} class="tool-result-content" />
-                                        </div>
-                                    }
-                                }
-                                Some(ToolResultContent::Structured(blocks)) => {
-                                    html! {
-                                        <div class={class}>
-                                            { for blocks.iter().map(|v| {
-                                                match serde_json::from_value::<shared::ContentBlock>(v.clone()) {
-                                                    Ok(typed) => render_structured_block(&typed),
-                                                    Err(_) => {
-                                                        let json = serde_json::to_string_pretty(v).unwrap_or_default();
-                                                        html! { <pre class="tool-result-content">{ json }</pre> }
-                                                    }
-                                                }
-                                            }) }
-                                        </div>
-                                    }
-                                }
-                                None => html! { <div class={class}></div> },
-                            }
-                        }
-                        ContentBlock::Image(img) => {
-                            render_image_source(&img.source, None)
-                        }
-                        ContentBlock::Thinking(th) => {
-                            let sig_title = if th.signature.is_empty() {
-                                "No signature on this thinking block.".to_string()
-                            } else {
-                                format!("Encrypted thinking signature:\n{}", th.signature)
-                            };
-                            html! {
-                                <div class="thinking-block">
-                                    <span class="thinking-label" title={sig_title}>{ "thinking" }</span>
-                                    if th.thinking.trim().is_empty() {
-                                        <div class="thinking-content muted" title="Thinking text was omitted by the model; the encrypted signature is preserved in the raw message.">
-                                            { "thinking omitted" }
-                                        </div>
-                                    } else {
-                                        <div class="thinking-content">{ crate::components::markdown::linkify_urls(&th.thinking) }</div>
-                                    }
-                                </div>
-                            }
-                        }
-                        ContentBlock::ServerToolUse(stu) => {
-                            render_server_tool_use(&stu.name, &stu.input)
-                        }
-                        ContentBlock::WebSearchToolResult(r) => {
-                            render_web_search_result(&r.content)
-                        }
-                        ContentBlock::CodeExecutionToolResult(r) => {
-                            render_code_execution_result(&r.content)
-                        }
-                        ContentBlock::McpToolUse(mtu) => {
-                            render_mcp_tool_use(&mtu.name, mtu.server_name.as_deref(), &mtu.input)
-                        }
-                        ContentBlock::McpToolResult(r) => {
-                            render_mcp_tool_result(&r.content, r.is_error.unwrap_or(false))
-                        }
-                        ContentBlock::ContainerUpload(upload) => {
-                            render_container_upload(&upload.data)
-                        }
-                        ContentBlock::Fallback(fb) => {
-                            // Typed model-fallback notice: the response switched
-                            // models mid-stream (e.g. overload fallback). Render
-                            // the from → to transition rather than a raw blob.
-                            html! {
-                                <div class="assistant-text model-fallback-notice">
-                                    { format!("Model fallback: {} → {}", fb.from.model, fb.to.model) }
-                                </div>
-                            }
-                        }
-                        ContentBlock::Unknown(value) => {
-                            render_unknown_block(value)
-                        }
-                    }
-                }).collect::<Html>()
+/// Render a run of content blocks, returning `None` when *no* block produces
+/// visible output (so callers can omit the surrounding wrapper/card entirely
+/// rather than emit a spaced-but-empty element).
+pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Option<Html> {
+    let rendered: Vec<Html> = blocks
+        .iter()
+        .filter_map(|block| render_block(block, session_id))
+        .collect();
+    (!rendered.is_empty()).then(|| html! { <>{ for rendered.into_iter() }</> })
+}
+
+/// Render one content block. `None` means the block renders nothing (e.g. a
+/// tool result that returned no content) — the caller drops it rather than
+/// emitting an empty box.
+fn render_block(block: &ContentBlock, session_id: Uuid) -> Option<Html> {
+    let rendered = match block {
+        ContentBlock::Text(t) => {
+            html! {
+                <div class="assistant-text">
+                    { render_markdown_for_session(&t.text, session_id) }
+                    { render_citations(&t.citations) }
+                </div>
             }
-        </>
-    }
+        }
+        ContentBlock::ToolUse(tu) => render_tool_use(&tu.name, &tu.input),
+        ContentBlock::ToolResult(tr) => {
+            let class = if tr.is_error.unwrap_or(false) {
+                "tool-result error"
+            } else {
+                "tool-result"
+            };
+            match &tr.content {
+                Some(ToolResultContent::Text(s)) => {
+                    html! {
+                        <div class={class}>
+                            <ExpandableText full_text={s.clone()} max_len={500} class="tool-result-content" />
+                        </div>
+                    }
+                }
+                Some(ToolResultContent::Structured(blocks)) => {
+                    html! {
+                        <div class={class}>
+                            { for blocks.iter().map(|v| {
+                                match serde_json::from_value::<shared::ContentBlock>(v.clone()) {
+                                    Ok(typed) => render_structured_block(&typed),
+                                    Err(_) => {
+                                        let json = serde_json::to_string_pretty(v).unwrap_or_default();
+                                        html! { <pre class="tool-result-content">{ json }</pre> }
+                                    }
+                                }
+                            }) }
+                        </div>
+                    }
+                }
+                // A tool result with no content renders nothing —
+                // drop it instead of emitting an empty box.
+                None => return None,
+            }
+        }
+        ContentBlock::Image(img) => render_image_source(&img.source, None),
+        ContentBlock::Thinking(th) => {
+            let sig_title = if th.signature.is_empty() {
+                "No signature on this thinking block.".to_string()
+            } else {
+                format!("Encrypted thinking signature:\n{}", th.signature)
+            };
+            html! {
+                <div class="thinking-block">
+                    <span class="thinking-label" title={sig_title}>{ "thinking" }</span>
+                    if th.thinking.trim().is_empty() {
+                        <div class="thinking-content muted" title="Thinking text was omitted by the model; the encrypted signature is preserved in the raw message.">
+                            { "thinking omitted" }
+                        </div>
+                    } else {
+                        <div class="thinking-content">{ crate::components::markdown::linkify_urls(&th.thinking) }</div>
+                    }
+                </div>
+            }
+        }
+        ContentBlock::ServerToolUse(stu) => render_server_tool_use(&stu.name, &stu.input),
+        ContentBlock::WebSearchToolResult(r) => render_web_search_result(&r.content),
+        ContentBlock::CodeExecutionToolResult(r) => render_code_execution_result(&r.content),
+        ContentBlock::McpToolUse(mtu) => {
+            render_mcp_tool_use(&mtu.name, mtu.server_name.as_deref(), &mtu.input)
+        }
+        ContentBlock::McpToolResult(r) => {
+            render_mcp_tool_result(&r.content, r.is_error.unwrap_or(false))
+        }
+        ContentBlock::ContainerUpload(upload) => render_container_upload(&upload.data),
+        ContentBlock::Fallback(fb) => {
+            // Typed model-fallback notice: the response switched
+            // models mid-stream (e.g. overload fallback). Render
+            // the from → to transition rather than a raw blob.
+            html! {
+                <div class="assistant-text model-fallback-notice">
+                    { format!("Model fallback: {} → {}", fb.from.model, fb.to.model) }
+                </div>
+            }
+        }
+        ContentBlock::Unknown(value) => render_unknown_block(value),
+    };
+    Some(rendered)
 }
 
 fn render_citations(citations: &[Citation]) -> Html {
