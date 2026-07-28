@@ -181,6 +181,25 @@ fn user_is_plain_text(msg: &shared::UserMessage) -> bool {
             .all(|b| matches!(b, shared::ContentBlock::Text(_)))
 }
 
+/// True iff a plain-text user message is actually a claude-echoed inter-agent
+/// message (`[message from <agent> <uuid>]\n…`). Such messages must render as
+/// their own provenance card rather than fold into a plain-text "You" run, so
+/// `classify` keeps them out of the User group. Uses the same detector the
+/// single-card renderer uses, so the two decisions can't drift.
+fn user_message_is_inter_agent(msg: &shared::UserMessage) -> bool {
+    let text = msg
+        .message
+        .content
+        .iter()
+        .filter_map(|b| match b {
+            shared::ContentBlock::Text(t) => Some(t.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    super::renderers::agent_message_event_from_agent_facing_text(&text).is_some()
+}
+
 /// Classify a single wire message into the display identity it belongs to,
 /// or `None` if it shouldn't roll into any group (renders as `Single`).
 ///
@@ -242,6 +261,17 @@ pub(super) fn classify(
                 });
             }
             if user_is_plain_text(&msg) {
+                // A claude-echoed inter-agent message (`[message from …]`) that
+                // carries no provenance metadata (the codex→claude case) must
+                // render as its own "Message from …" card, not merge into the
+                // "You" group and show its raw `[message from …]` / system-
+                // reminder wrapper. Returning `None` renders it as a `Single`,
+                // where the single-card path detects and cards it. (Source-
+                // tagged agent messages already route through `source_identity`
+                // above.)
+                if source.is_none() && user_message_is_inter_agent(&msg) {
+                    return None;
+                }
                 return Some(source.map_or_else(
                     || MessageIdentity {
                         category: GroupCategory::User,
