@@ -103,15 +103,21 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
     }
 }
 
+/// Render one member of an identity group. `None` when the member produces no
+/// visible content, so the caller omits the `grouped-message-part` wrapper
+/// (and its flex gap) rather than emitting a spaced-but-empty row.
 pub(crate) fn render_identity_group_part(
     message: &RenderedMessage,
     agent_type: shared::AgentType,
     session_id: Uuid,
     continuation_statuses: &HashMap<Uuid, String>,
     on_schedule_continuation: Callback<Uuid>,
-) -> Html {
+) -> Option<Html> {
     if let Some(shared::MessageSource::Agent { .. }) = message.source() {
-        return renderers::render_agent_message_body(&message_text(message), session_id);
+        return Some(renderers::render_agent_message_body(
+            &message_text(message),
+            session_id,
+        ));
     }
 
     let json = message.content.as_str();
@@ -126,16 +132,18 @@ pub(crate) fn render_identity_group_part(
         AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
             renderers::render_assistant_message_content(&msg, session_id)
         }
-        AgentFrame::Claude(ClaudeMessage::Portal(msg)) => renderers::render_portal_message_content(
-            &msg,
-            session_id,
-            continuation_statuses,
-            on_schedule_continuation,
-        ),
-        AgentFrame::Codex(event) => {
-            crate::components::codex_renderer::render_codex_frame_content(&event, session_id)
+        AgentFrame::Claude(ClaudeMessage::Portal(msg)) => {
+            Some(renderers::render_portal_message_content(
+                &msg,
+                session_id,
+                continuation_statuses,
+                on_schedule_continuation,
+            ))
         }
-        _ => html! {},
+        AgentFrame::Codex(event) => {
+            Some(crate::components::codex_renderer::render_codex_frame_content(&event, session_id))
+        }
+        _ => None,
     }
 }
 
