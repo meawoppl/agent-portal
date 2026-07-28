@@ -1,0 +1,1 @@
+ALTER TABLE proxy_auth_tokens DROP CONSTRAINT proxy_auth_tokens_session_id_fkey;
