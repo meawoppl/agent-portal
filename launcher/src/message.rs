@@ -52,6 +52,113 @@ pub(crate) fn api_base() -> Result<(String, String)> {
     Ok((http.trim_end_matches('/').to_string(), token))
 }
 
+/// Max HTTP attempts (1 initial + retries) for the agent-messaging calls.
+const MAX_ATTEMPTS: u32 = 4;
+/// Base backoff before the first retry; doubles each attempt.
+const BASE_BACKOFF_MS: u64 = 200;
+
+/// Whether a failed attempt is worth retrying (#1388). Kept as a pure function,
+/// separate from the async loop, so the classification is unit-testable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetryDecision {
+    Retry,
+    Stop,
+}
+
+/// Classify an HTTP status for retry.
+///
+/// `idempotent` gates 5xx retries: a GET (session list) is safe to replay on a
+/// server error, but a POST that may already have delivered the message is not,
+/// so a send only replays on the pre-delivery transient (a 404 from a stale
+/// session index / read-after-write race, where the server found nothing and
+/// did nothing) — never a 5xx that might double-send.
+///
+/// 400/401/403 are permanent (validation / auth / permission) and stop
+/// immediately; retrying them just hides the real error behind a delay.
+fn classify_status(status: reqwest::StatusCode, idempotent: bool) -> RetryDecision {
+    if status.is_success() {
+        return RetryDecision::Stop;
+    }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return RetryDecision::Retry;
+    }
+    if status.is_server_error() && idempotent {
+        return RetryDecision::Retry;
+    }
+    RetryDecision::Stop
+}
+
+/// Small non-cryptographic jitter in `0..=max` ms, seeded from the wall clock —
+/// enough to spread concurrent agents' retries, no `rand` dependency needed.
+fn jitter_ms(max: u64) -> u64 {
+    if max == 0 {
+        return 0;
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_nanos()))
+        .unwrap_or(0);
+    nanos % (max + 1)
+}
+
+/// Turn a permanent (non-retried) HTTP status into a user-facing error, with
+/// login/permission guidance for auth failures.
+fn permanent_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
+    use reqwest::StatusCode;
+    match status {
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => anyhow!(
+            "not authorized ({status}) — run `agent-portal login`, or check you own the target session"
+        ),
+        _ => anyhow!("backend returned {status}: {}", body.trim()),
+    }
+}
+
+/// Run `build` (which builds and sends a fresh request each call) with bounded
+/// exponential backoff + jitter, retrying transient failures (transport errors,
+/// 404, and — when `idempotent` — 5xx). Returns the successful response, or a
+/// concise error including the attempt count and last status/body once retries
+/// are exhausted or a permanent status is hit.
+async fn request_with_retry<F, Fut>(idempotent: bool, mut build: F) -> Result<reqwest::Response>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = reqwest::Result<reqwest::Response>>,
+{
+    let mut attempt = 1;
+    loop {
+        match build().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    return Ok(resp);
+                }
+                if classify_status(status, idempotent) == RetryDecision::Stop {
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(permanent_error(status, &body));
+                }
+                if attempt >= MAX_ATTEMPTS {
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(anyhow!(
+                        "backend returned {status} after {attempt} attempts: {}",
+                        body.trim()
+                    ));
+                }
+            }
+            Err(e) => {
+                // A transport error usually means the request never completed;
+                // replay it up to the bound.
+                if attempt >= MAX_ATTEMPTS {
+                    return Err(anyhow::Error::new(e).context(format!(
+                        "request to backend failed after {attempt} attempts"
+                    )));
+                }
+            }
+        }
+        let base = BASE_BACKOFF_MS * (1u64 << (attempt - 1));
+        tokio::time::sleep(std::time::Duration::from_millis(base + jitter_ms(base / 2))).await;
+        attempt += 1;
+    }
+}
+
 /// `agent-portal message list` — print the caller's sessions (agents).
 pub async fn list() -> Result<()> {
     let (base, token) = api_base()?;
@@ -86,15 +193,15 @@ async fn fetch_sessions(
     base: &str,
     token: &str,
 ) -> Result<AgentSessionsResponse> {
-    let resp = client
-        .get(format!("{base}/api/agent/sessions"))
-        .bearer_auth(token)
-        .send()
-        .await
-        .context("request to backend failed")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("backend returned {}", resp.status()));
-    }
+    // Idempotent GET: safe to replay on transport errors, 404 (stale session
+    // index), and 5xx.
+    let resp = request_with_retry(true, || {
+        client
+            .get(format!("{base}/api/agent/sessions"))
+            .bearer_auth(token)
+            .send()
+    })
+    .await?;
     resp.json().await.context("malformed response")
 }
 
@@ -106,23 +213,22 @@ pub async fn send(agent_id: &str, message: &str) -> Result<()> {
     let sessions = fetch_sessions(&client, &base, &token).await?;
     let resolved_agent_id = resolve_session_id(agent_id, &sessions.sessions)?;
     let from = sender_session_id();
-    let resp = client
-        .post(format!(
-            "{base}/api/agent/sessions/{resolved_agent_id}/message"
-        ))
-        .bearer_auth(token)
-        .json(&SendAgentMessageRequest {
-            message: message.to_string(),
-            from,
-        })
-        .send()
-        .await
-        .context("request to backend failed")?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("backend returned {}: {}", status, body.trim()));
-    }
+    // Non-idempotent POST: retry the pre-delivery transient (404 target lookup
+    // against a stale session index) and transport errors, but NOT 5xx — the
+    // server may already have delivered, and a replay would double-send.
+    let resp = request_with_retry(false, || {
+        client
+            .post(format!(
+                "{base}/api/agent/sessions/{resolved_agent_id}/message"
+            ))
+            .bearer_auth(&token)
+            .json(&SendAgentMessageRequest {
+                message: message.to_string(),
+                from: from.clone(),
+            })
+            .send()
+    })
+    .await?;
     let data: SendAgentMessageResponse = resp.json().await.context("malformed response")?;
     if data.delivered {
         println!("Delivered (seq {}).", data.seq);
@@ -267,6 +373,62 @@ mod tests {
                 .expect("resolved"),
             sessions[0].id
         );
+    }
+
+    #[test]
+    fn classify_status_retries_transient_for_idempotent_get() {
+        use reqwest::StatusCode;
+        // Stale index / read-after-write races and server errors are retryable
+        // for a safe-to-replay GET.
+        assert_eq!(
+            classify_status(StatusCode::NOT_FOUND, true),
+            RetryDecision::Retry
+        );
+        assert_eq!(
+            classify_status(StatusCode::INTERNAL_SERVER_ERROR, true),
+            RetryDecision::Retry
+        );
+        assert_eq!(
+            classify_status(StatusCode::BAD_GATEWAY, true),
+            RetryDecision::Retry
+        );
+        assert_eq!(
+            classify_status(StatusCode::SERVICE_UNAVAILABLE, true),
+            RetryDecision::Retry
+        );
+    }
+
+    #[test]
+    fn classify_status_does_not_replay_5xx_for_non_idempotent_send() {
+        use reqwest::StatusCode;
+        // A POST that may already have delivered must not replay a 5xx…
+        assert_eq!(
+            classify_status(StatusCode::INTERNAL_SERVER_ERROR, false),
+            RetryDecision::Stop
+        );
+        assert_eq!(
+            classify_status(StatusCode::BAD_GATEWAY, false),
+            RetryDecision::Stop
+        );
+        // …but a pre-delivery 404 target lookup is still safe to retry.
+        assert_eq!(
+            classify_status(StatusCode::NOT_FOUND, false),
+            RetryDecision::Retry
+        );
+    }
+
+    #[test]
+    fn classify_status_stops_on_permanent_and_success() {
+        use reqwest::StatusCode;
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::OK,
+        ] {
+            assert_eq!(classify_status(status, true), RetryDecision::Stop);
+            assert_eq!(classify_status(status, false), RetryDecision::Stop);
+        }
     }
 
     #[test]
