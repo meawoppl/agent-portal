@@ -299,4 +299,14 @@ pub enum ServerToLauncher {
     /// token is written to `launcher.json`. Older launchers may log a decode
     /// error and ignore this unknown frame; the old token remains valid.
     TokenRefresh { auth_token: String },
+
+    /// Echo of a `LauncherToServer::LauncherHeartbeat`. Lets the launcher tell
+    /// a live control socket from a half-open one: it sends heartbeats every
+    /// `LAUNCHER_HEARTBEAT_INTERVAL_SECS` but, on a half-open socket, the sends
+    /// succeed into a dead TCP connection and no ack ever comes back — so the
+    /// launcher can force a reconnect (which re-mints tokens and re-establishes
+    /// its sessions) instead of silently drifting them to `disconnected`
+    /// (#1366). Gated behind `LAUNCHER_CAPABILITY_HEARTBEAT_ACK` so it's never
+    /// sent to a launcher too old to decode it.
+    LauncherHeartbeatAck,
 }

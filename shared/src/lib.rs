@@ -21,6 +21,12 @@ pub const LAUNCHER_CAPABILITY_CREATE_WORKTREE: &str = "launch.create_worktree";
 /// `ServerToLauncher::Restart` (restart the process without updating the binary).
 pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
 
+/// Launcher capability advertised by versions that understand
+/// `ServerToLauncher::LauncherHeartbeatAck`. The backend only echoes heartbeat
+/// acks to launchers that advertise this, so older launchers never see an
+/// undecodable frame (#1366).
+pub const LAUNCHER_CAPABILITY_HEARTBEAT_ACK: &str = "launcher.heartbeat_ack";
+
 /// Split [`VERSION`] into `(major, minor, patch)` numeric components.
 /// `None` on the (impossible-by-construction) malformed string.
 pub fn version_parts() -> Option<(u64, u64, u64)> {
