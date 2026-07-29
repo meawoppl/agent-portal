@@ -30,6 +30,14 @@ pub struct NewUser {
     pub avatar_url: Option<String>,
 }
 
+/// WIRE-SHAPE WARNING: this model is `#[serde(flatten)]`-ed onto the
+/// `GET /api/sessions` response (`SessionWithRole` in `handlers/sessions.rs`),
+/// so **adding a column here silently adds a field to that endpoint** — and a
+/// column whose name collides with an explicit sibling field emits a duplicate
+/// JSON key that empties the frontend session list (#1454/#1456). Any field
+/// added below is an API change: audit the wire shape and keep the round-trip
+/// guard test (`sessions_response_roundtrips_with_launcher_version_present`)
+/// green.
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
 #[diesel(table_name = crate::schema::sessions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
