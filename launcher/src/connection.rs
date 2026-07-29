@@ -9,6 +9,12 @@ use uuid::Uuid;
 
 const HEARTBEAT_INTERVAL: Duration =
     Duration::from_secs(shared::protocol::LAUNCHER_HEARTBEAT_INTERVAL_SECS);
+/// If the backend echoes our heartbeats (it advertises support by sending the
+/// first ack) but then goes this long without one, the control socket is
+/// half-open — force a reconnect. Three missed intervals tolerates a slow tick
+/// or a dropped ack without flapping (#1366).
+const HEARTBEAT_ACK_TIMEOUT: Duration =
+    Duration::from_secs(shared::protocol::LAUNCHER_HEARTBEAT_INTERVAL_SECS * 3);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
 /// Retry cadence while parked on a fatal rejection: start here, double to the
 /// cap. Deliberately much slower than the network-error backoff — a fatal
@@ -32,6 +38,16 @@ fn classify_fatal(reason: Option<LauncherRejectReason>, error_msg: &str) -> Laun
     } else {
         LauncherRejectReason::DuplicateLauncher
     }
+}
+
+/// Whether the control socket looks half-open and should be reconnected.
+///
+/// Only ever true once we've seen at least one heartbeat ack (`ack_seen`) —
+/// against an older backend that never echoes, this stays `false` forever, so
+/// the watchdog can't cause false reconnect loops on a healthy-but-old hub
+/// (#1366).
+fn control_socket_half_open(ack_seen: bool, since_last_ack: Duration) -> bool {
+    ack_seen && since_last_ack > HEARTBEAT_ACK_TIMEOUT
 }
 
 /// The one-line operator instruction for a parked launcher.
@@ -99,6 +115,7 @@ pub async fn run_launcher_loop(
                     capabilities: vec![
                         shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
+                        shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
                     ],
                 };
                 if ws_sender.send(register).await.is_err() {
@@ -180,6 +197,13 @@ pub async fn run_launcher_loop(
                 // Main loop
                 let mut heartbeat_timer = tokio::time::interval(HEARTBEAT_INTERVAL);
                 let start = Instant::now();
+                // Half-open control-socket detection (#1366). `ack_seen` stays
+                // false against an older backend that doesn't echo heartbeats,
+                // which keeps the watchdog disabled (no false reconnects); once
+                // an ack proves the backend supports it, a subsequent drought
+                // past `HEARTBEAT_ACK_TIMEOUT` forces a reconnect.
+                let mut last_ack = Instant::now();
+                let mut ack_seen = false;
 
                 loop {
                     let sched_dur = scheduler
@@ -202,12 +226,22 @@ pub async fn run_launcher_loop(
                         result = ws_receiver.recv() => {
                             match result {
                                 Some(Ok(msg)) => {
-                                    handle_message(
-                                        msg,
-                                        &mut ws_sender,
-                                        &mut process_manager,
-                                        &mut scheduler,
-                                    ).await;
+                                    // A heartbeat echo proves the control socket
+                                    // is live end-to-end; record it and arm the
+                                    // watchdog. Handled here (not in
+                                    // `handle_message`) so the liveness state
+                                    // stays local to the loop.
+                                    if matches!(msg, ServerToLauncher::LauncherHeartbeatAck) {
+                                        last_ack = Instant::now();
+                                        ack_seen = true;
+                                    } else {
+                                        handle_message(
+                                            msg,
+                                            &mut ws_sender,
+                                            &mut process_manager,
+                                            &mut scheduler,
+                                        ).await;
+                                    }
                                 }
                                 Some(Err(e)) => {
                                     warn!("Decode error: {}", e);
@@ -221,6 +255,19 @@ pub async fn run_launcher_loop(
                         }
 
                         _ = heartbeat_timer.tick() => {
+                            // Half-open detection: if the backend has been
+                            // echoing heartbeats but has now gone silent past
+                            // the timeout, our sends are buffering into a dead
+                            // TCP connection — reconnect rather than believe the
+                            // socket is fine while the hub marks our sessions
+                            // disconnected (#1366).
+                            if control_socket_half_open(ack_seen, last_ack.elapsed()) {
+                                warn!(
+                                    "No launcher heartbeat ack for {}s — control socket half-open; reconnecting to re-establish sessions",
+                                    last_ack.elapsed().as_secs()
+                                );
+                                break;
+                            }
                             let hb = LauncherToServer::LauncherHeartbeat {
                                 launcher_id,
                                 running_sessions: process_manager.running_session_ids(),
@@ -797,6 +844,28 @@ mod tests {
             assert!(!parked_instruction(reason).is_empty());
         }
         assert!(parked_instruction(LauncherRejectReason::AuthFailed).contains("agent-portal login"));
+    }
+
+    #[test]
+    fn half_open_watchdog_never_fires_without_an_ack() {
+        // An older backend never echoes heartbeats, so `ack_seen` stays false
+        // and the watchdog must stay disabled no matter how long it's been —
+        // otherwise a new launcher would reconnect-loop against a healthy hub.
+        assert!(!control_socket_half_open(
+            false,
+            HEARTBEAT_ACK_TIMEOUT * 100
+        ));
+    }
+
+    #[test]
+    fn half_open_watchdog_fires_only_after_ack_drought() {
+        // Seen an ack and within the window: healthy.
+        assert!(!control_socket_half_open(true, HEARTBEAT_ACK_TIMEOUT / 2));
+        // Seen an ack but silent past the timeout: half-open, reconnect.
+        assert!(control_socket_half_open(
+            true,
+            HEARTBEAT_ACK_TIMEOUT + Duration::from_secs(1)
+        ));
     }
 
     fn home_test_dir(name: &str) -> std::path::PathBuf {

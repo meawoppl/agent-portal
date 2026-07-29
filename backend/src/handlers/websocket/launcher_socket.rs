@@ -630,6 +630,17 @@ fn handle_launcher_message(
             if let Some(mut launcher) = app_state.session_manager.launchers.get_mut(&launcher_id) {
                 launcher.running_sessions = running_sessions;
             }
+            // Echo the heartbeat so a launcher that supports it can detect a
+            // half-open control socket and reconnect (#1366). Gated on the
+            // capability so older launchers never receive an undecodable frame.
+            if app_state.session_manager.launcher_supports_capability(
+                launcher_id,
+                shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK,
+            ) {
+                app_state
+                    .session_manager
+                    .send_to_launcher(&launcher_id, ServerToLauncher::LauncherHeartbeatAck);
+            }
             reconcile_desired_sessions(app_state, launcher_id, user_id);
         }
         LauncherToServer::ProxyLog {
