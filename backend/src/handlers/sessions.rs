@@ -648,4 +648,79 @@ mod tests {
             AppError::BadRequest("Cannot change own role")
         ));
     }
+
+    /// A fully-populated `Session`. Every field is listed explicitly on purpose:
+    /// because `SessionWithRole` flattens the whole model onto the wire, a new
+    /// DB column silently becomes a new `/api/sessions` field, so a new column
+    /// must break this fixture's compile and force a wire-shape review (#1456).
+    fn sample_session(launcher_version: Option<&str>) -> Session {
+        let ts = chrono::NaiveDate::from_ymd_opt(2026, 7, 29)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        Session {
+            id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            session_name: "session".to_string(),
+            session_key: "key".to_string(),
+            working_directory: "/repo".to_string(),
+            status: SessionStatus::Active.as_str().to_string(),
+            last_activity: ts,
+            created_at: ts,
+            updated_at: ts,
+            git_branch: None,
+            total_cost_usd: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            client_version: None,
+            input_seq: 0,
+            hostname: "host".to_string(),
+            launcher_id: None,
+            pr_url: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(vec![]),
+            launch_failure_count: 0,
+            last_launch_attempt_at: None,
+            launch_lease_until: None,
+            open_prs: serde_json::Value::Array(vec![]),
+            archived_at: None,
+            last_model: None,
+            launcher_version: launcher_version.map(str::to_string),
+        }
+    }
+
+    /// Regression guard for #1454/#1456. `/api/sessions` flattens the whole
+    /// `Session` model onto the wire, and the frontend rejects duplicate JSON
+    /// keys. A duplicate `launcher_version` (a DB column colliding with the
+    /// explicit live-value field) emptied the entire session list in prod — but
+    /// only when a launcher was connected (`launcher_version = Some`), the one
+    /// case the test suite never exercised. Round-trip the launcher-connected
+    /// shape through the real frontend type so any such collision fails CI
+    /// rather than a user's browser.
+    #[test]
+    fn sessions_response_roundtrips_with_launcher_version_present() {
+        use shared::api::SessionsResponse;
+
+        let response = SessionListResponse {
+            sessions: vec![SessionWithRole {
+                session: sample_session(Some("2.13.1000")),
+                my_role: SessionRole::Owner,
+            }],
+        };
+
+        let json = serde_json::to_string(&response).expect("serialize");
+        let parsed: SessionsResponse =
+            serde_json::from_str(&json).expect("frontend must parse /api/sessions cleanly");
+
+        assert_eq!(parsed.sessions.len(), 1);
+        let info = &parsed.sessions[0];
+        assert_eq!(info.launcher_version.as_deref(), Some("2.13.1000"));
+        assert!(matches!(info.status, SessionStatus::Active));
+        assert!(matches!(info.my_role, SessionRole::Owner));
+    }
 }
