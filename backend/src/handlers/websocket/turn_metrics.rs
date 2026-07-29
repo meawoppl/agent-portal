@@ -126,6 +126,7 @@ pub fn handle_turn_metrics_report(
         tool_call_count: metrics.tool_call_count,
         stream_restarts: metrics.stream_restarts,
         total_cost_usd: metrics.total_cost_usd,
+        model_context_window: metrics.model_context_window,
     };
 
     use crate::schema::turn_metrics;

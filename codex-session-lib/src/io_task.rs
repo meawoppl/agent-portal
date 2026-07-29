@@ -358,6 +358,9 @@ pub(crate) async fn codex_io_task(
     // Latest `ThreadTokenUsageUpdated` capture for the current turn so we
     // can plug it into the finalized `TurnMetrics`.
     let mut current_turn_usage: Option<codex_codes::TokenUsageBreakdown> = None;
+    // Latched alongside `current_turn_usage` so the finalized `TurnMetrics`
+    // carries the window for the context-usage gauge.
+    let mut current_turn_context_window: Option<i64> = None;
     let mut current_turn_model: Option<String> = None;
     let mut subagent_token_tracker = CodexSubagentTokenTracker::new(thread_id.clone());
 
@@ -424,6 +427,8 @@ pub(crate) async fn codex_io_task(
                                         // finalized `TurnMetrics` can carry
                                         // the main-thread token counts.
                                         current_turn_usage = Some(p.token_usage.last.clone());
+                                        current_turn_context_window =
+                                            p.token_usage.model_context_window;
                                     } else {
                                         subagent_token_tracker
                                             .observe_token_usage(
@@ -488,6 +493,7 @@ pub(crate) async fn codex_io_task(
                                     codex_codes::TurnStatus::Completed
                                 );
                                 let usage = current_turn_usage.take();
+                                let model_context_window = current_turn_context_window.take();
                                 let model = current_turn_model
                                     .clone()
                                     .or_else(|| thread_model.clone())
@@ -521,6 +527,7 @@ pub(crate) async fn codex_io_task(
                                     stop_reason: Some(status.to_string()),
                                     is_error,
                                     total_cost_usd: None,
+                                    model_context_window,
                                 };
                                 if let Some(metrics) = turn_tracker.finalize(
                                     Instant::now(),

@@ -70,7 +70,7 @@ pub mod timezone;
 
 // Compact model-version extraction for the session-pill watermark
 pub mod model_version;
-pub use model_version::compact_model_version;
+pub use model_version::{compact_model_version, context_window_for};
 
 // API client types and trait
 pub mod api;

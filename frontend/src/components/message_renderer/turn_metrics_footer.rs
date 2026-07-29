@@ -351,6 +351,7 @@ mod tests {
             tool_call_count: 0,
             stream_restarts: 0,
             total_cost_usd: Some(0.014),
+            model_context_window: None,
         }
     }
 
@@ -407,6 +408,7 @@ mod tests {
             tool_call_count: 0,
             stream_restarts: 0,
             total_cost_usd: None, // None → cost chip drops
+            model_context_window: None,
         };
         let chips = build_chip_list(&m);
         assert_eq!(

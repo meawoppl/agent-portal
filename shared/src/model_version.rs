@@ -97,9 +97,32 @@ pub fn compact_model_version(model_id: &str) -> Option<String> {
     }
 }
 
+/// Nominal context-window size (in tokens) for a Claude model id.
+///
+/// Claude's stream-json output reports consumed tokens but *not* the window
+/// size (unlike Codex, which sends `model_context_window` at runtime), so a
+/// context-usage gauge needs a model → window map for Claude turns. Every
+/// current Claude family (Opus / Sonnet / Haiku, incl. the 3.x/4.x/5 lines)
+/// ships a 200k-token window by default, so recognized Claude ids map to
+/// `200_000`; anything unrecognized returns `None` (caller hides the gauge
+/// rather than guess).
+///
+/// Caveat: a 1M-token context is a per-request beta opt-in that isn't
+/// distinguishable from the model id alone, so a session running it will read
+/// as "more full" than it is. The nominal default matches what the CLI shows
+/// by default. Codex never uses this — it carries its own window on the wire.
+pub fn context_window_for(model_id: &str) -> Option<u64> {
+    let id = model_id.to_ascii_lowercase();
+    let is_claude = ["opus", "sonnet", "haiku"]
+        .iter()
+        .any(|family| id.contains(family))
+        || id.starts_with("claude");
+    is_claude.then_some(200_000)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::compact_model_version;
+    use super::{compact_model_version, context_window_for};
 
     #[test]
     fn claude_dashed_major_minor() {
@@ -161,5 +184,24 @@ mod tests {
     #[test]
     fn three_component_version_joins_all() {
         assert_eq!(compact_model_version("foo-1-2-3").as_deref(), Some("1.2.3"));
+    }
+
+    #[test]
+    fn context_window_recognizes_claude_families() {
+        for id in [
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-haiku-4-5-20251001",
+            "claude-fable-5",
+        ] {
+            assert_eq!(context_window_for(id), Some(200_000), "{id}");
+        }
+    }
+
+    #[test]
+    fn context_window_none_for_non_claude_or_unknown() {
+        assert_eq!(context_window_for("gpt-5-codex"), None);
+        assert_eq!(context_window_for(""), None);
+        assert_eq!(context_window_for("garbled-nonsense"), None);
     }
 }

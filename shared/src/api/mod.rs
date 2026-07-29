@@ -310,6 +310,7 @@ mod tests {
             tool_call_count: 3,
             stream_restarts: 0,
             total_cost_usd: Some(0.0145),
+            model_context_window: None,
         };
         let json = serde_json::to_value(&metrics).unwrap();
         assert_eq!(json["agent_type"], "claude");
@@ -349,6 +350,7 @@ mod tests {
             tool_call_count: 0,
             stream_restarts: 0,
             total_cost_usd: None,
+            model_context_window: None,
         };
         assert!(metrics.has_known_model());
 
@@ -467,6 +469,7 @@ mod tests {
             tool_call_count: 0,
             stream_restarts: 0,
             total_cost_usd: None,
+            model_context_window: None,
         };
         let json = serde_json::to_value(&metrics).unwrap();
         assert_eq!(json["agent_type"], "codex");

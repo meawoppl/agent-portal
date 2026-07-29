@@ -84,6 +84,7 @@ mod tests {
             tool_call_count: 0,
             stream_restarts: 0,
             total_cost_usd: None,
+            model_context_window: None,
         }
     }
 

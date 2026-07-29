@@ -204,6 +204,7 @@ impl TurnTracker {
             tool_call_count: turn.tool_call_count,
             stream_restarts: turn.stream_restarts,
             total_cost_usd: outcome.total_cost_usd,
+            model_context_window: outcome.model_context_window,
         };
 
         // Structured per-turn performance + token-accounting log. One line per
@@ -257,6 +258,10 @@ pub struct TurnOutcome {
     pub stop_reason: Option<String>,
     pub is_error: bool,
     pub total_cost_usd: Option<f64>,
+    /// Context window in tokens as reported by the agent (Codex sends this;
+    /// Claude leaves it `None` and the window is derived from the model id).
+    /// See [`shared::TurnMetrics::model_context_window`].
+    pub model_context_window: Option<i64>,
 }
 
 fn duration_to_ms_i64(d: Duration) -> i64 {
@@ -288,6 +293,7 @@ mod tests {
             stop_reason: Some("end_turn".to_string()),
             is_error: false,
             total_cost_usd: Some(0.005),
+            model_context_window: None,
         }
     }
 
@@ -404,6 +410,7 @@ mod tests {
             stop_reason: Some("completed".to_string()),
             is_error: false,
             total_cost_usd: None,
+            model_context_window: Some(272_000),
         };
         let m = tracker
             .finalize(t0 + Duration::from_millis(400), Utc::now(), outcome)
@@ -413,6 +420,8 @@ mod tests {
         assert!(m.model.is_none());
         assert_eq!(m.input_tokens, 42);
         assert_eq!(m.output_tokens, 7);
+        // The agent-reported window flows through to the metrics.
+        assert_eq!(m.model_context_window, Some(272_000));
         // Only one content frame seen → gap measurable as 0 (one frame, no
         // inter-frame interval), not None.
         assert_eq!(m.max_inter_token_gap_ms, Some(0));

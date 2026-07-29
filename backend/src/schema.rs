@@ -257,6 +257,7 @@ diesel::table! {
         created_at -> Timestamptz,
         user_id -> Uuid,
         subagent_tokens -> Int8,
+        model_context_window -> Nullable<Int8>,
     }
 }
 

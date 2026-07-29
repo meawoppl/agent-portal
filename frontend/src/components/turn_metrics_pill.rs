@@ -290,6 +290,7 @@ mod tests {
             model: model.map(|s| s.to_string()),
             service_tier: tier.map(|s| s.to_string()),
             total_cost_usd: Some(0.012),
+            model_context_window: None,
         }
     }
 
