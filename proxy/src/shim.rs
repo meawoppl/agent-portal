@@ -384,19 +384,19 @@ async fn run_shim_loop(
             ..config.clone()
         };
 
-        if register_session(&mut conn, &config_with_branch)
-            .await
-            .is_err()
-        {
-            warn!(
-                "Registration failed, retrying in {}s",
-                backoff.current_secs()
-            );
-            tokio::time::sleep(backoff.sleep_duration()).await;
-            backoff.advance();
-            first_connection = false;
-            continue;
-        }
+        let tunnel_data_ticket = match register_session(&mut conn, &config_with_branch).await {
+            Ok(ticket) => ticket,
+            Err(_) => {
+                warn!(
+                    "Registration failed, retrying in {}s",
+                    backoff.current_secs()
+                );
+                tokio::time::sleep(backoff.sleep_duration()).await;
+                backoff.advance();
+                first_connection = false;
+                continue;
+            }
+        };
 
         first_connection = false;
 
@@ -431,6 +431,7 @@ async fn run_shim_loop(
             permissions.clone(),
             output_buffer.clone(),
             portal_text_tx.clone(),
+            tunnel_data_ticket,
         )
         .await;
 
@@ -493,6 +494,7 @@ async fn run_shim_connection(
     permissions: Arc<Mutex<HashMap<String, PermissionState>>>,
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
     portal_text_tx: mpsc::UnboundedSender<String>,
+    tunnel_data_ticket: Option<String>,
 ) -> ShimConnectionResult {
     let (ws_write, ws_read) = conn.split();
     let ws_write: SharedWsWrite = Arc::new(Mutex::new(ws_write));
@@ -500,6 +502,16 @@ async fn run_shim_connection(
     // Per-connection port-forward tunnel state (docs/PORT_FORWARDING.md);
     // the backend replays `ForwardOpen`s after registration.
     let tunnel = session_lib::tunnel::TunnelManager::new(ws_write.clone());
+
+    // Bring up the binary data plane, if the backend issued a ticket (#1506).
+    // Detached and non-fatal: any failure leaves tunneling on the control socket.
+    if let Some(ticket) = tunnel_data_ticket {
+        tokio::spawn(session_lib::tunnel::run_data_plane(
+            tunnel.clone(),
+            config.backend_url.clone(),
+            ticket,
+        ));
+    }
 
     // Single event channel for all WebSocket reader events
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<WsEvent>();

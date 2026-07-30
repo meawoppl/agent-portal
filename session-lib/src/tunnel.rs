@@ -5,17 +5,35 @@
 //! probe dials with `ForwardStatus`, and runs one task per open stream
 //! copying bytes between the backend (WS frames) and `127.0.0.1:{port}`.
 //!
+//! # Two transports
+//!
+//! Stream bytes travel on whichever socket a stream was opened on (#1506):
+//!
+//! - **Binary data plane** (preferred) — a second WebSocket carrying raw
+//!   payloads. Attach it with [`run_data_plane`]; stream frames then bypass the
+//!   control socket entirely, so forward traffic no longer competes with agent
+//!   stdio and heartbeats, and payloads skip base64.
+//! - **Control socket** (fallback) — the original JSON `Tunnel*` frames with
+//!   base64 payloads. Used whenever no data plane is attached, which keeps older
+//!   backends and dropped data sockets working unchanged.
+//!
+//! The forward **allowlist** and health reports always stay on the control
+//! socket: they are low-volume policy, and they already have a replay path
+//! there. That split is what makes [`await_allowlist`] necessary — see its docs
+//! for the cross-socket ordering race it absorbs.
+//!
 //! Backpressure has two layers, per the spec:
 //! - **Stream credit**: each direction starts with a 256 KiB window; the
 //!   receiver re-grants as it drains bytes into the underlying socket
 //!   (`TunnelWindow`). A sender never reads more from TCP than it holds
 //!   credit for.
-//! - **Writer capacity**: outgoing frames go straight through the shared
+//! - **Writer capacity**: outgoing frames go straight through a shared
 //!   `WsSender` mutex (FIFO), one ≤16 KiB frame per lock. There is no queue
 //!   to grow — total buffered tunnel data is bounded by streams × 16 KiB and
-//!   waiting streams are served round-robin by mutex order. Session frames
-//!   share the same mutex, so tunnel traffic can delay but never starve them
-//!   behind unbounded queued data.
+//!   waiting streams are served round-robin by mutex order. On the control
+//!   socket that mutex is shared with session frames, so tunnel traffic can
+//!   delay them (the reason the data plane exists); on the data plane it is
+//!   private, so it cannot.
 //!
 //! Idle-stream reaping is a backend concern (only it knows which streams are
 //! WebSocket upgrades and therefore exempt); the proxy keeps streams until
@@ -28,7 +46,7 @@ use std::time::Duration;
 use base64::Engine;
 use shared::{
     ForwardStatusFields, ProxyToServer, ServerToProxy, TunnelCloseFields, TunnelDataFields,
-    TunnelOpenFields, TunnelRefuseReason, TunnelRefusedFields, TunnelStreamFields,
+    TunnelFrame, TunnelOpenFields, TunnelRefuseReason, TunnelRefusedFields, TunnelStreamFields,
     TunnelWindowFields,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -41,6 +59,26 @@ use uuid::Uuid;
 /// Shared write half of the session WebSocket (same shape as the hosts'
 /// `SharedWsWrite` aliases).
 pub type TunnelWsWrite = Arc<Mutex<ws_bridge::WsSender<ProxyToServer>>>;
+
+/// Shared write half of the dedicated binary data plane (#1506).
+pub type TunnelDataWrite = Arc<Mutex<ws_bridge::WsSender<TunnelFrame>>>;
+
+/// Which socket a stream's outbound frames travel on.
+///
+/// Decided once, from where the stream's `TunnelOpen` arrived, and then carried
+/// by value through `open_stream_with_egress` → `run_stream` so each stream task
+/// owns its own copy. Deliberately *not* looked up per frame from manager state:
+/// if the data plane attached midway through a stream, a per-frame lookup would
+/// split that stream's bytes across two sockets, and the two sockets have no
+/// ordering relationship — the payload could arrive reordered. Passing it by
+/// value makes "one stream, one ordered channel" structural.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamEgress {
+    /// Legacy: JSON frames with base64 payloads over the control socket.
+    Control,
+    /// Dedicated data plane: binary frames, raw payloads.
+    Binary,
+}
 
 /// Max decoded bytes per `TunnelData` frame.
 pub const MAX_CHUNK: usize = 16 * 1024;
@@ -99,6 +137,13 @@ struct StreamHandle {
 /// [`TunnelManager::shutdown`] when the connection ends.
 pub struct TunnelManager {
     ws: TunnelWsWrite,
+    /// Write half of the dedicated binary data plane, once connected (#1506).
+    ///
+    /// `None` means every stream uses the control socket, which is exactly the
+    /// pre-existing behavior — so an unavailable or dropped data plane degrades
+    /// instead of failing. Only *stream* frames move here; the forward allowlist
+    /// and health reports stay on the control socket.
+    data: Mutex<Option<TunnelDataWrite>>,
     allowed: Mutex<HashSet<u16>>,
     streams: Mutex<HashMap<Uuid, StreamHandle>>,
     /// Last reported `listening` verdict per allowlisted port; the background
@@ -115,6 +160,7 @@ impl TunnelManager {
     pub fn new(ws: TunnelWsWrite) -> Arc<Self> {
         let mgr = Arc::new(Self {
             ws,
+            data: Mutex::new(None),
             allowed: Mutex::new(HashSet::new()),
             streams: Mutex::new(HashMap::new()),
             last_health: Mutex::new(HashMap::new()),
@@ -309,16 +355,28 @@ impl TunnelManager {
     }
 
     async fn open_stream(self: &Arc<Self>, open: &TunnelOpenFields) {
-        let refuse = |reason: TunnelRefuseReason| {
-            ProxyToServer::TunnelRefused(TunnelRefusedFields {
-                stream_id: open.stream_id,
-                reason,
-            })
-        };
+        self.open_stream_with_egress(open, StreamEgress::Control)
+            .await;
+    }
 
+    async fn open_stream_with_egress(
+        self: &Arc<Self>,
+        open: &TunnelOpenFields,
+        egress: StreamEgress,
+    ) {
         if !self.allowed.lock().await.contains(&open.port) {
-            self.send(refuse(TunnelRefuseReason::NotForwarded)).await;
-            return;
+            // On the data plane, absorb the allowlist-sync race before refusing.
+            let synced = egress == StreamEgress::Binary
+                && await_allowlist(&self.allowed, open.port, ALLOWLIST_SYNC_GRACE).await;
+            if !synced {
+                self.send_stream_refused(egress, open.stream_id, TunnelRefuseReason::NotForwarded)
+                    .await;
+                return;
+            }
+            debug!(
+                "Port {} appeared in the allowlist after the stream open (cross-socket sync race)",
+                open.port
+            );
         }
         // Register the inbox before the dial so ordered frames can't miss it.
         let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
@@ -331,12 +389,14 @@ impl TunnelManager {
                     "Tunnel stream limit ({}) reached; refusing stream {}",
                     MAX_STREAMS, open.stream_id
                 );
-                self.send(refuse(TunnelRefuseReason::StreamLimit)).await;
+                self.send_stream_refused(egress, open.stream_id, TunnelRefuseReason::StreamLimit)
+                    .await;
                 return;
             }
             if streams.contains_key(&open.stream_id) {
                 drop(streams);
-                self.send(refuse(TunnelRefuseReason::Protocol)).await;
+                self.send_stream_refused(egress, open.stream_id, TunnelRefuseReason::Protocol)
+                    .await;
                 return;
             }
             streams.insert(
@@ -358,20 +418,14 @@ impl TunnelManager {
                 Err(e) => {
                     mgr.remove_stream(stream_id).await;
                     warn!("Tunnel dial to port {} refused: {}", port, e);
-                    mgr.send(ProxyToServer::TunnelRefused(TunnelRefusedFields {
-                        stream_id,
-                        reason: TunnelRefuseReason::NoListener,
-                    }))
-                    .await;
+                    mgr.send_stream_refused(egress, stream_id, TunnelRefuseReason::NoListener)
+                        .await;
                     return;
                 }
             };
-            mgr.send(ProxyToServer::TunnelOpened(TunnelStreamFields {
-                stream_id,
-            }))
-            .await;
+            mgr.send_stream_opened(egress, stream_id).await;
             debug!("Tunnel stream {} open to port {}", stream_id, port);
-            run_stream(mgr, stream_id, tcp, inbox_rx, recv_credit).await;
+            run_stream(mgr, stream_id, egress, tcp, inbox_rx, recv_credit).await;
         });
     }
 
@@ -384,6 +438,298 @@ impl TunnelManager {
         if let Err(e) = ws.send(msg).await {
             debug!("Tunnel WS send failed (connection closing): {}", e);
         }
+    }
+
+    /// Adopt a connected data plane. Streams opened from here on ride it;
+    /// streams already running keep the transport they opened with.
+    pub async fn attach_data_plane(&self, data: TunnelDataWrite) {
+        *self.data.lock().await = Some(data);
+        info!("Port-forward data plane attached (binary transport active)");
+    }
+
+    /// Forget the data plane (its socket ended). New streams fall back to the
+    /// control socket. Streams still pinned to `Binary` will fail their next
+    /// send and close, which is correct — their transport is gone.
+    pub async fn detach_data_plane(&self) {
+        if self.data.lock().await.take().is_some() {
+            info!("Port-forward data plane detached (falling back to control socket)");
+        }
+    }
+
+    /// Whether a data plane is currently attached.
+    pub async fn has_data_plane(&self) -> bool {
+        self.data.lock().await.is_some()
+    }
+
+    /// Send one binary frame on the data plane. Returns `false` if there is no
+    /// data plane or the send failed.
+    async fn send_binary(&self, frame: TunnelFrame) -> bool {
+        let mut guard = self.data.lock().await;
+        let Some(data) = guard.as_mut() else {
+            return false;
+        };
+        let mut ws = data.lock().await;
+        match ws.send(frame).await {
+            Ok(()) => true,
+            Err(e) => {
+                debug!("Data-plane send failed (connection closing): {}", e);
+                false
+            }
+        }
+    }
+
+    /// Emit a stream payload chunk on the stream's pinned transport.
+    async fn send_stream_data(&self, egress: StreamEgress, stream_id: Uuid, bytes: &[u8]) {
+        match egress {
+            StreamEgress::Binary => {
+                self.send_binary(TunnelFrame::Data {
+                    stream_id,
+                    bytes: bytes.to_vec(),
+                })
+                .await;
+            }
+            StreamEgress::Control => {
+                self.send(ProxyToServer::TunnelData(TunnelDataFields {
+                    stream_id,
+                    data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                }))
+                .await;
+            }
+        }
+    }
+
+    /// Grant the backend more send credit on the stream's pinned transport.
+    async fn send_stream_window(&self, egress: StreamEgress, stream_id: Uuid, add_bytes: u32) {
+        match egress {
+            StreamEgress::Binary => {
+                self.send_binary(TunnelFrame::Window {
+                    stream_id,
+                    add_bytes,
+                })
+                .await;
+            }
+            StreamEgress::Control => {
+                self.send(ProxyToServer::TunnelWindow(TunnelWindowFields {
+                    stream_id,
+                    add_bytes,
+                }))
+                .await;
+            }
+        }
+    }
+
+    async fn send_stream_opened(&self, egress: StreamEgress, stream_id: Uuid) {
+        match egress {
+            StreamEgress::Binary => {
+                self.send_binary(TunnelFrame::Opened { stream_id }).await;
+            }
+            StreamEgress::Control => {
+                self.send(ProxyToServer::TunnelOpened(TunnelStreamFields {
+                    stream_id,
+                }))
+                .await;
+            }
+        }
+    }
+
+    async fn send_stream_refused(
+        &self,
+        egress: StreamEgress,
+        stream_id: Uuid,
+        reason: TunnelRefuseReason,
+    ) {
+        match egress {
+            StreamEgress::Binary => {
+                self.send_binary(TunnelFrame::Refused { stream_id, reason })
+                    .await;
+            }
+            StreamEgress::Control => {
+                self.send(ProxyToServer::TunnelRefused(TunnelRefusedFields {
+                    stream_id,
+                    reason,
+                }))
+                .await;
+            }
+        }
+    }
+
+    async fn send_stream_close(
+        &self,
+        egress: StreamEgress,
+        stream_id: Uuid,
+        reason: Option<String>,
+    ) {
+        match egress {
+            StreamEgress::Binary => {
+                self.send_binary(TunnelFrame::Close { stream_id, reason })
+                    .await;
+            }
+            StreamEgress::Control => {
+                self.send(ProxyToServer::TunnelClose(TunnelCloseFields {
+                    stream_id,
+                    reason,
+                }))
+                .await;
+            }
+        }
+    }
+
+    /// Handle one inbound frame from the data plane.
+    ///
+    /// The mirror of [`Self::handle`] for the binary transport. Only
+    /// stream-scoped frames arrive here; the allowlist still syncs over the
+    /// control socket, so `ForwardOpen`/`ForwardClose` are not part of this
+    /// dispatch. Returns `false` if the frame was protocol misuse and the data
+    /// socket should be closed.
+    pub async fn handle_data_frame(self: &Arc<Self>, frame: TunnelFrame) -> bool {
+        match frame {
+            TunnelFrame::Open { stream_id, port } => {
+                self.open_stream_with_egress(
+                    &TunnelOpenFields { stream_id, port },
+                    StreamEgress::Binary,
+                )
+                .await;
+            }
+            TunnelFrame::Data { stream_id, bytes } => {
+                let handle = {
+                    let streams = self.streams.lock().await;
+                    streams
+                        .get(&stream_id)
+                        .map(|h| (h.inbox.clone(), h.recv_credit.clone()))
+                };
+                // Unknown stream: a post-close race; drop silently.
+                if let Some((inbox, recv_credit)) = handle {
+                    if bytes.len() > MAX_CHUNK {
+                        warn!(
+                            "Oversized data-plane payload ({} bytes) for stream {}; closing",
+                            bytes.len(),
+                            stream_id
+                        );
+                        let _ = inbox.send(StreamMsg::Close);
+                    } else {
+                        // Same credit enforcement as the control path: the
+                        // unbounded inbox must not absorb beyond the window.
+                        let prev = recv_credit
+                            .fetch_sub(bytes.len() as i64, std::sync::atomic::Ordering::AcqRel);
+                        if prev < bytes.len() as i64 {
+                            warn!(
+                                "Data-plane payload beyond granted window for stream {}; closing",
+                                stream_id
+                            );
+                            let _ = inbox.send(StreamMsg::Close);
+                        } else {
+                            let _ = inbox.send(StreamMsg::Data(bytes));
+                        }
+                    }
+                }
+            }
+            TunnelFrame::Window {
+                stream_id,
+                add_bytes,
+            } => {
+                let streams = self.streams.lock().await;
+                if let Some(handle) = streams.get(&stream_id) {
+                    let _ = handle.inbox.send(StreamMsg::Window(add_bytes));
+                }
+            }
+            TunnelFrame::Close { stream_id, .. } => {
+                let streams = self.streams.lock().await;
+                if let Some(handle) = streams.get(&stream_id) {
+                    let _ = handle.inbox.send(StreamMsg::Close);
+                }
+            }
+            // Proxy→server only; the backend sending these is confused.
+            TunnelFrame::Opened { .. }
+            | TunnelFrame::Refused { .. }
+            | TunnelFrame::Hello { .. } => {
+                warn!("Data plane received a client-only frame from the backend; closing");
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Connect the dedicated binary data plane and pump it until it ends (#1506).
+///
+/// Dials [`TunnelDataEndpoint`], sends the `Hello` ticket, attaches the write
+/// half to `mgr`, then forwards inbound frames into
+/// [`TunnelManager::handle_data_frame`]. Detaches on exit so subsequent streams
+/// fall back to the control socket.
+///
+/// Every failure here is non-fatal by design: the data plane is an optimization,
+/// so a dial error, a rejected ticket, or a mid-session drop leaves the session
+/// untouched and tunneling on the control socket. Spawn it and forget it — do
+/// not gate session startup on it.
+pub async fn run_data_plane(mgr: Arc<TunnelManager>, backend_url: String, ticket: String) {
+    let conn =
+        match ws_bridge::native_client::connect::<shared::TunnelDataEndpoint>(&backend_url).await {
+            Ok(conn) => conn,
+            Err(e) => {
+                warn!(
+                    "Port-forward data plane unavailable ({}); tunneling over the control socket",
+                    e
+                );
+                return;
+            }
+        };
+    let (mut write, mut read) = conn.split();
+
+    // The ticket must be the first frame; the backend routes nothing until it
+    // verifies.
+    if let Err(e) = write.send(TunnelFrame::Hello { ticket }).await {
+        warn!("Failed to send data-plane Hello: {}", e);
+        return;
+    }
+
+    mgr.attach_data_plane(Arc::new(Mutex::new(write))).await;
+
+    while let Some(result) = read.recv().await {
+        match result {
+            Ok(frame) => {
+                if !mgr.handle_data_frame(frame).await {
+                    break;
+                }
+            }
+            Err(e) => {
+                debug!("Data-plane read ended: {}", e);
+                break;
+            }
+        }
+    }
+
+    mgr.detach_data_plane().await;
+}
+
+/// Grace period for the forward-allowlist sync race (see [`await_allowlist`]).
+const ALLOWLIST_SYNC_GRACE: Duration = Duration::from_millis(750);
+
+/// Wait up to `grace` for `port` to appear in the forward allowlist.
+///
+/// Exists only because of the cross-socket race the data plane introduced: the
+/// allowlist syncs via `ForwardOpen` on the **control** socket while stream opens
+/// arrive on the **data** socket, and the two sockets have no ordering
+/// relationship. A `TunnelOpen` can therefore beat its port's `ForwardOpen` and
+/// be refused as `NotForwarded` even though the forward is perfectly valid. (On
+/// the control socket the two frames were ordered, so this could not happen.)
+///
+/// A revoked port simply is not in the allowlist and never will be, so the wait
+/// costs a bounded delay only on the genuinely-not-forwarded path — much cheaper
+/// than a spurious error page on a live forward.
+///
+/// Takes the allowlist directly rather than `&self` so the timing behavior is
+/// testable without a live WebSocket.
+async fn await_allowlist(allowed: &Mutex<HashSet<u16>>, port: u16, grace: Duration) -> bool {
+    const POLL: Duration = Duration::from_millis(25);
+    let deadline = Instant::now() + grace;
+    loop {
+        if allowed.lock().await.contains(&port) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(POLL).await;
     }
 }
 
@@ -484,6 +830,7 @@ impl CreditGate {
 async fn run_stream(
     mgr: Arc<TunnelManager>,
     stream_id: Uuid,
+    egress: StreamEgress,
     tcp: TcpStream,
     mut inbox: mpsc::UnboundedReceiver<StreamMsg>,
     recv_credit: Arc<std::sync::atomic::AtomicI64>,
@@ -506,10 +853,7 @@ async fn run_stream(
                 uplink_credit.grant((budget - n) as u32).await;
             }
             uplink_mgr
-                .send(ProxyToServer::TunnelData(TunnelDataFields {
-                    stream_id,
-                    data_base64: base64::engine::general_purpose::STANDARD.encode(&buf[..n]),
-                }))
+                .send_stream_data(egress, stream_id, &buf[..n])
                 .await;
         }
     });
@@ -523,11 +867,8 @@ async fn run_stream(
                 // Grant-on-drain: the bytes are in the socket, refill the
                 // peer's window (and our receive-credit enforcement book).
                 recv_credit.fetch_add(bytes.len() as i64, std::sync::atomic::Ordering::AcqRel);
-                mgr.send(ProxyToServer::TunnelWindow(TunnelWindowFields {
-                    stream_id,
-                    add_bytes: bytes.len() as u32,
-                }))
-                .await;
+                mgr.send_stream_window(egress, stream_id, bytes.len() as u32)
+                    .await;
             }
             Some(StreamMsg::Window(n)) => send_credit.grant(n).await,
             Some(StreamMsg::Close) | None => break None,
@@ -543,11 +884,7 @@ async fn run_stream(
     };
 
     mgr.remove_stream(stream_id).await;
-    mgr.send(ProxyToServer::TunnelClose(TunnelCloseFields {
-        stream_id,
-        reason,
-    }))
-    .await;
+    mgr.send_stream_close(egress, stream_id, reason).await;
     debug!("Tunnel stream {} closed", stream_id);
 }
 
@@ -555,55 +892,50 @@ async fn run_stream(
 mod tests {
     use super::*;
 
-    /// The port→process resolver finds our own test binary when we bind a
-    /// listener (same-user lookup, the case that matters in production).
-    #[tokio::test]
-    async fn process_on_port_resolves_own_listener() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let name = process_on_port(port).await;
-        assert!(
-            name.as_deref().is_some_and(|n| !n.is_empty()),
-            "expected to resolve our own listener, got {name:?}"
-        );
+    fn allowlist(ports: &[u16]) -> Mutex<HashSet<u16>> {
+        Mutex::new(ports.iter().copied().collect())
     }
 
-    /// A sender must block at zero credit and resume exactly when granted.
+    /// An already-synced port returns immediately, so the common path pays
+    /// nothing for the race handling.
     #[tokio::test]
-    async fn credit_gate_blocks_and_resumes() {
-        let gate = Arc::new(CreditGate::new(10));
-        assert_eq!(gate.take(4).await, 4);
-        assert_eq!(gate.take(100).await, 6); // clamped to remaining
+    async fn await_allowlist_is_immediate_when_already_synced() {
+        let allowed = allowlist(&[8080]);
+        let started = Instant::now();
+        assert!(await_allowlist(&allowed, 8080, ALLOWLIST_SYNC_GRACE).await);
+        assert!(started.elapsed() < Duration::from_millis(20));
+    }
 
-        // Window empty: take must not complete...
+    /// The race this exists for: the port lands (a `ForwardOpen` arrives on the
+    /// control socket) only after the stream open was already being handled.
+    #[tokio::test]
+    async fn await_allowlist_returns_once_the_port_syncs() {
+        let allowed = Arc::new(allowlist(&[]));
         let waiter = {
-            let gate = gate.clone();
-            tokio::spawn(async move { gate.take(8).await })
+            let allowed = allowed.clone();
+            tokio::spawn(async move { await_allowlist(&allowed, 4321, ALLOWLIST_SYNC_GRACE).await })
         };
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert!(!waiter.is_finished(), "take completed with zero credit");
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(!waiter.is_finished(), "should still be waiting");
 
-        // ...until a grant arrives.
-        gate.grant(3).await;
-        assert_eq!(waiter.await.unwrap(), 3);
+        allowed.lock().await.insert(4321);
+        assert!(waiter.await.unwrap(), "should observe the synced port");
     }
 
-    /// A grant issued immediately before the waiter arms must not be lost.
+    /// A genuinely un-forwarded port is still refused — the grace is bounded,
+    /// not an indefinite wait.
     #[tokio::test]
-    async fn credit_gate_grant_before_take_is_not_missed() {
-        let gate = CreditGate::new(0);
-        gate.grant(5).await;
-        assert_eq!(gate.take(16).await, 5);
-    }
-
-    /// Absurd window grants saturate instead of wrapping to a tiny window.
-    #[tokio::test]
-    async fn credit_gate_grant_saturates() {
-        let gate = CreditGate::new(u32::MAX - 1);
-        gate.grant(u32::MAX).await;
-        assert_eq!(gate.take(4).await, 4);
-        gate.grant(u32::MAX).await; // still sane after saturation
-        assert_eq!(gate.take(4).await, 4);
+    async fn await_allowlist_gives_up_on_a_port_that_never_syncs() {
+        let allowed = allowlist(&[]);
+        let grace = Duration::from_millis(100);
+        let started = Instant::now();
+        assert!(!await_allowlist(&allowed, 9999, grace).await);
+        assert!(started.elapsed() >= grace, "must honor the full grace");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "must stay bounded, took {:?}",
+            started.elapsed()
+        );
     }
 
     /// A browser-stream dial connects immediately when the service is up.
