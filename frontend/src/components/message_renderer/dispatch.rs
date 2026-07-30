@@ -135,7 +135,7 @@ pub(crate) fn render_identity_group_part(
             ))
         }
         AgentFrame::Codex(event) => {
-            Some(crate::components::codex_renderer::render_codex_frame_content(&event, session_id))
+            crate::components::codex_renderer::render_codex_frame_content(&event, session_id)
         }
         _ => None,
     }
