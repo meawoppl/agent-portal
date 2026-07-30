@@ -25,18 +25,21 @@ use tool_calls::{
 };
 use turns::{render_turn_completed, render_turn_failed};
 
-/// Render a parsed Codex frame as a standalone message card.
+/// Render a parsed Codex frame as a standalone message card. Events that carry
+/// no visible body render as an empty node.
 pub fn render_codex_frame(
     event: &CodexEvent,
     session_id: Uuid,
     turn_metrics: Option<&shared::TurnMetrics>,
 ) -> Html {
-    render_codex_event(event, session_id, false, turn_metrics)
+    render_codex_event(event, session_id, false, turn_metrics).unwrap_or_default()
 }
 
 /// Render the content-only body for a parsed Codex frame inside an
-/// `IdentityGroup`.
-pub fn render_codex_frame_content(event: &CodexEvent, session_id: Uuid) -> Html {
+/// `IdentityGroup`. Returns `None` when the event has no visible body, so the
+/// caller can omit the `grouped-message-part` wrapper rather than emit an
+/// empty, flex-gap-spaced blank row (mirrors the Claude group-part renderers).
+pub fn render_codex_frame_content(event: &CodexEvent, session_id: Uuid) -> Option<Html> {
     render_codex_event(event, session_id, true, None)
 }
 
@@ -44,51 +47,54 @@ pub fn render_codex_frame_content(event: &CodexEvent, session_id: Uuid) -> Html 
 /// path and the grouped content path. `bare_agent_message` selects the grouped
 /// behavior: agent messages render content-only (no card chrome), while other
 /// events render as they would standalone.
+///
+/// Returns `None` for events with no visible body (turn lifecycle markers,
+/// streaming deltas, the user-prompt echo) so both paths can drop them cleanly.
 fn render_codex_event(
     event: &CodexEvent,
     session_id: Uuid,
     bare_agent_message: bool,
     turn_metrics: Option<&shared::TurnMetrics>,
-) -> Html {
+) -> Option<Html> {
     match event {
-        CodexEvent::ThreadStarted { .. } => html! {},
-        CodexEvent::TurnStarted {} => html! {},
+        CodexEvent::ThreadStarted { .. } => None,
+        CodexEvent::TurnStarted {} => None,
         CodexEvent::TurnCompleted {
             usage,
             duration_ms,
             turn_id,
             status,
-        } => render_turn_completed(
+        } => Some(render_turn_completed(
             usage.as_ref(),
             *duration_ms,
             turn_id.as_deref(),
             status.as_deref(),
             turn_metrics,
-        ),
-        CodexEvent::TurnFailed { error } => render_turn_failed(error.as_ref(), turn_metrics),
+        )),
+        CodexEvent::TurnFailed { error } => Some(render_turn_failed(error.as_ref(), turn_metrics)),
         CodexEvent::ItemStarted { item } | CodexEvent::ItemUpdated { item } => {
             match item.as_ref() {
                 Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
-                    render_agent_message_content(&it.text, session_id)
+                    Some(render_agent_message_content(&it.text, session_id))
                 }
                 item => render_item(item, false, session_id),
             }
         }
         CodexEvent::ItemCompleted { item } => match item.as_ref() {
             Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
-                render_agent_message_content(&it.text, session_id)
+                Some(render_agent_message_content(&it.text, session_id))
             }
             item => render_item(item, true, session_id),
         },
-        CodexEvent::Error { message } => render_error_block(message.as_deref()),
-        CodexEvent::FileChangePatchUpdated { params } => {
-            render_file_change_patch(params.as_ref().and_then(|p| p.changes.as_deref()))
-        }
-        CodexEvent::TurnPlanUpdated { params } => render_turn_plan(
+        CodexEvent::Error { message } => Some(render_error_block(message.as_deref())),
+        CodexEvent::FileChangePatchUpdated { params } => Some(render_file_change_patch(
+            params.as_ref().and_then(|p| p.changes.as_deref()),
+        )),
+        CodexEvent::TurnPlanUpdated { params } => Some(render_turn_plan(
             params.as_ref().and_then(|p| p.plan.as_deref()),
             params.as_ref().and_then(|p| p.explanation.as_deref()),
-        ),
-        CodexEvent::ThreadCompacted { params } => render_context_compacted(params.as_ref()),
+        )),
+        CodexEvent::ThreadCompacted { params } => Some(render_context_compacted(params.as_ref())),
         // Cumulative whole-turn diffs (`turn/diff/updated`) are dropped: Codex
         // re-sends the entire turn diff on every edit tick, so they pile up
         // O(ticks) redundant cards (each the size of the whole turn) on top of
@@ -103,7 +109,7 @@ fn render_codex_event(
         | CodexEvent::PlanDelta { .. }
         | CodexEvent::ReasoningSummaryPartAdded { .. }
         | CodexEvent::ReasoningTextDelta { .. }
-        | CodexEvent::Unknown => html! {},
+        | CodexEvent::Unknown => None,
     }
 }
 
@@ -118,29 +124,29 @@ fn item_card_classes(completed: bool) -> &'static str {
     }
 }
 
-fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> Html {
-    let Some(item) = item else {
-        return html! {};
-    };
+fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> Option<Html> {
+    let item = item?;
     match item {
         CodexItem::Thread(item) => match item {
-            ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed, session_id),
-            ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
-            ThreadItem::CommandExecution(it) => render_command_execution(it, completed),
-            ThreadItem::FileChange(it) => render_file_change(it, completed),
-            ThreadItem::McpToolCall(it) => render_mcp_tool_call(it, completed),
-            ThreadItem::WebSearch(it) => render_web_search(&it.query, completed),
-            ThreadItem::TodoList(it) => render_todo_list(&it.items, completed),
-            ThreadItem::Error(it) => render_error_block(Some(&it.message)),
+            ThreadItem::AgentMessage(it) => {
+                Some(render_agent_message(&it.text, completed, session_id))
+            }
+            ThreadItem::Reasoning(it) => Some(render_reasoning(&it.text, completed)),
+            ThreadItem::CommandExecution(it) => Some(render_command_execution(it, completed)),
+            ThreadItem::FileChange(it) => Some(render_file_change(it, completed)),
+            ThreadItem::McpToolCall(it) => Some(render_mcp_tool_call(it, completed)),
+            ThreadItem::WebSearch(it) => Some(render_web_search(&it.query, completed)),
+            ThreadItem::TodoList(it) => Some(render_todo_list(&it.items, completed)),
+            ThreadItem::Error(it) => Some(render_error_block(Some(&it.message))),
             // UserMessage is the user's prompt for the turn — emitted by the
             // app-server protocol as the first item; the portal renders the
             // user-typed prompt out-of-band (Claude wire shape), so suppress
             // here to avoid duplication.
-            ThreadItem::UserMessage(_) => html! {},
+            ThreadItem::UserMessage(_) => None,
         },
         CodexItem::AppServer(item) => match item.as_ref() {
             AppServerThreadItem::ContextCompaction { .. } => {
-                render_context_compaction_item(completed)
+                Some(render_context_compaction_item(completed))
             }
             AppServerThreadItem::CollabAgentToolCall {
                 agents_states,
@@ -150,7 +156,7 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
                 status,
                 tool,
                 ..
-            } => render_collab_agent_tool_call(
+            } => Some(render_collab_agent_tool_call(
                 tool,
                 model.as_deref(),
                 reasoning_effort.as_ref(),
@@ -158,8 +164,8 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> H
                 prompt.as_deref(),
                 agents_states,
                 completed,
-            ),
-            _ => html! {},
+            )),
+            _ => None,
         },
     }
 }
@@ -450,6 +456,51 @@ mod tests {
         let json = r#"{"type":"some.future.event","data":123}"#;
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         assert!(matches!(event, CodexEvent::Unknown));
+    }
+
+    // --- group-part emptiness contract ---
+    //
+    // Codex identity groups drop members whose content renders empty, so the
+    // content path must report emptiness as `None` — otherwise each no-body
+    // event (turn lifecycle markers, streaming deltas, the user-prompt echo)
+    // leaves an empty `grouped-message-part`: a zero-height flex item the body
+    // `gap` still spaces into a blank row.
+
+    fn content_is_none(json: &str) -> bool {
+        let event: CodexEvent = serde_json::from_str(json).unwrap();
+        render_codex_frame_content(&event, Uuid::nil()).is_none()
+    }
+
+    #[test]
+    fn no_body_events_render_none_in_group() {
+        for json in [
+            r#"{"type":"thread.started","thread_id":"t"}"#,
+            r#"{"type":"turn.started"}"#,
+            r#"{"type":"item/reasoning/textDelta","delta":"x"}"#,
+            r#"{"type":"item/reasoning/summaryPartAdded"}"#,
+            r#"{"type":"item/plan/delta"}"#,
+            r#"{"type":"some.future.event","data":1}"#,
+            // The user-prompt echo item is rendered out-of-band, so it must not
+            // leave a blank part in the middle of a Codex run.
+            r#"{"type":"item.completed","item":{"type":"user_message","id":"u1","content":[{"type":"text","text":"hi"}]}}"#,
+        ] {
+            assert!(content_is_none(json), "expected None for: {json}");
+        }
+    }
+
+    #[test]
+    fn content_bearing_events_render_some_in_group() {
+        for json in [
+            r#"{"type":"item.completed","item":{"type":"agent_message","id":"m1","text":"hello"}}"#,
+            r#"{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"ls","status":"completed"}}"#,
+            r#"{"type":"item.completed","item":{"type":"reasoning","id":"r1","text":"thinking"}}"#,
+        ] {
+            let event: CodexEvent = serde_json::from_str(json).unwrap();
+            assert!(
+                render_codex_frame_content(&event, Uuid::nil()).is_some(),
+                "expected Some for: {json}"
+            );
+        }
     }
 
     // --- thread_item_id ---
