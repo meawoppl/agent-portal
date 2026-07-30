@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 mod client_fanout;
 mod correlation;
+mod data_plane;
 mod input_dedup;
 mod input_queue;
 mod launcher_registry;
@@ -35,6 +36,8 @@ mod proxy_lifecycle;
 mod session_tracking;
 mod tunnel_client;
 
+use data_plane::DataPlaneMap;
+pub use data_plane::{DataPlaneConnection, DataPlaneSender, DATA_PLANE_CHANNEL_CAPACITY};
 pub(crate) use input_dedup::{DedupVerdict, InputDeliveryState};
 pub use launcher_registry::LauncherConnection;
 pub use liveness::{
@@ -168,6 +171,11 @@ pub struct SessionManager {
     /// Live backend tunnel streams (docs/PORT_FORWARDING.md), keyed by
     /// stream id; the reverse proxy opens them, proxy sockets feed them.
     tunnel_streams: TunnelStreamMap,
+    /// Dedicated binary data-plane sockets for port forwarding, keyed by
+    /// session key and tagged with the control connection's generation
+    /// (#1506, see `data_plane.rs`). Optional state: absence simply means
+    /// tunnel bytes take the JSON-over-control-socket path.
+    data_planes: DataPlaneMap,
     pending_launch_sessions: Arc<DashMap<Uuid, Uuid>>,
     /// Tracks who sent the last input for each session (session_id → (user_id, display_name))
     last_input_sender: Arc<DashMap<Uuid, (Uuid, String)>>,
@@ -206,6 +214,7 @@ impl Default for SessionManager {
             forward_health: Arc::new(DashMap::new()),
             forward_failures: Arc::new(DashMap::new()),
             tunnel_streams: Arc::new(DashMap::new()),
+            data_planes: Arc::new(DashMap::new()),
             pending_launch_sessions: Arc::new(DashMap::new()),
             last_input_sender: Arc::new(DashMap::new()),
             subagent_tokens: Arc::new(DashMap::new()),

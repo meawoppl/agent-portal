@@ -27,6 +27,15 @@ pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
 /// undecodable frame (#1366).
 pub const LAUNCHER_CAPABILITY_HEARTBEAT_ACK: &str = "launcher.heartbeat_ack";
 
+/// Proxy capability advertised by versions that can open the dedicated binary
+/// data-plane socket for port forwarding (#1506).
+///
+/// The backend mints a `RegisterAck.tunnel_data_ticket` only for proxies that
+/// advertise this, and routes tunnel bytes over the data plane only while such
+/// a socket is registered — so a proxy that never advertises it (or whose data
+/// socket has dropped) transparently keeps the JSON-over-control-socket path.
+pub const PROXY_CAPABILITY_TUNNEL_BINARY_V1: &str = "session.tunnel_binary_v1";
+
 /// Split [`VERSION`] into `(major, minor, patch)` numeric components.
 /// `None` on the (impossible-by-construction) malformed string.
 pub fn version_parts() -> Option<(u64, u64, u64)> {

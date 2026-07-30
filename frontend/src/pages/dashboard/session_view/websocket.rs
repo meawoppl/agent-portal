@@ -96,6 +96,8 @@ pub fn connect_websocket(
                     repo_url: None,
                     scheduled_task_id: None,
                     claude_args: Vec::new(),
+                    // Web clients do not carry proxy protocol capabilities (#1506).
+                    capabilities: Vec::new(),
                 });
 
                 if sender.send(register_msg).await.is_err() {

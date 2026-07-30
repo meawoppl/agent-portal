@@ -106,6 +106,13 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     // staleness — these streams rode this connection's now-dead sender.
     if let (Some(key), Some(gen)) = (session_key.as_ref(), connection_gen) {
         session_manager.close_tunnels_for_connection(key, gen);
+        // The data plane exists only to serve THIS control connection, so it
+        // goes with it — otherwise a later `open_tunnel` could route bytes into
+        // a socket whose session is gone. Also gen-guarded, so a stale
+        // teardown can't close a reconnect's data plane. The reverse is not
+        // true: a data socket dropping on its own never touches the session,
+        // it just reverts tunneling to this control socket.
+        session_manager.close_data_plane_for_connection(key, gen);
     }
 
     if !is_stale {
@@ -199,6 +206,7 @@ fn handle_proxy_message(
             repo_url,
             scheduled_task_id,
             claude_args,
+            capabilities,
         }) => {
             let key = claude_session_id.to_string();
 
@@ -230,6 +238,12 @@ fn handle_proxy_message(
             };
             let result = register_or_update_session(app_state, &params);
 
+            // Data-plane ticket, minted only for proxies that advertise the
+            // capability. Bound to this connection's generation (known only
+            // after `register_session` below), so it cannot be replayed onto a
+            // later reconnect. `None` ⇒ tunnel bytes keep riding this socket.
+            let mut tunnel_data_ticket = None;
+
             if result.success {
                 // Only now do we expose the socket via SessionManager and
                 // bind cleanup state. The send_task in handle_session_socket
@@ -238,6 +252,17 @@ fn handle_proxy_message(
                 // registration, so the proxy still gets a response on
                 // failure even though we never registered the socket.
                 let gen = session_manager.register_session(key.clone(), tx.clone(), cancel.clone());
+                if capabilities
+                    .iter()
+                    .any(|c| c == shared::PROXY_CAPABILITY_TUNNEL_BINARY_V1)
+                {
+                    tunnel_data_ticket = crate::handlers::websocket::mint_tunnel_ticket(
+                        &app_state.jwt_secret,
+                        claude_session_id,
+                        &key,
+                        gen,
+                    );
+                }
                 *session_key = Some(key);
                 *connection_gen = Some(gen);
                 *db_session_id = result.session_id;
@@ -252,6 +277,7 @@ fn handle_proxy_message(
                 // and would wedge on a missing field, so we keep sending it.
                 max_image_mb: app_state.max_image_mb,
                 retryable: result.retryable,
+                tunnel_data_ticket,
             });
 
             info!(
