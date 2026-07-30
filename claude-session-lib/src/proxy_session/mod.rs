@@ -459,9 +459,10 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
         ..session.config.clone()
     };
 
-    // Register with backend and wait for acknowledgment
-    match register_session(&mut conn, &config_with_branch).await {
-        Ok(()) => {}
+    // Register with backend and wait for acknowledgment. A ticket in the ack
+    // means we may open the binary port-forward data plane (#1506).
+    let tunnel_data_ticket = match register_session(&mut conn, &config_with_branch).await {
+        Ok(ticket) => ticket,
         Err(RegisterError::Transient(duration)) => return ConnectionResult::Disconnected(duration),
         Err(RegisterError::Rejected) => return ConnectionResult::RegistrationRejected,
     };
@@ -607,7 +608,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     }
 
     // Run the message loop - split connection for concurrent read/write
-    run_message_loop(session, &config_with_branch, conn).await
+    run_message_loop(session, &config_with_branch, conn, tunnel_data_ticket).await
 }
 
 /// Connect to the backend WebSocket
@@ -634,10 +635,15 @@ pub async fn connect_to_backend(
 }
 
 /// Register session with the backend and wait for acknowledgment.
+///
+/// On success returns the backend's `tunnel_data_ticket` when it issued one
+/// (#1506) — the credential for dialing the binary port-forward data plane.
+/// `None` means no data plane for this connection: an older backend, or one that
+/// declined, in which case tunnel bytes keep riding the control socket.
 pub async fn register_session(
     conn: &mut NativeConnection,
     config: &ProxySessionConfig,
-) -> Result<(), RegisterError> {
+) -> Result<Option<String>, RegisterError> {
     info!("Registering session...");
 
     let hostname = hostname_or_unknown();
@@ -658,10 +664,11 @@ pub async fn register_session(
         repo_url: get_repo_url(&config.working_directory),
         scheduled_task_id: config.scheduled_task_id,
         claude_args: config.claude_args.clone(),
-        // The binary port-forward data plane is advertised in a follow-up
-        // change (#1506); until the proxy can dial it, claiming support would
-        // make the backend mint a ticket nothing uses.
-        capabilities: Vec::new(),
+        // Opt in to the dedicated binary port-forward data plane (#1506). The
+        // backend mints a `tunnel_data_ticket` only for proxies that advertise
+        // this; if we fail to dial the data socket, tunneling silently stays on
+        // this control socket.
+        capabilities: vec![shared::PROXY_CAPABILITY_TUNNEL_BINARY_V1.to_string()],
     });
 
     if conn.send(register_msg).await.is_err() {
@@ -682,11 +689,9 @@ pub async fn register_session(
                     // was replaced by `agent-portal show` (see output_forwarder).
                     max_image_mb: _,
                     retryable,
-                    // Data-plane ticket (#1506): ignored until this proxy
-                    // advertises the capability and dials the data socket.
-                    tunnel_data_ticket: _,
+                    tunnel_data_ticket,
                 }) => {
-                    return Some((success, error, retryable));
+                    return Some((success, error, retryable, tunnel_data_ticket));
                 }
                 Ok(_) => continue,
                 Err(_) => return None,
@@ -697,11 +702,14 @@ pub async fn register_session(
     .await;
 
     match ack_timeout {
-        Ok(Some((true, _, _))) => {
-            info!("Session registered");
-            Ok(())
+        Ok(Some((true, _, _, tunnel_data_ticket))) => {
+            info!(
+                "Session registered (data plane offered: {})",
+                tunnel_data_ticket.is_some()
+            );
+            Ok(tunnel_data_ticket)
         }
-        Ok(Some((false, error, retryable))) => {
+        Ok(Some((false, error, retryable, _))) => {
             let err_msg = error.as_deref().unwrap_or("Unknown error");
             if retryable {
                 // Transient infrastructure failure (DB blip mid-deploy) —
@@ -738,6 +746,7 @@ async fn run_message_loop<A: Agent>(
     session: &mut SessionState<'_, A>,
     config: &ProxySessionConfig,
     conn: NativeConnection,
+    tunnel_data_ticket: Option<String>,
 ) -> ConnectionResult {
     let connection_start = Instant::now();
     let session_id = config.session_id;
@@ -781,6 +790,17 @@ async fn run_message_loop<A: Agent>(
     // The backend replays `ForwardOpen`s after registration, so a fresh
     // manager per connection starts with the correct allowlist.
     let tunnel = session_lib::tunnel::TunnelManager::new(ws_write.clone());
+
+    // Bring up the binary data plane, if the backend issued a ticket (#1506).
+    // Detached: forward bytes must never gate session startup, and every
+    // failure inside just leaves tunneling on the control socket.
+    if let Some(ticket) = tunnel_data_ticket {
+        tokio::spawn(session_lib::tunnel::run_data_plane(
+            tunnel.clone(),
+            config.backend_url.clone(),
+            ticket,
+        ));
+    }
 
     // Heartbeat tracker for dead connection detection
     let heartbeat = session_lib::heartbeat::HeartbeatTracker::new();
