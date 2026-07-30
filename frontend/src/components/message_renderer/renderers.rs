@@ -66,6 +66,14 @@ pub fn render_optimistic_user_message(
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
+    // A synthetic echo carrying an inter-agent `[message from …]` payload (e.g.
+    // Codex's `UserEchoEvent`, or an older proxy's raw echo) renders as its own
+    // provenance card rather than a raw "You" bubble — mirroring
+    // `render_user_message`.
+    if let Some(event) = agent_message_event_from_agent_facing_text(&msg.content) {
+        return render_agent_message_event(&event, timestamp, session_id);
+    }
+
     let label = human_label(meta, current_user_id);
     let delivery = meta.and_then(|m| m.delivery.as_ref());
     let pending_class = if delivery.is_some_and(shared::DeliveryMeta::pending) {

@@ -200,6 +200,15 @@ fn user_message_is_inter_agent(msg: &shared::UserMessage) -> bool {
     super::renderers::agent_message_event_from_agent_facing_text(&text).is_some()
 }
 
+/// True iff a synthetic optimistic-user echo (its content is a single string,
+/// e.g. Codex's `UserEchoEvent` or an older proxy's raw echo) is actually an
+/// inter-agent message. The optimistic shape carries no content blocks, so this
+/// runs the detector on the string field directly, but the decision must match
+/// [`user_message_is_inter_agent`] so both echo shapes card identically.
+fn optimistic_user_is_inter_agent(msg: &super::types::OptimisticUserMessage) -> bool {
+    super::renderers::agent_message_event_from_agent_facing_text(&msg.content).is_some()
+}
+
 /// Classify a single wire message into the display identity it belongs to,
 /// or `None` if it shouldn't roll into any group (renders as `Single`).
 ///
@@ -282,7 +291,17 @@ pub(super) fn classify(
                 ));
             }
         }
-        AgentFrame::Claude(ClaudeMessage::OptimisticUser(_)) => {
+        AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
+            // A synthetic user echo carrying an inter-agent `[message from …]`
+            // payload with no provenance metadata must render as its own
+            // provenance card, not fold into the "You" group and expose its raw
+            // wrapper — mirroring the `ClaudeMessage::User` arm above. This shape
+            // is how Codex's `UserEchoEvent` (top-level `content` string, no
+            // `session_id`) and older proxies' echoes parse, so the `User`-arm
+            // detection alone missed them.
+            if source.is_none() && optimistic_user_is_inter_agent(&msg) {
+                return None;
+            }
             return Some(source.map_or_else(
                 || MessageIdentity {
                     category: GroupCategory::User,
