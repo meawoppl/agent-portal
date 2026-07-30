@@ -23,13 +23,13 @@
 //! for the cross-socket ordering race it absorbs.
 //!
 //! Backpressure has two layers, per the spec:
-//! - **Stream credit**: each direction starts with a 256 KiB window; the
-//!   receiver re-grants as it drains bytes into the underlying socket
+//! - **Stream credit**: each direction starts with an [`INITIAL_WINDOW`] credit;
+//!   the receiver re-grants as it drains bytes into the underlying socket
 //!   (`TunnelWindow`). A sender never reads more from TCP than it holds
 //!   credit for.
 //! - **Writer capacity**: outgoing frames go straight through a shared
-//!   `WsSender` mutex (FIFO), one ≤16 KiB frame per lock. There is no queue
-//!   to grow — total buffered tunnel data is bounded by streams × 16 KiB and
+//!   `WsSender` mutex (FIFO), one ≤[`MAX_CHUNK`] frame per lock. There is no
+//!   queue to grow — buffered tunnel data is bounded by streams × `MAX_CHUNK` and
 //!   waiting streams are served round-robin by mutex order. On the control
 //!   socket that mutex is shared with session frames, so tunnel traffic can
 //!   delay them (the reason the data plane exists); on the data plane it is
@@ -82,16 +82,35 @@ enum StreamEgress {
 
 /// Max decoded bytes per `TunnelData` frame.
 pub const MAX_CHUNK: usize = 16 * 1024;
-/// Initial per-stream, per-direction flow-control window. Kept small so the
-/// worst-case buffered bytes (`MAX_STREAMS × INITIAL_WINDOW` per direction)
-/// stay bounded even with a high stream cap; loopback/WS latency is low enough
-/// that a 64 KiB window saturates a single stream easily.
+/// Initial per-stream, per-direction flow-control window.
+///
+/// Kept small so the worst-case buffered bytes
+/// (`MAX_STREAMS × INITIAL_WINDOW` per direction) stay bounded even with a high
+/// stream cap; loopback/WS latency is low enough that this saturates a single
+/// stream easily.
+///
+/// **Both ends must agree** (`backend::…::tunnel_client::INITIAL_WINDOW`): the
+/// sender's credit gate and the receiver's credit book are seeded from this same
+/// value, so a mismatch makes the sender exceed the receiver's book and every
+/// stream closes as "beyond granted window". Raising it therefore needs a
+/// negotiated protocol bump rather than an edit here.
 pub const INITIAL_WINDOW: u32 = 64 * 1024;
-/// Max concurrent streams per session connection. A browser loading a
-/// resource-heavy page over HTTP/2 multiplexes many requests at once, each of
-/// which becomes one stream, so this is generous; the per-stream window keeps
-/// the aggregate memory bound flat (256 × 64 KiB = 16 MiB per direction).
-pub const MAX_STREAMS: usize = 256;
+/// Max concurrent streams per session connection.
+///
+/// Purely proxy-local: the backend has no cap of its own, it just receives a
+/// [`TunnelRefuseReason::StreamLimit`] refusal. That makes this the one sizing
+/// knob that needs no cross-version agreement, so it is safe to raise on its own
+/// (unlike `MAX_CHUNK`/`INITIAL_WINDOW`, which both ends must match — see their
+/// docs).
+///
+/// Every request becomes its own stream because upstream connections are not yet
+/// pooled (#1468), so a resource-heavy page or a polling app can burst through
+/// hundreds at once; past the cap requests fail with `at-capacity`. 512 doubles
+/// the previous headroom while keeping the worst case bounded at
+/// `MAX_STREAMS × INITIAL_WINDOW` = 32 MiB per direction — and that is the
+/// pathological all-streams-saturated figure, not steady state. Pooling is the
+/// real fix for the cap; this buys room until it lands.
+pub const MAX_STREAMS: usize = 512;
 /// How long a single dial to loopback may take before it is treated as a
 /// timeout (service hung, not down).
 const DIAL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -127,8 +146,8 @@ struct StreamHandle {
     /// reader decrements on arrival; the stream task re-increments as bytes
     /// drain into the socket. Going negative is a protocol violation and
     /// closes the stream — the inbox is unbounded, so this (not the channel)
-    /// is what bounds per-stream buffered downlink data to the 256 KiB
-    /// window even against a buggy or hostile peer.
+    /// is what bounds per-stream buffered downlink data to [`INITIAL_WINDOW`]
+    /// even against a buggy or hostile peer.
     recv_credit: Arc<std::sync::atomic::AtomicI64>,
 }
 

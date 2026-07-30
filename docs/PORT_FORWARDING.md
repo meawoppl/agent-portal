@@ -36,23 +36,74 @@ long as the session is alive.
 - **One listener.** The backend keeps its single HTTP listener and routes by
   `Host` header. No per-forward port allocation anywhere — which is why the
   CLI takes only a local port, never a remote one.
-- **A generic byte tunnel over the existing session WebSocket** is the
-  transport. The backend's forward handler is an ordinary streaming reverse
-  proxy (hyper client) whose connector "dials" `localhost:{port}` on the proxy
-  host through the tunnel. Plain requests, streamed responses, SSE, and
-  WebSocket upgrades all ride the same machinery. There is deliberately **no
-  separate buffered request/response protocol** — that would be throwaway
-  protocol surface.
+- **A generic byte tunnel over a dedicated binary WebSocket** is the transport
+  (`/ws/session/data`, see [Data plane](#the-data-plane) — originally this rode
+  the session control socket). The backend's forward handler is an ordinary
+  streaming reverse proxy (hyper client) whose connector "dials"
+  `localhost:{port}` on the proxy host through the tunnel. Plain requests,
+  streamed responses, SSE, and WebSocket upgrades all ride the same machinery.
+  There is deliberately **no separate buffered request/response protocol** —
+  that would be throwaway protocol surface.
 - **Auth by token handoff**, since a subdomain is a different origin and the
   portal cookie does not follow. The portal origin mints a short-lived JWT and
   redirects; the forward origin exchanges it for its own scoped cookie.
 
 ```text
 browser ──HTTP──▶ backend (Host-routed reverse proxy)
-                     │  TunnelOpen/Data/Close over /ws/session
+                     │  TunnelOpen/Data/Close over /ws/session/data (binary)
+                     │  ForwardOpen/Close/Status over /ws/session   (control)
                      ▼
                   proxy ──TCP──▶ 127.0.0.1:{port} (agent's service)
 ```
+
+## The data plane
+
+Stream bytes travel on their **own** WebSocket, separate from the session
+control socket (#1506). This is a correctness property, not just an
+optimization: when tunnel bytes shared the control socket they contended with
+agent stdio and **heartbeats**, so a busy forward could delay heartbeats past
+`PROXY_LIVENESS_DEADLINE_SECS`, get the connection evicted by the liveness
+sweeper, and take the *agent session* down with it. A separate socket makes that
+structurally impossible.
+
+| | Control socket (`/ws/session`) | Data plane (`/ws/session/data`) |
+|---|---|---|
+| Framing | JSON text | **Binary** (`shared/src/endpoints/tunnel.rs`) |
+| Payloads | base64 (+33%) | raw bytes |
+| Carries | session I/O, heartbeats, `ForwardOpen`/`Close`/`Status` | `Tunnel*` stream frames only |
+| Liveness | authoritative | **never** — diagnostic timestamps only |
+
+A 16 KiB chunk costs 16,401 bytes on the data plane vs 21,917 before (25.2%
+less wire), and no base64 work on either end.
+
+**Handshake and generation binding.** The data plane has no `Register` message
+to carry the proxy JWT, and it needs something the control socket never did:
+proof of *which control-connection generation* it serves, so a reconnecting
+proxy's data socket can never be wired to the session's previous connection. One
+short-TTL JWT covers both — minted during a successful `Register` (where the
+generation is already known), returned as `RegisterAck.tunnel_data_ticket`, and
+echoed back as the socket's first frame (`TunnelFrame::Hello`). It rides in the
+frame body, not a query parameter, so it never reaches access logs or `Referer`.
+
+**Capability gating and fallback.** A ticket is minted only for proxies
+advertising `PROXY_CAPABILITY_TUNNEL_BINARY_V1` (`RegisterFields.capabilities`).
+`open_tunnel` then picks the transport **per stream**: binary if this exact
+connection has a live data plane registered, otherwise the original JSON path,
+unchanged. So an older proxy, a proxy whose data socket dropped, and one still
+connecting all degrade transparently. Losing the data plane is never a session
+failure — it only reverts tunneling.
+
+Each stream's transport is **pinned** at open and carried by value into its task,
+never re-read per frame: if the data plane attached mid-stream, a per-frame
+lookup would split that stream's bytes across two sockets that have no ordering
+relationship, and the payload could arrive reordered.
+
+**Cross-socket ordering race.** Because the allowlist syncs via `ForwardOpen` on
+the *control* socket while stream opens arrive on the *data* socket, a
+`TunnelOpen` can beat its port's `ForwardOpen` and be refused as `NotForwarded`
+despite a valid forward — impossible when both rode one ordered socket.
+`await_allowlist` absorbs it with a bounded grace; a revoked port still refuses,
+just after that delay.
 
 ## Naming scheme
 
@@ -136,32 +187,83 @@ TunnelClose(TunnelCloseFields),
 ForwardStatus(ForwardStatusFields), // { port: u16, listening: bool, error: Option<String> }
 ```
 
+The `Tunnel*` frames above are now the **fallback** encoding, used when no data
+plane is attached. The live path uses their binary equivalents on
+`/ws/session/data` (`shared/src/endpoints/tunnel.rs`), a single symmetric
+`TunnelFrame` type with a hand-written `WsCodec`:
+
+```text
+0x00 Hello   [ticket utf8…]                  proxy → backend, first frame
+0x01 Open    [stream_id:16][port:u16 BE]      backend → proxy
+0x02 Opened  [stream_id:16]                   proxy → backend
+0x03 Refused [stream_id:16][reason:u8]        proxy → backend
+0x04 Data    [stream_id:16][bytes…]           either
+0x05 Window  [stream_id:16][add_bytes:u32 BE] either
+0x06 Close   [stream_id:16][reason utf8…]     either  (empty ⇒ None)
+```
+
+One `u8` tag then a per-variant body; stream-scoped bodies carry the raw 16-byte
+stream id rather than its 36-char hex form, so `Data` overhead is a flat 17
+bytes. Integers are big-endian. **Type tags and `Refused` reason codes are a wire
+contract** — build-skewed peers exchange them during a rolling deploy, so values
+may be appended but never renumbered; unit tests pin the exact numbers. An
+unknown reason code from a newer peer degrades to `Protocol` rather than erroring
+the frame, so the stream is still failed instead of stranded half-open.
+
+`TunnelFrame` deliberately does **not** derive `Serialize`/`Deserialize`:
+`ws_bridge`'s blanket `WsCodec` impl encodes such types as JSON *text* and rejects
+binary frames, so deriving them would both force text framing and collide with
+the manual impl (E0119).
+
+Two supporting fields on the existing handshake, both `#[serde(default)]` so
+mixed-version fleets keep working:
+
+```rust
+RegisterFields.capabilities: Vec<String>          // e.g. PROXY_CAPABILITY_TUNNEL_BINARY_V1
+RegisterAck.tunnel_data_ticket: Option<String>    // omitted from the wire when None
+```
+
 Semantics:
 
 - `TunnelOpen`: proxy checks the port against its allowlist (below), dials
   `TcpStream::connect(("127.0.0.1", port))`, replies `TunnelOpened` or
   `TunnelRefused`. The proxy never dials anything but loopback — hard-coded,
   not configurable.
-- `TunnelData`: raw bytes, base64 inside the existing JSON text frames, at
-  most **16 KiB decoded per frame**. The ~33% base64 overhead is accepted for
-  v1; binary WS frames are listed under future work.
-- Flow control: each direction starts with a 256 KiB window per stream. A
-  sender must not exceed its window; the receiver grants more via
-  `TunnelWindow` as it drains bytes to the underlying socket.
-- **Writer capacity, not just credit.** The session WS writer is an unbounded
-  mpsc on both sides today, so stream credit alone does not bound memory or
-  protect session traffic. Tunnel senders are pull-based: read from the TCP
-  socket / HTTP body only while holding *both* stream credit *and* tunnel
-  writer budget (a bounded per-connection cap, 64 queued `TunnelData` frames
-  across all streams), never eagerly. Streams with data ready are serviced
-  round-robin. Non-tunnel session messages (agent output, permissions,
-  heartbeats) bypass the tunnel budget entirely — tunnel traffic can starve
-  itself, never the session.
+- `TunnelData`: stream bytes. On the data plane these are raw binary; on the
+  control-socket fallback they are base64 inside JSON text. Either way at most
+  `MAX_CHUNK` (**16 KiB**) decoded per frame.
+- Flow control: each direction starts with an `INITIAL_WINDOW` (**64 KiB**)
+  credit per stream. A sender must not exceed its window; the receiver grants
+  more via `TunnelWindow` as it drains bytes to the underlying socket.
+- **`MAX_CHUNK` and `INITIAL_WINDOW` are a cross-version contract.** The sender
+  chunks to `MAX_CHUNK` and the receiver closes any stream exceeding it; the
+  sender's credit gate and the receiver's credit book are seeded from the same
+  `INITIAL_WINDOW`. Raising either on one side alone makes a build-skewed peer
+  tear down every stream mid-deploy, so larger frames/windows need a negotiated
+  protocol bump (`…_v2`), not a constant edit. `MAX_STREAMS` is the exception —
+  purely proxy-local, so it can be raised on its own.
+- **Writer capacity, not just credit.** Tunnel senders are pull-based: they read
+  from the TCP socket / HTTP body only while holding stream credit, never
+  eagerly, so credit is what bounds in-flight bytes. Beyond that, the two ends
+  differ:
+  - *Backend → proxy* goes through a bounded per-connection channel
+    (`DATA_PLANE_CHANNEL_CAPACITY` on the data plane, `PROXY_CHANNEL_CAPACITY` on
+    the control socket). Overflow is deliberately treated as a dead connection.
+  - *Proxy → backend* has no queue at all: frames go straight through a shared
+    `WsSender` mutex, one frame per lock, so waiting streams are serviced
+    round-robin by mutex order.
+
+  Protecting session traffic is no longer a budgeting problem: stream bytes are
+  on a **different socket** from agent output, permissions, and heartbeats, so
+  tunnel traffic cannot delay them at all. On the control-socket fallback the old
+  caveat still applies — tunnel frames share that mutex and *can* delay session
+  frames (though never starve them, since there is no unbounded queue to grow).
 - `TunnelClose`: either side; half-close is not modeled — close tears down the
   stream. On session WS disconnect, both sides drop all live streams; the
   browser sees 502s and retries land after the proxy reconnects.
-- Limits: at most 64 concurrent streams per session (a browser opens ~6 per
-  origin; SSE and WS connections are long-lived, so leave headroom). Plain
+- Limits: at most `MAX_STREAMS` (**512**) concurrent streams per session (a
+  browser opens ~6 per origin, but with no upstream pooling every request is its
+  own stream, and SSE/WS connections are long-lived, so leave headroom). Plain
   streams idle out (no bytes either direction) after 300 s; **upgraded
   (WebSocket) streams are exempt** from the idle timeout — a quiet Jupyter
   kernel socket must survive, and the stream cap plus session lifetime bound
@@ -518,6 +620,12 @@ protocol addition in M1 is a minor bump).
   links** (ngrok-style). Both are auth-model expansions to design separately.
 - **Path-prefix fallback mode** — superseded by subdomains; not worth
   maintaining two schemes.
-- **Binary WebSocket frames** for tunnel data to drop the base64 overhead.
+- **Negotiated larger chunk/window sizes** on the data plane. Now that stream
+  bytes have their own socket, the small 16 KiB/64 KiB values (chosen because the
+  socket was *shared*) are the main throughput limiter — but both ends must
+  agree, so this needs a `…_v2` capability rather than a constant bump.
+- **Pooling upstream tunnel connections** (#1468). Every request still opens its
+  own stream, which is what makes `MAX_STREAMS` reachable at all and adds a
+  round-trip before each request.
 - **Port auto-discovery** (sniffing `LISTEN` sockets) — explicit declaration
   keeps the allowlist meaningful and the reminder teaches agents to declare.
