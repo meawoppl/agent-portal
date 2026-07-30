@@ -250,6 +250,48 @@ mod tests {
         );
     }
 
+    /// The synthetic-echo (optimistic-user) shape carrying an inter-agent
+    /// message must ALSO render as its own card, not fold into "You". Codex's
+    /// `UserEchoEvent` and older proxies' echoes parse as `OptimisticUser`
+    /// (top-level `content` string), which the `User`-arm detection missed —
+    /// this is the regression that surfaced the raw `[message from …]` /
+    /// system-reminder wrapper again.
+    #[test]
+    fn inter_agent_optimistic_user_is_not_grouped() {
+        let sid = "e2d342f5-68c6-4134-a5d8-63cb4afcee9e";
+        let body = format!(
+            "[message from codex {sid}]\nReview started.\n\n\
+             <system-reminder>\nReply to that agent, not the user.\n</system-reminder>"
+        );
+
+        // Pure optimistic shape (no `message` field) — parses as OptimisticUser.
+        let bare = serde_json::json!({ "type": "user", "content": body }).to_string();
+        assert!(
+            classify(&rendered(&bare), shared::AgentType::Codex, None).is_none(),
+            "optimistic inter-agent echo must render as a Single card, not group"
+        );
+
+        // The full Codex `UserEchoEvent` shape (blocks + top-level content).
+        let codex_echo = serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{ "type": "text", "text": body }] },
+            "content": body,
+        })
+        .to_string();
+        assert!(
+            classify(&rendered(&codex_echo), shared::AgentType::Codex, None).is_none(),
+            "codex UserEchoEvent inter-agent shape must render as a Single card"
+        );
+
+        // An ordinary optimistic echo still groups as User.
+        let prose =
+            serde_json::json!({ "type": "user", "content": "ordinary pending prose" }).to_string();
+        assert_eq!(
+            classify(&rendered(&prose), shared::AgentType::Codex, None).map(|i| i.category),
+            Some(GroupCategory::User),
+        );
+    }
+
     /// A tool-result user message coming from a Claude session MUST classify
     /// into the assistant group — otherwise serial Read tool uses don't roll
     /// together with their preceding assistant turn.
