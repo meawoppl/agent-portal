@@ -7,6 +7,37 @@ use yew::prelude::*;
 use super::sorted_prs;
 use super::sparkline::{render_activity_sparkline, ActivityRef};
 
+/// How long after a compaction marker the context bar keeps flashing.
+const COMPACTION_FLASH_MS: f64 = 4_000.0;
+/// Context fill above this reads amber; above [`CTX_HIGH`], red + pulse.
+const CTX_MID: f64 = 0.6;
+const CTX_HIGH: f64 = 0.85;
+
+/// Render the top context-usage bar for a pill: a thin left→right fill sized to
+/// the context fraction, colored green→amber→red, that drains smoothly on
+/// compaction (CSS `width` transition) and flashes when one just landed.
+/// Renders nothing when the fraction is unknown.
+fn render_context_bar(fraction: Option<f64>, compacting: bool) -> Html {
+    let Some(fraction) = fraction else {
+        return html! {};
+    };
+    let pct = (fraction.clamp(0.0, 1.0)) * 100.0;
+    let band = if fraction >= CTX_HIGH {
+        "ctx-high"
+    } else if fraction >= CTX_MID {
+        "ctx-mid"
+    } else {
+        "ctx-low"
+    };
+    let bar_class = classes!("pill-context-bar", compacting.then_some("compacting"));
+    let fill_class = classes!("pill-context-fill", band);
+    html! {
+        <div class={bar_class} title={format!("Context {:.0}% full", fraction * 100.0)}>
+            <div class={fill_class} style={format!("width: {pct:.1}%")} />
+        </div>
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum VcsView {
     PullRequests(Vec<(i64, String)>),
@@ -45,6 +76,11 @@ pub(super) struct SessionPillProps {
     pub nav_mode: bool,
     pub server_version: String,
     pub activity_timestamps: ActivityRef,
+    /// Fraction (0.0..) of the model's context window occupied on this
+    /// session's most recent turn, or `None` when unknown (no recent metrics /
+    /// unknown window). Drives the top context-usage bar.
+    #[prop_or_default]
+    pub context_fraction: Option<f64>,
     pub is_broadcast_sender: bool,
     pub is_broadcast_receiver: bool,
     pub render_time: f64,
@@ -71,6 +107,17 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
 
     let sparkline =
         render_activity_sparkline(&props.activity_timestamps, session.id, props.render_time);
+
+    // Top context-usage bar: the counterpart to the bottom activity ticks, but
+    // filling left→right with how full the model's context window is. Flashes
+    // briefly when a compaction just landed (context drains) — reusing the same
+    // compaction markers the bottom sparkline plots.
+    let compacting = props.activity_timestamps.recent_compaction(
+        session.id,
+        props.render_time,
+        COMPACTION_FLASH_MS,
+    );
+    let context_bar = render_context_bar(props.context_fraction, compacting);
 
     html! {
         <div
@@ -140,6 +187,7 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             <button type="button" class="pill-menu-toggle" onclick={on_toggle_menu}>
                 { "▼" }
             </button>
+            { context_bar }
             { sparkline }
         </div>
     }

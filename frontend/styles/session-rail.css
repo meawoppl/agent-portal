@@ -949,6 +949,71 @@
     opacity: 0.2;
 }
 
+/* Top context-usage bar: the counterpart to the bottom activity ticks, but a
+   single fill sized to how full the model's context window is. Clipped to the
+   pill's rounded top by the pill's own `overflow: hidden`, like the sparkline
+   at the bottom. */
+.pill-context-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    pointer-events: none;
+    background: rgba(192, 202, 245, 0.06);
+    overflow: hidden;
+}
+
+.pill-context-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    border-radius: 1px;
+    transform: translateZ(0);
+    background: var(--success);
+    /* Grows as context fills; drains smoothly when a compaction shrinks it. */
+    transition: width 0.6s ease, background-color 0.6s ease;
+}
+
+.pill-context-fill.ctx-mid {
+    background: #e0af68;
+}
+
+.pill-context-fill.ctx-high {
+    background: var(--error);
+    /* Ambient warning pulse when close to the window limit. */
+    animation: ctx-near-full 1.8s ease-in-out infinite;
+}
+
+@keyframes ctx-near-full {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Brief flash the moment a compaction lands (context drains). */
+.pill-context-bar.compacting {
+    animation: ctx-compact-flash 0.8s ease-out;
+}
+
+@keyframes ctx-compact-flash {
+    0% {
+        box-shadow: 0 0 6px 1px var(--accent);
+    }
+    100% {
+        box-shadow: none;
+    }
+}
+
+.session-pill.hidden .pill-context-fill {
+    opacity: 0.2;
+}
+
 .pill-status {
     font-size: 0.6rem;
     line-height: 1;

@@ -58,6 +58,18 @@ impl ActivityRef {
         events.push((timestamp, tag));
     }
 
+    /// True if a compaction event occurred within `window_ms` of `now` for
+    /// this session. Drives the context-usage bar's brief compaction flash —
+    /// reuses the same compaction markers the bottom sparkline already plots.
+    pub fn recent_compaction(&self, session_id: Uuid, now: f64, window_ms: f64) -> bool {
+        let map = self.0.borrow();
+        map.get(&session_id).is_some_and(|events| {
+            events.iter().any(|(t, tag)| {
+                now - *t <= window_ms && (tag.is_compaction_start() || tag.is_compaction_end())
+            })
+        })
+    }
+
     /// Compute the sparkline view for one session at the given wall-clock time.
     fn view_for(&self, session_id: Uuid, now: f64) -> SparklineView {
         let cutoff = now - SPARKLINE_WINDOW_MS;
