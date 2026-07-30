@@ -1,11 +1,13 @@
 mod client;
 mod launcher;
 mod session;
+mod tunnel;
 mod types;
 
 pub use client::*;
 pub use launcher::*;
 pub use session::*;
+pub use tunnel::*;
 pub use types::*;
 pub use ws_bridge::WsEndpoint;
 
