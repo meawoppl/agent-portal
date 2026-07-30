@@ -122,6 +122,16 @@ pub fn dashboard_page() -> Html {
         .filter_map(|m| m.model.clone().map(|model| (m.session_id, model)))
         .collect();
 
+    // Per-session context-window fill, same source and "latest turn wins"
+    // ordering as `live_models` above. Feeds each pill's top context bar; a
+    // turn whose window is unknown (e.g. an unrecognized model) is skipped, so
+    // that session simply shows no bar.
+    let context_fractions: HashMap<Uuid, f64> = ws_hook
+        .recent_turn_metrics
+        .iter()
+        .filter_map(|m| m.context_fraction().map(|frac| (m.session_id, frac)))
+        .collect();
+
     let active_sessions: Vec<SessionInfo> = {
         let mut sorted: Vec<SessionInfo> = sessions.to_vec();
         // Overlay the live model onto the polled row so the watermark reflects
@@ -778,6 +788,7 @@ pub fn dashboard_page() -> Html {
                         connected_sessions={session_state.connected_sessions.clone()}
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
+                        context_fractions={context_fractions.clone()}
                         broadcasts={(*agent_message_broadcasts).clone()}
                         rail_position={ui_state.rail_position}
                         server_version={server_version.clone()}

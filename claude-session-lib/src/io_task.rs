@@ -605,6 +605,10 @@ pub(crate) async fn claude_io_task(
                                 stop_reason: r.stop_reason.clone(),
                                 is_error: r.is_error,
                                 total_cost_usd: Some(r.total_cost_usd),
+                                // Claude's stream-json carries no window size;
+                                // `TurnMetrics::context_window` derives it from
+                                // the model id instead.
+                                model_context_window: None,
                             };
                             if let Some(metrics) = turn_tracker.finalize(
                                 Instant::now(),

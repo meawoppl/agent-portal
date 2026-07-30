@@ -189,6 +189,7 @@ fn render_pill_section(
                 nav_mode={props.nav_mode}
                 server_version={props.server_version.clone()}
                 activity_timestamps={props.activity_timestamps.clone()}
+                context_fraction={props.context_fractions.get(&session.id).copied()}
                 is_broadcast_sender={broadcast_senders.contains(&session.id)}
                 is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
                 render_time={render_time}
@@ -216,6 +217,11 @@ pub struct SessionRailProps {
     pub nav_mode: bool,
     #[prop_or_default]
     pub activity_timestamps: ActivityRef,
+    /// Per-session context-window fill fraction (session id → 0.0..), derived
+    /// from recent turn metrics upstream. Sessions absent from the map render
+    /// no context bar.
+    #[prop_or_default]
+    pub context_fractions: std::collections::HashMap<Uuid, f64>,
     #[prop_or_default]
     pub broadcasts: BroadcastRef,
     pub rail_position: crate::pages::dashboard::RailPosition,

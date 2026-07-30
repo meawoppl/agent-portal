@@ -109,6 +109,14 @@ pub struct TurnMetrics {
     /// `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_cost_usd: Option<f64>,
+
+    /// The model's context window in tokens, when the agent reports it. Codex
+    /// sends `model_context_window` on its wire, so codex turns carry it here.
+    /// Claude does not report a window, so claude turns leave this `None` and
+    /// [`TurnMetrics::context_window`] derives a nominal size from the model id
+    /// instead. Powers the context-usage gauge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_context_window: Option<i64>,
 }
 
 impl TurnMetrics {
@@ -121,6 +129,47 @@ impl TurnMetrics {
             let value = value.trim();
             !value.is_empty() && !value.eq_ignore_ascii_case("unknown")
         })
+    }
+
+    /// Tokens occupying the context window on this turn's most recent request —
+    /// the numerator of the context-usage gauge.
+    ///
+    /// The math is **agent-specific** because the two protocols count input
+    /// tokens differently:
+    /// - **Claude** reports the three input buckets *disjointly* (`input`,
+    ///   `cache_read`, `cache_creation`), so the full prompt is their sum.
+    /// - **Codex** reports `input_tokens` as the *whole* prompt, with the
+    ///   cached / cache-write counts as subsets already inside it — so summing
+    ///   them would double-count. Its occupancy is just `input_tokens`.
+    pub fn context_tokens(&self) -> i64 {
+        match self.agent_type {
+            AgentType::Codex => self.input_tokens,
+            // Claude (and the default) — disjoint buckets sum to the prompt.
+            AgentType::Claude => {
+                self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens
+            }
+        }
+    }
+
+    /// Effective context window in tokens: the value the agent reported, else a
+    /// nominal size derived from the model id (Claude). `None` when neither is
+    /// available (e.g. a Codex turn from before the window was on the wire, or
+    /// an unrecognized model) — the caller hides the gauge rather than guess.
+    pub fn context_window(&self) -> Option<i64> {
+        self.model_context_window.filter(|w| *w > 0).or_else(|| {
+            self.model
+                .as_deref()
+                .and_then(crate::context_window_for)
+                .map(|w| w as i64)
+        })
+    }
+
+    /// Fraction of the context window occupied on this turn, `0.0..`. Can
+    /// briefly exceed `1.0` right before an auto-compaction; callers clamp for
+    /// display. `None` when the window is unknown.
+    pub fn context_fraction(&self) -> Option<f64> {
+        let window = self.context_window()?;
+        (window > 0).then(|| self.context_tokens() as f64 / window as f64)
     }
 }
 
@@ -193,4 +242,116 @@ pub struct MetricBucket {
 pub struct MetricBucketsResponse {
     #[serde(default)]
     pub buckets: Vec<MetricBucket>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal turn with the token fields that drive the gauge.
+    fn turn(
+        agent_type: AgentType,
+        model: Option<&str>,
+        model_context_window: Option<i64>,
+        input_tokens: i64,
+        cache_read_tokens: i64,
+        cache_creation_tokens: i64,
+    ) -> TurnMetrics {
+        TurnMetrics {
+            id: None,
+            session_id: uuid::Uuid::nil(),
+            user_message_id: None,
+            agent_type,
+            model: model.map(str::to_string),
+            service_tier: None,
+            started_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap(),
+            first_token_at: None,
+            completed_at: None,
+            ttft_ms: None,
+            total_duration_ms: None,
+            generation_duration_ms: None,
+            max_inter_token_gap_ms: None,
+            input_tokens,
+            output_tokens: 0,
+            cache_creation_tokens,
+            cache_read_tokens,
+            thinking_tokens: 0,
+            subagent_tokens: 0,
+            stop_reason: None,
+            is_error: false,
+            tool_call_count: 0,
+            stream_restarts: 0,
+            total_cost_usd: None,
+            model_context_window,
+        }
+    }
+
+    #[test]
+    fn claude_context_tokens_sum_disjoint_buckets() {
+        // Claude: input + cache_read + cache_creation = full prompt.
+        let t = turn(
+            AgentType::Claude,
+            Some("claude-opus-4-8"),
+            None,
+            1_000,
+            40_000,
+            2_000,
+        );
+        assert_eq!(t.context_tokens(), 43_000);
+        // Window derived from the model-name map (200k).
+        assert_eq!(t.context_window(), Some(200_000));
+        assert_eq!(t.context_fraction(), Some(43_000.0 / 200_000.0));
+    }
+
+    #[test]
+    fn codex_context_tokens_do_not_double_count_cache() {
+        // Codex: input_tokens already includes the cached subset — occupancy is
+        // input_tokens alone, and the window comes from the wire.
+        let t = turn(
+            AgentType::Codex,
+            Some("gpt-5-codex"),
+            Some(400_000),
+            120_000,
+            90_000,
+            5_000,
+        );
+        assert_eq!(t.context_tokens(), 120_000);
+        assert_eq!(t.context_window(), Some(400_000));
+        assert_eq!(t.context_fraction(), Some(120_000.0 / 400_000.0));
+    }
+
+    #[test]
+    fn reported_window_wins_over_model_map() {
+        // A Claude turn that somehow carries an explicit window uses it.
+        let t = turn(
+            AgentType::Claude,
+            Some("claude-sonnet-5"),
+            Some(1_000_000),
+            500_000,
+            0,
+            0,
+        );
+        assert_eq!(t.context_window(), Some(1_000_000));
+    }
+
+    #[test]
+    fn no_window_when_unknown() {
+        // Codex turn with no wire window and a non-Claude model → gauge hidden.
+        let t = turn(AgentType::Codex, Some("gpt-5-codex"), None, 100, 0, 0);
+        assert_eq!(t.context_window(), None);
+        assert_eq!(t.context_fraction(), None);
+    }
+
+    #[test]
+    fn fraction_may_exceed_one_before_compaction() {
+        let t = turn(
+            AgentType::Claude,
+            Some("claude-opus-4-8"),
+            None,
+            210_000,
+            0,
+            0,
+        );
+        assert!(t.context_fraction().unwrap() > 1.0);
+    }
 }
