@@ -10,8 +10,8 @@
 //! credit per direction, ≤16 KiB `TunnelData` frames, window re-granted as
 //! bytes drain into the pipe. The outgoing path is the session's unbounded
 //! `ProxySender`, so per-stream credit is what bounds queued tunnel bytes:
-//! at most `MAX_STREAMS × INITIAL_WINDOW` (16 MiB) per session in the
-//! pathological case, in practice one window per active stream.
+//! at most `MAX_STREAMS × INITIAL_WINDOW` per session in the pathological
+//! case, in practice one window per active stream.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +29,13 @@ use uuid::Uuid;
 
 use super::{ProxySender, SessionManager};
 
-/// Max decoded bytes per `TunnelData` frame (spec).
+/// Max decoded bytes per payload frame (spec).
+///
+/// **Both ends must agree.** The sender chunks to this and the receiver closes
+/// any stream that exceeds it, so raising it on one side alone makes a
+/// build-skewed peer tear down every stream mid-deploy. `session.tunnel_binary_v1`
+/// already means "16 KiB chunks", so a larger frame size needs a negotiated
+/// protocol bump, not an edit here.
 pub const MAX_CHUNK: usize = 16 * 1024;
 /// Initial per-stream, per-direction flow-control window. Must match the proxy
 /// side (`session_lib::tunnel::INITIAL_WINDOW`) — both ends seed their credit
@@ -60,7 +66,7 @@ pub enum TunnelIn {
 
 /// One live backend stream: the relay inbox plus receive-credit enforcement
 /// (mirrors the proxy side — the inbox is unbounded, so the credit book, not
-/// the channel, bounds buffered downlink bytes to the 256 KiB window even
+/// the channel, bounds buffered downlink bytes to [`INITIAL_WINDOW`] even
 /// against a buggy peer).
 pub(super) struct BackendStreamEntry {
     inbox: mpsc::UnboundedSender<TunnelIn>,
