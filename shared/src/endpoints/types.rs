@@ -93,6 +93,16 @@ pub struct RegisterFields {
     pub scheduled_task_id: Option<Uuid>,
     #[serde(default)]
     pub claude_args: Vec<String>,
+    /// Optional protocol features this client supports, mirroring the launcher
+    /// capability model (`crate::PROXY_CAPABILITY_*`). Defaults to empty, so an
+    /// older proxy — which sends no capabilities — is simply treated as
+    /// supporting none and keeps the pre-existing behavior.
+    ///
+    /// Before this, the session socket had no capability mechanism at all: new
+    /// frames relied purely on `#[serde(default)]` tolerance, which cannot
+    /// express "this peer can receive a frame shape it never used to get".
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 /// Core scheduled-task fields shared by `ScheduledTaskConfig`,

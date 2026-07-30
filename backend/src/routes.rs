@@ -323,6 +323,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(handlers::websocket::handle_session_websocket),
         )
         .route(
+            shared::TunnelDataEndpoint::PATH,
+            get(handlers::websocket::handle_tunnel_data_websocket),
+        )
+        .route(
             shared::ClientEndpoint::PATH,
             get(handlers::websocket::handle_web_client_websocket),
         )

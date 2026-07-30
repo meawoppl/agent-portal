@@ -91,6 +91,7 @@ fn test_register_fields() -> RegisterFields {
         repo_url: None,
         scheduled_task_id: None,
         claude_args: vec![],
+        capabilities: Vec::new(),
     }
 }
 

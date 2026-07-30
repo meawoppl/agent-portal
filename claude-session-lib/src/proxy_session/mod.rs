@@ -658,6 +658,10 @@ pub async fn register_session(
         repo_url: get_repo_url(&config.working_directory),
         scheduled_task_id: config.scheduled_task_id,
         claude_args: config.claude_args.clone(),
+        // The binary port-forward data plane is advertised in a follow-up
+        // change (#1506); until the proxy can dial it, claiming support would
+        // make the backend mint a ticket nothing uses.
+        capabilities: Vec::new(),
     });
 
     if conn.send(register_msg).await.is_err() {
@@ -678,6 +682,9 @@ pub async fn register_session(
                     // was replaced by `agent-portal show` (see output_forwarder).
                     max_image_mb: _,
                     retryable,
+                    // Data-plane ticket (#1506): ignored until this proxy
+                    // advertises the capability and dials the data socket.
+                    tunnel_data_ticket: _,
                 }) => {
                     return Some((success, error, retryable));
                 }

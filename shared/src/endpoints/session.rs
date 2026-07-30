@@ -210,6 +210,20 @@ pub enum ServerToProxy {
         /// backends keep today's fatal semantics. #1264.
         #[serde(default)]
         retryable: bool,
+        /// Short-TTL credential authorizing this proxy to open the binary
+        /// data-plane socket ([`TunnelDataEndpoint`](crate::TunnelDataEndpoint))
+        /// for port forwarding (#1506).
+        ///
+        /// Present only when the proxy advertised
+        /// [`PROXY_CAPABILITY_TUNNEL_BINARY_V1`](crate::PROXY_CAPABILITY_TUNNEL_BINARY_V1)
+        /// and registration succeeded. The ticket is bound to this session *and
+        /// this connection's generation*, so it cannot be replayed onto a later
+        /// reconnect — that binding is what keeps the two sockets from crossing
+        /// wires when a proxy reconnects. `None` (older backend, or capability
+        /// not advertised) simply means tunnel bytes keep riding the control
+        /// socket as before.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tunnel_data_ticket: Option<String>,
     },
 
     /// Keepalive heartbeat

@@ -44,6 +44,41 @@ mod tests {
         assert_eq!(back, SessionExitReason::CrashedEarly);
     }
 
+    /// Wire compat for the capability/ticket plumbing (#1506): an older proxy
+    /// sends no `capabilities`, and an older backend sends no
+    /// `tunnel_data_ticket`. Both must parse as "feature absent" rather than
+    /// failing the frame and wedging registration.
+    #[test]
+    fn tunnel_data_plane_fields_default_for_older_peers() {
+        let legacy_register = r#"{"type":"Register","session_id":"00000000-0000-0000-0000-000000000000","session_name":"s","auth_token":null,"working_directory":"/tmp"}"#;
+        match serde_json::from_str::<ProxyToServer>(legacy_register).unwrap() {
+            ProxyToServer::Register(reg) => assert!(reg.capabilities.is_empty()),
+            _ => panic!("expected Register"),
+        }
+
+        let legacy_ack = r#"{"type":"RegisterAck","success":true,"session_id":"00000000-0000-0000-0000-000000000000","max_image_mb":10}"#;
+        match serde_json::from_str::<ServerToProxy>(legacy_ack).unwrap() {
+            ServerToProxy::RegisterAck {
+                tunnel_data_ticket, ..
+            } => assert!(tunnel_data_ticket.is_none()),
+            _ => panic!("expected RegisterAck"),
+        }
+
+        // And the ticket is omitted from the wire entirely when absent, so an
+        // older proxy sees a byte-identical ack to what it got before.
+        let ack = ServerToProxy::RegisterAck {
+            success: true,
+            session_id: Uuid::nil(),
+            error: None,
+            max_image_mb: 10,
+            retryable: false,
+            tunnel_data_ticket: None,
+        };
+        assert!(!serde_json::to_string(&ack)
+            .unwrap()
+            .contains("tunnel_data_ticket"));
+    }
+
     #[test]
     fn client_endpoint_path() {
         assert_eq!(ClientEndpoint::PATH, "/ws/client");
@@ -72,6 +107,7 @@ mod tests {
             repo_url: None,
             scheduled_task_id: None,
             claude_args: Vec::new(),
+            capabilities: Vec::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"Register""#));

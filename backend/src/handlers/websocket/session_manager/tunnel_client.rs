@@ -19,8 +19,8 @@ use std::time::Duration;
 use base64::Engine;
 use dashmap::DashMap;
 use shared::{
-    ServerToProxy, TunnelCloseFields, TunnelDataFields, TunnelOpenFields, TunnelRefuseReason,
-    TunnelWindowFields,
+    ServerToProxy, TunnelCloseFields, TunnelDataFields, TunnelFrame, TunnelOpenFields,
+    TunnelRefuseReason, TunnelWindowFields,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex, Notify};
@@ -78,6 +78,91 @@ pub(super) struct BackendStreamEntry {
 /// Registry of live backend tunnel streams, keyed by stream id.
 pub(super) type TunnelStreamMap = Arc<DashMap<Uuid, BackendStreamEntry>>;
 
+/// Where a stream's outbound frames go: the dedicated binary data plane when
+/// one is registered for this connection, otherwise the legacy JSON path over
+/// the session control socket (#1506).
+///
+/// Selected once per stream at open time and carried by the relay, so the copy
+/// loops stay transport-agnostic. Choosing per stream (rather than globally) is
+/// what makes the rollout safe: a proxy without the capability, or one whose
+/// data socket has dropped, transparently keeps the old path.
+#[derive(Clone)]
+pub(super) enum TunnelEgress {
+    /// JSON frames over the shared control socket — base64-encoded payloads.
+    Control(ProxySender),
+    /// Binary frames over the dedicated data plane — raw payloads.
+    Binary(super::DataPlaneSender),
+}
+
+impl TunnelEgress {
+    /// Human label for logs/metrics.
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Control(_) => "control",
+            Self::Binary(_) => "binary",
+        }
+    }
+
+    fn open(&self, stream_id: Uuid, port: u16) -> bool {
+        match self {
+            Self::Control(tx) => tx
+                .send(ServerToProxy::TunnelOpen(TunnelOpenFields {
+                    stream_id,
+                    port,
+                }))
+                .is_ok(),
+            Self::Binary(tx) => tx.send(TunnelFrame::Open { stream_id, port }).is_ok(),
+        }
+    }
+
+    fn data(&self, stream_id: Uuid, bytes: &[u8]) -> bool {
+        match self {
+            Self::Control(tx) => tx
+                .send(ServerToProxy::TunnelData(TunnelDataFields {
+                    stream_id,
+                    data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                }))
+                .is_ok(),
+            // The point of the binary plane: the payload goes on the wire as-is.
+            Self::Binary(tx) => tx
+                .send(TunnelFrame::Data {
+                    stream_id,
+                    bytes: bytes.to_vec(),
+                })
+                .is_ok(),
+        }
+    }
+
+    fn window(&self, stream_id: Uuid, add_bytes: u32) -> bool {
+        match self {
+            Self::Control(tx) => tx
+                .send(ServerToProxy::TunnelWindow(TunnelWindowFields {
+                    stream_id,
+                    add_bytes,
+                }))
+                .is_ok(),
+            Self::Binary(tx) => tx
+                .send(TunnelFrame::Window {
+                    stream_id,
+                    add_bytes,
+                })
+                .is_ok(),
+        }
+    }
+
+    fn close(&self, stream_id: Uuid, reason: Option<String>) -> bool {
+        match self {
+            Self::Control(tx) => tx
+                .send(ServerToProxy::TunnelClose(TunnelCloseFields {
+                    stream_id,
+                    reason,
+                }))
+                .is_ok(),
+            Self::Binary(tx) => tx.send(TunnelFrame::Close { stream_id, reason }).is_ok(),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum TunnelError {
     #[error("session proxy is not connected")]
@@ -101,44 +186,58 @@ impl SessionManager {
         }
     }
 
-    /// Route a `TunnelData` frame: decode outside any map lock, reject
-    /// oversized frames, and enforce the granted receive window before the
-    /// bytes may enter the unbounded relay inbox.
+    /// Route a JSON-plane `TunnelData` frame: decode outside any map lock, then
+    /// hand the bytes to the shared ingest path.
+    ///
+    /// This is the legacy control-socket transport, kept for proxies that don't
+    /// advertise [`PROXY_CAPABILITY_TUNNEL_BINARY_V1`](shared::PROXY_CAPABILITY_TUNNEL_BINARY_V1).
+    /// The binary data plane calls [`Self::tunnel_bytes_in`] directly — same
+    /// size and credit enforcement, no base64 step.
     pub fn tunnel_data_in(&self, fields: &shared::TunnelDataFields) {
-        let entry = self
-            .tunnel_streams
-            .get(&fields.stream_id)
-            .map(|e| (e.value().inbox.clone(), e.value().recv_credit.clone()));
-        let Some((inbox, recv_credit)) = entry else {
-            debug!("TunnelData for unknown stream {} dropped", fields.stream_id);
-            return;
-        };
         match base64::engine::general_purpose::STANDARD.decode(&fields.data_base64) {
-            Ok(bytes) if bytes.len() > MAX_CHUNK => {
-                tracing::warn!(
-                    "Oversized TunnelData ({} bytes) for stream {}; closing",
-                    bytes.len(),
-                    fields.stream_id
-                );
-                let _ = inbox.send(TunnelIn::Close);
-            }
-            Ok(bytes) => {
-                let prev =
-                    recv_credit.fetch_sub(bytes.len() as i64, std::sync::atomic::Ordering::AcqRel);
-                if prev < bytes.len() as i64 {
-                    tracing::warn!(
-                        "TunnelData beyond granted window for stream {}; closing",
-                        fields.stream_id
-                    );
-                    let _ = inbox.send(TunnelIn::Close);
-                } else {
-                    let _ = inbox.send(TunnelIn::Data(bytes));
-                }
-            }
+            Ok(bytes) => self.tunnel_bytes_in(fields.stream_id, bytes),
             Err(_) => {
                 tracing::warn!("Undecodable TunnelData for stream {}", fields.stream_id);
-                let _ = inbox.send(TunnelIn::Close);
+                if let Some(entry) = self.tunnel_streams.get(&fields.stream_id) {
+                    let _ = entry.value().inbox.send(TunnelIn::Close);
+                }
             }
+        }
+    }
+
+    /// Shared ingest for stream payload bytes, whichever transport carried them:
+    /// reject oversized frames and enforce the granted receive window before the
+    /// bytes may enter the unbounded relay inbox.
+    ///
+    /// The credit book — not the channel — is what bounds buffered downlink
+    /// bytes, so this check is load-bearing against a buggy or hostile peer.
+    pub fn tunnel_bytes_in(&self, stream_id: Uuid, bytes: Vec<u8>) {
+        let entry = self
+            .tunnel_streams
+            .get(&stream_id)
+            .map(|e| (e.value().inbox.clone(), e.value().recv_credit.clone()));
+        let Some((inbox, recv_credit)) = entry else {
+            debug!("Tunnel payload for unknown stream {} dropped", stream_id);
+            return;
+        };
+        if bytes.len() > MAX_CHUNK {
+            tracing::warn!(
+                "Oversized tunnel payload ({} bytes) for stream {}; closing",
+                bytes.len(),
+                stream_id
+            );
+            let _ = inbox.send(TunnelIn::Close);
+            return;
+        }
+        let prev = recv_credit.fetch_sub(bytes.len() as i64, std::sync::atomic::Ordering::AcqRel);
+        if prev < bytes.len() as i64 {
+            tracing::warn!(
+                "Tunnel payload beyond granted window for stream {}; closing",
+                stream_id
+            );
+            let _ = inbox.send(TunnelIn::Close);
+        } else {
+            let _ = inbox.send(TunnelIn::Data(bytes));
         }
     }
 
@@ -196,6 +295,15 @@ impl SessionManager {
             None => return Err(TunnelError::NotConnected),
         };
 
+        // Prefer the dedicated binary data plane when this exact connection has
+        // one registered; otherwise fall back to JSON over the control socket.
+        // Resolved per stream, so a data socket that appears or drops mid-session
+        // is picked up (or degraded away from) without any coordination.
+        let egress = match self.data_plane_sender(session_key, gen) {
+            Some(tx) => TunnelEgress::Binary(tx),
+            None => TunnelEgress::Control(proxy_tx.clone()),
+        };
+
         let stream_id = Uuid::new_v4();
         let (relay_tx, mut relay_rx) = mpsc::unbounded_channel::<TunnelIn>();
         let recv_credit = Arc::new(std::sync::atomic::AtomicI64::new(INITIAL_WINDOW as i64));
@@ -209,13 +317,7 @@ impl SessionManager {
             },
         );
 
-        if proxy_tx
-            .send(ServerToProxy::TunnelOpen(TunnelOpenFields {
-                stream_id,
-                port,
-            }))
-            .is_err()
-        {
+        if !egress.open(stream_id, port) {
             self.tunnel_streams.remove(&stream_id);
             return Err(TunnelError::NotConnected);
         }
@@ -235,19 +337,21 @@ impl SessionManager {
             Err(_) => {
                 self.tunnel_streams.remove(&stream_id);
                 // Best effort: tell the proxy to forget the half-open stream.
-                let _ = proxy_tx.send(ServerToProxy::TunnelClose(TunnelCloseFields {
-                    stream_id,
-                    reason: Some("open timed out".to_string()),
-                }));
+                egress.close(stream_id, Some("open timed out".to_string()));
                 return Err(TunnelError::OpenTimeout);
             }
         }
 
+        debug!(
+            "Tunnel stream {} open over the {} plane",
+            stream_id,
+            egress.kind()
+        );
         let (client_io, relay_io) = tokio::io::duplex(PIPE_CAPACITY);
         let streams = self.tunnel_streams.clone();
         tokio::spawn(run_relay(
             stream_id,
-            proxy_tx,
+            egress,
             relay_io,
             relay_rx,
             streams,
@@ -303,7 +407,7 @@ impl CreditGate {
 /// Copy loop between the duplex pipe (hyper side) and tunnel frames.
 async fn run_relay(
     stream_id: Uuid,
-    proxy_tx: ProxySender,
+    egress: TunnelEgress,
     relay_io: tokio::io::DuplexStream,
     mut inbox: mpsc::UnboundedReceiver<TunnelIn>,
     streams: TunnelStreamMap,
@@ -312,9 +416,9 @@ async fn run_relay(
     let (mut pipe_rd, mut pipe_wr) = tokio::io::split(relay_io);
     let send_credit = Arc::new(CreditGate::new(INITIAL_WINDOW));
 
-    // Uplink: bytes hyper writes (requests) → TunnelData frames, credit-gated.
+    // Uplink: bytes hyper writes (requests) → payload frames, credit-gated.
     let uplink_credit = send_credit.clone();
-    let uplink_tx = proxy_tx.clone();
+    let uplink_egress = egress.clone();
     let uplink = tokio::spawn(async move {
         let mut buf = vec![0u8; MAX_CHUNK];
         loop {
@@ -326,11 +430,7 @@ async fn run_relay(
             if n < budget {
                 uplink_credit.grant((budget - n) as u32).await;
             }
-            let frame = ServerToProxy::TunnelData(TunnelDataFields {
-                stream_id,
-                data_base64: base64::engine::general_purpose::STANDARD.encode(&buf[..n]),
-            });
-            if uplink_tx.send(frame).is_err() {
+            if !uplink_egress.data(stream_id, &buf[..n]) {
                 break;
             }
         }
@@ -347,10 +447,7 @@ async fn run_relay(
                 // Grant-on-drain: refill the peer's window and our
                 // receive-credit enforcement book together.
                 recv_credit.fetch_add(bytes.len() as i64, std::sync::atomic::Ordering::AcqRel);
-                let _ = proxy_tx.send(ServerToProxy::TunnelWindow(TunnelWindowFields {
-                    stream_id,
-                    add_bytes: bytes.len() as u32,
-                }));
+                egress.window(stream_id, bytes.len() as u32);
             }
             Some(TunnelIn::Window(n)) => send_credit.grant(n).await,
             Some(TunnelIn::Opened) => {} // late duplicate; ignore
@@ -360,10 +457,7 @@ async fn run_relay(
 
     uplink.abort();
     streams.remove(&stream_id);
-    let _ = proxy_tx.send(ServerToProxy::TunnelClose(TunnelCloseFields {
-        stream_id,
-        reason: None,
-    }));
+    egress.close(stream_id, None);
     debug!("Backend tunnel stream {} closed", stream_id);
 }
 
