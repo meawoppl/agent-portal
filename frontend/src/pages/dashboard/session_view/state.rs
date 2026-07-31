@@ -79,6 +79,7 @@ mod tests {
             cache_read_tokens: 0,
             thinking_tokens: 0,
             subagent_tokens: 0,
+            context_snapshot_tokens: None,
             stop_reason: None,
             is_error: false,
             tool_call_count: 0,

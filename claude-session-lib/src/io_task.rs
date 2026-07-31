@@ -222,6 +222,64 @@ fn truncate_for_log(text: &str) -> String {
 // is_error=true. We retry that turn for the user with full-jitter exponential
 // backoff.
 const RATE_LIMIT_TEXT_PREFIX: &str = "API Error: Server is temporarily limiting requests";
+
+/// The model id the CLI stamps on messages it injects itself. Real usage never
+/// rides these, so they must not anchor context occupancy — the CLI's own
+/// predicate excludes them (`lIe`: `e.message.model !== jC`, where
+/// `jC = "<synthetic>"`; verified in Claude Code 2.1.220). #1517.
+const SYNTHETIC_MODEL: &str = "<synthetic>";
+
+/// Texts the CLI treats as injected/synthetic assistant content, excluded from
+/// the context anchor. These are the resolved members of the CLI's `_mt` set
+/// (`lIe`, Claude Code 2.1.220): interrupt notices and tool-rejection notices.
+/// Compared as prefixes because the longer two continue with instructions.
+const SYNTHETIC_ASSISTANT_TEXTS: &[&str] = &[
+    "[Request interrupted by user]",
+    "[Request interrupted by user for tool use]",
+    "No response requested.",
+    "The user doesn't want to take this action right now.",
+    "The user doesn't want to proceed with this tool use.",
+];
+
+/// Context tokens contributed by one assistant-message usage snapshot.
+///
+/// Matches the CLI's status-line form (`pro`, Claude Code 2.1.220):
+/// `input + cache_creation + cache_read`, **excluding** `output_tokens`. (The
+/// CLI's internal auto-compact accounting, `cIe`, does add output; the status
+/// line — what a user sees as "% context used" — does not, and that is the
+/// semantics this gauge reproduces.)
+fn context_snapshot_tokens(usage: &claude_codes::io::AssistantUsage) -> i64 {
+    usage.input_tokens as i64
+        + usage.cache_creation_input_tokens as i64
+        + usage.cache_read_input_tokens as i64
+}
+
+/// Whether an assistant frame may anchor context occupancy, mirroring the CLI's
+/// `lIe`: it must carry usage, not be CLI-injected content, and not be stamped
+/// with the synthetic model.
+fn can_anchor_context(msg: &claude_codes::io::AssistantMessage) -> bool {
+    if msg.message.model == SYNTHETIC_MODEL {
+        return false;
+    }
+    // The CLI only inspects the FIRST content block, so a real reply that merely
+    // quotes one of these strings later is unaffected.
+    let first_text = msg.message.content.iter().find_map(|b| match b {
+        ContentBlock::Text(t) => Some(t.text.as_str()),
+        _ => None,
+    });
+    let first_is_text = matches!(msg.message.content.first(), Some(ContentBlock::Text(_)));
+    if first_is_text {
+        if let Some(text) = first_text {
+            if SYNTHETIC_ASSISTANT_TEXTS
+                .iter()
+                .any(|synthetic| text.starts_with(synthetic))
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
 const MAX_RATE_LIMIT_RETRIES: u32 = 30;
 const RATE_LIMIT_BACKOFF_CAP_SECS: u64 = 60;
 
@@ -426,6 +484,17 @@ pub(crate) async fn claude_io_task(
     // assistant message's `model` field (per-message); the tracker doesn't
     // know either on its own.
     let mut current_model: Option<String> = None;
+    // Context-occupancy anchor (#1517): tokens from the LAST real assistant
+    // usage, which is a per-API-call snapshot. Deliberately not the Result
+    // frame's usage — that is an accumulated roll-up across the turn's
+    // iterations (the CLI sums usage field-by-field in `vTo`), so its
+    // cache_read re-counts nearly the whole context once per tool call and a
+    // tool-heavy turn reads many times over the window.
+    let mut context_anchor_tokens: Option<i64> = None;
+    // Message id the anchor came from, so streamed chunks sharing an id don't
+    // re-anchor: the CLI takes the first chunk of a group (`e1d` de-dupes on
+    // `message.id`).
+    let mut context_anchor_msg_id: Option<String> = None;
     let mut current_service_tier: Option<String> = None;
     // Session-lifetime subagent (`Task`) usage rollup (claude-codes 2.1.160,
     // #1275). Unlike the hand-rolled per-turn sum it replaces, the rollup
@@ -529,6 +598,20 @@ pub(crate) async fn claude_io_task(
                                     if let Some(tier) = &usage.service_tier {
                                         current_service_tier = Some(tier.clone());
                                     }
+                                    // Re-anchor context occupancy on this frame
+                                    // unless it repeats the current message id
+                                    // (a streamed continuation) or is CLI-
+                                    // injected content. Later groups overwrite
+                                    // earlier ones, leaving the turn's last real
+                                    // usage as the anchor.
+                                    let id = asst.message.id.as_str();
+                                    let same_group =
+                                        context_anchor_msg_id.as_deref() == Some(id);
+                                    if !same_group && can_anchor_context(asst) {
+                                        context_anchor_msg_id = Some(id.to_string());
+                                        context_anchor_tokens =
+                                            Some(context_snapshot_tokens(usage));
+                                    }
                                 }
                                 // Count tool-use blocks for the turn.
                                 for block in &asst.message.content {
@@ -595,6 +678,9 @@ pub(crate) async fn claude_io_task(
                                     .map(|u| u.cache_read_input_tokens as i64)
                                     .unwrap_or(0),
                                 thinking_tokens: 0,
+                                // Per-request occupancy snapshot (#1517), not
+                                // the roll-up in the token fields above.
+                                context_snapshot_tokens: context_anchor_tokens,
                                 // Subagent (`Task`) tokens attributed to THIS
                                 // turn: the session-lifetime rollup's total
                                 // minus its value when the turn started —
@@ -1105,6 +1191,90 @@ mod tests {
         user_output_with_content(serde_json::json!([
             { "type": "text", "text": text }
         ]))
+    }
+
+    fn assistant_frame(model: &str, text: Option<&str>, usage: bool) -> serde_json::Value {
+        let content = match text {
+            Some(t) => serde_json::json!([{"type": "text", "text": t}]),
+            None => serde_json::json!([{"type": "tool_use", "id": "toolu_1",
+                                        "name": "Bash", "input": {}}]),
+        };
+        let mut message = serde_json::json!({
+            "id": "msg_1", "role": "assistant", "model": model, "content": content,
+        });
+        if usage {
+            message["usage"] = serde_json::json!({
+                "input_tokens": 10, "output_tokens": 1,
+                "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3,
+            });
+        }
+        serde_json::json!({"type": "assistant", "message": message,
+                           "session_id": "01890000-0000-7000-8000-000000000001"})
+    }
+
+    fn parse_assistant(v: serde_json::Value) -> claude_codes::io::AssistantMessage {
+        match serde_json::from_value::<ClaudeOutput>(v).expect("parse") {
+            ClaudeOutput::Assistant(a) => a,
+            other => panic!("expected assistant, got {other:?}"),
+        }
+    }
+
+    /// The context anchor is the CLI's `pro` form: input + cache_creation +
+    /// cache_read, EXCLUDING output (#1517).
+    #[test]
+    fn context_snapshot_excludes_output_tokens() {
+        let asst = parse_assistant(assistant_frame("claude-opus-4-8", Some("hi"), true));
+        let usage = asst.message.usage.as_ref().expect("usage");
+        // 10 + 2 + 3 = 15; the output token is deliberately not counted.
+        assert_eq!(context_snapshot_tokens(usage), 15);
+    }
+
+    /// CLI-injected frames must never anchor context: the synthetic model, and
+    /// the interrupt / tool-rejection notices (the CLI's `_mt` set).
+    #[test]
+    fn synthetic_frames_cannot_anchor_context() {
+        // Real reply anchors.
+        assert!(can_anchor_context(&parse_assistant(assistant_frame(
+            "claude-opus-4-8",
+            Some("a real answer"),
+            true
+        ))));
+        // The `<synthetic>` model never anchors, whatever its text.
+        assert!(!can_anchor_context(&parse_assistant(assistant_frame(
+            SYNTHETIC_MODEL,
+            Some("a real answer"),
+            true
+        ))));
+        // Each known injected text is excluded.
+        for text in SYNTHETIC_ASSISTANT_TEXTS {
+            assert!(
+                !can_anchor_context(&parse_assistant(assistant_frame(
+                    "claude-opus-4-8",
+                    Some(text),
+                    true
+                ))),
+                "should not anchor: {text}"
+            );
+        }
+    }
+
+    /// The exclusion only inspects the FIRST content block, matching the CLI —
+    /// so a genuine reply that merely quotes one of those strings still anchors,
+    /// and a tool-use-first frame is unaffected.
+    #[test]
+    fn context_anchor_only_inspects_the_first_block() {
+        let quoting = format!("Here is what happened: {}", SYNTHETIC_ASSISTANT_TEXTS[0]);
+        assert!(can_anchor_context(&parse_assistant(assistant_frame(
+            "claude-opus-4-8",
+            Some(&quoting),
+            true
+        ))));
+        // Leading tool_use block (no text first) anchors normally.
+        assert!(can_anchor_context(&parse_assistant(assistant_frame(
+            "claude-opus-4-8",
+            None,
+            true
+        ))));
     }
 
     #[test]

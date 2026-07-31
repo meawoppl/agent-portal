@@ -117,6 +117,14 @@ pub struct TurnMetrics {
     /// instead. Powers the context-usage gauge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_context_window: Option<i64>,
+    /// Context occupancy at the end of the turn, from the LAST real assistant
+    /// usage snapshot (#1517). The other token fields are the turn's accumulated
+    /// roll-up — right for cost, wrong for context, because the roll-up
+    /// re-counts `cache_read` once per API call in a tool-use loop. `None` from
+    /// agents/proxies that don't supply a snapshot, where
+    /// [`TurnMetrics::context_tokens`] falls back to the roll-up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_snapshot_tokens: Option<i64>,
 }
 
 impl TurnMetrics {
@@ -142,9 +150,19 @@ impl TurnMetrics {
     ///   cached / cache-write counts as subsets already inside it — so summing
     ///   them would double-count. Its occupancy is just `input_tokens`.
     pub fn context_tokens(&self) -> i64 {
+        // Prefer the per-request snapshot when the proxy supplied one: for
+        // Claude the fields below are a roll-up across the turn's API calls, so
+        // a tool-heavy turn re-counts `cache_read` once per call and can read
+        // several times the window (#1517).
+        if let Some(snapshot) = self.context_snapshot_tokens.filter(|t| *t > 0) {
+            return snapshot;
+        }
         match self.agent_type {
             AgentType::Codex => self.input_tokens,
-            // Claude (and the default) — disjoint buckets sum to the prompt.
+            // Claude fallback (older proxy, or no usable assistant usage this
+            // turn): the disjoint buckets sum to the prompt. Correct for a
+            // single-call turn and an over-count for a multi-call one — the
+            // pre-#1517 behavior, kept so an old proxy still shows something.
             AgentType::Claude => {
                 self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens
             }
@@ -277,6 +295,7 @@ mod tests {
             cache_read_tokens,
             thinking_tokens: 0,
             subagent_tokens: 0,
+            context_snapshot_tokens: None,
             stop_reason: None,
             is_error: false,
             tool_call_count: 0,
@@ -284,6 +303,52 @@ mod tests {
             total_cost_usd: None,
             model_context_window,
         }
+    }
+
+    /// The per-request snapshot wins over the roll-up when present (#1517).
+    /// This is the whole point of the field: on a tool-heavy Claude turn the
+    /// roll-up re-counts `cache_read` once per API call, so it can exceed the
+    /// window several times over while the true occupancy is far lower.
+    #[test]
+    fn snapshot_overrides_the_rolled_up_token_fields() {
+        // A 6-call turn whose roll-up sums to ~900k against a 200k window…
+        let mut t = turn(
+            AgentType::Claude,
+            Some("claude-opus-4-8"),
+            None,
+            60_000,
+            800_000,
+            40_000,
+        );
+        assert_eq!(t.context_tokens(), 900_000, "roll-up over-counts");
+        assert!(
+            t.context_fraction().unwrap() > 4.0,
+            "roll-up would peg the gauge"
+        );
+
+        // …but the last request actually held 150k of the 200k window.
+        t.context_snapshot_tokens = Some(150_000);
+        assert_eq!(t.context_tokens(), 150_000);
+        assert_eq!(t.context_fraction(), Some(150_000.0 / 200_000.0));
+    }
+
+    /// Absent or non-positive snapshots fall back to the pre-#1517 sum, so a
+    /// turn recorded by an older proxy still renders something.
+    #[test]
+    fn missing_snapshot_falls_back_to_the_sum() {
+        let mut t = turn(
+            AgentType::Claude,
+            Some("claude-opus-4-8"),
+            None,
+            30_000,
+            10_000,
+            3_000,
+        );
+        assert_eq!(t.context_snapshot_tokens, None);
+        assert_eq!(t.context_tokens(), 43_000);
+        // A zero snapshot is treated as "no data", not as an empty context.
+        t.context_snapshot_tokens = Some(0);
+        assert_eq!(t.context_tokens(), 43_000);
     }
 
     #[test]

@@ -588,6 +588,7 @@ pub struct TurnMetric {
     pub user_id: Uuid,
     pub subagent_tokens: i64,
     pub model_context_window: Option<i64>,
+    pub context_snapshot_tokens: Option<i64>,
 }
 
 impl TurnMetric {
@@ -626,6 +627,7 @@ impl TurnMetric {
             stream_restarts: self.stream_restarts,
             total_cost_usd: self.total_cost_usd,
             model_context_window: self.model_context_window,
+            context_snapshot_tokens: self.context_snapshot_tokens,
         }
     }
 }
@@ -658,6 +660,7 @@ pub struct NewTurnMetric {
     pub stream_restarts: i32,
     pub total_cost_usd: Option<f64>,
     pub model_context_window: Option<i64>,
+    pub context_snapshot_tokens: Option<i64>,
 }
 
 #[cfg(test)]
