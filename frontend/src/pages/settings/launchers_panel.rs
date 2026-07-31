@@ -366,17 +366,21 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
     let status = match &props.phase {
         Some(UpdatePhase::Succeeded { new_version, .. }) => Some(html! {
             <tr class="launcher-update-status">
-                <td colspan="5" class="launcher-status launcher-status--success">
-                    { format!("Back online — v{new_version}") }
+                <td colspan="5">
+                    <div class="launcher-status launcher-status--success">
+                        { format!("Back online — v{new_version}") }
+                    </div>
                 </td>
             </tr>
         }),
         Some(UpdatePhase::SameVersion { version }) => Some(html! {
             <tr class="launcher-update-status">
-                <td colspan="5" class="launcher-status launcher-status--warning">
-                    { format!(
-                        "Came back on the same version (v{version}) — update may have failed."
-                    ) }
+                <td colspan="5">
+                    <div class="launcher-status launcher-status--warning">
+                        { format!(
+                            "Came back on the same version (v{version}) — update may have failed."
+                        ) }
+                    </div>
                 </td>
             </tr>
         }),
@@ -388,9 +392,11 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
             };
             Some(html! {
                 <tr class="launcher-update-status">
-                    <td colspan="5" class="launcher-status launcher-status--waiting">
-                        <span class="spinner-small"></span>
-                        { msg }
+                    <td colspan="5">
+                        <div class="launcher-status launcher-status--waiting">
+                            <span class="spinner-small"></span>
+                            { msg }
+                        </div>
                     </td>
                 </tr>
             })
@@ -497,8 +503,10 @@ fn phantom_launcher_row(props: &PhantomLauncherRowProps) -> Html {
                 <td class="token-actions">{ "—" }</td>
             </tr>
             <tr class="launcher-update-status">
-                <td colspan="5" class={classes!("launcher-status", status_class)}>
-                    { status_body }
+                <td colspan="5">
+                    <div class={classes!("launcher-status", status_class)}>
+                        { status_body }
+                    </div>
                 </td>
             </tr>
         </>

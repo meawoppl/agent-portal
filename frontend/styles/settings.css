@@ -440,15 +440,22 @@
 }
 
 /* Per-launcher update lifecycle feedback (#710 follow-up) */
+
+/* The status line sits in a full-width cell beneath its row. Keep the cell a
+   real table cell so `colspan` spans every column (and its bottom border spans
+   with it) — the flex layout for the spinner + text lives on the inner div, NOT
+   the td. Putting `display: flex` on the td drops it out of table layout, which
+   makes it ignore `colspan` and collapse under the first column. */
 .launcher-update-status td {
     padding-top: 0;
 }
+
 .launcher-status {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     font-size: 0.85rem;
-    padding: 0.35rem 0 0.6rem;
+    padding-bottom: 0.25rem;
 }
 .launcher-status--waiting {
     color: var(--text-secondary);
