@@ -110,6 +110,12 @@ const DIAL_TIMEOUT: Duration = Duration::from_secs(2);
 /// off and retries within this budget instead of instantly reporting the port
 /// dead. A dial that *times out* is never retried (repeating a multi-second
 /// hang would only stall the browser).
+///
+/// **Invariant (#1504):** the backend gives up on the open verdict after its
+/// `OPEN_TIMEOUT`, so this budget plus the final [`DIAL_TIMEOUT`] plus RTT must
+/// stay under that, or a truthful `NoListener` refusal lands after the backend
+/// has already reported `agent-unreachable`. Backend `OPEN_TIMEOUT` is 15 s vs.
+/// `8 + 2` here, leaving ~5 s of margin; keep it that way if either moves.
 const STREAM_DIAL_RETRY_BUDGET: Duration = Duration::from_secs(8);
 /// Retry budget for the background health probe and the registration probe.
 /// Short: a small grace absorbs a momentary refusal (so the chip doesn't flap
@@ -450,7 +456,10 @@ impl TunnelManager {
                 }
             };
             mgr.send_stream_opened(egress, stream_id).await;
-            debug!("Tunnel stream {} open to port {}", stream_id, port);
+            // INFO so a deployment diagnosing a forward incident can see opens
+            // arriving on the agent side without fleet-wide debug logging
+            // (#1504 actionable 3).
+            info!("Tunnel stream {} open to port {}", stream_id, port);
             run_stream(mgr, stream_id, egress, sizing, tcp, inbox_rx, recv_credit).await;
         });
     }

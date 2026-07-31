@@ -32,8 +32,18 @@ use uuid::Uuid;
 
 use super::{ProxySender, SessionManager};
 
-/// How long to wait for the proxy's `TunnelOpened`/`TunnelRefused`.
-const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long to wait for the proxy's `TunnelOpened`/`TunnelRefused` before
+/// giving up and reporting `agent-unreachable`.
+///
+/// **Invariant (#1504):** this must exceed the proxy's worst-case time to
+/// *produce* a verdict, plus network RTT, or a truthful `no-listener` refusal
+/// arrives after the deadline — the stream is already reaped, so the verdict is
+/// dropped and the user sees the misleading `agent-unreachable` instead. The
+/// proxy retries a refused loopback dial for `STREAM_DIAL_RETRY_BUDGET` (8 s)
+/// with a `DIAL_TIMEOUT` (2 s) final attempt, so a mid-restart origin can emit
+/// its refusal as late as ~10 s. 15 s leaves ~3 s of RTT/queueing headroom;
+/// keep `STREAM_DIAL_RETRY_BUDGET + DIAL_TIMEOUT + RTT < OPEN_TIMEOUT`.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
 /// Duplex pipe capacity between the relay and hyper.
 const PIPE_CAPACITY: usize = 64 * 1024;
 
@@ -183,7 +193,25 @@ impl SessionManager {
         if let Some(entry) = self.tunnel_streams.get(&stream_id) {
             let _ = entry.value().inbox.send(msg);
         } else {
-            debug!("Tunnel frame for unknown stream {} dropped", stream_id);
+            // A verdict (`Opened`/`Refused`) for an unknown stream almost always
+            // means it arrived *after* `OPEN_TIMEOUT` reaped the stream — so the
+            // browser was already told `agent-unreachable` even though the proxy
+            // did answer. Log that at INFO so the misclassification is visible
+            // (#1504) rather than silently dropped; it also disambiguates a lost
+            // frame (no late verdict ever arrives) from a slow one. Data/Window/
+            // Close for an unknown stream are ordinary post-close races — quiet.
+            match msg {
+                TunnelIn::Opened => tracing::info!(
+                    "Late tunnel Opened for reaped stream {stream_id} \
+                     (arrived after OPEN_TIMEOUT; was reported agent-unreachable)"
+                ),
+                TunnelIn::Refused(reason) => tracing::info!(
+                    "Late tunnel Refused({reason:?}) for reaped stream {stream_id} \
+                     (arrived after OPEN_TIMEOUT; was reported agent-unreachable — \
+                     the truthful verdict was this refusal)"
+                ),
+                _ => debug!("Tunnel frame for unknown stream {} dropped", stream_id),
+            }
         }
     }
 
@@ -354,7 +382,10 @@ impl SessionManager {
             }
         }
 
-        debug!(
+        // INFO, not DEBUG: a deployment diagnosing a forward incident needs to
+        // see that opens are arriving and succeeding without turning on debug
+        // logging fleet-wide (#1504).
+        tracing::info!(
             "Tunnel stream {} open over the {} plane",
             stream_id,
             egress.kind()
