@@ -863,7 +863,7 @@ pub fn dashboard_page() -> Html {
                                 } else {
                                     html! {
                                         <>
-                                            <span>{ "Esc = nav mode" }</span>
+                                            <span>{ "Ctrl/Cmd+K = nav mode" }</span>
                                             <span>{ "Shift+Tab = next active" }</span>
                                             <span>{ "Ctrl+M = voice" }</span>
                                             <span>{ "Enter = send" }</span>
