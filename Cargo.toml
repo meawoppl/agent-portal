@@ -77,7 +77,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 claude-codes = { version = "2.1.220", default-features = false, features = ["types"] }
 
 # Codex CLI integration
-codex-codes = { version = "0.145.0", default-features = false, features = ["types"] }
+codex-codes = { version = "0.146.0", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
 # bundled HTTP clients (isahc/libcurl and hyper) — we build the message here and
