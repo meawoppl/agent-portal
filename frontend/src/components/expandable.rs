@@ -1,3 +1,4 @@
+use super::ansi::render_ansi;
 use super::markdown::linkify_urls;
 use shared::fmt::truncate_str;
 use yew::prelude::*;
@@ -11,6 +12,23 @@ pub struct ExpandableTextProps {
     pub tag: AttrValue,
     #[prop_or_default]
     pub class: Classes,
+    /// Render the text as terminal output: parse ANSI SGR escapes into styled
+    /// spans (#1496). Off by default — only tool/command output opts in, so
+    /// ordinary text keeps plain linkified rendering. When on, URL auto-linking
+    /// still applies within each styled run.
+    #[prop_or_default]
+    pub ansi: bool,
+}
+
+/// Render `text` as either ANSI-styled terminal output or plain linkified text,
+/// per the `ansi` flag. Both escape output content (Yew escapes text nodes;
+/// the ANSI path only adds spans with a fixed style vocabulary).
+fn render_body(text: &str, ansi: bool) -> Html {
+    if ansi {
+        render_ansi(text)
+    } else {
+        linkify_urls(text)
+    }
 }
 
 /// Character-based expandable text. Shows truncated content with a clickable
@@ -23,9 +41,13 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
 
     if text.len() <= props.max_len {
         return match props.tag.as_str() {
-            "span" => html! { <span class={props.class.clone()}>{ linkify_urls(text) }</span> },
-            "div" => html! { <div class={props.class.clone()}>{ linkify_urls(text) }</div> },
-            _ => html! { <pre class={props.class.clone()}>{ linkify_urls(text) }</pre> },
+            "span" => {
+                html! { <span class={props.class.clone()}>{ render_body(text, props.ansi) }</span> }
+            }
+            "div" => {
+                html! { <div class={props.class.clone()}>{ render_body(text, props.ansi) }</div> }
+            }
+            _ => html! { <pre class={props.class.clone()}>{ render_body(text, props.ansi) }</pre> },
         };
     }
 
@@ -56,19 +78,19 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
     match props.tag.as_str() {
         "span" => html! {
             <span class={props.class.clone()}>
-                { linkify_urls(&display) }
+                { render_body(&display, props.ansi) }
                 <span class="expandable-toggle" onclick={toggle}>{ toggle_label }</span>
             </span>
         },
         "div" => html! {
             <div class={props.class.clone()}>
-                { linkify_urls(&display) }
+                { render_body(&display, props.ansi) }
                 <div class="expandable-toggle" onclick={toggle}>{ toggle_label }</div>
             </div>
         },
         _ => html! {
             <pre class={props.class.clone()}>
-                { linkify_urls(&display) }
+                { render_body(&display, props.ansi) }
                 <div class="expandable-toggle" onclick={toggle}>{ toggle_label }</div>
             </pre>
         },

@@ -142,7 +142,10 @@ pub(super) fn render_structured_block(block: &shared::ContentBlock) -> Html {
             html! { <span class="tool-result-image-tag">{ "[image]" }</span> }
         }
         shared::ContentBlock::Text(t) => {
-            html! { <ExpandableText full_text={t.text.clone()} max_len={500} class="tool-result-content" /> }
+            // Tool/command output can carry ANSI SGR color (cargo, git, test
+            // runners, …); render it styled rather than as raw escape bytes
+            // (#1496). Non-ANSI text is unaffected — it parses to one plain run.
+            html! { <ExpandableText full_text={t.text.clone()} max_len={500} class="tool-result-content" ansi=true /> }
         }
         other => {
             let json = serde_json::to_string_pretty(other).unwrap_or_default();
