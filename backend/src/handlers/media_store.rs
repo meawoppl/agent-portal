@@ -327,7 +327,9 @@ pub async fn serve_media(
                 .await
                 .map_err(|e| AppError::Internal(format!("seek media: {e}")))?;
             let stream = ReaderStream::new(file.take(len));
-            Ok(Response::builder()
+            let security =
+                crate::handlers::media_security::media_security_headers(&meta.content_type);
+            let mut response = Response::builder()
                 .status(StatusCode::PARTIAL_CONTENT)
                 .header(header::CONTENT_TYPE, meta.content_type)
                 .header(header::ACCEPT_RANGES, "bytes")
@@ -338,21 +340,27 @@ pub async fn serve_media(
                 )
                 .header(header::CACHE_CONTROL, "private, max-age=86400, immutable")
                 .body(Body::from_stream(stream))
-                .map_err(|e| AppError::Internal(format!("build range response: {e}")))?)
+                .map_err(|e| AppError::Internal(format!("build range response: {e}")))?;
+            response.headers_mut().extend(security);
+            Ok(response)
         }
         None => {
             let file = tokio::fs::File::open(&meta.path)
                 .await
                 .map_err(|_| AppError::NotFound("Media not found"))?;
             let stream = ReaderStream::new(file);
-            Ok(Response::builder()
+            let security =
+                crate::handlers::media_security::media_security_headers(&meta.content_type);
+            let mut response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, meta.content_type)
                 .header(header::ACCEPT_RANGES, "bytes")
                 .header(header::CONTENT_LENGTH, total)
                 .header(header::CACHE_CONTROL, "private, max-age=86400, immutable")
                 .body(Body::from_stream(stream))
-                .map_err(|e| AppError::Internal(format!("build media response: {e}")))?)
+                .map_err(|e| AppError::Internal(format!("build media response: {e}")))?;
+            response.headers_mut().extend(security);
+            Ok(response)
         }
     }
 }

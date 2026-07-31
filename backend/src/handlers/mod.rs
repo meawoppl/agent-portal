@@ -13,6 +13,7 @@ pub mod history;
 pub mod images;
 pub mod launchers;
 pub mod media_archive;
+pub mod media_security;
 pub mod media_store;
 pub mod messages;
 pub mod mobile_links;

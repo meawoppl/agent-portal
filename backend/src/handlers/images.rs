@@ -11,7 +11,7 @@
 
 use axum::{
     extract::{Path, State},
-    http::header,
+    http::{header, HeaderValue},
     response::IntoResponse,
 };
 use base64::Engine;
@@ -227,16 +227,20 @@ pub async fn serve_image(
         }
     }
 
-    Ok((
-        [
-            (header::CONTENT_TYPE, image.content_type.clone()),
-            (
-                header::CACHE_CONTROL,
-                "private, max-age=86400, immutable".to_string(),
-            ),
-        ],
-        image.data.clone(),
-    ))
+    let mut headers = crate::handlers::media_security::media_security_headers(&image.content_type);
+    headers.insert(
+        header::CONTENT_TYPE,
+        image
+            .content_type
+            .parse()
+            .map_err(|_| AppError::Internal("stored image has an invalid content type".into()))?,
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=86400, immutable"),
+    );
+
+    Ok((headers, image.data.clone()))
 }
 
 /// Does `user_id` appear in `session_members` for `session_id`?
