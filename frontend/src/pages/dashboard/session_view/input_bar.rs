@@ -227,24 +227,29 @@ impl Component for InputBar {
         if first_focused_render || self.focus_after_render {
             self.focus_after_render = false;
             // Focus immediately for the common case (switching to an
-            // already-mounted session). On a fresh page load / new session the
-            // focused InputBar mounts with `focused` already true, so the
-            // false→true `changed()` path never runs — this first-render call is
-            // the only shot. A synchronous `.focus()` here can be silently
-            // undone by the browser restoring focus to the document as the page
-            // finishes loading, leaving the composer unfocused (#1373). Re-apply
-            // it on the next macrotask, after that restoration settles. The
-            // textarea node is stable (uncontrolled, held via `NodeRef`), so
-            // this is a genuine post-load focus, not a refocus loop.
+            // already-mounted, enabled session). Two things can defeat that
+            // synchronous focus, and both hit the new-session path (#1405):
+            //   1. the textarea is `disabled` while the just-launched session's
+            //      socket comes up, so `.focus()` no-ops on it; and
+            //   2. even once it lands, the browser can restore focus to the
+            //      document as a page load — or a just-closed launch dialog —
+            //      settles, silently stealing it (#1373).
+            // Re-apply on the next macrotask, after that settles. Originally
+            // only the first-render (page-load) path got this retry; the
+            // new-session path reaches here via the `became_focused` /
+            // `became_connected` flag in `changed()`, so it needs the same
+            // retry — without it, the connect-time focus is placed once and can
+            // be stolen with no recovery. The textarea node is stable
+            // (uncontrolled, held via `NodeRef`) and reassigning the timer
+            // cancels any prior one, so this is a genuine post-settle focus,
+            // not a refocus loop.
             self.focus_textarea();
-            if first_focused_render {
-                let input_ref = self.input_ref.clone();
-                self.initial_focus_timer = Some(Timeout::new(0, move || {
-                    if let Some(input) = input_ref.cast::<HtmlTextAreaElement>() {
-                        let _ = input.focus();
-                    }
-                }));
-            }
+            let input_ref = self.input_ref.clone();
+            self.initial_focus_timer = Some(Timeout::new(0, move || {
+                if let Some(input) = input_ref.cast::<HtmlTextAreaElement>() {
+                    let _ = input.focus();
+                }
+            }));
         }
         // Restore textarea content if it was cleared by a re-render (e.g.
         // WS reconnect): the textarea is uncontrolled (we don't pass `value`
