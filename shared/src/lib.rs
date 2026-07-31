@@ -132,6 +132,7 @@ pub use claude_codes::io::{
 };
 pub use claude_codes::CacheCreationDetails;
 pub use claude_codes::ClaudeOutput;
+pub use claude_codes::FastModeDisabledReason;
 
 // Re-export typed tool-input types so frontend renderers can match on enum
 // variants instead of poking at JSON field names.

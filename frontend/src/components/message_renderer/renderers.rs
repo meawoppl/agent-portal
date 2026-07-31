@@ -35,6 +35,28 @@ fn preserve_user_newlines(text: &str) -> String {
     text.replace('\n', "  \n")
 }
 
+/// A human-readable phrase for why fast mode couldn't serve (#1475), shown in
+/// the "Fast off" tooltip. Shared by the result footer and the init bar so the
+/// two never drift. Unknown/novel reasons fall back to the raw code so nothing
+/// is silently swallowed.
+pub(super) fn fast_mode_disabled_label(reason: &shared::FastModeDisabledReason) -> String {
+    use shared::FastModeDisabledReason as R;
+    match reason {
+        R::Free => "requires a paid plan",
+        R::Preference => "turned off in preferences",
+        R::ExtraUsageDisabled => "extra usage disabled",
+        R::NetworkError => "network error",
+        R::NotFirstParty => "unavailable for this provider",
+        R::DisabledByEnv => "disabled by environment",
+        R::ModelNotAllowed => "model not allowed",
+        R::SdkOptInRequired => "SDK opt-in required",
+        R::Pending => "warming up",
+        R::UnknownReason => "unknown reason",
+        R::Unknown(s) => return format!("reason: {s}"),
+    }
+    .to_string()
+}
+
 /// Extract the joined text content and tool-result presence from a user
 /// message's content blocks. Shared by [`render_user_message`] and
 /// [`render_user_message_content`].
@@ -596,6 +618,17 @@ pub fn render_result_message(
                     html! {
                         <span class="stat-item fast-mode" title="Fast mode enabled">
                             { "Fast" }
+                        </span>
+                    }
+                } else if let Some(reason) = &msg.fast_mode_disabled_reason {
+                    // Fast mode was requested but couldn't serve — say why (#1475).
+                    let label = fast_mode_disabled_label(reason);
+                    html! {
+                        <span
+                            class="stat-item fast-mode-off"
+                            title={format!("Fast mode unavailable: {label}")}
+                        >
+                            { "Fast off" }
                         </span>
                     }
                 } else {
