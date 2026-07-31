@@ -236,11 +236,17 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
             // dialog, full-page modals, and help overlay are included so their
             // own keys (Esc / backdrop) win and nav shortcuts don't fire
             // underneath them.
+            // `.permission-prompt` covers the permission dialog, the
+            // AskUserQuestion answer card, and the exit-plan-mode prompt (they
+            // share that root class). While one is open the user is answering
+            // it, so nav keys must stand down rather than double-handle the
+            // keystroke — driving navigation *and* leaking into the choice UI
+            // (#1413).
             if gloo::utils::document()
                 .query_selector(
                     ".sched-overlay, .share-dialog-overlay, .help-overlay, \
                      .launch-dialog-backdrop, .modal-overlay, .full-page-modal, \
-                     .health-timer-overlay",
+                     .health-timer-overlay, .permission-prompt",
                 )
                 .ok()
                 .flatten()
