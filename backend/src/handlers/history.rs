@@ -329,7 +329,7 @@ pub async fn get_history_media(
 /// already in memory (`get_media_bytes`), so ranging is a slice.
 fn bytes_response(bytes: &[u8], content_type: &str, headers: &HeaderMap) -> Response {
     let total = bytes.len() as u64;
-    match parse_range(headers, total) {
+    let mut response = match parse_range(headers, total) {
         Some(Err(())) => Response::builder()
             .status(StatusCode::RANGE_NOT_SATISFIABLE)
             .header(header::ACCEPT_RANGES, "bytes")
@@ -358,7 +358,15 @@ fn bytes_response(bytes: &[u8], content_type: &str, headers: &HeaderMap) -> Resp
             .header(header::CONTENT_LENGTH, total)
             .body(Body::from(bytes.to_vec()))
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
-    }
+    };
+    // Archived media is the same attacker-influenced upload as the live copy, so
+    // it carries the same hardening (see `media_security`).
+    response
+        .headers_mut()
+        .extend(crate::handlers::media_security::media_security_headers(
+            content_type,
+        ));
+    response
 }
 
 #[cfg(test)]
