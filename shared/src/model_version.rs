@@ -103,6 +103,45 @@ const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
 /// Window for models flagged as 1M-context.
 const MILLION_CONTEXT_WINDOW: u64 = 1_000_000;
 
+/// Models the CLI's capability table marks `native_1m` — a 1M window with **no
+/// `[1m]` tag required.
+///
+/// Transcribed from the model-capability table in the Claude Code 2.1.220
+/// binary, where each of these carries `context: { window: 1e6, native_1m: true }`.
+/// This matters far more than the tagged case: `claude-opus-4-8` and the other
+/// current-generation ids are here, so without this table the gauge reported
+/// **5x too full for essentially every modern model** (#1517 / #1529).
+///
+/// TODO(SDK rust-code-agent-sdks#250): a hand-maintained table is exactly what
+/// that issue asks upstream to remove — delete this and read the capability from
+/// `claude-codes` once it exposes one. Tracked locally in #1533.
+///
+/// Caveat we cannot see from a model id: the CLI additionally gates native-1M on
+/// entitlement/provider (`IP` consults `native_1m_3p` per provider and an
+/// account check). These ids all list `native_1m_3p: { bedrock: true,
+/// vertex: true }`, so the gap is narrow — but on a provider without the
+/// entitlement this over-states the window (reads emptier than reality) instead
+/// of the pre-fix under-statement.
+const NATIVE_1M_MODELS: &[&str] = &[
+    "claude-fable-5",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-5",
+];
+
+/// True when `model_id` is one of [`NATIVE_1M_MODELS`], allowing a trailing
+/// date/build suffix (`claude-opus-4-8-20260101`) but not a longer version
+/// (`claude-opus-4-80`).
+fn is_native_1m_model(model_id: &str) -> bool {
+    NATIVE_1M_MODELS.iter().any(|base| {
+        model_id == *base
+            || model_id
+                .strip_prefix(base)
+                .is_some_and(|rest| rest.starts_with('-'))
+    })
+}
+
 /// True when the model id carries the CLI's `[1m]` tag.
 ///
 /// The CLI's own test is a bare regex on the id — `function Wb(e){ return
@@ -130,8 +169,9 @@ fn has_one_million_tag(model_id: &str) -> bool {
 ///
 /// **Known gaps vs. the CLI** (see #1517 and the upstream ask in
 /// `rust-code-agent-sdks#250`): steps 2–4 are only partially reachable from a
-/// model id. `native_1m` lives in a model-capabilities table we don't have, so
-/// only the by-name `claude-mythos-preview` case is covered; the per-request 1M
+/// model id. `native_1m` is covered by the transcribed [`NATIVE_1M_MODELS`]
+/// table rather than a real capability lookup, so a *newly shipped* 1M model is
+/// missed until that list is updated; the per-request 1M
 /// beta *header* isn't visible here at all; and the env override is read from
 /// the backend's environment, which is the proxy host's only in single-host
 /// deployments. Those cases under-report the window (a session reads fuller
@@ -150,8 +190,9 @@ pub fn context_window_for(model_id: &str) -> Option<u64> {
     if has_one_million_tag(&id) {
         return Some(MILLION_CONTEXT_WINDOW);
     }
-    // 2. Models that are natively 1M. Only the by-name case is knowable here.
-    if id.contains("mythos-preview") {
+    // 2. Models that are natively 1M: the transcribed capability table, plus
+    //    `claude-mythos-preview`, which the CLI special-cases by name.
+    if is_native_1m_model(&id) || id.contains("mythos-preview") {
         return Some(MILLION_CONTEXT_WINDOW);
     }
     // 4. Env override. The CLI applies it only to non-`claude-` ids (so it can't
@@ -251,13 +292,17 @@ mod tests {
         assert_eq!(compact_model_version("foo-1-2-3").as_deref(), Some("1.2.3"));
     }
 
+    /// Recognized Claude families resolve to the default window. Uses only ids
+    /// the CLI's capability table actually puts at 200k — `claude-opus-4-8`,
+    /// `claude-sonnet-5`, and `claude-fable-5` were originally asserted here at
+    /// 200k, which the 2.1.220 capability table shows is wrong: they are
+    /// `native_1m` (see `context_window_honors_natively_one_million_models`).
     #[test]
     fn context_window_recognizes_claude_families() {
         for id in [
-            "claude-opus-4-8",
-            "claude-sonnet-5",
             "claude-haiku-4-5-20251001",
-            "claude-fable-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-opus-4-6",
         ] {
             assert_eq!(context_window_for(id), Some(200_000), "{id}");
         }
@@ -283,9 +328,11 @@ mod tests {
         ] {
             assert_eq!(context_window_for(id), Some(1_000_000), "{id}");
         }
-        // The same families without the tag stay at the default.
-        assert_eq!(context_window_for("claude-opus-4-7"), Some(200_000));
+        // A 200k model without the tag stays at the default. (Deliberately not
+        // `claude-opus-4-7` as originally written — that one is `native_1m`, so
+        // it is 1M tagged or not.)
         assert_eq!(context_window_for("claude-sonnet-4-6"), Some(200_000));
+        assert_eq!(context_window_for("claude-opus-4-6"), Some(200_000));
     }
 
     /// Natively-1M models are 1M without needing the tag. Only the by-name case

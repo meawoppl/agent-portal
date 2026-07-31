@@ -267,6 +267,12 @@ mod tests {
     use super::*;
 
     /// Build a minimal turn with the token fields that drive the gauge.
+    ///
+    /// Tests below use `claude-opus-4-6` where they assert a fraction: it is one
+    /// of the models the CLI's capability table puts at the 200k default, which
+    /// keeps the expected arithmetic legible. Current-generation ids
+    /// (`claude-opus-4-8`, `claude-sonnet-5`, …) are `native_1m` and resolve to
+    /// 1M, so they would change every denominator here.
     fn turn(
         agent_type: AgentType,
         model: Option<&str>,
@@ -314,7 +320,7 @@ mod tests {
         // A 6-call turn whose roll-up sums to ~900k against a 200k window…
         let mut t = turn(
             AgentType::Claude,
-            Some("claude-opus-4-8"),
+            Some("claude-opus-4-6"),
             None,
             60_000,
             800_000,
@@ -338,7 +344,7 @@ mod tests {
     fn missing_snapshot_falls_back_to_the_sum() {
         let mut t = turn(
             AgentType::Claude,
-            Some("claude-opus-4-8"),
+            Some("claude-opus-4-6"),
             None,
             30_000,
             10_000,
@@ -356,7 +362,7 @@ mod tests {
         // Claude: input + cache_read + cache_creation = full prompt.
         let t = turn(
             AgentType::Claude,
-            Some("claude-opus-4-8"),
+            Some("claude-opus-4-6"),
             None,
             1_000,
             40_000,
@@ -411,7 +417,7 @@ mod tests {
     fn fraction_may_exceed_one_before_compaction() {
         let t = turn(
             AgentType::Claude,
-            Some("claude-opus-4-8"),
+            Some("claude-opus-4-6"),
             None,
             210_000,
             0,
