@@ -349,6 +349,20 @@
     display: block;
 }
 
+/* An SVG may declare no intrinsic pixel size (a bare `viewBox`, or percentage
+   `width`/`height`) — common in hand-authored diagrams. It then has only an
+   aspect ratio, so the shrink-to-fit frame above sizes to the image while the
+   image's `max-width: 100%` sizes to the frame. Browsers resolve that cycle at
+   zero and the diagram renders 0x0: invisible, with no `onerror` to trigger the
+   "media expired" fallback. `min-width` breaks the cycle with a definite basis
+   without capping SVGs that *do* carry a size (a matplotlib plot still renders
+   at its full natural width). `min(100%, ...)` keeps it from overflowing a
+   narrow phone column. Frame class is set by `needs_size_fallback` in
+   frontend/src/components/message_renderer/renderers.rs. */
+.tool-result-image.svg {
+    min-width: min(100%, 320px);
+}
+
 /* Video shown via `agent-portal show`. Sizing mirrors `.tool-result-image`
    so images and videos read as one family in the transcript. */
 .tool-result-video {
@@ -412,6 +426,14 @@
     max-height: 85vh;
     object-fit: contain;
     border-radius: 4px;
+}
+
+/* Same 0x0 collapse as `.tool-result-image.svg` (see the note there): this img
+   is the cross-axis item of a centered flex column, so it is shrink-to-fit too.
+   Here we set `width` rather than `min-width` — the lightbox is the "zoom" view,
+   and an SVG is vector, so scaling one up to fill the overlay stays crisp. */
+.image-lightbox-content img.svg {
+    width: min(95vw, 900px);
 }
 
 .image-lightbox-controls {
