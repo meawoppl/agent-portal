@@ -39,12 +39,12 @@
 // ---------------------------------------------------------------------------
 
 pub use archive_format::{
-    archive_config_from_env, manifest_key, media_key, media_meta_key, merge_transcript_lines,
-    read_transcript, scan, transcript_key, zstd_decode, zstd_encode, ArchiveBackendConfig,
-    ArchiveConfig, ArchiveMemberEntry, ArchiveMessageLine, ArchiveStore, ArchiveTokenTotals,
-    ArchiveTranscriptInfo, ArchiveTurnStats, ArchivedMediaMeta, LocalArchiveStore, MediaEntry,
-    ObjectArchiveStore, SessionArchiveBundle, SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION,
-    TRANSCRIPT_COMPRESSION,
+    archive_config_from_env, decode_transcript, manifest_key, media_key, media_meta_key,
+    merge_transcript_lines, read_transcript, scan, transcript_key, zstd_decode, zstd_encode,
+    ArchiveBackendConfig, ArchiveConfig, ArchiveMemberEntry, ArchiveMessageLine, ArchiveStore,
+    ArchiveTokenTotals, ArchiveTranscriptInfo, ArchiveTurnStats, ArchivedMediaMeta,
+    LocalArchiveStore, MediaEntry, ObjectArchiveStore, SessionArchiveBundle,
+    SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION, TRANSCRIPT_COMPRESSION,
 };
 
 /// How often the archival sweep runs.

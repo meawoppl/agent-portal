@@ -8,9 +8,9 @@ use object_store::ObjectStoreExt as _;
 use uuid::Uuid;
 
 use crate::{
-    manifest_key, media_key, media_meta_key, parse_transcript_ndjson, transcript_key, zstd_decode,
-    zstd_encode, ArchiveMessageLine, ArchivedMediaMeta, SessionArchiveBundle,
-    SessionArchiveManifest,
+    decode_transcript, manifest_key, media_key, media_meta_key, parse_transcript_ndjson,
+    transcript_key, zstd_encode, ArchiveMessageLine, ArchivedMediaMeta, SessionArchiveBundle,
+    SessionArchiveManifest, TRANSCRIPT_COMPRESSION,
 };
 
 // ---------------------------------------------------------------------------
@@ -194,7 +194,16 @@ impl ArchiveStore {
             Some(bytes) => bytes,
             None => return Ok(None),
         };
-        parse_transcript_ndjson(&zstd_decode(&raw)?).map(Some)
+        // Honor the manifest's declared codec rather than assuming zstd (#1466).
+        // The manifest is written last (its existence implies a complete
+        // transcript), so if it's absent we're reading mid-write — fall back to
+        // the write-side default, which is what that partial object is.
+        let compression = self
+            .get_session_manifest(user_id, session_id)?
+            .and_then(|m| m.transcript)
+            .map(|t| t.compression)
+            .unwrap_or_else(|| TRANSCRIPT_COMPRESSION.to_string());
+        parse_transcript_ndjson(&decode_transcript(&compression, &raw)?).map(Some)
     }
 
     /// Write a raw object at `key` (overwrites; deterministic keys make this
@@ -494,13 +503,23 @@ impl LocalArchiveStore {
 }
 
 /// Decompress + parse an archived transcript (test/inspection helper).
+///
+/// Honors the sibling manifest's `transcript.compression` (#1466), falling back
+/// to the write-side default if the manifest is absent/unreadable — matching
+/// [`ArchiveStore::read_transcript_lines`].
 pub fn read_transcript(
     root: &Path,
     user_id: Uuid,
     session_id: Uuid,
 ) -> std::io::Result<Vec<ArchiveMessageLine>> {
     let raw = std::fs::read(root.join(transcript_key(user_id, session_id)))?;
-    parse_transcript_ndjson(&zstd_decode(&raw)?)
+    let compression = std::fs::read(root.join(manifest_key(user_id, session_id)))
+        .ok()
+        .and_then(|m| serde_json::from_slice::<SessionArchiveManifest>(&m).ok())
+        .and_then(|m| m.transcript)
+        .map(|t| t.compression)
+        .unwrap_or_else(|| TRANSCRIPT_COMPRESSION.to_string());
+    parse_transcript_ndjson(&decode_transcript(&compression, &raw)?)
 }
 
 #[cfg(test)]
