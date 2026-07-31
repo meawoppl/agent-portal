@@ -70,6 +70,22 @@ pub fn zstd_decode(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
     zstd::decode_all(bytes)
 }
 
+/// Decode a transcript body according to the codec its manifest declares in
+/// `transcript.compression`, so readers stay self-describing (#1466). An
+/// unknown codec fails loudly instead of feeding garbage to the zstd decoder.
+/// `zstd` is the only codec today (and the write-side default); the dispatch
+/// exists so a future schema version can add one without silently breaking old
+/// readers.
+pub fn decode_transcript(compression: &str, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    match compression {
+        TRANSCRIPT_COMPRESSION => zstd_decode(bytes),
+        other => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("unsupported transcript compression `{other}`"),
+        )),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Manifest / bundle types
 // ---------------------------------------------------------------------------
@@ -473,6 +489,21 @@ mod tests {
         let encoded = zstd_encode(body).unwrap();
         assert_eq!(&encoded[..4], &[0x28, 0xb5, 0x2f, 0xfd], "zstd magic bytes");
         assert_eq!(zstd_decode(&encoded).unwrap(), body);
+    }
+
+    #[test]
+    fn decode_transcript_dispatches_on_declared_codec() {
+        let body = b"{\"id\":1}\n";
+        let encoded = zstd_encode(body).unwrap();
+        // The manifest's default codec decodes.
+        assert_eq!(
+            decode_transcript(TRANSCRIPT_COMPRESSION, &encoded).unwrap(),
+            body
+        );
+        // An unknown codec fails loudly rather than handing garbage to zstd.
+        let err = decode_transcript("gzip", &encoded).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("gzip"), "{err}");
     }
 
     #[test]

@@ -38,7 +38,8 @@ use uuid::Uuid;
 use shared::api::{HistorySessionSummary, HistorySessionsResponse};
 
 use crate::archive::{
-    manifest_key, scan, transcript_key, zstd_decode, ArchiveRuntime, SessionArchiveManifest,
+    decode_transcript, manifest_key, scan, transcript_key, ArchiveRuntime, SessionArchiveManifest,
+    TRANSCRIPT_COMPRESSION,
 };
 use crate::auth::extract_user;
 use crate::errors::AppError;
@@ -262,7 +263,18 @@ pub async fn get_history_messages(
             .store
             .get_object(&transcript_key(owner_id, session_id))?
         {
-            Some(raw) => zstd_decode(&raw).map(Some),
+            // Decode per the manifest's declared codec, not a hardcoded zstd
+            // (#1466). Manifest-last write order means an absent manifest is a
+            // mid-write read; fall back to the write-side default.
+            Some(raw) => {
+                let compression = runtime
+                    .store
+                    .get_session_manifest(owner_id, session_id)?
+                    .and_then(|m| m.transcript)
+                    .map(|t| t.compression)
+                    .unwrap_or_else(|| TRANSCRIPT_COMPRESSION.to_string());
+                decode_transcript(&compression, &raw).map(Some)
+            }
             None => Ok(None),
         }
     })
