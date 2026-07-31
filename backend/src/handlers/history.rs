@@ -316,10 +316,16 @@ pub async fn get_history_media(
     .await?;
 
     let bytes = bytes.ok_or(AppError::NotFound("Media not found"))?;
-    // The sidecar carries the content type; fall back to octet-stream if a
-    // blob somehow lacks one.
+    // The sidecar carries the content type. When it's missing, sniff the bytes
+    // rather than serving `application/octet-stream`: browsers content-sniff
+    // raster formats and render them regardless, but they never sniff SVG, so a
+    // blanket octet-stream fallback breaks *only* SVG while PNG/JPEG keep
+    // working — a failure shaped to escape notice. Octet-stream remains the
+    // last resort for bytes we don't recognize.
     let content_type = meta
         .map(|m| m.content_type)
+        .filter(|ct| !ct.trim().is_empty())
+        .or_else(|| shared::media::sniff_content_type(&bytes).map(str::to_string))
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
     Ok(bytes_response(&bytes, &content_type, &request_headers))
