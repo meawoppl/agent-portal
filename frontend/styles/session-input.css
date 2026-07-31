@@ -303,15 +303,25 @@
     position: absolute;
     left: 48px;
     right: 100px;
-    top: 50%;
-    transform: translateY(-50%);
+
+    /* Top-aligned to the textarea's padding rather than vertically centered on
+       one line, so multi-sentence dictation reads as paragraphs from the top. */
+    top: 0.5rem;
     color: var(--text-muted);
     font-style: italic;
     font-size: 0.9rem;
+    line-height: 1.4;
     pointer-events: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+
+    /* Wrap long dictation into paragraphs instead of truncating to one line
+       with an ellipsis (#1408); very long tokens break rather than overflow. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+
+    /* Bound to the textarea's own max-height and scroll past it, so a long
+       preview stays inside the composer instead of overrunning the controls. */
+    max-height: 10em;
+    overflow-y: auto;
     z-index: 1;
 }
 
