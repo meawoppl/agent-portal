@@ -125,36 +125,16 @@ fn synthetic_user_echo_value(
     Some(claude_user_echo_value(text.to_string(), session_id))
 }
 
-/// Build the interrupt to write to claude's stdin as a wrapped `control_request`.
+/// Build the interrupt to write to claude's stdin.
 ///
-/// TODO(SDK meawoppl/rust-code-agent-sdks#218): `claude_codes::ClaudeInput::interrupt()`
-/// (claude-codes 2.1.161) serializes to a bare `{"subtype":"interrupt"}`, which the
-/// current claude CLI silently ignores (verified against claude 2.1.211 — the in-flight
-/// turn is never cancelled). The CLI's control protocol requires the interrupt wrapped as
-/// a `control_request` with a unique `request_id`, the same envelope as `can_use_tool` /
-/// `initialize`. There's no typed constructor for it today, so hand-build the JSON and
-/// send it as `ClaudeInput::Raw`; revert to `ClaudeInput::interrupt()` once #218 lands.
+/// The CLI's control protocol requires the interrupt wrapped as a
+/// `control_request` with a unique `request_id` — the same envelope as
+/// `can_use_tool` / `initialize`. A bare `{"subtype":"interrupt"}` is silently
+/// ignored. `claude-codes` 2.1.220 provides that envelope typed (SDK #218, which
+/// this used to hand-build as raw JSON), so the constructor is now the whole
+/// implementation.
 fn interrupt_input() -> ClaudeInput {
-    #[derive(serde::Serialize)]
-    struct Request {
-        #[serde(rename = "type")]
-        message_type: &'static str,
-        request_id: String,
-        request: Payload,
-    }
-    #[derive(serde::Serialize)]
-    struct Payload {
-        subtype: &'static str,
-    }
-    let value = serde_json::to_value(Request {
-        message_type: "control_request",
-        request_id: format!("interrupt-{}", uuid::Uuid::new_v4()),
-        request: Payload {
-            subtype: "interrupt",
-        },
-    })
-    .unwrap_or(serde_json::Value::Null);
-    ClaudeInput::Raw(value)
+    ClaudeInput::interrupt(format!("interrupt-{}", uuid::Uuid::new_v4()))
 }
 
 fn plain_input_text(input: &ClaudeInput) -> Option<String> {
@@ -1191,6 +1171,27 @@ mod tests {
         user_output_with_content(serde_json::json!([
             { "type": "text", "text": text }
         ]))
+    }
+
+    /// The typed `ClaudeInput::interrupt` (claude-codes 2.1.220, SDK #218) must
+    /// serialize to the exact envelope this code used to hand-build as raw JSON:
+    /// a `control_request` carrying a unique `request_id` and a
+    /// `{"subtype":"interrupt"}` payload. A bare `{"subtype":"interrupt"}` — what
+    /// the pre-#218 constructor emitted — is silently ignored by the CLI, so this
+    /// pins the shape rather than trusting the swap.
+    #[test]
+    fn interrupt_serializes_as_a_control_request() {
+        let value = serde_json::to_value(interrupt_input()).expect("serialize");
+        assert_eq!(value["type"], "control_request");
+        assert_eq!(value["request"]["subtype"], "interrupt");
+        let request_id = value["request_id"].as_str().expect("request_id present");
+        assert!(
+            request_id.starts_with("interrupt-"),
+            "unexpected request id: {request_id}"
+        );
+        // Unique per call, so a second interrupt can't be mistaken for a replay.
+        let other = serde_json::to_value(interrupt_input()).expect("serialize");
+        assert_ne!(value["request_id"], other["request_id"]);
     }
 
     fn assistant_frame(model: &str, text: Option<&str>, usage: bool) -> serde_json::Value {

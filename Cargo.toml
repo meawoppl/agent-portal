@@ -74,7 +74,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Claude Code integration
-claude-codes = { version = "2.1.166", default-features = false, features = ["types"] }
+claude-codes = { version = "2.1.220", default-features = false, features = ["types"] }
 
 # Codex CLI integration
 codex-codes = { version = "0.145.0", default-features = false, features = ["types"] }
