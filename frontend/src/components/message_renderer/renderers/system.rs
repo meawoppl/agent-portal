@@ -76,6 +76,11 @@ fn render_init_bar(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html
         .as_ref()
         .and_then(|m| m.fast_mode_state.as_deref())
         .unwrap_or("off");
+    // Reason fast mode couldn't serve, when requested-but-disabled (#1475).
+    let fast_off_label = init
+        .as_ref()
+        .and_then(|m| m.fast_mode_disabled_reason.as_ref())
+        .map(super::fast_mode_disabled_label);
 
     html! {
         <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
@@ -88,6 +93,10 @@ fn render_init_bar(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html
             }
             if fast_mode == "on" {
                 <span class="init-badge fast">{ "Fast" }</span>
+            } else if let Some(label) = &fast_off_label {
+                <span class="init-badge fast-off" title={format!("Fast mode unavailable: {label}")}>
+                    { "Fast off" }
+                </span>
             }
             if mcp_count > 0 {
                 <span class="init-badge">{ format!("{} MCP", mcp_count) }</span>
