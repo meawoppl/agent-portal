@@ -23,14 +23,14 @@
 //! for the cross-socket ordering race it absorbs.
 //!
 //! Backpressure has two layers, per the spec:
-//! - **Stream credit**: each direction starts with an [`INITIAL_WINDOW`] credit;
-//!   the receiver re-grants as it drains bytes into the underlying socket
-//!   (`TunnelWindow`). A sender never reads more from TCP than it holds
-//!   credit for.
+//! - **Stream credit**: each direction starts with the negotiated
+//!   [`shared::TunnelSizing::initial_window`] credit; the receiver re-grants as
+//!   it drains bytes into the underlying socket (`TunnelWindow`). A sender never
+//!   reads more from TCP than it holds credit for.
 //! - **Writer capacity**: outgoing frames go straight through a shared
-//!   `WsSender` mutex (FIFO), one ≤[`MAX_CHUNK`] frame per lock. There is no
-//!   queue to grow — buffered tunnel data is bounded by streams × `MAX_CHUNK` and
-//!   waiting streams are served round-robin by mutex order. On the control
+//!   `WsSender` mutex (FIFO), one `max_chunk`-bounded frame per lock. There is
+//!   no queue to grow — buffered tunnel data is bounded by streams × the window
+//!   and waiting streams are served round-robin by mutex order. On the control
 //!   socket that mutex is shared with session frames, so tunnel traffic can
 //!   delay them (the reason the data plane exists); on the data plane it is
 //!   private, so it cannot.
@@ -80,36 +80,26 @@ enum StreamEgress {
     Binary,
 }
 
-/// Max decoded bytes per `TunnelData` frame.
-pub const MAX_CHUNK: usize = 16 * 1024;
-/// Initial per-stream, per-direction flow-control window.
-///
-/// Kept small so the worst-case buffered bytes
-/// (`MAX_STREAMS × INITIAL_WINDOW` per direction) stay bounded even with a high
-/// stream cap; loopback/WS latency is low enough that this saturates a single
-/// stream easily.
-///
-/// **Both ends must agree** (`backend::…::tunnel_client::INITIAL_WINDOW`): the
-/// sender's credit gate and the receiver's credit book are seeded from this same
-/// value, so a mismatch makes the sender exceed the receiver's book and every
-/// stream closes as "beyond granted window". Raising it therefore needs a
-/// negotiated protocol bump rather than an edit here.
-pub const INITIAL_WINDOW: u32 = 64 * 1024;
+// The per-stream frame size and flow-control window are no longer constants:
+// they are the connection's negotiated [`shared::TunnelSizing`] (#1511),
+// defaulting to [`shared::TunnelSizing::V1`] on the control-socket fallback.
+// Both ends of a stream must agree, which is exactly why they are negotiated
+// rather than hard-coded here.
+
 /// Max concurrent streams per session connection.
 ///
 /// Purely proxy-local: the backend has no cap of its own, it just receives a
 /// [`TunnelRefuseReason::StreamLimit`] refusal. That makes this the one sizing
 /// knob that needs no cross-version agreement, so it is safe to raise on its own
-/// (unlike `MAX_CHUNK`/`INITIAL_WINDOW`, which both ends must match — see their
-/// docs).
+/// (unlike the negotiated frame size / window — see [`shared::TunnelSizing`]).
 ///
 /// Every request becomes its own stream because upstream connections are not yet
 /// pooled (#1468), so a resource-heavy page or a polling app can burst through
 /// hundreds at once; past the cap requests fail with `at-capacity`. 512 doubles
-/// the previous headroom while keeping the worst case bounded at
-/// `MAX_STREAMS × INITIAL_WINDOW` = 32 MiB per direction — and that is the
-/// pathological all-streams-saturated figure, not steady state. Pooling is the
-/// real fix for the cap; this buys room until it lands.
+/// the original headroom while keeping the worst case bounded at
+/// `MAX_STREAMS × window` per direction (32 MiB at the V1 window, 128 MiB at
+/// V2) — the pathological all-streams-saturated figure, not steady state.
+/// Pooling is the real fix for the cap; this buys room until it lands.
 pub const MAX_STREAMS: usize = 512;
 /// How long a single dial to loopback may take before it is treated as a
 /// timeout (service hung, not down).
@@ -146,9 +136,19 @@ struct StreamHandle {
     /// reader decrements on arrival; the stream task re-increments as bytes
     /// drain into the socket. Going negative is a protocol violation and
     /// closes the stream — the inbox is unbounded, so this (not the channel)
-    /// is what bounds per-stream buffered downlink data to [`INITIAL_WINDOW`]
-    /// even against a buggy or hostile peer.
+    /// is what bounds per-stream buffered downlink data to the negotiated
+    /// window even against a buggy or hostile peer.
     recv_credit: Arc<std::sync::atomic::AtomicI64>,
+    /// Negotiated max frame size for this stream (#1511). The inbound handlers
+    /// close any stream whose frame exceeds it; stored per stream so the check
+    /// uses the value this connection agreed on.
+    max_chunk: usize,
+}
+
+/// The attached binary data plane and the sizing negotiated for it (#1511).
+struct DataPlane {
+    write: TunnelDataWrite,
+    sizing: shared::TunnelSizing,
 }
 
 /// Per-connection tunnel state. Create one per established session WS,
@@ -161,8 +161,9 @@ pub struct TunnelManager {
     /// `None` means every stream uses the control socket, which is exactly the
     /// pre-existing behavior — so an unavailable or dropped data plane degrades
     /// instead of failing. Only *stream* frames move here; the forward allowlist
-    /// and health reports stay on the control socket.
-    data: Mutex<Option<TunnelDataWrite>>,
+    /// and health reports stay on the control socket. Carries the negotiated
+    /// sizing (#1511) so binary streams are configured to it.
+    data: Mutex<Option<DataPlane>>,
     allowed: Mutex<HashSet<u16>>,
     streams: Mutex<HashMap<Uuid, StreamHandle>>,
     /// Last reported `listening` verdict per allowlisted port; the background
@@ -305,12 +306,12 @@ impl TunnelManager {
                     let streams = self.streams.lock().await;
                     streams
                         .get(&data.stream_id)
-                        .map(|h| (h.inbox.clone(), h.recv_credit.clone()))
+                        .map(|h| (h.inbox.clone(), h.recv_credit.clone(), h.max_chunk))
                 };
                 // Unknown stream: a post-close race; drop silently.
-                if let Some((inbox, recv_credit)) = handle {
+                if let Some((inbox, recv_credit, max_chunk)) = handle {
                     match base64::engine::general_purpose::STANDARD.decode(&data.data_base64) {
-                        Ok(bytes) if bytes.len() > MAX_CHUNK => {
+                        Ok(bytes) if bytes.len() > max_chunk => {
                             warn!(
                                 "Oversized TunnelData ({} bytes) for stream {}; closing",
                                 bytes.len(),
@@ -397,9 +398,14 @@ impl TunnelManager {
                 open.port
             );
         }
+        // Sizing is fixed at open (#1511): the negotiated profile for a binary
+        // stream, V1 for the control fallback.
+        let sizing = self.sizing_for(egress).await;
         // Register the inbox before the dial so ordered frames can't miss it.
         let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
-        let recv_credit = Arc::new(std::sync::atomic::AtomicI64::new(INITIAL_WINDOW as i64));
+        let recv_credit = Arc::new(std::sync::atomic::AtomicI64::new(
+            sizing.initial_window as i64,
+        ));
         {
             let mut streams = self.streams.lock().await;
             if streams.len() >= MAX_STREAMS {
@@ -424,6 +430,7 @@ impl TunnelManager {
                     port: open.port,
                     inbox: inbox_tx,
                     recv_credit: recv_credit.clone(),
+                    max_chunk: sizing.max_chunk as usize,
                 },
             );
         }
@@ -444,7 +451,7 @@ impl TunnelManager {
             };
             mgr.send_stream_opened(egress, stream_id).await;
             debug!("Tunnel stream {} open to port {}", stream_id, port);
-            run_stream(mgr, stream_id, egress, tcp, inbox_rx, recv_credit).await;
+            run_stream(mgr, stream_id, egress, sizing, tcp, inbox_rx, recv_credit).await;
         });
     }
 
@@ -459,11 +466,16 @@ impl TunnelManager {
         }
     }
 
-    /// Adopt a connected data plane. Streams opened from here on ride it;
-    /// streams already running keep the transport they opened with.
-    pub async fn attach_data_plane(&self, data: TunnelDataWrite) {
-        *self.data.lock().await = Some(data);
-        info!("Port-forward data plane attached (binary transport active)");
+    /// Adopt a connected data plane with the sizing negotiated for it. Streams
+    /// opened from here on ride it (at that sizing); streams already running
+    /// keep the transport they opened with.
+    pub async fn attach_data_plane(&self, write: TunnelDataWrite, sizing: shared::TunnelSizing) {
+        *self.data.lock().await = Some(DataPlane { write, sizing });
+        info!(
+            "Port-forward data plane attached ({} KiB frames / {} KiB window)",
+            sizing.max_chunk / 1024,
+            sizing.initial_window / 1024,
+        );
     }
 
     /// Forget the data plane (its socket ended). New streams fall back to the
@@ -480,6 +492,13 @@ impl TunnelManager {
         self.data.lock().await.is_some()
     }
 
+    /// Sizing to configure a stream opened over `egress`. Reads the attached
+    /// data plane's sizing (if any) and defers to [`sizing_for`].
+    async fn sizing_for(&self, egress: StreamEgress) -> shared::TunnelSizing {
+        let attached = self.data.lock().await.as_ref().map(|d| d.sizing);
+        sizing_for(egress, attached)
+    }
+
     /// Send one binary frame on the data plane. Returns `false` if there is no
     /// data plane or the send failed.
     async fn send_binary(&self, frame: TunnelFrame) -> bool {
@@ -487,7 +506,7 @@ impl TunnelManager {
         let Some(data) = guard.as_mut() else {
             return false;
         };
-        let mut ws = data.lock().await;
+        let mut ws = data.write.lock().await;
         match ws.send(frame).await {
             Ok(()) => true,
             Err(e) => {
@@ -614,11 +633,11 @@ impl TunnelManager {
                     let streams = self.streams.lock().await;
                     streams
                         .get(&stream_id)
-                        .map(|h| (h.inbox.clone(), h.recv_credit.clone()))
+                        .map(|h| (h.inbox.clone(), h.recv_credit.clone(), h.max_chunk))
                 };
                 // Unknown stream: a post-close race; drop silently.
-                if let Some((inbox, recv_credit)) = handle {
-                    if bytes.len() > MAX_CHUNK {
+                if let Some((inbox, recv_credit, max_chunk)) = handle {
+                    if bytes.len() > max_chunk {
                         warn!(
                             "Oversized data-plane payload ({} bytes) for stream {}; closing",
                             bytes.len(),
@@ -680,7 +699,12 @@ impl TunnelManager {
 /// so a dial error, a rejected ticket, or a mid-session drop leaves the session
 /// untouched and tunneling on the control socket. Spawn it and forget it — do
 /// not gate session startup on it.
-pub async fn run_data_plane(mgr: Arc<TunnelManager>, backend_url: String, ticket: String) {
+pub async fn run_data_plane(
+    mgr: Arc<TunnelManager>,
+    backend_url: String,
+    ticket: String,
+    sizing: shared::TunnelSizing,
+) {
     let conn =
         match ws_bridge::native_client::connect::<shared::TunnelDataEndpoint>(&backend_url).await {
             Ok(conn) => conn,
@@ -701,7 +725,8 @@ pub async fn run_data_plane(mgr: Arc<TunnelManager>, backend_url: String, ticket
         return;
     }
 
-    mgr.attach_data_plane(Arc::new(Mutex::new(write))).await;
+    mgr.attach_data_plane(Arc::new(Mutex::new(write)), sizing)
+        .await;
 
     while let Some(result) = read.recv().await {
         match result {
@@ -718,6 +743,24 @@ pub async fn run_data_plane(mgr: Arc<TunnelManager>, backend_url: String, ticket
     }
 
     mgr.detach_data_plane().await;
+}
+
+/// The sizing a stream opened over `egress` should use, given the sizing of the
+/// currently-attached data plane (`None` if none is attached).
+///
+/// Binary streams take the negotiated sizing; the control fallback — and a
+/// binary stream whose data plane vanished between its open frame and here —
+/// use [`shared::TunnelSizing::V1`], which is exactly what a control-socket
+/// stream has always used. Pure so the per-stream sizing choice is testable
+/// without a live manager.
+fn sizing_for(
+    egress: StreamEgress,
+    attached: Option<shared::TunnelSizing>,
+) -> shared::TunnelSizing {
+    match egress {
+        StreamEgress::Binary => attached.unwrap_or_default(),
+        StreamEgress::Control => shared::TunnelSizing::V1,
+    }
 }
 
 /// Grace period for the forward-allowlist sync race (see [`await_allowlist`]).
@@ -850,19 +893,21 @@ async fn run_stream(
     mgr: Arc<TunnelManager>,
     stream_id: Uuid,
     egress: StreamEgress,
+    sizing: shared::TunnelSizing,
     tcp: TcpStream,
     mut inbox: mpsc::UnboundedReceiver<StreamMsg>,
     recv_credit: Arc<std::sync::atomic::AtomicI64>,
 ) {
     let (mut tcp_rd, mut tcp_wr) = tcp.into_split();
-    let send_credit = Arc::new(CreditGate::new(INITIAL_WINDOW));
+    let send_credit = Arc::new(CreditGate::new(sizing.initial_window));
+    let max_chunk = sizing.max_chunk as usize;
 
     let uplink_credit = send_credit.clone();
     let uplink_mgr = mgr.clone();
     let uplink = tokio::spawn(async move {
-        let mut buf = vec![0u8; MAX_CHUNK];
+        let mut buf = vec![0u8; max_chunk];
         loop {
-            let budget = uplink_credit.take(MAX_CHUNK).await;
+            let budget = uplink_credit.take(max_chunk).await;
             let n = match tcp_rd.read(&mut buf[..budget]).await {
                 Ok(0) => break None,
                 Ok(n) => n,
@@ -913,6 +958,32 @@ mod tests {
 
     fn allowlist(ports: &[u16]) -> Mutex<HashSet<u16>> {
         Mutex::new(ports.iter().copied().collect())
+    }
+
+    /// Binary streams use the negotiated profile; the control fallback and a
+    /// binary stream whose data plane vanished both use V1 (#1511).
+    #[test]
+    fn stream_sizing_selection() {
+        // Binary with a negotiated V2 data plane → V2.
+        assert_eq!(
+            sizing_for(StreamEgress::Binary, Some(shared::TunnelSizing::V2)),
+            shared::TunnelSizing::V2
+        );
+        // Binary with a V1 data plane → V1.
+        assert_eq!(
+            sizing_for(StreamEgress::Binary, Some(shared::TunnelSizing::V1)),
+            shared::TunnelSizing::V1
+        );
+        // Binary but the data plane vanished → V1 default, never a panic.
+        assert_eq!(
+            sizing_for(StreamEgress::Binary, None),
+            shared::TunnelSizing::V1
+        );
+        // Control fallback is always V1, regardless of any attached plane.
+        assert_eq!(
+            sizing_for(StreamEgress::Control, Some(shared::TunnelSizing::V2)),
+            shared::TunnelSizing::V1
+        );
     }
 
     /// An already-synced port returns immediately, so the common path pays

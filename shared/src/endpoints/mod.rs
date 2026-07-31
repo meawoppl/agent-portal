@@ -64,8 +64,9 @@ mod tests {
             _ => panic!("expected RegisterAck"),
         }
 
-        // And the ticket is omitted from the wire entirely when absent, so an
-        // older proxy sees a byte-identical ack to what it got before.
+        // And the ticket + sizing are omitted from the wire entirely when
+        // absent, so an older proxy sees a byte-identical ack to what it got
+        // before.
         let ack = ServerToProxy::RegisterAck {
             success: true,
             session_id: Uuid::nil(),
@@ -73,10 +74,72 @@ mod tests {
             max_image_mb: 10,
             retryable: false,
             tunnel_data_ticket: None,
+            tunnel_sizing: None,
         };
-        assert!(!serde_json::to_string(&ack)
-            .unwrap()
-            .contains("tunnel_data_ticket"));
+        let json = serde_json::to_string(&ack).unwrap();
+        assert!(!json.contains("tunnel_data_ticket"));
+        assert!(!json.contains("tunnel_sizing"));
+    }
+
+    /// The sizing negotiation (#1511): the backend picks the largest profile the
+    /// proxy advertised, and a v2-capable proxy still advertises v1 so a v1
+    /// backend (which never sees v2) keeps issuing V1.
+    #[test]
+    fn tunnel_sizing_negotiation() {
+        use crate::{
+            TunnelSizing, PROXY_CAPABILITY_TUNNEL_BINARY_V1, PROXY_CAPABILITY_TUNNEL_BINARY_V2,
+        };
+
+        // No capabilities (pre-#1506 proxy) → V1.
+        assert_eq!(TunnelSizing::negotiate(&[]), TunnelSizing::V1);
+        // v1 only → V1.
+        assert_eq!(
+            TunnelSizing::negotiate(&[PROXY_CAPABILITY_TUNNEL_BINARY_V1.to_string()]),
+            TunnelSizing::V1
+        );
+        // v1 + v2 (the shape a v2 proxy actually sends) → V2.
+        assert_eq!(
+            TunnelSizing::negotiate(&[
+                PROXY_CAPABILITY_TUNNEL_BINARY_V1.to_string(),
+                PROXY_CAPABILITY_TUNNEL_BINARY_V2.to_string(),
+            ]),
+            TunnelSizing::V2
+        );
+        // V2 is strictly larger, and both keep the 4×-window ratio. Bind to
+        // runtime locals so this isn't a compile-time-const assertion
+        // (clippy::assertions_on_constants).
+        let (v1, v2) = (TunnelSizing::V1, TunnelSizing::V2);
+        assert!(v2.max_chunk > v1.max_chunk);
+        assert_eq!(v1.initial_window / v1.max_chunk, 4);
+        assert_eq!(v2.initial_window / v2.max_chunk, 4);
+    }
+
+    /// A v2 sizing survives the RegisterAck round-trip; older backends omit it
+    /// and the proxy reads `None` (→ V1).
+    #[test]
+    fn register_ack_carries_tunnel_sizing() {
+        let ack = ServerToProxy::RegisterAck {
+            success: true,
+            session_id: Uuid::nil(),
+            error: None,
+            max_image_mb: 10,
+            retryable: false,
+            tunnel_data_ticket: Some("tok".to_string()),
+            tunnel_sizing: Some(crate::TunnelSizing::V2),
+        };
+        let json = serde_json::to_string(&ack).unwrap();
+        match serde_json::from_str::<ServerToProxy>(&json).unwrap() {
+            ServerToProxy::RegisterAck { tunnel_sizing, .. } => {
+                assert_eq!(tunnel_sizing, Some(crate::TunnelSizing::V2));
+            }
+            _ => panic!("expected RegisterAck"),
+        }
+
+        let legacy = r#"{"type":"RegisterAck","success":true,"session_id":"00000000-0000-0000-0000-000000000000","max_image_mb":10}"#;
+        match serde_json::from_str::<ServerToProxy>(legacy).unwrap() {
+            ServerToProxy::RegisterAck { tunnel_sizing, .. } => assert!(tunnel_sizing.is_none()),
+            _ => panic!("expected RegisterAck"),
+        }
     }
 
     #[test]

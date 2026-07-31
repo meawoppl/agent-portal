@@ -39,6 +39,9 @@ pub struct DataPlaneConnection {
     /// Generation of the *control* connection this socket serves. Frames are
     /// only routed here while this matches the live control connection.
     pub gen: u64,
+    /// Tunnel sizing negotiated for this connection (#1511); streams opened over
+    /// this data plane are configured to it.
+    pub sizing: shared::TunnelSizing,
     /// Fired to force this socket's task to close (mirrors `ProxyConnection`).
     pub cancel: CancellationToken,
     /// Epoch seconds of the last inbound frame, for diagnostics.
@@ -56,6 +59,7 @@ impl SessionManager {
         &self,
         session_key: SessionId,
         gen: u64,
+        sizing: shared::TunnelSizing,
         sender: DataPlaneSender,
         cancel: CancellationToken,
     ) -> bool {
@@ -81,6 +85,7 @@ impl SessionManager {
             DataPlaneConnection {
                 sender,
                 gen,
+                sizing,
                 cancel,
                 last_seen: AtomicU64::new(super::liveness::epoch_secs()),
             },
@@ -127,11 +132,18 @@ impl SessionManager {
         }
     }
 
-    /// Sender for the live data plane of `(session_key, gen)`, if one is
-    /// registered. `None` means "use the control-socket JSON path".
-    pub fn data_plane_sender(&self, session_key: &str, gen: u64) -> Option<DataPlaneSender> {
+    /// Sender and negotiated sizing for the live data plane of
+    /// `(session_key, gen)`, if one is registered. `None` means "use the
+    /// control-socket JSON path". The sizing is returned alongside the sender so
+    /// `open_tunnel` configures the stream from the same lookup that chose the
+    /// transport, with no second map access to race.
+    pub fn data_plane_egress(
+        &self,
+        session_key: &str,
+        gen: u64,
+    ) -> Option<(DataPlaneSender, shared::TunnelSizing)> {
         let conn = self.data_planes.get(session_key)?;
-        (conn.gen == gen).then(|| conn.sender.clone())
+        (conn.gen == gen).then(|| (conn.sender.clone(), conn.sizing))
     }
 
     /// Stamp liveness for a data-plane socket (diagnostics only — the control
@@ -179,19 +191,37 @@ mod tests {
         let gen = register_control(&mgr, "s1");
 
         let (tx, _rx) = data_sender();
-        assert!(mgr.register_data_plane("s1".into(), gen, tx, CancellationToken::new()));
+        assert!(mgr.register_data_plane(
+            "s1".into(),
+            gen,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new()
+        ));
         assert!(mgr.has_data_plane("s1", gen));
 
         // A stale generation is refused outright.
         let (tx, _rx) = data_sender();
-        assert!(!mgr.register_data_plane("s1".into(), gen - 1, tx, CancellationToken::new()));
+        assert!(!mgr.register_data_plane(
+            "s1".into(),
+            gen - 1,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new()
+        ));
     }
 
     #[test]
     fn rejects_data_plane_for_unknown_session() {
         let mgr = SessionManager::new();
         let (tx, _rx) = data_sender();
-        assert!(!mgr.register_data_plane("nope".into(), 1, tx, CancellationToken::new()));
+        assert!(!mgr.register_data_plane(
+            "nope".into(),
+            1,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new()
+        ));
         assert!(!mgr.has_data_plane("nope", 1));
     }
 
@@ -205,10 +235,22 @@ mod tests {
         assert_ne!(old_gen, new_gen);
 
         let (tx, _rx) = data_sender();
-        assert!(!mgr.register_data_plane("s1".into(), old_gen, tx, CancellationToken::new()));
+        assert!(!mgr.register_data_plane(
+            "s1".into(),
+            old_gen,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new()
+        ));
 
         let (tx, _rx) = data_sender();
-        assert!(mgr.register_data_plane("s1".into(), new_gen, tx, CancellationToken::new()));
+        assert!(mgr.register_data_plane(
+            "s1".into(),
+            new_gen,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new()
+        ));
         assert!(mgr.has_data_plane("s1", new_gen));
         assert!(!mgr.has_data_plane("s1", old_gen));
     }
@@ -218,7 +260,13 @@ mod tests {
         let mgr = SessionManager::new();
         let gen = register_control(&mgr, "s1");
         let (tx, _rx) = data_sender();
-        mgr.register_data_plane("s1".into(), gen, tx, CancellationToken::new());
+        mgr.register_data_plane(
+            "s1".into(),
+            gen,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new(),
+        );
 
         // A late teardown from an older generation is a no-op.
         mgr.unregister_data_plane(&"s1".to_string(), gen - 1);
@@ -235,10 +283,22 @@ mod tests {
 
         let first_cancel = CancellationToken::new();
         let (tx, _rx) = data_sender();
-        mgr.register_data_plane("s1".into(), gen, tx, first_cancel.clone());
+        mgr.register_data_plane(
+            "s1".into(),
+            gen,
+            shared::TunnelSizing::V1,
+            tx,
+            first_cancel.clone(),
+        );
 
         let (tx, _rx) = data_sender();
-        mgr.register_data_plane("s1".into(), gen, tx, CancellationToken::new());
+        mgr.register_data_plane(
+            "s1".into(),
+            gen,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new(),
+        );
 
         assert!(
             first_cancel.is_cancelled(),
@@ -252,13 +312,19 @@ mod tests {
         let mgr = SessionManager::new();
         let gen = register_control(&mgr, "s1");
         let (tx, _rx) = data_sender();
-        mgr.register_data_plane("s1".into(), gen, tx, CancellationToken::new());
+        mgr.register_data_plane(
+            "s1".into(),
+            gen,
+            shared::TunnelSizing::V1,
+            tx,
+            CancellationToken::new(),
+        );
 
-        assert!(mgr.data_plane_sender("s1", gen).is_some());
+        assert!(mgr.data_plane_egress("s1", gen).is_some());
         // Falling back to the control path is the correct answer for any other
         // generation, and for a session with no data plane at all.
-        assert!(mgr.data_plane_sender("s1", gen + 1).is_none());
-        assert!(mgr.data_plane_sender("other", gen).is_none());
+        assert!(mgr.data_plane_egress("s1", gen + 1).is_none());
+        assert!(mgr.data_plane_egress("other", gen).is_none());
     }
 
     #[test]
@@ -267,7 +333,13 @@ mod tests {
         let gen = register_control(&mgr, "s1");
         let cancel = CancellationToken::new();
         let (tx, _rx) = data_sender();
-        mgr.register_data_plane("s1".into(), gen, tx, cancel.clone());
+        mgr.register_data_plane(
+            "s1".into(),
+            gen,
+            shared::TunnelSizing::V1,
+            tx,
+            cancel.clone(),
+        );
 
         mgr.close_data_plane_for_connection(&"s1".to_string(), gen);
 
@@ -285,7 +357,13 @@ mod tests {
 
         let cancel = CancellationToken::new();
         let (tx, _rx) = data_sender();
-        mgr.register_data_plane("s1".into(), new_gen, tx, cancel.clone());
+        mgr.register_data_plane(
+            "s1".into(),
+            new_gen,
+            shared::TunnelSizing::V1,
+            tx,
+            cancel.clone(),
+        );
 
         mgr.close_data_plane_for_connection(&"s1".to_string(), old_gen);
 

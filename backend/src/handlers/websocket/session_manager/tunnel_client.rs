@@ -6,12 +6,15 @@
 //! the tunnel frames. The reverse-proxy handler hands the other end to a
 //! hyper HTTP/1.1 client — hyper never knows it isn't a TCP socket.
 //!
-//! Flow control mirrors the proxy side (`session_lib::tunnel`): a 64 KiB
-//! credit per direction, ≤16 KiB `TunnelData` frames, window re-granted as
-//! bytes drain into the pipe. The outgoing path is the session's unbounded
-//! `ProxySender`, so per-stream credit is what bounds queued tunnel bytes:
-//! at most `MAX_STREAMS × INITIAL_WINDOW` per session in the pathological
-//! case, in practice one window per active stream.
+//! Flow control mirrors the proxy side (`session_lib::tunnel`): a per-stream
+//! credit per direction and a max frame size, window re-granted as bytes drain
+//! into the pipe. Both come from the connection's negotiated
+//! [`shared::TunnelSizing`] (#1511) rather than a fixed constant — the sender
+//! and receiver of a stream must agree, so the values are chosen once per
+//! connection and carried on the stream. The outgoing path is the session's
+//! unbounded `ProxySender`, so per-stream credit is what bounds queued tunnel
+//! bytes: at most `MAX_STREAMS × window` per session in the pathological case,
+//! in practice one window per active stream.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,18 +32,6 @@ use uuid::Uuid;
 
 use super::{ProxySender, SessionManager};
 
-/// Max decoded bytes per payload frame (spec).
-///
-/// **Both ends must agree.** The sender chunks to this and the receiver closes
-/// any stream that exceeds it, so raising it on one side alone makes a
-/// build-skewed peer tear down every stream mid-deploy. `session.tunnel_binary_v1`
-/// already means "16 KiB chunks", so a larger frame size needs a negotiated
-/// protocol bump, not an edit here.
-pub const MAX_CHUNK: usize = 16 * 1024;
-/// Initial per-stream, per-direction flow-control window. Must match the proxy
-/// side (`session_lib::tunnel::INITIAL_WINDOW`) — both ends seed their credit
-/// from it.
-pub const INITIAL_WINDOW: u32 = 64 * 1024;
 /// How long to wait for the proxy's `TunnelOpened`/`TunnelRefused`.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Duplex pipe capacity between the relay and hyper.
@@ -66,11 +57,15 @@ pub enum TunnelIn {
 
 /// One live backend stream: the relay inbox plus receive-credit enforcement
 /// (mirrors the proxy side — the inbox is unbounded, so the credit book, not
-/// the channel, bounds buffered downlink bytes to [`INITIAL_WINDOW`] even
+/// the channel, bounds buffered downlink bytes to the negotiated window even
 /// against a buggy peer).
 pub(super) struct BackendStreamEntry {
     inbox: mpsc::UnboundedSender<TunnelIn>,
     recv_credit: Arc<std::sync::atomic::AtomicI64>,
+    /// Negotiated max frame size for this stream (#1511). Stored per stream so
+    /// the receive-side oversize check uses the value this connection agreed on,
+    /// not a global constant, keeping it correct if profiles ever differ.
+    max_chunk: usize,
     /// The connection this stream was opened on. Its relay task holds a clone
     /// of that connection's `ProxySender`, so when the connection tears down
     /// we must close the stream (dropping the clone) — otherwise the session
@@ -218,15 +213,18 @@ impl SessionManager {
     /// The credit book — not the channel — is what bounds buffered downlink
     /// bytes, so this check is load-bearing against a buggy or hostile peer.
     pub fn tunnel_bytes_in(&self, stream_id: Uuid, bytes: Vec<u8>) {
-        let entry = self
-            .tunnel_streams
-            .get(&stream_id)
-            .map(|e| (e.value().inbox.clone(), e.value().recv_credit.clone()));
-        let Some((inbox, recv_credit)) = entry else {
+        let entry = self.tunnel_streams.get(&stream_id).map(|e| {
+            (
+                e.value().inbox.clone(),
+                e.value().recv_credit.clone(),
+                e.value().max_chunk,
+            )
+        });
+        let Some((inbox, recv_credit, max_chunk)) = entry else {
             debug!("Tunnel payload for unknown stream {} dropped", stream_id);
             return;
         };
-        if bytes.len() > MAX_CHUNK {
+        if bytes.len() > max_chunk {
             tracing::warn!(
                 "Oversized tunnel payload ({} bytes) for stream {}; closing",
                 bytes.len(),
@@ -304,20 +302,28 @@ impl SessionManager {
         // Prefer the dedicated binary data plane when this exact connection has
         // one registered; otherwise fall back to JSON over the control socket.
         // Resolved per stream, so a data socket that appears or drops mid-session
-        // is picked up (or degraded away from) without any coordination.
-        let egress = match self.data_plane_sender(session_key, gen) {
-            Some(tx) => TunnelEgress::Binary(tx),
-            None => TunnelEgress::Control(proxy_tx.clone()),
+        // is picked up (or degraded away from) without any coordination. The
+        // data plane carries its negotiated sizing; the control fallback is
+        // always V1, which is exactly what a pre-#1511 proxy on that path uses.
+        let (egress, sizing) = match self.data_plane_egress(session_key, gen) {
+            Some((tx, sizing)) => (TunnelEgress::Binary(tx), sizing),
+            None => (
+                TunnelEgress::Control(proxy_tx.clone()),
+                shared::TunnelSizing::V1,
+            ),
         };
 
         let stream_id = Uuid::new_v4();
         let (relay_tx, mut relay_rx) = mpsc::unbounded_channel::<TunnelIn>();
-        let recv_credit = Arc::new(std::sync::atomic::AtomicI64::new(INITIAL_WINDOW as i64));
+        let recv_credit = Arc::new(std::sync::atomic::AtomicI64::new(
+            sizing.initial_window as i64,
+        ));
         self.tunnel_streams.insert(
             stream_id,
             BackendStreamEntry {
                 inbox: relay_tx,
                 recv_credit: recv_credit.clone(),
+                max_chunk: sizing.max_chunk as usize,
                 session_key: session_key.to_string(),
                 gen,
             },
@@ -358,6 +364,7 @@ impl SessionManager {
         tokio::spawn(run_relay(
             stream_id,
             egress,
+            sizing,
             relay_io,
             relay_rx,
             streams,
@@ -414,21 +421,23 @@ impl CreditGate {
 async fn run_relay(
     stream_id: Uuid,
     egress: TunnelEgress,
+    sizing: shared::TunnelSizing,
     relay_io: tokio::io::DuplexStream,
     mut inbox: mpsc::UnboundedReceiver<TunnelIn>,
     streams: TunnelStreamMap,
     recv_credit: Arc<std::sync::atomic::AtomicI64>,
 ) {
     let (mut pipe_rd, mut pipe_wr) = tokio::io::split(relay_io);
-    let send_credit = Arc::new(CreditGate::new(INITIAL_WINDOW));
+    let send_credit = Arc::new(CreditGate::new(sizing.initial_window));
+    let max_chunk = sizing.max_chunk as usize;
 
     // Uplink: bytes hyper writes (requests) → payload frames, credit-gated.
     let uplink_credit = send_credit.clone();
     let uplink_egress = egress.clone();
     let uplink = tokio::spawn(async move {
-        let mut buf = vec![0u8; MAX_CHUNK];
+        let mut buf = vec![0u8; max_chunk];
         loop {
-            let budget = uplink_credit.take(MAX_CHUNK).await;
+            let budget = uplink_credit.take(max_chunk).await;
             let n = match pipe_rd.read(&mut buf[..budget]).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => n,
@@ -485,7 +494,10 @@ mod tests {
             id,
             BackendStreamEntry {
                 inbox: tx,
-                recv_credit: Arc::new(std::sync::atomic::AtomicI64::new(INITIAL_WINDOW as i64)),
+                recv_credit: Arc::new(std::sync::atomic::AtomicI64::new(
+                    shared::TunnelSizing::V1.initial_window as i64,
+                )),
+                max_chunk: shared::TunnelSizing::V1.max_chunk as usize,
                 session_key: key.to_string(),
                 gen,
             },

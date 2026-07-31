@@ -224,6 +224,13 @@ pub enum ServerToProxy {
         /// socket as before.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tunnel_data_ticket: Option<String>,
+        /// The tunnel sizing profile the backend negotiated from the proxy's
+        /// advertised capabilities (#1511). `None` (older backend) means the
+        /// proxy uses [`TunnelSizing::V1`](crate::TunnelSizing::V1), the sizing
+        /// that shipped with the data plane — so a v2-capable proxy talking to a
+        /// v1 backend transparently stays on v1 frames.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tunnel_sizing: Option<crate::TunnelSizing>,
     },
 
     /// Keepalive heartbeat

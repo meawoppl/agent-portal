@@ -384,8 +384,8 @@ async fn run_shim_loop(
             ..config.clone()
         };
 
-        let tunnel_data_ticket = match register_session(&mut conn, &config_with_branch).await {
-            Ok(ticket) => ticket,
+        let tunnel_data_grant = match register_session(&mut conn, &config_with_branch).await {
+            Ok(grant) => grant,
             Err(_) => {
                 warn!(
                     "Registration failed, retrying in {}s",
@@ -431,7 +431,7 @@ async fn run_shim_loop(
             permissions.clone(),
             output_buffer.clone(),
             portal_text_tx.clone(),
-            tunnel_data_ticket,
+            tunnel_data_grant,
         )
         .await;
 
@@ -494,7 +494,7 @@ async fn run_shim_connection(
     permissions: Arc<Mutex<HashMap<String, PermissionState>>>,
     output_buffer: Arc<Mutex<PendingOutputBuffer>>,
     portal_text_tx: mpsc::UnboundedSender<String>,
-    tunnel_data_ticket: Option<String>,
+    tunnel_data_grant: Option<(String, shared::TunnelSizing)>,
 ) -> ShimConnectionResult {
     let (ws_write, ws_read) = conn.split();
     let ws_write: SharedWsWrite = Arc::new(Mutex::new(ws_write));
@@ -505,11 +505,12 @@ async fn run_shim_connection(
 
     // Bring up the binary data plane, if the backend issued a ticket (#1506).
     // Detached and non-fatal: any failure leaves tunneling on the control socket.
-    if let Some(ticket) = tunnel_data_ticket {
+    if let Some((ticket, sizing)) = tunnel_data_grant {
         tokio::spawn(session_lib::tunnel::run_data_plane(
             tunnel.clone(),
             config.backend_url.clone(),
             ticket,
+            sizing,
         ));
     }
 

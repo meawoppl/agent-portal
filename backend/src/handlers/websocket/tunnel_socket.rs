@@ -81,6 +81,7 @@ pub async fn handle_tunnel_data_socket(socket: WebSocket, app_state: Arc<AppStat
     if !session_manager.register_data_plane(
         ticket.session_key.clone(),
         ticket.gen,
+        ticket.sizing,
         tx,
         cancel.clone(),
     ) {

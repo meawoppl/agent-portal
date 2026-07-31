@@ -461,8 +461,8 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
 
     // Register with backend and wait for acknowledgment. A ticket in the ack
     // means we may open the binary port-forward data plane (#1506).
-    let tunnel_data_ticket = match register_session(&mut conn, &config_with_branch).await {
-        Ok(ticket) => ticket,
+    let tunnel_data_grant = match register_session(&mut conn, &config_with_branch).await {
+        Ok(grant) => grant,
         Err(RegisterError::Transient(duration)) => return ConnectionResult::Disconnected(duration),
         Err(RegisterError::Rejected) => return ConnectionResult::RegistrationRejected,
     };
@@ -608,7 +608,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     }
 
     // Run the message loop - split connection for concurrent read/write
-    run_message_loop(session, &config_with_branch, conn, tunnel_data_ticket).await
+    run_message_loop(session, &config_with_branch, conn, tunnel_data_grant).await
 }
 
 /// Connect to the backend WebSocket
@@ -636,14 +636,15 @@ pub async fn connect_to_backend(
 
 /// Register session with the backend and wait for acknowledgment.
 ///
-/// On success returns the backend's `tunnel_data_ticket` when it issued one
-/// (#1506) — the credential for dialing the binary port-forward data plane.
-/// `None` means no data plane for this connection: an older backend, or one that
-/// declined, in which case tunnel bytes keep riding the control socket.
+/// On success returns the backend's data-plane grant when it issued one (#1506):
+/// the `(ticket, sizing)` for dialing the binary port-forward data plane, where
+/// `sizing` is the negotiated [`shared::TunnelSizing`] (#1511). `None` means no
+/// data plane for this connection — an older backend, or one that declined — in
+/// which case tunnel bytes keep riding the control socket.
 pub async fn register_session(
     conn: &mut NativeConnection,
     config: &ProxySessionConfig,
-) -> Result<Option<String>, RegisterError> {
+) -> Result<Option<(String, shared::TunnelSizing)>, RegisterError> {
     info!("Registering session...");
 
     let hostname = hostname_or_unknown();
@@ -690,8 +691,9 @@ pub async fn register_session(
                     max_image_mb: _,
                     retryable,
                     tunnel_data_ticket,
+                    tunnel_sizing,
                 }) => {
-                    return Some((success, error, retryable, tunnel_data_ticket));
+                    return Some((success, error, retryable, tunnel_data_ticket, tunnel_sizing));
                 }
                 Ok(_) => continue,
                 Err(_) => return None,
@@ -702,14 +704,24 @@ pub async fn register_session(
     .await;
 
     match ack_timeout {
-        Ok(Some((true, _, _, tunnel_data_ticket))) => {
-            info!(
-                "Session registered (data plane offered: {})",
-                tunnel_data_ticket.is_some()
-            );
-            Ok(tunnel_data_ticket)
+        Ok(Some((true, _, _, tunnel_data_ticket, tunnel_sizing))) => {
+            // Pair the ticket with its negotiated sizing. An older backend sends
+            // no sizing, so default to V1 — the profile the data plane shipped
+            // with (#1511).
+            let grant =
+                tunnel_data_ticket.map(|ticket| (ticket, tunnel_sizing.unwrap_or_default()));
+            if let Some((_, sizing)) = &grant {
+                info!(
+                    "Session registered (data plane offered, {} KiB frames / {} KiB window)",
+                    sizing.max_chunk / 1024,
+                    sizing.initial_window / 1024,
+                );
+            } else {
+                info!("Session registered (no data plane)");
+            }
+            Ok(grant)
         }
-        Ok(Some((false, error, retryable, _))) => {
+        Ok(Some((false, error, retryable, _, _))) => {
             let err_msg = error.as_deref().unwrap_or("Unknown error");
             if retryable {
                 // Transient infrastructure failure (DB blip mid-deploy) —
@@ -746,7 +758,7 @@ async fn run_message_loop<A: Agent>(
     session: &mut SessionState<'_, A>,
     config: &ProxySessionConfig,
     conn: NativeConnection,
-    tunnel_data_ticket: Option<String>,
+    tunnel_data_grant: Option<(String, shared::TunnelSizing)>,
 ) -> ConnectionResult {
     let connection_start = Instant::now();
     let session_id = config.session_id;
@@ -794,11 +806,12 @@ async fn run_message_loop<A: Agent>(
     // Bring up the binary data plane, if the backend issued a ticket (#1506).
     // Detached: forward bytes must never gate session startup, and every
     // failure inside just leaves tunneling on the control socket.
-    if let Some(ticket) = tunnel_data_ticket {
+    if let Some((ticket, sizing)) = tunnel_data_grant {
         tokio::spawn(session_lib::tunnel::run_data_plane(
             tunnel.clone(),
             config.backend_url.clone(),
             ticket,
+            sizing,
         ));
     }
 
