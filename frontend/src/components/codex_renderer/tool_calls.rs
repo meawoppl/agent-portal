@@ -72,6 +72,7 @@ pub(super) fn render_command_execution(it: &CommandExecutionItem, completed: boo
                                 max_len=500
                                 tag="pre"
                                 class={classes!("tool-result-content")}
+                                ansi=true
                             />
                         </div>
                     }

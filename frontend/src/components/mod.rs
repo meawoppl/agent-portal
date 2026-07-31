@@ -1,4 +1,5 @@
 pub mod agent_frame;
+pub mod ansi;
 pub mod charts;
 pub mod codex_renderer;
 mod confirm_modal;
