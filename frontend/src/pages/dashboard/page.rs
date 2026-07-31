@@ -65,6 +65,8 @@ pub fn dashboard_page() -> Html {
     let current_user_id = bootstrap.current_user_id;
     let app_title = bootstrap.app_title;
     let server_version = bootstrap.server_version;
+    let git_hash = bootstrap.git_hash;
+    let build_time = bootstrap.build_time;
     let archive_enabled = bootstrap.archive_enabled;
 
     // Push-driven session refresh: the backend broadcasts
@@ -883,7 +885,25 @@ pub fn dashboard_page() -> Html {
                                 { "\u{1f41b}" }
                             </a>
                             if !server_version.is_empty() {
-                                <span class="server-version">{ format!("v{}", server_version) }</span>
+                                <span class="server-version">
+                                    { format!("v{}", server_version) }
+                                    // Short hash (links to the commit) + Pacific
+                                    // build time for deploy tracing (#1386);
+                                    // each shown only when the backend supplies
+                                    // it, so an older server degrades cleanly.
+                                    if !git_hash.is_empty() && git_hash != "unknown" {
+                                        { " · " }
+                                        <a
+                                            class="build-hash"
+                                            href={format!("https://github.com/meawoppl/agent-portal/commit/{git_hash}")}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >{ git_hash.clone() }</a>
+                                    }
+                                    if !build_time.is_empty() && build_time != "unknown" {
+                                        <span class="build-time">{ format!(" · {build_time}") }</span>
+                                    }
+                                </span>
                             }
                         </div>
                     </div>

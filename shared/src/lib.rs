@@ -13,6 +13,15 @@ use uuid::Uuid;
 /// placeholder.
 pub const VERSION: &str = env!("PORTAL_VERSION");
 
+/// Short git commit hash of this build, or `"unknown"` without git (#1386).
+/// Surfaced next to [`VERSION`] for deploy tracing.
+pub const GIT_HASH: &str = env!("PORTAL_GIT_HASH");
+
+/// Build timestamp in Pacific time with a `PST`/`PDT` label (or `"unknown"`),
+/// e.g. `2026-07-16 14:32 PDT` (#1386). Refreshes per deploy via `build.rs`'s
+/// HEAD-based rerun triggers, so it reads as "last built/deployed".
+pub const BUILD_TIME: &str = env!("PORTAL_BUILD_TIME");
+
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::LaunchSession.create_worktree`.
 pub const LAUNCHER_CAPABILITY_CREATE_WORKTREE: &str = "launch.create_worktree";
@@ -822,6 +831,13 @@ pub struct AppConfig {
     pub app_title: String,
     /// Backend server version string (e.g. "1.3.24")
     pub server_version: String,
+    /// Short git commit hash of the running server (#1386). `#[serde(default)]`
+    /// so an older backend that omits it degrades to empty (frontend hides it).
+    #[serde(default)]
+    pub git_hash: String,
+    /// Build/deploy timestamp of the running server, Pacific time (#1386).
+    #[serde(default)]
+    pub build_time: String,
     /// When set, replaces the marketing splash page with a minimal login page
     /// displaying this text as the heading. Set via SPLASH_TEXT env var.
     #[serde(default)]
