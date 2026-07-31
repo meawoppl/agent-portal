@@ -97,27 +97,92 @@ pub fn compact_model_version(model_id: &str) -> Option<String> {
     }
 }
 
+/// Default Claude context window when nothing marks the model as larger.
+/// Mirrors the CLI's `ber` constant (verified in Claude Code 2.1.220).
+const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
+/// Window for models flagged as 1M-context.
+const MILLION_CONTEXT_WINDOW: u64 = 1_000_000;
+
+/// True when the model id carries the CLI's `[1m]` tag.
+///
+/// The CLI's own test is a bare regex on the id — `function Wb(e){ return
+/// /\[1m\]/i.test(e) }` — and ids like `claude-opus-4-7[1m]` appear verbatim on
+/// the wire (see the `claude-codes` result fixture), so matching the tag is
+/// exact, not a heuristic.
+fn has_one_million_tag(model_id: &str) -> bool {
+    model_id.to_ascii_lowercase().contains("[1m]")
+}
+
 /// Nominal context-window size (in tokens) for a Claude model id.
 ///
 /// Claude's stream-json output reports consumed tokens but *not* the window
 /// size (unlike Codex, which sends `model_context_window` at runtime), so a
-/// context-usage gauge needs a model → window map for Claude turns. Every
-/// current Claude family (Opus / Sonnet / Haiku, incl. the 3.x/4.x/5 lines)
-/// ships a 200k-token window by default, so recognized Claude ids map to
-/// `200_000`; anything unrecognized returns `None` (caller hides the gauge
-/// rather than guess).
+/// context-usage gauge needs a model → window map for Claude turns. Anything
+/// unrecognized returns `None` (caller hides the gauge rather than guess).
 ///
-/// Caveat: a 1M-token context is a per-request beta opt-in that isn't
-/// distinguishable from the model id alone, so a session running it will read
-/// as "more full" than it is. The nominal default matches what the CLI shows
-/// by default. Codex never uses this — it carries its own window on the wire.
+/// Mirrors the resolution order the CLI uses (`mZc`, Claude Code 2.1.220):
+///
+/// 1. the `[1m]` id tag ⇒ 1M,
+/// 2. the `native_1m` capability or `claude-mythos-preview` ⇒ 1M,
+/// 3. a per-model override,
+/// 4. `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, for non-`claude-` ids only,
+/// 5. otherwise 200k.
+///
+/// **Known gaps vs. the CLI** (see #1517 and the upstream ask in
+/// `rust-code-agent-sdks#250`): steps 2–4 are only partially reachable from a
+/// model id. `native_1m` lives in a model-capabilities table we don't have, so
+/// only the by-name `claude-mythos-preview` case is covered; the per-request 1M
+/// beta *header* isn't visible here at all; and the env override is read from
+/// the backend's environment, which is the proxy host's only in single-host
+/// deployments. Those cases under-report the window (a session reads fuller
+/// than it is) rather than over-reporting it.
 pub fn context_window_for(model_id: &str) -> Option<u64> {
     let id = model_id.to_ascii_lowercase();
     let is_claude = ["opus", "sonnet", "haiku"]
         .iter()
         .any(|family| id.contains(family))
         || id.starts_with("claude");
-    is_claude.then_some(200_000)
+    if !is_claude {
+        return None;
+    }
+
+    // 1. Explicit `[1m]` tag on the id.
+    if has_one_million_tag(&id) {
+        return Some(MILLION_CONTEXT_WINDOW);
+    }
+    // 2. Models that are natively 1M. Only the by-name case is knowable here.
+    if id.contains("mythos-preview") {
+        return Some(MILLION_CONTEXT_WINDOW);
+    }
+    // 4. Env override. The CLI applies it only to non-`claude-` ids (so it can't
+    //    silently misreport a first-party model), and we keep that restriction.
+    if !id.starts_with("claude-") {
+        if let Some(env_window) = env_max_context_tokens() {
+            return Some(env_window);
+        }
+    }
+    // 5. Default.
+    Some(DEFAULT_CONTEXT_WINDOW)
+}
+
+/// `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, when set to a positive integer.
+///
+/// WASM has no process environment, so this is a compile-time `None` there —
+/// the frontend never resolves windows itself (it consumes the value computed
+/// where the turn was recorded), so that costs nothing.
+fn env_max_context_tokens() -> Option<u64> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var("CLAUDE_CODE_MAX_CONTEXT_TOKENS")
+            .ok()?
+            .parse::<u64>()
+            .ok()
+            .filter(|n| *n > 0)
+    }
 }
 
 #[cfg(test)]
@@ -203,5 +268,40 @@ mod tests {
         assert_eq!(context_window_for("gpt-5-codex"), None);
         assert_eq!(context_window_for(""), None);
         assert_eq!(context_window_for("garbled-nonsense"), None);
+    }
+
+    /// The `[1m]` tag means a 1M window (#1517). Before this, a tagged model
+    /// resolved to 200k and the fullness gauge read 5x too full. The tag appears
+    /// verbatim on the wire — the `claude-codes` result fixture carries
+    /// `claude-opus-4-7[1m]`.
+    #[test]
+    fn context_window_honors_the_one_million_tag() {
+        for id in [
+            "claude-opus-4-7[1m]",
+            "claude-sonnet-4-6[1M]",
+            "claude-opus-4-8[1m]",
+        ] {
+            assert_eq!(context_window_for(id), Some(1_000_000), "{id}");
+        }
+        // The same families without the tag stay at the default.
+        assert_eq!(context_window_for("claude-opus-4-7"), Some(200_000));
+        assert_eq!(context_window_for("claude-sonnet-4-6"), Some(200_000));
+    }
+
+    /// Natively-1M models are 1M without needing the tag. Only the by-name case
+    /// is knowable from an id (the `native_1m` capability table isn't available
+    /// here — see the fn docs and rust-code-agent-sdks#250).
+    #[test]
+    fn context_window_honors_natively_one_million_models() {
+        assert_eq!(context_window_for("claude-mythos-preview"), Some(1_000_000));
+    }
+
+    /// The tag still wins for an id that is neither a known family nor
+    /// `claude-`-prefixed, so an unrecognized-but-tagged model isn't dropped.
+    #[test]
+    fn context_window_tag_applies_across_recognized_families() {
+        assert_eq!(context_window_for("claude-haiku-4-5[1m]"), Some(1_000_000));
+        // Still `None` when nothing identifies it as Claude at all.
+        assert_eq!(context_window_for("some-other-model[1m]"), None);
     }
 }
