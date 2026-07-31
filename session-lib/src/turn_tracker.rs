@@ -197,6 +197,7 @@ impl TurnTracker {
             output_tokens: outcome.output_tokens,
             cache_creation_tokens: outcome.cache_creation_tokens,
             cache_read_tokens: outcome.cache_read_tokens,
+            context_snapshot_tokens: outcome.context_snapshot_tokens,
             thinking_tokens: outcome.thinking_tokens,
             subagent_tokens: outcome.subagent_tokens,
             stop_reason: outcome.stop_reason,
@@ -255,6 +256,16 @@ pub struct TurnOutcome {
     /// turn's tokens. `0` when no subagents ran or the agent protocol doesn't
     /// surface the rollup. See [`shared::TurnMetrics::subagent_tokens`].
     pub subagent_tokens: i64,
+    /// Context occupancy at the end of the turn, in tokens: the LAST real
+    /// assistant usage's `input + cache_creation + cache_read` (#1517).
+    ///
+    /// Deliberately separate from the token fields above, which are the turn's
+    /// accumulated roll-up — correct for cost and the per-turn footer, but wrong
+    /// as a context measure, because the roll-up re-counts `cache_read` once per
+    /// API call in a tool-use loop. `None` when the agent gives no per-call
+    /// snapshot (Codex, or a turn with no usable assistant usage), in which case
+    /// consumers fall back to the roll-up.
+    pub context_snapshot_tokens: Option<i64>,
     pub stop_reason: Option<String>,
     pub is_error: bool,
     pub total_cost_usd: Option<f64>,
@@ -290,6 +301,7 @@ mod tests {
             cache_read_tokens: 10,
             thinking_tokens: 3,
             subagent_tokens: 25,
+            context_snapshot_tokens: None,
             stop_reason: Some("end_turn".to_string()),
             is_error: false,
             total_cost_usd: Some(0.005),
@@ -407,6 +419,7 @@ mod tests {
             cache_read_tokens: 0,
             thinking_tokens: 0,
             subagent_tokens: 0,
+            context_snapshot_tokens: None,
             stop_reason: Some("completed".to_string()),
             is_error: false,
             total_cost_usd: None,

@@ -524,6 +524,12 @@ pub(crate) async fn codex_io_task(
                                         .unwrap_or(0),
                                     subagent_tokens: subagent_token_tracker
                                         .take_current_turn_tokens(),
+                                    // Codex's `token_usage.last` is already the
+                                    // per-turn value, so there is no separate
+                                    // per-call snapshot to carry (#1517);
+                                    // `context_tokens()` falls back to
+                                    // `input_tokens`, which is that value.
+                                    context_snapshot_tokens: None,
                                     stop_reason: Some(status.to_string()),
                                     is_error,
                                     total_cost_usd: None,

@@ -127,6 +127,7 @@ pub fn handle_turn_metrics_report(
         stream_restarts: metrics.stream_restarts,
         total_cost_usd: metrics.total_cost_usd,
         model_context_window: metrics.model_context_window,
+        context_snapshot_tokens: metrics.context_snapshot_tokens,
     };
 
     use crate::schema::turn_metrics;

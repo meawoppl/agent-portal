@@ -258,6 +258,7 @@ diesel::table! {
         user_id -> Uuid,
         subagent_tokens -> Int8,
         model_context_window -> Nullable<Int8>,
+        context_snapshot_tokens -> Nullable<Int8>,
     }
 }
 
