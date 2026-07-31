@@ -404,6 +404,26 @@ struct ImageViewerProps {
     pub filename: Option<String>,
 }
 
+/// Does this media type need a CSS width fallback to be visible?
+///
+/// Raster formats always carry intrinsic pixel dimensions, but an SVG may
+/// declare none — a bare `viewBox`, or percentage `width`/`height`, is common
+/// in hand-authored diagrams (matplotlib is fine; it emits `width`/`height` in
+/// points). Such an image has *only* an aspect ratio, so inside the
+/// shrink-to-fit `.tool-result-image` frame the frame's width depends on the
+/// image and the image's `max-width: 100%` depends on the frame. Nothing can
+/// resolve that cycle and browsers collapse it to **0×0** — the diagram
+/// silently vanishes, leaving just the frame's 1px border.
+///
+/// Tagging those elements with `svg` lets CSS supply a definite width basis.
+/// Don't drop this without re-testing a `viewBox`-only SVG: it fails silently
+/// (no `onerror`, no console warning), so it's easy to regress unnoticed.
+/// See `.tool-result-image.svg` / `.image-lightbox-content img.svg` in
+/// `frontend/styles/markdown.css`.
+fn needs_size_fallback(media_type: &str) -> bool {
+    media_type == "image/svg+xml"
+}
+
 #[function_component(ImageViewer)]
 fn image_viewer(props: &ImageViewerProps) -> Html {
     let expanded = use_state(|| false);
@@ -451,15 +471,17 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
         .clone()
         .unwrap_or_else(|| format!("image.{ext}"));
 
+    let size_fallback = needs_size_fallback(&props.media_type).then_some("svg");
+
     html! {
         <>
-            <div class="tool-result-image" onclick={on_thumb_click}>
+            <div class={classes!("tool-result-image", size_fallback)} onclick={on_thumb_click}>
                 <img src={props.src.clone()} alt="Tool result image" onerror={on_error} />
             </div>
             if *expanded {
                 <div class="image-lightbox" onclick={on_close.clone()}>
                     <div class="image-lightbox-content" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        <img src={props.src.clone()} alt="Full size image" />
+                        <img class={classes!(size_fallback)} src={props.src.clone()} alt="Full size image" />
                         <div class="image-lightbox-controls">
                             <a
                                 class="image-lightbox-download"
@@ -832,5 +854,31 @@ fn format_error_type(error_type: &str) -> String {
         "rate_limit_error" => "Rate Limited".to_string(),
         "request_too_large" => "Request Too Large".to_string(),
         other => other.replace('_', " ").to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn svg_gets_a_size_fallback_but_rasters_do_not() {
+        // SVG can lack intrinsic dimensions and collapse to 0x0 without it.
+        assert!(needs_size_fallback("image/svg+xml"));
+        // Raster formats always carry pixel dimensions; forcing a width on them
+        // would stretch small images instead of letting the frame hug them.
+        for raster in ["image/png", "image/jpeg", "image/gif", "image/webp"] {
+            assert!(!needs_size_fallback(raster), "{raster} needs no fallback");
+        }
+    }
+
+    #[test]
+    fn every_allowed_image_type_is_classified() {
+        // Guards against a new format being allowed without deciding whether it
+        // can render without intrinsic dimensions.
+        for media_type in ALLOWED_IMAGE_MEDIA_TYPES {
+            let expected = *media_type == "image/svg+xml";
+            assert_eq!(needs_size_fallback(media_type), expected, "{media_type}");
+        }
     }
 }
