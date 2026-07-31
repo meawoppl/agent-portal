@@ -77,6 +77,18 @@
     white-space: nowrap;
 }
 
+/* Deploy-tracing hash/time beside the version (#1386): inherit the muted
+   version styling; the hash is a link but stays recessive until hovered. */
+.keyboard-hints .server-version .build-hash {
+    color: inherit;
+    text-decoration: none;
+    font-family: var(--font-mono, monospace);
+}
+
+.keyboard-hints .server-version .build-hash:hover {
+    text-decoration: underline;
+}
+
 /* ==========================================================================
    Delete Confirmation Modal
    ========================================================================== */

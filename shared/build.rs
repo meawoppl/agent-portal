@@ -38,9 +38,32 @@ fn main() {
     };
     println!("cargo:rustc-env=PORTAL_VERSION={major}.{minor}.{patch}");
 
-    // Recompute only when the commit count could have changed: HEAD moving
-    // (branch switch / detached commit) or the reflog appending (any
-    // commit/reset/checkout). Without git, fall through to Cargo's default.
+    // Short commit hash for deploy tracing (#1386). "unknown" in a build with
+    // no git (tarball / vendored) — same degradation as the patch above.
+    let git_hash = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=PORTAL_GIT_HASH={git_hash}");
+
+    // Build timestamp in Pacific, with the correct PST/PDT label from the
+    // system tz database rather than a hardcoded abbreviation. Shelled out to
+    // `date` so no timezone crate is pulled into the build. This is captured
+    // when build.rs runs, which — given the HEAD-based rerun triggers below —
+    // is each deploy (HEAD moves), so it reads as "last built/deployed".
+    let build_time = Command::new("date")
+        .args(["+%Y-%m-%d %H:%M %Z"])
+        .env("TZ", "America/Los_Angeles")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=PORTAL_BUILD_TIME={build_time}");
+
+    // Recompute only when the commit count / hash could have changed: HEAD
+    // moving (branch switch / detached commit) or the reflog appending (any
+    // commit/reset/checkout). This also refreshes the build time per deploy.
+    // Without git, fall through to Cargo's default.
     if let Some(git_dir) = git(&["rev-parse", "--absolute-git-dir"]) {
         println!("cargo:rerun-if-changed={git_dir}/HEAD");
         println!("cargo:rerun-if-changed={git_dir}/logs/HEAD");
