@@ -243,6 +243,7 @@ pub fn dashboard_page() -> Html {
         on_new_session,
         on_delete: on_delete.clone(),
         on_jump_to_latest: focus.on_jump_to_latest.clone(),
+        on_interrupt: focus.on_interrupt.clone(),
     });
 
     // Ctrl+C interrupt: a window capture-phase listener so it fires in every
@@ -856,6 +857,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "1-9 = select" }</span>
                                             <span>{ "w = next waiting" }</span>
                                             <span>{ "n = new" }</span>
+                                            <span>{ "x = interrupt" }</span>
                                             <span>{ "Enter or Ctrl/Cmd+K = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>

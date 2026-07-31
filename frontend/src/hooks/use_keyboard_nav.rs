@@ -170,6 +170,9 @@ pub struct KeyboardNavConfig {
     /// Callback to jump the focused session's transcript to the newest message
     /// and resume live tailing (nav-mode `G`).
     pub on_jump_to_latest: Callback<()>,
+    /// Callback to interrupt the focused session's running agent (nav-mode
+    /// `x`). Same action as `Ctrl+C`, exposed as a single nav-mode key (#1330).
+    pub on_interrupt: Callback<()>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -231,6 +234,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_new_session = config.on_new_session.clone();
         let on_delete = config.on_delete.clone();
         let on_jump_to_latest = config.on_jump_to_latest.clone();
+        let on_interrupt = config.on_interrupt.clone();
         Callback::from(move |e: KeyboardEvent| {
             // Don't handle keyboard nav when a modal overlay is open. The launch
             // dialog, full-page modals, and help overlay are included so their
@@ -428,6 +432,15 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         if let Some(session) = sessions.get(focused_index) {
                             on_delete.emit(session.id);
                         }
+                    }
+                    "x" => {
+                        // Interrupt the focused session's running agent — the
+                        // same action as Ctrl+C, as a single nav-mode key
+                        // (#1330). Non-destructive (the transcript/session stay);
+                        // `d` remains the destructive close-with-confirm. Stays
+                        // in nav mode like the other action keys.
+                        e.prevent_default();
+                        on_interrupt.emit(());
                     }
                     "G" => {
                         // Jump the focused session's transcript to the newest
