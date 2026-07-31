@@ -34,7 +34,25 @@ pub const LAUNCHER_CAPABILITY_HEARTBEAT_ACK: &str = "launcher.heartbeat_ack";
 /// advertise this, and routes tunnel bytes over the data plane only while such
 /// a socket is registered — so a proxy that never advertises it (or whose data
 /// socket has dropped) transparently keeps the JSON-over-control-socket path.
+///
+/// Implies [`TunnelSizing::V1`] (16 KiB frames / 64 KiB window). A proxy that
+/// also supports larger frames advertises [`PROXY_CAPABILITY_TUNNEL_BINARY_V2`]
+/// *in addition*, never instead — so a v1 backend still recognizes it (#1511).
 pub const PROXY_CAPABILITY_TUNNEL_BINARY_V1: &str = "session.tunnel_binary_v1";
+
+/// Proxy capability advertised by versions that can use the larger
+/// [`TunnelSizing::V2`] profile on the binary data plane (#1511).
+///
+/// The 16 KiB/64 KiB v1 sizing was chosen when tunnel bytes shared the control
+/// socket; on the dedicated data plane it is the throughput limiter, but the
+/// frame size and credit window are a cross-version contract — the receiver
+/// closes any stream whose frame exceeds the agreed `max_chunk`, and both ends
+/// seed credit from the agreed `initial_window`. So the larger sizing can't be a
+/// constant bump: it is negotiated. The backend picks
+/// [`TunnelSizing::V2`] only when the proxy advertises this, and echoes the
+/// agreed profile in `RegisterAck.tunnel_sizing`. A v2 proxy still advertises
+/// [`PROXY_CAPABILITY_TUNNEL_BINARY_V1`] too, so a v1 backend keeps working.
+pub const PROXY_CAPABILITY_TUNNEL_BINARY_V2: &str = "session.tunnel_binary_v2";
 
 /// Split [`VERSION`] into `(major, minor, patch)` numeric components.
 /// `None` on the (impossible-by-construction) malformed string.

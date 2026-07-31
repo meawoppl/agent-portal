@@ -41,10 +41,70 @@
 //! UTF-8). Chunk-size policy stays with the callers, which enforce it against
 //! their negotiated flow-control window.
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use ws_bridge::{DecodeError, EncodeError, WsCodec, WsEndpoint, WsMessage};
 
 use super::types::TunnelRefuseReason;
+
+/// Per-stream tunnel sizing, negotiated once per connection at registration and
+/// then fixed for that connection's life (#1511).
+///
+/// Both ends must use the same values: the sender chunks payloads to `max_chunk`
+/// and the receiver **closes any stream whose frame exceeds it**; the sender's
+/// credit gate and the receiver's credit book are both seeded from
+/// `initial_window`, so a mismatch makes the sender overrun the book and every
+/// stream dies as "beyond granted window". That is why raising these is a
+/// negotiation, not a constant bump — see [`crate::PROXY_CAPABILITY_TUNNEL_BINARY_V2`].
+///
+/// The backend computes the agreed profile from the proxy's advertised
+/// capabilities and reports it back in `RegisterAck.tunnel_sizing`; both ends
+/// then configure their tunnel to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TunnelSizing {
+    /// Max decoded payload bytes per `Data` frame.
+    pub max_chunk: u32,
+    /// Initial per-stream, per-direction flow-control credit.
+    pub initial_window: u32,
+}
+
+impl TunnelSizing {
+    /// The original profile (`session.tunnel_binary_v1`): 16 KiB frames, 64 KiB
+    /// window. Also the default whenever nothing was negotiated — an older
+    /// backend that sends no `tunnel_sizing`, or the JSON-over-control-socket
+    /// fallback.
+    pub const V1: TunnelSizing = TunnelSizing {
+        max_chunk: 16 * 1024,
+        initial_window: 64 * 1024,
+    };
+
+    /// The larger profile (`session.tunnel_binary_v2`): 64 KiB frames, 256 KiB
+    /// window. The 4× window-to-chunk ratio matches V1, so a single stream can
+    /// keep four frames in flight before waiting on a grant.
+    pub const V2: TunnelSizing = TunnelSizing {
+        max_chunk: 64 * 1024,
+        initial_window: 256 * 1024,
+    };
+
+    /// The sizing to use given a proxy's advertised capabilities. The backend is
+    /// the negotiator: it supports every profile up to the newest it knows and
+    /// picks the highest the proxy also advertised. Unknown/empty capabilities
+    /// yield [`TunnelSizing::V1`], which is what a pre-#1511 proxy gets.
+    pub fn negotiate(proxy_capabilities: &[String]) -> TunnelSizing {
+        let advertises = |cap: &str| proxy_capabilities.iter().any(|c| c == cap);
+        if advertises(crate::PROXY_CAPABILITY_TUNNEL_BINARY_V2) {
+            TunnelSizing::V2
+        } else {
+            TunnelSizing::V1
+        }
+    }
+}
+
+impl Default for TunnelSizing {
+    fn default() -> Self {
+        TunnelSizing::V1
+    }
+}
 
 /// The dedicated data-plane endpoint. Symmetric: both directions speak
 /// [`TunnelFrame`].

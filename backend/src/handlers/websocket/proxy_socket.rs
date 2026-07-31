@@ -242,7 +242,11 @@ fn handle_proxy_message(
             // capability. Bound to this connection's generation (known only
             // after `register_session` below), so it cannot be replayed onto a
             // later reconnect. `None` ⇒ tunnel bytes keep riding this socket.
+            // The negotiated sizing rides with it: reported in the ack so the
+            // proxy configures its tunnel, and embedded in the ticket so the
+            // data-socket registration knows it too (#1511).
             let mut tunnel_data_ticket = None;
+            let mut tunnel_sizing = None;
 
             if result.success {
                 // Only now do we expose the socket via SessionManager and
@@ -256,12 +260,16 @@ fn handle_proxy_message(
                     .iter()
                     .any(|c| c == shared::PROXY_CAPABILITY_TUNNEL_BINARY_V1)
                 {
+                    let sizing = shared::TunnelSizing::negotiate(&capabilities);
                     tunnel_data_ticket = crate::handlers::websocket::mint_tunnel_ticket(
                         &app_state.jwt_secret,
                         claude_session_id,
                         &key,
                         gen,
+                        sizing,
                     );
+                    // Only report sizing alongside a ticket the proxy can act on.
+                    tunnel_sizing = tunnel_data_ticket.as_ref().map(|_| sizing);
                 }
                 *session_key = Some(key);
                 *connection_gen = Some(gen);
@@ -278,6 +286,7 @@ fn handle_proxy_message(
                 max_image_mb: app_state.max_image_mb,
                 retryable: result.retryable,
                 tunnel_data_ticket,
+                tunnel_sizing,
             });
 
             info!(

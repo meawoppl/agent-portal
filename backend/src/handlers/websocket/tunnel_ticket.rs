@@ -42,8 +42,23 @@ struct TicketClaims {
     session_key: String,
     /// Control-connection generation this data socket is bound to.
     gen: u64,
+    /// Negotiated frame size (#1511); defaulted so a ticket minted by an older
+    /// backend still decodes, as V1.
+    #[serde(default = "default_max_chunk")]
+    max_chunk: u32,
+    /// Negotiated flow-control window (#1511); defaulted as V1.
+    #[serde(default = "default_initial_window")]
+    initial_window: u32,
     exp: i64,
     iat: i64,
+}
+
+fn default_max_chunk() -> u32 {
+    shared::TunnelSizing::V1.max_chunk
+}
+
+fn default_initial_window() -> u32 {
+    shared::TunnelSizing::V1.initial_window
 }
 
 /// What a verified ticket authorizes.
@@ -52,6 +67,9 @@ pub struct TunnelTicket {
     pub session_id: Uuid,
     pub session_key: String,
     pub gen: u64,
+    /// Sizing the backend negotiated for this connection; the data socket's
+    /// streams are configured to it.
+    pub sizing: shared::TunnelSizing,
 }
 
 /// Mint a data-plane ticket for `(session_id, session_key, gen)`.
@@ -60,6 +78,7 @@ pub fn mint(
     session_id: Uuid,
     session_key: &str,
     gen: u64,
+    sizing: shared::TunnelSizing,
     now: i64,
 ) -> Option<String> {
     let claims = TicketClaims {
@@ -67,6 +86,8 @@ pub fn mint(
         session_id,
         session_key: session_key.to_string(),
         gen,
+        max_chunk: sizing.max_chunk,
+        initial_window: sizing.initial_window,
         exp: now + TICKET_TTL_SECS,
         iat: now,
     };
@@ -98,6 +119,10 @@ pub fn verify(jwt_secret: &str, token: &str) -> Option<TunnelTicket> {
         session_id: data.claims.session_id,
         session_key: data.claims.session_key,
         gen: data.claims.gen,
+        sizing: shared::TunnelSizing {
+            max_chunk: data.claims.max_chunk,
+            initial_window: data.claims.initial_window,
+        },
     })
 }
 
@@ -114,20 +139,37 @@ mod tests {
     #[test]
     fn roundtrips_session_key_and_generation() {
         let sid = Uuid::new_v4();
-        let token = mint(SECRET, sid, "session-key", 42, now()).expect("mint");
+        let token = mint(
+            SECRET,
+            sid,
+            "session-key",
+            42,
+            shared::TunnelSizing::V2,
+            now(),
+        )
+        .expect("mint");
         assert_eq!(
             verify(SECRET, &token),
             Some(TunnelTicket {
                 session_id: sid,
                 session_key: "session-key".to_string(),
                 gen: 42,
+                sizing: shared::TunnelSizing::V2,
             })
         );
     }
 
     #[test]
     fn rejects_wrong_secret() {
-        let token = mint(SECRET, Uuid::new_v4(), "k", 1, now()).expect("mint");
+        let token = mint(
+            SECRET,
+            Uuid::new_v4(),
+            "k",
+            1,
+            shared::TunnelSizing::V1,
+            now(),
+        )
+        .expect("mint");
         assert!(verify("a-different-secret-at-least-32-bytes!!", &token).is_none());
     }
 
@@ -137,7 +179,15 @@ mod tests {
     #[test]
     fn rejects_expired_ticket() {
         let stale = now() - TICKET_TTL_SECS - 3600;
-        let token = mint(SECRET, Uuid::new_v4(), "k", 1, stale).expect("mint");
+        let token = mint(
+            SECRET,
+            Uuid::new_v4(),
+            "k",
+            1,
+            shared::TunnelSizing::V1,
+            stale,
+        )
+        .expect("mint");
         assert!(verify(SECRET, &token).is_none());
     }
 
@@ -208,8 +258,8 @@ mod tests {
     #[test]
     fn generation_distinguishes_successive_connections() {
         let sid = Uuid::new_v4();
-        let first = mint(SECRET, sid, "k", 7, now()).expect("mint");
-        let second = mint(SECRET, sid, "k", 8, now()).expect("mint");
+        let first = mint(SECRET, sid, "k", 7, shared::TunnelSizing::V1, now()).expect("mint");
+        let second = mint(SECRET, sid, "k", 8, shared::TunnelSizing::V1, now()).expect("mint");
         assert_eq!(verify(SECRET, &first).unwrap().gen, 7);
         assert_eq!(verify(SECRET, &second).unwrap().gen, 8);
     }

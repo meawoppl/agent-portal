@@ -231,17 +231,23 @@ Semantics:
   not configurable.
 - `TunnelData`: stream bytes. On the data plane these are raw binary; on the
   control-socket fallback they are base64 inside JSON text. Either way at most
-  `MAX_CHUNK` (**16 KiB**) decoded per frame.
-- Flow control: each direction starts with an `INITIAL_WINDOW` (**64 KiB**)
+  the negotiated `max_chunk` decoded per frame.
+- Flow control: each direction starts with the negotiated `initial_window`
   credit per stream. A sender must not exceed its window; the receiver grants
   more via `TunnelWindow` as it drains bytes to the underlying socket.
-- **`MAX_CHUNK` and `INITIAL_WINDOW` are a cross-version contract.** The sender
-  chunks to `MAX_CHUNK` and the receiver closes any stream exceeding it; the
-  sender's credit gate and the receiver's credit book are seeded from the same
-  `INITIAL_WINDOW`. Raising either on one side alone makes a build-skewed peer
-  tear down every stream mid-deploy, so larger frames/windows need a negotiated
-  protocol bump (`…_v2`), not a constant edit. `MAX_STREAMS` is the exception —
-  purely proxy-local, so it can be raised on its own.
+- **Frame size / window are negotiated, because they're a cross-version
+  contract** (`shared::TunnelSizing`, #1511). The sender chunks to `max_chunk`
+  and the receiver closes any stream exceeding it; the sender's credit gate and
+  the receiver's credit book are seeded from the same `initial_window`. So they
+  can't be a constant bump — a build-skewed peer would tear down every stream
+  mid-deploy. Instead the proxy advertises the profiles it supports
+  (`session.tunnel_binary_v1`, and `…_v2` if newer), the backend picks the
+  largest both know and reports it in `RegisterAck.tunnel_sizing` (and embeds it
+  in the data-plane ticket), and both ends configure to it. A v2 proxy still
+  advertises v1, so a v1 backend keeps issuing V1. Profiles: **V1** = 16 KiB
+  frames / 64 KiB window (what the data plane shipped with); **V2** = 64 KiB /
+  256 KiB. `MAX_STREAMS` is the exception — purely proxy-local, so it can be
+  raised on its own.
 - **Writer capacity, not just credit.** Tunnel senders are pull-based: they read
   from the TCP socket / HTTP body only while holding stream credit, never
   eagerly, so credit is what bounds in-flight bytes. Beyond that, the two ends
@@ -620,12 +626,13 @@ protocol addition in M1 is a minor bump).
   links** (ngrok-style). Both are auth-model expansions to design separately.
 - **Path-prefix fallback mode** — superseded by subdomains; not worth
   maintaining two schemes.
-- **Negotiated larger chunk/window sizes** on the data plane. Now that stream
-  bytes have their own socket, the small 16 KiB/64 KiB values (chosen because the
-  socket was *shared*) are the main throughput limiter — but both ends must
-  agree, so this needs a `…_v2` capability rather than a constant bump.
 - **Pooling upstream tunnel connections** (#1468). Every request still opens its
   own stream, which is what makes `MAX_STREAMS` reachable at all and adds a
-  round-trip before each request.
+  round-trip before each request. With the V2 sizing (#1511) landed, this is now
+  the main remaining throughput lever, and it may dominate the frame-size win —
+  worth benchmarking the two together.
+- **A larger sizing profile (`…_v3`)** if V2's 64 KiB/256 KiB proves too small
+  once pooling lands. The negotiation (`shared::TunnelSizing`) is in place; a new
+  profile is a capability const plus a `TunnelSizing` entry.
 - **Port auto-discovery** (sniffing `LISTEN` sockets) — explicit declaration
   keeps the allowlist meaningful and the reminder teaches agents to declare.

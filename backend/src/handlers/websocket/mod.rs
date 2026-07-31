@@ -28,12 +28,14 @@ pub(crate) fn mint_tunnel_ticket(
     session_id: uuid::Uuid,
     session_key: &str,
     gen: u64,
+    sizing: shared::TunnelSizing,
 ) -> Option<String> {
     tunnel_ticket::mint(
         jwt_secret,
         session_id,
         session_key,
         gen,
+        sizing,
         chrono::Utc::now().timestamp(),
     )
 }
