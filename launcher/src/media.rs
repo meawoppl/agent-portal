@@ -13,7 +13,10 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 
 use shared::api::ShowMediaResponse;
-use shared::media::{media_kind, MediaKind, SUPPORTED_FORMATS_HINT};
+use shared::media::{
+    has_gif_magic, has_jpeg_magic, has_mp4_magic, has_png_magic, has_webm_magic, has_webp_magic,
+    looks_like_svg, media_kind, MediaKind, SUPPORTED_FORMATS_HINT,
+};
 
 /// Detect a supported media content type from `path`'s extension, verified
 /// against `bytes`' magic. Returns the canonical content type (e.g.
@@ -48,43 +51,6 @@ pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static 
         ));
     }
     Ok(content_type)
-}
-
-fn has_png_magic(b: &[u8]) -> bool {
-    b.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-}
-
-fn has_jpeg_magic(b: &[u8]) -> bool {
-    b.starts_with(&[0xFF, 0xD8, 0xFF])
-}
-
-fn has_gif_magic(b: &[u8]) -> bool {
-    b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a")
-}
-
-fn has_webp_magic(b: &[u8]) -> bool {
-    b.len() >= 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP"
-}
-
-fn has_mp4_magic(b: &[u8]) -> bool {
-    // ISO Base Media: an `ftyp` box at offset 4.
-    b.len() >= 12 && &b[4..8] == b"ftyp"
-}
-
-fn has_webm_magic(b: &[u8]) -> bool {
-    // EBML header (Matroska/WebM).
-    b.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
-}
-
-/// SVG is XML text, so there's no single magic number. Skip a UTF-8 BOM and
-/// leading whitespace, then look for an `<svg` (or `<?xml` prolog) near the
-/// start.
-fn looks_like_svg(b: &[u8]) -> bool {
-    let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(b);
-    let head = &b[..b.len().min(1024)];
-    let text = String::from_utf8_lossy(head).to_ascii_lowercase();
-    let trimmed = text.trim_start();
-    trimmed.starts_with("<svg") || trimmed.starts_with("<?xml") || text.contains("<svg")
 }
 
 /// Per-kind size cap (MB) from the environment, defaulting to the documented
