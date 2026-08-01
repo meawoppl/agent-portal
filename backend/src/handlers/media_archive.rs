@@ -317,7 +317,6 @@ mod tests {
         let nonce = Uuid::new_v4();
         let owner: Uuid = diesel::insert_into(users::table)
             .values(&NewUser {
-                google_id: format!("media_rt_{nonce}"),
                 email: format!("media_rt_{nonce}@example.invalid"),
                 name: Some("Media RT".into()),
                 avatar_url: None,

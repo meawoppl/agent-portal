@@ -198,7 +198,6 @@ mod db_tests {
         use crate::schema::users;
         let nonce = Uuid::new_v4();
         let new_user = NewUser {
-            google_id: format!("test_session_access_{}_{}", label, nonce),
             email: format!("test_session_access_{}_{}@example.invalid", label, nonce),
             name: Some(format!("Test {}", label)),
             avatar_url: None,

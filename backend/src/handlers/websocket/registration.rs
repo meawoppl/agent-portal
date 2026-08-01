@@ -545,7 +545,6 @@ mod tests {
         let nonce = Uuid::new_v4();
         let user = diesel::insert_into(users::table)
             .values(&NewUser {
-                google_id: format!("test_launcher_version_{nonce}"),
                 email: format!("test_launcher_version_{nonce}@example.invalid"),
                 name: Some("Launcher Version Test".to_string()),
                 avatar_url: None,

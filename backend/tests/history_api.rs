@@ -49,7 +49,6 @@ fn create_user(conn: &mut PgConnection, email: &str, is_admin: bool) -> User {
     use backend::schema::users;
     let user: User = diesel::insert_into(users::table)
         .values(backend::models::NewUser {
-            google_id: format!("hist-test-{}", Uuid::new_v4()),
             email: email.to_string(),
             name: Some(email.split('@').next().unwrap_or(email).to_string()),
             avatar_url: None,

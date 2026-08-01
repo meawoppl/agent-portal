@@ -8,7 +8,6 @@ use uuid::Uuid;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct User {
     pub id: Uuid,
-    pub google_id: String,
     pub email: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
@@ -24,10 +23,36 @@ pub struct User {
 #[derive(Debug, Insertable)]
 #[diesel(table_name = crate::schema::users)]
 pub struct NewUser {
-    pub google_id: String,
     pub email: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
+}
+
+/// A login identity: one (provider, subject) pair belonging to a user (#1535).
+///
+/// Identity lives here rather than on `users` so one account can hold several
+/// providers. `subject` is the provider's immutable id for the person (OIDC
+/// `sub`, GitHub's numeric id as text) — deliberately never the email, which
+/// can change hands.
+#[derive(Debug, Queryable, Selectable, Clone)]
+#[diesel(table_name = crate::schema::user_identities)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct UserIdentity {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub provider: String,
+    pub subject: String,
+    pub email: Option<String>,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::user_identities)]
+pub struct NewUserIdentity {
+    pub user_id: Uuid,
+    pub provider: String,
+    pub subject: String,
+    pub email: Option<String>,
 }
 
 /// WIRE-SHAPE WARNING: this model is `#[serde(flatten)]`-ed onto the

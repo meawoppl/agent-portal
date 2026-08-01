@@ -75,8 +75,9 @@ pub fn seed_dev_user(pool: &DbPool) -> Result<()> {
     let test_user = dev_user(&mut conn).optional()?;
 
     if test_user.is_none() {
+        // Dev login resolves by email (see `auth::dev_user`), so this user needs
+        // no `user_identities` row — it never goes through a provider.
         let new_user = NewUser {
-            google_id: "dev_mode_test_user".to_string(),
             email: DEV_USER_EMAIL.to_string(),
             name: Some("Test User".to_string()),
             avatar_url: None,

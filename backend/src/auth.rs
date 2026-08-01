@@ -159,7 +159,6 @@ mod tests {
     fn user(disabled: bool) -> User {
         User {
             id: Uuid::new_v4(),
-            google_id: "google-id".to_string(),
             email: "user@example.com".to_string(),
             name: Some("User".to_string()),
             avatar_url: None,
@@ -191,7 +190,6 @@ mod tests {
         let id = Uuid::new_v4();
         let mut user: User = diesel::insert_into(users::table)
             .values(&NewUser {
-                google_id: format!("google-{id}"),
                 email: format!("auth-{id}@example.com"),
                 name: Some("Auth Test".to_string()),
                 avatar_url: None,
