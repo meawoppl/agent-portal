@@ -263,10 +263,22 @@ diesel::table! {
 }
 
 diesel::table! {
+    user_identities (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 32]
+        provider -> Varchar,
+        #[max_length = 255]
+        subject -> Varchar,
+        #[max_length = 255]
+        email -> Nullable<Varchar>,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     users (id) {
         id -> Uuid,
-        #[max_length = 255]
-        google_id -> Varchar,
         #[max_length = 255]
         email -> Varchar,
         #[max_length = 255]
@@ -300,6 +312,7 @@ diesel::joinable!(session_forwards -> sessions (session_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
+diesel::joinable!(user_identities -> users (user_id));
 diesel::joinable!(turn_metrics -> messages (user_message_id));
 diesel::joinable!(turn_metrics -> sessions (session_id));
 diesel::joinable!(turn_metrics -> users (user_id));
@@ -317,6 +330,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     session_continuations,
     session_forwards,
     session_members,
+    user_identities,
     sessions,
     turn_metrics,
     users,

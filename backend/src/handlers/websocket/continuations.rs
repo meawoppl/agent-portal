@@ -685,7 +685,6 @@ mod tests {
         use crate::schema::users;
         let nonce = Uuid::new_v4();
         let new_user = NewUser {
-            google_id: format!("test_overload_{nonce}"),
             email: format!("test_overload_{nonce}@example.invalid"),
             name: Some("Overload Test".to_string()),
             avatar_url: None,

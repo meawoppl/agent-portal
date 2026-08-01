@@ -18,7 +18,7 @@ use crate::{
     handlers::proxy_tokens::{
         issue_proxy_token_with_type, verify_and_get_user_with_token, TokenPersist,
     },
-    models::{NewUser, User},
+    models::User,
     routes,
     schema::proxy_auth_tokens,
     AppState,
@@ -26,7 +26,10 @@ use crate::{
 
 use shared::protocol::SESSION_COOKIE_NAME;
 
+mod identity;
 mod oauth;
+
+pub use identity::{ProviderIdentity, PROVIDER_GITHUB, PROVIDER_GOOGLE};
 
 const MOBILE_TOKEN_TTL_DAYS: u32 = 30;
 const TOKEN_REFRESH_GRACE_MINUTES: i64 = 10;
@@ -122,6 +125,12 @@ pub struct AuthCallbackQuery {
 struct GoogleUserInfo {
     sub: String,
     email: String,
+    /// Google's own verification flag. Previously ignored; the account-linking
+    /// rule (#1535) requires it, and an unverified Google address must not be
+    /// able to claim an allow-listed domain. Defaults to `false` so a response
+    /// missing the field fails closed.
+    #[serde(default)]
+    email_verified: bool,
     name: Option<String>,
     picture: Option<String>,
 }
@@ -184,7 +193,12 @@ pub async fn callback(
             AppError::Internal(format!("Failed to exchange OAuth code: {e}"))
         })?;
 
-    // Fetch user info from Google
+    // Fetch user info from Google.
+    //
+    // Must stay on the OIDC (`v3`) endpoint: it spells the verification flag
+    // `email_verified`, whereas the legacy `v2` endpoint spells it
+    // `verified_email`. Since `GoogleUserInfo::email_verified` fails closed,
+    // switching endpoints without renaming the field would reject every login.
     let client = reqwest::Client::new();
     let user_info: GoogleUserInfo = client
         .get("https://www.googleapis.com/oauth2/v3/userinfo")
@@ -226,31 +240,35 @@ pub async fn callback(
         return Ok(redirect);
     }
 
-    // Save or update user in database
+    // Resolve the login to a user: existing identity, link on a verified email,
+    // or create. See `identity` for the rule and why linking is gated on
+    // verification (#1535).
     let mut conn = app_state.conn()?;
 
-    use crate::schema::users::dsl::*;
+    let resolved = identity::resolve_user(
+        &mut conn,
+        &ProviderIdentity {
+            provider: PROVIDER_GOOGLE,
+            subject: user_info.sub,
+            email: Some(user_info.email.clone()),
+            email_verified: user_info.email_verified,
+            name: user_info.name,
+            avatar_url: user_info.picture,
+        },
+    )
+    .map_err(|e| AppError::DbQuery(format!("Failed to resolve login identity: {e}")))?;
 
-    let user = users
-        .filter(google_id.eq(&user_info.sub))
-        .first::<User>(&mut conn)
-        .optional()
-        .map_err(|e| AppError::DbQuery(format!("Failed to look up user by google_id: {e}")))?;
-
-    let user = match user {
-        Some(user) => user,
-        None => {
-            let new_user = NewUser {
-                google_id: user_info.sub,
-                email: user_info.email,
-                name: user_info.name,
-                avatar_url: user_info.picture,
-            };
-
-            diesel::insert_into(users)
-                .values(&new_user)
-                .get_result::<User>(&mut conn)
-                .map_err(|e| AppError::DbQuery(format!("Failed to create user: {e}")))?
+    let user = match resolved {
+        Ok(user) => user,
+        Err(identity::IdentityError::UnverifiedEmail) => {
+            warn!(
+                target: "auth_audit",
+                event = "oauth_callback_denied",
+                flow = callback_kind,
+                reason = "unverified_email",
+                user_email = %user_info.email,
+            );
+            return Ok(unverified_email_redirect());
         }
     };
 
@@ -562,6 +580,20 @@ fn remove_session_cookie() -> Cookie<'static> {
     cookie
 }
 
+/// The provider gave us no verified email and we have never seen this identity,
+/// so we refuse rather than silently forking a second account for the same
+/// person (#1535). Reuses the access-denied page with an explanatory reason.
+fn unverified_email_redirect() -> Redirect {
+    Redirect::temporary(&format!(
+        "{}?reason={}",
+        routes::ACCESS_DENIED,
+        encode_query_value(
+            "Your identity provider did not supply a verified email address. \
+             Verify your email with that provider, then sign in again."
+        )
+    ))
+}
+
 fn banned_redirect(reason: &str) -> Redirect {
     Redirect::temporary(&format!(
         "{}?reason={}",
@@ -599,6 +631,32 @@ mod tests {
     use crate::models::{NewUser, ProxyAuthToken};
     use crate::schema::{proxy_auth_tokens, users};
     use axum::http::{header::AUTHORIZATION, HeaderValue};
+
+    /// Pins the field names of the OIDC (`v3`) userinfo response. The legacy
+    /// `v2` endpoint spells the flag `verified_email`, and because the field
+    /// fails closed, getting this wrong rejects every Google login rather than
+    /// failing loudly — so assert the happy-path payload parses as verified.
+    #[test]
+    fn google_userinfo_parses_the_oidc_verification_flag() {
+        let body = r#"{
+            "sub": "1234567890",
+            "email": "person@example.com",
+            "email_verified": true,
+            "name": "A Person",
+            "picture": "https://example.invalid/p.png"
+        }"#;
+        let info: GoogleUserInfo = serde_json::from_str(body).expect("parses v3 userinfo");
+        assert_eq!(info.sub, "1234567890");
+        assert!(info.email_verified);
+
+        // A response without the flag must fail closed, not default to trusted.
+        let missing = r#"{"sub": "1", "email": "p@example.com"}"#;
+        let info: GoogleUserInfo = serde_json::from_str(missing).expect("parses");
+        assert!(
+            !info.email_verified,
+            "a missing verification flag must not be treated as verified"
+        );
+    }
 
     #[test]
     fn auth_user_error_preserves_forbidden_and_database_errors() {
@@ -665,7 +723,6 @@ mod tests {
         let id = uuid::Uuid::new_v4();
         diesel::insert_into(users::table)
             .values(&NewUser {
-                google_id: format!("google-{id}"),
                 email: format!("mobile-{id}@example.com"),
                 name: Some("Mobile Test".to_string()),
                 avatar_url: None,
