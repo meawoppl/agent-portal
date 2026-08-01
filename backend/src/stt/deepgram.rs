@@ -1,0 +1,154 @@
+//! Deepgram pre-recorded transcription (`/v1/listen`).
+//!
+//! Deliberately the opposite request shape from the OpenAI provider — raw body
+//! rather than multipart, query parameters rather than form fields, a nested
+//! response rather than a flat one — which is what makes the pair a real test
+//! of the abstraction rather than two spellings of the same call.
+//!
+//! Bias goes in as repeated `keyterm` parameters. That is a Nova-3 feature; on
+//! older models the equivalent parameter is `keywords`, so overriding
+//! `PORTAL_STT_MODEL` to a pre-Nova-3 model silently loses biasing (the request
+//! still succeeds — Deepgram ignores unknown parameters).
+
+use serde::Deserialize;
+
+use super::{SttError, TranscribeRequest};
+
+const ENDPOINT: &str = "https://api.deepgram.com/v1/listen";
+const DEFAULT_MODEL: &str = "nova-3";
+
+#[derive(Clone)]
+pub struct DeepgramStt {
+    api_key: String,
+    model: String,
+    /// Owned per provider, matching the push transports — a `Client` is a
+    /// connection pool, so it must outlive individual requests.
+    http: reqwest::Client,
+}
+
+#[derive(Deserialize)]
+struct ListenBody {
+    results: Option<ListenResults>,
+}
+
+#[derive(Deserialize)]
+struct ListenResults {
+    channels: Vec<ListenChannel>,
+}
+
+#[derive(Deserialize)]
+struct ListenChannel {
+    alternatives: Vec<ListenAlternative>,
+}
+
+#[derive(Deserialize)]
+struct ListenAlternative {
+    transcript: String,
+}
+
+impl DeepgramStt {
+    pub fn new(api_key: String, model: Option<String>) -> Self {
+        Self {
+            api_key,
+            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            http: reqwest::Client::new(),
+        }
+    }
+
+    pub async fn transcribe(&self, request: TranscribeRequest<'_>) -> Result<String, SttError> {
+        // `smart_format` supplies punctuation and capitalization, which the
+        // transcript needs to read as a prompt rather than a wall of words.
+        let mut query: Vec<(&str, String)> = vec![
+            ("model", self.model.clone()),
+            ("smart_format", "true".to_string()),
+        ];
+        if let Some(language) = request.language {
+            query.push(("language", language.to_string()));
+        }
+        for term in request.keyterms {
+            query.push(("keyterm", term.clone()));
+        }
+
+        let response = self
+            .http
+            .post(ENDPOINT)
+            .query(&query)
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!("Token {}", self.api_key),
+            )
+            .header(reqwest::header::CONTENT_TYPE, request.content_type)
+            .body(request.audio)
+            .send()
+            .await
+            .map_err(|e| SttError::Transport(e.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SttError::Provider(format!(
+                "HTTP {status}: {}",
+                body.chars().take(400).collect::<String>()
+            )));
+        }
+
+        let body: ListenBody = response
+            .json()
+            .await
+            .map_err(|e| SttError::Decode(e.to_string()))?;
+        Ok(first_transcript(&body))
+    }
+}
+
+/// Pull the best alternative out of the nested response.
+///
+/// Silence is a successful transcription of nothing — Deepgram answers with an
+/// empty `transcript`, or occasionally no channels at all — so a missing value
+/// is an empty string rather than an error.
+fn first_transcript(body: &ListenBody) -> String {
+    body.results
+        .as_ref()
+        .and_then(|r| r.channels.first())
+        .and_then(|c| c.alternatives.first())
+        .map(|a| a.transcript.trim().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json: &str) -> ListenBody {
+        serde_json::from_str(json).expect("valid Deepgram body")
+    }
+
+    #[test]
+    fn reads_the_first_alternative() {
+        let body = parse(
+            r#"{"results":{"channels":[{"alternatives":[
+                {"transcript":"run cargo clippy"},{"transcript":"run cargo clippie"}]}]}}"#,
+        );
+        assert_eq!(first_transcript(&body), "run cargo clippy");
+    }
+
+    /// Recording silence must read as "nothing said", not as a failure.
+    #[test]
+    fn silence_yields_an_empty_transcript() {
+        assert_eq!(
+            first_transcript(&parse(
+                r#"{"results":{"channels":[{"alternatives":[{"transcript":""}]}]}}"#
+            )),
+            ""
+        );
+        assert_eq!(
+            first_transcript(&parse(r#"{"results":{"channels":[]}}"#)),
+            ""
+        );
+        assert_eq!(first_transcript(&parse(r#"{"metadata":{}}"#)), "");
+    }
+
+    #[test]
+    fn the_default_model_is_used_when_none_is_configured() {
+        assert_eq!(DeepgramStt::new("k".to_string(), None).model, DEFAULT_MODEL);
+    }
+}

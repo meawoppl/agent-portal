@@ -901,6 +901,10 @@ When making changes, verify:
 | `MESSAGE_RETENTION_COUNT` | Max messages per session | Optional (default: 100) |
 | `MESSAGE_RETENTION_DAYS` | Days before message deletion | Optional (default: 30) |
 | `SESSION_MAX_AGE_DAYS` | Days before session deletion | Optional (default: 14) |
+| `PORTAL_STT_BACKEND` | Server-side speech-to-text provider: `disabled`, `openai`, or `deepgram`. Unset/`disabled` keeps voice on the browser's Web Speech API | Optional (default: disabled) |
+| `PORTAL_STT_API_KEY` | API key for the selected STT provider | Required when `PORTAL_STT_BACKEND` is not `disabled` |
+| `PORTAL_STT_MODEL` | Override the provider's default model (`gpt-4o-transcribe` / `nova-3`). Note: Deepgram keyterm biasing needs Nova-3 | Optional |
+| `PORTAL_MAX_AUDIO_MB` | Per-recording cap for `POST /api/stt/transcribe` | Optional (default: 25) |
 | `PORTAL_MAX_IMAGE_MB` | Max image size for proxies (also the per-file cap for image `agent-portal show`) | Optional (default: 10) |
 | `PORTAL_MAX_VIDEO_MB` | Per-file cap for videos shown via `agent-portal show` | Optional (default: 100) |
 | `PORTAL_IMAGE_STORE_MAX_MB` | Backend served-image cache total-byte cap (LRU eviction past this) | Optional (default: 256) |
@@ -925,7 +929,29 @@ When making changes, verify:
 | `PORTAL_APNS_BUNDLE_ID` | App bundle id used as the APNs topic | Required with other `PORTAL_APNS_*` vars |
 | `PORTAL_FCM_SERVICE_ACCOUNT_PATH` | Google service-account JSON path for FCM v1 native Android push | Optional (FCM disabled when unset) |
 
-Note: Dev mode is enabled via `--dev-mode` CLI flag, not an environment variable. Voice input is browser-native (Web Speech API on Chromium / Safari); no server-side speech credentials are needed.
+Note: Dev mode is enabled via `--dev-mode` CLI flag, not an environment variable. Voice input is browser-native (Web Speech API on Chromium / Safari) unless `PORTAL_STT_BACKEND` is configured — see below.
+
+### Speech-to-text
+
+Voice defaults to the browser's Web Speech API and needs no credentials. Setting
+`PORTAL_STT_BACKEND` switches capture to a hosted provider, which is worth doing
+because the browser API has **no vocabulary hook**: `clippy`, `Diesel`, branch
+names and file paths come back mangled, and Firefox has no support at all.
+
+`backend/src/stt/` holds the providers as an **enum, not a trait object** — same
+reasoning as `ArchiveStore`, so adding one is a compile error until every arm is
+filled in. A new provider is: a variant, a `from_env` arm, a `key()` arm, and a
+module implementing `transcribe`.
+
+The accuracy comes mostly from `stt::session_keyterms`, which turns the session's
+repo / branch / working directory / agent into bias terms. Keep that list short
+and specific — a long tail of common words measurably *hurts* accuracy, which is
+why `STOP_TERMS` and `MAX_KEYTERMS` exist.
+
+**Do not make this mandatory.** Server STT was removed once already (2.6.x)
+because it required a GCP service account, a gRPC client, a `/ws/voice/{id}`
+route and a PCM `AudioWorklet`. The feature stays off unless configured, and the
+browser path must keep working untouched.
 
 ### Common Imports
 

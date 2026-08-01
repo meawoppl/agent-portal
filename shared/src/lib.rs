@@ -855,6 +855,12 @@ pub struct AppConfig {
     /// Empty in dev mode, where login is bypassed entirely.
     #[serde(default)]
     pub auth_providers: Vec<String>,
+    /// Whether the server can transcribe audio itself. When false the frontend
+    /// keeps using the browser's Web Speech API, which is why this is a
+    /// capability flag rather than a provider name — the client only needs to
+    /// know which capture path to take.
+    #[serde(default)]
+    pub stt_enabled: bool,
 }
 
 #[cfg(test)]

@@ -228,6 +228,15 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         )
         // Serve videos shown via `agent-portal show`, with HTTP Range support.
         .route("/api/media/{id}", get(handlers::media_store::serve_media))
+        // Voice recordings post the whole utterance as the body; the handler
+        // enforces the exact cap, but axum's 2 MB default would reject a long
+        // one first.
+        .route(
+            "/api/stt/transcribe",
+            post(handlers::stt::transcribe).layer(axum::extract::DefaultBodyLimit::max(
+                app_state.max_audio_mb as usize * 1024 * 1024,
+            )),
+        )
         // Session-history browser over the long-term archive. Visibility
         // (owner / shared / admin) is enforced in each handler.
         .route(
