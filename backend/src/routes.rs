@@ -22,6 +22,8 @@ pub const ACCESS_DENIED: &str = "/access-denied";
 
 pub const AUTH_GOOGLE: &str = "/api/auth/google";
 pub const AUTH_GOOGLE_CALLBACK: &str = "/api/auth/google/callback";
+pub const AUTH_GITHUB: &str = "/api/auth/github";
+pub const AUTH_GITHUB_CALLBACK: &str = "/api/auth/github/callback";
 pub const AUTH_ME: &str = "/api/auth/me";
 pub const AUTH_REFRESH: &str = "/api/auth/refresh";
 pub const AUTH_TOKEN_LOGIN: &str = "/api/auth/token-login";
@@ -84,6 +86,8 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
     let auth_login_routes = Router::new()
         .route(AUTH_GOOGLE, get(handlers::auth::login))
         .route(AUTH_GOOGLE_CALLBACK, get(handlers::auth::callback))
+        .route(AUTH_GITHUB, get(handlers::auth::github_login))
+        .route(AUTH_GITHUB_CALLBACK, get(handlers::auth::github_callback))
         .route(AUTH_DEV_LOGIN, get(handlers::auth::dev_login))
         .route(AUTH_DEVICE_LOGIN, get(handlers::auth::device_login))
         .layer(rate_limit(2, 20))

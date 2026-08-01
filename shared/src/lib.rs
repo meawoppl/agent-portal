@@ -847,6 +847,14 @@ pub struct AppConfig {
     /// closing a session preserves archived history only when this is true.
     #[serde(default)]
     pub archive_enabled: bool,
+    /// Login providers this deploy has credentials for, in the order they
+    /// should be offered (`"google"`, `"github"`). The splash page renders one
+    /// button per entry, so a provider without credentials is never shown — a
+    /// button that always 404s is worse than no button.
+    ///
+    /// Empty in dev mode, where login is bypassed entirely.
+    #[serde(default)]
+    pub auth_providers: Vec<String>,
 }
 
 #[cfg(test)]

@@ -552,9 +552,35 @@ There are **TWO COMPLETELY SEPARATE** authentication flows:
 **Critical**: The OAuth callback distinguishes flows by checking if `state` starts with `device:`. Regular CSRF tokens don't have this prefix.
 
 **Quick Reference**:
-- Web login → `/api/auth/google` → Google OAuth → `/dashboard`
+- Web login → `/api/auth/google` (or `/api/auth/github`) → provider OAuth → `/dashboard`
 - Device flow → CLI polls `/api/auth/device/poll` while user approves in browser
 - Dev mode bypasses OAuth, auto-logs in as `testing@testing.local`
+
+### Login providers and identity (#1535)
+
+A user is **not** a Google account. Identity lives in `user_identities`, keyed by
+`(provider, subject)`; `users` holds only the portal-side profile, and one person
+may hold several identities. `subject` is the provider's immutable id (GitHub's
+numeric `id`, not the renameable login handle), so a provider changing the email
+it reports never forks the account.
+
+**The linking rule — do not loosen it casually.** `handlers::auth::identity::resolve_user`
+links a new provider to an existing account *only* on a **verified** email, and
+refuses the login otherwise. Silent linking on an unverified address is an
+account-takeover primitive: set your unverified email to the victim's, sign in,
+inherit their sessions. This is why GitHub logins need `GET /user/emails` — the
+`/user` response has no verification flag and is null for private addresses.
+
+**Adding a provider** is meant to be small: add a `PROVIDER_*` const, an
+`oauth::Provider` entry (key, callback path, scopes), a `build_provider(...)`
+call plus a field in `OAuthProviders`, a `fetch_provider_identity` arm, routes,
+and a `provider_button`/`provider_icon` arm in the frontend splash. Everything
+else — CSRF, device flow, banning, allow-lists — is already provider-agnostic.
+
+**At least one provider must be configured** outside `--dev-mode`, or boot fails
+(`OAuthProviders::from_env`). Half-configuring one is also an error rather than a
+silent skip. The frontend renders a login button per entry in
+`AppConfig::auth_providers`, so an unconfigured provider is never offered.
 
 ## Troubleshooting Guide for AI Assistants
 
@@ -858,9 +884,12 @@ When making changes, verify:
 | Variable | Purpose | Required |
 |----------|---------|----------|
 | `DATABASE_URL` | PostgreSQL connection | Yes |
-| `GOOGLE_CLIENT_ID` | OAuth (prod) | Production only |
-| `GOOGLE_CLIENT_SECRET` | OAuth (prod) | Production only |
-| `GOOGLE_REDIRECT_URI` | OAuth callback | Production only |
+| `GOOGLE_CLIENT_ID` | Google login | With the other two `GOOGLE_*` vars, enables Google login |
+| `GOOGLE_CLIENT_SECRET` | Google login | Required if any `GOOGLE_*` var is set |
+| `GOOGLE_REDIRECT_URI` | Google OAuth callback | Required if any `GOOGLE_*` var is set |
+| `GITHUB_CLIENT_ID` | GitHub login | With the other two `GITHUB_*` vars, enables GitHub login |
+| `GITHUB_CLIENT_SECRET` | GitHub login | Required if any `GITHUB_*` var is set |
+| `GITHUB_REDIRECT_URI` | GitHub OAuth callback | Required if any `GITHUB_*` var is set |
 | `SESSION_SECRET` | Cookie signing + JWT secret | Production only |
 | `HOST` | Bind address | Optional (default: 0.0.0.0) |
 | `PORT` | Listen port | Optional (default: 3000) |

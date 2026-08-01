@@ -40,7 +40,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use handlers::websocket::SessionManager;
 
-pub use crate::config::GoogleOAuthClient;
+pub use crate::config::{OAuthClient, OAuthProviders};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "agent-portal-backend")]
@@ -60,7 +60,7 @@ pub struct AppState {
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub session_manager: SessionManager,
-    pub oauth_basic_client: Option<GoogleOAuthClient>,
+    pub oauth: OAuthProviders,
     pub device_flow_store: Option<DeviceFlowStore>,
     pub public_url: String,
     pub cookie_key: Key,
@@ -138,8 +138,9 @@ pub async fn run() -> anyhow::Result<()> {
     // Create device flow store
     let device_flow_store = handlers::device_flow::DeviceFlowStore::default();
 
-    // Create OAuth client (skip in dev mode)
-    let oauth_basic_client = config::build_google_oauth_client(args.dev_mode)?;
+    // Build every configured login provider (none in dev mode; outside dev
+    // mode at least one is required, enforced by `from_env`).
+    let oauth = config::OAuthProviders::from_env(args.dev_mode)?;
 
     // Create test user in dev mode
     if args.dev_mode {
@@ -173,7 +174,7 @@ pub async fn run() -> anyhow::Result<()> {
         dev_mode: args.dev_mode,
         db_pool: pool,
         session_manager,
-        oauth_basic_client,
+        oauth,
         device_flow_store: Some(device_flow_store),
         public_url: config.public_url,
         cookie_key: config.cookie_key,

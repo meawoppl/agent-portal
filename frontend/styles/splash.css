@@ -164,6 +164,19 @@
     font-weight: bold;
 }
 
+/* Stacks the per-provider sign-in buttons; a single provider looks unchanged. */
+.login-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.provider-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
 .splash-footer {
     margin-top: 2rem;
     display: flex;
