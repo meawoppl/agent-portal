@@ -30,38 +30,37 @@ npm install
 
 ## Remote URL
 
-Which URL the shell loads depends on whether you are running a **dev** or a
-**build**, and the two read different config keys:
+Two config keys are in play, and they do **different** jobs — conflating them
+is the main way to get stuck here:
 
-| Command | URL used | Config key |
-|---|---|---|
-| `ios:dev` / `android:dev` | `http://localhost:3000` | `build.devUrl` |
-| `ios:build` / `android:build` | `https://txcl.io` | `app.windows[].url` |
+| Key | Job |
+|---|---|
+| `app.windows[].url` (`https://txcl.io`) | What the WebView actually loads. Applies to **both** dev and build — this window's URL is an explicit external URL, so Tauri uses it verbatim rather than resolving it against the dev server. |
+| `build.devUrl` (`http://localhost:3000`) | A **readiness gate only**. `*:dev` polls it *from the host* and refuses to build until something answers. It does not change what the WebView loads. |
 
-**`*:dev` blocks until something answers on `build.devUrl`.** Tauri polls that
-URL from the *host* before it will build, printing
-`Waiting for your frontend dev server to start on http://localhost:3000/` in a
-loop until it responds. So start the backend first:
+The gate is the surprising half: with nothing listening on `localhost:3000`,
+`npm run ios:dev` never starts building and just loops on
+`Waiting for your frontend dev server to start on http://localhost:3000/`. So
+for any `*:dev` run, start the backend first:
 
 ```bash
 ./scripts/dev.sh start
 ```
 
-Because `build.devUrl` is already `http://localhost:3000`, a plain
-`npm run ios:dev` is the local-backend case — the iOS simulator shares the
-Mac's `localhost`, so no override is needed. Android needs one, because the
-emulator reaches host loopback via `10.0.2.2` (the host-side poll of `devUrl`
-still uses `localhost`):
+With the backend up, point the WebView at it by overriding the window URL. The
+iOS simulator shares the Mac's `localhost`; the Android emulator reaches host
+loopback via `10.0.2.2` (the host-side gate still polls `localhost` either way):
 
 ```bash
+npm run ios:dev -- --config '{"app":{"windows":[{"url":"http://localhost:3000"}]}}'
 npm run android:dev -- --config '{"app":{"windows":[{"url":"http://10.0.2.2:3000"}]}}'
 ```
 
 Use a LAN IP instead of `localhost` for physical devices.
 
-To run a dev build against the **deployed** portal instead of a local backend,
-override `build.devUrl` — overriding `app.windows[].url` alone does nothing in
-dev, and leaves you stuck on the wait loop above:
+Without those overrides a `*:dev` run still loads the **deployed** portal, since
+that is what `app.windows[].url` says. If you want that *and* don't want to run
+a local backend, point the gate at something that answers so it stops blocking:
 
 ```bash
 npm run ios:dev -- --config '{"build":{"devUrl":"https://txcl.io"}}'
