@@ -400,23 +400,26 @@
 }
 
 .agent-broadcast-path {
+    /* Plasma tunables + the three seeded 0..1 variation values, which
+       `plasma_seeds` in session_rail/broadcast.rs sets inline per broadcast.
+       See the plasma block below for how they're consumed. */
+    --pl-size: 18px;
+    --pl-pulse: 360ms;
+    --pl-travel: 1350ms;
+    --pl-hot: #fff;
+    --pl-s1: 0.5;
+    --pl-s2: 0.5;
+    --pl-s3: 0.5;
+
+    /* Signed -0.5..+0.5 deviations. */
+    --j1: calc(var(--pl-s1) - 0.5);
+    --j2: calc(var(--pl-s2) - 0.5);
+    --j3: calc(var(--pl-s3) - 0.5);
+
     position: absolute;
     display: block;
     opacity: 0;
     animation: agent-path-fade 1.35s ease-out;
-}
-
-.agent-broadcast-path::before,
-.agent-broadcast-path::after {
-    content: "";
-    position: absolute;
-    display: block;
-    opacity: 0;
-    pointer-events: none;
-    background: linear-gradient(90deg, transparent, rgba(216, 180, 255, 0.95), #bb9af7, rgba(216, 180, 255, 0.95), transparent);
-    box-shadow:
-        0 0 8px rgba(216, 180, 255, 0.9),
-        0 0 18px rgba(187, 154, 247, 0.72);
 }
 
 .agent-broadcast-layer.horizontal .agent-broadcast-path {
@@ -424,131 +427,9 @@
     height: 34px;
 }
 
-.agent-broadcast-layer.horizontal .agent-broadcast-path::before,
-.agent-broadcast-layer.horizontal .agent-broadcast-path::after {
-    left: 0;
-    width: 42px;
-    height: 2px;
-    animation: agent-strand-x 1.35s cubic-bezier(0.2, 0.75, 0.18, 1) forwards;
-}
-
-.agent-broadcast-layer.horizontal .agent-broadcast-path::before {
-    top: 11px;
-}
-
-.agent-broadcast-layer.horizontal .agent-broadcast-path::after {
-    top: 21px;
-    animation-delay: 90ms;
-}
-
-.agent-broadcast-layer.horizontal .agent-broadcast-path.reverse::before,
-.agent-broadcast-layer.horizontal .agent-broadcast-path.reverse::after {
-    animation-name: agent-strand-x-reverse;
-}
-
 .agent-broadcast-layer.vertical .agent-broadcast-path {
     left: 0;
     width: 34px;
-}
-
-.agent-broadcast-layer.vertical .agent-broadcast-path::before,
-.agent-broadcast-layer.vertical .agent-broadcast-path::after {
-    top: 0;
-    width: 2px;
-    height: 42px;
-    background: linear-gradient(180deg, transparent, rgba(216, 180, 255, 0.95), #bb9af7, rgba(216, 180, 255, 0.95), transparent);
-    animation: agent-strand-y 1.35s cubic-bezier(0.2, 0.75, 0.18, 1) forwards;
-}
-
-.agent-broadcast-layer.vertical .agent-broadcast-path::before {
-    left: 11px;
-}
-
-.agent-broadcast-layer.vertical .agent-broadcast-path::after {
-    left: 21px;
-    animation-delay: 90ms;
-}
-
-.agent-broadcast-layer.vertical .agent-broadcast-path.reverse::before,
-.agent-broadcast-layer.vertical .agent-broadcast-path.reverse::after {
-    animation-name: agent-strand-y-reverse;
-}
-
-.agent-broadcast-packet {
-    position: absolute;
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 18px;
-    border: 1px solid rgba(216, 180, 255, 0.98);
-    border-radius: 4px;
-    background: rgba(26, 27, 38, 0.9);
-    box-shadow:
-        inset 0 0 10px rgba(216, 180, 255, 0.26),
-        0 0 18px rgba(216, 180, 255, 0.75),
-        0 0 28px rgba(187, 154, 247, 0.5);
-}
-
-.agent-broadcast-packet::before,
-.agent-broadcast-packet::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    width: 18px;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, #d8b4ff, #bb9af7);
-    opacity: 0;
-    transform: translateY(-50%) scaleX(0.25);
-    animation: packet-strand-pulse 1.35s ease-out forwards;
-}
-
-.agent-broadcast-packet::before {
-    right: 100%;
-    transform-origin: right center;
-}
-
-.agent-broadcast-packet::after {
-    left: 100%;
-    transform-origin: left center;
-    rotate: 180deg;
-}
-
-.agent-broadcast-packet-logo {
-    width: 12px;
-    height: 12px;
-    display: block;
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
-    filter: drop-shadow(0 0 4px rgba(192, 202, 245, 0.45));
-}
-
-.agent-broadcast-packet.claude .agent-broadcast-packet-logo {
-    background-image: url('/anthropic-mark.svg');
-}
-
-.agent-broadcast-packet.codex .agent-broadcast-packet-logo {
-    background-image: url('/openai-mark.png');
-}
-
-.agent-broadcast-layer.horizontal .agent-broadcast-packet {
-    top: 8px;
-    left: 0;
-    animation: agent-packet-x 1.35s cubic-bezier(0.2, 0.75, 0.18, 1) forwards;
-}
-
-.agent-broadcast-layer.horizontal .agent-broadcast-path.reverse .agent-broadcast-packet {
-    animation-name: agent-packet-x-reverse;
-}
-
-.agent-broadcast-layer.vertical .agent-broadcast-packet {
-    top: 0;
-    left: 4px;
-    animation: agent-packet-y 1.35s cubic-bezier(0.2, 0.75, 0.18, 1) forwards;
-}
-
-.agent-broadcast-layer.vertical .agent-broadcast-path.reverse .agent-broadcast-packet {
-    animation-name: agent-packet-y-reverse;
 }
 
 @keyframes pill-strands-gather {
@@ -642,176 +523,416 @@
     }
 }
 
-@keyframes packet-strand-pulse {
-    0%,
-    14% {
-        opacity: 0;
-        scale: 0.2 1;
-    }
-    32%,
-    68% {
-        opacity: 0.8;
-        scale: 1 1;
-    }
-    100% {
-        opacity: 0;
-        scale: 0.15 1;
-    }
+/* ---------------------------------------------------------------------------
+   Agent-to-agent broadcast: a pulsating ball of plasma that coalesces at the
+   sending pill's centre, crosses the rail, and dissolves into the receiving
+   pill's centre.
+
+   Per-instance variation comes from --pl-s1/--pl-s2/--pl-s3, three 0..1 values
+   set inline by `plasma_seeds` in session_rail/broadcast.rs. They are hashed
+   from the message identity, not random: the rail re-renders throughout the
+   2.4s broadcast window, and random seeds would reshuffle the orbits mid-flight.
+   --------------------------------------------------------------------------- */
+
+/* Agent identity is carried by hue rather than by a glyph — a mark inside a
+   plasma ball fights the effect. Claude: Anthropic orange. Codex: sampled from
+   its mark (#3f3aff indigo -> #7193fe -> #b49cfc lavender). */
+.agent-broadcast-orb.claude {
+    --pl-core: #ffc9a8;
+    --pl-edge: #d97757;
 }
 
-@keyframes agent-strand-x {
+.agent-broadcast-orb.codex {
+    --pl-core: #b9a8ff;
+    --pl-edge: #5b57fb;
+}
+
+.agent-broadcast-orb {
+    position: absolute;
+    width: var(--pl-size);
+    height: var(--pl-size);
+    display: grid;
+    place-items: center;
+    opacity: 0;
+
+    /* The orbits are real 3D rotations; without a perspective origin and a
+       preserved 3D context the tilted rings flatten into squashed ellipses and
+       read as 2D. Short perspective exaggerates near/far at this small size. */
+    perspective: calc(var(--pl-size) * 5);
+    transform-style: preserve-3d;
+}
+
+/* The path spans centre-to-centre (see view_for_positions), so the orb is
+   offset by half its diameter in both axes to sit exactly on each endpoint. */
+.agent-broadcast-layer.horizontal .agent-broadcast-orb {
+    top: 50%;
+    margin-top: calc(var(--pl-size) / -2);
+    margin-left: calc(var(--pl-size) / -2);
+    animation: agent-orb-x calc(var(--pl-travel) * (1 + var(--j1) * 0.28))
+        cubic-bezier(0.3, 0.7, 0.2, 1) forwards;
+}
+
+.agent-broadcast-layer.vertical .agent-broadcast-orb {
+    left: 50%;
+    margin-left: calc(var(--pl-size) / -2);
+    margin-top: calc(var(--pl-size) / -2);
+    animation: agent-orb-y calc(var(--pl-travel) * (1 + var(--j1) * 0.28))
+        cubic-bezier(0.3, 0.7, 0.2, 1) forwards;
+}
+
+.agent-broadcast-layer.horizontal .agent-broadcast-path.reverse .agent-broadcast-orb {
+    animation-name: agent-orb-x-reverse;
+}
+
+.agent-broadcast-layer.vertical .agent-broadcast-path.reverse .agent-broadcast-orb {
+    animation-name: agent-orb-y-reverse;
+}
+
+/* Radial gradients rather than a border: the hard bordered edge is what made
+   the previous packet read as an envelope. The core holds the centre — the
+   orbits supply the motion — so it only breathes and never drifts. */
+.agent-broadcast-core {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%,
+        var(--pl-hot) 0%,
+        var(--pl-core) 32%,
+        var(--pl-edge) 58%,
+        color-mix(in srgb, var(--pl-edge) 40%, transparent) 76%,
+        transparent 100%);
+    box-shadow:
+        0 0 calc(var(--pl-size) * 0.5) color-mix(in srgb, var(--pl-core) 85%, transparent),
+        0 0 calc(var(--pl-size) * 1.15) color-mix(in srgb, var(--pl-edge) 65%, transparent),
+        0 0 calc(var(--pl-size) * 2) color-mix(in srgb, var(--pl-edge) 32%, transparent);
+    animation: agent-orb-pulse calc(var(--pl-pulse) * (1 + var(--j1) * 0.55)) ease-in-out infinite;
+    animation-delay: calc(var(--pl-s2) * -900ms);
+}
+
+/* Comet tail, horizontal only — on the vertical rail it would point sideways. */
+.agent-broadcast-core::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 55%;
+    width: calc(var(--pl-size) * (1.35 + var(--pl-s3) * 0.6));
+    height: calc(var(--pl-size) * 0.42);
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pl-edge) 45%, transparent));
+    filter: blur(2px);
+    opacity: calc(0.7 + var(--pl-s1) * 0.3);
+}
+
+.agent-broadcast-path.reverse .agent-broadcast-core::after {
+    right: auto;
+    left: 55%;
+    rotate: 180deg;
+}
+
+.agent-broadcast-layer.vertical .agent-broadcast-core::after {
+    display: none;
+}
+
+/* Conic rings masked to thin arcs. Each keeps a fixed seeded tilt and spins
+   about its OWN normal: rotateZ sits innermost in the keyframes so the spin
+   happens inside the already-tilted frame, which is what makes it orbit through
+   the plane instead of spinning flat on screen. */
+.agent-broadcast-arc {
+    position: absolute;
+    border-radius: 50%;
+    opacity: 0;
+    pointer-events: none;
+    transform-style: preserve-3d;
+}
+
+.agent-broadcast-arc.a1 {
+    inset: calc(var(--pl-size) * -0.3);
+    background: conic-gradient(from 0deg,
+        transparent 0deg 24deg, var(--pl-core) 30deg 36deg,
+        transparent 42deg 150deg, var(--pl-hot) 156deg 162deg,
+        transparent 168deg 268deg, var(--pl-core) 274deg 282deg,
+        transparent 288deg 360deg);
+    mask: radial-gradient(circle, transparent 58%, #000 62%, #000 84%, transparent 88%);
+
+    --tx: calc(64deg + var(--j1) * 54deg);
+    --ty: calc(10deg + var(--j2) * 44deg);
+
+    animation:
+        agent-orbit-a calc(var(--pl-pulse) * (3.4 + var(--j1) * 2.4)) linear infinite,
+        agent-arc-flicker calc(var(--pl-pulse) * (0.62 + var(--j2) * 0.4)) steps(2, end) infinite;
+    animation-delay: calc(var(--pl-s1) * -4000ms), calc(var(--pl-s3) * -700ms);
+}
+
+.agent-broadcast-arc.a2 {
+    inset: calc(var(--pl-size) * -0.52);
+    background: conic-gradient(from 90deg,
+        transparent 0deg 60deg, var(--pl-edge) 66deg 74deg,
+        transparent 80deg 196deg, var(--pl-core) 202deg 210deg,
+        transparent 216deg 360deg);
+    mask: radial-gradient(circle, transparent 66%, #000 70%, #000 88%, transparent 92%);
+
+    --tx: calc(-46deg + var(--j2) * 50deg);
+    --ty: calc(36deg + var(--j3) * 42deg);
+
+    animation:
+        agent-orbit-b calc(var(--pl-pulse) * (5.1 + var(--j3) * 2.8)) linear infinite,
+        agent-arc-flicker calc(var(--pl-pulse) * (0.83 + var(--j1) * 0.5)) steps(2, end) infinite;
+    animation-delay: calc(var(--pl-s2) * -5200ms), calc(var(--pl-s1) * -900ms);
+}
+
+/* The outermost arc's presence is seeded, so some broadcasts crackle wide and
+   others stay tight. */
+.agent-broadcast-arc.a3 {
+    --arc-scale: calc(0.35 + var(--pl-s3) * 0.9);
+
+    inset: calc(var(--pl-size) * -0.78);
+    background: conic-gradient(from 200deg,
+        transparent 0deg 40deg, var(--pl-hot) 44deg 49deg,
+        transparent 54deg 240deg, var(--pl-edge) 246deg 252deg,
+        transparent 258deg 360deg);
+    mask: radial-gradient(circle, transparent 74%, #000 78%, #000 94%, transparent 97%);
+
+    --tx: calc(16deg + var(--j3) * 48deg);
+    --ty: calc(-58deg + var(--j1) * 46deg);
+
+    animation:
+        agent-orbit-c calc(var(--pl-pulse) * (6.8 + var(--j2) * 3.6)) linear infinite,
+        agent-arc-flicker-faint calc(var(--pl-pulse) * (1.07 + var(--j3) * 0.6)) steps(2, end) infinite;
+    animation-delay: calc(var(--pl-s3) * -6000ms), calc(var(--pl-s2) * -1400ms);
+}
+
+.agent-broadcast-mark {
+    position: relative;
+    width: calc(var(--pl-size) * 0.5);
+    height: calc(var(--pl-size) * 0.5);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.9;
+    mix-blend-mode: overlay;
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.6));
+}
+
+.agent-broadcast-orb.claude .agent-broadcast-mark {
+    background-image: url('/anthropic-mark.svg');
+}
+
+.agent-broadcast-orb.codex .agent-broadcast-mark {
+    background-image: url('/openai-mark.png');
+}
+
+/* Travel, with a coalesce/dissolve envelope. The envelope lives here on the
+   orb rather than on the core because the core's infinite pulse already owns
+   scale and filter — two animations on one property clobber each other. Putting
+   it on the orb also scales and blurs the orbits, so it coalesces as one body. */
+@keyframes agent-orb-x {
     0% {
-        left: 0;
+        left: 0%;
         opacity: 0;
-        scale: 0.2 1;
+        scale: 2.1;
+        filter: blur(7px);
     }
-    18%,
-    76% {
+    9% {
         opacity: 1;
-        scale: 1 1;
+        scale: 1.12;
+        filter: blur(1.5px);
     }
-    100% {
-        left: calc(100% - 42px);
-        opacity: 0;
-        scale: 0.45 1;
+    16% {
+        scale: 1;
+        filter: blur(0);
     }
-}
-
-@keyframes agent-strand-x-reverse {
-    0% {
-        left: calc(100% - 42px);
-        opacity: 0;
-        scale: 0.2 1;
-    }
-    18%,
-    76% {
-        opacity: 1;
-        scale: 1 1;
-    }
-    100% {
-        left: 0;
-        opacity: 0;
-        scale: 0.45 1;
-    }
-}
-
-@keyframes agent-strand-y {
-    0% {
-        top: 0;
-        opacity: 0;
-        scale: 1 0.2;
-    }
-    18%,
-    76% {
-        opacity: 1;
-        scale: 1 1;
-    }
-    100% {
-        top: calc(100% - 42px);
-        opacity: 0;
-        scale: 1 0.45;
-    }
-}
-
-@keyframes agent-strand-y-reverse {
-    0% {
-        top: calc(100% - 42px);
-        opacity: 0;
-        scale: 1 0.2;
-    }
-    18%,
-    76% {
-        opacity: 1;
-        scale: 1 1;
-    }
-    100% {
-        top: 0;
-        opacity: 0;
-        scale: 1 0.45;
-    }
-}
-
-@keyframes agent-packet-x {
-    0% {
-        left: 0;
-        opacity: 0;
-        scale: 0.68;
-    }
-    16%,
     82% {
         opacity: 1;
         scale: 1;
+        filter: blur(0);
+    }
+    92% {
+        opacity: 0.85;
+        scale: 1.45;
+        filter: blur(3.5px);
     }
     100% {
-        left: calc(100% - 26px);
+        left: 100%;
         opacity: 0;
-        scale: 0.82;
+        scale: 2.5;
+        filter: blur(10px);
     }
 }
 
-@keyframes agent-packet-x-reverse {
+@keyframes agent-orb-x-reverse {
     0% {
-        left: calc(100% - 26px);
+        left: 100%;
         opacity: 0;
-        scale: 0.68;
+        scale: 2.1;
+        filter: blur(7px);
     }
-    16%,
+    9% {
+        opacity: 1;
+        scale: 1.12;
+        filter: blur(1.5px);
+    }
+    16% {
+        scale: 1;
+        filter: blur(0);
+    }
     82% {
         opacity: 1;
         scale: 1;
+        filter: blur(0);
+    }
+    92% {
+        opacity: 0.85;
+        scale: 1.45;
+        filter: blur(3.5px);
     }
     100% {
-        left: 0;
+        left: 0%;
         opacity: 0;
-        scale: 0.82;
+        scale: 2.5;
+        filter: blur(10px);
     }
 }
 
-@keyframes agent-packet-y {
+@keyframes agent-orb-y {
     0% {
-        top: 0;
+        top: 0%;
         opacity: 0;
-        scale: 0.68;
+        scale: 2.1;
+        filter: blur(7px);
     }
-    16%,
+    9% {
+        opacity: 1;
+        scale: 1.12;
+        filter: blur(1.5px);
+    }
+    16% {
+        scale: 1;
+        filter: blur(0);
+    }
     82% {
         opacity: 1;
         scale: 1;
+        filter: blur(0);
+    }
+    92% {
+        opacity: 0.85;
+        scale: 1.45;
+        filter: blur(3.5px);
     }
     100% {
-        top: calc(100% - 18px);
+        top: 100%;
         opacity: 0;
-        scale: 0.82;
+        scale: 2.5;
+        filter: blur(10px);
     }
 }
 
-@keyframes agent-packet-y-reverse {
+@keyframes agent-orb-y-reverse {
     0% {
-        top: calc(100% - 18px);
+        top: 100%;
         opacity: 0;
-        scale: 0.68;
+        scale: 2.1;
+        filter: blur(7px);
     }
-    16%,
+    9% {
+        opacity: 1;
+        scale: 1.12;
+        filter: blur(1.5px);
+    }
+    16% {
+        scale: 1;
+        filter: blur(0);
+    }
     82% {
         opacity: 1;
         scale: 1;
+        filter: blur(0);
+    }
+    92% {
+        opacity: 0.85;
+        scale: 1.45;
+        filter: blur(3.5px);
     }
     100% {
-        top: 0;
+        top: 0%;
         opacity: 0;
-        scale: 0.82;
+        scale: 2.5;
+        filter: blur(10px);
     }
+}
+
+/* Uneven stops: size and brightness move together so it reads as unstable
+   energy rather than a metronomic throb. */
+@keyframes agent-orb-pulse {
+    0% {
+        scale: 0.92;
+        filter: brightness(0.95) saturate(1);
+    }
+    38% {
+        scale: 1.12;
+        filter: brightness(1.4) saturate(1.3);
+    }
+    55% {
+        scale: 1.01;
+        filter: brightness(1.1) saturate(1.1);
+    }
+    72% {
+        scale: 1.08;
+        filter: brightness(1.28) saturate(1.22);
+    }
+    100% {
+        scale: 0.92;
+        filter: brightness(0.95) saturate(1);
+    }
+}
+
+/* Tilt held constant across every stop, only rotateZ sweeps, so the ring
+   travels through its own plane. Uneven stops under linear timing give varying
+   angular velocity — a bit accelerates near and coasts far. */
+@keyframes agent-orbit-a {
+    0% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(0deg); }
+    34% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(158deg); }
+    61% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(203deg); }
+    100% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(360deg); }
+}
+
+@keyframes agent-orbit-b {
+    0% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(360deg); }
+    29% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(232deg); }
+    68% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(141deg); }
+    100% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(0deg); }
+}
+
+@keyframes agent-orbit-c {
+    0% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(0deg); }
+    42% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(198deg); }
+    73% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(241deg); }
+    100% { transform: rotateX(var(--tx)) rotateY(var(--ty)) rotateZ(360deg); }
+}
+
+@keyframes agent-arc-flicker {
+    0%, 41% { opacity: 0.85; }
+    42%, 57% { opacity: 0.22; }
+    58%, 66% { opacity: 1; }
+    67% { opacity: 0.4; }
+    100% { opacity: 0.62; }
+}
+
+@keyframes agent-arc-flicker-faint {
+    0%, 33% { opacity: calc(0.5 * var(--arc-scale)); }
+    34%, 52% { opacity: calc(0.1 * var(--arc-scale)); }
+    53%, 61% { opacity: calc(0.9 * var(--arc-scale)); }
+    100% { opacity: calc(0.3 * var(--arc-scale)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .pill-broadcast-strand,
     .pill-broadcast-core,
     .agent-broadcast-path,
-    .agent-broadcast-path::before,
-    .agent-broadcast-path::after,
-    .agent-broadcast-packet,
-    .agent-broadcast-packet::before,
-    .agent-broadcast-packet::after {
+    .agent-broadcast-orb,
+    .agent-broadcast-core,
+    .agent-broadcast-arc {
         animation: none;
     }
 
