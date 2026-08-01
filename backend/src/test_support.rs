@@ -48,6 +48,8 @@ pub fn test_app_state(pool: DbPool) -> AppState {
         db_pool: pool,
         session_manager: SessionManager::new(),
         oauth: crate::config::OAuthProviders::default(),
+        stt: None,
+        max_audio_mb: 25,
         device_flow_store: None,
         public_url: "http://localhost:3000".to_string(),
         cookie_key: Key::generate(),

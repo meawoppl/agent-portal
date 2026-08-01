@@ -254,6 +254,8 @@ pub struct ServerConfig {
     pub image_store_ttl: std::time::Duration,
     /// Per-file cap for videos shown via `agent-portal show` (default 100 MB).
     pub max_video_mb: u32,
+    /// Per-recording cap (MB) for speech-to-text uploads.
+    pub max_audio_mb: u32,
     /// Total-byte cap for the on-disk media (video) store (default 1 GiB).
     pub media_store_max_bytes: u64,
     /// Authority (host, optionally `:port`) under which per-forward subdomains
@@ -418,6 +420,9 @@ impl ServerConfig {
         // than images (video is inherently larger); the on-disk store cap bounds
         // total footprint. Videos reuse `image_store_ttl` for per-entry expiry.
         let max_video_mb: u32 = parse_or(&mut errors, "PORTAL_MAX_VIDEO_MB", 100);
+        // 25 MB matches the smallest per-request limit among supported speech
+        // providers; a minute of Opus is well under 1 MB, so this is generous.
+        let max_audio_mb: u32 = parse_or(&mut errors, "PORTAL_MAX_AUDIO_MB", 25);
         let media_store_max_mb: u64 = parse_or(
             &mut errors,
             "PORTAL_MEDIA_STORE_MAX_MB",
@@ -435,6 +440,7 @@ impl ServerConfig {
             session_max_age_days
         );
         tracing::info!("Max image size: {} MB", max_image_mb);
+        tracing::info!("Max audio size: {} MB", max_audio_mb);
         tracing::info!(
             "Max video size: {} MB, media store cap: {} MB",
             max_video_mb,
@@ -558,6 +564,7 @@ impl ServerConfig {
             image_store_max_bytes,
             image_store_ttl,
             max_video_mb,
+            max_audio_mb,
             media_store_max_bytes,
             forward_domain,
             archive,

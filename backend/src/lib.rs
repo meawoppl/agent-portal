@@ -22,6 +22,7 @@ pub mod models;
 pub mod push;
 pub mod routes;
 pub mod schema;
+pub mod stt;
 
 // Visible to the crate's own `#[cfg(test)]` modules AND to the separate
 // integration-test binaries (e.g. `tests/harness.rs`), which link the lib
@@ -99,6 +100,11 @@ pub struct AppState {
     pub vapid_public_key: Option<String>,
     /// Native mobile app-link association payload configuration.
     pub mobile_app_links: config::MobileAppLinksConfig,
+    /// Configured speech-to-text provider. `None` = the browser's Web Speech
+    /// API remains the only voice path (see `stt`).
+    pub stt: Option<stt::SttProvider>,
+    /// Per-recording cap (MB) for `POST /api/stt/transcribe`.
+    pub max_audio_mb: u32,
 }
 
 impl AppState {
@@ -142,6 +148,13 @@ pub async fn run() -> anyhow::Result<()> {
     // mode at least one is required, enforced by `from_env`).
     let oauth = config::OAuthProviders::from_env(args.dev_mode)?;
 
+    // Speech-to-text is opt-in; `None` leaves voice on the browser path.
+    let stt = stt::SttProvider::from_env()?;
+    match &stt {
+        Some(provider) => tracing::info!("Speech-to-text provider: {}", provider.key()),
+        None => tracing::info!("Speech-to-text: disabled (browser Web Speech API)"),
+    }
+
     // Create test user in dev mode
     if args.dev_mode {
         db::seed_dev_user(&pool)?;
@@ -175,6 +188,7 @@ pub async fn run() -> anyhow::Result<()> {
         db_pool: pool,
         session_manager,
         oauth,
+        stt,
         device_flow_store: Some(device_flow_store),
         public_url: config.public_url,
         cookie_key: config.cookie_key,
@@ -187,6 +201,7 @@ pub async fn run() -> anyhow::Result<()> {
         message_retention_days: config.message_retention_days,
         session_max_age_days: config.session_max_age_days,
         max_image_mb: config.max_image_mb,
+        max_audio_mb: config.max_audio_mb,
         image_store: handlers::images::ImageStore::new(
             config.image_store_max_bytes,
             config.image_store_ttl,
