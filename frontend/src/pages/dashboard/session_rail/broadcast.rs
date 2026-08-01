@@ -208,18 +208,25 @@ pub(super) fn render_broadcasts(
                         format!("top: {:.2}{unit}; height: {:.2}{unit};", view.start, span)
                     }
                 };
-                let packet_class = match view.agent_type {
+                let orb_class = match view.agent_type {
                     AgentType::Claude => "claude",
                     AgentType::Codex => "codex",
                 };
+                let (s1, s2, s3) = plasma_seeds(&view);
+                let style =
+                    format!("{style} --pl-s1: {s1:.4}; --pl-s2: {s2:.4}; --pl-s3: {s3:.4};");
                 html! {
                     <span
                         key={format!("{}-{}-{:.0}", view.from_session_id, view.to_session_id, view.timestamp)}
                         class={classes!("agent-broadcast-path", view.reverse.then_some("reverse"))}
                         {style}
                     >
-                        <span class={classes!("agent-broadcast-packet", packet_class)}>
-                            <span class="agent-broadcast-packet-logo" />
+                        <span class={classes!("agent-broadcast-orb", orb_class)}>
+                            <span class="agent-broadcast-core" />
+                            <span class="agent-broadcast-arc a1" />
+                            <span class="agent-broadcast-arc a2" />
+                            <span class="agent-broadcast-arc a3" />
+                            <span class="agent-broadcast-mark" />
                         </span>
                     </span>
                 }
@@ -272,6 +279,31 @@ fn slot_pct(index: usize, total: usize) -> f64 {
     ((index as f64) + 0.5) / (total as f64) * 100.0
 }
 
+fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Three independent `0.0..1.0` values that vary the orb's orbit geometry,
+/// crackle rate and pulse (see `--pl-s1..3` in `session-rail.css`).
+///
+/// Derived by hashing the broadcast's identity rather than drawn at random, for
+/// two reasons: the rail re-renders repeatedly during the 2.4s broadcast window
+/// and random seeds would reshuffle the orbits mid-flight, and a pure function
+/// of the event keeps rendering deterministic for tests.
+fn plasma_seeds(view: &BroadcastView) -> (f64, f64, f64) {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut hash = fnv1a(view.from_session_id.as_bytes(), FNV_OFFSET);
+    hash = fnv1a(view.to_session_id.as_bytes(), hash);
+    hash = fnv1a(&(view.timestamp as i64).to_le_bytes(), hash);
+    // Three widely-separated bit windows so the values don't correlate.
+    let unit = |bits: u64| (bits % 10_000) as f64 / 10_000.0;
+    (unit(hash), unit(hash >> 21), unit(hash >> 42))
+}
+
 fn push_unique(values: &mut Vec<Uuid>, id: Uuid) {
     if !values.contains(&id) {
         values.push(id);
@@ -318,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn broadcast_view_uses_sender_agent_type_for_packet_logo() {
+    fn broadcast_view_uses_sender_agent_type_for_orb_hue() {
         let events = BroadcastRef::default();
         events.push(AgentMessageBroadcast {
             from_session_id: id(2),
@@ -337,6 +369,56 @@ mod tests {
 
         assert_eq!(view.len(), 1);
         assert_eq!(view[0].agent_type, AgentType::Codex);
+    }
+
+    fn view_at(from: Uuid, to: Uuid, timestamp: f64) -> BroadcastView {
+        BroadcastView {
+            from_session_id: from,
+            to_session_id: to,
+            timestamp,
+            start: 0.0,
+            end: 100.0,
+            units: BroadcastUnits::Percent,
+            reverse: false,
+            agent_type: AgentType::Claude,
+        }
+    }
+
+    #[test]
+    fn plasma_seeds_are_stable_for_the_same_broadcast() {
+        // The rail re-renders repeatedly across the 2.4s window; if the seeds
+        // moved, every re-render would reshuffle the orbits mid-flight.
+        let view = view_at(id(1), id(2), 1_000.0);
+        assert_eq!(
+            plasma_seeds(&view),
+            plasma_seeds(&view_at(id(1), id(2), 1_000.0))
+        );
+    }
+
+    #[test]
+    fn plasma_seeds_differ_across_broadcasts() {
+        let base = plasma_seeds(&view_at(id(1), id(2), 1_000.0));
+        // Any component of the identity changing must reshape the animation.
+        assert_ne!(base, plasma_seeds(&view_at(id(3), id(2), 1_000.0)));
+        assert_ne!(base, plasma_seeds(&view_at(id(1), id(3), 1_000.0)));
+        assert_ne!(base, plasma_seeds(&view_at(id(1), id(2), 2_000.0)));
+    }
+
+    #[test]
+    fn plasma_seeds_are_unit_range_and_uncorrelated() {
+        // Out-of-range values would push tilts and durations somewhere the CSS
+        // never anticipated (a negative duration silently disables an orbit).
+        let mut all_equal = true;
+        for n in 0..64u128 {
+            let (s1, s2, s3) = plasma_seeds(&view_at(id(n), id(n + 1), n as f64 * 37.0));
+            for v in [s1, s2, s3] {
+                assert!((0.0..1.0).contains(&v), "seed {v} out of range");
+            }
+            if s1 != s2 || s2 != s3 {
+                all_equal = false;
+            }
+        }
+        assert!(!all_equal, "the three seeds should not track each other");
     }
 
     #[test]
