@@ -47,7 +47,7 @@ pub fn test_app_state(pool: DbPool) -> AppState {
         dev_mode: false,
         db_pool: pool,
         session_manager: SessionManager::new(),
-        oauth_basic_client: None,
+        oauth: crate::config::OAuthProviders::default(),
         device_flow_store: None,
         public_url: "http://localhost:3000".to_string(),
         cookie_key: Key::generate(),

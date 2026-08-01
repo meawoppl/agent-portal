@@ -20,7 +20,7 @@ use tower_cookies::Key;
 
 use crate::handlers;
 
-pub type GoogleOAuthClient =
+pub type OAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 /// Log the provenance of one resolved variable. Never logs the value — only the
@@ -90,51 +90,149 @@ fn string_or(name: &str, default: &str) -> String {
     }
 }
 
-/// Build the Google OAuth client from environment variables.
-/// Returns `None` in dev mode (OAuth is bypassed).
+/// The OAuth clients configured for this deploy, one per login provider.
 ///
-/// Reports **all** missing credentials at once (fail-fast) rather than
-/// panicking on the first one, so a misconfigured deploy is fixed in a single
-/// pass.
-pub fn build_google_oauth_client(dev_mode: bool) -> anyhow::Result<Option<GoogleOAuthClient>> {
-    if dev_mode {
+/// A provider is *enabled* when its credentials are present; every provider is
+/// individually optional, but outside dev mode [`OAuthProviders::from_env`]
+/// insists on at least one. Booting with none would serve a login page whose
+/// every button 404s — a failure that only shows up when a user tries to sign
+/// in, so it is worth catching at startup instead.
+#[derive(Clone, Default)]
+pub struct OAuthProviders {
+    pub google: Option<OAuthClient>,
+    pub github: Option<OAuthClient>,
+}
+
+impl OAuthProviders {
+    /// Build every provider whose credentials are configured.
+    ///
+    /// Returns an empty set in dev mode (OAuth is bypassed entirely). Partially
+    /// configured providers are an error rather than a silent skip: someone who
+    /// set two of a provider's three variables meant to enable it, and quietly
+    /// disabling it would be baffling.
+    pub fn from_env(dev_mode: bool) -> anyhow::Result<Self> {
+        if dev_mode {
+            return Ok(Self::default());
+        }
+
+        let google = build_provider(
+            "GOOGLE",
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            "https://oauth2.googleapis.com/token",
+        )?;
+        let github = build_provider(
+            "GITHUB",
+            "https://github.com/login/oauth/authorize",
+            "https://github.com/login/oauth/access_token",
+        )?;
+
+        if google.is_none() && github.is_none() {
+            anyhow::bail!(
+                "No login provider is configured, so nobody could sign in. Set \
+                 GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REDIRECT_URI or \
+                 GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET/GITHUB_REDIRECT_URI, or \
+                 pass --dev-mode to bypass OAuth."
+            );
+        }
+
+        Ok(Self { google, github })
+    }
+
+    /// The client for one provider key, or `None` when it is not configured.
+    pub fn client(&self, provider: &str) -> Option<&OAuthClient> {
+        match provider {
+            handlers::auth::PROVIDER_GOOGLE => self.google.as_ref(),
+            handlers::auth::PROVIDER_GITHUB => self.github.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Configured provider keys, in the order they are offered on the login
+    /// page. Empty in dev mode.
+    pub fn enabled(&self) -> Vec<&'static str> {
+        let mut keys = Vec::new();
+        if self.google.is_some() {
+            keys.push(handlers::auth::PROVIDER_GOOGLE);
+        }
+        if self.github.is_some() {
+            keys.push(handlers::auth::PROVIDER_GITHUB);
+        }
+        keys
+    }
+}
+
+/// Build one provider's client from `{PREFIX}_CLIENT_ID` / `_CLIENT_SECRET` /
+/// `_REDIRECT_URI`.
+///
+/// All three absent → `Ok(None)` (provider simply not enabled). Some present
+/// and some missing → an error naming every missing one at once, so a
+/// misconfigured deploy is fixed in a single pass.
+fn build_provider(
+    prefix: &str,
+    auth_url: &str,
+    token_url: &str,
+) -> anyhow::Result<Option<OAuthClient>> {
+    let names = [
+        format!("{prefix}_CLIENT_ID"),
+        format!("{prefix}_CLIENT_SECRET"),
+        format!("{prefix}_REDIRECT_URI"),
+    ];
+    let values: [Option<String>; 3] = [
+        env::var(&names[0]).ok(),
+        env::var(&names[1]).ok(),
+        env::var(&names[2]).ok(),
+    ];
+
+    let Some(credentials) = resolve_provider_vars(prefix, &names, values)? else {
+        return Ok(None);
+    };
+    for name in &names {
+        log_source(name, true);
+    }
+
+    let [client_id, client_secret, redirect_uri] = credentials;
+    Ok(Some(
+        BasicClient::new(ClientId::new(client_id))
+            .set_client_secret(ClientSecret::new(client_secret))
+            .set_auth_uri(AuthUrl::new(auth_url.to_string())?)
+            .set_token_uri(TokenUrl::new(token_url.to_string())?)
+            .set_redirect_uri(RedirectUrl::new(redirect_uri)?),
+    ))
+}
+
+/// Pure core of [`build_provider`]: classify a provider's three raw values as
+/// not-configured, fully configured, or a fail-fast error. No env read, no
+/// logging — kept separate so it is unit-testable without mutating process
+/// globals (same idiom as [`resolve_parse`]).
+fn resolve_provider_vars(
+    prefix: &str,
+    names: &[String; 3],
+    values: [Option<String>; 3],
+) -> Result<Option<[String; 3]>, anyhow::Error> {
+    if values.iter().all(|v| v.is_none()) {
         return Ok(None);
     }
 
-    let mut missing = Vec::new();
-    let mut required = |name: &str| match env::var(name) {
-        Ok(v) => {
-            log_source(name, true);
-            v
-        }
-        Err(_) => {
-            missing.push(name.to_string());
-            String::new()
-        }
-    };
-    let client_id = required("GOOGLE_CLIENT_ID");
-    let client_secret = required("GOOGLE_CLIENT_SECRET");
-    let redirect_uri_raw = required("GOOGLE_REDIRECT_URI");
-
+    let missing: Vec<&str> = names
+        .iter()
+        .zip(&values)
+        .filter(|(_, v)| v.is_none())
+        .map(|(n, _)| n.as_str())
+        .collect();
     if !missing.is_empty() {
         anyhow::bail!(
-            "Missing required OAuth environment variable(s): {}. \
-             Set them, or pass --dev-mode to bypass OAuth.",
+            "{prefix} login is partially configured — missing {}. Set the \
+             missing variable(s), or unset the others to disable {prefix} login.",
             missing.join(", ")
         );
     }
 
-    let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())?;
-    let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string())?;
-    let redirect_uri = RedirectUrl::new(redirect_uri_raw)?;
-
-    Ok(Some(
-        BasicClient::new(ClientId::new(client_id))
-            .set_client_secret(ClientSecret::new(client_secret))
-            .set_auth_uri(auth_url)
-            .set_token_uri(token_url)
-            .set_redirect_uri(redirect_uri),
-    ))
+    let [id, secret, redirect] = values;
+    match (id, secret, redirect) {
+        (Some(id), Some(secret), Some(redirect)) => Ok(Some([id, secret, redirect])),
+        // Unreachable: `missing` is empty, so all three are `Some`.
+        _ => unreachable!("all three values present when nothing is missing"),
+    }
 }
 
 /// Server configuration parsed from environment variables.
@@ -621,6 +719,85 @@ fn native_push_config_from_env(errors: &mut Vec<String>) -> crate::push::NativeP
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn provider_names() -> [String; 3] {
+        [
+            "GITHUB_CLIENT_ID".to_string(),
+            "GITHUB_CLIENT_SECRET".to_string(),
+            "GITHUB_REDIRECT_URI".to_string(),
+        ]
+    }
+
+    #[test]
+    fn a_provider_with_no_variables_set_is_simply_disabled() {
+        let resolved = resolve_provider_vars("GITHUB", &provider_names(), [None, None, None])
+            .expect("absent is not an error");
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn a_fully_configured_provider_resolves_its_credentials() {
+        let resolved = resolve_provider_vars(
+            "GITHUB",
+            &provider_names(),
+            [
+                Some("id".to_string()),
+                Some("secret".to_string()),
+                Some("https://example.invalid/cb".to_string()),
+            ],
+        )
+        .expect("complete config is valid");
+        assert_eq!(
+            resolved,
+            Some([
+                "id".to_string(),
+                "secret".to_string(),
+                "https://example.invalid/cb".to_string()
+            ])
+        );
+    }
+
+    /// Half-configuring a provider is a typo, not a request to disable it —
+    /// silently skipping would leave the operator staring at a missing button.
+    #[test]
+    fn a_partially_configured_provider_names_every_missing_variable() {
+        let err = resolve_provider_vars(
+            "GITHUB",
+            &provider_names(),
+            [Some("id".to_string()), None, None],
+        )
+        .expect_err("partial config must fail");
+        let message = err.to_string();
+        assert!(message.contains("GITHUB_CLIENT_SECRET"), "{message}");
+        assert!(message.contains("GITHUB_REDIRECT_URI"), "{message}");
+        assert!(!message.contains("GITHUB_CLIENT_ID"), "{message}");
+    }
+
+    #[test]
+    fn dev_mode_enables_no_providers() {
+        let providers = OAuthProviders::from_env(true).expect("dev mode never fails");
+        assert!(providers.enabled().is_empty());
+        assert!(providers.client("google").is_none());
+    }
+
+    #[test]
+    fn enabled_lists_only_configured_providers_and_client_looks_them_up() {
+        let client = |redirect: &str| {
+            BasicClient::new(ClientId::new("id".to_string()))
+                .set_auth_uri(AuthUrl::new("https://example.invalid/a".to_string()).unwrap())
+                .set_token_uri(TokenUrl::new("https://example.invalid/t".to_string()).unwrap())
+                .set_redirect_uri(RedirectUrl::new(redirect.to_string()).unwrap())
+        };
+        let providers = OAuthProviders {
+            google: None,
+            github: Some(client("https://example.invalid/cb")),
+        };
+
+        assert_eq!(providers.enabled(), vec!["github"]);
+        assert!(providers.client("github").is_some());
+        assert!(providers.client("google").is_none());
+        assert!(providers.client("gitlab").is_none());
+    }
 
     #[test]
     fn unset_var_uses_default_marked_not_from_env() {

@@ -34,25 +34,46 @@ pub use identity::{ProviderIdentity, PROVIDER_GITHUB, PROVIDER_GOOGLE};
 const MOBILE_TOKEN_TTL_DAYS: u32 = 30;
 const TOKEN_REFRESH_GRACE_MINUTES: i64 = 10;
 
-/// Regular web login - redirects to Google OAuth
+/// Regular web login via Google.
 pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+    start_login(&oauth::GOOGLE, &app_state, &cookies)
+}
+
+/// Regular web login via GitHub.
+pub async fn github_login(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+) -> impl IntoResponse {
+    start_login(&oauth::GITHUB, &app_state, &cookies)
+}
+
+/// Begin the authorization-code flow for one provider.
+///
+/// With no client configured this falls through to dev login, which is only
+/// reachable in dev mode — outside it, boot fails unless a provider is
+/// configured, so the fallback cannot silently become the production path.
+fn start_login(
+    provider: &oauth::Provider,
+    app_state: &AppState,
+    cookies: &Cookies,
+) -> axum::response::Response {
+    let client = app_state.oauth.client(provider.key);
     info!(
         target: "auth_audit",
         event = "web_login_start",
-        oauth_configured = app_state.oauth_basic_client.is_some(),
+        provider = provider.key,
+        oauth_configured = client.is_some(),
     );
-    let client = match &app_state.oauth_basic_client {
-        Some(c) => c,
-        None => {
-            info!(
-                target: "auth_audit",
-                event = "web_login_dev_redirect",
-            );
-            return Redirect::temporary(routes::AUTH_DEV_LOGIN).into_response();
-        }
+    let Some(client) = client else {
+        info!(
+            target: "auth_audit",
+            event = "web_login_dev_redirect",
+            provider = provider.key,
+        );
+        return Redirect::temporary(routes::AUTH_DEV_LOGIN).into_response();
     };
 
-    oauth::regular_authorization_redirect(client, &cookies, &app_state).into_response()
+    oauth::regular_authorization_redirect(provider, client, cookies, app_state).into_response()
 }
 
 /// Device flow login - separate endpoint that stores device_user_code in state
@@ -60,6 +81,11 @@ pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> 
 #[derive(Debug, Deserialize)]
 pub struct DeviceLoginQuery {
     pub device_user_code: String,
+    /// Which provider to authenticate with. Absent (the CLI never sends it)
+    /// means "whichever is configured first", so a deploy that enables only
+    /// GitHub still has a working device flow.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 pub async fn device_login(
@@ -71,10 +97,10 @@ pub async fn device_login(
         target: "auth_audit",
         event = "device_login_start",
         user_code = %query.device_user_code,
-        oauth_configured = app_state.oauth_basic_client.is_some(),
+        oauth_configured = !app_state.oauth.enabled().is_empty(),
     );
     // In dev mode, auto-login and redirect to device approval page
-    if app_state.oauth_basic_client.is_none() {
+    if app_state.oauth.enabled().is_empty() {
         let mut conn = app_state.conn()?;
 
         let user = crate::auth::dev_user(&mut conn).map_err(dev_user_lookup_error)?;
@@ -107,12 +133,26 @@ pub async fn device_login(
         return Ok(device_approval_redirect(&query.device_user_code).into_response());
     }
 
-    let client = app_state.oauth_basic_client.as_ref().unwrap();
+    let requested = query
+        .provider
+        .as_deref()
+        .or_else(|| app_state.oauth.enabled().first().copied())
+        .unwrap_or(PROVIDER_GOOGLE);
+    let provider =
+        oauth::by_key(requested).ok_or(AppError::ServiceUnavailable("Unknown login provider"))?;
+    let client = app_state
+        .oauth
+        .client(provider.key)
+        .ok_or(AppError::ServiceUnavailable("OAuth client not configured"))?;
 
-    Ok(
-        oauth::device_authorization_redirect(client, &cookies, &app_state, &query.device_user_code)
-            .into_response(),
+    Ok(oauth::device_authorization_redirect(
+        provider,
+        client,
+        &cookies,
+        &app_state,
+        &query.device_user_code,
     )
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,11 +175,49 @@ struct GoogleUserInfo {
     picture: Option<String>,
 }
 
+/// GitHub's `/user` response. `id` is numeric and immutable — the login handle
+/// is renameable, so it must not be used as the subject.
+///
+/// `email` is deliberately ignored here even though the field exists: it is
+/// null when the user keeps their address private, and GitHub attaches no
+/// verification flag to it. The address comes from `/user/emails` instead.
+#[derive(Debug, Deserialize)]
+struct GitHubUserInfo {
+    id: u64,
+    name: Option<String>,
+    avatar_url: Option<String>,
+}
+
+/// One entry of GitHub's `/user/emails` response.
+#[derive(Debug, Deserialize)]
+struct GitHubEmail {
+    email: String,
+    primary: bool,
+    verified: bool,
+}
+
 pub async fn callback(
     State(app_state): State<Arc<AppState>>,
     cookies: Cookies,
     Query(query): Query<AuthCallbackQuery>,
 ) -> Result<impl IntoResponse, AppError> {
+    provider_callback(&oauth::GOOGLE, app_state, cookies, query).await
+}
+
+pub async fn github_callback(
+    State(app_state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Query(query): Query<AuthCallbackQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    provider_callback(&oauth::GITHUB, app_state, cookies, query).await
+}
+
+async fn provider_callback(
+    provider: &oauth::Provider,
+    app_state: Arc<AppState>,
+    cookies: Cookies,
+    query: AuthCallbackQuery,
+) -> Result<axum::response::Response, AppError> {
     let callback_kind = if query
         .state
         .as_deref()
@@ -152,28 +230,31 @@ pub async fn callback(
     info!(
         target: "auth_audit",
         event = "oauth_callback_start",
+        provider = provider.key,
         flow = callback_kind,
         state_present = query.state.is_some(),
     );
 
     let client = app_state
-        .oauth_basic_client
-        .as_ref()
+        .oauth
+        .client(provider.key)
         .ok_or(AppError::ServiceUnavailable("OAuth client not configured"))?;
     let http_client = oauth2::reqwest::ClientBuilder::new()
         .redirect(oauth2::reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| AppError::Internal(format!("Failed to build OAuth HTTP client: {e}")))?;
 
-    let device_state = oauth::validate_callback_state(&cookies, &app_state, query.state.as_deref())
-        .inspect_err(|_| {
-            warn!(
-                target: "auth_audit",
-                event = "oauth_callback_denied",
-                flow = callback_kind,
-                reason = "invalid_state",
-            );
-        })?;
+    let device_state =
+        oauth::validate_callback_state(provider, &cookies, &app_state, query.state.as_deref())
+            .inspect_err(|_| {
+                warn!(
+                    target: "auth_audit",
+                    event = "oauth_callback_denied",
+                    provider = provider.key,
+                    flow = callback_kind,
+                    reason = "invalid_state",
+                );
+            })?;
 
     // Exchange code for token
     let token: oauth2::StandardTokenResponse<
@@ -193,70 +274,46 @@ pub async fn callback(
             AppError::Internal(format!("Failed to exchange OAuth code: {e}"))
         })?;
 
-    // Fetch user info from Google.
-    //
-    // Must stay on the OIDC (`v3`) endpoint: it spells the verification flag
-    // `email_verified`, whereas the legacy `v2` endpoint spells it
-    // `verified_email`. Since `GoogleUserInfo::email_verified` fails closed,
-    // switching endpoints without renaming the field would reject every login.
-    let client = reqwest::Client::new();
-    let user_info: GoogleUserInfo = client
-        .get("https://www.googleapis.com/oauth2/v3/userinfo")
-        .bearer_auth(token.access_token().secret())
-        .send()
+    let resolved_identity = fetch_provider_identity(provider, token.access_token().secret())
         .await
-        .map_err(|e| {
+        .inspect_err(|_| {
             warn!(
                 target: "auth_audit",
                 event = "oauth_callback_failed",
+                provider = provider.key,
                 flow = callback_kind,
-                stage = "userinfo_fetch",
+                stage = "userinfo",
             );
-            AppError::Internal(format!("Failed to fetch Google user info: {e}"))
-        })?
-        .json()
-        .await
-        .map_err(|e| {
-            warn!(
-                target: "auth_audit",
-                event = "oauth_callback_failed",
-                flow = callback_kind,
-                stage = "userinfo_parse",
-            );
-            AppError::Internal(format!("Failed to parse Google user info: {e}"))
         })?;
 
-    info!("User authenticated: {}", user_info.email);
-
-    // Check email access control
-    if let Err(redirect) = check_email_allowed(&app_state, &user_info.email) {
+    // An address the provider has not vouched for must not satisfy the
+    // allow-list — otherwise anyone could claim a permitted domain. Treat it as
+    // absent here and let `resolve_user` refuse below.
+    let allowlist_email = resolved_identity
+        .email
+        .as_deref()
+        .filter(|_| resolved_identity.email_verified)
+        .unwrap_or_default();
+    if let Err(redirect) = check_email_allowed(&app_state, allowlist_email) {
         warn!(
             target: "auth_audit",
             event = "oauth_callback_denied",
+            provider = provider.key,
             flow = callback_kind,
             reason = "email_not_allowed",
-            user_email = %user_info.email,
         );
-        return Ok(redirect);
+        return Ok(redirect.into_response());
     }
+
+    info!("User authenticated via {}", provider.key);
 
     // Resolve the login to a user: existing identity, link on a verified email,
     // or create. See `identity` for the rule and why linking is gated on
     // verification (#1535).
     let mut conn = app_state.conn()?;
 
-    let resolved = identity::resolve_user(
-        &mut conn,
-        &ProviderIdentity {
-            provider: PROVIDER_GOOGLE,
-            subject: user_info.sub,
-            email: Some(user_info.email.clone()),
-            email_verified: user_info.email_verified,
-            name: user_info.name,
-            avatar_url: user_info.picture,
-        },
-    )
-    .map_err(|e| AppError::DbQuery(format!("Failed to resolve login identity: {e}")))?;
+    let resolved = identity::resolve_user(&mut conn, &resolved_identity)
+        .map_err(|e| AppError::DbQuery(format!("Failed to resolve login identity: {e}")))?;
 
     let user = match resolved {
         Ok(user) => user,
@@ -264,11 +321,11 @@ pub async fn callback(
             warn!(
                 target: "auth_audit",
                 event = "oauth_callback_denied",
+                provider = provider.key,
                 flow = callback_kind,
                 reason = "unverified_email",
-                user_email = %user_info.email,
             );
-            return Ok(unverified_email_redirect());
+            return Ok(unverified_email_redirect().into_response());
         }
     };
 
@@ -284,7 +341,7 @@ pub async fn callback(
             user_id = %user.id,
             user_email = %user.email,
         );
-        return Ok(banned_redirect(reason));
+        return Ok(banned_redirect(reason).into_response());
     }
 
     if let Some(device_state) = device_state {
@@ -303,7 +360,7 @@ pub async fn callback(
             user_email = %user.email,
             user_code = %device_state.user_code,
         );
-        return Ok(device_approval_redirect(&device_state.user_code));
+        return Ok(device_approval_redirect(&device_state.user_code).into_response());
     }
 
     add_session_cookie(&cookies, &app_state, &user);
@@ -315,7 +372,106 @@ pub async fn callback(
         user_email = %user.email,
     );
 
-    Ok(Redirect::temporary(routes::DASHBOARD))
+    Ok(Redirect::temporary(routes::DASHBOARD).into_response())
+}
+
+/// GitHub rejects API requests without a `User-Agent`, so every call sends one.
+const GITHUB_USER_AGENT: &str = "agent-portal";
+
+/// Ask the provider who just authorized us, normalized to a [`ProviderIdentity`].
+async fn fetch_provider_identity(
+    provider: &oauth::Provider,
+    access_token: &str,
+) -> Result<ProviderIdentity, AppError> {
+    let http = reqwest::Client::new();
+    match provider.key {
+        PROVIDER_GOOGLE => google_identity(&http, access_token).await,
+        PROVIDER_GITHUB => github_identity(&http, access_token).await,
+        other => Err(AppError::Internal(format!("Unknown provider: {other}"))),
+    }
+}
+
+/// Must stay on the OIDC (`v3`) userinfo endpoint: it spells the verification
+/// flag `email_verified`, whereas the legacy `v2` endpoint spells it
+/// `verified_email`. Since the field fails closed, switching endpoints without
+/// renaming it would reject every login rather than fail loudly.
+async fn google_identity(
+    http: &reqwest::Client,
+    access_token: &str,
+) -> Result<ProviderIdentity, AppError> {
+    let info: GoogleUserInfo = http
+        .get("https://www.googleapis.com/oauth2/v3/userinfo")
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch Google user info: {e}")))?
+        .json()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to parse Google user info: {e}")))?;
+
+    Ok(ProviderIdentity {
+        provider: PROVIDER_GOOGLE,
+        subject: info.sub,
+        email: Some(info.email),
+        email_verified: info.email_verified,
+        name: info.name,
+        avatar_url: info.picture,
+    })
+}
+
+/// GitHub needs two calls: `/user` for the immutable numeric id and profile,
+/// and `/user/emails` for an address we can trust. `/user` alone is not enough —
+/// its `email` is null for users with a private address and carries no
+/// verification flag, and an unverified address must never link an account.
+async fn github_identity(
+    http: &reqwest::Client,
+    access_token: &str,
+) -> Result<ProviderIdentity, AppError> {
+    let info: GitHubUserInfo = http
+        .get("https://api.github.com/user")
+        .bearer_auth(access_token)
+        .header(header::USER_AGENT, GITHUB_USER_AGENT)
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch GitHub user: {e}")))?
+        .json()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to parse GitHub user: {e}")))?;
+
+    let emails: Vec<GitHubEmail> = http
+        .get("https://api.github.com/user/emails")
+        .bearer_auth(access_token)
+        .header(header::USER_AGENT, GITHUB_USER_AGENT)
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch GitHub emails: {e}")))?
+        .json()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to parse GitHub emails: {e}")))?;
+
+    let email = primary_verified_email(&emails);
+
+    Ok(ProviderIdentity {
+        provider: PROVIDER_GITHUB,
+        subject: info.id.to_string(),
+        email_verified: email.is_some(),
+        email,
+        name: info.name,
+        avatar_url: info.avatar_url,
+    })
+}
+
+/// Pick the address GitHub considers primary **and** verified.
+///
+/// Both conditions are required, and neither is inferable from the other: a
+/// user may have several verified addresses, and the primary one may be
+/// unverified. Returning `None` makes the caller refuse the login rather than
+/// trust an address the user has not proven they control.
+fn primary_verified_email(emails: &[GitHubEmail]) -> Option<String> {
+    emails
+        .iter()
+        .find(|e| e.primary && e.verified)
+        .map(|e| e.email.clone())
 }
 
 pub async fn me(
@@ -631,6 +787,60 @@ mod tests {
     use crate::models::{NewUser, ProxyAuthToken};
     use crate::schema::{proxy_auth_tokens, users};
     use axum::http::{header::AUTHORIZATION, HeaderValue};
+
+    fn gh_email(email: &str, primary: bool, verified: bool) -> GitHubEmail {
+        GitHubEmail {
+            email: email.to_string(),
+            primary,
+            verified,
+        }
+    }
+
+    #[test]
+    fn github_picks_the_primary_verified_address() {
+        let emails = vec![
+            gh_email("alt@example.invalid", false, true),
+            gh_email("main@example.invalid", true, true),
+        ];
+        assert_eq!(
+            primary_verified_email(&emails),
+            Some("main@example.invalid".to_string())
+        );
+    }
+
+    /// An unverified primary must not fall back to some other verified address:
+    /// the account the person is signing into is the primary one, and silently
+    /// substituting a different address would link the wrong portal account.
+    #[test]
+    fn github_refuses_when_the_primary_address_is_unverified() {
+        let emails = vec![
+            gh_email("main@example.invalid", true, false),
+            gh_email("alt@example.invalid", false, true),
+        ];
+        assert_eq!(primary_verified_email(&emails), None);
+    }
+
+    #[test]
+    fn github_refuses_when_no_address_is_verified() {
+        let emails = vec![gh_email("main@example.invalid", true, false)];
+        assert_eq!(primary_verified_email(&emails), None);
+        assert_eq!(primary_verified_email(&[]), None);
+    }
+
+    /// GitHub ids are numeric; the subject must be the id and not the
+    /// renameable login handle.
+    #[test]
+    fn github_user_info_parses_the_numeric_id() {
+        let body = r#"{
+            "id": 583231,
+            "login": "octocat",
+            "name": "The Octocat",
+            "avatar_url": "https://example.invalid/a.png"
+        }"#;
+        let info: GitHubUserInfo = serde_json::from_str(body).expect("parses /user");
+        assert_eq!(info.id.to_string(), "583231");
+        assert_eq!(info.name.as_deref(), Some("The Octocat"));
+    }
 
     /// Pins the field names of the OIDC (`v3`) userinfo response. The legacy
     /// `v2` endpoint spells the flag `verified_email`, and because the field

@@ -16,5 +16,11 @@ pub async fn get_config(State(app_state): State<Arc<AppState>>) -> Json<AppConfi
         build_time: shared::BUILD_TIME.to_string(),
         splash_text: app_state.splash_text.clone(),
         archive_enabled: app_state.archive.is_some(),
+        auth_providers: app_state
+            .oauth
+            .enabled()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
     })
 }
