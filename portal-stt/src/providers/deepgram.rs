@@ -12,15 +12,20 @@
 
 use serde::Deserialize;
 
+use crate::config::{Field, SttEnv};
+use crate::http::{decode, ensure_ok, transport};
 use crate::{SttError, TranscribeRequest};
 
-const ENDPOINT: &str = "https://api.deepgram.com/v1/listen";
+const DEFAULT_ENDPOINT: &str = "https://api.deepgram.com";
 const DEFAULT_MODEL: &str = "nova-3";
 
 #[derive(Clone)]
-pub struct DeepgramStt {
+pub(crate) struct DeepgramStt {
     api_key: String,
     model: String,
+    /// Overridable for Deepgram's self-hosted deployment.
+    endpoint: String,
+    language: Option<String>,
     /// Owned per provider, matching the push transports — a `Client` is a
     /// connection pool, so it must outlive individual requests.
     http: reqwest::Client,
@@ -47,22 +52,27 @@ struct ListenAlternative {
 }
 
 impl DeepgramStt {
-    pub fn new(api_key: String, model: Option<String>) -> Self {
-        Self {
-            api_key,
-            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+    pub(crate) fn from_env(env: &SttEnv) -> anyhow::Result<Self> {
+        Ok(Self {
+            api_key: env.require(Field::ApiKey, "deepgram")?,
+            model: env.model_or(DEFAULT_MODEL),
+            endpoint: env.endpoint_or(DEFAULT_ENDPOINT),
+            language: env.language.clone(),
             http: reqwest::Client::new(),
-        }
+        })
     }
 
-    pub async fn transcribe(&self, request: TranscribeRequest<'_>) -> Result<String, SttError> {
+    pub(crate) async fn transcribe(
+        &self,
+        request: TranscribeRequest<'_>,
+    ) -> Result<String, SttError> {
         // `smart_format` supplies punctuation and capitalization, which the
         // transcript needs to read as a prompt rather than a wall of words.
         let mut query: Vec<(&str, String)> = vec![
             ("model", self.model.clone()),
             ("smart_format", "true".to_string()),
         ];
-        if let Some(language) = request.language {
+        if let Some(language) = request.language.or(self.language.as_deref()) {
             query.push(("language", language.to_string()));
         }
         for term in request.keyterms {
@@ -71,7 +81,7 @@ impl DeepgramStt {
 
         let response = self
             .http
-            .post(ENDPOINT)
+            .post(format!("{}/v1/listen", self.endpoint))
             .query(&query)
             .header(
                 reqwest::header::AUTHORIZATION,
@@ -81,21 +91,9 @@ impl DeepgramStt {
             .body(request.audio)
             .send()
             .await
-            .map_err(|e| SttError::Transport(e.to_string()))?;
+            .map_err(transport)?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(SttError::Provider(format!(
-                "HTTP {status}: {}",
-                body.chars().take(400).collect::<String>()
-            )));
-        }
-
-        let body: ListenBody = response
-            .json()
-            .await
-            .map_err(|e| SttError::Decode(e.to_string()))?;
+        let body: ListenBody = ensure_ok(response).await?.json().await.map_err(decode)?;
         Ok(first_transcript(&body))
     }
 }
@@ -149,6 +147,19 @@ mod tests {
 
     #[test]
     fn the_default_model_is_used_when_none_is_configured() {
-        assert_eq!(DeepgramStt::new("k".to_string(), None).model, DEFAULT_MODEL);
+        let env = SttEnv {
+            api_key: Some("k".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            DeepgramStt::from_env(&env).expect("configured").model,
+            DEFAULT_MODEL
+        );
+    }
+
+    #[test]
+    fn deepgram_requires_a_key() {
+        let err = crate::config_error(DeepgramStt::from_env(&SttEnv::default()));
+        assert!(err.contains("PORTAL_STT_API_KEY"), "{err}");
     }
 }

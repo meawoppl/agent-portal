@@ -7,15 +7,20 @@
 
 use serde::Deserialize;
 
+use crate::config::{Field, SttEnv};
+use crate::http::{decode, ensure_ok, transport};
 use crate::{extension_for, SttError, TranscribeRequest};
 
-const ENDPOINT: &str = "https://api.openai.com/v1/audio/transcriptions";
+const DEFAULT_ENDPOINT: &str = "https://api.openai.com";
 const DEFAULT_MODEL: &str = "gpt-4o-transcribe";
 
 #[derive(Clone)]
-pub struct OpenAiStt {
+pub(crate) struct OpenAiStt {
     api_key: String,
     model: String,
+    /// Overridable for OpenAI-compatible gateways and self-hosted Whisper.
+    endpoint: String,
+    language: Option<String>,
     /// Owned per provider, matching the push transports — a `Client` is a
     /// connection pool, so it must outlive individual requests.
     http: reqwest::Client,
@@ -27,15 +32,20 @@ struct TranscriptionBody {
 }
 
 impl OpenAiStt {
-    pub fn new(api_key: String, model: Option<String>) -> Self {
-        Self {
-            api_key,
-            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+    pub(crate) fn from_env(env: &SttEnv) -> anyhow::Result<Self> {
+        Ok(Self {
+            api_key: env.require(Field::ApiKey, "openai")?,
+            model: env.model_or(DEFAULT_MODEL),
+            endpoint: env.endpoint_or(DEFAULT_ENDPOINT),
+            language: env.language.clone(),
             http: reqwest::Client::new(),
-        }
+        })
     }
 
-    pub async fn transcribe(&self, request: TranscribeRequest<'_>) -> Result<String, SttError> {
+    pub(crate) async fn transcribe(
+        &self,
+        request: TranscribeRequest<'_>,
+    ) -> Result<String, SttError> {
         let filename = format!("audio.{}", extension_for(request.content_type));
         let part = reqwest::multipart::Part::bytes(request.audio.to_vec())
             .file_name(filename)
@@ -46,7 +56,7 @@ impl OpenAiStt {
             .text("model", self.model.clone())
             .text("response_format", "json")
             .part("file", part);
-        if let Some(language) = request.language {
+        if let Some(language) = request.language.or(self.language.as_deref()) {
             form = form.text("language", language.to_string());
         }
         if let Some(prompt) = bias_prompt(request.keyterms) {
@@ -55,26 +65,14 @@ impl OpenAiStt {
 
         let response = self
             .http
-            .post(ENDPOINT)
+            .post(format!("{}/v1/audio/transcriptions", self.endpoint))
             .bearer_auth(&self.api_key)
             .multipart(form)
             .send()
             .await
-            .map_err(|e| SttError::Transport(e.to_string()))?;
+            .map_err(transport)?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(SttError::Provider(format!(
-                "HTTP {status}: {}",
-                body.chars().take(400).collect::<String>()
-            )));
-        }
-
-        let body: TranscriptionBody = response
-            .json()
-            .await
-            .map_err(|e| SttError::Decode(e.to_string()))?;
+        let body: TranscriptionBody = ensure_ok(response).await?.json().await.map_err(decode)?;
         Ok(body.text.trim().to_string())
     }
 }
@@ -113,9 +111,28 @@ mod tests {
 
     #[test]
     fn the_default_model_is_used_when_none_is_configured() {
-        let provider = OpenAiStt::new("k".to_string(), None);
-        assert_eq!(provider.model, DEFAULT_MODEL);
-        let overridden = OpenAiStt::new("k".to_string(), Some("whisper-1".to_string()));
-        assert_eq!(overridden.model, "whisper-1");
+        let env = SttEnv {
+            api_key: Some("k".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            OpenAiStt::from_env(&env).expect("configured").model,
+            DEFAULT_MODEL
+        );
+
+        let overridden = SttEnv {
+            model: Some("whisper-1".into()),
+            ..env.clone()
+        };
+        assert_eq!(
+            OpenAiStt::from_env(&overridden).expect("configured").model,
+            "whisper-1"
+        );
+    }
+
+    #[test]
+    fn openai_requires_a_key() {
+        let err = crate::config_error(OpenAiStt::from_env(&SttEnv::default()));
+        assert!(err.contains("PORTAL_STT_API_KEY"), "{err}");
     }
 }

@@ -29,16 +29,14 @@
 
 pub use bytes::Bytes;
 
+mod config;
+mod http;
 mod keyterms;
+mod poll;
 mod providers;
 
+pub use config::{SttEnv, BACKEND_VAR};
 pub use keyterms::session_keyterms;
-
-/// Environment variable selecting the provider (`disabled`, `openai`,
-/// `deepgram`). Named to match `PORTAL_SESSION_ARCHIVE_BACKEND`.
-const BACKEND_VAR: &str = "PORTAL_STT_BACKEND";
-const API_KEY_VAR: &str = "PORTAL_STT_API_KEY";
-const MODEL_VAR: &str = "PORTAL_STT_MODEL";
 
 /// What the caller wants transcribed, plus the context to bias it with.
 pub struct TranscribeRequest<'a> {
@@ -73,12 +71,58 @@ impl std::fmt::Display for SttError {
     }
 }
 
-/// A configured speech-to-text provider.
-#[derive(Clone)]
-pub enum SttProvider {
-    OpenAi(providers::openai::OpenAiStt),
-    Deepgram(providers::deepgram::DeepgramStt),
+/// The message from a provider's `from_env` failure.
+///
+/// Providers deliberately do not derive `Debug` — they hold API keys, and a
+/// derived impl would print them — so tests cannot call `unwrap_err` directly.
+#[cfg(test)]
+pub(crate) fn config_error<T>(result: anyhow::Result<T>) -> String {
+    result
+        .map(|_| ())
+        .expect_err("expected a configuration error")
+        .to_string()
 }
+
+/// A configured speech-to-text provider.
+///
+/// Opaque on the outside — callers only need [`key`](Self::key),
+/// [`supports_keyterms`](Self::supports_keyterms) and
+/// [`transcribe`](Self::transcribe) — and a closed enum on the inside, so
+/// adding a vendor is a compile error in every arm that has to learn about it.
+#[derive(Clone)]
+pub struct SttProvider {
+    inner: Inner,
+}
+
+#[derive(Clone)]
+enum Inner {
+    AssemblyAi(providers::assemblyai::AssemblyAiStt),
+    Aws(providers::aws::AwsStt),
+    Azure(providers::azure::AzureStt),
+    Deepgram(providers::deepgram::DeepgramStt),
+    Google(providers::google::GoogleStt),
+    Ibm(providers::ibm::IbmStt),
+    OpenAi(providers::openai::OpenAiStt),
+    RevAi(providers::revai::RevAiStt),
+    Simplismart(providers::simplismart::SimplismartStt),
+    Speechmatics(providers::speechmatics::SpeechmaticsStt),
+}
+
+/// Every backend name accepted by `PORTAL_STT_BACKEND`, for error messages and
+/// for the probe tool. Kept adjacent to [`SttProvider::build`] so the two do not
+/// drift.
+pub const BACKENDS: &[&str] = &[
+    "assemblyai",
+    "aws",
+    "azure",
+    "deepgram",
+    "google",
+    "ibm",
+    "openai",
+    "revai",
+    "simplismart",
+    "speechmatics",
+];
 
 impl SttProvider {
     /// Build the configured provider, or `None` when STT is disabled.
@@ -92,43 +136,83 @@ impl SttProvider {
         if backend.is_empty() || backend == "disabled" {
             return Ok(None);
         }
+        Self::build(&backend, &SttEnv::from_process()).map(Some)
+    }
 
-        let api_key = std::env::var(API_KEY_VAR).map_err(|_| {
-            anyhow::anyhow!("{BACKEND_VAR}={backend} requires {API_KEY_VAR} to be set")
-        })?;
-        if api_key.trim().is_empty() {
-            anyhow::bail!("{API_KEY_VAR} is set but empty");
-        }
-        let model = std::env::var(MODEL_VAR)
-            .ok()
-            .map(|m| m.trim().to_string())
-            .filter(|m| !m.is_empty());
-
-        match backend.as_str() {
-            "openai" => Ok(Some(Self::OpenAi(providers::openai::OpenAiStt::new(
-                api_key, model,
-            )))),
-            "deepgram" => Ok(Some(Self::Deepgram(providers::deepgram::DeepgramStt::new(
-                api_key, model,
-            )))),
+    /// Construct one provider by name from an explicit environment. Separate
+    /// from [`Self::from_env`] so it is reachable without mutating process
+    /// globals.
+    pub fn build(backend: &str, env: &SttEnv) -> anyhow::Result<Self> {
+        let inner = match backend {
+            "assemblyai" => Inner::AssemblyAi(providers::assemblyai::AssemblyAiStt::from_env(env)?),
+            "aws" => Inner::Aws(providers::aws::AwsStt::from_env(env)?),
+            "azure" => Inner::Azure(providers::azure::AzureStt::from_env(env)?),
+            "deepgram" => Inner::Deepgram(providers::deepgram::DeepgramStt::from_env(env)?),
+            "google" => Inner::Google(providers::google::GoogleStt::from_env(env)?),
+            "ibm" => Inner::Ibm(providers::ibm::IbmStt::from_env(env)?),
+            "openai" => Inner::OpenAi(providers::openai::OpenAiStt::from_env(env)?),
+            "revai" => Inner::RevAi(providers::revai::RevAiStt::from_env(env)?),
+            "simplismart" => {
+                Inner::Simplismart(providers::simplismart::SimplismartStt::from_env(env)?)
+            }
+            "speechmatics" => {
+                Inner::Speechmatics(providers::speechmatics::SpeechmaticsStt::from_env(env)?)
+            }
             other => anyhow::bail!(
-                "unknown {BACKEND_VAR}={other:?}; expected one of: disabled, openai, deepgram"
+                "unknown {BACKEND_VAR}={other:?}; expected disabled or one of: {}",
+                BACKENDS.join(", ")
             ),
-        }
+        };
+        Ok(Self { inner })
     }
 
     /// Stable key for logs and `/api/config`.
     pub fn key(&self) -> &'static str {
-        match self {
-            Self::OpenAi(_) => "openai",
-            Self::Deepgram(_) => "deepgram",
+        match &self.inner {
+            Inner::AssemblyAi(_) => "assemblyai",
+            Inner::Aws(_) => "aws",
+            Inner::Azure(_) => "azure",
+            Inner::Deepgram(_) => "deepgram",
+            Inner::Google(_) => "google",
+            Inner::Ibm(_) => "ibm",
+            Inner::OpenAi(_) => "openai",
+            Inner::RevAi(_) => "revai",
+            Inner::Simplismart(_) => "simplismart",
+            Inner::Speechmatics(_) => "speechmatics",
+        }
+    }
+
+    /// Whether this provider can bias decoding with [`session_keyterms`].
+    ///
+    /// Not every vendor exposes a per-request vocabulary: Azure, IBM and
+    /// Simplismart need a trained model instead, and AWS needs a pre-created
+    /// named vocabulary. Callers use this to avoid computing hints nobody will
+    /// read, and it keeps the "which providers actually bias?" answer in one
+    /// place rather than scattered through the modules.
+    pub fn supports_keyterms(&self) -> bool {
+        match &self.inner {
+            Inner::AssemblyAi(_)
+            | Inner::Deepgram(_)
+            | Inner::Google(_)
+            | Inner::OpenAi(_)
+            | Inner::RevAi(_)
+            | Inner::Speechmatics(_) => true,
+            Inner::Aws(_) | Inner::Azure(_) | Inner::Ibm(_) | Inner::Simplismart(_) => false,
         }
     }
 
     pub async fn transcribe(&self, request: TranscribeRequest<'_>) -> Result<String, SttError> {
-        match self {
-            Self::OpenAi(provider) => provider.transcribe(request).await,
-            Self::Deepgram(provider) => provider.transcribe(request).await,
+        match &self.inner {
+            Inner::AssemblyAi(provider) => provider.transcribe(request).await,
+            Inner::Aws(provider) => provider.transcribe(request).await,
+            Inner::Azure(provider) => provider.transcribe(request).await,
+            Inner::Deepgram(provider) => provider.transcribe(request).await,
+            Inner::Google(provider) => provider.transcribe(request).await,
+            Inner::Ibm(provider) => provider.transcribe(request).await,
+            Inner::OpenAi(provider) => provider.transcribe(request).await,
+            Inner::RevAi(provider) => provider.transcribe(request).await,
+            Inner::Simplismart(provider) => provider.transcribe(request).await,
+            Inner::Speechmatics(provider) => provider.transcribe(request).await,
         }
     }
 }
@@ -150,6 +234,7 @@ pub(crate) fn extension_for(content_type: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{API_KEY_VAR, MODEL_VAR};
 
     /// `from_env` reads process globals, so these run serially under one lock
     /// and restore what they touched — matching the archive-config tests.

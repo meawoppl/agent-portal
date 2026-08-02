@@ -69,13 +69,17 @@ pub async fn transcribe(
         )));
     }
 
-    // Vocabulary hints, when the caller named a session they belong to. A
-    // session they are *not* a member of contributes nothing rather than
-    // erroring: the transcript is still useful, and this keeps the endpoint
-    // from doubling as a membership oracle.
+    // Vocabulary hints, when the caller named a session they belong to and the
+    // provider can actually use them — several vendors bias through a trained
+    // model instead, and there is no point paying for the query to build a list
+    // nobody reads. A session the user is *not* a member of contributes nothing
+    // rather than erroring: the transcript is still useful, and this keeps the
+    // endpoint from doubling as a membership oracle.
     let keyterms = match query.session_id {
-        Some(session_id) => keyterms_for_session(&app_state, user_id, session_id)?,
-        None => Vec::new(),
+        Some(session_id) if provider.supports_keyterms() => {
+            keyterms_for_session(&app_state, user_id, session_id)?
+        }
+        _ => Vec::new(),
     };
 
     let audio_len = body.len();
