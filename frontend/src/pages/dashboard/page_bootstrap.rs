@@ -20,6 +20,10 @@ pub struct DashboardBootstrap {
     /// Whether the long-term session archive is enabled — drives the
     /// close-session copy (history preserved vs. permanently removed).
     pub archive_enabled: bool,
+    /// Whether the server can transcribe audio itself. Selects the voice
+    /// capture strategy: record-and-upload when true, the browser's Web Speech
+    /// API when false.
+    pub stt_enabled: bool,
 }
 
 /// Fetch current-user and app configuration data for the dashboard shell.
@@ -32,6 +36,7 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
     let git_hash = use_state(String::new);
     let build_time = use_state(String::new);
     let archive_enabled = use_state(|| false);
+    let stt_enabled = use_state(|| false);
 
     {
         let is_admin = is_admin.clone();
@@ -54,6 +59,7 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
         let git_hash = git_hash.clone();
         let build_time = build_time.clone();
         let archive_enabled = archive_enabled.clone();
+        let stt_enabled = stt_enabled.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
                 if let Ok(config) =
@@ -64,6 +70,7 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
                     git_hash.set(config.git_hash);
                     build_time.set(config.build_time);
                     archive_enabled.set(config.archive_enabled);
+                    stt_enabled.set(config.stt_enabled);
                 }
             });
             || ()
@@ -78,5 +85,6 @@ pub fn use_dashboard_bootstrap() -> DashboardBootstrap {
         git_hash: (*git_hash).clone(),
         build_time: (*build_time).clone(),
         archive_enabled: *archive_enabled,
+        stt_enabled: *stt_enabled,
     }
 }

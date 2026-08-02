@@ -68,6 +68,7 @@ pub fn dashboard_page() -> Html {
     let git_hash = bootstrap.git_hash;
     let build_time = bootstrap.build_time;
     let archive_enabled = bootstrap.archive_enabled;
+    let stt_enabled = bootstrap.stt_enabled;
 
     // Push-driven session refresh: the backend broadcasts
     // `ServerToClient::LaunchSessionResult` the moment the launcher's
@@ -829,6 +830,7 @@ pub fn dashboard_page() -> Html {
                                                 current_user_id={current_user_id.map(|id| id.to_string())}
                                                 interrupt_signal={focus.interrupt_signal}
                                                 jump_to_latest_signal={focus.jump_to_latest_signal}
+                                                stt_enabled={stt_enabled}
                                             />
                                         </div>
                                     }

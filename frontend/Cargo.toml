@@ -55,6 +55,14 @@ web-sys = { workspace = true, features = [
     "File",
     "FileList",
     "Blob",
+    # Recording audio for server-side speech-to-text. MediaRecorder works in
+    # every browser we target, including Firefox, where the Web Speech API the
+    # browser-native path uses does not exist at all.
+    "MediaRecorder",
+    "MediaRecorderOptions",
+    "BlobEvent",
+    "MediaStream",
+    "MediaStreamTrack",
     # Audio APIs for ADSR synthesis (voice input uses Web Speech API directly via js-sys)
     "AudioContext",
     "AudioContextState",

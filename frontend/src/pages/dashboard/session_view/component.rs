@@ -73,6 +73,10 @@ pub struct SessionViewProps {
     /// jumps its transcript to the newest message and resumes live tailing.
     #[prop_or(0)]
     pub jump_to_latest_signal: u32,
+    /// Whether the server can transcribe audio (`AppConfig::stt_enabled`).
+    /// Forwarded to the voice button, which picks its capture strategy from it.
+    #[prop_or(false)]
+    pub stt_enabled: bool,
 }
 
 fn optimistic_user_message(
@@ -1153,6 +1157,7 @@ impl SessionView {
                 session_id={ctx.props().session.id}
                 focused={ctx.props().focused}
                 ws_connected={self.ws_connected}
+                stt_enabled={ctx.props().stt_enabled}
                 {on_register}
                 {on_send_text}
                 {on_send_frame}
