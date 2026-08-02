@@ -10,6 +10,7 @@ members = [
     "codex-session-lib",
     "launcher",
     "portal-auth",
+    "portal-stt",
     "portal-update",
     "mobile/src-tauri",
 ]

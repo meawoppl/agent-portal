@@ -12,7 +12,7 @@
 
 use serde::Deserialize;
 
-use super::{SttError, TranscribeRequest};
+use crate::{SttError, TranscribeRequest};
 
 const ENDPOINT: &str = "https://api.deepgram.com/v1/listen";
 const DEFAULT_MODEL: &str = "nova-3";

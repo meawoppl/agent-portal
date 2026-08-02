@@ -1,0 +1,16 @@
+[package]
+name = "portal-stt"
+version.workspace = true
+edition.workspace = true
+description = "Speech-to-text providers for Agent Portal"
+
+[dependencies]
+anyhow = { workspace = true }
+bytes = "1"
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

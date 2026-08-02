@@ -90,6 +90,7 @@ urlencoding = "2.1.3"
 serde_urlencoded = "0.7.1"
 zstd = "0.13"
 object_store = { version = "0.14.0", features = ["aws"] }
+portal-stt = { version = "2.13.11", path = "../portal-stt" }
 
 [build-dependencies]
 memory-serve = "2.1"

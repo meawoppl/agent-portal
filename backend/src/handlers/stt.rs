@@ -21,8 +21,8 @@ use uuid::Uuid;
 
 use crate::auth::CurrentUserId;
 use crate::errors::AppError;
-use crate::stt::{session_keyterms, TranscribeRequest};
 use crate::AppState;
+use portal_stt::{session_keyterms, TranscribeRequest};
 
 #[derive(Debug, Deserialize)]
 pub struct TranscribeQuery {
