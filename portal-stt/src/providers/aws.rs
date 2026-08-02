@@ -22,7 +22,7 @@ use aws_sigv4::http_request::{
     sign, PayloadChecksumKind, SignableBody, SignableRequest, SigningSettings,
 };
 use aws_sigv4::sign::v4;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{resolve_language, Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
@@ -39,6 +39,38 @@ pub(crate) struct AwsStt {
     language: Option<String>,
     vocabulary_name: Option<String>,
     http: reqwest::Client,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct StartJobRequest<'a> {
+    transcription_job_name: &'a str,
+    language_code: &'a str,
+    media: Media,
+    /// Omitted when the container is not one Transcribe names — see
+    /// [`media_format_for`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    media_format: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    settings: Option<JobSettings<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct Media {
+    media_file_uri: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct JobSettings<'a> {
+    vocabulary_name: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct GetJobRequest<'a> {
+    transcription_job_name: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -158,17 +190,18 @@ impl AwsStt {
     ) -> Result<(), SttError> {
         let language =
             resolve_language(request.language, self.language.as_deref(), DEFAULT_LANGUAGE);
-        let mut payload = serde_json::json!({
-            "TranscriptionJobName": job_name,
-            "LanguageCode": language,
-            "Media": { "MediaFileUri": format!("s3://{}/{key}", self.bucket) },
-        });
-        if let Some(format) = media_format_for(request.content_type) {
-            payload["MediaFormat"] = serde_json::json!(format);
-        }
-        if let Some(vocabulary) = &self.vocabulary_name {
-            payload["Settings"] = serde_json::json!({ "VocabularyName": vocabulary });
-        }
+        let payload = StartJobRequest {
+            transcription_job_name: job_name,
+            language_code: &language,
+            media: Media {
+                media_file_uri: format!("s3://{}/{key}", self.bucket),
+            },
+            media_format: media_format_for(request.content_type),
+            settings: self
+                .vocabulary_name
+                .as_deref()
+                .map(|vocabulary_name| JobSettings { vocabulary_name }),
+        };
 
         self.transcribe_call("StartTranscriptionJob", &payload)
             .await
@@ -176,7 +209,9 @@ impl AwsStt {
     }
 
     async fn get_job(&self, job_name: &str) -> Result<GetJobBody, SttError> {
-        let payload = serde_json::json!({ "TranscriptionJobName": job_name });
+        let payload = GetJobRequest {
+            transcription_job_name: job_name,
+        };
         let text = self
             .transcribe_call("GetTranscriptionJob", &payload)
             .await?;
@@ -187,7 +222,7 @@ impl AwsStt {
     async fn transcribe_call(
         &self,
         target: &str,
-        payload: &serde_json::Value,
+        payload: &impl Serialize,
     ) -> Result<String, SttError> {
         let url = format!("https://transcribe.{}.amazonaws.com/", self.region);
         let body = serde_json::to_vec(payload).map_err(decode)?;

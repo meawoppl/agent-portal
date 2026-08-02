@@ -8,7 +8,7 @@
 //! this endpoint. Point `PORTAL_STT_MODEL` at a Custom Speech deployment to get
 //! domain vocabulary.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{resolve_language, Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
@@ -25,6 +25,21 @@ pub(crate) struct AzureStt {
     /// Custom Speech deployment id, when one is configured.
     model: Option<String>,
     http: reqwest::Client,
+}
+
+/// The `definition` part of the multipart request.
+#[derive(Serialize)]
+struct Definition<'a> {
+    locales: [&'a str; 1],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<ModelRef<'a>>,
+}
+
+/// A Custom Speech deployment reference. The field really is named `self`.
+#[derive(Serialize)]
+struct ModelRef<'a> {
+    #[serde(rename = "self")]
+    self_uri: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -58,10 +73,12 @@ impl AzureStt {
         request: TranscribeRequest<'_>,
     ) -> Result<String, SttError> {
         let locale = resolve_language(request.language, self.language.as_deref(), DEFAULT_LOCALE);
-        let mut definition = serde_json::json!({ "locales": [locale] });
-        if let Some(model) = &self.model {
-            definition["model"] = serde_json::json!({ "self": model });
-        }
+        let definition = Definition {
+            locales: [&locale],
+            model: self.model.as_deref().map(|self_uri| ModelRef { self_uri }),
+        };
+        let definition = serde_json::to_string(&definition)
+            .map_err(|e| SttError::Provider(format!("could not encode request: {e}")))?;
 
         let audio = reqwest::multipart::Part::bytes(request.audio.to_vec())
             .file_name(format!("audio.{}", extension_for(request.content_type)))
@@ -69,7 +86,7 @@ impl AzureStt {
             .map_err(|e| SttError::Provider(format!("unsupported audio content type: {e}")))?;
         let form = reqwest::multipart::Form::new()
             .part("audio", audio)
-            .text("definition", definition.to_string());
+            .text("definition", definition);
 
         let response = self
             .http

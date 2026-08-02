@@ -3,7 +3,7 @@
 //! Same three-step shape as Rev AI, with the job configuration supplied as a
 //! JSON part alongside the audio. Keyterms map onto `additional_vocab`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{resolve_language, Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
@@ -24,6 +24,28 @@ pub(crate) struct SpeechmaticsStt {
     /// Operating point (`standard` / `enhanced`), when configured.
     model: Option<String>,
     http: reqwest::Client,
+}
+
+/// The `config` part of the multipart submit.
+#[derive(Serialize)]
+struct JobConfig<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    transcription_config: TranscriptionConfig<'a>,
+}
+
+#[derive(Serialize)]
+struct TranscriptionConfig<'a> {
+    language: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operating_point: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    additional_vocab: Option<Vec<AdditionalVocab<'a>>>,
+}
+
+#[derive(Serialize)]
+struct AdditionalVocab<'a> {
+    content: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -78,25 +100,25 @@ impl SpeechmaticsStt {
     async fn submit(&self, request: &TranscribeRequest<'_>) -> Result<String, SttError> {
         let language =
             resolve_language(request.language, self.language.as_deref(), DEFAULT_LANGUAGE);
-        let mut transcription_config = serde_json::json!({
-            "language": bare_language(&language),
-        });
-        if let Some(model) = &self.model {
-            transcription_config["operating_point"] = serde_json::json!(model);
-        }
-        if !request.keyterms.is_empty() {
-            let vocab: Vec<serde_json::Value> = request
-                .keyterms
-                .iter()
-                .take(MAX_ADDITIONAL_VOCAB)
-                .map(|term| serde_json::json!({ "content": term }))
-                .collect();
-            transcription_config["additional_vocab"] = serde_json::json!(vocab);
-        }
-        let config = serde_json::json!({
-            "type": "transcription",
-            "transcription_config": transcription_config,
-        });
+        let config = JobConfig {
+            kind: "transcription",
+            transcription_config: TranscriptionConfig {
+                language: bare_language(&language),
+                operating_point: self.model.as_deref(),
+                additional_vocab: (!request.keyterms.is_empty()).then(|| {
+                    request
+                        .keyterms
+                        .iter()
+                        .take(MAX_ADDITIONAL_VOCAB)
+                        .map(|term| AdditionalVocab {
+                            content: term.as_str(),
+                        })
+                        .collect()
+                }),
+            },
+        };
+        let config = serde_json::to_string(&config)
+            .map_err(|e| SttError::Provider(format!("could not encode request: {e}")))?;
 
         let data_file = reqwest::multipart::Part::bytes(request.audio.to_vec())
             .file_name(format!("audio.{}", extension_for(request.content_type)))
@@ -104,7 +126,7 @@ impl SpeechmaticsStt {
             .map_err(|e| SttError::Provider(format!("unsupported audio content type: {e}")))?;
         let form = reqwest::multipart::Form::new()
             .part("data_file", data_file)
-            .text("config", config.to_string());
+            .text("config", config);
 
         let response = self
             .http

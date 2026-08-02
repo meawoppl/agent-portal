@@ -9,7 +9,7 @@
 //! initial-prompt parameter, so there is nowhere to put them.
 
 use base64::Engine;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{resolve_language, Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
@@ -26,6 +26,14 @@ pub(crate) struct SimplismartStt {
     endpoint: String,
     language: Option<String>,
     http: reqwest::Client,
+}
+
+/// Request body: the audio travels base64-encoded inside the JSON.
+#[derive(Serialize)]
+struct InferRequest {
+    audio_data: String,
+    language: String,
+    task: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -51,11 +59,11 @@ impl SimplismartStt {
     ) -> Result<String, SttError> {
         let language =
             resolve_language(request.language, self.language.as_deref(), DEFAULT_LANGUAGE);
-        let body = serde_json::json!({
-            "audio_data": base64::engine::general_purpose::STANDARD.encode(&request.audio),
-            "language": bare_language(&language),
-            "task": "transcribe",
-        });
+        let body = InferRequest {
+            audio_data: base64::engine::general_purpose::STANDARD.encode(&request.audio),
+            language: bare_language(&language),
+            task: "transcribe",
+        };
 
         let response = self
             .http

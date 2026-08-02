@@ -4,7 +4,7 @@
 //! the finished transcript is a separate fetch rather than a field on the
 //! status. Keyterms map onto `custom_vocabularies`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
@@ -19,6 +19,21 @@ pub(crate) struct RevAiStt {
     endpoint: String,
     language: Option<String>,
     http: reqwest::Client,
+}
+
+/// The `options` part of the multipart submit.
+#[derive(Serialize)]
+struct JobOptions<'a> {
+    skip_diarization: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom_vocabularies: Option<[CustomVocabulary<'a>; 1]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct CustomVocabulary<'a> {
+    phrases: &'a [String],
 }
 
 #[derive(Deserialize)]
@@ -61,13 +76,15 @@ impl RevAiStt {
     }
 
     async fn submit(&self, request: &TranscribeRequest<'_>) -> Result<String, SttError> {
-        let mut options = serde_json::json!({ "skip_diarization": true });
-        if !request.keyterms.is_empty() {
-            options["custom_vocabularies"] = serde_json::json!([{ "phrases": request.keyterms }]);
-        }
-        if let Some(language) = &self.language {
-            options["language"] = serde_json::json!(language);
-        }
+        let options = JobOptions {
+            skip_diarization: true,
+            custom_vocabularies: (!request.keyterms.is_empty()).then_some([CustomVocabulary {
+                phrases: request.keyterms,
+            }]),
+            language: self.language.as_deref(),
+        };
+        let options = serde_json::to_string(&options)
+            .map_err(|e| SttError::Provider(format!("could not encode request: {e}")))?;
 
         let media = reqwest::multipart::Part::bytes(request.audio.to_vec())
             .file_name(format!("audio.{}", extension_for(request.content_type)))
@@ -75,7 +92,7 @@ impl RevAiStt {
             .map_err(|e| SttError::Provider(format!("unsupported audio content type: {e}")))?;
         let form = reqwest::multipart::Form::new()
             .part("media", media)
-            .text("options", options.to_string());
+            .text("options", options);
 
         let response = self
             .http

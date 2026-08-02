@@ -59,6 +59,37 @@ struct TokenResponse {
     expires_in: u64,
 }
 
+#[derive(Serialize)]
+struct RecognizeRequest<'a> {
+    config: RecognitionConfig<'a>,
+    audio: RecognitionAudio,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecognitionConfig<'a> {
+    language_code: &'a str,
+    enable_automatic_punctuation: bool,
+    model: &'a str,
+    /// Omitted when the container describes itself — see [`encoding_for`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    encoding: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speech_contexts: Option<[SpeechContext<'a>; 1]>,
+}
+
+#[derive(Serialize)]
+struct SpeechContext<'a> {
+    phrases: &'a [String],
+    boost: f32,
+}
+
+#[derive(Serialize)]
+struct RecognitionAudio {
+    /// Base64 of the recording.
+    content: String,
+}
+
 #[derive(Deserialize)]
 struct RecognizeBody {
     #[serde(default)]
@@ -117,25 +148,21 @@ impl GoogleStt {
         let language =
             resolve_language(request.language, self.language.as_deref(), DEFAULT_LANGUAGE);
 
-        let mut config = serde_json::json!({
-            "languageCode": language,
-            "enableAutomaticPunctuation": true,
-            "model": self.model,
-        });
-        if let Some(encoding) = encoding_for(request.content_type) {
-            config["encoding"] = serde_json::json!(encoding);
-        }
-        if !request.keyterms.is_empty() {
-            config["speechContexts"] = serde_json::json!([{
-                "phrases": request.keyterms,
-                "boost": PHRASE_BOOST,
-            }]);
-        }
-
-        let body = serde_json::json!({
-            "config": config,
-            "audio": { "content": base64::engine::general_purpose::STANDARD.encode(&request.audio) },
-        });
+        let body = RecognizeRequest {
+            config: RecognitionConfig {
+                language_code: &language,
+                enable_automatic_punctuation: true,
+                model: &self.model,
+                encoding: encoding_for(request.content_type),
+                speech_contexts: (!request.keyterms.is_empty()).then_some([SpeechContext {
+                    phrases: request.keyterms,
+                    boost: PHRASE_BOOST,
+                }]),
+            },
+            audio: RecognitionAudio {
+                content: base64::engine::general_purpose::STANDARD.encode(&request.audio),
+            },
+        };
 
         let response = self
             .http

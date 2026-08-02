@@ -3,7 +3,7 @@
 //! Three calls: the audio is uploaded to get a URL, a transcript job is created
 //! against that URL, then the job is polled. Keyterms map onto `word_boost`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
@@ -22,6 +22,20 @@ pub(crate) struct AssemblyAiStt {
     language: Option<String>,
     model: Option<String>,
     http: reqwest::Client,
+}
+
+#[derive(Serialize)]
+struct TranscriptRequest<'a> {
+    audio_url: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    word_boost: Option<&'a [String]>,
+    /// Only meaningful alongside `word_boost`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    boost_param: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language_code: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speech_model: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -82,18 +96,14 @@ impl AssemblyAiStt {
     }
 
     async fn submit(&self, audio_url: &str, keyterms: &[String]) -> Result<String, SttError> {
-        let mut payload = serde_json::json!({ "audio_url": audio_url });
-        if !keyterms.is_empty() {
-            let boosted: Vec<&String> = keyterms.iter().take(MAX_WORD_BOOST).collect();
-            payload["word_boost"] = serde_json::json!(boosted);
-            payload["boost_param"] = serde_json::json!("high");
-        }
-        if let Some(language) = &self.language {
-            payload["language_code"] = serde_json::json!(language);
-        }
-        if let Some(model) = &self.model {
-            payload["speech_model"] = serde_json::json!(model);
-        }
+        let boosted = &keyterms[..keyterms.len().min(MAX_WORD_BOOST)];
+        let payload = TranscriptRequest {
+            audio_url,
+            word_boost: (!boosted.is_empty()).then_some(boosted),
+            boost_param: (!boosted.is_empty()).then_some("high"),
+            language_code: self.language.as_deref(),
+            speech_model: self.model.as_deref(),
+        };
 
         let response = self
             .http
