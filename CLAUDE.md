@@ -901,9 +901,15 @@ When making changes, verify:
 | `MESSAGE_RETENTION_COUNT` | Max messages per session | Optional (default: 100) |
 | `MESSAGE_RETENTION_DAYS` | Days before message deletion | Optional (default: 30) |
 | `SESSION_MAX_AGE_DAYS` | Days before session deletion | Optional (default: 14) |
-| `PORTAL_STT_BACKEND` | Server-side speech-to-text provider: `disabled`, `openai`, or `deepgram`. Unset/`disabled` keeps voice on the browser's Web Speech API | Optional (default: disabled) |
-| `PORTAL_STT_API_KEY` | API key for the selected STT provider | Required when `PORTAL_STT_BACKEND` is not `disabled` |
-| `PORTAL_STT_MODEL` | Override the provider's default model (`gpt-4o-transcribe` / `nova-3`). Note: Deepgram keyterm biasing needs Nova-3 | Optional |
+| `PORTAL_STT_BACKEND` | Speech-to-text provider: `disabled` or one of `assemblyai`, `aws`, `azure`, `deepgram`, `google`, `ibm`, `openai`, `revai`, `simplismart`, `speechmatics`. Unset/`disabled` keeps voice on the browser's Web Speech API | Optional (default: disabled) |
+| `PORTAL_STT_API_KEY` | API key for the selected provider | Required by every provider except `google` (service account) and `aws` (`AWS_*` credentials) |
+| `PORTAL_STT_MODEL` | Override the provider's default model / operating point / custom deployment | Optional |
+| `PORTAL_STT_ENDPOINT` | Override the API host — self-hosted Deepgram, OpenAI-compatible gateways, a Simplismart deployment | Required for `ibm` (per-instance URL); optional elsewhere |
+| `PORTAL_STT_REGION` | Cloud region | Required for `azure` and `aws` (`aws` also accepts `AWS_REGION`) |
+| `PORTAL_STT_LANGUAGE` | Default BCP-47 language when the client does not send one | Optional |
+| `PORTAL_STT_BUCKET` | S3 bucket used to stage audio | Required for `aws` |
+| `PORTAL_STT_SERVICE_ACCOUNT_PATH` | Google service-account JSON | Required for `google` |
+| `PORTAL_STT_VOCABULARY_NAME` | Pre-created custom-vocabulary resource | Optional (`aws`) |
 | `PORTAL_MAX_AUDIO_MB` | Per-recording cap for `POST /api/stt/transcribe` | Optional (default: 25) |
 | `PORTAL_MAX_IMAGE_MB` | Max image size for proxies (also the per-file cap for image `agent-portal show`) | Optional (default: 10) |
 | `PORTAL_MAX_VIDEO_MB` | Per-file cap for videos shown via `agent-portal show` | Optional (default: 100) |
@@ -938,15 +944,30 @@ Voice defaults to the browser's Web Speech API and needs no credentials. Setting
 because the browser API has **no vocabulary hook**: `clippy`, `Diesel`, branch
 names and file paths come back mangled, and Firefox has no support at all.
 
-`backend/src/stt/` holds the providers as an **enum, not a trait object** — same
-reasoning as `ArchiveStore`, so adding one is a compile error until every arm is
-filled in. A new provider is: a variant, a `from_env` arm, a `key()` arm, and a
-module implementing `transcribe`.
+The **`portal-stt` crate** holds the providers as an **enum, not a trait object**
+— same reasoning as `ArchiveStore`, so adding one is a compile error until every
+arm is filled in. It has its own infrastructure because the vendors genuinely
+differ: `http.rs` normalizes error responses, `poll.rs` drives the ones that
+transcribe as an asynchronous job, `config.rs` maps one env var per *concept*
+onto per-provider requirements.
 
-The accuracy comes mostly from `stt::session_keyterms`, which turns the session's
-repo / branch / working directory / agent into bias terms. Keep that list short
-and specific — a long tail of common words measurably *hurts* accuracy, which is
-why `STOP_TERMS` and `MAX_KEYTERMS` exist.
+| Shape | Providers |
+|---|---|
+| Single request | OpenAI, Deepgram, Azure, Google, IBM, Simplismart |
+| Submit → poll → fetch | AssemblyAI, Rev AI, Speechmatics, AWS |
+
+**Not every provider can bias.** `SttProvider::supports_keyterms` is the single
+source of truth: AssemblyAI, Deepgram, Google, OpenAI, Rev AI and Speechmatics
+take a per-request vocabulary; Azure, IBM and Simplismart need a trained model,
+and AWS needs a pre-created named vocabulary. The backend skips building hints
+when the provider cannot use them, so don't add a caller that assumes they are
+always sent.
+
+**Verify a provider with the probe, not by reasoning about it.** Network code
+cannot be unit-tested, so `cargo run -p portal-stt --bin stt-probe` sends real
+audio (or a generated moment of silence) to the real API. With a deliberately
+wrong key, a `provider`-class error proves the URL, headers and body reached the
+vendor; a `transport` error or a 404 means the request is built wrong.
 
 **Do not make this mandatory.** Server STT was removed once already (2.6.x)
 because it required a GCP service account, a gRPC client, a `/ws/voice/{id}`
