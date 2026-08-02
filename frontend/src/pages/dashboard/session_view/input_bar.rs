@@ -41,6 +41,10 @@ pub struct InputBarProps {
     /// Whether the WebSocket is currently connected. Disables the textarea
     /// + send buttons when false.
     pub ws_connected: bool,
+    /// Whether the server can transcribe audio (`AppConfig::stt_enabled`).
+    /// Selects the voice button's capture strategy.
+    #[prop_or(false)]
+    pub stt_enabled: bool,
     /// Fired exactly once on `create`, handing the parent a callback it can
     /// invoke to push inbound events into the bar. Mirrors the
     /// dispatcher-registration pattern used by `PermissionHandler` and
@@ -836,6 +840,8 @@ impl InputBar {
                 {on_error}
                 disabled={!ctx.props().ws_connected}
                 button_ref={Some(button_ref)}
+                server_stt={ctx.props().stt_enabled}
+                session_id={Some(ctx.props().session_id)}
             />
         }
     }

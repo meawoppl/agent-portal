@@ -252,6 +252,28 @@
     color: var(--error);
 }
 
+/* Server transcription is in flight. The recording has stopped, so this must
+   read as "working", not as "still listening" like .recording does. */
+.voice-button.transcribing {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.voice-button.transcribing .transcribing-icon {
+    animation: voice-transcribing-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-transcribing-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
 .voice-button svg {
     width: 20px;
     height: 20px;

@@ -963,6 +963,15 @@ and AWS needs a pre-created named vocabulary. The backend skips building hints
 when the provider cannot use them, so don't add a caller that assumes they are
 always sent.
 
+**The browser picks its capture path from `AppConfig::stt_enabled`.**
+`frontend/src/components/voice_input.rs` holds both strategies behind one
+button: `MediaRecorder` → `POST /api/stt/transcribe` when a provider is
+configured, and the Web Speech API otherwise. The iOS singleton/permission-race
+workarounds in that file apply to the **browser** path only — the recorder has
+neither problem, and it works in Firefox, which has no Web Speech API at all.
+The flag is threaded `use_dashboard_bootstrap` → `page.rs` → `SessionView` →
+`InputBar` → `VoiceInput`, the same way `archive_enabled` is.
+
 **Verify a provider with the probe, not by reasoning about it.** Network code
 cannot be unit-tested, so `cargo run -p portal-stt --bin stt-probe` sends real
 audio (or a generated moment of silence) to the real API. With a deliberately
