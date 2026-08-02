@@ -27,11 +27,10 @@
 //! is off unless `PORTAL_STT_BACKEND` is set**, in which case the browser path
 //! stays exactly as it is today.
 
-use axum::body::Bytes;
+pub use bytes::Bytes;
 
-mod deepgram;
 mod keyterms;
-mod openai;
+mod providers;
 
 pub use keyterms::session_keyterms;
 
@@ -77,8 +76,8 @@ impl std::fmt::Display for SttError {
 /// A configured speech-to-text provider.
 #[derive(Clone)]
 pub enum SttProvider {
-    OpenAi(openai::OpenAiStt),
-    Deepgram(deepgram::DeepgramStt),
+    OpenAi(providers::openai::OpenAiStt),
+    Deepgram(providers::deepgram::DeepgramStt),
 }
 
 impl SttProvider {
@@ -106,8 +105,10 @@ impl SttProvider {
             .filter(|m| !m.is_empty());
 
         match backend.as_str() {
-            "openai" => Ok(Some(Self::OpenAi(openai::OpenAiStt::new(api_key, model)))),
-            "deepgram" => Ok(Some(Self::Deepgram(deepgram::DeepgramStt::new(
+            "openai" => Ok(Some(Self::OpenAi(providers::openai::OpenAiStt::new(
+                api_key, model,
+            )))),
+            "deepgram" => Ok(Some(Self::Deepgram(providers::deepgram::DeepgramStt::new(
                 api_key, model,
             )))),
             other => anyhow::bail!(
@@ -135,7 +136,7 @@ impl SttProvider {
 /// Map a recording's MIME type to the filename extension providers expect when
 /// the audio is uploaded as a file. Unknown types fall back to `webm`, which is
 /// what every browser `MediaRecorder` we target produces.
-fn extension_for(content_type: &str) -> &'static str {
+pub(crate) fn extension_for(content_type: &str) -> &'static str {
     match content_type.split(';').next().unwrap_or("").trim() {
         "audio/mp4" | "audio/x-m4a" => "mp4",
         "audio/mpeg" => "mp3",

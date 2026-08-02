@@ -544,6 +544,7 @@ dependencies = [
  "mini-moka",
  "oauth2",
  "object_store",
+ "portal-stt",
  "rand 0.8.6",
  "reqwest 0.12.28",
  "serde",
@@ -5215,6 +5216,18 @@ dependencies = [
  "serde_json",
  "shared",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "portal-stt"
+version = "2.13.11"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

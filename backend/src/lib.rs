@@ -22,7 +22,6 @@ pub mod models;
 pub mod push;
 pub mod routes;
 pub mod schema;
-pub mod stt;
 
 // Visible to the crate's own `#[cfg(test)]` modules AND to the separate
 // integration-test binaries (e.g. `tests/harness.rs`), which link the lib
@@ -102,7 +101,7 @@ pub struct AppState {
     pub mobile_app_links: config::MobileAppLinksConfig,
     /// Configured speech-to-text provider. `None` = the browser's Web Speech
     /// API remains the only voice path (see `stt`).
-    pub stt: Option<stt::SttProvider>,
+    pub stt: Option<portal_stt::SttProvider>,
     /// Per-recording cap (MB) for `POST /api/stt/transcribe`.
     pub max_audio_mb: u32,
 }
@@ -149,7 +148,7 @@ pub async fn run() -> anyhow::Result<()> {
     let oauth = config::OAuthProviders::from_env(args.dev_mode)?;
 
     // Speech-to-text is opt-in; `None` leaves voice on the browser path.
-    let stt = stt::SttProvider::from_env()?;
+    let stt = portal_stt::SttProvider::from_env()?;
     match &stt {
         Some(provider) => tracing::info!("Speech-to-text provider: {}", provider.key()),
         None => tracing::info!("Speech-to-text: disabled (browser Web Speech API)"),

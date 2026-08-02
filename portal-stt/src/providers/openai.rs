@@ -7,7 +7,7 @@
 
 use serde::Deserialize;
 
-use super::{extension_for, SttError, TranscribeRequest};
+use crate::{extension_for, SttError, TranscribeRequest};
 
 const ENDPOINT: &str = "https://api.openai.com/v1/audio/transcriptions";
 const DEFAULT_MODEL: &str = "gpt-4o-transcribe";
