@@ -38,7 +38,7 @@ runs:
 
     - name: Install Rust
       if: runner.os != 'macOS'
-      uses: dtolnay/rust-toolchain@1.92.0
+      uses: dtolnay/rust-toolchain@1.96.0
       with:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
@@ -54,7 +54,7 @@ runs:
       run: |
         rm -rf "$HOME/.cargo" "$HOME/.rustup"
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-          | sh -s -- -y --default-toolchain 1.92.0 --profile minimal
+          | sh -s -- -y --default-toolchain 1.96.0 --profile minimal
         if [ -n "${{ inputs.components }}" ]; then
           "$HOME/.cargo/bin/rustup" component add $(echo "${{ inputs.components }}" | tr ',' ' ')
         fi
