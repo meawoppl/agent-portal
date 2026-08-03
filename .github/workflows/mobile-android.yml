@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
       - name: Install Rust (aarch64-linux-android)
-        uses: dtolnay/rust-toolchain@1.92.0
+        uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy
           targets: aarch64-linux-android
