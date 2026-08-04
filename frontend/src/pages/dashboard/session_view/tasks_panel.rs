@@ -18,6 +18,21 @@ use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
+/// A task's own id (from `system.task_started.task_id`).
+///
+/// Distinct from [`ToolUseId`] so the reverse index below cannot be indexed
+/// with the wrong kind of id: `active_tasks` is keyed by `TaskId`, the reverse
+/// index maps `ToolUseId → TaskId`, and the compiler now rejects looking one up
+/// with the other. Both were bare `String` (#921); a `tool_use_to_task.get(task_id)`
+/// slip used to compile and silently miss.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TaskId(pub String);
+
+/// The `tool_use_id` a task is spawned under, used to close the task when its
+/// `tool_result` arrives in `--print` mode (which skips `task_notification`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ToolUseId(pub String);
+
 /// Status of a tracked task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
@@ -75,8 +90,8 @@ pub enum TaskEvent {
     /// row's server-assigned `created_at` when present, falling back to
     /// `js_sys::Date::now()` only for live frames without metadata.
     Started {
-        task_id: String,
-        tool_use_id: String,
+        task_id: TaskId,
+        tool_use_id: ToolUseId,
         task_type: String,
         description: String,
         started_at: f64,
@@ -86,7 +101,7 @@ pub enum TaskEvent {
     /// (an out-of-order replay or a progress that arrived before its
     /// `started` cousin).
     Progress {
-        task_id: String,
+        task_id: TaskId,
         description: String,
         last_tool_name: String,
         duration_ms: u64,
@@ -100,7 +115,7 @@ pub enum TaskEvent {
     /// any matching `Started`, the panel inserts a placeholder so the row
     /// still shows up.
     Notification {
-        task_id: String,
+        task_id: TaskId,
         summary: String,
         status: TaskStatus,
         completed_at: f64,
@@ -113,7 +128,7 @@ pub enum TaskEvent {
     /// looks up the task via its `tool_use_id → task_id` reverse index
     /// and only marks it `Completed` if it was still `Running`.
     ToolResult {
-        tool_use_id: String,
+        tool_use_id: ToolUseId,
         completed_at: f64,
     },
 }
@@ -159,10 +174,10 @@ pub enum TasksPanelMsg {
 }
 
 pub struct TasksPanel {
-    active_tasks: HashMap<String, TaskEntry>,
+    active_tasks: HashMap<TaskId, TaskEntry>,
     /// Maps `tool_use_id → task_id` so a `ToolResult` event can find its
     /// task without the parent having to thread the mapping.
-    tool_use_to_task: HashMap<String, String>,
+    tool_use_to_task: HashMap<ToolUseId, TaskId>,
     tasks_panel_open: bool,
     task_tick_handle: Option<Interval>,
     /// Animation state for the tasks tab: "entering", "progress", or
@@ -559,15 +574,15 @@ pub(super) fn derive_task_events(
                     .unwrap_or("unknown")
                     .to_string();
                 events.push(TaskEvent::Started {
-                    task_id: task.task_id.clone(),
-                    tool_use_id: task.tool_use_id.clone().unwrap_or_default(),
+                    task_id: TaskId(task.task_id.clone()),
+                    tool_use_id: ToolUseId(task.tool_use_id.clone().unwrap_or_default()),
                     task_type,
                     description: task.description.clone(),
                     started_at: resolve_ts(),
                 });
             } else if let Some(progress) = sys.as_task_progress() {
                 events.push(TaskEvent::Progress {
-                    task_id: progress.task_id.clone(),
+                    task_id: TaskId(progress.task_id.clone()),
                     description: progress.description.clone(),
                     // Option in 2.1.160; empty string renders as "no tool yet".
                     last_tool_name: progress.last_tool_name.clone().unwrap_or_default(),
@@ -594,7 +609,7 @@ pub(super) fn derive_task_events(
                         .as_ref()
                         .map(|u| (u.duration_ms, u.tool_uses, u.total_tokens));
                     events.push(TaskEvent::Notification {
-                        task_id: notif.task_id.clone(),
+                        task_id: TaskId(notif.task_id.clone()),
                         summary: notif.summary.clone(),
                         status,
                         completed_at: resolve_ts(),
@@ -611,7 +626,7 @@ pub(super) fn derive_task_events(
             for block in &user_msg.message.content {
                 if let shared::ContentBlock::ToolResult(tr) = block {
                     events.push(TaskEvent::ToolResult {
-                        tool_use_id: tr.tool_use_id.clone(),
+                        tool_use_id: ToolUseId(tr.tool_use_id.clone()),
                         completed_at: resolve_ts(),
                     });
                 }
@@ -639,8 +654,8 @@ mod tests {
 
     fn started(task_id: &str, tool_use_id: &str, started_at: f64) -> TaskEvent {
         TaskEvent::Started {
-            task_id: task_id.to_string(),
-            tool_use_id: tool_use_id.to_string(),
+            task_id: TaskId(task_id.to_string()),
+            tool_use_id: ToolUseId(tool_use_id.to_string()),
             task_type: "local_agent".to_string(),
             description: format!("desc-{task_id}"),
             started_at,
@@ -649,7 +664,7 @@ mod tests {
 
     fn progress(task_id: &str, last_tool_name: &str, started_at: f64) -> TaskEvent {
         TaskEvent::Progress {
-            task_id: task_id.to_string(),
+            task_id: TaskId(task_id.to_string()),
             description: format!("progress-{task_id}"),
             last_tool_name: last_tool_name.to_string(),
             duration_ms: 2_500,
@@ -661,7 +676,7 @@ mod tests {
 
     fn notification(task_id: &str, status: TaskStatus, completed_at: f64) -> TaskEvent {
         TaskEvent::Notification {
-            task_id: task_id.to_string(),
+            task_id: TaskId(task_id.to_string()),
             summary: format!("notif-{task_id}"),
             status,
             completed_at,
@@ -671,7 +686,7 @@ mod tests {
 
     fn tool_result(tool_use_id: &str, completed_at: f64) -> TaskEvent {
         TaskEvent::ToolResult {
-            tool_use_id: tool_use_id.to_string(),
+            tool_use_id: ToolUseId(tool_use_id.to_string()),
             completed_at,
         }
     }
@@ -685,15 +700,18 @@ mod tests {
         panel.apply_event(started("t1", "tu1", 1_000.0));
         let e = panel
             .active_tasks
-            .get("t1")
+            .get(&TaskId("t1".to_string()))
             .expect("task missing after start");
         assert_eq!(e.status, TaskStatus::Running);
         assert_eq!(e.started_at, 1_000.0);
         assert_eq!(e.task_type, "local_agent");
-        assert_eq!(panel.tool_use_to_task.get("tu1"), Some(&"t1".to_string()));
+        assert_eq!(
+            panel.tool_use_to_task.get(&ToolUseId("tu1".to_string())),
+            Some(&TaskId("t1".to_string()))
+        );
 
         panel.apply_event(progress("t1", "Bash", 1_000.0));
-        let e = panel.active_tasks.get("t1").unwrap();
+        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
         assert_eq!(e.last_tool_name.as_deref(), Some("Bash"));
         assert_eq!(e.tool_uses, Some(4));
         assert_eq!(e.duration_ms, Some(2_500));
@@ -703,7 +721,7 @@ mod tests {
         assert_eq!(e.started_at, 1_000.0);
 
         panel.apply_event(notification("t1", TaskStatus::Completed, 5_000.0));
-        let e = panel.active_tasks.get("t1").unwrap();
+        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
         assert_eq!(e.status, TaskStatus::Completed);
         assert_eq!(e.completed_at, Some(5_000.0));
         // Notification usage payload overrode the progress numbers.
@@ -721,7 +739,10 @@ mod tests {
         // timestamp the parent supplied (the row's `created_at`).
         let mut panel = mk_panel();
         panel.apply_event(progress("t1", "Bash", 1_500.0));
-        let e = panel.active_tasks.get("t1").expect("placeholder missing");
+        let e = panel
+            .active_tasks
+            .get(&TaskId("t1".to_string()))
+            .expect("placeholder missing");
         assert_eq!(e.status, TaskStatus::Running);
         assert_eq!(e.started_at, 1_500.0);
         assert_eq!(e.last_tool_name.as_deref(), Some("Bash"));
@@ -735,7 +756,10 @@ mod tests {
         // extraction behavior in `LoadHistory`.
         let mut panel = mk_panel();
         panel.apply_event(notification("t1", TaskStatus::Failed, 7_777.0));
-        let e = panel.active_tasks.get("t1").expect("placeholder missing");
+        let e = panel
+            .active_tasks
+            .get(&TaskId("t1".to_string()))
+            .expect("placeholder missing");
         assert_eq!(e.status, TaskStatus::Failed);
         assert_eq!(e.started_at, 7_777.0);
         assert_eq!(e.completed_at, Some(7_777.0));
@@ -760,7 +784,7 @@ mod tests {
         let mut panel = mk_panel();
         panel.apply_event(started("t1", "tu1", 1_000.0));
         panel.apply_event(tool_result("tu1", 4_000.0));
-        let e = panel.active_tasks.get("t1").unwrap();
+        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
         assert_eq!(e.status, TaskStatus::Completed);
         assert_eq!(e.completed_at, Some(4_000.0));
     }
@@ -776,7 +800,7 @@ mod tests {
         panel.apply_event(notification("t1", TaskStatus::Completed, 4_000.0));
         // Now a stray duplicate tool_result for the same tool_use.
         panel.apply_event(tool_result("tu1", 9_999.0));
-        let e = panel.active_tasks.get("t1").unwrap();
+        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
         assert_eq!(
             e.completed_at,
             Some(4_000.0),
