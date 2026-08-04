@@ -404,6 +404,7 @@ struct UserBasicInfo {
     id: Uuid,
     email: String,
     name: Option<String>,
+    nickname: Option<String>,
 }
 
 /// Validate a member role supplied by the caller
@@ -464,7 +465,7 @@ pub async fn list_session_members(
         .filter(session_members::session_id.eq(session_id))
         .select((
             SessionMember::as_select(),
-            (users::id, users::email, users::name),
+            (users::id, users::email, users::name, users::nickname),
         ))
         .load(&mut conn)?;
 
@@ -472,8 +473,13 @@ pub async fn list_session_members(
         .into_iter()
         .map(|(member, user)| SessionMemberInfo {
             user_id: user.id,
+            // Prefer the member's chosen nickname for the label; email stays
+            // shown alongside so the row still maps to a person (#1485).
+            name: crate::handlers::helpers::preferred_name(
+                user.nickname.as_deref(),
+                user.name.as_deref(),
+            ),
             email: user.email,
-            name: user.name,
             role: member.role.parse().unwrap_or(SessionRole::Unknown),
             created_at: member.created_at,
         })

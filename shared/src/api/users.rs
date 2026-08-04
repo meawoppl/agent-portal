@@ -68,6 +68,11 @@ pub struct MeResponse {
     pub email: String,
     #[serde(default)]
     pub name: Option<String>,
+    /// Optional self-chosen display label (#1485); shown in message
+    /// attribution instead of `name`. The profile settings panel reads this
+    /// to prefill its field.
+    #[serde(default)]
+    pub nickname: Option<String>,
     #[serde(default)]
     pub avatar_url: Option<String>,
     #[serde(default)]

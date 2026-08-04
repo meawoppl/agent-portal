@@ -614,6 +614,7 @@ fn me_response(user: User) -> MeResponse {
         id: user.id,
         email: user.email,
         name: user.name,
+        nickname: user.nickname,
         avatar_url: user.avatar_url,
         is_admin: user.is_admin,
     }

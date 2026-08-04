@@ -8,6 +8,14 @@ pub struct SoundSettingsResponse {
     pub sound_config: Option<serde_json::Value>,
 }
 
+/// Body for `PUT /api/settings/profile` (#1485). A `nickname` of `None` or an
+/// empty/whitespace string clears the nickname (falls back to name/email).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateProfileRequest {
+    #[serde(default)]
+    pub nickname: Option<String>,
+}
+
 /// Response for POST /api/stt/transcribe.
 ///
 /// Empty `text` is a success, not a failure: it means the recording contained

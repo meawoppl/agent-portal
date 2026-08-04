@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use governor::clock::QuantaInstant;
@@ -323,6 +323,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/settings/sound",
             get(handlers::sound_settings::get_sound_settings)
                 .put(handlers::sound_settings::save_sound_settings),
+        )
+        .route(
+            "/api/settings/profile",
+            put(handlers::profile::update_profile),
         )
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
