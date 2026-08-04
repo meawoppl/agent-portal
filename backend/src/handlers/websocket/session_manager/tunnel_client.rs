@@ -509,6 +509,7 @@ async fn run_relay(
 
 #[cfg(test)]
 mod tests {
+    use super::super::SessionId;
     use super::*;
     use crate::handlers::websocket::SessionManager;
 
@@ -579,7 +580,7 @@ mod tests {
         let mgr = SessionManager::new();
         let (tx, _rx) = conn_channel::<ServerToProxy>(64);
         mgr.register_session(
-            "k".to_string(),
+            SessionId::new("k"),
             tx,
             tokio_util::sync::CancellationToken::new(),
         );

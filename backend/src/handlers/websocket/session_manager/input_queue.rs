@@ -23,7 +23,7 @@ use crate::markers::{INPUT_SEQ_BUMP_FAILED, PENDING_INPUT_PERSIST_FAILED};
 use crate::db::DbPool;
 use crate::models::NewPendingInput;
 
-use super::{SessionId, SessionManager};
+use super::SessionManager;
 
 /// Outcome of [`SessionManager::enqueue_input`].
 pub(crate) struct EnqueueOutcome {
@@ -42,7 +42,7 @@ impl SessionManager {
     pub(crate) fn enqueue_input(
         &self,
         db_pool: &DbPool,
-        session_key: &SessionId,
+        session_key: &str,
         session_id: Uuid,
         content: serde_json::Value,
         send_mode: Option<SendMode>,

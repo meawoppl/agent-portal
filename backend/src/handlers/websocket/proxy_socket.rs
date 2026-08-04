@@ -208,7 +208,7 @@ fn handle_proxy_message(
             claude_args,
             capabilities,
         }) => {
-            let key = claude_session_id.to_string();
+            let key = SessionId::new(claude_session_id.to_string());
 
             // SECURITY (#780): authenticate *before* registering the socket
             // with the SessionManager. Previously the socket was registered

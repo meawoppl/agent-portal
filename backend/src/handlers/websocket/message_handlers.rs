@@ -1,4 +1,4 @@
-use super::{ProxySender, SessionManager};
+use super::{ProxySender, SessionId, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
 use serde::Deserialize;
@@ -138,7 +138,7 @@ fn parse_send_mode(value: &str) -> Option<SendMode> {
 /// Stable dependencies for handling one proxy-originated output frame.
 pub struct ClaudeOutputContext<'a> {
     pub session_manager: &'a SessionManager,
-    pub session_key: &'a Option<String>,
+    pub session_key: &'a Option<SessionId>,
     pub db_session_id: Option<Uuid>,
     pub db_pool: &'a DbPool,
     pub notifications: &'a crate::push::NotificationSender,
@@ -400,7 +400,7 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
 /// skip, since the "human already responded" guard has no baseline).
 fn maybe_schedule_overloaded_retry(
     session_manager: &SessionManager,
-    session_key: &Option<String>,
+    session_key: &Option<SessionId>,
     session_id: Uuid,
     db_pool: &DbPool,
     content: &serde_json::Value,

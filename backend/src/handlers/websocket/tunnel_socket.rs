@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::session_manager::DATA_PLANE_CHANNEL_CAPACITY;
-use super::{conn_channel, tunnel_ticket};
+use super::{conn_channel, tunnel_ticket, SessionId};
 use crate::AppState;
 
 /// How long a freshly connected data socket may take to send its `Hello`.
@@ -79,7 +79,7 @@ pub async fn handle_tunnel_data_socket(socket: WebSocket, app_state: Arc<AppStat
     // since been superseded, and a socket that finished connecting only after
     // its control connection was replaced.
     if !session_manager.register_data_plane(
-        ticket.session_key.clone(),
+        SessionId::new(ticket.session_key.clone()),
         ticket.gen,
         ticket.sizing,
         tx,

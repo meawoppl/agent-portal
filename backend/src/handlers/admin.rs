@@ -378,7 +378,7 @@ pub async fn list_sessions(
             let is_connected = app_state
                 .session_manager
                 .sessions
-                .contains_key(&session.id.to_string());
+                .contains_key(session.id.to_string().as_str());
 
             AdminSessionInfo {
                 id: session.id,

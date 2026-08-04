@@ -101,7 +101,7 @@ impl SessionManager {
 
     /// Remove a data-plane socket, but only if it is still the registered one
     /// for `gen` — so a stale socket's teardown cannot evict its successor.
-    pub fn unregister_data_plane(&self, session_key: &SessionId, gen: u64) {
+    pub fn unregister_data_plane(&self, session_key: &str, gen: u64) {
         if self
             .data_planes
             .remove_if(session_key, |_, conn| conn.gen == gen)
@@ -119,7 +119,7 @@ impl SessionManager {
     /// teardown: the data plane exists only to serve that connection, so
     /// leaving it registered would let a later `open_tunnel` route bytes into
     /// a socket whose session is gone.
-    pub fn close_data_plane_for_connection(&self, session_key: &SessionId, gen: u64) {
+    pub fn close_data_plane_for_connection(&self, session_key: &str, gen: u64) {
         if let Some((_, conn)) = self
             .data_planes
             .remove_if(session_key, |_, conn| conn.gen == gen)
@@ -178,7 +178,11 @@ mod tests {
         let (tx, rx) = conn_channel::<shared::ServerToProxy>(8);
         // Keep the receiver alive for the test's duration.
         std::mem::forget(rx);
-        mgr.register_session(key.to_string(), tx, CancellationToken::new())
+        mgr.register_session(
+            SessionId::new(key.to_string()),
+            tx,
+            CancellationToken::new(),
+        )
     }
 
     fn data_sender() -> (DataPlaneSender, tokio::sync::mpsc::Receiver<TunnelFrame>) {
@@ -269,10 +273,10 @@ mod tests {
         );
 
         // A late teardown from an older generation is a no-op.
-        mgr.unregister_data_plane(&"s1".to_string(), gen - 1);
+        mgr.unregister_data_plane("s1", gen - 1);
         assert!(mgr.has_data_plane("s1", gen));
 
-        mgr.unregister_data_plane(&"s1".to_string(), gen);
+        mgr.unregister_data_plane("s1", gen);
         assert!(!mgr.has_data_plane("s1", gen));
     }
 
@@ -341,7 +345,7 @@ mod tests {
             cancel.clone(),
         );
 
-        mgr.close_data_plane_for_connection(&"s1".to_string(), gen);
+        mgr.close_data_plane_for_connection("s1", gen);
 
         assert!(!mgr.has_data_plane("s1", gen));
         assert!(cancel.is_cancelled());
@@ -365,7 +369,7 @@ mod tests {
             cancel.clone(),
         );
 
-        mgr.close_data_plane_for_connection(&"s1".to_string(), old_gen);
+        mgr.close_data_plane_for_connection("s1", old_gen);
 
         assert!(mgr.has_data_plane("s1", new_gen));
         assert!(!cancel.is_cancelled());
