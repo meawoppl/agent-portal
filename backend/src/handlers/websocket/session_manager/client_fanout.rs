@@ -37,7 +37,7 @@ impl SessionManager {
             .push(sender);
     }
 
-    pub fn broadcast_to_web_clients(&self, session_key: &SessionId, msg: ServerToClient) {
+    pub fn broadcast_to_web_clients(&self, session_key: &str, msg: ServerToClient) {
         if let Some(mut clients) = self.web_clients.get_mut(session_key) {
             fanout_to_clients(clients.value_mut(), msg);
         }
@@ -53,7 +53,7 @@ impl SessionManager {
     /// would keep suppressing pushes until the next failed send lazily
     /// pruned it (see docs/MOBILE_APPS_PLAN.md §8.2). The lazy prune in
     /// `fanout_to_clients` stays as a backstop.
-    pub fn remove_web_client(&self, session_key: &SessionId, sender: &WebClientSender) {
+    pub fn remove_web_client(&self, session_key: &str, sender: &WebClientSender) {
         if let Some(mut clients) = self.web_clients.get_mut(session_key) {
             clients.retain(|c| !c.same_channel(sender));
             if clients.is_empty() {
@@ -160,7 +160,7 @@ mod tests {
         mgr.add_web_client("s1".into(), tx1);
         mgr.add_web_client("s1".into(), tx2);
 
-        mgr.broadcast_to_web_clients(&"s1".into(), make_client_msg());
+        mgr.broadcast_to_web_clients("s1", make_client_msg());
 
         assert!(matches!(
             rx1.try_recv().unwrap(),
@@ -183,7 +183,7 @@ mod tests {
 
         drop(rx1);
 
-        mgr.broadcast_to_web_clients(&"s1".into(), make_client_msg());
+        mgr.broadcast_to_web_clients("s1", make_client_msg());
 
         assert!(matches!(
             rx2.try_recv().unwrap(),
@@ -210,7 +210,7 @@ mod tests {
 
         drop(rx3);
 
-        mgr.broadcast_to_web_clients(&"s1".into(), make_client_msg());
+        mgr.broadcast_to_web_clients("s1", make_client_msg());
 
         assert!(matches!(
             rx1.try_recv().unwrap(),
@@ -280,12 +280,12 @@ mod tests {
         mgr.add_web_client("s1".into(), tx2.clone());
 
         // Removing one sender leaves the other and keeps the entry.
-        mgr.remove_web_client(&"s1".into(), &tx1);
+        mgr.remove_web_client("s1", &tx1);
         assert_eq!(mgr.web_clients.get("s1").unwrap().len(), 1);
 
         // Removing the last sender drops the map entry entirely, so presence
         // checks (map contains session) stay correct.
-        mgr.remove_web_client(&"s1".into(), &tx2);
+        mgr.remove_web_client("s1", &tx2);
         assert!(mgr.web_clients.get("s1").is_none());
     }
 

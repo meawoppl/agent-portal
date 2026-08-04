@@ -22,7 +22,7 @@ pub(super) struct PendingMessage {
 }
 
 impl SessionManager {
-    pub fn send_to_session(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {
+    pub fn send_to_session(&self, session_key: &str, msg: ServerToProxy) -> bool {
         let msg = match self.sessions.get(session_key) {
             Some(conn) => match conn.sender.send(msg) {
                 Ok(()) => return true,
@@ -43,7 +43,7 @@ impl SessionManager {
         self.queue_pending_message(session_key, msg)
     }
 
-    pub fn send_to_connected_session(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {
+    pub fn send_to_connected_session(&self, session_key: &str, msg: ServerToProxy) -> bool {
         match self.sessions.get(session_key) {
             Some(conn) => match conn.sender.send(msg) {
                 Ok(()) => true,
@@ -61,11 +61,7 @@ impl SessionManager {
 
     /// Drain this session's pending queue into `sender`, dropping entries
     /// older than [`MAX_PENDING_MESSAGE_AGE`]. Called on proxy registration.
-    pub(super) fn replay_pending_messages(
-        &self,
-        session_key: &SessionId,
-        sender: &ProxySender,
-    ) -> usize {
+    pub(super) fn replay_pending_messages(&self, session_key: &str, sender: &ProxySender) -> usize {
         let mut replayed = 0;
         let now = Instant::now();
 
@@ -91,10 +87,10 @@ impl SessionManager {
         replayed
     }
 
-    fn queue_pending_message(&self, session_key: &SessionId, msg: ServerToProxy) -> bool {
+    fn queue_pending_message(&self, session_key: &str, msg: ServerToProxy) -> bool {
         let mut queue = self
             .pending_messages
-            .entry(session_key.clone())
+            .entry(SessionId::from(session_key))
             .or_default();
 
         while queue.len() >= MAX_PENDING_MESSAGES_PER_SESSION {
@@ -137,8 +133,8 @@ mod tests {
     fn send_to_unregistered_queues_pending() {
         let mgr = SessionManager::new();
 
-        assert!(mgr.send_to_session(&"s1".into(), make_output(1)));
-        assert!(mgr.send_to_session(&"s1".into(), make_output(2)));
+        assert!(mgr.send_to_session("s1", make_output(1)));
+        assert!(mgr.send_to_session("s1", make_output(2)));
 
         let (tx, mut rx) = crate::handlers::websocket::conn_channel(64);
         register(&mgr, "s1", tx);
@@ -156,7 +152,7 @@ mod tests {
         let mgr = SessionManager::new();
 
         for i in 0..(MAX_PENDING_MESSAGES_PER_SESSION + 10) as u32 {
-            mgr.send_to_session(&"s1".into(), make_output(i));
+            mgr.send_to_session("s1", make_output(i));
         }
 
         // Must exceed MAX_PENDING_MESSAGES_PER_SESSION: registration replays
@@ -188,7 +184,7 @@ mod tests {
         drop(rx);
 
         let queued = mgr.send_to_session(
-            &"s1".into(),
+            "s1",
             ServerToProxy::OutputAck {
                 session_id: Uuid::nil(),
                 ack_seq: 7,
@@ -213,10 +209,10 @@ mod tests {
         let (tx, _rx) = crate::handlers::websocket::conn_channel(64);
 
         let gen = register(&mgr, "s1", tx);
-        mgr.unregister_session(&"s1".into(), Some(gen));
+        mgr.unregister_session("s1", Some(gen));
 
-        mgr.send_to_session(&"s1".into(), make_output(1));
-        mgr.send_to_session(&"s1".into(), make_output(2));
+        mgr.send_to_session("s1", make_output(1));
+        mgr.send_to_session("s1", make_output(2));
 
         let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
         register(&mgr, "s1", tx2);

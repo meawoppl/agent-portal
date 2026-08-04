@@ -402,7 +402,7 @@ mod tests {
         // forwarded, and (c) `pending_uploads` is cleared once the unique
         // chunk count hits `total_chunks`.
         let session_manager = SessionManager::new();
-        let session_key: SessionId = "test-session".to_string();
+        let session_key = SessionId::new("test-session");
         let (proxy_tx, mut proxy_rx) = crate::handlers::websocket::conn_channel(64);
         let (client_tx, _client_rx) = crate::handlers::websocket::conn_channel(64);
         session_manager.register_session(
@@ -484,7 +484,7 @@ mod tests {
         // remove the pending entry, so subsequent chunks for the same
         // upload_id are silently dropped (the unknown-upload_id path).
         let session_manager = SessionManager::new();
-        let session_key: SessionId = "test-session-2".to_string();
+        let session_key = SessionId::new("test-session-2");
         let (proxy_tx, mut proxy_rx) = crate::handlers::websocket::conn_channel(64);
         let (client_tx, _client_rx) = crate::handlers::websocket::conn_channel(64);
         session_manager.register_session(

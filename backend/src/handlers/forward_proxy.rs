@@ -502,7 +502,7 @@ fn note_reachability(
         .note_forward_reachability(session_id, port, listening)
     {
         app_state.session_manager.broadcast_to_web_clients(
-            &session_key.to_string(),
+            session_key,
             shared::ServerToClient::ForwardsChanged { session_id },
         );
     }

@@ -40,7 +40,7 @@ pub(super) fn epoch_secs() -> u64 {
 
 impl SessionManager {
     /// Record inbound activity from a proxy connection.
-    pub fn touch_session(&self, session_key: &SessionId) {
+    pub fn touch_session(&self, session_key: &str) {
         if let Some(conn) = self.sessions.get(session_key) {
             conn.last_seen.store(epoch_secs(), Ordering::Relaxed);
         }
@@ -220,7 +220,7 @@ mod tests {
             .store(epoch_secs() - 3600, Ordering::Relaxed);
 
         // An inbound frame arrives: the connection is alive after all.
-        mgr.touch_session(&"s1".into());
+        mgr.touch_session("s1");
 
         let (proxies, _) = mgr.sweep_stale_connections(
             PROXY_LIVENESS_DEADLINE_SECS,
@@ -228,6 +228,6 @@ mod tests {
         );
         assert_eq!(proxies, 0);
         assert!(mgr.sessions.contains_key("s1"));
-        assert!(mgr.send_to_session(&"s1".into(), make_heartbeat()));
+        assert!(mgr.send_to_session("s1", make_heartbeat()));
     }
 }

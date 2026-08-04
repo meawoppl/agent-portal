@@ -9,7 +9,7 @@ use uuid::Uuid;
 #[allow(clippy::too_many_arguments)]
 pub fn handle_permission_request(
     session_manager: &SessionManager,
-    session_key: &Option<String>,
+    session_key: &Option<SessionId>,
     db_session_id: Option<Uuid>,
     db_pool: &DbPool,
     notifications: &crate::push::NotificationSender,

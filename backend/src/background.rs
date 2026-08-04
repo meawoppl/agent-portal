@@ -58,8 +58,11 @@ pub fn spawn_stale_session_cleanup(
         );
         tokio::time::sleep(std::time::Duration::from_secs(RECONNECT_GRACE_SECS)).await;
 
-        let connected_keys: std::collections::HashSet<String> =
-            manager.registered_session_keys().into_iter().collect();
+        let connected_keys: std::collections::HashSet<String> = manager
+            .registered_session_keys()
+            .into_iter()
+            .map(|k| k.to_string())
+            .collect();
 
         let Ok(mut conn) = pool.get() else {
             tracing::error!("Failed to get DB connection for stale session cleanup");

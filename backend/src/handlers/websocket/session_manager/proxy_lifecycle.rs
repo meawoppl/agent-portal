@@ -49,7 +49,7 @@ impl SessionManager {
     /// entry when it matches the current generation — preventing a stale
     /// connection's cleanup from removing a newer connection's registration.
     /// Pass `None` to force removal (e.g. admin delete).
-    pub fn unregister_session(&self, session_key: &SessionId, gen: Option<u64>) {
+    pub fn unregister_session(&self, session_key: &str, gen: Option<u64>) {
         let removed = match gen {
             // Atomic compare-and-remove under one shard lock (the previous
             // separate check-then-remove had a small TOCTOU window).
@@ -80,7 +80,7 @@ impl SessionManager {
     /// cancelled either way).
     pub(super) fn evict_dead_connection(
         &self,
-        session_key: &SessionId,
+        session_key: &str,
         gen: u64,
         cancel: &CancellationToken,
     ) -> bool {
@@ -101,7 +101,7 @@ impl SessionManager {
     /// Check whether the given generation is still the current connection for
     /// this session. Used by cleanup code to avoid overwriting a newer
     /// connection's DB status.
-    pub fn is_current_connection(&self, session_key: &SessionId, gen: u64) -> bool {
+    pub fn is_current_connection(&self, session_key: &str, gen: u64) -> bool {
         self.sessions
             .get(session_key)
             .is_none_or(|conn| conn.gen == gen)
@@ -151,7 +151,7 @@ mod tests {
 
         register(&mgr, "s1", tx);
 
-        assert!(mgr.send_to_session(&"s1".into(), make_heartbeat()));
+        assert!(mgr.send_to_session("s1", make_heartbeat()));
 
         let msg = rx.try_recv().unwrap();
         assert!(matches!(msg, ServerToProxy::Heartbeat));
@@ -165,7 +165,7 @@ mod tests {
         let gen = register(&mgr, "s1", tx);
         assert!(mgr.sessions.contains_key("s1"));
 
-        mgr.unregister_session(&"s1".into(), Some(gen));
+        mgr.unregister_session("s1", Some(gen));
         assert!(!mgr.sessions.contains_key("s1"));
     }
 
@@ -177,7 +177,7 @@ mod tests {
         register(&mgr, "s1", tx);
         assert!(mgr.sessions.contains_key("s1"));
 
-        mgr.unregister_session(&"s1".into(), None);
+        mgr.unregister_session("s1", None);
         assert!(!mgr.sessions.contains_key("s1"));
     }
 
@@ -194,11 +194,11 @@ mod tests {
         let _new_gen = register(&mgr, "s1", tx2);
 
         // Old connection's cleanup tries to unregister with stale gen
-        mgr.unregister_session(&"s1".into(), Some(old_gen));
+        mgr.unregister_session("s1", Some(old_gen));
 
         // Session should still be registered with the new sender
         assert!(mgr.sessions.contains_key("s1"));
-        assert!(mgr.send_to_session(&"s1".into(), make_heartbeat()));
+        assert!(mgr.send_to_session("s1", make_heartbeat()));
         assert!(matches!(rx2.try_recv().unwrap(), ServerToProxy::Heartbeat));
     }
 
@@ -208,12 +208,12 @@ mod tests {
         let (tx1, _rx1) = crate::handlers::websocket::conn_channel(64);
 
         let gen1 = register(&mgr, "s1", tx1);
-        assert!(mgr.is_current_connection(&"s1".into(), gen1));
+        assert!(mgr.is_current_connection("s1", gen1));
 
         let (tx2, _rx2) = crate::handlers::websocket::conn_channel(64);
         let gen2 = register(&mgr, "s1", tx2);
-        assert!(!mgr.is_current_connection(&"s1".into(), gen1));
-        assert!(mgr.is_current_connection(&"s1".into(), gen2));
+        assert!(!mgr.is_current_connection("s1", gen1));
+        assert!(mgr.is_current_connection("s1", gen2));
     }
 
     /// #1256: a send to a registered connection whose channel has died must
@@ -232,7 +232,7 @@ mod tests {
         // The direct send fails internally; the message is queued for the
         // successor (hence `true`), the dead entry is evicted, and its
         // socket is told to close.
-        assert!(mgr.send_to_session(&"s1".into(), make_heartbeat()));
+        assert!(mgr.send_to_session("s1", make_heartbeat()));
         assert!(!mgr.sessions.contains_key("s1"));
         assert!(cancel.is_cancelled());
 
@@ -256,11 +256,11 @@ mod tests {
         register(&mgr, "s1", tx2);
 
         drop(rx1);
-        mgr.evict_dead_connection(&"s1".into(), gen1, &cancel1);
+        mgr.evict_dead_connection("s1", gen1, &cancel1);
 
         // Successor survives and still receives.
         assert!(mgr.sessions.contains_key("s1"));
-        assert!(mgr.send_to_session(&"s1".into(), make_heartbeat()));
+        assert!(mgr.send_to_session("s1", make_heartbeat()));
         assert!(matches!(rx2.try_recv().unwrap(), ServerToProxy::Heartbeat));
         // The dead connection's socket still gets closed.
         assert!(cancel1.is_cancelled());

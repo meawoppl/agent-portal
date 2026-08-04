@@ -47,7 +47,66 @@ use pending_queue::PendingMessage;
 use tunnel_client::TunnelStreamMap;
 pub use tunnel_client::{TunnelError, TunnelIn};
 
-pub type SessionId = String;
+/// The key a connection registry entry is filed under (#921).
+///
+/// Formerly `type SessionId = String`, which is exactly the trap #921 targets:
+/// a bare alias documents intent but gives no safety — any `String` (a
+/// `user_id.to_string()`, a hostname, an unrelated id) could be handed to the
+/// registry as a session key and the compiler would say nothing, mis-routing a
+/// connection. As a newtype it is distinct from `String`, so constructing one
+/// is now an explicit, greppable act.
+///
+/// `Borrow<str>` keeps `DashMap` lookups (`get`/`remove`/`contains_key`)
+/// working with a `&str` and no allocation, so only the places that *create* a
+/// session key changed; call sites that merely look one up did not.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SessionId(String);
+
+impl SessionId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for SessionId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for SessionId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl std::borrow::Borrow<str> for SessionId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+// Deref to `str` so a `&SessionId` reads like the key it wraps — coercing to
+// `&str` at lookup call sites and giving `{}`/comparison for free — while
+// *construction* stays explicit (`SessionId::new`/`from`), which is where the
+// type safety lives.
+impl std::ops::Deref for SessionId {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
 pub type ProxySender = ConnSender<ServerToProxy>;
 pub type WebClientSender = ConnSender<ServerToClient>;
 

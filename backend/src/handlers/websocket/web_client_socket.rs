@@ -346,7 +346,7 @@ fn handle_web_register(
     });
     match access {
         Ok(_session) => {
-            let key = session_id.to_string();
+            let key = SessionId::new(session_id.to_string());
             *session_key = Some(key.clone());
             *verified_session_id = Some(session_id);
 
