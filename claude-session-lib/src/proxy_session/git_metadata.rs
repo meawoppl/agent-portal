@@ -12,6 +12,24 @@ use uuid::Uuid;
 
 use super::SharedWsWrite;
 
+/// The CLI's own "this session now has a published PR/MR" signal
+/// (`system/code_change_published`, claude-codes 2.1.163+), if this is one.
+///
+/// This is more immediate and authoritative than the heuristic
+/// [`claude_output_has_git_signal`] scan of bash commands: it fires the moment
+/// the CLI publishes, so the caller can refresh PR metadata now instead of
+/// waiting for the next deferred git poll. We still route it through the shared
+/// `gh`-backed refresh rather than trusting the event's URL blindly, so branch /
+/// repo / open-PR fields stay consistent with everything else on the session.
+pub(super) fn claude_output_code_change_published(
+    output: &ClaudeOutput,
+) -> Option<claude_codes::CodeChangePublishedMessage> {
+    match output {
+        ClaudeOutput::System(sys) => sys.as_code_change_published(),
+        _ => None,
+    }
+}
+
 pub(super) fn claude_output_has_git_signal(output: &ClaudeOutput) -> bool {
     if let ClaudeOutput::User(user) = output {
         for block in &user.message.content {
@@ -233,5 +251,39 @@ mod tests {
             assert!(!trigger.should_check_before_message());
         }
         assert!(trigger.should_check_before_message());
+    }
+
+    #[test]
+    fn code_change_published_is_recognized_and_carries_the_url() {
+        let output: ClaudeOutput = serde_json::from_value(json!({
+            "type": "system",
+            "subtype": "code_change_published",
+            "provider": "github",
+            "url": "https://github.com/meawoppl/agent-portal/pull/1473",
+            "repo": "meawoppl/agent-portal",
+            "identifier": "1473",
+            "uuid": "u-1",
+            "session_id": "s-1",
+        }))
+        .expect("valid code_change_published frame");
+
+        let published =
+            claude_output_code_change_published(&output).expect("should detect the signal");
+        assert_eq!(
+            published.url,
+            "https://github.com/meawoppl/agent-portal/pull/1473"
+        );
+        assert_eq!(published.provider, "github");
+    }
+
+    #[test]
+    fn other_system_messages_are_not_code_change_published() {
+        let output: ClaudeOutput = serde_json::from_value(json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": "s-1",
+        }))
+        .expect("valid system frame");
+        assert!(claude_output_code_change_published(&output).is_none());
     }
 }

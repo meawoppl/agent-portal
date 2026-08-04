@@ -20,7 +20,8 @@ use uuid::Uuid;
 use session_lib::output_buffer::PendingOutputBuffer;
 
 use super::git_metadata::{
-    check_and_send_branch_update, claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
+    check_and_send_branch_update, claude_output_code_change_published,
+    claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
 };
 use super::{format_duration, truncate, SharedWsWrite};
 
@@ -62,6 +63,24 @@ pub fn spawn_output_forwarder(
 
             if let Some(ref output) = parsed {
                 log_claude_output(output);
+
+                // The CLI's own PR-published signal: refresh PR metadata NOW
+                // rather than deferring, since the PR already exists in `gh`
+                // by the time this fires (#1473). Reuses the shared refresh so
+                // branch / repo / open-PR fields stay consistent.
+                if let Some(published) = claude_output_code_change_published(output) {
+                    debug!(
+                        "← code_change_published: {} {} ({})",
+                        published.provider, published.url, published.repo
+                    );
+                    check_and_send_branch_update(
+                        &ws_write,
+                        session_id,
+                        &working_directory,
+                        &git_metadata,
+                    )
+                    .await;
+                }
 
                 // Is THIS message a git-related bash command (for next iteration)?
                 if claude_output_has_git_signal(output) {
