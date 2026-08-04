@@ -31,6 +31,9 @@ pub mod schema;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
+#[cfg(test)]
+mod migration_tests;
+
 use crate::db::DbPool;
 use crate::handlers::device_flow::DeviceFlowStore;
 use clap::Parser;
