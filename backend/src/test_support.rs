@@ -15,8 +15,12 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use diesel::pg::PgConnection;
+use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use tower_cookies::Key;
+use uuid::Uuid;
+
+use crate::models::{NewUser, User};
 
 use crate::config::MobileAppLinksConfig;
 use crate::db::DbPool;
@@ -120,4 +124,26 @@ pub fn shared_pool() -> Option<DbPool> {
         pool
     });
     Some(pool.clone())
+}
+
+/// Insert a throwaway user and return the persisted row.
+///
+/// Consolidates the near-identical `make_user` helpers that several handler
+/// test modules each defined (#924). `label` only disambiguates the generated
+/// email/name in logs — a fresh UUID keeps the row unique regardless — so
+/// tests that don't care can pass any short tag.
+///
+/// Takes a bare `&mut PgConnection` so it works with both a pooled connection
+/// and a direct one; call sites pass `&mut pool.get().unwrap()`.
+pub fn insert_user(conn: &mut PgConnection, label: &str) -> User {
+    use crate::schema::users;
+    let nonce = Uuid::new_v4();
+    diesel::insert_into(users::table)
+        .values(&NewUser {
+            email: format!("test_{label}_{nonce}@example.invalid"),
+            name: Some(format!("Test {label}")),
+            avatar_url: None,
+        })
+        .get_result::<User>(conn)
+        .expect("insert test user")
 }

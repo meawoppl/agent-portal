@@ -200,21 +200,7 @@ pub(crate) fn disable_subscription(conn: &mut DbConnection, sub_id: Uuid) -> Que
 #[cfg(test)]
 mod db_tests {
     use super::*;
-    use crate::models::{NewPushSubscription, NewUser, PushSubscription, User};
-
-    fn make_user(conn: &mut DbConnection) -> User {
-        use crate::schema::users;
-        let nonce = Uuid::new_v4();
-        let new_user = NewUser {
-            email: format!("test_push_{nonce}@example.invalid"),
-            name: Some("Push Test".to_string()),
-            avatar_url: None,
-        };
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .get_result::<User>(conn)
-            .expect("insert test user")
-    }
+    use crate::models::{NewPushSubscription, PushSubscription};
 
     fn make_sub(conn: &mut DbConnection, user_id: Uuid) -> PushSubscription {
         use crate::schema::push_subscriptions;
@@ -238,7 +224,7 @@ mod db_tests {
             return;
         };
         let mut conn = pool.get().expect("db conn");
-        let user = make_user(&mut conn);
+        let user = crate::test_support::insert_user(&mut conn, "push");
         let sub = make_sub(&mut conn, user.id);
         assert!(sub.disabled_at.is_none());
 
@@ -267,7 +253,7 @@ mod db_tests {
             return;
         };
         let mut conn = pool.get().expect("db conn");
-        let user = make_user(&mut conn);
+        let user = crate::test_support::insert_user(&mut conn, "push");
         let sub = make_sub(&mut conn, user.id);
         assert!(sub.last_success_at.is_none());
 
@@ -288,7 +274,7 @@ mod db_tests {
             return;
         };
         let mut conn = pool.get().expect("db conn");
-        let user = make_user(&mut conn);
+        let user = crate::test_support::insert_user(&mut conn, "push");
 
         use crate::models::NewSessionWithId;
         use crate::schema::sessions;

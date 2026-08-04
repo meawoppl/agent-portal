@@ -287,21 +287,8 @@ mod tests {
 #[cfg(test)]
 mod db_tests {
     use super::*;
-    use crate::models::{NewSessionWithId, NewUser, Session, User};
+    use crate::models::{NewSessionWithId, Session};
     use chrono::Utc;
-    fn make_user(conn: &mut diesel::pg::PgConnection, label: &str) -> User {
-        use crate::schema::users;
-        let nonce = uuid::Uuid::new_v4();
-        let new_user = NewUser {
-            email: format!("test_messages_{}_{}@example.invalid", label, nonce),
-            name: Some(format!("Test {}", label)),
-            avatar_url: None,
-        };
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .get_result::<User>(conn)
-            .expect("insert test user")
-    }
 
     fn make_session(conn: &mut diesel::pg::PgConnection, owner_id: uuid::Uuid) -> Session {
         use crate::schema::sessions;
@@ -403,7 +390,7 @@ mod db_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let user = make_user(&mut conn, "default");
+        let user = crate::test_support::insert_user(&mut conn, "default");
         let session = make_session(&mut conn, user.id);
         let stamps = seed_messages(&mut conn, session.id, user.id, 250);
 
@@ -439,7 +426,7 @@ mod db_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let user = make_user(&mut conn, "before");
+        let user = crate::test_support::insert_user(&mut conn, "before");
         let session = make_session(&mut conn, user.id);
         let stamps = seed_messages(&mut conn, session.id, user.id, 50);
 
@@ -476,7 +463,7 @@ mod db_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let user = make_user(&mut conn, "after");
+        let user = crate::test_support::insert_user(&mut conn, "after");
         let session = make_session(&mut conn, user.id);
         let stamps = seed_messages(&mut conn, session.id, user.id, 50);
 

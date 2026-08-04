@@ -213,20 +213,6 @@ pub async fn put_prefs(
 #[cfg(test)]
 mod db_tests {
     use super::*;
-    use crate::models::{NewUser, User};
-    fn make_user(conn: &mut diesel::pg::PgConnection) -> User {
-        use crate::schema::users;
-        let nonce = Uuid::new_v4();
-        let new_user = NewUser {
-            email: format!("test_push_prefs_{nonce}@example.invalid"),
-            name: Some("Test Prefs".to_string()),
-            avatar_url: None,
-        };
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .get_result::<User>(conn)
-            .expect("insert test user")
-    }
 
     /// Read `users.notification_prefs`, applying the same NULL/parse-failure ->
     /// default fallback as the `get_prefs` handler.
@@ -248,7 +234,7 @@ mod db_tests {
             return;
         };
         let mut conn = pool.get().expect("get conn");
-        let user = make_user(&mut conn);
+        let user = crate::test_support::insert_user(&mut conn, "push_prefs");
 
         // GET on a fresh user: column is NULL -> defaults.
         assert_eq!(read_prefs(&mut conn, user.id), NotificationPrefs::default());

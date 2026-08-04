@@ -192,21 +192,7 @@ pub fn is_session_mutator(app_state: &AppState, session_id: Uuid, user_id: Uuid)
 #[cfg(test)]
 mod db_tests {
     use super::*;
-    use crate::models::{NewSessionMember, NewSessionWithId, NewUser, Session, User};
-    /// Insert a throwaway user with a random google_id/email and return its row.
-    fn make_user(conn: &mut diesel::pg::PgConnection, label: &str) -> User {
-        use crate::schema::users;
-        let nonce = Uuid::new_v4();
-        let new_user = NewUser {
-            email: format!("test_session_access_{}_{}@example.invalid", label, nonce),
-            name: Some(format!("Test {}", label)),
-            avatar_url: None,
-        };
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .get_result::<User>(conn)
-            .expect("insert test user")
-    }
+    use crate::models::{NewSessionMember, NewSessionWithId, Session};
 
     /// Insert a throwaway session owned by `owner_id`.
     fn make_session(conn: &mut diesel::pg::PgConnection, owner_id: Uuid) -> Session {
@@ -275,9 +261,9 @@ mod db_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let owner = make_user(&mut conn, "owner");
-        let viewer = make_user(&mut conn, "viewer");
-        let editor = make_user(&mut conn, "editor");
+        let owner = crate::test_support::insert_user(&mut conn, "owner");
+        let viewer = crate::test_support::insert_user(&mut conn, "viewer");
+        let editor = crate::test_support::insert_user(&mut conn, "editor");
         let session = make_session(&mut conn, owner.id);
         // The session-creation code path adds an owner member row; here we
         // skip that and add only viewer + editor, then verify the
@@ -309,8 +295,8 @@ mod db_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let owner = make_user(&mut conn, "owner_nm");
-        let stranger = make_user(&mut conn, "stranger");
+        let owner = crate::test_support::insert_user(&mut conn, "owner_nm");
+        let stranger = crate::test_support::insert_user(&mut conn, "stranger");
         let session = make_session(&mut conn, owner.id);
 
         let stranger_result = verify_session_mutator(&mut conn, session.id, stranger.id);
@@ -331,7 +317,7 @@ mod db_tests {
 
         // Verifies the canonical path that `registration.rs::create_new_session`
         // produces: owner has both sessions.user_id AND a `role = owner` row.
-        let owner = make_user(&mut conn, "owner_mr");
+        let owner = crate::test_support::insert_user(&mut conn, "owner_mr");
         let session = make_session(&mut conn, owner.id);
         add_member(&mut conn, session.id, owner.id, "owner");
 
