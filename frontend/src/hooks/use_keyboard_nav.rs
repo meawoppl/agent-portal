@@ -30,6 +30,36 @@ fn focus_active_message_input() {
     }
 }
 
+/// If keyboard focus has escaped the dashboard's `.focus-flow-container` (for
+/// example onto `<body>` after a full-page Settings/Admin modal closed without
+/// restoring focus), pull it onto the container, which carries `tabindex=0`.
+///
+/// The nav-mode movement keys (`j`/`k`/`h`/`l`, numbers, `Enter`) are handled by
+/// that container's *bubble-phase* `onkeydown`, so they only fire while focus
+/// sits inside it. The Ctrl/Cmd+K toggle now works from anywhere (a document
+/// capture-phase listener), so it can flip into Nav mode while focus is outside
+/// the container — this re-homes focus so the movement keys land afterwards.
+/// When focus is already within the container (the common case: the composer is
+/// focused) this is a no-op, preserving the existing "composer keeps DOM focus
+/// in nav mode" behavior.
+fn ensure_focus_in_dashboard() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(container) = doc.query_selector(".focus-flow-container").ok().flatten() else {
+        return;
+    };
+    let inside = doc
+        .active_element()
+        .map(|a| container.contains(Some(a.unchecked_ref::<web_sys::Node>())))
+        .unwrap_or(false);
+    if !inside {
+        if let Some(el) = container.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = el.focus();
+        }
+    }
+}
+
 /// Look up the focused session's transcript ("text window") element. Prefers the
 /// focused session's pane and falls back to the only one on screen. Shared by the
 /// nav-mode transcript-scroll helpers (`j`/`k` and `gg`).
@@ -216,6 +246,13 @@ pub struct UseKeyboardNav {
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
     let nav_mode = use_state(|| false);
+    // Live handle to `nav_mode` for the document-level toggle listener below.
+    // That listener is registered once (`use_effect_with((), …)`), so a handle
+    // captured directly would be pinned to the first render's value; refreshing
+    // this ref every render lets the listener read and set the *current* state
+    // (same trick `use_interrupt_hotkey` uses for its callback).
+    let nav_mode_handle = use_mut_ref(|| nav_mode.clone());
+    *nav_mode_handle.borrow_mut() = nav_mode.clone();
     // "Pending g" state for the two-press `gg` (jump to top). A first `g` arms it
     // by parking a short disarm timeout here; a second `g` (while armed) fires and
     // any other nav-mode key clears it. Held in a ref so arming doesn't re-render.
@@ -320,21 +357,13 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 return;
             }
 
-            // Ctrl/Cmd+K is the single mode toggle: it flips between edit mode
-            // and Nav mode from anywhere. It is deliberately the *only* way to
-            // switch modes — Escape no longer enters Nav mode (it kept throwing
-            // people out of the composer mid-type). Leaving Nav mode refocuses
-            // the composer so you land ready to type.
-            if (e.ctrl_key() || e.meta_key()) && e.key().eq_ignore_ascii_case("k") {
-                e.prevent_default();
-                if in_nav_mode {
-                    nav_mode.set(false);
-                    focus_active_message_input();
-                } else {
-                    nav_mode.set(true);
-                }
-                return;
-            }
+            // Ctrl/Cmd+K (the single mode toggle) is deliberately NOT handled
+            // here. It lives in a document capture-phase listener registered at
+            // the end of this hook, so it fires from anywhere — including when
+            // focus has left `.focus-flow-container` (this element-scoped
+            // bubble-phase handler only sees keys while focus is inside the
+            // container, so a Cmd+K on `<body>` after a full-page modal closed
+            // never reached it). See the toggle listener below.
 
             // `?` opens the keyboard-shortcuts help overlay, unless the user is
             // typing into a text field (textarea/input). In nav mode the
@@ -498,10 +527,72 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     }
                 }
             }
-            // Edit mode has no mode key: Ctrl/Cmd+K (handled above) is the only
-            // way into Nav mode. Escape intentionally does nothing here anymore.
+            // Edit mode has no mode key: Ctrl/Cmd+K (the document listener below)
+            // is the only way into Nav mode. Escape intentionally does nothing
+            // here anymore.
         })
     };
+
+    // Ctrl/Cmd+K toggles Nav mode from *anywhere*, via a document capture-phase
+    // listener — mirroring `use_interrupt_hotkey`. It used to live only in the
+    // `.focus-flow-container` bubble-phase `onkeydown`, which meant the toggle
+    // silently died whenever focus escaped that container (e.g. closing a
+    // full-page Settings/Admin modal drops focus to `<body>`, which is outside
+    // the container, so the keydown never bubbled to the handler). Capturing at
+    // the document catches Cmd+K wherever focus currently sits.
+    {
+        let nav_mode_handle = nav_mode_handle.clone();
+        use_effect_with((), move |_| {
+            let options = EventListenerOptions {
+                phase: EventListenerPhase::Capture,
+                passive: false,
+            };
+            let listener = EventListener::new_with_options(
+                &gloo::utils::document(),
+                "keydown",
+                options,
+                move |event| {
+                    let Some(ke) = event.dyn_ref::<KeyboardEvent>() else {
+                        return;
+                    };
+                    if !((ke.ctrl_key() || ke.meta_key()) && ke.key().eq_ignore_ascii_case("k")) {
+                        return;
+                    }
+                    // Stand down while a modal/overlay owns the keyboard, matching
+                    // the guard in the container-level handler above so the two
+                    // stay in lockstep.
+                    if gloo::utils::document()
+                        .query_selector(
+                            ".sched-overlay, .share-dialog-overlay, .help-overlay, \
+                             .launch-dialog-backdrop, .modal-overlay, .full-page-modal, \
+                             .health-timer-overlay, .permission-prompt",
+                        )
+                        .ok()
+                        .flatten()
+                        .is_some()
+                    {
+                        return;
+                    }
+                    // Own the chord outright: stop the browser's default Cmd+K and
+                    // keep it from reaching the composer/container handlers.
+                    ke.prevent_default();
+                    ke.stop_propagation();
+                    let nav_mode = nav_mode_handle.borrow();
+                    if **nav_mode {
+                        // Leaving Nav mode: return the caret to the composer.
+                        nav_mode.set(false);
+                        focus_active_message_input();
+                    } else {
+                        // Entering Nav mode: re-home focus into the dashboard
+                        // container if it had escaped, so the movement keys land.
+                        nav_mode.set(true);
+                        ensure_focus_in_dashboard();
+                    }
+                },
+            );
+            move || drop(listener)
+        });
+    }
 
     UseKeyboardNav {
         nav_mode: *nav_mode,
