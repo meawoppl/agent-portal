@@ -18,6 +18,7 @@ pub mod media_store;
 pub mod messages;
 pub mod mobile_links;
 pub mod privacy;
+pub mod profile;
 pub mod proxy_tokens;
 pub mod push;
 pub mod responses;

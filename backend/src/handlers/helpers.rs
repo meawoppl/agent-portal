@@ -26,12 +26,33 @@ pub fn parse_iso_cursor(s: &str) -> Option<NaiveDateTime> {
         .ok()
 }
 
-/// Look up display names for the senders of the user-role messages in
-/// `message_list`: collect the distinct `user_id`s, load `(id, name, email)`
-/// for each, and map to name-or-email. Shared by the REST `list_messages`
-/// handler and the WebSocket history replay so both enrich user messages
-/// identically. Lookup failures degrade to an empty map (no sender names)
-/// rather than erroring.
+/// The label to attribute a user by, preferring their chosen nickname (#1485).
+///
+/// `None` when the user set neither a nickname nor a name — the single source
+/// of the nickname-then-name precedence, so every attribution surface resolves
+/// it identically.
+pub fn preferred_name(nickname: Option<&str>, name: Option<&str>) -> Option<String> {
+    // The first *non-blank* of nickname-then-name. Filtering after `.or()`
+    // would let a blank nickname shadow a real name and skip to email.
+    [nickname, name]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// [`preferred_name`] falling back to the email when neither is set — used by
+/// attribution surfaces that render a single name string (message bubbles).
+pub fn display_name(nickname: Option<&str>, name: Option<&str>, email: &str) -> String {
+    preferred_name(nickname, name).unwrap_or_else(|| email.to_string())
+}
+
+/// Display names for the senders of the user-role messages in `message_list`:
+/// collect the distinct `user_id`s, load each user's identity columns, and map
+/// to their [`display_name`]. Shared by the REST `list_messages` handler and
+/// the WebSocket history replay so both enrich user messages identically.
+/// Lookup failures degrade to an empty map rather than erroring.
 pub fn sender_names(conn: &mut PgConnection, message_list: &[Message]) -> HashMap<Uuid, String> {
     let user_ids: Vec<Uuid> = message_list
         .iter()
@@ -45,11 +66,16 @@ pub fn sender_names(conn: &mut PgConnection, message_list: &[Message]) -> HashMa
     }
     users::table
         .filter(users::id.eq_any(&user_ids))
-        .select((users::id, users::name, users::email))
-        .load::<(Uuid, Option<String>, String)>(conn)
+        .select((users::id, users::nickname, users::name, users::email))
+        .load::<(Uuid, Option<String>, Option<String>, String)>(conn)
         .unwrap_or_default()
         .into_iter()
-        .map(|(id, name, email)| (id, name.unwrap_or(email)))
+        .map(|(id, nickname, name, email)| {
+            (
+                id,
+                display_name(nickname.as_deref(), name.as_deref(), &email),
+            )
+        })
         .collect()
 }
 
@@ -219,6 +245,39 @@ pub fn delete_user_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nickname_is_preferred_then_name_then_email() {
+        assert_eq!(
+            display_name(Some("mopps"), Some("Matt"), "matt@example.com"),
+            "mopps"
+        );
+        assert_eq!(display_name(None, Some("Matt"), "matt@example.com"), "Matt");
+        assert_eq!(
+            display_name(None, None, "matt@example.com"),
+            "matt@example.com"
+        );
+    }
+
+    /// A blank/whitespace nickname or name must fall through, not render as an
+    /// invisible label.
+    #[test]
+    fn blank_values_fall_through() {
+        assert_eq!(display_name(Some("  "), Some("Matt"), "e@x.com"), "Matt");
+        assert_eq!(display_name(Some(""), None, "e@x.com"), "e@x.com");
+        assert_eq!(preferred_name(Some("   "), Some("  ")), None);
+        // Preferred label is trimmed, not just non-empty-checked.
+        assert_eq!(
+            preferred_name(Some("  mopps  "), None).as_deref(),
+            Some("mopps")
+        );
+    }
+
+    #[test]
+    fn preferred_name_is_none_only_when_both_absent() {
+        assert_eq!(preferred_name(None, None), None);
+        assert_eq!(preferred_name(None, Some("Matt")).as_deref(), Some("Matt"));
+    }
 
     #[test]
     fn parse_iso_cursor_accepts_fractional_seconds() {

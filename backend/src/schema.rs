@@ -291,6 +291,8 @@ diesel::table! {
         ban_reason -> Nullable<Text>,
         sound_config -> Nullable<Jsonb>,
         notification_prefs -> Nullable<Jsonb>,
+        #[max_length = 64]
+        nickname -> Nullable<Varchar>,
     }
 }
 
@@ -312,10 +314,10 @@ diesel::joinable!(session_forwards -> sessions (session_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
 diesel::joinable!(sessions -> users (user_id));
-diesel::joinable!(user_identities -> users (user_id));
 diesel::joinable!(turn_metrics -> messages (user_message_id));
 diesel::joinable!(turn_metrics -> sessions (session_id));
 diesel::joinable!(turn_metrics -> users (user_id));
+diesel::joinable!(user_identities -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     custom_subdomains,
@@ -330,8 +332,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     session_continuations,
     session_forwards,
     session_members,
-    user_identities,
     sessions,
     turn_metrics,
+    user_identities,
     users,
 );

@@ -198,10 +198,15 @@ fn archive_one_session(
     use schema::{messages, session_members, turn_metrics, users};
     use std::collections::BTreeMap;
 
-    let (owner_email, owner_name): (String, Option<String>) = users::table
-        .find(session.user_id)
-        .select((users::email, users::name))
-        .first(conn)?;
+    let (owner_email, owner_nickname, owner_name): (String, Option<String>, Option<String>) =
+        users::table
+            .find(session.user_id)
+            .select((users::email, users::nickname, users::name))
+            .first(conn)?;
+    // Bake the display label (nickname preferred) into the manifest so the
+    // history browser attributes the owner the same way live views do (#1485).
+    let owner_name =
+        crate::handlers::helpers::preferred_name(owner_nickname.as_deref(), owner_name.as_deref());
 
     // Membership snapshot for the manifest: visibility ("shared with me")
     // must survive the eventual deletion of the hot DB rows, so the archive
