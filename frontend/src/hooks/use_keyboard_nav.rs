@@ -284,17 +284,25 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
             // dialog, full-page modals, and help overlay are included so their
             // own keys (Esc / backdrop) win and nav shortcuts don't fire
             // underneath them.
-            // `.permission-prompt` covers the permission dialog, the
-            // AskUserQuestion answer card, and the exit-plan-mode prompt (they
-            // share that root class). While one is open the user is answering
-            // it, so nav keys must stand down rather than double-handle the
-            // keystroke — driving navigation *and* leaking into the choice UI
-            // (#1413).
+            // `div.permission-prompt` covers the permission dialog, the
+            // AskUserQuestion answer card, and the exit-plan-mode prompt (their
+            // three dialog roots are `<div class="permission-prompt …">`). While
+            // one is open the user is answering it, so nav keys must stand down
+            // rather than double-handle the keystroke — driving navigation *and*
+            // leaking into the choice UI (#1413).
+            //
+            // The `div.` qualifier is load-bearing: transcript tool renderers
+            // also emit `<span class="permission-prompt">` for each requested-
+            // permission line (`tool_renderers/interactive.rs`). A bare
+            // `.permission-prompt` therefore matches historical transcript
+            // content, so any session that has shown a tool permission would
+            // leave the guard permanently tripped and silently kill Cmd+K / all
+            // nav keys. Scoping to the dialog `<div>` avoids that collision.
             if gloo::utils::document()
                 .query_selector(
                     ".sched-overlay, .share-dialog-overlay, .help-overlay, \
                      .launch-dialog-backdrop, .modal-overlay, .full-page-modal, \
-                     .health-timer-overlay, .permission-prompt",
+                     .health-timer-overlay, div.permission-prompt",
                 )
                 .ok()
                 .flatten()
@@ -596,7 +604,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         .query_selector(
                             ".sched-overlay, .share-dialog-overlay, .help-overlay, \
                              .launch-dialog-backdrop, .modal-overlay, .full-page-modal, \
-                             .health-timer-overlay, .permission-prompt",
+                             .health-timer-overlay, div.permission-prompt",
                         )
                         .ok()
                         .flatten()
