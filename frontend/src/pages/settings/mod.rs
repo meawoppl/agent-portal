@@ -1,3 +1,4 @@
+mod agents_panel;
 mod appearance_panel;
 mod forwarding_panel;
 mod health_timer_panel;
@@ -10,6 +11,7 @@ mod sounds_panel;
 mod tokens_panel;
 
 use crate::utils;
+use agents_panel::AgentsPanel;
 use appearance_panel::AppearancePanel;
 use forwarding_panel::ForwardingPanel;
 use health_timer_panel::HealthTimerPanel;
@@ -26,6 +28,7 @@ use yew::prelude::*;
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
     Profile,
+    Agents,
     Sessions,
     Tokens,
     Launchers,
@@ -71,6 +74,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         Callback::from(move |_: MouseEvent| active_tab.set(tab))
     };
     let on_profile_tab = make_tab_handler(SettingsTab::Profile);
+    let on_agents_tab = make_tab_handler(SettingsTab::Agents);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
     let on_launchers_tab = make_tab_handler(SettingsTab::Launchers);
@@ -104,6 +108,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     onclick={on_profile_tab}
                 >
                     { "Profile" }
+                </button>
+                <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Agents).then_some("active"))}
+                    onclick={on_agents_tab}
+                >
+                    { "Agents" }
                 </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sessions).then_some("active"))}
@@ -186,6 +196,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Profile {
                     <ProfilePanel />
+                }
+                if *active_tab == SettingsTab::Agents {
+                    <AgentsPanel />
                 }
                 if *active_tab == SettingsTab::Sessions {
                     <SessionsPanel on_sessions_loaded={on_sessions_loaded} />

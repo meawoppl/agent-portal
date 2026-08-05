@@ -12,6 +12,7 @@
 //! forwarding) and isn't getting split until a future PR.
 
 pub mod agent;
+pub mod auth;
 pub mod io_task;
 pub mod proxy_session;
 mod spawn;

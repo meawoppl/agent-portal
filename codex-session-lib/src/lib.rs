@@ -10,6 +10,7 @@
 //! backed session.
 
 pub mod agent;
+pub mod auth;
 mod classifier;
 mod events;
 mod handler;

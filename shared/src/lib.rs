@@ -366,9 +366,44 @@ pub struct DirectoryEntry {
     pub is_dir: bool,
 }
 
+/// Whether an agent CLI is signed in on a launcher host, gathered alongside
+/// the install probe so the settings triage matrix can show a new user exactly
+/// what still needs doing on each computer.
+///
+/// The account label is best-effort and agent-specific (an email, a mode name
+/// like `API key`/`Bedrock`, or a provider like `meta`): claude exposes an
+/// email + plan, codex an email + plan only in ChatGPT mode, and muse no
+/// identity at all by CLI design — so a `None` label under `LoggedIn` is normal,
+/// not an error.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AgentLoginStatus {
+    /// Not determined — the agent isn't installed, or the probe couldn't read
+    /// its auth state. Rendered as a neutral "unknown" cell, never as "logged
+    /// out" (which would wrongly imply an actionable login).
+    #[default]
+    Unknown,
+    LoggedOut,
+    LoggedIn {
+        /// Human label for the cell — an email, or a mode/provider name.
+        /// Absent when the agent persists no identity (e.g. muse).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        /// Secondary badge, when the agent reports one (plan / subscription,
+        /// e.g. `max`, `plus`, `pro`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan: Option<String>,
+        /// How the credential is supplied, when notable — e.g. `env` for a
+        /// key coming from an environment variable rather than a saved file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        via: Option<String>,
+    },
+}
+
 /// Result of probing one agent CLI on a launcher host. Built at launcher
 /// startup (sent in `LauncherRegister`) and refreshed on demand via
-/// `ProbeAgents` when the user opens the launch dialog.
+/// `ProbeAgents` when the user opens the launch dialog or the agents settings
+/// matrix.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentInstall {
     pub agent_type: AgentType,
@@ -380,6 +415,11 @@ pub struct AgentInstall {
     /// `<bin> --version` stdout, trimmed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Sign-in state for this agent on the host. `#[serde(default)]` =
+    /// `Unknown`, so an older launcher that only reports install state
+    /// deserializes cleanly (the matrix shows its login cells as unknown).
+    #[serde(default)]
+    pub login: AgentLoginStatus,
 }
 
 /// Info about a connected launcher daemon
