@@ -117,6 +117,10 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Interrupt the focused session's agent",
             },
             Shortcut {
+                keys: &["c"],
+                description: "Collapse (hide) / expand the focused session",
+            },
+            Shortcut {
                 keys: &["Enter"],
                 description: "Accept the current pane and return to edit mode",
             },
