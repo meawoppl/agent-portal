@@ -236,6 +236,23 @@ pub fn dashboard_page() -> Html {
     };
 
     // Use the keyboard navigation hook
+    // Toggle a session between hidden ("collapsed") and shown. Shared by the
+    // rail kebab menu and the nav-mode `c` shortcut; persists to localStorage.
+    let on_toggle_hidden = {
+        let session_state = session_state.clone();
+        Callback::from(move |session_id: Uuid| {
+            let hidden = !session_state.hidden_sessions.contains(&session_id);
+            let mut set = session_state.hidden_sessions.clone();
+            if hidden {
+                set.insert(session_id);
+            } else {
+                set.remove(&session_id);
+            }
+            save_hidden_sessions(&set);
+            session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
+        })
+    };
+
     let keyboard_nav = use_keyboard_nav(KeyboardNavConfig {
         sessions: active_sessions.clone(),
         focused_index: focus.focused_index,
@@ -247,6 +264,7 @@ pub fn dashboard_page() -> Html {
         on_delete: on_delete.clone(),
         on_jump_to_latest: focus.on_jump_to_latest.clone(),
         on_interrupt: focus.on_interrupt.clone(),
+        on_toggle_hidden: on_toggle_hidden.clone(),
     });
 
     // Ctrl+C interrupt: a window capture-phase listener so it fires in every
@@ -490,21 +508,6 @@ pub fn dashboard_page() -> Html {
                     }
                 }
             });
-        })
-    };
-
-    let on_toggle_hidden = {
-        let session_state = session_state.clone();
-        Callback::from(move |session_id: Uuid| {
-            let hidden = !session_state.hidden_sessions.contains(&session_id);
-            let mut set = session_state.hidden_sessions.clone();
-            if hidden {
-                set.insert(session_id);
-            } else {
-                set.remove(&session_id);
-            }
-            save_hidden_sessions(&set);
-            session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
         })
     };
 
