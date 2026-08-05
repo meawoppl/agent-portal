@@ -203,6 +203,11 @@ pub struct KeyboardNavConfig {
     /// Callback to interrupt the focused session's running agent (nav-mode
     /// `x`). Same action as `Ctrl+C`, exposed as a single nav-mode key (#1330).
     pub on_interrupt: Callback<()>,
+    /// Callback to collapse (hide) / expand (show) a session, given its id
+    /// (nav-mode `c` on the focused session). Reuses the rail's Hide toggle, so
+    /// a collapsed session drops into the rail's hidden group and out of
+    /// focus/keyboard rotation.
+    pub on_toggle_hidden: Callback<Uuid>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -233,6 +238,7 @@ pub struct UseKeyboardNav {
 /// - Numbers 1-9 select directly (stays in Nav mode)
 /// - n -> new session (launch dialog)
 /// - d -> delete the focused session (via the confirm modal)
+/// - c -> collapse (hide) / expand (show) the focused session
 /// - w -> next waiting session
 /// - Enter -> accept the current pane and return to Edit Mode
 /// - Ctrl/Cmd+K -> back to Edit Mode
@@ -272,6 +278,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_delete = config.on_delete.clone();
         let on_jump_to_latest = config.on_jump_to_latest.clone();
         let on_interrupt = config.on_interrupt.clone();
+        let on_toggle_hidden = config.on_toggle_hidden.clone();
         Callback::from(move |e: KeyboardEvent| {
             // Don't handle keyboard nav when a modal overlay is open. The launch
             // dialog, full-page modals, and help overlay are included so their
@@ -476,6 +483,30 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         // in nav mode like the other action keys.
                         e.prevent_default();
                         on_interrupt.emit(());
+                    }
+                    "c" => {
+                        // Collapse (hide) / expand (show) the focused session,
+                        // reusing the rail's Hide toggle — a keyboard path to
+                        // tuck a session out of rotation without the kebab menu.
+                        // When collapsing the focused session, advance focus to
+                        // the next active session so you land on something you're
+                        // working with rather than the pane you just hid. Stays in
+                        // nav mode like the other action keys.
+                        e.prevent_default();
+                        if let Some(session) = sessions.get(focused_index) {
+                            let was_hidden = hidden_sessions.contains(&session.id);
+                            on_toggle_hidden.emit(session.id);
+                            if !was_hidden {
+                                if let Some(new_idx) = navigate_to_next_active(focused_index) {
+                                    if new_idx != focused_index {
+                                        if let Some(next) = sessions.get(new_idx) {
+                                            on_activate.emit(next.id);
+                                        }
+                                        on_select.emit(new_idx);
+                                    }
+                                }
+                            }
+                        }
                     }
                     "G" => {
                         // Jump the focused session's transcript to the newest
