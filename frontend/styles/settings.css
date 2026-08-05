@@ -930,6 +930,98 @@
    Appearance panel
    ========================================================================== */
 
+.agents-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.link-button {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+    text-decoration: underline;
+}
+
+.agents-matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.agents-matrix th,
+.agents-matrix td {
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+
+.agents-matrix th {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.agents-host-name {
+    font-family: var(--font-mono, monospace);
+    color: var(--text-primary);
+}
+
+.agents-host-alias {
+    color: var(--text-secondary);
+    margin-left: 0.4rem;
+    font-size: 0.8rem;
+}
+
+.agents-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.agents-cell.unreachable,
+.agents-cell.unknown,
+.agents-cell.loading {
+    color: var(--text-secondary);
+}
+
+.agents-badge {
+    display: inline-block;
+    width: fit-content;
+    padding: 0.05rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.agents-badge.installed {
+    background: color-mix(in srgb, var(--success, #9ece6a) 20%, transparent);
+    color: var(--success, #9ece6a);
+}
+
+.agents-badge.missing {
+    background: color-mix(in srgb, var(--error, #f7768e) 18%, transparent);
+    color: var(--error, #f7768e);
+}
+
+.agents-login {
+    font-size: 0.8rem;
+}
+
+.agents-login.logged-in {
+    color: var(--success, #9ece6a);
+}
+
+.agents-login.logged-out {
+    color: var(--error, #f7768e);
+}
+
+.agents-login.unknown {
+    color: var(--text-secondary);
+}
+
 .profile-section {
     display: flex;
     flex-direction: column;

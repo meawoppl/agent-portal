@@ -453,13 +453,28 @@ pub async fn run_launcher_loop(
 fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
     session_lib::probe::probe_all_agents()
         .into_iter()
-        .map(|(agent_type, result)| shared::AgentInstall {
-            agent_type,
-            installed: result.installed,
-            resolved_path: result
-                .resolved_path
-                .map(|p| p.to_string_lossy().to_string()),
-            version: result.version,
+        .map(|(agent_type, result)| {
+            // Only read sign-in state for agents that are actually installed —
+            // spawning `claude auth status` / `codex login status` for a binary
+            // that isn't there just burns a failed exec to reach the same
+            // `Unknown` the field defaults to.
+            let login = if result.installed {
+                match agent_type {
+                    shared::AgentType::Claude => claude_session_lib::auth::probe_login(),
+                    shared::AgentType::Codex => codex_session_lib::auth::probe_login(),
+                }
+            } else {
+                shared::AgentLoginStatus::Unknown
+            };
+            shared::AgentInstall {
+                agent_type,
+                installed: result.installed,
+                resolved_path: result
+                    .resolved_path
+                    .map(|p| p.to_string_lossy().to_string()),
+                version: result.version,
+                login,
+            }
         })
         .collect()
 }

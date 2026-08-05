@@ -8,7 +8,7 @@ license = "MIT"
 [dependencies]
 session-lib = { path = "../session-lib" }
 shared = { path = "../shared" }
-claude-codes = { workspace = true, features = ["async-client"] }
+claude-codes = { workspace = true, features = ["async-client", "auth"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
