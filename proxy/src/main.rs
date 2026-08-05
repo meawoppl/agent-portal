@@ -22,7 +22,7 @@ use shared::api::{ResolveProxySessionRequest, ResolveProxySessionResponse};
 /// Type alias — the proxy binary only ever drives Claude sessions; the
 /// launcher is where heterogeneous (Claude + Codex) dispatch lives.
 type ClaudeSession = Session<ClaudeAgent>;
-use config::{DirectorySession, ProxyConfig, SessionAuth};
+use config::{ConfigLock, DirectorySession, ProxyConfig, SessionAuth};
 use session::ProxySessionConfig;
 use session_lib::git_metadata::get_git_branch;
 use tracing::{info, warn};
@@ -548,13 +548,34 @@ fn resolve_session_from_local_cache(args: &Args, cwd: &str) -> Result<ResolvedSe
             resuming: true,
         })
     } else {
-        create_fresh_local_session(args, cwd, false)
+        // We already hold the config lock from the `load_locked` above. Re-acquiring
+        // it inside `create_fresh_local_session` would deadlock against our own PID
+        // (the lock is a non-re-entrant PID-file), so hand the held config+lock down.
+        create_fresh_local_session_locked(args, cwd, false, config, lock)
     }
 }
 
 fn create_fresh_local_session(args: &Args, cwd: &str, forced: bool) -> Result<ResolvedSession> {
-    let (mut config, lock) =
-        ProxyConfig::load_locked().context("Failed to load config with lock")?;
+    let (config, lock) = ProxyConfig::load_locked().context("Failed to load config with lock")?;
+    create_fresh_local_session_locked(args, cwd, forced, config, lock)
+}
+
+/// Create a fresh local session using an already-held config lock.
+///
+/// Callers that have already `load_locked`ed the config (e.g.
+/// `resolve_session_from_local_cache`) MUST use this instead of
+/// `create_fresh_local_session`: the config lock is a PID-file and is **not**
+/// re-entrant, so a second `load_locked` from the same process spins on its own
+/// live PID until it times out (`Failed to acquire config lock after 50
+/// attempts`). This bit every `--dev` / no-cached-session start, which always
+/// takes the create-fresh path (#1558 follow-up).
+fn create_fresh_local_session_locked(
+    args: &Args,
+    cwd: &str,
+    forced: bool,
+    mut config: ProxyConfig,
+    lock: ConfigLock,
+) -> Result<ResolvedSession> {
     let had_existing = config.get_directory_session(cwd).is_some();
     let session_id = Uuid::new_v4();
     let session_name = args
