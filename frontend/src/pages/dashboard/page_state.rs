@@ -16,6 +16,14 @@ use super::types::RailPosition;
 pub(super) struct DashboardSessionState {
     pub focused_id: Option<Uuid>,
     pub awaiting_sessions: HashSet<Uuid>,
+    /// Sessions whose *current* "needs response" state the user has already
+    /// looked at. The rail's red outline (and the waiting count) show
+    /// `awaiting_sessions - seen_awaiting`, so once you view an awaiting session
+    /// it stops nagging even after focus moves elsewhere — until a fresh
+    /// awaiting cycle (the agent finishing another turn) re-lights it. Kept as a
+    /// separate set rather than mutating `awaiting_sessions` so the underlying
+    /// "agent is parked" truth stays intact for other consumers.
+    pub seen_awaiting: HashSet<Uuid>,
     pub hidden_sessions: HashSet<Uuid>,
     pub connected_sessions: HashSet<Uuid>,
     pub activated_sessions: HashSet<Uuid>,
@@ -28,6 +36,7 @@ impl DashboardSessionState {
         Self {
             focused_id: None,
             awaiting_sessions: HashSet::new(),
+            seen_awaiting: HashSet::new(),
             hidden_sessions,
             connected_sessions: HashSet::new(),
             activated_sessions: HashSet::new(),
@@ -82,6 +91,11 @@ impl Reducible for DashboardSessionState {
             DashboardSessionAction::FocusAndActivate(session_id) => {
                 state.focused_id = Some(session_id);
                 state.activated_sessions.insert(session_id);
+                // Viewing a session acknowledges its current awaiting state, so
+                // the rail stops flagging it red even after focus moves on.
+                if state.awaiting_sessions.contains(&session_id) {
+                    state.seen_awaiting.insert(session_id);
+                }
             }
             DashboardSessionAction::Activate(session_id) => {
                 state.activated_sessions.insert(session_id);
@@ -93,6 +107,20 @@ impl Reducible for DashboardSessionState {
                 let changed = set_membership(&mut state.awaiting_sessions, session_id, awaiting);
                 if !changed {
                     return self;
+                }
+                if awaiting {
+                    // Rising edge (a genuinely new awaiting cycle). If the user
+                    // is already looking at this session, treat it as seen;
+                    // otherwise leave it unseen so the rail lights it red.
+                    if state.focused_id == Some(session_id) {
+                        state.seen_awaiting.insert(session_id);
+                    } else {
+                        state.seen_awaiting.remove(&session_id);
+                    }
+                } else {
+                    // Falling edge: forget any acknowledgement so the next
+                    // awaiting cycle re-alerts.
+                    state.seen_awaiting.remove(&session_id);
                 }
             }
             DashboardSessionAction::SetConnected {
@@ -111,7 +139,9 @@ impl Reducible for DashboardSessionState {
                 }
             }
             DashboardSessionAction::MessageSent(session_id) => {
-                if !state.awaiting_sessions.remove(&session_id) {
+                let was_awaiting = state.awaiting_sessions.remove(&session_id);
+                let was_seen = state.seen_awaiting.remove(&session_id);
+                if !was_awaiting && !was_seen {
                     return self;
                 }
             }
@@ -357,6 +387,87 @@ mod tests {
 
         let state = state.reduce(DashboardSessionAction::MessageSent(id(1)));
         assert!(!state.awaiting_sessions.contains(&id(1)));
+    }
+
+    fn set_awaiting(
+        awaiting: bool,
+    ) -> impl Fn(Rc<DashboardSessionState>) -> Rc<DashboardSessionState> {
+        move |state: Rc<DashboardSessionState>| {
+            state.reduce(DashboardSessionAction::SetAwaiting {
+                session_id: id(1),
+                awaiting,
+            })
+        }
+    }
+
+    #[test]
+    fn viewing_an_awaiting_session_marks_it_seen_until_the_next_cycle() {
+        // Becomes awaiting while unfocused → unseen, so the rail lights it red.
+        let state = reduce(
+            DashboardSessionState::new(HashSet::new()),
+            DashboardSessionAction::SetAwaiting {
+                session_id: id(1),
+                awaiting: true,
+            },
+        );
+        assert!(state.awaiting_sessions.contains(&id(1)));
+        assert!(!state.seen_awaiting.contains(&id(1)));
+
+        // User views it → acknowledged; still awaiting underneath.
+        let state = state.reduce(DashboardSessionAction::FocusAndActivate(id(1)));
+        assert!(state.seen_awaiting.contains(&id(1)));
+        assert!(state.awaiting_sessions.contains(&id(1)));
+
+        // A redundant re-assert of the same awaiting level is a no-op and keeps
+        // the acknowledgement (the agent is still parked on the same turn).
+        let state = set_awaiting(true)(state);
+        assert!(state.seen_awaiting.contains(&id(1)));
+
+        // User switches focus to a different session; the acknowledgement on the
+        // first one survives, so it stays quiet in the background.
+        let state = state.reduce(DashboardSessionAction::FocusAndActivate(id(2)));
+        assert!(state.seen_awaiting.contains(&id(1)));
+
+        // The agent works (falling edge) then finishes again (rising edge) while
+        // that session is unfocused → it re-alerts.
+        let state = set_awaiting(false)(state);
+        assert!(!state.seen_awaiting.contains(&id(1)));
+        let state = set_awaiting(true)(state);
+        assert!(state.awaiting_sessions.contains(&id(1)));
+        assert!(!state.seen_awaiting.contains(&id(1)));
+    }
+
+    #[test]
+    fn awaiting_while_focused_is_acknowledged_immediately() {
+        // Focus a session that is not yet awaiting.
+        let state = reduce(
+            DashboardSessionState::new(HashSet::new()),
+            DashboardSessionAction::FocusAndActivate(id(1)),
+        );
+        assert!(!state.seen_awaiting.contains(&id(1)));
+
+        // It finishes its turn while the user is looking at it → seen at once,
+        // so it never flashes red when the user later switches away.
+        let state = set_awaiting(true)(state);
+        assert!(state.awaiting_sessions.contains(&id(1)));
+        assert!(state.seen_awaiting.contains(&id(1)));
+    }
+
+    #[test]
+    fn message_sent_clears_both_awaiting_and_seen() {
+        let state = reduce(
+            DashboardSessionState::new(HashSet::new()),
+            DashboardSessionAction::SetAwaiting {
+                session_id: id(1),
+                awaiting: true,
+            },
+        );
+        let state = state.reduce(DashboardSessionAction::FocusAndActivate(id(1)));
+        assert!(state.seen_awaiting.contains(&id(1)));
+
+        let state = state.reduce(DashboardSessionAction::MessageSent(id(1)));
+        assert!(!state.awaiting_sessions.contains(&id(1)));
+        assert!(!state.seen_awaiting.contains(&id(1)));
     }
 
     fn reduce_ui(state: DashboardUiState, action: DashboardUiAction) -> Rc<DashboardUiState> {

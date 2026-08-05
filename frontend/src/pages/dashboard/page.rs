@@ -582,9 +582,18 @@ pub fn dashboard_page() -> Html {
         )
     };
 
-    // Computed values
-    let waiting_count = session_state
+    // Computed values.
+    // The rail's red "needs response" outline and this count show sessions still
+    // awaiting a reply that the user hasn't looked at yet — awaiting minus the
+    // ones whose current awaiting state has been seen (see DashboardSessionState
+    // `seen_awaiting`). Viewing a session clears it here without disturbing the
+    // underlying "agent is parked" flag.
+    let effective_awaiting: HashSet<Uuid> = session_state
         .awaiting_sessions
+        .difference(&session_state.seen_awaiting)
+        .copied()
+        .collect();
+    let waiting_count = effective_awaiting
         .iter()
         .filter(|id| !effective_hidden_sessions.contains(id))
         .count();
@@ -785,7 +794,7 @@ pub fn dashboard_page() -> Html {
                     <SessionRail
                         sessions={active_sessions.clone()}
                         focused_index={focus.focused_index}
-                        awaiting_sessions={session_state.awaiting_sessions.clone()}
+                        awaiting_sessions={effective_awaiting.clone()}
                         hidden_sessions={effective_hidden_sessions.clone()}
                         inactive_hidden={ui_state.inactive_hidden}
                         group_by_host={ui_state.group_by_host}
