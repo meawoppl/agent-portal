@@ -811,6 +811,30 @@ async fn handle_message(
                 warn!("Failed to send probe agents result");
             }
         }
+        ServerToLauncher::InstallAgent {
+            request_id,
+            agent_type,
+        } => {
+            info!("Installing agent {agent_type} on request");
+            // The install command (npm) can run for tens of seconds — off the
+            // message loop, like the probe.
+            let result = tokio::task::spawn_blocking(move || {
+                session_lib::install::install_agent(agent_type)
+            })
+            .await;
+            let (success, message) = match result {
+                Ok(r) => (r.success, r.message),
+                Err(e) => (false, Some(format!("install task failed to run: {e}"))),
+            };
+            let response = shared::LauncherToServer::InstallAgentResult {
+                request_id,
+                success,
+                message,
+            };
+            if ws_sender.send(response).await.is_err() {
+                warn!("Failed to send install agent result");
+            }
+        }
         ServerToLauncher::ScheduleSync { tasks } => {
             info!("Received ScheduleSync with {} task(s)", tasks.len());
             scheduler.update_tasks(tasks);
