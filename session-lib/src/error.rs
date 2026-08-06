@@ -27,6 +27,13 @@ pub enum SessionError {
     /// have to depend on every agent SDK in its error surface.
     #[error("Agent error: {0}")]
     Agent(String),
+
+    /// The agent type is known to the portal (probes, matrix, install) but
+    /// has no session implementation yet. Muse is in this state until
+    /// `muse-session-lib` lands; the launch UI blocks it rather than
+    /// spawning something that can't stream.
+    #[error("{0} sessions are not supported by this launcher yet")]
+    AgentNotSupported(&'static str),
 }
 
 #[cfg(test)]

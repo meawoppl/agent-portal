@@ -211,6 +211,7 @@ pub(super) fn render_broadcasts(
                 let orb_class = match view.agent_type {
                     AgentType::Claude => "claude",
                     AgentType::Codex => "codex",
+                    AgentType::Muse => "muse",
                 };
                 let (s1, s2, s3) = plasma_seeds(&view);
                 let style =

@@ -13,12 +13,15 @@ pub struct ProbeResult {
     pub installed: bool,
     pub resolved_path: Option<PathBuf>,
     pub version: Option<String>,
+    /// Sandbox readiness for agents whose tool execution depends on host
+    /// packages. `None` for agents with no sandbox concept.
+    pub sandbox_ok: Option<bool>,
 }
 
 /// Probe both supported agent CLIs. Cheap — each binary returns from
 /// `--version` in tens of milliseconds.
 pub fn probe_all_agents() -> Vec<(AgentType, ProbeResult)> {
-    [AgentType::Claude, AgentType::Codex]
+    [AgentType::Claude, AgentType::Codex, AgentType::Muse]
         .into_iter()
         .map(|agent| (agent, probe_agent(agent)))
         .collect()
@@ -35,6 +38,7 @@ pub fn probe_agent(agent: AgentType) -> ProbeResult {
             installed: false,
             resolved_path: None,
             version: None,
+            sandbox_ok: None,
         };
     }
 
@@ -55,10 +59,58 @@ pub fn probe_agent(agent: AgentType) -> ProbeResult {
         Ok(_) | Err(_) => None,
     };
 
+    let installed = version.is_some();
     ProbeResult {
-        installed: version.is_some(),
+        installed,
         resolved_path,
         version,
+        sandbox_ok: if installed && agent == AgentType::Muse {
+            Some(probe_muse_sandbox())
+        } else {
+            None
+        },
+    }
+}
+
+/// Muse executes tools inside an OS sandbox (bubblewrap on Linux). Without
+/// it, runs still complete but every tool call comes back as a failed
+/// `tool.result` — an installed-but-degraded state the matrix must show
+/// distinctly from "not installed".
+///
+/// Probed by resolving the sandbox helper rather than executing anything:
+/// `muse sandbox` only exposes a Windows check subcommand at 0.1.0, so a
+/// PATH lookup of `bwrap` is the cheap, side-effect-free signal on Linux.
+/// Non-Linux hosts report ready (the sandbox ships differently there).
+pub fn probe_muse_sandbox() -> bool {
+    if cfg!(not(target_os = "linux")) {
+        return true;
+    }
+    which::which("bwrap").is_ok()
+}
+
+/// Presence-only login probe for Muse: the CLI persists no account
+/// identity (no `whoami` at 0.1.0), so a logged-in cell carries a provider
+/// label instead of a name, annotated when the credential comes from the
+/// environment rather than the saved file.
+pub fn probe_muse_login() -> shared::AgentLoginStatus {
+    let via_env = std::env::var("META_API_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    if via_env {
+        return shared::AgentLoginStatus::LoggedIn {
+            label: Some("meta".to_string()),
+            plan: None,
+            via: Some("env".to_string()),
+        };
+    }
+    if muse_codes::auth::credentials_present() {
+        shared::AgentLoginStatus::LoggedIn {
+            label: Some("meta".to_string()),
+            plan: None,
+            via: None,
+        }
+    } else {
+        shared::AgentLoginStatus::LoggedOut
     }
 }
 
@@ -66,3 +118,58 @@ pub fn probe_agent(agent: AgentType) -> ProbeResult {
 /// here so callers don't have to guess at the timeout for the request/response
 /// round-trip when probing via WS.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(test)]
+mod muse_probe_tests {
+    use super::*;
+
+    /// Muse joins the probe set — the matrix needs a column for it even on
+    /// hosts where the binary is absent.
+    #[test]
+    fn probe_covers_all_three_agents() {
+        let probed: Vec<AgentType> = probe_all_agents().into_iter().map(|(a, _)| a).collect();
+        assert!(probed.contains(&AgentType::Muse));
+        assert_eq!(probed.len(), 3);
+    }
+
+    /// sandbox_ok is muse-only: claude/codex have no sandbox concept and
+    /// must serialize exactly as before (None => field omitted).
+    #[test]
+    fn sandbox_ok_is_none_for_non_muse_agents() {
+        for (agent, result) in probe_all_agents() {
+            if agent != AgentType::Muse {
+                assert_eq!(
+                    result.sandbox_ok, None,
+                    "{agent:?} should have no sandbox state"
+                );
+            }
+        }
+    }
+
+    /// An absent binary reports not-installed with no sandbox claim —
+    /// never `Some(false)`, which would read as "installed but degraded".
+    #[test]
+    fn missing_binary_makes_no_sandbox_claim() {
+        let r = probe_agent(AgentType::Muse);
+        if !r.installed {
+            assert_eq!(r.sandbox_ok, None);
+        }
+    }
+
+    /// Presence-only login shape: muse carries a provider label, never a
+    /// plan, and marks env-supplied credentials.
+    #[test]
+    fn muse_login_probe_shape() {
+        match probe_muse_login() {
+            shared::AgentLoginStatus::LoggedIn { label, plan, via } => {
+                assert_eq!(label.as_deref(), Some("meta"));
+                assert_eq!(plan, None, "muse exposes no plan/subscription");
+                assert!(via.is_none() || via.as_deref() == Some("env"));
+            }
+            shared::AgentLoginStatus::LoggedOut => {}
+            shared::AgentLoginStatus::Unknown => {
+                panic!("probe should decide presence, not return Unknown")
+            }
+        }
+    }
+}

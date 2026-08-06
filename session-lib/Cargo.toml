@@ -12,6 +12,8 @@ shared = { path = "../shared" }
 # Pulled in as types-only — no native async / tokio bits — so this stays
 # agent-agnostic at the runtime level.
 claude-codes = { workspace = true, features = ["async-client"] }
+# Muse auth probe (credentials_present / AuthFile) for the agent matrix.
+muse-codes = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

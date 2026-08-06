@@ -263,6 +263,7 @@ impl PillViewModel {
             watermark_class: match session.agent_type {
                 shared::AgentType::Claude => "pill-watermark claude",
                 shared::AgentType::Codex => "pill-watermark codex",
+                shared::AgentType::Muse => "pill-watermark muse",
             },
             model_watermark: session
                 .last_model

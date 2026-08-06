@@ -119,6 +119,7 @@ fn args_placeholder(agent_type: shared::AgentType) -> &'static str {
     match agent_type {
         shared::AgentType::Claude => "ex: --model sonnet --allowedTools \"Bash Edit\"",
         shared::AgentType::Codex => "ex: -c model=gpt-5.5 -c model_reasoning_effort=high",
+        shared::AgentType::Muse => "ex: --reasoning-effort high --preset native-basic",
     }
 }
 
@@ -705,6 +706,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let selected_agent_label = match *agent_type {
         AgentType::Claude => "Claude",
         AgentType::Codex => "Codex",
+        AgentType::Muse => "Muse",
     };
 
     // Pre-compute directory listing HTML

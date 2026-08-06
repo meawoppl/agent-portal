@@ -78,6 +78,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 claude-codes = { version = "2.1.223", default-features = false, features = ["types"] }
 
 # Codex CLI integration
+muse-codes = { version = "0.1.3", default-features = false, features = ["async-client"] }
 codex-codes = { version = "0.146.4", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the

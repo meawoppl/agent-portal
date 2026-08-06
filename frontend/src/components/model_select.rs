@@ -23,6 +23,9 @@ pub fn model_cli_args(agent_type: AgentType, model_value: &str) -> Vec<String> {
     match agent_type {
         AgentType::Claude => vec!["--model".to_string(), model_value.to_string()],
         AgentType::Codex => vec!["-c".to_string(), format!("model={model_value}")],
+        // `muse exec --model <id>`; the catalog is empty until sessions land
+        // (see model_catalog), so this only fires for hand-typed values.
+        AgentType::Muse => vec!["--model".to_string(), model_value.to_string()],
     }
 }
 
@@ -35,6 +38,10 @@ fn model_catalog(agent_type: AgentType) -> Vec<(&'static str, &'static str, bool
             .iter()
             .map(|m| (m.cli_arg(), m.display_name(), m.is_alias()))
             .collect(),
+        // Muse has no published model catalog yet (0.1.0 resolves the model
+        // server-side and reports it in-band via run.model.configured), so
+        // the picker offers nothing and users pass --model by hand.
+        AgentType::Muse => Vec::new(),
         AgentType::Codex => CodexModel::known()
             .iter()
             .filter(|m| !matches!(m, CodexModel::CodexAutoReview))
@@ -87,6 +94,10 @@ pub fn extract_model_arg(args: &[String], agent_type: AgentType) -> (Option<Stri
                     None
                 }
             }
+            // No catalog to validate against yet, so a hand-typed
+            // `--model` stays in the raw args rather than being lifted
+            // into the (empty) picker.
+            AgentType::Muse => None,
         };
 
         if let Some(value) = matched {
@@ -139,6 +150,9 @@ pub fn model_select(props: &ModelSelectProps) -> Html {
 
     let catalog = model_catalog(props.agent_type);
     let options: Html = match props.agent_type {
+        // Empty catalog: the picker renders no options and users pass
+        // `--model` in the raw-args field.
+        AgentType::Muse => html! {},
         AgentType::Claude => html! {
             <>
                 <optgroup label="Aliases — track the newest model">

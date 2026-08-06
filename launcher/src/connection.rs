@@ -464,6 +464,9 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
                 match agent_type {
                     shared::AgentType::Claude => claude_session_lib::auth::probe_login(),
                     shared::AgentType::Codex => codex_session_lib::auth::probe_login(),
+                    // Muse persists no account identity (no whoami at 0.1.0),
+                    // so the cell is presence-only.
+                    shared::AgentType::Muse => session_lib::probe::probe_muse_login(),
                 }
             } else {
                 shared::AgentLoginStatus::Unknown
@@ -475,6 +478,7 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
                     .resolved_path
                     .map(|p| p.to_string_lossy().to_string()),
                 version: result.version,
+                sandbox_ok: result.sandbox_ok,
                 login,
             }
         })

@@ -174,6 +174,8 @@ pub enum AgentType {
     #[default]
     Claude,
     Codex,
+    /// Meta Muse Code (`muse` CLI) — journal-stream agent, spawn-per-turn.
+    Muse,
 }
 
 impl AgentType {
@@ -181,6 +183,7 @@ impl AgentType {
         match self {
             AgentType::Claude => "claude",
             AgentType::Codex => "codex",
+            AgentType::Muse => "muse",
         }
     }
 
@@ -235,6 +238,7 @@ impl std::str::FromStr for AgentType {
         match s.trim().to_ascii_lowercase().as_str() {
             "claude" => Ok(AgentType::Claude),
             "codex" => Ok(AgentType::Codex),
+            "muse" => Ok(AgentType::Muse),
             other => Err(format!("unknown agent type: {}", other)),
         }
     }
@@ -498,6 +502,14 @@ pub struct AgentInstall {
     /// `<bin> --version` stdout, trimmed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Sandbox readiness for agents whose TOOL execution depends on host
+    /// packages (muse: bubblewrap on Linux). `None` = no sandbox concept
+    /// for this agent (claude/codex — serialization unchanged);
+    /// `Some(false)` = installed-but-degraded: runs complete but every
+    /// tool call fails; `Some(true)` = ready. Degraded is NEVER modeled
+    /// as `installed: false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_ok: Option<bool>,
     /// Sign-in state for this agent on the host. `#[serde(default)]` =
     /// `Unknown`, so an older launcher that only reports install state
     /// deserializes cleanly (the matrix shows its login cells as unknown).
