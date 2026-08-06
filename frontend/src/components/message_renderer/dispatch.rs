@@ -102,9 +102,9 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
                 let mut tree = crate::components::muse_renderer::TaskTree::default();
                 tree.apply(&value);
                 html! {
-                    <div class="claude-message assistant-message muse-task-card">
+                    <div class="claude-message muse-message muse-task-card">
                         <div class="message-header">
-                            <span class="message-type-badge assistant">{ "Muse" }</span>
+                            <span class="message-type-badge muse">{ "Muse" }</span>
                         </div>
                         <div class="message-body">
                             { crate::components::muse_renderer::render_task_tree(&tree) }
