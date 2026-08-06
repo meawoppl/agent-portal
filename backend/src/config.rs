@@ -393,8 +393,14 @@ impl ServerConfig {
             );
         }
 
-        // Message retention settings
-        let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 100);
+        // Message retention settings. The default counts wire records, not
+        // turns: muse journals ~60–90 durable records per turn, so a default of
+        // 100 kept barely one muse turn and the per-session trim evicted the
+        // user's own earlier messages (and split older muse turns) on reload.
+        // 1000 holds ~10+ muse turns and is a no-op for Claude/Codex sessions,
+        // which rarely reach even the old cap. Kept in sync with the frontend
+        // live-buffer cap (`MAX_MESSAGES_PER_SESSION`).
+        let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 1000);
         let message_retention_days: u32 = parse_or(&mut errors, "MESSAGE_RETENTION_DAYS", 30);
 
         let session_max_age_days: u32 = parse_or(&mut errors, "SESSION_MAX_AGE_DAYS", 14);

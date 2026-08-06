@@ -31,8 +31,18 @@ pub const SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY: &str = "claude-portal-session-
 /// Storage key for the opt-in vim editing mode in localStorage
 pub const VIM_MODE_STORAGE_KEY: &str = "claude-portal-vim-mode";
 
-/// Maximum number of messages to keep in frontend memory (matches backend limit)
-pub const MAX_MESSAGES_PER_SESSION: usize = 100;
+/// Maximum number of messages to keep in the frontend live buffer.
+///
+/// This counts individual wire records, not conversational turns. Claude/Codex
+/// emit a handful of records per turn, but **muse journals ~60–90 durable
+/// records per turn** (each task lifecycle transition, tool result, etc. is its
+/// own record, later grouped into one task-tree card). At the old cap of 100 a
+/// single muse turn nearly filled the buffer and the next turn's flood evicted
+/// the oldest entries — the user's own prior messages — and left partial muse
+/// turns whose task-tree card rebuilt from a truncated record set. Sized to
+/// hold ~10+ muse turns so a turn's records never push the user's messages (or
+/// a neighbouring turn's records) out of view.
+pub const MAX_MESSAGES_PER_SESSION: usize = 1000;
 
 /// Type alias for WebSocket sender.
 ///
