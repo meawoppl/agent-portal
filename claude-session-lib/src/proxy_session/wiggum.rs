@@ -342,16 +342,11 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
             );
         }
         Some(SessionEvent::Ephemeral(_)) => {
-            // Live-status output (muse's streamed deltas / task status).
-            // Deliberately DROPPED here rather than forwarded as RawOutput:
-            // RawOutput persists, and persisting live-status is a mistake
-            // that takes a migration to unwind. The typed side-channel that
-            // carries these to web clients (`ProxyToServer::Ephemeral`,
-            // mirroring `ToolProgress`) lands with the backend fan-out; until
-            // then muse streams are simply not shown mid-turn — the durable
-            // `run.terminal.*` record still carries the full final text.
-            tracing::trace!("dropping ephemeral session event (no side-channel carrier yet)");
-            None
+            // Handled in session_event.rs (forwarded as ProxyToServer::Ephemeral)
+            // before calling this function — same as ToolProgress below.
+            unreachable!(
+                "Ephemeral should be handled before calling handle_session_event_with_wiggum"
+            );
         }
         Some(SessionEvent::ToolProgress { .. }) => {
             // Handled in run_main_loop (session_event::handle_next_event) before

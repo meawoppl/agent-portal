@@ -616,9 +616,85 @@ pub(crate) fn format_tool_elapsed(seconds: f64) -> String {
     }
 }
 
+/// Derive a one-line human summary from a neutral ephemeral live-status frame
+/// (`WsEvent::Ephemeral`) for the transient status strip.
+///
+/// The payload is opaque wire JSON by design — the frontend can't depend on
+/// the native `muse-codes` types — so this reads it defensively: streaming
+/// text (`payload.text`) or a status message (`payload.event.message`) when
+/// present, else the dotted `payload_type` as a fallback label so an unmodeled
+/// frame still names itself instead of showing nothing. Returns `None` only
+/// when the frame carries no usable signal at all.
+///
+/// This is an interim, agent-neutral render; the rich per-agent view (muse's
+/// task tree) is built on top of this same live stream in a follow-up.
+pub(crate) fn ephemeral_summary(payload: &serde_json::Value) -> Option<String> {
+    let inner = payload.get("payload");
+    // Streaming output text (muse `run.output.delta`).
+    if let Some(text) = inner
+        .and_then(|p| p.get("text"))
+        .and_then(|t| t.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        return Some(text.to_string());
+    }
+    // Status message (muse `task.lifecycle.status`).
+    if let Some(msg) = inner
+        .and_then(|p| p.get("event"))
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    {
+        return Some(msg.to_string());
+    }
+    // Fallback: name the frame by its type rather than showing nothing.
+    payload
+        .get("payload_type")
+        .and_then(|t| t.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn ephemeral_summary_prefers_streaming_text() {
+        let frame = json!({
+            "payload_type": "run.output.delta",
+            "payload": {"text": "  hello world  "}
+        });
+        assert_eq!(ephemeral_summary(&frame).as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn ephemeral_summary_falls_back_to_status_message() {
+        let frame = json!({
+            "payload_type": "task.lifecycle.status",
+            "payload": {"event": {"message": "opening stream"}}
+        });
+        assert_eq!(ephemeral_summary(&frame).as_deref(), Some("opening stream"));
+    }
+
+    #[test]
+    fn ephemeral_summary_labels_unmodeled_frames_by_type() {
+        // No text/message — an unmodeled ephemeral still names itself.
+        let frame = json!({"payload_type": "subagent.progress.heartbeat", "payload": {}});
+        assert_eq!(
+            ephemeral_summary(&frame).as_deref(),
+            Some("subagent.progress.heartbeat")
+        );
+    }
+
+    #[test]
+    fn ephemeral_summary_none_when_no_signal() {
+        assert_eq!(ephemeral_summary(&json!({"payload": {}})), None);
+    }
 
     #[test]
     fn normalize_iso_utc_appends_z_only_when_no_timezone() {

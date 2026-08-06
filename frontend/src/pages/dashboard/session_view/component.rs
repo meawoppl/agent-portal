@@ -27,9 +27,9 @@ use yew::prelude::*;
 use super::forward_chips::ForwardChips;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools,
-    enrich_codex_file_change_permission, format_tool_elapsed, is_claude_awaiting, parse_iso_ms_utc,
-    reconcile_pending_sends, running_tool_key, update_pending_send_delivery, upsert_tool_progress,
-    ActiveToolProgress, ActivityTag,
+    enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed,
+    is_claude_awaiting, parse_iso_ms_utc, reconcile_pending_sends, running_tool_key,
+    update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -265,6 +265,12 @@ pub struct SessionView {
     /// ends. Kept out of the memoized message-render props on purpose (see the
     /// `helpers` tool-progress section).
     active_tools: Vec<ActiveToolProgress>,
+    /// Latest neutral ephemeral live-status line (`WsEvent::Ephemeral`), shown
+    /// as a transient strip at the transcript tail while a turn runs and
+    /// cleared when a durable message arrives. Never persisted. Muse's streamed
+    /// deltas / task status flow here; the rich per-agent view is layered on
+    /// top of this same stream separately.
+    ephemeral_status: Option<String>,
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
@@ -344,6 +350,7 @@ impl Component for SessionView {
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
             active_tools: Vec::new(),
+            ephemeral_status: None,
             forwards_refresh: 0,
         }
     }
@@ -676,6 +683,7 @@ impl Component for SessionView {
                             html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                         })}
                         { self.render_active_tools() }
+                        { self.render_ephemeral_status() }
                     </div>
                     if !is_tailing {
                         <button
@@ -807,6 +815,18 @@ impl SessionView {
                 let key = running_tool_key(&tool_use_id, parent_tool_use_id.as_deref());
                 upsert_tool_progress(&mut self.active_tools, key, tool_name, elapsed_time_seconds);
                 true
+            }
+            WsEvent::Ephemeral(payload) => {
+                // Transient live status: replace the strip line. Never touches
+                // `messages` (no persistence, no replay watermark). A frame we
+                // can't summarize is ignored rather than clearing a good line.
+                match ephemeral_summary(&payload) {
+                    Some(summary) => {
+                        self.ephemeral_status = Some(summary);
+                        true
+                    }
+                    None => false,
+                }
             }
         }
     }
@@ -1039,6 +1059,8 @@ impl SessionView {
         // tool_result for the running tool, or a turn `result` that ends the
         // turn entirely. (The live heartbeat side-channel only adds entries.)
         clear_completed_tools(&mut self.active_tools, &output.content);
+        // A durable message supersedes the transient live-status line.
+        self.ephemeral_status = None;
 
         push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
         true
@@ -1067,6 +1089,23 @@ impl SessionView {
                         </div>
                     }
                 }) }
+            </div>
+        }
+    }
+
+    /// Transient live-status strip fed by the neutral `WsEvent::Ephemeral`
+    /// channel (muse's streamed deltas / task status). One line, replaced per
+    /// frame, cleared when a durable message arrives. Renders nothing when
+    /// idle. Deliberately minimal — a placeholder the per-agent live view
+    /// (muse's task tree) replaces, not a base to extend.
+    fn render_ephemeral_status(&self) -> Html {
+        let Some(status) = self.ephemeral_status.as_deref() else {
+            return html! {};
+        };
+        html! {
+            <div class="ephemeral-status-strip">
+                <span class="ephemeral-status-spinner" />
+                <span class="ephemeral-status-text">{ status }</span>
             </div>
         }
     }

@@ -124,6 +124,26 @@ pub(super) async fn handle_next_event<A: Agent>(
         return None;
     }
 
+    // Neutral ephemeral live-status (muse's streamed deltas / task status):
+    // forward as a typed side-channel exactly like `ToolProgress` above.
+    // Deliberately bypasses the output buffer — live-status only, never
+    // persisted or replayed. The backend fans it out to web clients (never to
+    // the DB); if nobody is listening it evaporates.
+    if let Some(SessionEvent::Ephemeral(payload)) = event {
+        let msg = ProxyToServer::Ephemeral {
+            session_id: state.session_id,
+            payload,
+        };
+        let mut ws = state.ws_write.lock().await;
+        if ws.send(msg).await.is_err() {
+            error!("Failed to send ephemeral live-status frame");
+            return Some(ConnectionResult::Disconnected(
+                state.connection_start.elapsed(),
+            ));
+        }
+        return None;
+    }
+
     // Codex app-server thread id: hand it to the persistence sink (the proxy's
     // ProxyConfig writer) so the next resume of this session can call
     // `thread/resume` with it. Emitted once per spawn by codex-session-lib.

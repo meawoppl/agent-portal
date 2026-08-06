@@ -1551,3 +1551,32 @@
 .active-tool-status {
     color: var(--text-muted);
 }
+
+/* Transient live-status line (neutral ephemeral channel; muse deltas/status). */
+.ephemeral-status-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.1rem 0.1rem;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+.ephemeral-status-spinner {
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 2px solid rgba(122, 162, 247, 0.35);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+.ephemeral-status-text {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
