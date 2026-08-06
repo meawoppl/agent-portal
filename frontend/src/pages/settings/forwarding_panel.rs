@@ -58,7 +58,7 @@ pub fn forwarding_panel() -> Html {
     };
 
     html! {
-        <section class="forwarding-section">
+        <section class="section-stack forwarding-section">
             <div class="section-header">
                 <h2>{ "Port Forwarding" }</h2>
                 <p class="section-description">

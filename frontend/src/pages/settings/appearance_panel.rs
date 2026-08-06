@@ -38,7 +38,7 @@ pub fn appearance_panel() -> Html {
     };
 
     html! {
-        <section class="appearance-section">
+        <section class="section-stack">
             <div class="section-header">
                 <h2>{ "Appearance" }</h2>
                 <p class="section-description">

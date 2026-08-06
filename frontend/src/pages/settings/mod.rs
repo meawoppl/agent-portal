@@ -1,26 +1,20 @@
-mod agent_install;
-mod agent_login;
-mod agents_panel;
 mod appearance_panel;
 mod forwarding_panel;
 mod health_timer_panel;
 mod launchers_panel;
 mod notifications_panel;
 mod performance_panel;
-mod profile_panel;
 mod sessions_panel;
 mod sounds_panel;
 mod tokens_panel;
 
 use crate::utils;
-use agents_panel::AgentsPanel;
 use appearance_panel::AppearancePanel;
 use forwarding_panel::ForwardingPanel;
 use health_timer_panel::HealthTimerPanel;
 use launchers_panel::LaunchersPanel;
 use notifications_panel::NotificationsPanel;
 use performance_panel::PerformancePanel;
-use profile_panel::ProfilePanel;
 use sessions_panel::SessionsPanel;
 use shared::{ProxyTokenInfo, SessionInfo};
 use sounds_panel::SoundsPanel;
@@ -29,8 +23,6 @@ use yew::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
-    Profile,
-    Agents,
     Sessions,
     Tokens,
     Launchers,
@@ -75,8 +67,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         let active_tab = active_tab.clone();
         Callback::from(move |_: MouseEvent| active_tab.set(tab))
     };
-    let on_profile_tab = make_tab_handler(SettingsTab::Profile);
-    let on_agents_tab = make_tab_handler(SettingsTab::Agents);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
     let on_launchers_tab = make_tab_handler(SettingsTab::Launchers);
@@ -105,18 +95,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
             </header>
 
             <nav class="settings-tabs">
-                <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::Profile).then_some("active"))}
-                    onclick={on_profile_tab}
-                >
-                    { "Profile" }
-                </button>
-                <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::Agents).then_some("active"))}
-                    onclick={on_agents_tab}
-                >
-                    { "Agents" }
-                </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sessions).then_some("active"))}
                     onclick={on_sessions_tab}
@@ -195,12 +173,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::HealthTimer {
                     <HealthTimerPanel />
-                }
-                if *active_tab == SettingsTab::Profile {
-                    <ProfilePanel />
-                }
-                if *active_tab == SettingsTab::Agents {
-                    <AgentsPanel />
                 }
                 if *active_tab == SettingsTab::Sessions {
                     <SessionsPanel on_sessions_loaded={on_sessions_loaded} />

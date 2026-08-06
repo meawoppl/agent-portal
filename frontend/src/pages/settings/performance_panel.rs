@@ -59,7 +59,7 @@ pub fn performance_panel() -> Html {
     };
 
     html! {
-        <section class="performance-panel">
+        <section class="section-stack">
             <div class="section-header">
                 <h2>{ "Performance" }</h2>
                 <p class="section-description">

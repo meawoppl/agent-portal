@@ -164,7 +164,7 @@ pub fn notifications_panel() -> Html {
     };
 
     html! {
-        <section class="notifications-section">
+        <section class="section-stack notifications-section">
             <div class="section-header">
                 <h2>{ "Push Notifications" }</h2>
                 <p class="section-description">

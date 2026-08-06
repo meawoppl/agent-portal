@@ -49,7 +49,7 @@ pub fn health_timer_panel() -> Html {
     };
 
     html! {
-        <section class="health-settings-section">
+        <section class="section-stack health-settings-section">
             <div class="section-header">
                 <h2>{ "Health timer" }</h2>
                 <p class="section-description">

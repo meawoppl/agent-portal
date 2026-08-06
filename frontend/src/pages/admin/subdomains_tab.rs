@@ -142,7 +142,7 @@ pub fn admin_subdomains_tab() -> Html {
         .unwrap_or_default();
 
     html! {
-        <section class="admin-subdomains">
+        <section class="section-stack admin-subdomains">
             <div class="section-header">
                 <h2>{ "Custom Subdomains" }</h2>
                 <p class="section-description">
