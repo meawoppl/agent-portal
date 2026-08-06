@@ -225,6 +225,28 @@ record of every session and silently overwrite one transcript with
 another. The UUIDv7 *shape* is a trap for anyone who assumes global
 uniqueness from appearance; always composite with `stream_id`.
 
+**Generalization — treat record `id` as stream-local *everywhere*, not
+just in the database.** The collision is a property of the value, so it
+applies to every use of it: dedup/idempotency checks, correlation maps,
+and especially frontend list keys. A `key={record.id}` in a component
+rendering two sessions' records would alias and drop DOM nodes — the same
+bug one layer up from the DB. The only handle that is unique across
+sessions is `stream_id`; anything cross-session must carry it.
+
+**Why the partition half is trustworthy — and how it could rot.** The
+composite is only safe because `stream_id` is genuinely unique per
+session. Two independent reasons it holds today, both verified:
+(1) the portal mints the session id itself (a v4 uuid) and passes it via
+`--session-id`, and the CLI adopts it verbatim as `stream.id`;
+(2) when *no* `--session-id` is passed, muse mints one, and unlike the
+record ids these are real random v4s (two runs produced
+`4147604e-…` and `e01e5f16-…` — no shared prefix, no counter). So the
+partition is sound on both paths. **The failure mode to guard against is
+a future change that makes `stream_id` derived or sequential** — if that
+ever happens the composite silently reintroduces the collision, so
+re-verify this property before trusting `(stream_id, id)` after any
+upstream session-id change.
+
 **Interrupt-as-kill is safe.** A run SIGKILLed 60 ms in (before it emitted
 any output) left the session store usable: the next turn on the same
 session id ran to a clean `run.terminal.completed`. No corruption, and no
