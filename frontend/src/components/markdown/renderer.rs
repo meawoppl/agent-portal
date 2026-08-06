@@ -5,6 +5,7 @@ use yew::prelude::*;
 use crate::components::copy_button::copy_to_clipboard;
 
 use super::links::linkify_urls;
+use super::portal_file_link::PortalFileLink;
 use super::sanitizer::{classify_link_destination, sanitize_raw_html, LinkDestination};
 
 /// Convert pulldown-cmark events to Yew Html.
@@ -75,10 +76,13 @@ fn render_tag(tag: &Tag, events: &[Event], session_id: Option<Uuid>) -> (Html, u
                     } else {
                         Some(title.to_string())
                     };
+                    // A component, not a bare anchor: the pull endpoint is
+                    // fallible and a plain href would navigate out of the SPA
+                    // on every error path. See portal_file_link.rs.
                     html! {
-                        <a href={download_href} title={title_attr} class="md-link portal-file-link">
+                        <PortalFileLink href={download_href} title={title_attr}>
                             { inner_html }
-                        </a>
+                        </PortalFileLink>
                     }
                 }
                 LinkDestination::LiteralAngleText => {

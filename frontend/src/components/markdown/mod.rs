@@ -11,6 +11,7 @@ use yew::prelude::*;
 mod links;
 mod math;
 mod parser;
+mod portal_file_link;
 mod renderer;
 mod sanitizer;
 
