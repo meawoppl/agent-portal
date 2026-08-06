@@ -393,14 +393,22 @@ impl ServerConfig {
             );
         }
 
-        // Message retention settings. The default counts wire records, not
-        // turns: muse journals ~60–90 durable records per turn, so a default of
-        // 100 kept barely one muse turn and the per-session trim evicted the
-        // user's own earlier messages (and split older muse turns) on reload.
-        // 1000 holds ~10+ muse turns and is a no-op for Claude/Codex sessions,
-        // which rarely reach even the old cap. Kept in sync with the frontend
-        // live-buffer cap (`MAX_MESSAGES_PER_SESSION`).
-        let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 1000);
+        // Message retention counts wire records, not turns.
+        //
+        // #1581 raised this to 1000 because muse journals ~60–90 records per
+        // turn, so 100 kept barely one turn. But this value is also the
+        // *initial replay limit* (`web_client_socket.rs`: every session open
+        // ships the trailing `message_retention_count` records), so 1000 made
+        // each session open ship 10x the payload — which the frontend then
+        // trimmed to its own live-buffer cap and discarded. That made the
+        // portal unusably slow, which is a worse failure than muse eviction,
+        // so this is back to 100.
+        //
+        // Untangling it properly means decoupling the three things this one
+        // number controls — durable retention, replay size, and render budget —
+        // rather than trading one off against the others. Kept in sync with the
+        // frontend live-buffer cap (`MAX_MESSAGES_PER_SESSION`) meanwhile.
+        let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 100);
         let message_retention_days: u32 = parse_or(&mut errors, "MESSAGE_RETENTION_DAYS", 30);
 
         let session_max_age_days: u32 = parse_or(&mut errors, "SESSION_MAX_AGE_DAYS", 14);

@@ -57,7 +57,7 @@ SESSION_SECRET=generate-a-random-32-char-secret-here
 # ALLOWED_EMAILS=user1@gmail.com,user2@example.com
 
 # Optional - Message retention (data cleanup)
-# MESSAGE_RETENTION_COUNT=1000   # Max messages per session (default: 1000)
+# MESSAGE_RETENTION_COUNT=100    # Max messages per session (default: 100)
 # MESSAGE_RETENTION_DAYS=30      # Delete messages older than N days (default: 30, 0=disabled)
 ```
 
@@ -190,7 +190,7 @@ docker buildx build \
 | `PROXY_BINARY_PATH` | Auto-detected | Path to `claude-portal` binary for downloads |
 | `ALLOWED_EMAIL_DOMAIN` | *(none)* | Restrict sign-in to emails from this domain |
 | `ALLOWED_EMAILS` | *(none)* | Comma-separated list of allowed email addresses |
-| `MESSAGE_RETENTION_COUNT` | `1000` | Maximum messages to keep per session |
+| `MESSAGE_RETENTION_COUNT` | `100` | Maximum messages to keep per session |
 | `MESSAGE_RETENTION_DAYS` | `30` | Delete messages older than N days (0 = disabled) |
 | `SESSION_MAX_AGE_DAYS` | `14` | Delete sessions older than N days (0 = disabled) |
 | `PORTAL_MAX_IMAGE_MB` | `10` | Max image size in MB for proxy inlining |
