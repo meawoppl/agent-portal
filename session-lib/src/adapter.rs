@@ -59,6 +59,21 @@ pub enum AgentOutput {
         tool_name: String,
         elapsed_time_seconds: f64,
     },
+    /// Live-status output that must stream to the UI but must **never** be
+    /// buffered or persisted.
+    ///
+    /// The general case of [`AgentOutput::ToolProgress`], which is the
+    /// Claude-shaped specialization (`tool_use_id` / `elapsed_time_seconds`).
+    /// Muse's journal marks roughly a third of its records `ephemeral` —
+    /// streamed output deltas and task-status chatter — whose final content
+    /// arrives separately on a durable record, so persisting them would
+    /// duplicate the answer in the transcript. Payload is opaque wire JSON
+    /// carrying its own `payload_type`, same neutrality as
+    /// [`AgentOutput::Visible`].
+    ///
+    /// `Session` maps this to `SessionEvent::Ephemeral` **without touching
+    /// the replay buffer**.
+    Ephemeral(serde_json::Value),
     /// Internal ack / nothing for the consumer — `Session` skips it.
     Noop,
 }

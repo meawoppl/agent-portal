@@ -34,23 +34,26 @@ fn every_captured_record_classifies_with_identity() {
         let records = load(fixture);
         assert!(!records.is_empty(), "{fixture} is empty");
         for r in &records {
-            match classify_record(r) {
-                AgentOutput::Visible(v) => {
-                    assert_eq!(
-                        v["stream_id"], r.stream.id,
-                        "{fixture}: stream_id must survive"
-                    );
-                    assert_eq!(v["record_id"], r.id, "{fixture}: record_id must survive");
-                    assert_eq!(
-                        v["causation_id"], r.causation_id,
-                        "{fixture}: causation_id groups the turn"
-                    );
-                    assert!(
-                        v["payload_type"].is_string(),
-                        "{fixture}: every event names its payload type"
-                    );
-                }
+            // Durable records persist; ephemeral ones stream without being
+            // buffered. Both carry the same identity fields.
+            let v = match classify_record(r) {
+                AgentOutput::Visible(v) | AgentOutput::Ephemeral(v) => v,
                 other => panic!("{fixture}: unexpected classification {other:?}"),
+            };
+            {
+                assert_eq!(
+                    v["stream_id"], r.stream.id,
+                    "{fixture}: stream_id must survive"
+                );
+                assert_eq!(v["record_id"], r.id, "{fixture}: record_id must survive");
+                assert_eq!(
+                    v["causation_id"], r.causation_id,
+                    "{fixture}: causation_id groups the turn"
+                );
+                assert!(
+                    v["payload_type"].is_string(),
+                    "{fixture}: every event names its payload type"
+                );
             }
         }
     }
@@ -119,26 +122,30 @@ fn live_capture_covers_provider_only_payloads() {
     }
 }
 
-/// Durability reaches the consumer on every event, so a persistence layer
-/// can filter live-status records once the neutral contract supports it
-/// (see the OPEN QUESTION in the classifier).
+/// The routing contract on real data: every record the wire marks
+/// `ephemeral` lands on the non-persisting channel, and every durable one
+/// persists. This is the assertion that stops live-status ever reaching
+/// `messages` — a mistake that would take a migration to unwind.
 #[test]
-fn durability_is_carried_on_every_event() {
+fn wire_durability_decides_routing_on_real_captures() {
     let records = load("corpus_meta_tool_use.jsonl");
-    let mut saw_ephemeral = false;
+    let mut ephemeral = 0usize;
+    let mut durable = 0usize;
     for r in &records {
-        let AgentOutput::Visible(v) = classify_record(r) else {
-            panic!("expected visible");
-        };
-        let d = v["durability"].as_str().expect("durability present");
-        assert!(
-            matches!(d, "durable" | "ephemeral"),
-            "unexpected durability {d}"
-        );
-        saw_ephemeral |= d == "ephemeral";
+        match (r.durability, classify_record(r)) {
+            (muse_codes::Durability::Ephemeral, AgentOutput::Ephemeral(v)) => {
+                assert_eq!(v["durability"], "ephemeral");
+                ephemeral += 1;
+            }
+            (muse_codes::Durability::Durable, AgentOutput::Visible(v)) => {
+                assert_eq!(v["durability"], "durable");
+                durable += 1;
+            }
+            (d, other) => panic!("{d:?} record mis-routed to {other:?}: {}", r.payload_type),
+        }
     }
     assert!(
-        saw_ephemeral,
-        "a live turn should contain ephemeral records (deltas/status)"
+        ephemeral > 0 && durable > 0,
+        "a live turn should exercise both channels (got {ephemeral} ephemeral, {durable} durable)"
     );
 }

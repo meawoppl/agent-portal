@@ -5,14 +5,14 @@
 //! measured against the real CLI (see `docs/MUSE_SUPPORT.md`, "Measured
 //! corrections") rather than assumed:
 //!
-//! - **Durability is carried, not yet enforced.** The journal marks
-//!   `run.output.delta` and `task.lifecycle.status` as `ephemeral`: pure
-//!   live-status that should stream to the UI without becoming transcript
-//!   rows. `AgentOutput` has no neutral ephemeral variant today (only
-//!   Claude-shaped `ToolProgress`), so these are classified `Visible` and
-//!   every event carries `durability` for the consumer to honor. See the
-//!   OPEN QUESTION below — this is a session-lib contract decision, not a
-//!   muse one.
+//! - **Durability decides routing, read off the wire.** Records the journal
+//!   marks `ephemeral` (streamed output deltas, task-status chatter) become
+//!   [`AgentOutput::Ephemeral`] — streamed to the UI, never buffered or
+//!   persisted, because their final content arrives separately on a durable
+//!   record. Durable records become [`AgentOutput::Visible`]. The branch is
+//!   on the envelope's own `durability` field rather than a list of payload
+//!   types, so a NEW ephemeral type muse introduces routes correctly
+//!   automatically instead of silently landing in the transcript.
 //! - **Identity is `(stream_id, id)`.** The record `id` is a UUID-*shaped*
 //!   counter that repeats byte-for-byte across sessions, and `sequence`
 //!   repeats across turns, so neither is a safe handle alone. Treat `id` as
@@ -50,9 +50,9 @@ pub fn classify_record(record: &MuseRecord) -> AgentOutput {
     // PermissionRequest. See MUSE_SUPPORT.md.
     match record.typed_payload() {
         Ok(payload) => classify_payload(record, &payload),
-        // A payload that fails its typed shape is real wire drift: forward
-        // it rather than dropping it, so the UI shows something and the
-        // drift is visible instead of silent.
+        // A payload that fails its typed shape is real wire drift. Always
+        // Visible — never routed by durability: drift must persist and be
+        // seen, not silently dropped down the ephemeral channel.
         Err(e) => AgentOutput::Visible(json!({
             "type": "muse_decode_error",
             "payload_type": record.payload_type,
@@ -64,24 +64,15 @@ pub fn classify_record(record: &MuseRecord) -> AgentOutput {
     }
 }
 
-/// OPEN QUESTION for session-lib's owner — deliberately visible rather than
-/// silently decided here:
-///
-/// Muse marks a third of its records `ephemeral` (`run.output.delta`,
-/// `task.lifecycle.status`). Semantically these are live-status: a long task
-/// emits status chatter continuously, and the complete final text arrives
-/// separately on `run.terminal.*`, so persisting deltas duplicates the
-/// answer in the transcript.
-///
-/// `AgentOutput` currently offers no neutral way to say that.
-/// `ToolProgress` is the right *concept* but a Claude-shaped variant
-/// (`tool_use_id`, `elapsed_time_seconds`) that muse records do not fit.
-/// Until a neutral variant exists, these classify as `Visible` and the
-/// event carries `"durability"` so the persistence layer can filter. The
-/// alternative — dropping them — would break streaming text, which is
-/// strictly worse than an over-full transcript.
+/// Route on the wire's own durability flag. Deliberately not a match on
+/// payload types: muse is a days-old beta and will add ephemeral kinds, and
+/// an unlisted one must not default into the transcript — persisting
+/// live-status is expensive to unwind (a migration, not a code change).
 fn classify_payload(record: &MuseRecord, _payload: &MusePayload) -> AgentOutput {
-    AgentOutput::Visible(to_event(record))
+    match record.durability {
+        muse_codes::Durability::Ephemeral => AgentOutput::Ephemeral(to_event(record)),
+        muse_codes::Durability::Durable => AgentOutput::Visible(to_event(record)),
+    }
 }
 
 /// Wire shape the frontend receives for one journal record.
@@ -135,11 +126,11 @@ mod tests {
         .expect("envelope builds")
     }
 
-    /// Deltas reach the UI (streaming would break otherwise) but carry the
-    /// `ephemeral` marker so a persistence layer can filter them once the
-    /// neutral contract supports it. See the OPEN QUESTION in this module.
+    /// Deltas stream but must never be persisted — the terminal record
+    /// carries the final text, so persisting deltas would duplicate the
+    /// answer in the transcript.
     #[test]
-    fn output_deltas_are_visible_and_marked_ephemeral() {
+    fn output_deltas_route_to_the_ephemeral_channel() {
         let r = env(
             "run.output.delta",
             "ephemeral",
@@ -147,8 +138,8 @@ mod tests {
                    "run_stream": {"kind": "run", "id": "r"}}),
         );
         match classify_record(&r) {
-            AgentOutput::Visible(v) => assert_eq!(v["durability"], "ephemeral"),
-            other => panic!("deltas must reach the UI, got {other:?}"),
+            AgentOutput::Ephemeral(v) => assert_eq!(v["durability"], "ephemeral"),
+            other => panic!("deltas must not be persisted, got {other:?}"),
         }
     }
 
@@ -165,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn task_status_carries_its_durability_marker() {
+    fn task_status_is_ephemeral_structural_transitions_are_not() {
         let status = env(
             "task.lifecycle.status",
             "ephemeral",
@@ -176,8 +167,8 @@ mod tests {
                              "details": {"phase": "opening_stream"}}}),
         );
         match classify_record(&status) {
-            AgentOutput::Visible(v) => assert_eq!(v["durability"], "ephemeral"),
-            other => panic!("status must reach the UI, got {other:?}"),
+            AgentOutput::Ephemeral(v) => assert_eq!(v["durability"], "ephemeral"),
+            other => panic!("status chatter must not be persisted, got {other:?}"),
         }
 
         let completed = env(
@@ -244,5 +235,61 @@ mod tests {
         };
         assert_eq!(v["payload_type"], "runtime.command.accepted");
         assert_eq!(v["durability"], "durable");
+    }
+}
+
+#[cfg(test)]
+mod durability_contract {
+    use super::*;
+
+    /// A payload type this crate has never seen, marked ephemeral, must
+    /// still route to the ephemeral channel — the reason the branch reads
+    /// `durability` instead of matching known payload types.
+    #[test]
+    fn unknown_ephemeral_type_does_not_land_in_the_transcript() {
+        let r: MuseRecord = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "018f0000-0000-7000-8000-00000000c399",
+            "stream": {"kind": "session", "id": "s"},
+            "sequence": 1,
+            "recorded_at": 1780531400000000u64,
+            "record_type": "status",
+            "durability": "ephemeral",
+            "causation_id": "c",
+            "payload_type": "subagent.progress.heartbeat",
+            "payload_schema_version": 1,
+            "payload": {"kind": "future_thing"},
+        }))
+        .expect("envelope");
+        assert!(
+            matches!(classify_record(&r), AgentOutput::Ephemeral(_)),
+            "a NEW ephemeral payload type must route by durability, not fall into the transcript"
+        );
+    }
+
+    /// Wire drift persists: a payload that fails its typed shape stays
+    /// Visible even if the record is marked ephemeral, so the failure is
+    /// seen rather than dropped down a non-persisting channel.
+    #[test]
+    fn decode_failure_persists_even_when_marked_ephemeral() {
+        let r: MuseRecord = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "018f0000-0000-7000-8000-00000000c39a",
+            "stream": {"kind": "session", "id": "s"},
+            "sequence": 2,
+            "recorded_at": 1780531400000000u64,
+            "record_type": "status",
+            "durability": "ephemeral",
+            "causation_id": "c",
+            "payload_type": "run.output.delta",
+            "payload_schema_version": 1,
+            // `text` missing and `run_stream` malformed: fails RunOutputDelta.
+            "payload": {"kind": "run_output_delta", "command_id": "c", "run_stream": 7},
+        }))
+        .expect("envelope");
+        match classify_record(&r) {
+            AgentOutput::Visible(v) => assert_eq!(v["type"], "muse_decode_error"),
+            other => panic!("drift must persist, got {other:?}"),
+        }
     }
 }
