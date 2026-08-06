@@ -114,6 +114,18 @@ pub struct TaskNode {
     pub tool_results: Vec<ToolOutcome>,
 }
 
+impl TaskNode {
+    /// Muse-internal scaffolding: the `tbh-reminders` plugin's
+    /// skill/scope/goal/verify prompt reminders (`task_kind` `reminder.*`).
+    /// Bookkeeping the agent runs on itself, not user-facing work — the view
+    /// hides these, and tool attribution prefers real work tasks over them.
+    pub fn is_reminder(&self) -> bool {
+        self.task_kind
+            .as_deref()
+            .is_some_and(|kind| kind.starts_with("reminder."))
+    }
+}
+
 /// The tree for one turn, keyed by `task_id`.
 ///
 /// `BTreeMap` rather than a hash map so iteration order is stable across
@@ -272,22 +284,42 @@ impl TaskTree {
             text: str_field(payload, "text").unwrap_or_default(),
             has_edit_facts: payload.get("edit_facts").is_some_and(|v| !v.is_null()),
         };
-        // `tool.result` carries no task_id on the observed wire, so attach it
-        // to the most recently started task — the one that issued the call.
-        if let Some(id) = self.latest_running_task() {
+        if let Some(id) = self.tool_result_target(outcome.tool_name.as_deref()) {
             self.node_mut(&id).tool_results.push(outcome);
         }
     }
 
-    fn latest_running_task(&self) -> Option<String> {
+    /// The task a `tool.result` belongs to. The record carries no task_id,
+    /// but the wire models each tool call as its own task
+    /// (`task_kind: tool.<tool_name>`), and in every committed capture the
+    /// result's `correlation_facts.tool_name` matches exactly one such task —
+    /// so kind-match on the latest one (any state: the tool task has usually
+    /// already completed by the time its result record lands, which is why a
+    /// running-only scan can never find it). Fall back to the latest running
+    /// non-reminder task, then to any running task, rather than dropping the
+    /// result on the floor.
+    fn tool_result_target(&self, tool_name: Option<&str>) -> Option<String> {
+        if let Some(name) = tool_name {
+            let kind = format!("tool.{name}");
+            if let Some(id) = self.order.iter().rev().find(|id| {
+                self.nodes
+                    .get(*id)
+                    .is_some_and(|n| n.task_kind.as_deref() == Some(kind.as_str()))
+            }) {
+                return Some(id.clone());
+            }
+        }
+        let running = |id: &&String| {
+            self.nodes
+                .get(*id)
+                .is_some_and(|n| !n.state.is_terminal() && n.state >= TaskState::Started)
+        };
         self.order
             .iter()
             .rev()
-            .find(|id| {
-                self.nodes
-                    .get(*id)
-                    .is_some_and(|n| !n.state.is_terminal() && n.state >= TaskState::Started)
-            })
+            .filter(running)
+            .find(|id| self.nodes.get(*id).is_some_and(|n| !n.is_reminder()))
+            .or_else(|| self.order.iter().rev().find(running))
             .cloned()
     }
 
@@ -491,6 +523,63 @@ mod tests {
         assert!(
             tree.other_records().next().is_none(),
             "a failed terminal must render, not footer-count"
+        );
+    }
+
+    /// Attribution pins the measured correlation: the wire models each tool
+    /// call as a `tool.<name>` task, and the result's
+    /// `correlation_facts.tool_name` names it. A recency scan cannot work —
+    /// the tool task has already completed when its result record lands, so
+    /// "latest running" found only reminder scaffolding (hidden by the view),
+    /// making every tool outcome in every capture invisible.
+    #[test]
+    fn tool_results_attach_to_their_tool_task_not_reminder_scaffolding() {
+        for capture in [TOOL_USE, SUBAGENTS] {
+            let tree = build(capture);
+            let carriers: Vec<&TaskNode> = tree
+                .nodes()
+                .filter(|n| !n.tool_results.is_empty())
+                .collect();
+            assert!(!carriers.is_empty(), "capture must yield tool results");
+            for node in carriers {
+                let kind = node.task_kind.as_deref().unwrap_or_default();
+                assert!(
+                    kind.starts_with("tool."),
+                    "tool result landed on {kind:?}, not its tool task"
+                );
+                for r in &node.tool_results {
+                    let expect = format!("tool.{}", r.tool_name.as_deref().unwrap_or_default());
+                    assert_eq!(kind, expect, "result matched to the wrong tool task");
+                }
+            }
+        }
+    }
+
+    /// The fallback still fires: when ONLY a reminder task is running, a tool
+    /// result attaches to it rather than being dropped on the floor.
+    #[test]
+    fn tool_results_fall_back_to_a_reminder_task_when_nothing_else_runs() {
+        let mut tree = TaskTree::new();
+        tree.apply(&json!({
+            "payload_type": "task.lifecycle.proposed",
+            "payload": {"task_id": "r1", "event": {
+                "kind": "proposed", "task_id": "r1",
+                "task_kind": "reminder.agent.plugin:tbh-reminders:scope-reminder"
+            }},
+        }));
+        tree.apply(&json!({
+            "payload_type": "task.lifecycle.started",
+            "payload": {"task_id": "r1", "event": {"kind": "started", "task_id": "r1"}},
+        }));
+        tree.apply(&json!({
+            "payload_type": "tool.result",
+            "payload": {"call_id": "c1", "text": "ok"},
+        }));
+        let node = tree.get("r1").expect("node");
+        assert_eq!(
+            node.tool_results.len(),
+            1,
+            "sole running task keeps the result"
         );
     }
 
