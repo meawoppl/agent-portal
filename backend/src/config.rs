@@ -393,22 +393,23 @@ impl ServerConfig {
             );
         }
 
-        // Message retention counts wire records, not turns.
+        // Durable per-session message budget, counted in wire records.
         //
-        // #1581 raised this to 1000 because muse journals ~60–90 records per
-        // turn, so 100 kept barely one turn. But this value is also the
-        // *initial replay limit* (`web_client_socket.rs`: every session open
-        // ships the trailing `message_retention_count` records), so 1000 made
-        // each session open ship 10x the payload — which the frontend then
-        // trimmed to its own live-buffer cap and discarded. That made the
-        // portal unusably slow, which is a worse failure than muse eviction,
-        // so this is back to 100.
+        // This is deliberately NOT the same knob as the frontend's render budget
+        // (`MAX_MESSAGES_PER_SESSION`), even though both were 1000 before. They
+        // answer different questions — how much history is kept, versus how much
+        // is drawn — and the portal-slowness incident that lowered the render
+        // budget was not a reason to delete history. Keeping this high is the
+        // conservative side: trimming is irreversible, over-rendering is not.
         //
-        // Untangling it properly means decoupling the three things this one
-        // number controls — durable retention, replay size, and render budget —
-        // rather than trading one off against the others. Kept in sync with the
-        // frontend live-buffer cap (`MAX_MESSAGES_PER_SESSION`) meanwhile.
-        let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 100);
+        // One coupling remains and is worth knowing about: `web_client_socket.rs`
+        // sets `initial_replay_limit` from this value, so a cold session open
+        // ships the trailing N records and the frontend discards all but its
+        // render budget. That is wasted bytes, not the cause of the slowness
+        // people reported (measured: the render budget was), so it's an
+        // efficiency fix rather than an urgent one — bound the replay separately
+        // instead of lowering retention to compensate.
+        let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 1000);
         let message_retention_days: u32 = parse_or(&mut errors, "MESSAGE_RETENTION_DAYS", 30);
 
         let session_max_age_days: u32 = parse_or(&mut errors, "SESSION_MAX_AGE_DAYS", 14);
