@@ -7,11 +7,20 @@ links, system-browser auth handoff, push registration, and share targets.
 
 ## Prerequisites
 
-- Rust stable with the Android and/or iOS targets installed.
+- Rust stable with the Android and/or iOS targets installed:
+  ```bash
+  rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+  ```
 - Node.js 20+.
 - Tauri 2 mobile prerequisites:
   - Android: Android Studio, Android SDK, NDK, and a configured emulator or device.
-  - iOS: macOS with Xcode and a simulator or device.
+  - iOS: macOS with Xcode (the full app, not just Command Line Tools) plus
+    CocoaPods, and a simulator or device. If `xcode-select -p` reports
+    `/Library/Developer/CommandLineTools`, point it at Xcode first:
+    ```bash
+    sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+    sudo xcodebuild -license accept
+    ```
 
 Install the local CLI dependencies from this directory:
 
@@ -21,20 +30,41 @@ npm install
 
 ## Remote URL
 
-The checked-in default loads `https://txcl.io`. For local development against a
-backend on your machine, pass a temporary Tauri config override:
+Two config keys are in play, and they do **different** jobs — conflating them
+is the main way to get stuck here:
+
+| Key | Job |
+|---|---|
+| `app.windows[].url` (`https://txcl.io`) | What the WebView actually loads. Applies to **both** dev and build — this window's URL is an explicit external URL, so Tauri uses it verbatim rather than resolving it against the dev server. |
+| `build.devUrl` (`http://localhost:3000`) | A **readiness gate only**. `*:dev` polls it *from the host* and refuses to build until something answers. It does not change what the WebView loads. |
+
+The gate is the surprising half: with nothing listening on `localhost:3000`,
+`npm run ios:dev` never starts building and just loops on
+`Waiting for your frontend dev server to start on http://localhost:3000/`. So
+for any `*:dev` run, start the backend first:
 
 ```bash
-npm run android:dev -- --config '{"app":{"windows":[{"url":"http://10.0.2.2:3000"}]}}'
+./scripts/dev.sh start
 ```
 
-For an iOS simulator talking to a local backend:
+With the backend up, point the WebView at it by overriding the window URL. The
+iOS simulator shares the Mac's `localhost`; the Android emulator reaches host
+loopback via `10.0.2.2` (the host-side gate still polls `localhost` either way):
 
 ```bash
 npm run ios:dev -- --config '{"app":{"windows":[{"url":"http://localhost:3000"}]}}'
+npm run android:dev -- --config '{"app":{"windows":[{"url":"http://10.0.2.2:3000"}]}}'
 ```
 
 Use a LAN IP instead of `localhost` for physical devices.
+
+Without those overrides a `*:dev` run still loads the **deployed** portal, since
+that is what `app.windows[].url` says. If you want that *and* don't want to run
+a local backend, point the gate at something that answers so it stops blocking:
+
+```bash
+npm run ios:dev -- --config '{"build":{"devUrl":"https://txcl.io"}}'
+```
 
 For a self-hosted or long-lived dev shell build, bake the target URL into the
 native binary instead:
@@ -167,10 +197,14 @@ npm run android:init
 npm run ios:init
 ```
 
-The generated Android and iOS project files should be committed by the PR that
-first runs each platform init. This scaffold keeps E1 small and gives follow-up
-PRs a clean place to add deep links, auth handoff, push bridges, and share
-targets.
+The generated projects land in `src-tauri/gen/` and are **not** committed —
+`src-tauri/.gitignore` ignores `/gen/`, and the Android CI lane regenerates
+`gen/android` on every run. Treat them as local build output: re-run the init
+for a platform whenever you need it back, and never hand-edit files under
+`gen/` expecting the change to survive.
+
+This is also why anything that must persist across regeneration lives outside
+`gen/` — see the APNs bridge in [`ios/`](ios/) below.
 
 ## iOS push (APNs) bridge
 
@@ -183,17 +217,26 @@ and, in CI, the F2/F3 signing prerequisites).
 
 ## Development
 
-Run on Android:
+Start the backend first (see [Remote URL](#remote-url) — `*:dev` waits on
+`build.devUrl` and will not proceed without it), then:
 
 ```bash
-npm run android:dev
+npm run android:dev    # Android emulator or device
+npm run ios:dev        # iOS simulator or device
 ```
 
-Run on iOS:
+Append a device name to skip the interactive picker, e.g.
+`npm run ios:dev -- "iPhone 17 Pro"`. `xcrun simctl list devices available`
+lists the installed simulators; if that comes up empty, install an iOS runtime
+from Xcode → Settings → Components.
 
-```bash
-npm run ios:dev
-```
+Either command stays in the foreground after the app launches, watching
+`src-tauri/` and `shared/` for changes and rebuilding on edit — leave it
+running for hot reload.
+
+The `Warn No code signing certificates found` line at startup is expected and
+harmless for simulator/emulator runs; signing only matters for physical devices
+and release builds.
 
 The fallback `mobile/www/index.html` is only a splash screen for build tooling;
 normal app navigation uses the configured remote URL.
