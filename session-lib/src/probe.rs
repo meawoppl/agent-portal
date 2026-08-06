@@ -104,6 +104,15 @@ pub fn probe_muse_sandbox() -> Option<bool> {
         let status = text
             .lines()
             .find_map(|l| l.trim().strip_prefix("status="))?;
+        // The healthy string is a GUESS: `status=setup_required` was observed
+        // on an unconfigured host, but no ready value has been seen. Log the
+        // raw line so the first Windows user can confirm or correct this
+        // match instead of silently getting a wrong cell.
+        tracing::info!(
+            status = %status,
+            "muse sandbox windows check status (healthy-value match is unverified; report this \
+             line if the sandbox is configured but the matrix shows degraded)"
+        );
         Some(status == "ready" || status == "ok")
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
