@@ -2,9 +2,19 @@
    Mobile Responsiveness
    ========================================================================== */
 
-/* --- Safe area insets for notched devices (iPhone X+, etc.) -------------- */
+/* --- Safe area insets for notched devices (iPhone X+, etc.) --------------
+   `index.html` sets `viewport-fit=cover`, which deliberately extends the page
+   under the status bar / Dynamic Island / home indicator. That is only correct
+   if every top-level container adds the inset back — otherwise its first row
+   renders *behind* the clock. Miss the top inset and it is invisible in a
+   desktop browser and in the mobile Safari tab (whose chrome hides it), but
+   obvious in the native shell, which is edge-to-edge.
+
+   Keep `max(<base>, env(...))` rather than a bare `env(...)`: the inset is 0 on
+   non-notched devices, and a bare env() would collapse the normal padding. */
 @supports (padding: env(safe-area-inset-bottom)) {
     .focus-flow-header {
+        padding-top: max(0.75rem, env(safe-area-inset-top));
         padding-left: max(0.75rem, env(safe-area-inset-left));
         padding-right: max(0.75rem, env(safe-area-inset-right));
     }
@@ -23,8 +33,12 @@
     }
 
     /* ---- Header ---- */
+
+    /* Restates the insets from the @supports block above, which this rule would
+       otherwise reset — putting the first row back under the Dynamic Island. */
     .focus-flow-header {
-        padding: 0.5rem 0.75rem;
+        padding: max(0.5rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) 0.5rem
+            max(0.75rem, env(safe-area-inset-left));
         flex-wrap: wrap;
         gap: 0.5rem;
     }
@@ -199,16 +213,6 @@
     }
 
     /* ---- Dashboard page ---- */
-    .dashboard-container {
-        padding: 1rem;
-    }
-
-    .dashboard-header {
-        margin-bottom: 1rem;
-        flex-wrap: wrap;
-        gap: 0.75rem;
-    }
-
     .header-button {
         padding: 0.4rem 0.75rem;
         font-size: 0.8rem;
@@ -572,15 +576,6 @@
 
     .session-view-input .input-prompt {
         display: none;
-    }
-
-    /* Dashboard even tighter */
-    .dashboard-container {
-        padding: 0.75rem;
-    }
-
-    .dashboard-header {
-        margin-bottom: 0.75rem;
     }
 
     .header-actions {

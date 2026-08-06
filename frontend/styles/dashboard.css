@@ -1,16 +1,4 @@
 /* Dashboard */
-.dashboard-container {
-    min-height: 100vh;
-    padding: 2rem;
-}
-
-.dashboard-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-}
-
 .header-actions {
     display: flex;
     align-items: center;
