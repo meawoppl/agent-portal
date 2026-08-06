@@ -14,6 +14,7 @@ mod launch_dialog;
 pub(crate) mod markdown;
 pub mod message_renderer;
 mod model_select;
+pub mod muse_renderer;
 mod proxy_token_setup;
 mod schedule_dialog;
 mod share_dialog;
