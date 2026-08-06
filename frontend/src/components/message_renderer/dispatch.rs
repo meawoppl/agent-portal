@@ -83,6 +83,7 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             }
             AgentFrame::Claude(ClaudeMessage::Unknown)
             | AgentFrame::Codex(_)
+            | AgentFrame::Muse(_)
             | AgentFrame::RawJson => render_raw_json(json),
         },
         FrameRenderer::Codex => match frame {
@@ -91,6 +92,26 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
                 ctx.session_id,
                 ctx.turn_metrics,
             ),
+            _ => html! {},
+        },
+        // A muse record reaching here rendered alone (grouping folds runs of
+        // them into one task-tree card): draw a one-record tree rather than
+        // the raw-JSON "Unrecognized Message" bubble — the type IS recognized.
+        FrameRenderer::Muse => match frame {
+            AgentFrame::Muse(value) => {
+                let mut tree = crate::components::muse_renderer::TaskTree::default();
+                tree.apply(&value);
+                html! {
+                    <div class="claude-message assistant-message muse-task-card">
+                        <div class="message-header">
+                            <span class="message-type-badge assistant">{ "Muse" }</span>
+                        </div>
+                        <div class="message-body">
+                            { crate::components::muse_renderer::render_task_tree(&tree) }
+                        </div>
+                    </div>
+                }
+            }
             _ => html! {},
         },
         FrameRenderer::RawJson => render_raw_json(json),

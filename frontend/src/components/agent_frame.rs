@@ -19,6 +19,10 @@ use super::message_renderer::types::ClaudeMessage;
 pub enum AgentFrame {
     Claude(ClaudeMessage),
     Codex(CodexEvent),
+    /// One muse journal record (`type: "muse_record"`), kept as parsed JSON:
+    /// the task-tree reducer consumes `serde_json::Value` directly, so a
+    /// typed intermediate here would be parsed only to be re-serialized.
+    Muse(serde_json::Value),
     RawJson,
 }
 
@@ -47,6 +51,7 @@ pub enum AgentFrameKind {
     CodexReasoningSummaryPartAdded,
     CodexReasoningTextDelta,
     CodexThreadCompacted,
+    MuseRecord,
     RawJson,
 }
 
@@ -54,6 +59,7 @@ pub enum AgentFrameKind {
 pub enum FrameRenderer {
     Claude,
     Codex,
+    Muse,
     RawJson,
 }
 
@@ -85,6 +91,14 @@ impl AgentFrame {
             }
         }
 
+        if agent_type == shared::AgentType::Muse {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(json) {
+                if value.get("type").and_then(|t| t.as_str()) == Some("muse_record") {
+                    return Self::Muse(value);
+                }
+            }
+        }
+
         Self::RawJson
     }
 
@@ -92,6 +106,7 @@ impl AgentFrame {
         match self {
             Self::Claude(message) => message.kind(),
             Self::Codex(event) => event.kind(),
+            Self::Muse(_) => AgentFrameKind::MuseRecord,
             Self::RawJson => AgentFrameKind::RawJson,
         }
     }
@@ -123,6 +138,7 @@ impl FrameRenderer {
             | AgentFrameKind::CodexReasoningSummaryPartAdded
             | AgentFrameKind::CodexReasoningTextDelta
             | AgentFrameKind::CodexThreadCompacted => Self::Codex,
+            AgentFrameKind::MuseRecord => Self::Muse,
             AgentFrameKind::RawJson => Self::RawJson,
         }
     }

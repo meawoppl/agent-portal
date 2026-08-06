@@ -28,9 +28,8 @@ use super::forward_chips::ForwardChips;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools,
     enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed,
-    is_claude_awaiting, is_muse_record, parse_iso_ms_utc, reconcile_pending_sends,
-    running_tool_key, update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress,
-    ActivityTag,
+    is_claude_awaiting, parse_iso_ms_utc, reconcile_pending_sends, running_tool_key,
+    update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -266,12 +265,6 @@ pub struct SessionView {
     /// ends. Kept out of the memoized message-render props on purpose (see the
     /// `helpers` tool-progress section).
     active_tools: Vec<ActiveToolProgress>,
-    /// Live task tree for Muse turns, fed from BOTH channels: durable
-    /// structure from the persisted output stream and live status from
-    /// `WsEvent::Ephemeral`. The reducer is channel-agnostic — see
-    /// [`crate::components::muse_renderer::TaskTree`] — so both feed one
-    /// `apply()`. Empty for non-Muse agents, which never emit these records.
-    muse_tasks: crate::components::muse_renderer::TaskTree,
     /// Latest neutral ephemeral live-status line (`WsEvent::Ephemeral`), shown
     /// as a transient strip at the transcript tail while a turn runs and
     /// cleared when a durable message arrives. Never persisted. Muse's streamed
@@ -357,7 +350,6 @@ impl Component for SessionView {
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
             active_tools: Vec::new(),
-            muse_tasks: Default::default(),
             ephemeral_status: None,
             forwards_refresh: 0,
         }
@@ -691,7 +683,6 @@ impl Component for SessionView {
                             html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                         })}
                         { self.render_active_tools() }
-                        { self.render_muse_tasks() }
                         { self.render_ephemeral_status() }
                     </div>
                     if !is_tailing {
@@ -826,22 +817,18 @@ impl SessionView {
                 true
             }
             WsEvent::Ephemeral(payload) => {
-                // Live status. Never touches `messages` (no persistence, no
-                // replay watermark). Muse records feed the task tree, which
-                // renders them structurally; anything else falls back to the
-                // one-line strip so a new agent's live status is visible
-                // rather than silently dropped.
-                if is_muse_record(&payload) {
-                    self.muse_tasks.apply(&payload);
-                    true
-                } else {
-                    match ephemeral_summary(&payload) {
-                        Some(summary) => {
-                            self.ephemeral_status = Some(summary);
-                            true
-                        }
-                        None => false,
+                // Transient live status: replace the strip line. Never touches
+                // `messages` (no persistence, no replay watermark). A frame we
+                // can't summarize is ignored rather than clearing a good line.
+                // Durable muse structure renders as the transcript's task-tree
+                // card (`GroupCategory::Muse`); this strip carries only the
+                // between-records heartbeat.
+                match ephemeral_summary(&payload) {
+                    Some(summary) => {
+                        self.ephemeral_status = Some(summary);
+                        true
                     }
+                    None => false,
                 }
             }
         }
@@ -1077,16 +1064,6 @@ impl SessionView {
         clear_completed_tools(&mut self.active_tools, &output.content);
         // A durable message supersedes the transient live-status line.
         self.ephemeral_status = None;
-        // Durable muse records carry the task tree's STRUCTURE (stream
-        // links, lifecycle transitions, tool results); the ephemeral channel
-        // carries its live status. Same reducer, both channels. Persisted
-        // content arrives as a JSON string, so parse before routing; a
-        // non-JSON or non-muse message simply isn't tree material.
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&output.content) {
-            if is_muse_record(&value) {
-                self.muse_tasks.apply(&value);
-            }
-        }
 
         push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
         true
@@ -1116,61 +1093,6 @@ impl SessionView {
                     }
                 }) }
             </div>
-        }
-    }
-
-    /// The Muse task tree: one collapsible node per task, showing its
-    /// lifecycle state, the live status line for a running task, tool
-    /// outcomes, and the policy decision muse applied to any side effect
-    /// (it decides tool policy itself and never prompts, so these are an
-    /// audit trail rather than an approval).
-    fn render_muse_tasks(&self) -> Html {
-        if self.muse_tasks.is_empty() {
-            return html! {};
-        }
-        html! {
-            <div class="muse-task-tree">
-                { for self.muse_tasks.nodes().map(Self::render_muse_task) }
-            </div>
-        }
-    }
-
-    fn render_muse_task(node: &crate::components::muse_renderer::TaskNode) -> Html {
-        let state = node.state;
-        let kind = node.task_kind.as_deref().unwrap_or("task");
-        html! {
-            <details class="muse-task" open={!state.is_terminal()}>
-                <summary class="muse-task-summary">
-                    <span class={classes!("muse-task-badge", format!("muse-task-{}", state.label()))}>
-                        { state.label() }
-                    </span>
-                    <span class="muse-task-kind">{ kind }</span>
-                    if let Some(status) = node.status.as_deref() {
-                        <span class="muse-task-status">{ status }</span>
-                    }
-                </summary>
-                if let Some(reason) = node.reason.as_deref() {
-                    <div class="muse-task-reason">{ reason }</div>
-                }
-                if let Some((op, decision)) = node.side_effect.as_ref() {
-                    <div class="muse-task-side-effect">
-                        { format!("{op} — policy: {decision}") }
-                    </div>
-                }
-                { for node.tool_results.iter().map(|r| {
-                    let outcome = r.outcome.as_deref().unwrap_or("unknown");
-                    let tool = r.tool_name.as_deref().unwrap_or("tool");
-                    html! {
-                        <div class={classes!("muse-tool-result", format!("muse-tool-{outcome}"))}>
-                            <span class="muse-tool-name">{ tool }</span>
-                            <span class="muse-tool-text">{ &r.text }</span>
-                        </div>
-                    }
-                }) }
-                { for node.output.iter().map(|chunk| html! {
-                    <div class="muse-task-output">{ chunk }</div>
-                }) }
-            </details>
         }
     }
 

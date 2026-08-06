@@ -19,6 +19,10 @@ pub enum GroupCategory {
     User,
     /// Consecutive Codex protocol events (any non-Unknown `CodexEvent`).
     Codex,
+    /// Consecutive muse journal records. A live turn journals ~100 of them;
+    /// the group renders as ONE task-tree card (see `MessageGroupRenderer`)
+    /// instead of one raw-JSON bubble each.
+    Muse,
     /// Consecutive `system`/`thinking_tokens` markers emitted by the Claude CLI.
     /// These carry no renderable body — the portal collapses a run of them into
     /// a single compact `thinking × N` chip instead of one empty badge each.
@@ -37,6 +41,7 @@ impl GroupCategory {
             GroupCategory::User => "u",
             GroupCategory::Codex => "x",
             GroupCategory::Thinking => "t",
+            GroupCategory::Muse => "m",
         }
     }
 }
@@ -332,6 +337,13 @@ pub(super) fn classify(
             return Some(MessageIdentity {
                 category: GroupCategory::Codex,
                 label: "Codex".to_string(),
+                badge_class: "assistant".to_string(),
+            });
+        }
+        AgentFrame::Muse(_) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Muse,
+                label: "Muse".to_string(),
                 badge_class: "assistant".to_string(),
             });
         }

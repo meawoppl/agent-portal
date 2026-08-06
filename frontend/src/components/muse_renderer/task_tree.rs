@@ -125,6 +125,11 @@ pub struct TaskTree {
     order: Vec<String>,
     /// Turn this tree belongs to (`causation_id`), set by the first record.
     pub causation_id: Option<String>,
+    /// Count per `payload_type` of records the tree does not render
+    /// structurally (`run.model.configured`, `command.received`, terminal
+    /// records, future vocabulary). Surfaced as a muted footer so nothing
+    /// on the wire silently disappears from the transcript.
+    other_records: BTreeMap<String, usize>,
 }
 
 impl TaskTree {
@@ -176,8 +181,16 @@ impl TaskTree {
             }
             t if t.starts_with("task.lifecycle.") => self.apply_lifecycle(payload),
             "tool.result" => self.apply_tool_result(payload),
-            _ => {}
+            other => {
+                *self.other_records.entry(other.to_string()).or_default() += 1;
+            }
         }
+    }
+
+    /// `payload_type → count` of records not rendered as tree structure, in
+    /// stable order, for the card footer.
+    pub fn other_records(&self) -> impl Iterator<Item = (&str, usize)> {
+        self.other_records.iter().map(|(k, v)| (k.as_str(), *v))
     }
 
     fn apply_lifecycle(&mut self, payload: &serde_json::Value) {
