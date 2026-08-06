@@ -44,14 +44,15 @@ mod mobile {
     const MAX_STATUS_SESSIONS: usize = 5;
 
     pub fn run() -> tauri::Result<()> {
-        let mut builder = tauri::Builder::default()
+        let builder = tauri::Builder::default()
             .plugin(tauri_plugin_deep_link::init())
             .plugin(tauri_plugin_opener::init())
             .plugin(tauri_plugin_store::Builder::default().build());
+        // Shadow under cfg rather than `let mut` — the Android-only plugin was the
+        // sole reason for the `mut`, so non-Android targets tripped `unused_mut`.
+        // (The mobile clippy lane only runs aarch64-linux-android, so it never saw it.)
         #[cfg(target_os = "android")]
-        {
-            builder = builder.plugin(agent_portal_mobile_status_notification::init());
-        }
+        let builder = builder.plugin(agent_portal_mobile_status_notification::init());
 
         builder
             .setup(|app| {
@@ -128,14 +129,26 @@ mod mobile {
         if let Some(token) = stored_auth_token(&store) {
             match refresh_mobile_token(&shell_url, &token).await? {
                 RefreshDecision::UseExisting => {
-                    login_webview_with_token(app, &token, destination_url).await?;
+                    login_webview_with_token(
+                        app,
+                        &token,
+                        destination_url,
+                        PostLoginDestination::KeepCurrentPage,
+                    )
+                    .await?;
                     register_fcm_subscription(app, &shell_url, &token).await;
                     update_status_notification_once(app, &shell_url, &token).await;
                     return Ok(());
                 }
                 RefreshDecision::UseReplacement(token) => {
                     save_auth_token(&store, &token)?;
-                    login_webview_with_token(app, &token, destination_url).await?;
+                    login_webview_with_token(
+                        app,
+                        &token,
+                        destination_url,
+                        PostLoginDestination::KeepCurrentPage,
+                    )
+                    .await?;
                     register_fcm_subscription(app, &shell_url, &token).await;
                     update_status_notification_once(app, &shell_url, &token).await;
                     return Ok(());
@@ -152,7 +165,13 @@ mod mobile {
 
         let token = run_device_flow(app, &shell_url).await?;
         save_auth_token(&store, &token)?;
-        login_webview_with_token(app, &token, destination_url).await?;
+        login_webview_with_token(
+            app,
+            &token,
+            destination_url,
+            PostLoginDestination::Dashboard,
+        )
+        .await?;
         register_fcm_subscription(app, &shell_url, &token).await;
         update_status_notification_once(app, &shell_url, &token).await;
         Ok(())
@@ -282,10 +301,27 @@ mod mobile {
         Ok(url)
     }
 
+    /// Where to send the WebView after `token-login`, when no deep link named a
+    /// destination.
+    ///
+    /// The two auth paths want opposite things, and conflating them is why a
+    /// fresh login used to land back on the splash: at that moment the WebView
+    /// is *on* the logged-out splash, so "keep the current page" means "stay
+    /// logged out-looking" right after authenticating. A token refresh is the
+    /// reverse — the user is mid-session and navigating them to the dashboard
+    /// would lose their place.
+    enum PostLoginDestination {
+        /// Fresh device-flow login: the current page is the splash, so ignore it.
+        Dashboard,
+        /// Refresh of an existing token: the user is already somewhere useful.
+        KeepCurrentPage,
+    }
+
     async fn login_webview_with_token<R: tauri::Runtime>(
         app: &tauri::AppHandle<R>,
         token: &str,
         preferred_destination_url: Option<Url>,
+        fallback: PostLoginDestination,
     ) -> Result<(), String> {
         let window = app
             .get_webview_window(MAIN_WINDOW_LABEL)
@@ -302,7 +338,9 @@ mod mobile {
         }
         match window.url() {
             Ok(current_url) if same_origin(&current_url, shell_url.as_str()) => {
-                if !has_preferred_destination {
+                if !has_preferred_destination
+                    && matches!(fallback, PostLoginDestination::KeepCurrentPage)
+                {
                     destination_url = current_url;
                 }
             }
