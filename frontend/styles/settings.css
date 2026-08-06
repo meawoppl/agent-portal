@@ -1156,6 +1156,17 @@
     justify-content: flex-end;
 }
 
+.agent-install-command {
+    display: block;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.85rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border, #2a2e42);
+    border-radius: 6px;
+    background: var(--bg-primary, #1a1b26);
+    word-break: break-all;
+}
+
 .profile-section {
     display: flex;
     flex-direction: column;

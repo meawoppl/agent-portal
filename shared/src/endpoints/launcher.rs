@@ -136,6 +136,15 @@ pub enum LauncherToServer {
         agents: Vec<AgentInstall>,
     },
 
+    /// Reply to `InstallAgent`: whether the install command exited cleanly, plus
+    /// the CLI's own output tail on failure. The frontend re-probes on success.
+    InstallAgentResult {
+        request_id: Uuid,
+        success: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+
     /// Request the backend to mint a token and launch a session
     RequestLaunch {
         request_id: Uuid,
@@ -291,6 +300,14 @@ pub enum ServerToLauncher {
     /// Ask the launcher to (re-)probe its agent CLIs. The launcher replies
     /// with `LauncherToServer::ProbeAgentsResult` carrying the fresh state.
     ProbeAgents { request_id: Uuid },
+
+    /// Ask the launcher to install `agent_type`'s CLI (its
+    /// `AgentType::install_command`). The launcher runs it and replies
+    /// `InstallAgentResult`; the frontend re-probes on success.
+    InstallAgent {
+        request_id: Uuid,
+        agent_type: AgentType,
+    },
 
     /// Begin an interactive login for `agent_type` on this host. The launcher
     /// starts the agent's login flow, parks it under `flow_id`, and replies

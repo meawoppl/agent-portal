@@ -5,11 +5,12 @@ use axum::{
 use diesel::prelude::*;
 use serde::Deserialize;
 use shared::api::{
-    DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse, StartAgentLoginRequest,
-    StartAgentLoginResponse, SubmitAgentLoginCodeRequest,
+    DirectoryListingResponse, InstallAgentResponse, LaunchRequest, ProbeAgentsResponse,
+    StartAgentLoginRequest, StartAgentLoginResponse, SubmitAgentLoginCodeRequest,
 };
 use shared::{
-    AgentLoginOutcome, LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole, SessionStatus,
+    AgentLoginOutcome, AgentType, LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole,
+    SessionStatus,
 };
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -642,6 +643,38 @@ fn login_outcome(reply: LauncherToServer) -> Result<Json<AgentLoginOutcome>, App
         LauncherToServer::AgentLoginOutcomeResult { outcome, .. } => Ok(Json(outcome)),
         _ => Err(AppError::Internal(
             "Unexpected launcher login response".into(),
+        )),
+    }
+}
+
+/// POST /api/launchers/:id/agents/:agent_type/install — run the agent's install
+/// command on that host and report the outcome. Owner-gated: installing on a
+/// host is a privileged action, so only the launcher's owner may trigger it.
+pub async fn install_agent(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path((launcher_id, agent_type)): Path<(Uuid, AgentType)>,
+) -> Result<Json<InstallAgentResponse>, AppError> {
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
+    let request_id = Uuid::new_v4();
+    // A global npm install can run for tens of seconds — allow generous slack.
+    let reply = launcher_rpc(
+        &app_state,
+        launcher_id,
+        request_id,
+        ServerToLauncher::InstallAgent {
+            request_id,
+            agent_type,
+        },
+        180,
+    )
+    .await?;
+    match reply {
+        LauncherToServer::InstallAgentResult {
+            success, message, ..
+        } => Ok(Json(InstallAgentResponse { success, message })),
+        _ => Err(AppError::Internal(
+            "Unexpected launcher install response".into(),
         )),
     }
 }

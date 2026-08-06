@@ -1,3 +1,4 @@
+mod agent_install;
 mod agent_login;
 mod agents_panel;
 mod appearance_panel;

@@ -69,3 +69,12 @@ pub struct StartAgentLoginResponse {
 pub struct SubmitAgentLoginCodeRequest {
     pub code: String,
 }
+
+/// Response from POST /api/launchers/:id/agents/:agent/install — whether the
+/// install command succeeded, plus the CLI's own output tail on failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstallAgentResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
