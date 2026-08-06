@@ -242,6 +242,7 @@
 }
 .pill-watermark.claude { background-image: url('/anthropic-mark.svg'); }
 .pill-watermark.codex  { background-image: url('/openai-mark.png'); }
+.pill-watermark.muse   { background-image: url('/meta-mark.svg'); }
 
 /* Model-version watermark — the session's compact model number (e.g. "4.8")
    rendered in the same faint grey/opacity treatment as the agent logo. The
