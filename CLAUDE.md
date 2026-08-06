@@ -912,7 +912,7 @@ When making changes, verify:
 | `PORTAL_STT_VOCABULARY_NAME` | Pre-created custom-vocabulary resource | Optional (`aws`) |
 | `PORTAL_MAX_AUDIO_MB` | Per-recording cap for `POST /api/stt/transcribe` | Optional (default: 25) |
 | `PORTAL_MAX_IMAGE_MB` | Max image size for proxies (also the per-file cap for image `agent-portal show`) | Optional (default: 10) |
-| `PORTAL_MAX_VIDEO_MB` | Per-file cap for videos shown via `agent-portal show` | Optional (default: 100) |
+| `PORTAL_MAX_VIDEO_MB` | Per-file cap for videos shown via `agent-portal show` | Optional (default: 1000) |
 | `PORTAL_IMAGE_STORE_MAX_MB` | Backend served-image cache total-byte cap (LRU eviction past this) | Optional (default: 256) |
 | `PORTAL_MEDIA_STORE_MAX_MB` | Backend on-disk video store total-byte cap (oldest evicted past this); TTL reuses `PORTAL_IMAGE_STORE_TTL_SECS` | Optional (default: 1024) |
 | `PORTAL_IMAGE_STORE_TTL_SECS` | Backend served-image per-entry TTL in seconds | Optional (default: 3600) |

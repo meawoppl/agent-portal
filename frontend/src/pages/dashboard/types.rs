@@ -31,18 +31,22 @@ pub const SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY: &str = "claude-portal-session-
 /// Storage key for the opt-in vim editing mode in localStorage
 pub const VIM_MODE_STORAGE_KEY: &str = "claude-portal-vim-mode";
 
-/// Maximum number of messages to keep in the frontend live buffer.
+/// Maximum messages held in the frontend live buffer — a **render** budget,
+/// separate from durable history (`MESSAGE_RETENTION_COUNT`, a DB row count).
 ///
-/// This counts individual wire records, not conversational turns. Claude/Codex
-/// emit a handful of records per turn, but **muse journals ~60–90 durable
-/// records per turn** (each task lifecycle transition, tool result, etc. is its
-/// own record, later grouped into one task-tree card). At the old cap of 100 a
-/// single muse turn nearly filled the buffer and the next turn's flood evicted
-/// the oldest entries — the user's own prior messages — and left partial muse
-/// turns whose task-tree card rebuilt from a truncated record set. Sized to
-/// hold ~10+ muse turns so a turn's records never push the user's messages (or
-/// a neighbouring turn's records) out of view.
-pub const MAX_MESSAGES_PER_SESSION: usize = 1000;
+/// Every buffered record is grouped and re-parsed on each streamed frame and
+/// is a live DOM subtree, so this is what governs interactivity. 1000 (from
+/// #1581) was the laggy extreme; 100 keeps a long session responsive — this is
+/// the change that actually fixed the felt lag.
+///
+/// The tension with #1581 (a muse turn's ~60–90-record flood evicting the
+/// user's own earlier messages at a low cap) is resolved by cutting the flood
+/// at the source rather than by raising this budget: the muse classifier
+/// `Noop`s its `reminder.*` scaffolding (~41–47% of a turn) *before* the
+/// buffer, so those records never count here — a post-screen turn is ~30–40
+/// rendered records and 100 holds a couple of turns of real content. Durable
+/// history is unaffected (kept server-side under `MESSAGE_RETENTION_COUNT`).
+pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
 /// Type alias for WebSocket sender.
 ///
