@@ -1,3 +1,4 @@
+mod agent_login;
 mod agents_panel;
 mod appearance_panel;
 mod forwarding_panel;

@@ -84,6 +84,7 @@ pub async fn run_launcher_loop(
     // guidance, not just "Still parked".
     let mut last_parked_reason: Option<LauncherRejectReason> = None;
     let mut scheduler = Scheduler::new();
+    let mut login_registry = crate::login_registry::LoginRegistry::new();
 
     loop {
         // Re-resolve the token every attempt (CLI flag still wins): a parked
@@ -240,6 +241,7 @@ pub async fn run_launcher_loop(
                                             &mut ws_sender,
                                             &mut process_manager,
                                             &mut scheduler,
+                                            &mut login_registry,
                                         ).await;
                                     }
                                 }
@@ -613,6 +615,7 @@ async fn handle_message(
     ws_sender: &mut ws_bridge::WsSender<LauncherToServer>,
     process_manager: &mut ProcessManager,
     scheduler: &mut Scheduler,
+    login_registry: &mut crate::login_registry::LoginRegistry,
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
@@ -735,6 +738,67 @@ async fn handle_message(
             if ws_sender.send(response).await.is_err() {
                 warn!("Failed to send list directories result");
             }
+        }
+        ServerToLauncher::StartAgentLogin {
+            request_id,
+            flow_id,
+            agent_type,
+        } => {
+            let response = match login_registry.start(flow_id, agent_type).await {
+                Ok((presentable, interaction)) => LauncherToServer::AgentLoginStartResult {
+                    request_id,
+                    flow_id,
+                    presentable: Some(presentable),
+                    interaction: Some(interaction),
+                    error: None,
+                },
+                Err(error) => LauncherToServer::AgentLoginStartResult {
+                    request_id,
+                    flow_id,
+                    presentable: None,
+                    interaction: None,
+                    error: Some(error),
+                },
+            };
+            if ws_sender.send(response).await.is_err() {
+                warn!("Failed to send agent login start result");
+            }
+        }
+        ServerToLauncher::SubmitAgentLoginCode {
+            request_id,
+            flow_id,
+            code,
+        } => {
+            let outcome = login_registry.submit_code(flow_id, code).await;
+            if outcome.done {
+                login_registry.remove(flow_id);
+            }
+            let response = LauncherToServer::AgentLoginOutcomeResult {
+                request_id,
+                outcome,
+            };
+            if ws_sender.send(response).await.is_err() {
+                warn!("Failed to send agent login outcome");
+            }
+        }
+        ServerToLauncher::PollAgentLogin {
+            request_id,
+            flow_id,
+        } => {
+            let outcome = login_registry.poll(flow_id);
+            if outcome.done {
+                login_registry.remove(flow_id);
+            }
+            let response = LauncherToServer::AgentLoginOutcomeResult {
+                request_id,
+                outcome,
+            };
+            if ws_sender.send(response).await.is_err() {
+                warn!("Failed to send agent login poll result");
+            }
+        }
+        ServerToLauncher::CancelAgentLogin { flow_id } => {
+            login_registry.remove(flow_id);
         }
         ServerToLauncher::ProbeAgents { request_id } => {
             // Synchronous probe in a blocking task so two `--version` spawns

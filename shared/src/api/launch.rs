@@ -47,3 +47,25 @@ pub struct ProbeAgentsResponse {
     #[serde(default)]
     pub agents: Vec<crate::AgentInstall>,
 }
+
+/// Body of POST /api/launchers/:id/agent-login/start — which agent to sign in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartAgentLoginRequest {
+    pub agent_type: crate::AgentType,
+}
+
+/// Response from the start endpoint: the flow id to reference in follow-up
+/// calls, plus what the user must act on and how the flow finishes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartAgentLoginResponse {
+    pub flow_id: uuid::Uuid,
+    pub presentable: crate::LoginPresentable,
+    pub interaction: crate::LoginInteraction,
+}
+
+/// Body of POST /api/launchers/:id/agent-login/:flow/code — the pasted code
+/// (claude's `SubmitCode` interaction).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitAgentLoginCodeRequest {
+    pub code: String,
+}

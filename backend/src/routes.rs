@@ -370,6 +370,22 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/launchers/{launcher_id}/probe-agents",
             get(handlers::launchers::probe_agents),
         )
+        .route(
+            "/api/launchers/{launcher_id}/agent-login/start",
+            post(handlers::launchers::start_agent_login),
+        )
+        .route(
+            "/api/launchers/{launcher_id}/agent-login/{flow_id}/code",
+            post(handlers::launchers::submit_agent_login_code),
+        )
+        .route(
+            "/api/launchers/{launcher_id}/agent-login/{flow_id}",
+            get(handlers::launchers::poll_agent_login),
+        )
+        .route(
+            "/api/launchers/{launcher_id}/agent-login/{flow_id}/cancel",
+            post(handlers::launchers::cancel_agent_login),
+        )
         // Admin dashboard routes (admin-only)
         .route("/api/admin/stats", get(handlers::admin::get_stats))
         .route("/api/admin/users", get(handlers::admin::list_users))

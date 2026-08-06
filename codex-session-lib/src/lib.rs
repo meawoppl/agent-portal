@@ -16,6 +16,7 @@ mod events;
 mod handler;
 mod helpers;
 mod io_task;
+pub mod login;
 
 pub use agent::CodexAgent;
 pub use classifier::CodexClassifier;
