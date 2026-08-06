@@ -125,10 +125,15 @@ pub struct TaskTree {
     order: Vec<String>,
     /// Turn this tree belongs to (`causation_id`), set by the first record.
     pub causation_id: Option<String>,
+    /// The run's final answer text (`run.terminal.completed` → `payload.text`),
+    /// in markdown. This is the agent's actual reply — rendered as prose above
+    /// the task tree, the same way a Claude/Codex assistant message renders —
+    /// rather than being dropped into the footer as a bare count.
+    answer: Option<String>,
     /// Count per `payload_type` of records the tree does not render
-    /// structurally (`run.model.configured`, `command.received`, terminal
-    /// records, future vocabulary). Surfaced as a muted footer so nothing
-    /// on the wire silently disappears from the transcript.
+    /// structurally (`run.model.configured`, `command.received`, future
+    /// vocabulary). Surfaced as a muted footer so nothing on the wire silently
+    /// disappears from the transcript.
     other_records: BTreeMap<String, usize>,
 }
 
@@ -146,7 +151,12 @@ impl TaskTree {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.order.is_empty()
+        self.order.is_empty() && self.answer.is_none()
+    }
+
+    /// The run's final answer text, if a terminal record carried one.
+    pub fn answer(&self) -> Option<&str> {
+        self.answer.as_deref()
     }
 
     /// Look up one node. Used by tests asserting state transitions; the
@@ -181,6 +191,14 @@ impl TaskTree {
             }
             t if t.starts_with("task.lifecycle.") => self.apply_lifecycle(payload),
             "tool.result" => self.apply_tool_result(payload),
+            // The run's final answer text — the agent's actual reply. Render it
+            // as prose, not a footer count. Later terminal records (retries)
+            // overwrite, so the last answer wins.
+            "run.terminal.completed" => {
+                if let Some(text) = str_field(payload, "text").filter(|t| !t.trim().is_empty()) {
+                    self.answer = Some(text);
+                }
+            }
             other => {
                 *self.other_records.entry(other.to_string()).or_default() += 1;
             }
@@ -414,6 +432,40 @@ mod tests {
             "live status must clear at terminal state"
         );
         assert!(node.reason.is_some(), "the failure reason must be kept");
+    }
+
+    /// The run's final answer text is captured as prose, not dumped into the
+    /// footer — this is the whole point of the muse card carrying the reply.
+    #[test]
+    fn terminal_text_becomes_the_answer_not_a_footer_count() {
+        let mut tree = TaskTree::new();
+        tree.apply(&json!({
+            "payload_type": "run.terminal.completed",
+            "payload": {"terminal": "completed", "reason": null,
+                        "text": "Created `hello.txt` — contents:\n\n```\nhello\n```"},
+        }));
+        assert_eq!(
+            tree.answer(),
+            Some("Created `hello.txt` — contents:\n\n```\nhello\n```")
+        );
+        // It must NOT also show as an "unrendered" footer count.
+        assert!(
+            tree.other_records().next().is_none(),
+            "the answer is rendered, so it must not appear in the footer too"
+        );
+        // An answer-only turn (no tasks) is still a card worth rendering.
+        assert!(!tree.is_empty(), "a tree with an answer is not empty");
+    }
+
+    /// A blank terminal text leaves no answer (and no empty prose block).
+    #[test]
+    fn blank_terminal_text_sets_no_answer() {
+        let mut tree = TaskTree::new();
+        tree.apply(&json!({
+            "payload_type": "run.terminal.completed",
+            "payload": {"terminal": "completed", "text": "   "},
+        }));
+        assert_eq!(tree.answer(), None);
     }
 
     /// A frame the model cannot interpret must not break the tree built by
