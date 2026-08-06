@@ -1341,3 +1341,30 @@ mod tests {
         assert_eq!(format_tool_elapsed(-5.0), "0s");
     }
 }
+
+/// True when a payload is one of muse's journal records (the classifier
+/// stamps `type: "muse_record"`), so the session view can route it to the
+/// task tree instead of the generic live-status strip.
+pub fn is_muse_record(payload: &serde_json::Value) -> bool {
+    payload.get("type").and_then(|t| t.as_str()) == Some("muse_record")
+}
+
+#[cfg(test)]
+mod muse_record_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Only muse's own records route to the task tree; another agent's
+    /// ephemerals must keep falling back to the generic status strip
+    /// rather than silently disappearing into a tree that can't render
+    /// them.
+    #[test]
+    fn only_muse_records_are_routed_to_the_task_tree() {
+        assert!(is_muse_record(
+            &json!({"type": "muse_record", "payload_type": "x"})
+        ));
+        assert!(!is_muse_record(&json!({"type": "thread.started"})));
+        assert!(!is_muse_record(&json!({"no_type": true})));
+        assert!(!is_muse_record(&json!("a bare string")));
+    }
+}
