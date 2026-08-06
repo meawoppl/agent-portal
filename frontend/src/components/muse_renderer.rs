@@ -9,4 +9,4 @@
 
 pub mod task_tree;
 
-pub use task_tree::{TaskNode, TaskState, TaskTree, ToolOutcome};
+pub use task_tree::{TaskNode, TaskTree};

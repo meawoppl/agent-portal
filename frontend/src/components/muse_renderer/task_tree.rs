@@ -128,6 +128,9 @@ pub struct TaskTree {
 }
 
 impl TaskTree {
+    /// Construct an empty tree. Production builds it via `Default`; this
+    /// exists for tests and future callers.
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -141,6 +144,9 @@ impl TaskTree {
         self.order.is_empty()
     }
 
+    /// Look up one node. Used by tests asserting state transitions; the
+    /// view iterates [`TaskTree::nodes`] instead.
+    #[cfg(test)]
     pub fn get(&self, task_id: &str) -> Option<&TaskNode> {
         self.nodes.get(task_id)
     }

@@ -1580,3 +1580,96 @@
     white-space: nowrap;
     max-width: 100%;
 }
+
+/* ── Muse task tree ─────────────────────────────────────────────────
+   One node per task, keyed on task_id. Running tasks stay open and show
+   their live status line (fed by the ephemeral channel); terminal ones
+   collapse and drop the status, since a finished task's last progress
+   message is stale by definition. */
+.muse-task-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0.35rem 0;
+    font-size: 0.8rem;
+}
+
+.muse-task {
+    border-left: 2px solid var(--border-subtle, #333);
+    padding-left: 0.5rem;
+}
+
+.muse-task-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    cursor: pointer;
+    list-style: none;
+}
+
+.muse-task-badge {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.2rem;
+    background: var(--bg-subtle, #222);
+    color: var(--text-secondary);
+}
+
+.muse-task-running {
+    color: var(--accent, #7aa2f7);
+}
+.muse-task-completed {
+    color: var(--success, #9ece6a);
+}
+.muse-task-failed,
+.muse-task-rejected {
+    color: var(--error, #f7768e);
+}
+.muse-task-cancelled {
+    color: var(--text-tertiary, #666);
+}
+
+.muse-task-kind {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+.muse-task-status {
+    color: var(--text-tertiary, #888);
+    font-style: italic;
+}
+
+.muse-task-reason,
+.muse-task-side-effect,
+.muse-task-output {
+    margin: 0.15rem 0 0.15rem 0.5rem;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+}
+
+.muse-tool-result {
+    display: flex;
+    gap: 0.4rem;
+    margin: 0.15rem 0 0.15rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
+.muse-tool-name {
+    color: var(--text-secondary);
+}
+
+.muse-tool-failure .muse-tool-name {
+    color: var(--error, #f7768e);
+}
+
+.muse-tool-text {
+    color: var(--text-tertiary, #888);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
