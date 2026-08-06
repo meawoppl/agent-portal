@@ -65,27 +65,51 @@ pub fn probe_agent(agent: AgentType) -> ProbeResult {
         resolved_path,
         version,
         sandbox_ok: if installed && agent == AgentType::Muse {
-            Some(probe_muse_sandbox())
+            probe_muse_sandbox()
         } else {
             None
         },
     }
 }
 
-/// Muse executes tools inside an OS sandbox (bubblewrap on Linux). Without
-/// it, runs still complete but every tool call comes back as a failed
-/// `tool.result` — an installed-but-degraded state the matrix must show
-/// distinctly from "not installed".
+/// Muse executes tools inside an OS sandbox. Without it, runs still
+/// complete but every tool call comes back as a failed `tool.result` — an
+/// installed-but-degraded state the matrix must show distinctly from "not
+/// installed".
 ///
-/// Probed by resolving the sandbox helper rather than executing anything:
-/// `muse sandbox` only exposes a Windows check subcommand at 0.1.0, so a
-/// PATH lookup of `bwrap` is the cheap, side-effect-free signal on Linux.
-/// Non-Linux hosts report ready (the sandbox ships differently there).
-pub fn probe_muse_sandbox() -> bool {
-    if cfg!(not(target_os = "linux")) {
-        return true;
+/// Returns `None` where this crate cannot honestly attest to sandbox state
+/// (rather than claiming ready), so the matrix shows no sandbox indicator
+/// instead of a green badge it can't back up.
+///
+/// - **Linux**: bubblewrap. Probed by resolving `bwrap` on PATH — cheap and
+///   side-effect-free (`muse sandbox` exposes no Linux check at 0.1.0).
+/// - **Windows**: `muse sandbox windows check` reports a real backend and
+///   status (`status=setup_required` is exactly the degraded state), so it
+///   is parsed. Written from the observed key=value output format; not yet
+///   exercised on a Windows host.
+/// - **macOS**: no probe — Muse supports macOS but exposes no sandbox
+///   check, and this crate will not assert readiness it cannot verify.
+pub fn probe_muse_sandbox() -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        Some(which::which("bwrap").is_ok())
     }
-    which::which("bwrap").is_ok()
+    #[cfg(target_os = "windows")]
+    {
+        let out = Command::new("muse")
+            .args(["sandbox", "windows", "check"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let status = text
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("status="))?;
+        Some(status == "ready" || status == "ok")
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        None
+    }
 }
 
 /// Presence-only login probe for Muse: the CLI persists no account

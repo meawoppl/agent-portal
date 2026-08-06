@@ -807,6 +807,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     // Launch mode: agent selector, directory browser, args, actions
                     <div class="launch-field">
                         <label>{ "Agent" }</label>
+                        // Muse is intentionally NOT offered here: it is
+                        // probeable/installable/loginable (it appears in the
+                        // agents matrix) but has no session implementation
+                        // yet, so launching it would fail at spawn and trip
+                        // the launch crashloop auto-pause. Add the option
+                        // when muse-session-lib lands.
                         <select class="launcher-select" onchange={on_agent_type_change}>
                             <option value="claude" selected={*agent_type == AgentType::Claude}>
                                 { &claude_label }

@@ -999,6 +999,56 @@ pub struct AppConfig {
 }
 
 #[cfg(test)]
+mod agent_install_serde_tests {
+    use super::*;
+
+    fn install(agent_type: AgentType, sandbox_ok: Option<bool>) -> AgentInstall {
+        AgentInstall {
+            agent_type,
+            installed: true,
+            resolved_path: Some("/usr/bin/x".to_string()),
+            version: Some("1.0".to_string()),
+            sandbox_ok,
+            login: AgentLoginStatus::Unknown,
+        }
+    }
+
+    /// Agents with no sandbox concept must serialize EXACTLY as before the
+    /// field existed — absent, not `null`. Otherwise every existing
+    /// AgentInstall consumer sees a new key.
+    #[test]
+    fn sandbox_ok_absent_from_claude_and_codex_json() {
+        for agent in [AgentType::Claude, AgentType::Codex] {
+            let json = serde_json::to_value(install(agent, None)).unwrap();
+            assert!(
+                json.get("sandbox_ok").is_none(),
+                "{agent:?} JSON must not carry a sandbox_ok key: {json}"
+            );
+        }
+    }
+
+    /// Muse carries the field when it has something to say.
+    #[test]
+    fn sandbox_ok_present_for_muse_when_known() {
+        let json = serde_json::to_value(install(AgentType::Muse, Some(false))).unwrap();
+        assert_eq!(json["sandbox_ok"], serde_json::json!(false));
+    }
+
+    /// Payloads written by an older launcher (no such key) still parse.
+    #[test]
+    fn old_payload_without_sandbox_ok_deserializes() {
+        let old = serde_json::json!({
+            "agent_type": "claude",
+            "installed": true,
+            "version": "1.0",
+            "login": {"state": "unknown"}
+        });
+        let parsed: AgentInstall = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.sandbox_ok, None);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

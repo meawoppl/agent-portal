@@ -32,7 +32,7 @@ pub enum SessionError {
     /// has no session implementation yet. Muse is in this state until
     /// `muse-session-lib` lands; the launch UI blocks it rather than
     /// spawning something that can't stream.
-    #[error("{0} sessions are not supported by this launcher yet")]
+    #[error("{0} launches are not supported yet")]
     AgentNotSupported(&'static str),
 }
 

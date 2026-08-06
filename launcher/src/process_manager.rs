@@ -305,7 +305,7 @@ impl AnySession {
             // Muse is probeable/installable/loginable ahead of its session
             // implementation (muse-session-lib). Fail loudly rather than
             // spawning a agent we can't stream.
-            shared::AgentType::Muse => Err(session_lib::SessionError::AgentNotSupported("Muse")),
+            shared::AgentType::Muse => Err(session_lib::SessionError::AgentNotSupported("muse")),
         }
     }
 
