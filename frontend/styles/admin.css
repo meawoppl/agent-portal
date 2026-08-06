@@ -402,9 +402,10 @@
 }
 
 /* Admin ▸ Subdomains */
-.admin-subdomains .section-header {
-    margin-bottom: 1rem;
-}
+
+/* No `.section-header` margin override here: `.section-stack` owns the spacing
+   below the header now. A descendant override would also out-specify the
+   shell's `> *` margin reset (0-2-0 vs 0-1-0) and silently re-add to the gap. */
 
 .subdomain-create {
     display: flex;

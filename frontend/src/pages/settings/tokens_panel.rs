@@ -389,7 +389,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
 
     html! {
         <>
-            <section class="tokens-section">
+            <section class="section-stack tokens-section">
                 <div class="section-header">
                     <h2>{ "Proxy Credentials" }</h2>
                     <p class="section-description">

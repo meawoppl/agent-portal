@@ -693,7 +693,7 @@ pub fn launchers_panel() -> Html {
     let has_rows = !launchers.is_empty() || !phantom.is_empty();
 
     html! {
-        <section class="tokens-section">
+        <section class="section-stack tokens-section">
             <div class="section-header">
                 <h2>{ "Launchers" }</h2>
                 <p class="section-description">

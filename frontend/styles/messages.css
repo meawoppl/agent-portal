@@ -876,12 +876,30 @@
     opacity: 0.6;
 }
 
-/* When a thinking block leads its group part, the grouped body's flex `gap`
-   already separates it from the block above — its own top margin then
-   double-counts into unusual headroom above the "THINKING" label. Drop the
-   redundant top margin in that leading position only. */
-.grouped-message-part > .thinking-block:first-child {
-    margin-top: 0;
+/* Inside a grouped body the flex `gap` is the single source of inter-part
+   spacing. Flex item margins do NOT collapse into `gap` — they add to it — so
+   any part whose outermost element carries its own vertical margin
+   double-counts every boundary. `.thinking-block` and `.tool-use` both ship
+   `margin: 0.5rem 0`, making an intended 8px gap render as 16px.
+   Neutralise once at the boundary rather than per part type: these are the
+   outermost elements of each part, so their vertical margin is purely
+   inter-part spacing that `gap` now owns. Descendants are untouched (direct
+   child selector), and the standalone `.thinking-block` / `.tool-use` margins
+   still apply in a plain `.message-body` — e.g. the codex reasoning card —
+   which has no `gap` to inherit from.
+   This replaces a narrower fix that zeroed only `margin-top`, and only for
+   `:first-child`: it cured the headroom above a leading "THINKING" label but
+   left `margin-bottom` double-counting at every boundary below it.
+ *
+ * `> [class]` rather than `> *` is deliberate, and load-bearing. `> *` scores
+ * 0-1-0, exactly tying every single-class rule it needs to override, so the
+ * winner would be decided by stylesheet source order — and `markdown.css`
+ * (`.tool-use`) loads *after* this file in index.html, so the tie went the wrong
+ * way and the reset silently did nothing for tool cards. The attribute selector
+ * makes it 0-2-0, which wins regardless of file order. Every part's outermost
+ * element carries a class, so coverage is unchanged. */
+.grouped-message-part > [class] {
+    margin-block: 0;
 }
 
 .thinking-label {

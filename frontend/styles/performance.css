@@ -3,11 +3,9 @@
    Hand-rolled SVG plots over /api/metrics/turns. Tokyo-Night palette.
    ============================================================================= */
 
-.performance-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-}
+/* The stack (column + gap) comes from `.section-stack` in settings.css, shared
+   with every other settings/admin panel. This panel's old 1.25rem gap is now the
+   common 1.5rem — a 4px change, taken deliberately in favour of one mechanism. */
 
 .performance-controls {
     display: flex;

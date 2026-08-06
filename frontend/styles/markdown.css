@@ -509,8 +509,10 @@
     font-size: 0.75rem;
 }
 
+/* No `margin-top`: the only parent is `.tool-use`, which is a flex column with
+   `gap: 0.25rem`. Flex margins add to `gap` rather than collapsing into it, so a
+   margin here rendered the gap below the tool header at 0.75rem — 3x intended. */
 .write-preview {
-    margin-top: 0.5rem;
     border-radius: 4px;
     overflow: hidden;
     background: rgba(0, 0, 0, 0.2);

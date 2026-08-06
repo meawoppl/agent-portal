@@ -181,7 +181,7 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
 
     html! {
         <>
-            <section class="sessions-section">
+            <section class="section-stack sessions-section">
                 <div class="section-header">
                     <h2>{ "Session History" }</h2>
                     <p class="section-description">

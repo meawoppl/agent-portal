@@ -111,7 +111,7 @@ pub fn sounds_panel() -> Html {
 
     if *loading {
         return html! {
-            <section class="sounds-section">
+            <section class="section-stack sounds-section">
                 <div class="loading">
                     <div class="spinner"></div>
                     <p>{ "Loading sound settings..." }</p>
@@ -121,7 +121,7 @@ pub fn sounds_panel() -> Html {
     }
 
     html! {
-        <section class="sounds-section">
+        <section class="section-stack sounds-section">
             <div class="section-header">
                 <h2>{ "Sound Notifications" }</h2>
                 <p class="section-description">
