@@ -34,6 +34,11 @@ web-sys = { workspace = true, features = [
     "Document",
     "Element",
     "NodeList",
+    # Blob -> object URL -> synthetic <a download> click, so a session-file
+    # download never becomes a top-level navigation (markdown/portal_file_link.rs)
+    "Url",
+    "BlobPropertyBag",
+    "HtmlAnchorElement",
     "DomRect",
     "HtmlElement",
     "HtmlInputElement",

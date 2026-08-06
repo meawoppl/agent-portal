@@ -91,6 +91,23 @@
     color: var(--link-visited);
 }
 
+/* Session-file download feedback (see markdown/portal_file_link.rs). The pull
+   endpoint is fallible, so the outcome has to be reported in place rather than
+   by navigating to an error page. */
+.portal-file-status,
+.portal-file-error {
+    margin-left: 0.5rem;
+    font-size: 0.85em;
+}
+
+.portal-file-status {
+    color: var(--text-muted);
+}
+
+.portal-file-error {
+    color: var(--error-color, #f7768e);
+}
+
 /* Inline code */
 .md-inline-code {
     font-family: var(--font-mono);
