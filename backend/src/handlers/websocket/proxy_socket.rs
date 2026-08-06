@@ -475,6 +475,18 @@ fn handle_proxy_message(
                 );
             }
         }
+        ProxyToServer::Ephemeral {
+            session_id: _,
+            payload,
+        } => {
+            // Neutral ephemeral live-status (muse deltas / task status): fan out
+            // to web clients only — NO DB write, same contract as ToolProgress.
+            // Evaporates if no client is connected.
+            if let Some(key) = session_key {
+                session_manager
+                    .broadcast_to_web_clients(key, shared::ServerToClient::Ephemeral { payload });
+            }
+        }
         ProxyToServer::SessionLimitReached(fields) => {
             handle_session_limit_reached(
                 app_state,

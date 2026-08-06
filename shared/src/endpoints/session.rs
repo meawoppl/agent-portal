@@ -149,6 +149,19 @@ pub enum ProxyToServer {
         elapsed_time_seconds: f64,
     },
 
+    /// A neutral ephemeral live-status frame — the agent-agnostic generalization
+    /// of [`ProxyToServer::ToolProgress`]. Same contract: never buffered, never
+    /// persisted, never replayed; the backend fans it out to the session's web
+    /// clients as [`ServerToClient::Ephemeral`] and it evaporates if nobody is
+    /// listening. Unlike `ToolProgress` it carries an opaque `payload` instead
+    /// of Claude's tool-heartbeat fields, so backends whose live-status is not a
+    /// tool heartbeat (muse's `run.output.delta` / `task.lifecycle.status`) can
+    /// use it. Produced from `session_lib::SessionEvent::Ephemeral`.
+    Ephemeral {
+        session_id: Uuid,
+        payload: serde_json::Value,
+    },
+
     /// Claude reported a hard session limit with a reset time. The backend
     /// persists a one-shot continuation candidate and asks the user whether
     /// to schedule it.

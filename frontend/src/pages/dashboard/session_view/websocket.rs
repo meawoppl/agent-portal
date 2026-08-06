@@ -64,6 +64,10 @@ pub enum WsEvent {
         tool_name: String,
         elapsed_time_seconds: f64,
     },
+    /// Neutral ephemeral live-status frame (`ServerToClient::Ephemeral`).
+    /// Drives a transient per-session live-status line (muse's streamed
+    /// deltas / task status); never persisted, not part of `Output`.
+    Ephemeral(serde_json::Value),
 }
 
 /// Connect to WebSocket and start receiving messages.
@@ -253,6 +257,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
                 tool_name,
                 elapsed_time_seconds,
             });
+        }
+        ServerToClient::Ephemeral { payload } => {
+            on_event.emit(WsEvent::Ephemeral(payload));
         }
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
@@ -619,6 +626,7 @@ mod tests {
             WsEvent::ForwardsChanged => "ForwardsChanged",
             WsEvent::UploadResult(_) => "UploadResult",
             WsEvent::ToolProgress { .. } => "ToolProgress",
+            WsEvent::Ephemeral(_) => "Ephemeral",
         }
     }
 }

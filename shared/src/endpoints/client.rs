@@ -342,4 +342,13 @@ pub enum ServerToClient {
         tool_name: String,
         elapsed_time_seconds: f64,
     },
+
+    /// Neutral ephemeral live-status, fanned out from
+    /// [`ProxyToServer::Ephemeral`]. Same live-only contract as
+    /// [`ServerToClient::ToolProgress`]: never persisted, never part of
+    /// `HistoryBatch`, no `created_at` / `PortalMeta`. Carries the opaque
+    /// per-frame `payload` (e.g. a muse journal record) for the frontend to
+    /// render as transient live status and drop at turn end. A client offline
+    /// during the frame loses nothing.
+    Ephemeral { payload: serde_json::Value },
 }
