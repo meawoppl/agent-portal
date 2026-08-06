@@ -20,8 +20,8 @@
 //! - **Unknown frames still name themselves.** An unmodeled `payload_type`
 //!   is forwarded with its dotted label plus the raw body, never dropped.
 
-use muse_codes::{MusePayload, MuseRecord};
-use serde_json::json;
+use muse_codes::{Durability, MusePayload, MuseRecord, RecordType};
+use serde::Serialize;
 use session_lib::adapter::{AgentOutput, AgentOutputClassifier};
 
 /// Muse-protocol output classifier.
@@ -53,13 +53,13 @@ pub fn classify_record(record: &MuseRecord) -> AgentOutput {
         // A payload that fails its typed shape is real wire drift. Always
         // Visible — never routed by durability: drift must persist and be
         // seen, not silently dropped down the ephemeral channel.
-        Err(e) => AgentOutput::Visible(json!({
-            "type": "muse_decode_error",
-            "payload_type": record.payload_type,
-            "error": e.to_string(),
-            "raw": record.payload,
-            "stream_id": record.stream.id,
-            "record_id": record.id,
+        Err(e) => AgentOutput::Visible(to_value(&MuseDecodeError {
+            kind: "muse_decode_error",
+            payload_type: &record.payload_type,
+            error: e.to_string(),
+            raw: &record.payload,
+            stream_id: &record.stream.id,
+            record_id: &record.id,
         })),
     }
 }
@@ -83,26 +83,65 @@ fn classify_payload(record: &MuseRecord, _payload: &MusePayload) -> AgentOutput 
 /// `payload_type` is lifted to the top level so a renderer can dispatch (or
 /// fall back to a labeled passthrough) without re-parsing.
 fn to_event(record: &MuseRecord) -> serde_json::Value {
-    json!({
-        "type": "muse_record",
-        "payload_type": record.payload_type,
-        // Composite identity — NEVER use `id` alone: it repeats across
-        // sessions (UUID-shaped counter), and `sequence` repeats across
-        // turns.
-        "stream_id": record.stream.id,
-        "record_id": record.id,
-        "causation_id": record.causation_id,
-        "sequence": record.sequence,
-        "durability": record.durability,
-        "record_type": record.record_type,
-        "recorded_at": record.recorded_at,
-        "payload": record.payload,
+    to_value(&MuseWireEvent {
+        kind: "muse_record",
+        payload_type: &record.payload_type,
+        stream_id: &record.stream.id,
+        record_id: &record.id,
+        causation_id: &record.causation_id,
+        sequence: record.sequence,
+        durability: record.durability,
+        record_type: record.record_type,
+        recorded_at: record.recorded_at,
+        payload: &record.payload,
     })
+}
+
+/// One journal record as the frontend receives it.
+///
+/// The composite identity is spelled out field-by-field so a consumer
+/// cannot accidentally key on `record_id` alone: it repeats across sessions
+/// (UUID-shaped counter), and `sequence` repeats across turns.
+#[derive(Debug, Serialize)]
+struct MuseWireEvent<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    payload_type: &'a str,
+    stream_id: &'a str,
+    record_id: &'a str,
+    causation_id: &'a str,
+    sequence: u64,
+    durability: Durability,
+    record_type: RecordType,
+    recorded_at: u64,
+    payload: &'a serde_json::Value,
+}
+
+/// A record whose payload failed its typed shape — forwarded so the drift
+/// is visible rather than silently dropped.
+#[derive(Debug, Serialize)]
+struct MuseDecodeError<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    payload_type: &'a str,
+    error: String,
+    raw: &'a serde_json::Value,
+    stream_id: &'a str,
+    record_id: &'a str,
+}
+
+/// Serialization of these local structs cannot fail (no maps with
+/// non-string keys, no failing custom impls), so a failure here would be a
+/// bug in this module rather than a runtime condition — surface it as a
+/// null payload instead of panicking in a session's hot path.
+fn to_value<T: Serialize>(value: &T) -> serde_json::Value {
+    serde_json::to_value(value).unwrap_or(serde_json::Value::Null)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn record(line: &str) -> MuseRecord {
         serde_json::from_str(line).expect("corpus line parses")
@@ -241,6 +280,7 @@ mod tests {
 #[cfg(test)]
 mod durability_contract {
     use super::*;
+    use serde_json::json;
 
     /// A payload type this crate has never seen, marked ephemeral, must
     /// still route to the ephemeral channel — the reason the branch reads
