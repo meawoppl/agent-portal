@@ -1398,3 +1398,24 @@ mod muse_install_command_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod agent_type_parse_roundtrip {
+    use super::*;
+
+    /// The backend stores `agent_type` as a string and parses it back with
+    /// `.parse().unwrap_or(Claude)` in nine places. If `"muse"` failed to
+    /// parse, every muse session would silently be treated as Claude —
+    /// a data-integrity bug with no error anywhere. This pins the round
+    /// trip for every variant so adding one can't reintroduce that.
+    #[test]
+    fn every_agent_type_round_trips_through_its_string_form() {
+        for agent in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
+            let s = agent.as_str();
+            let parsed: AgentType = s.parse().unwrap_or_else(|_| {
+                panic!("{s} must parse back; the backend's unwrap_or(Claude) would mask it")
+            });
+            assert_eq!(parsed, agent, "{s} round trip");
+        }
+    }
+}

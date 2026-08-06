@@ -130,12 +130,34 @@ struct MuseDecodeError<'a> {
     record_id: &'a str,
 }
 
-/// Serialization of these local structs cannot fail (no maps with
-/// non-string keys, no failing custom impls), so a failure here would be a
-/// bug in this module rather than a runtime condition — surface it as a
-/// null payload instead of panicking in a session's hot path.
+/// Serialization of these local structs cannot fail today (no maps with
+/// non-string keys, no failing custom impls), so a failure would be a bug
+/// in this module rather than a runtime condition.
+///
+/// Panicking in a session's I/O hot path over a provably-impossible branch
+/// would be worse than the impossible thing. But a silent `Value::Null`
+/// would be the one place in this file that can go quiet later: if a future
+/// refactor adds a non-string-keyed field, the failure would vanish into
+/// the stream looking like nothing happened. So the impossible branch
+/// surfaces as a visible, persisted error instead — same no-silent-gap rule
+/// the rest of this module follows.
 fn to_value<T: Serialize>(value: &T) -> serde_json::Value {
-    serde_json::to_value(value).unwrap_or(serde_json::Value::Null)
+    match serde_json::to_value(value) {
+        Ok(v) => v,
+        Err(e) => serde_json::to_value(SerializeFailure {
+            kind: "muse_wire_serialize_error",
+            error: e.to_string(),
+        })
+        .unwrap_or(serde_json::Value::Null),
+    }
+}
+
+/// Emitted only if serializing a wire event ever fails — see [`to_value`].
+#[derive(Debug, Serialize)]
+struct SerializeFailure {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    error: String,
 }
 
 #[cfg(test)]
