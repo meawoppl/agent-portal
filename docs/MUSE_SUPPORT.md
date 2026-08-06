@@ -21,7 +21,7 @@ Muse is a third protocol shape, distinct from both existing agents:
 |---|---|---|---|
 | Wire | role-tagged JSON messages | thread/turn/item events | **event-sourced journal** (envelope + payload) |
 | Process model | spawn per turn, `--resume`/session id | long-lived app-server, many turns | **spawn per turn**, `muse exec --session-id <uuid>` |
-| Ordering/dedup | uuid bookkeeping | implicit | per-record `id` (unique); `sequence` orders **within a turn only** — see the correction below |
+| Ordering/dedup | uuid bookkeeping | implicit | composite `(stream_id, id)`; both `id` and `sequence` repeat across streams/turns — see corrections |
 | Tools | content blocks in messages | first-class items | **task streams** with a lifecycle state machine |
 | Approvals | `control_request` round-trip | `ServerMessage::Request` round-trip | **none headless** — policy decisions are journaled (`side_effect_intent.policy_decision`), not asked |
 | Streaming text | assistant deltas | `agent_message` items | `run.output.delta` (ephemeral) reconciled by `run.terminal.completed`'s full final text |
@@ -122,8 +122,9 @@ Codex one:
   - `MusePayload::Unknown` → passthrough event `{label: payload_type,
     body: payload}`
 - Identity plumbing — **corrected by measurement, see below**: key events on
-  the record `id`, group a turn by `causation_id`, and use `sequence` only
-  to order records *within* one turn.
+  the composite `(stream_id, id)` (the record `id` is a counter that
+  repeats across sessions), group a turn by `causation_id`, and use
+  `sequence` only to order records *within* one turn.
 - Tests: **echo-provider round-trips as the integration suite** (spawn
   real `muse`, no credentials) + the muse-codes committed corpus replayed
   through the classifier as fixtures.
@@ -138,8 +139,9 @@ sdk repo's `muse-schema-drift.yml` does).
   supervisor; session id minted portal-side and passed via
   `--session-id` (muse accepts caller-supplied uuids — same pattern as
   claude's `--session-id`).
-- Persistence: transcript rows from durable events only; store the record
-  `id` as the unique key (see the sequence-collision correction below),
+- Persistence: transcript rows from durable events only, keyed on the
+  composite `(stream_id, id)` — **not** `id` alone and **not**
+  `(stream_id, sequence)`; both collide (see the corrections section),
   with `causation_id` for turn grouping and `sequence` for intra-turn
   order. DB migration: agent column already stores a string —
   confirm no enum constraint blocks `"muse"`.
@@ -207,10 +209,21 @@ Three turns on a single `--session-id` produced: turn 1 `seq 1..33`, turn 2
 session id). Consecutive turns therefore collide on **32 of 33** sequence
 values. An earlier draft of this plan called `(stream_id, sequence)` the
 "native dedup/ordering key"; that would have silently overwritten or
-dropped prior-turn records. What is actually unique is the record **`id`**
-(99/99 distinct across the three turns), with `causation_id` identifying
-the turn. Key on `id`; group by `causation_id`; treat `sequence` as
-intra-turn ordering only.
+dropped prior-turn records. The record **`id`** is unique
+*within* a stream (99/99 distinct across the three turns) — but **not
+across streams**, see below. The persistence key is therefore the
+composite **`(stream_id, id)`**; `causation_id` identifies the turn; and
+`sequence` is intra-turn ordering only.
+
+**Record `id` is a UUID-shaped counter, not a UUID — never key on it
+alone.** Two runs under *different* session ids produced **byte-identical
+id lists**: 33 of 33 collisions, every session starting at
+`018f0000-0000-7000-8000-00000000c350` and incrementing (`…c351`,
+`…c352`, a hex counter in the low bits under a constant prefix). Keying on
+bare `id` would not merely risk a collision — it would collide on every
+record of every session and silently overwrite one transcript with
+another. The UUIDv7 *shape* is a trap for anyone who assumes global
+uniqueness from appearance; always composite with `stream_id`.
 
 **Interrupt-as-kill is safe.** A run SIGKILLed 60 ms in (before it emitted
 any output) left the session store usable: the next turn on the same
