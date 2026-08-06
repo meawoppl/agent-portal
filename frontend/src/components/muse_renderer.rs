@@ -33,12 +33,25 @@ pub fn render_task_tree(tree: &TaskTree) -> Html {
         })
         .collect();
     html! {
-        <div class="muse-task-tree">
-            { for tree.nodes().map(render_task_node) }
-            if !footer.is_empty() {
-                <div class="muse-journal-footer">{ footer.join(" · ") }</div>
+        <>
+            // The agent's actual reply, rendered as markdown prose like a
+            // Claude/Codex assistant message — the task tree below is the
+            // supporting work log, the same way tool-use cards sit under
+            // assistant text.
+            if let Some(answer) = tree.answer() {
+                <div class="muse-answer">
+                    { crate::components::markdown::render_markdown(answer) }
+                </div>
             }
-        </div>
+            if tree.nodes().next().is_some() || !footer.is_empty() {
+                <div class="muse-task-tree">
+                    { for tree.nodes().map(render_task_node) }
+                    if !footer.is_empty() {
+                        <div class="muse-journal-footer">{ footer.join(" · ") }</div>
+                    }
+                </div>
+            }
+        </>
     }
 }
 

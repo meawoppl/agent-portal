@@ -1586,6 +1586,17 @@
    their live status line (fed by the ephemeral channel); terminal ones
    collapse and drop the status, since a finished task's last progress
    message is stale by definition. */
+
+/* The agent's actual reply, rendered as markdown prose — the primary content
+   of a muse turn, sitting above the task-tree work log. */
+.muse-answer {
+    margin-bottom: 0.5rem;
+}
+
+.muse-answer:last-child {
+    margin-bottom: 0;
+}
+
 .muse-task-tree {
     display: flex;
     flex-direction: column;
