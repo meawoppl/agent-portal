@@ -436,10 +436,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         Callback::from(move |e: Event| {
             if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                 let val = select.value();
-                agent_type.set(if val == "codex" {
-                    shared::AgentType::Codex
-                } else {
-                    shared::AgentType::Claude
+                agent_type.set(match val.as_str() {
+                    "codex" => shared::AgentType::Codex,
+                    "muse" => shared::AgentType::Muse,
+                    _ => shared::AgentType::Claude,
                 });
                 model_arg.set(String::new());
             }
@@ -701,6 +701,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         Some(false) => "Codex (not installed)".to_string(),
         _ => "Codex".to_string(),
     };
+    let muse_label = match agent_installed(&agent_installs, AgentType::Muse) {
+        Some(false) => "Muse (not installed)".to_string(),
+        _ => "Muse".to_string(),
+    };
     let selected_agent_missing = agent_installed(&agent_installs, *agent_type) == Some(false);
     let still_probing = *probing_agents && agent_installs.is_empty();
     let selected_agent_label = match *agent_type {
@@ -807,18 +811,15 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     // Launch mode: agent selector, directory browser, args, actions
                     <div class="launch-field">
                         <label>{ "Agent" }</label>
-                        // Muse is intentionally NOT offered here: it is
-                        // probeable/installable/loginable (it appears in the
-                        // agents matrix) but has no session implementation
-                        // yet, so launching it would fail at spawn and trip
-                        // the launch crashloop auto-pause. Add the option
-                        // when muse-session-lib lands.
                         <select class="launcher-select" onchange={on_agent_type_change}>
                             <option value="claude" selected={*agent_type == AgentType::Claude}>
                                 { &claude_label }
                             </option>
                             <option value="codex" selected={*agent_type == AgentType::Codex}>
                                 { &codex_label }
+                            </option>
+                            <option value="muse" selected={*agent_type == AgentType::Muse}>
+                                { &muse_label }
                             </option>
                         </select>
                     </div>
