@@ -189,17 +189,32 @@ impl AgentType {
 
     /// The command that installs this agent's CLI, as structured data so the
     /// launcher (which runs it) and the frontend (which displays it for the
-    /// user to confirm) agree on exactly one thing. Both ship as global npm
-    /// packages, the most portable option that avoids piping a remote script
-    /// into a shell on the user's host.
+    /// user to confirm) agree on exactly one thing. Claude and Codex ship as
+    /// global npm packages, the most portable option that avoids piping a
+    /// remote script into a shell on the user's host.
+    ///
+    /// Muse is the exception: at 0.1.0 Meta ships **only** an installer
+    /// script (no npm/Homebrew package, and no self-update subcommand), so
+    /// its command is that pipeline wrapped in `bash -c`. The arguments are
+    /// static — there is no interpolation and so no injection surface — and
+    /// the confirmation modal renders the whole line via
+    /// [`AgentInstallCommand::display`], so the user sees they are piping a
+    /// remote script to a shell before they approve it. Switch this to a
+    /// package manager the moment Meta publishes one.
     pub fn install_command(self) -> AgentInstallCommand {
-        let package = match self {
-            AgentType::Claude => "@anthropic-ai/claude-code",
-            AgentType::Codex => "@openai/codex",
-        };
-        AgentInstallCommand {
-            program: "npm",
-            args: vec!["install", "-g", package],
+        match self {
+            AgentType::Claude => AgentInstallCommand {
+                program: "npm",
+                args: vec!["install", "-g", "@anthropic-ai/claude-code"],
+            },
+            AgentType::Codex => AgentInstallCommand {
+                program: "npm",
+                args: vec!["install", "-g", "@openai/codex"],
+            },
+            AgentType::Muse => AgentInstallCommand {
+                program: "bash",
+                args: vec!["-c", "curl -fsSL https://dev.meta.ai/install.sh | bash"],
+            },
         }
     }
 }
@@ -1345,5 +1360,41 @@ mod tests {
         );
         assert_eq!(compact.leaf_message_count, Some(7));
         assert_eq!(compact.duration_ms, Some(1234));
+    }
+}
+
+#[cfg(test)]
+mod muse_install_command_tests {
+    use super::*;
+
+    /// Muse ships only an installer script at 0.1.0 — no npm/Homebrew
+    /// package — so its install command is a `bash -c` pipeline. The args
+    /// are static (no interpolation, no injection surface) and the whole
+    /// line is rendered for the user to confirm before it runs.
+    #[test]
+    fn muse_install_is_the_vendor_script_and_displays_verbatim() {
+        let cmd = AgentType::Muse.install_command();
+        assert_eq!(cmd.program, "bash");
+        assert_eq!(
+            cmd.display(),
+            "bash -c curl -fsSL https://dev.meta.ai/install.sh | bash"
+        );
+        assert!(
+            cmd.display().contains("dev.meta.ai/install.sh"),
+            "the confirm modal must show the remote script being piped"
+        );
+    }
+
+    /// The npm agents are untouched by muse's exception.
+    #[test]
+    fn npm_agents_unchanged() {
+        assert_eq!(
+            AgentType::Claude.install_command().display(),
+            "npm install -g @anthropic-ai/claude-code"
+        );
+        assert_eq!(
+            AgentType::Codex.install_command().display(),
+            "npm install -g @openai/codex"
+        );
     }
 }

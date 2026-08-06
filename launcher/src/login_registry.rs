@@ -72,6 +72,15 @@ impl LoginRegistry {
                 let (s, p, i) = CodexLoginSession::start().await?;
                 (LoginSession::Codex(s), p, i)
             }
+            // Muse's device-code flow maps onto `LoginPresentable::DeviceCode`
+            // + `AwaitCompletion` exactly (muse_codes::auth::DeviceLoginFlow
+            // yields {verification_url, code}, then wait_approved/cancel), but
+            // the driver is deliberately left to the follow-up that adds the
+            // muse arms to the matrix/login/install surfaces. Until then this
+            // reports honestly rather than parking a flow that can't settle.
+            AgentType::Muse => {
+                return Err("muse sign-in is not wired up yet".to_string());
+            }
         };
         self.flows.insert(flow_id, Arc::new(session));
         Ok((presentable, interaction))
