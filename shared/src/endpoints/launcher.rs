@@ -3,7 +3,9 @@ use uuid::Uuid;
 use ws_bridge::WsEndpoint;
 
 use super::types::{ContinuationConfig, ScheduledTaskConfig};
-use crate::{AgentInstall, AgentType, DirectoryEntry};
+use crate::{
+    AgentInstall, AgentLoginOutcome, AgentType, DirectoryEntry, LoginInteraction, LoginPresentable,
+};
 
 pub struct LauncherEndpoint;
 
@@ -103,6 +105,27 @@ pub enum LauncherToServer {
         error: Option<String>,
         #[serde(default)]
         resolved_path: Option<String>,
+    },
+
+    /// Reply to `StartAgentLogin`: either what the user must act on
+    /// (`presentable` + `interaction`) or why the flow couldn't start
+    /// (`error`). Exactly one of `{presentable, error}` is set.
+    AgentLoginStartResult {
+        request_id: Uuid,
+        flow_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        presentable: Option<LoginPresentable>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        interaction: Option<LoginInteraction>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `SubmitAgentLoginCode` / `PollAgentLogin`: the flow's outcome,
+    /// possibly still pending (`outcome.done == false`).
+    AgentLoginOutcomeResult {
+        request_id: Uuid,
+        outcome: AgentLoginOutcome,
     },
 
     /// On-demand agent install probe result. The launcher re-runs the
@@ -268,6 +291,35 @@ pub enum ServerToLauncher {
     /// Ask the launcher to (re-)probe its agent CLIs. The launcher replies
     /// with `LauncherToServer::ProbeAgentsResult` carrying the fresh state.
     ProbeAgents { request_id: Uuid },
+
+    /// Begin an interactive login for `agent_type` on this host. The launcher
+    /// starts the agent's login flow, parks it under `flow_id`, and replies
+    /// with `AgentLoginStartResult` carrying what the user must act on. The
+    /// backend mints `flow_id`; subsequent `SubmitAgentLoginCode` /
+    /// `PollAgentLogin` / `CancelAgentLogin` reference it (#agent-login).
+    StartAgentLogin {
+        request_id: Uuid,
+        flow_id: Uuid,
+        agent_type: AgentType,
+    },
+
+    /// Feed the code the provider showed back into a parked
+    /// `LoginInteraction::SubmitCode` flow (claude). The launcher submits it and
+    /// replies `AgentLoginOutcomeResult`.
+    SubmitAgentLoginCode {
+        request_id: Uuid,
+        flow_id: Uuid,
+        code: String,
+    },
+
+    /// Ask a parked `LoginInteraction::AwaitCompletion` flow (codex) for its
+    /// current state. Replies `AgentLoginOutcomeResult` with `done=false` while
+    /// still awaiting the user.
+    PollAgentLogin { request_id: Uuid, flow_id: Uuid },
+
+    /// Abandon a parked login flow (browser closed / navigated away). The
+    /// launcher drops the flow, reaping any child process. Fire-and-forget.
+    CancelAgentLogin { flow_id: Uuid },
 
     /// Server is shutting down
     ServerShutdown {

@@ -5,6 +5,7 @@
 mod config;
 mod connection;
 mod forward;
+mod login_registry;
 mod media;
 mod message;
 mod pastebin;

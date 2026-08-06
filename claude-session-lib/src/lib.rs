@@ -14,6 +14,7 @@
 pub mod agent;
 pub mod auth;
 pub mod io_task;
+pub mod login;
 pub mod proxy_session;
 mod spawn;
 pub mod transcript;

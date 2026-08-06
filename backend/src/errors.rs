@@ -17,6 +17,11 @@ pub enum AppError {
     Conflict(&'static str),
     NotFound(&'static str),
     BadGateway(&'static str),
+    /// Like [`AppError::BadGateway`] but carries a dynamic upstream message —
+    /// used to relay an agent CLI's own error text (login start failures) to
+    /// the browser verbatim, matching the login contract's "errors relay as
+    /// Display strings".
+    BadGatewayMessage(String),
     GatewayTimeout(&'static str),
     ServiceUnavailable(&'static str),
     Internal(String),
@@ -57,6 +62,7 @@ impl IntoResponse for AppError {
             AppError::Conflict(msg) => (StatusCode::CONFLICT, *msg),
             AppError::NotFound(what) => (StatusCode::NOT_FOUND, *what),
             AppError::BadGateway(msg) => (StatusCode::BAD_GATEWAY, *msg),
+            AppError::BadGatewayMessage(msg) => (StatusCode::BAD_GATEWAY, msg.as_str()),
             AppError::GatewayTimeout(msg) => (StatusCode::GATEWAY_TIMEOUT, *msg),
             AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, *msg),
             AppError::Internal(e) => {

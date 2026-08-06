@@ -11,9 +11,11 @@
 //! (`/api/launchers/{id}/probe-agents`), fanned across the user's launchers;
 //! offline launchers render as unreachable rather than blank.
 //!
-//! Read-only for now. The login buttons that act on a "signed out" cell land in
-//! a follow-up against the rust-code-agent-sdks login flows.
+//! A "signed out"/"unknown" cell for an installed agent gets a Sign-in button
+//! that opens [`AgentLoginModal`], which drives the launcher-side login flow; a
+//! successful sign-in re-probes the matrix.
 
+use crate::pages::settings::agent_login::AgentLoginModal;
 use crate::utils::{self, On401};
 use shared::api::ProbeAgentsResponse;
 use shared::{AgentInstall, AgentLoginStatus, AgentType, LauncherInfo};
@@ -21,6 +23,14 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
+
+/// Which cell's sign-in modal is open: (launcher, agent, agent display name).
+#[derive(Clone, PartialEq)]
+struct LoginTarget {
+    launcher_id: Uuid,
+    agent_type: AgentType,
+    agent_name: String,
+}
 
 /// Columns of the matrix, in display order. Mirrors `AgentType`.
 const AGENTS: [(AgentType, &str); 2] = [(AgentType::Claude, "Claude"), (AgentType::Codex, "Codex")];
@@ -40,8 +50,10 @@ enum ProbeState {
 pub fn agents_panel() -> Html {
     let launchers = use_state(|| None::<Vec<LauncherInfo>>);
     let probes = use_state(HashMap::<Uuid, ProbeState>::new);
-    // Bumped by the refresh button to re-run the whole fan-out.
+    // Bumped by the refresh button (and a successful sign-in) to re-run the fan-out.
     let refresh = use_state(|| 0u32);
+    // The open sign-in modal, if any.
+    let login_target = use_state(|| None::<LoginTarget>);
 
     {
         let launchers = launchers.clone();
@@ -89,6 +101,11 @@ pub fn agents_panel() -> Html {
         Callback::from(move |_: MouseEvent| refresh.set(*refresh + 1))
     };
 
+    let on_sign_in = {
+        let login_target = login_target.clone();
+        Callback::from(move |target: LoginTarget| login_target.set(Some(target)))
+    };
+
     let body = match (*launchers).clone() {
         None => html! { <p class="setting-description">{ "Loading…" }</p> },
         Some(list) if list.is_empty() => html! {
@@ -106,11 +123,31 @@ pub fn agents_panel() -> Html {
                     </tr>
                 </thead>
                 <tbody>
-                    { for list.iter().map(|l| render_row(l, &probes)) }
+                    { for list.iter().map(|l| render_row(l, &probes, &on_sign_in)) }
                 </tbody>
             </table>
         },
     };
+
+    let modal = (*login_target).clone().map(|target| {
+        let on_close = {
+            let login_target = login_target.clone();
+            Callback::from(move |_| login_target.set(None))
+        };
+        let on_success = {
+            let refresh = refresh.clone();
+            Callback::from(move |_| refresh.set(*refresh + 1))
+        };
+        html! {
+            <AgentLoginModal
+                launcher_id={target.launcher_id}
+                agent_type={target.agent_type}
+                agent_name={target.agent_name}
+                {on_close}
+                {on_success}
+            />
+        }
+    });
 
     html! {
         <section class="agents-section">
@@ -123,11 +160,16 @@ pub fn agents_panel() -> Html {
                 </p>
             </div>
             { body }
+            { for modal }
         </section>
     }
 }
 
-fn render_row(launcher: &LauncherInfo, probes: &HashMap<Uuid, ProbeState>) -> Html {
+fn render_row(
+    launcher: &LauncherInfo,
+    probes: &HashMap<Uuid, ProbeState>,
+    on_sign_in: &Callback<LoginTarget>,
+) -> Html {
     let state = probes.get(&launcher.launcher_id);
     html! {
         <tr>
@@ -137,26 +179,42 @@ fn render_row(launcher: &LauncherInfo, probes: &HashMap<Uuid, ProbeState>) -> Ht
                     <span class="agents-host-alias">{ format!("({})", launcher.launcher_name) }</span>
                 }
             </td>
-            { for AGENTS.iter().map(|(agent, _)| render_cell(state, *agent)) }
+            { for AGENTS.iter().map(|(agent, name)| {
+                render_cell(state, *agent, name, launcher.launcher_id, on_sign_in)
+            }) }
         </tr>
     }
 }
 
-fn render_cell(state: Option<&ProbeState>, agent: AgentType) -> Html {
+fn render_cell(
+    state: Option<&ProbeState>,
+    agent: AgentType,
+    agent_name: &str,
+    launcher_id: Uuid,
+    on_sign_in: &Callback<LoginTarget>,
+) -> Html {
     match state {
         None => html! { <td class="agents-cell loading">{ "…" }</td> },
         Some(ProbeState::Unreachable) => {
             html! { <td class="agents-cell unreachable">{ "offline" }</td> }
         }
         Some(ProbeState::Loaded(agents)) => match agents.get(&agent) {
-            Some(install) => render_install_cell(install),
+            Some(install) => {
+                render_install_cell(install, agent, agent_name, launcher_id, on_sign_in)
+            }
             // Probe ran but didn't report this agent at all — treat as unknown.
             None => html! { <td class="agents-cell unknown">{ "—" }</td> },
         },
     }
 }
 
-fn render_install_cell(install: &AgentInstall) -> Html {
+fn render_install_cell(
+    install: &AgentInstall,
+    agent: AgentType,
+    agent_name: &str,
+    launcher_id: Uuid,
+    on_sign_in: &Callback<LoginTarget>,
+) -> Html {
     if !install.installed {
         return html! {
             <td class="agents-cell not-installed">
@@ -169,8 +227,34 @@ fn render_install_cell(install: &AgentInstall) -> Html {
         <td class="agents-cell installed">
             <span class="agents-badge installed">{ "installed" }</span>
             <span class={classes!("agents-login", login_class)}>{ login_text }</span>
+            { for sign_in_button(&install.login, agent, agent_name, launcher_id, on_sign_in) }
         </td>
     }
+}
+
+/// A Sign-in button, shown only when the agent is installed but not signed in
+/// (or its state is unknown — offering the action can't hurt). `None` when
+/// already signed in, so the option collapses out of the cell.
+fn sign_in_button(
+    login: &AgentLoginStatus,
+    agent: AgentType,
+    agent_name: &str,
+    launcher_id: Uuid,
+    on_sign_in: &Callback<LoginTarget>,
+) -> Option<Html> {
+    if matches!(login, AgentLoginStatus::LoggedIn { .. }) {
+        return None;
+    }
+    let target = LoginTarget {
+        launcher_id,
+        agent_type: agent,
+        agent_name: agent_name.to_string(),
+    };
+    let on_sign_in = on_sign_in.clone();
+    let onclick = Callback::from(move |_: MouseEvent| on_sign_in.emit(target.clone()));
+    Some(html! {
+        <button class="agents-signin" {onclick}>{ "Sign in" }</button>
+    })
 }
 
 /// Cell text + CSS modifier for a login state. Pure, so the label precedence is

@@ -4,8 +4,13 @@ use axum::{
 };
 use diesel::prelude::*;
 use serde::Deserialize;
-use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
-use shared::{LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole, SessionStatus};
+use shared::api::{
+    DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse, StartAgentLoginRequest,
+    StartAgentLoginResponse, SubmitAgentLoginCodeRequest,
+};
+use shared::{
+    AgentLoginOutcome, LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole, SessionStatus,
+};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -474,6 +479,170 @@ pub async fn probe_agents(
             warn!("Probe agents timed out for launcher {}", launcher_id);
             Err(AppError::GatewayTimeout("Agent probe timed out"))
         }
+    }
+}
+
+/// Confirm the caller owns `launcher_id` (agent logins run credentials on that
+/// host, so only its owner may drive them). 404 on unknown so we don't leak
+/// launcher existence to non-owners.
+fn require_launcher_owner(
+    app_state: &AppState,
+    launcher_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    let launcher = app_state
+        .session_manager
+        .launchers
+        .get(&launcher_id)
+        .ok_or(AppError::NotFound("Launcher not found"))?;
+    if launcher.user_id != user_id {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+/// Relay one request/response RPC to a launcher, reusing the probe correlation.
+async fn launcher_rpc(
+    app_state: &AppState,
+    launcher_id: Uuid,
+    request_id: Uuid,
+    message: ServerToLauncher,
+    timeout_secs: u64,
+) -> Result<LauncherToServer, AppError> {
+    let rx = app_state.session_manager.register_probe_request(request_id);
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, message)
+    {
+        app_state.session_manager.cancel_probe_request(request_id);
+        return Err(AppError::BadGateway("Launcher is not connected"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
+        Ok(Ok(reply)) => Ok(reply),
+        Ok(Err(_)) => Err(AppError::Internal(
+            "Launcher response channel closed".into(),
+        )),
+        Err(_) => {
+            app_state.session_manager.cancel_probe_request(request_id);
+            Err(AppError::GatewayTimeout("Launcher did not respond in time"))
+        }
+    }
+}
+
+/// POST /api/launchers/:id/agent-login/start — begin an interactive login for
+/// an agent on that host. Returns the URL/code for the user to act on.
+pub async fn start_agent_login(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path(launcher_id): Path<Uuid>,
+    Json(req): Json<StartAgentLoginRequest>,
+) -> Result<Json<StartAgentLoginResponse>, AppError> {
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
+
+    let request_id = Uuid::new_v4();
+    let flow_id = Uuid::new_v4();
+    // Starting can wait on the CLI printing its URL (claude ~30s); allow slack.
+    let reply = launcher_rpc(
+        &app_state,
+        launcher_id,
+        request_id,
+        ServerToLauncher::StartAgentLogin {
+            request_id,
+            flow_id,
+            agent_type: req.agent_type,
+        },
+        45,
+    )
+    .await?;
+
+    match reply {
+        LauncherToServer::AgentLoginStartResult {
+            presentable: Some(presentable),
+            interaction: Some(interaction),
+            ..
+        } => Ok(Json(StartAgentLoginResponse {
+            flow_id,
+            presentable,
+            interaction,
+        })),
+        LauncherToServer::AgentLoginStartResult {
+            error: Some(error), ..
+        } => Err(AppError::BadGatewayMessage(error)),
+        _ => Err(AppError::Internal(
+            "Unexpected launcher login response".into(),
+        )),
+    }
+}
+
+/// POST /api/launchers/:id/agent-login/:flow_id/code — submit the pasted code
+/// (claude). Blocks until the flow settles.
+pub async fn submit_agent_login_code(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path((launcher_id, flow_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<SubmitAgentLoginCodeRequest>,
+) -> Result<Json<AgentLoginOutcome>, AppError> {
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
+    let request_id = Uuid::new_v4();
+    // The CLI can take up to ~a minute to settle after the code is submitted.
+    let reply = launcher_rpc(
+        &app_state,
+        launcher_id,
+        request_id,
+        ServerToLauncher::SubmitAgentLoginCode {
+            request_id,
+            flow_id,
+            code: req.code,
+        },
+        90,
+    )
+    .await?;
+    login_outcome(reply)
+}
+
+/// GET /api/launchers/:id/agent-login/:flow_id — poll an in-browser login
+/// (codex) for completion. `outcome.done == false` = keep polling.
+pub async fn poll_agent_login(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path((launcher_id, flow_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<AgentLoginOutcome>, AppError> {
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
+    let request_id = Uuid::new_v4();
+    let reply = launcher_rpc(
+        &app_state,
+        launcher_id,
+        request_id,
+        ServerToLauncher::PollAgentLogin {
+            request_id,
+            flow_id,
+        },
+        8,
+    )
+    .await?;
+    login_outcome(reply)
+}
+
+/// POST /api/launchers/:id/agent-login/:flow_id/cancel — abandon a flow
+/// (browser closed). Fire-and-forget; the launcher drops the flow.
+pub async fn cancel_agent_login(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path((launcher_id, flow_id)): Path<(Uuid, Uuid)>,
+) -> Result<crate::handlers::responses::EmptyResponse, AppError> {
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
+    app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, ServerToLauncher::CancelAgentLogin { flow_id });
+    Ok(crate::handlers::responses::EmptyResponse::OK)
+}
+
+fn login_outcome(reply: LauncherToServer) -> Result<Json<AgentLoginOutcome>, AppError> {
+    match reply {
+        LauncherToServer::AgentLoginOutcomeResult { outcome, .. } => Ok(Json(outcome)),
+        _ => Err(AppError::Internal(
+            "Unexpected launcher login response".into(),
+        )),
     }
 }
 

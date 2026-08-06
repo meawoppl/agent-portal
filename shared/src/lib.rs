@@ -400,6 +400,51 @@ pub enum AgentLoginStatus {
     },
 }
 
+/// What the user must act on to complete an interactive agent login, relayed
+/// from the launcher to the browser (#agent-login).
+///
+/// Agent-neutral: claude and codex-ChatGPT hand back a URL to open; codex's
+/// device-code mode hands back a short code to enter at a verification URL.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LoginPresentable {
+    /// Open this URL in a browser and complete sign-in there.
+    AuthUrl { url: String },
+    /// Enter `user_code` at `verification_url`.
+    DeviceCode {
+        user_code: String,
+        verification_url: String,
+    },
+}
+
+/// How the browser finishes the flow after showing the [`LoginPresentable`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginInteraction {
+    /// The provider shows the user a code to paste back into the portal
+    /// (claude has no device-code mode): present a code field, then submit.
+    SubmitCode,
+    /// Sign-in completes entirely in the provider's browser/device page
+    /// (codex): the portal polls for the async completion.
+    AwaitCompletion,
+}
+
+/// Terminal (or still-pending) result of an interactive login, relayed to the
+/// browser. `done == false` means "keep polling"; on `done` the matrix
+/// re-probes to pick up the new signed-in state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentLoginOutcome {
+    /// Whether the flow has settled (`false` = still awaiting the user).
+    pub done: bool,
+    /// On a settled flow, whether sign-in succeeded.
+    #[serde(default)]
+    pub success: bool,
+    /// Human-readable detail — the CLI's own error text on failure, when we
+    /// have it. Shown verbatim so a failure is diagnosable, not mysterious.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 /// Result of probing one agent CLI on a launcher host. Built at launcher
 /// startup (sent in `LauncherRegister`) and refreshed on demand via
 /// `ProbeAgents` when the user opens the launch dialog or the agents settings
@@ -906,6 +951,54 @@ pub struct AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_login_status_defaults_to_unknown_and_round_trips() {
+        // Older launcher omits `login` → must deserialize as Unknown, not a
+        // false "signed out".
+        let legacy = r#"{"agent_type":"claude","installed":true}"#;
+        let probe: AgentInstall = serde_json::from_str(legacy).expect("legacy probe");
+        assert_eq!(probe.login, AgentLoginStatus::Unknown);
+
+        let signed_in = AgentLoginStatus::LoggedIn {
+            label: Some("matt@exclosure.io".into()),
+            plan: Some("max".into()),
+            via: None,
+        };
+        let round: AgentLoginStatus =
+            serde_json::from_str(&serde_json::to_string(&signed_in).unwrap()).unwrap();
+        assert_eq!(round, signed_in);
+    }
+
+    #[test]
+    fn login_presentable_round_trips_both_shapes() {
+        for p in [
+            LoginPresentable::AuthUrl {
+                url: "https://claude.ai/oauth?x=1".into(),
+            },
+            LoginPresentable::DeviceCode {
+                user_code: "ABCD-1234".into(),
+                verification_url: "https://auth.openai.com/device".into(),
+            },
+        ] {
+            let round: LoginPresentable =
+                serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+            assert_eq!(round, p);
+        }
+    }
+
+    #[test]
+    fn login_outcome_pending_omits_nothing_load_bearing() {
+        let pending = AgentLoginOutcome {
+            done: false,
+            success: false,
+            message: None,
+        };
+        let round: AgentLoginOutcome =
+            serde_json::from_str(&serde_json::to_string(&pending).unwrap()).unwrap();
+        assert_eq!(round, pending);
+        assert!(!round.done);
+    }
 
     #[test]
     fn session_mode_serde_and_default() {
