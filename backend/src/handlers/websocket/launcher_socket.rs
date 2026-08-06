@@ -692,7 +692,8 @@ fn handle_launcher_message(
                 .complete_probe_request(request_id, msg);
         }
         LauncherToServer::AgentLoginStartResult { request_id, .. }
-        | LauncherToServer::AgentLoginOutcomeResult { request_id, .. } => {
+        | LauncherToServer::AgentLoginOutcomeResult { request_id, .. }
+        | LauncherToServer::InstallAgentResult { request_id, .. } => {
             // Same request/response correlation as the probe path.
             app_state
                 .session_manager

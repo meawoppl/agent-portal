@@ -386,6 +386,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/launchers/{launcher_id}/agent-login/{flow_id}/cancel",
             post(handlers::launchers::cancel_agent_login),
         )
+        .route(
+            "/api/launchers/{launcher_id}/agents/{agent_type}/install",
+            post(handlers::launchers::install_agent),
+        )
         // Admin dashboard routes (admin-only)
         .route("/api/admin/stats", get(handlers::admin::get_stats))
         .route("/api/admin/users", get(handlers::admin::list_users))

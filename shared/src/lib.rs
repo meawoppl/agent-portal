@@ -183,6 +183,44 @@ impl AgentType {
             AgentType::Codex => "codex",
         }
     }
+
+    /// The command that installs this agent's CLI, as structured data so the
+    /// launcher (which runs it) and the frontend (which displays it for the
+    /// user to confirm) agree on exactly one thing. Both ship as global npm
+    /// packages, the most portable option that avoids piping a remote script
+    /// into a shell on the user's host.
+    pub fn install_command(self) -> AgentInstallCommand {
+        let package = match self {
+            AgentType::Claude => "@anthropic-ai/claude-code",
+            AgentType::Codex => "@openai/codex",
+        };
+        AgentInstallCommand {
+            program: "npm",
+            args: vec!["install", "-g", package],
+        }
+    }
+}
+
+/// A resolved install command: a program and its arguments, ready to spawn or
+/// to render as `program args…` for a confirmation prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInstallCommand {
+    pub program: &'static str,
+    pub args: Vec<&'static str>,
+}
+
+impl AgentInstallCommand {
+    /// The command as a single shell-style line, e.g.
+    /// `npm install -g @openai/codex`. Display only — the launcher spawns
+    /// `program`/`args` directly, never a shell.
+    pub fn display(&self) -> String {
+        let mut line = String::from(self.program);
+        for arg in &self.args {
+            line.push(' ');
+            line.push_str(arg);
+        }
+        line
+    }
 }
 
 impl std::fmt::Display for AgentType {
