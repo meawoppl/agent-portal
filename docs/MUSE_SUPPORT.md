@@ -80,11 +80,22 @@ Smallest possible enum-and-probe change, unblocks everything else.
   not as healthy. (Observed failure mode: runs complete, every tool call
   returns `tool.result` with `outcome: failure` — confusing without the
   matrix warning.)
+  - **Agreed shape** (with the matrix owner): `shared::AgentInstall` gains
+    an additive `sandbox_ok: Option<bool>` — `None` for agents with no
+    sandbox concept (claude/codex serialize unchanged), `Some(false)` =
+    installed-but-degraded, `Some(true)` = ready. Degraded is NEVER
+    modeled as `installed: false`.
 - Coordinates with the login-matrix work (Settings pane PR1): the matrix
   cell shapes for muse land here.
 
 Verify: probe unit tests; matrix renders the muse column on a host with and
 without the binary.
+
+Sequencing note: the Settings-pane matrix (#1561), login buttons (#1562),
+and install helpers shipped claude/codex-only ahead of this plan; once this
+PR lands, the muse arms fold into those surfaces as a portal-side follow-up
+(device-code slots into the existing `LoginPresentable::DeviceCode` +
+poll shape).
 
 ### PR 2 — `muse-session-lib`: the session proxy crate
 
