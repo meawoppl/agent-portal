@@ -96,9 +96,9 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                     return html! {};
                 }
                 return html! {
-                    <div class="claude-message assistant-message muse-task-card" title={ts.unwrap_or_default()}>
+                    <div class="claude-message muse-message muse-task-card" title={ts.unwrap_or_default()}>
                         <div class="message-header">
-                            <span class="message-type-badge assistant">{ "Muse" }</span>
+                            <span class="message-type-badge muse">{ "Muse" }</span>
                         </div>
                         <div class="message-body">
                             { crate::components::muse_renderer::render_task_tree(&tree) }

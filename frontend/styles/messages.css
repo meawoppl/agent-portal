@@ -107,6 +107,14 @@
     color: #7dcfff;
 }
 
+/* Muse's agent identity: blue, its own hue rather than Claude's green
+   `assistant` badge — the same way Codex owns purple and Portal owns teal. */
+.message-type-badge.muse {
+    background: rgba(122, 162, 247, 0.2);
+    color: var(--accent);
+    text-transform: none;
+}
+
 /* Inter-agent message (`agent-portal message send`): the "external" link hue
    so it reads as coming from another agent, distinct from the user's own. */
 .message-type-badge.other-agent {
@@ -144,6 +152,12 @@
 
 .portal-message {
     border-left: 3px solid #7dcfff;
+}
+
+/* Muse turn card: blue agent stripe, mirroring the codex/portal/user
+   left-accent treatment so muse reads as its own agent, not an assistant. */
+.muse-message {
+    border-left: 3px solid var(--accent);
 }
 
 .continuation-card {
@@ -285,7 +299,7 @@
  * `item.completed` one), the styling disappears.
  * ----------------------------------------------------------------------- */
 
-@keyframes codex-item-pulse {
+@keyframes agent-inflight-pulse {
     0%, 100% { opacity: 0.45; }
     50% { opacity: 1.0; }
 }
@@ -300,7 +314,7 @@
     content: "\25CF"; /* filled bullet */
     color: var(--warning); /* tokyo-night orange — portal "in-flight" cue */
     margin-right: 0.5rem;
-    animation: codex-item-pulse 1.5s ease-in-out infinite;
+    animation: agent-inflight-pulse 1.5s ease-in-out infinite;
     font-size: 0.7em;
     vertical-align: middle;
 }
@@ -1605,17 +1619,40 @@
     font-size: 0.8rem;
 }
 
+/* One task per stacked card (no accordion) — the Codex `.codex-item` pattern:
+   a run of tasks reads as a vertical stack, and a running one carries the
+   same pulsing-dot in-flight cue. */
 .muse-task {
-    border-left: 2px solid var(--border-subtle, #333);
-    padding-left: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    background: rgba(0, 0, 0, 0.12);
 }
 
-.muse-task-summary {
+.muse-task-header {
     display: flex;
     align-items: baseline;
     gap: 0.45rem;
-    cursor: pointer;
-    list-style: none;
+}
+
+/* In-flight cue, shared with `.codex-item-in-progress`: a pulsing dot before
+   the header and slightly dimmed body while the task runs. */
+.muse-task-in-progress .muse-task-header {
+    position: relative;
+}
+
+.muse-task-in-progress .muse-task-header::before {
+    content: "\25CF"; /* filled bullet */
+    color: var(--warning);
+    margin-right: 0.35rem;
+    animation: agent-inflight-pulse 1.5s ease-in-out infinite;
+    font-size: 0.7em;
+    vertical-align: middle;
+}
+
+.muse-task-in-progress .muse-task-output,
+.muse-task-in-progress .muse-task-status {
+    opacity: 0.82;
 }
 
 .muse-task-badge {
@@ -1625,22 +1662,25 @@
     letter-spacing: 0.03em;
     padding: 0.05rem 0.35rem;
     border-radius: 0.2rem;
-    background: var(--bg-subtle, #222);
+    background: var(--bg-dark);
     color: var(--text-secondary);
 }
 
 .muse-task-running {
-    color: var(--accent, #7aa2f7);
+    color: var(--accent);
 }
+
 .muse-task-completed {
-    color: var(--success, #9ece6a);
+    color: var(--success);
 }
+
 .muse-task-failed,
 .muse-task-rejected {
-    color: var(--error, #f7768e);
+    color: var(--error);
 }
+
 .muse-task-cancelled {
-    color: var(--text-tertiary, #666);
+    color: var(--text-muted);
 }
 
 .muse-task-kind {
@@ -1649,7 +1689,7 @@
 }
 
 .muse-task-status {
-    color: var(--text-tertiary, #888);
+    color: var(--text-muted);
     font-style: italic;
 }
 
@@ -1680,7 +1720,7 @@
 }
 
 .muse-tool-text {
-    color: var(--text-tertiary, #888);
+    color: var(--text-muted);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
@@ -1693,5 +1733,5 @@
     margin-top: 0.3rem;
     font-family: var(--font-mono);
     font-size: 0.7rem;
-    color: var(--text-tertiary, #666);
+    color: var(--text-muted);
 }

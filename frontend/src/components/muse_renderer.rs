@@ -13,7 +13,7 @@ use yew::prelude::*;
 
 pub mod task_tree;
 
-pub use task_tree::{TaskNode, TaskTree};
+pub use task_tree::{TaskNode, TaskState, TaskTree};
 
 /// Draw a task tree: one collapsible node per task showing lifecycle state,
 /// tool outcomes, streamed output, and the policy decision muse applied to
@@ -58,9 +58,18 @@ pub fn render_task_tree(tree: &TaskTree) -> Html {
 fn render_task_node(node: &TaskNode) -> Html {
     let state = node.state;
     let kind = node.task_kind.as_deref().unwrap_or("task");
+    // Codex-style stacked item: one card per task, no accordion. A running
+    // task (Started, not yet terminal) carries the same in-progress cue as a
+    // `.codex-item-in-progress` card — a pulsing dot + dimmed text.
+    let running = state == TaskState::Started;
+    let item_class = classes!(
+        "muse-task",
+        format!("muse-task-{}", state.label()),
+        running.then_some("muse-task-in-progress"),
+    );
     html! {
-        <details class="muse-task" open={!state.is_terminal()}>
-            <summary class="muse-task-summary">
+        <div class={item_class}>
+            <div class="muse-task-header">
                 <span class={classes!("muse-task-badge", format!("muse-task-{}", state.label()))}>
                     { state.label() }
                 </span>
@@ -68,7 +77,7 @@ fn render_task_node(node: &TaskNode) -> Html {
                 if let Some(status) = node.status.as_deref() {
                     <span class="muse-task-status">{ status }</span>
                 }
-            </summary>
+            </div>
             if let Some(reason) = node.reason.as_deref() {
                 <div class="muse-task-reason">{ reason }</div>
             }
@@ -90,6 +99,6 @@ fn render_task_node(node: &TaskNode) -> Html {
             { for node.output.iter().map(|chunk| html! {
                 <div class="muse-task-output">{ chunk }</div>
             }) }
-        </details>
+        </div>
     }
 }
