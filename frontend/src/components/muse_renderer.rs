@@ -32,7 +32,7 @@ pub fn render_task_tree(tree: &TaskTree) -> Html {
     let visible: Vec<&TaskNode> = tree
         .nodes()
         .filter(|node| {
-            if is_reminder_task(node) {
+            if is_hidden_scaffolding(node) {
                 hidden_reminders += 1;
                 false
             } else {
@@ -90,6 +90,20 @@ fn is_reminder_task(node: &TaskNode) -> bool {
     node.task_kind
         .as_deref()
         .is_some_and(|kind| kind.starts_with("reminder."))
+}
+
+/// A reminder scaffolding task we can safely hide: only when it carries **no
+/// user-facing content**. The reducer's current tool-result attribution
+/// ("latest running task") lands tool outcomes on a running scaffolding task
+/// in every captured turn, so blindly hiding all reminders would silently drop
+/// the tool results Matt most wants to see. Rendering any reminder node that
+/// holds a tool result, streamed output, or a side-effect keeps that content
+/// visible; the attribution itself is corrected upstream in the reducer.
+fn is_hidden_scaffolding(node: &TaskNode) -> bool {
+    is_reminder_task(node)
+        && node.tool_results.is_empty()
+        && node.output.is_empty()
+        && node.side_effect.is_none()
 }
 
 fn render_task_node(node: &TaskNode) -> Html {
@@ -151,21 +165,45 @@ mod tests {
         }
     }
 
+    const REMINDER: &str = "reminder.agent.plugin:tbh-reminders:scope-reminder";
+
     #[test]
-    fn reminder_scaffolding_tasks_are_hidden() {
-        assert!(is_reminder_task(&node(Some(
-            "reminder.agent.plugin:tbh-reminders:skill-reminder"
-        ))));
-        assert!(is_reminder_task(&node(Some(
+    fn contentless_reminder_scaffolding_is_hidden() {
+        assert!(is_hidden_scaffolding(&node(Some(REMINDER))));
+        assert!(is_hidden_scaffolding(&node(Some(
             "reminder.agent.plugin:tbh-reminders:goal-reminder"
         ))));
     }
 
     #[test]
+    fn reminder_carrying_a_tool_result_is_kept() {
+        // The reducer attributes tool results to a running scaffolding task in
+        // every captured turn — hiding it would silently drop the tool output.
+        let mut n = node(Some(REMINDER));
+        n.tool_results.push(task_tree::ToolOutcome {
+            call_id: "c1".to_string(),
+            tool_name: Some("write_file".to_string()),
+            outcome: Some("success".to_string()),
+            text: "wrote hello.txt".to_string(),
+            has_edit_facts: true,
+        });
+        assert!(
+            !is_hidden_scaffolding(&n),
+            "a reminder with a tool result must render"
+        );
+
+        let mut with_output = node(Some(REMINDER));
+        with_output.output.push("some streamed text".to_string());
+        assert!(!is_hidden_scaffolding(&with_output));
+    }
+
+    #[test]
     fn real_tasks_and_unknowns_are_kept() {
-        assert!(!is_reminder_task(&node(Some("model.unknown.response"))));
-        assert!(!is_reminder_task(&node(None)));
+        assert!(!is_hidden_scaffolding(&node(Some(
+            "model.unknown.response"
+        ))));
+        assert!(!is_hidden_scaffolding(&node(None)));
         // Must START with `reminder.` — a kind that merely contains it stays.
-        assert!(!is_reminder_task(&node(Some("agent.reminder.thing"))));
+        assert!(!is_hidden_scaffolding(&node(Some("agent.reminder.thing"))));
     }
 }
