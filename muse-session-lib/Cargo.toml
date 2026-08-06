@@ -1,0 +1,28 @@
+[package]
+name = "muse-session-lib"
+version.workspace = true
+edition.workspace = true
+description = "Muse Code agent backend for session-lib (MuseAgent + muse_io_task + journal record classifier)."
+license = "MIT"
+
+[dependencies]
+session-lib = { path = "../session-lib" }
+shared = { path = "../shared" }
+# The cross-agent `IoCommand` enum (defined in session-lib) carries
+# claude-codes types for the Input variant — even Muse sessions read user
+# input through that channel.
+claude-codes = { workspace = true, features = ["async-client"] }
+muse-codes = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+muse-codes = { workspace = true }
+
+[lints]
+workspace = true

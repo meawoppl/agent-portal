@@ -136,6 +136,17 @@ pub enum SessionEvent {
     /// proxy can persist it. See `IoEvent::CodexThreadId`.
     CodexThreadId(String),
 
+    /// Live-status agent output that must never be buffered or persisted.
+    ///
+    /// The agent-neutral sibling of [`SessionEvent::ToolProgress`]: same
+    /// "stream it, never store it" contract, but with an opaque payload so
+    /// backends whose live-status records are not tool heartbeats (muse's
+    /// output deltas and task status) can use it. Carries its own
+    /// `payload_type` inside the value.
+    ///
+    /// Deliberately NOT added to the replay buffer by `Session`.
+    Ephemeral(serde_json::Value),
+
     /// Ephemeral tool-progress heartbeat for a long-running tool call.
     ///
     /// Deliberately NOT buffered into the replay buffer by `Session` (unlike

@@ -11,6 +11,7 @@ use claude_session_lib::{
     ProxySessionConfig, TranscriptStatus,
 };
 use codex_session_lib::CodexAgent;
+use muse_session_lib::MuseAgent;
 use session_lib::git_metadata::get_git_branch;
 use session_lib::{Session, SessionConfig};
 use shared::SessionExitReason;
@@ -293,6 +294,7 @@ impl ProcessManager {
 enum AnySession {
     Claude(Session<ClaudeAgent>),
     Codex(Session<CodexAgent>),
+    Muse(Session<MuseAgent>),
 }
 
 impl AnySession {
@@ -302,10 +304,7 @@ impl AnySession {
                 Ok(Self::Claude(Session::<ClaudeAgent>::new(config).await?))
             }
             shared::AgentType::Codex => Ok(Self::Codex(Session::<CodexAgent>::new(config).await?)),
-            // Muse is probeable/installable/loginable ahead of its session
-            // implementation (muse-session-lib). Fail loudly rather than
-            // spawning a agent we can't stream.
-            shared::AgentType::Muse => Err(session_lib::SessionError::AgentNotSupported("muse")),
+            shared::AgentType::Muse => Ok(Self::Muse(Session::<MuseAgent>::new(config).await?)),
         }
     }
 
@@ -313,6 +312,7 @@ impl AnySession {
         match self {
             Self::Claude(s) => s.stop().await,
             Self::Codex(s) => s.stop().await,
+            Self::Muse(s) => s.stop().await,
         }
     }
 }
@@ -400,6 +400,9 @@ async fn run_session_task(
                         run_connection_loop(&config, s, input_tx, &mut input_rx).await
                     }
                     AnySession::Codex(s) => {
+                        run_connection_loop(&config, s, input_tx, &mut input_rx).await
+                    }
+                    AnySession::Muse(s) => {
                         run_connection_loop(&config, s, input_tx, &mut input_rx).await
                     }
                 }

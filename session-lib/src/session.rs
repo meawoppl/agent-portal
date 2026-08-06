@@ -273,6 +273,12 @@ impl<A: Agent> Session<A> {
                         // live-status side-channel event WITHOUT buffering, so
                         // it is never persisted or replayed. See
                         // `AgentOutput::ToolProgress`.
+                        // Live status: forwarded, never buffered — the same
+                        // contract as ToolProgress below, for backends whose
+                        // ephemerals are not tool heartbeats.
+                        AgentOutput::Ephemeral(value) => {
+                            return Some(SessionEvent::Ephemeral(value));
+                        }
                         AgentOutput::ToolProgress {
                             tool_use_id,
                             parent_tool_use_id,
