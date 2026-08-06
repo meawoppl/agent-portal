@@ -12,11 +12,21 @@ This guide covers how to use Claude Code Portal once it's set up.
 
 ### Keyboard Shortcuts
 
+Press `?` in the app for the full, always-current list. The essentials:
+
 | Shortcut | Action |
 |----------|--------|
+| `Ctrl/Cmd+K` | Toggle nav mode (enter / leave) |
+| `?` | Show the shortcuts overlay |
+| `Shift+Tab` | Jump to the next active session |
+| `Ctrl+C` | Interrupt the running agent (copies if text is selected) |
 | `Ctrl+M` | Toggle voice recording |
 | `Enter` | Send message |
-| `Escape` | Cancel current action |
+
+**Nav mode** is the keyboard-driven session switcher: `Ctrl/Cmd+K` enters it,
+then `↑`/`↓` move between sessions, `1`–`9` jump straight to one, `w` goes to the
+next session waiting on you, `j`/`k` scroll the transcript, and `Enter` accepts
+the current pane and returns to edit mode.
 
 ### Session Management
 

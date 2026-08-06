@@ -8,6 +8,62 @@ use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
 use yew::prelude::*;
 
+/// Singleton, app-modal overlays that own the keyboard while they are open.
+///
+/// Each of these mounts only while it is actually open and there is at most one
+/// on screen, so a document-wide "does it exist" test is a faithful proxy for
+/// "is it open". Per-pane dialogs must **not** be listed here — see
+/// [`answering_permission_dialog`] for why.
+const MODAL_OVERLAY_SELECTOR: &str = ".sched-overlay, .share-dialog-overlay, .help-overlay, \
+     .launch-dialog-backdrop, .modal-overlay, .full-page-modal, .health-timer-overlay";
+
+/// True while one of the [`MODAL_OVERLAY_SELECTOR`] overlays is open, so its own
+/// keys (Esc / backdrop click) win and nav shortcuts don't fire underneath it.
+fn modal_overlay_open() -> bool {
+    gloo::utils::document()
+        .query_selector(MODAL_OVERLAY_SELECTOR)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+/// True while keyboard focus sits inside a permission dialog — the permission
+/// prompt, the AskUserQuestion answer card, or the exit-plan-mode prompt (all
+/// three dialog roots are `<div class="permission-prompt …">`).
+///
+/// The dialog's own handler binds `j`/`k`/arrows/`Enter` and calls only
+/// `prevent_default()`, not `stop_propagation()`, so those keys bubble on into
+/// the nav handler. Without this test a single press would drive navigation *and*
+/// leak into the choice UI (#1413).
+///
+/// Scoping to **focus** rather than existence is load-bearing. Every activated
+/// session keeps its `SessionView` — and therefore its permission dialog —
+/// mounted; non-focused panes are merely `display: none`. A document-wide
+/// existence test consequently matched dialogs belonging to *invisible
+/// background* sessions, so one background session waiting on a permission
+/// prompt disabled Cmd+K and every nav key across the whole dashboard, right
+/// when many live sessions make navigation most useful. Asking whether the user
+/// is actually *answering* a dialog keeps the #1413 protection while confining
+/// it to the dialog in hand.
+///
+/// The `div.` qualifier stays deliberate: transcript tool renderers also emit
+/// `<span class="permission-prompt">` for each requested-permission line
+/// (`tool_renderers/interactive.rs`), and a bare `.permission-prompt` would
+/// match that historical transcript content (#1558).
+fn answering_permission_dialog() -> bool {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let Some(active) = doc.active_element() else {
+        return false;
+    };
+    active
+        .closest("div.permission-prompt")
+        .ok()
+        .flatten()
+        .is_some()
+}
+
 /// Focus the message input of the currently-focused session view, so leaving
 /// Nav mode via `i`/`Enter` returns the caret to the composer. When vim mode is
 /// on, the box was reset to INSERT as it handed off to Nav, so this lands the
@@ -42,6 +98,13 @@ fn focus_active_message_input() {
 /// When focus is already within the container (the common case: the composer is
 /// focused) this is a no-op, preserving the existing "composer keeps DOM focus
 /// in nav mode" behavior.
+///
+/// A permission dialog counts as "focus has escaped" even though it sits inside
+/// the container: [`answering_permission_dialog`] stands the movement keys down
+/// while it holds focus, so entering Nav mode without moving focus off it would
+/// leave Nav mode reachable but inert. Pulling focus to the container hands the
+/// movement keys back, and the dialog stays on screen to answer with the mouse
+/// or after toggling back.
 fn ensure_focus_in_dashboard() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
@@ -53,7 +116,7 @@ fn ensure_focus_in_dashboard() {
         .active_element()
         .map(|a| container.contains(Some(a.unchecked_ref::<web_sys::Node>())))
         .unwrap_or(false);
-    if !inside {
+    if !inside || answering_permission_dialog() {
         if let Some(el) = container.dyn_ref::<web_sys::HtmlElement>() {
             let _ = el.focus();
         }
@@ -280,34 +343,10 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
         let on_interrupt = config.on_interrupt.clone();
         let on_toggle_hidden = config.on_toggle_hidden.clone();
         Callback::from(move |e: KeyboardEvent| {
-            // Don't handle keyboard nav when a modal overlay is open. The launch
-            // dialog, full-page modals, and help overlay are included so their
-            // own keys (Esc / backdrop) win and nav shortcuts don't fire
-            // underneath them.
-            // `div.permission-prompt` covers the permission dialog, the
-            // AskUserQuestion answer card, and the exit-plan-mode prompt (their
-            // three dialog roots are `<div class="permission-prompt …">`). While
-            // one is open the user is answering it, so nav keys must stand down
-            // rather than double-handle the keystroke — driving navigation *and*
-            // leaking into the choice UI (#1413).
-            //
-            // The `div.` qualifier is load-bearing: transcript tool renderers
-            // also emit `<span class="permission-prompt">` for each requested-
-            // permission line (`tool_renderers/interactive.rs`). A bare
-            // `.permission-prompt` therefore matches historical transcript
-            // content, so any session that has shown a tool permission would
-            // leave the guard permanently tripped and silently kill Cmd+K / all
-            // nav keys. Scoping to the dialog `<div>` avoids that collision.
-            if gloo::utils::document()
-                .query_selector(
-                    ".sched-overlay, .share-dialog-overlay, .help-overlay, \
-                     .launch-dialog-backdrop, .modal-overlay, .full-page-modal, \
-                     .health-timer-overlay, div.permission-prompt",
-                )
-                .ok()
-                .flatten()
-                .is_some()
-            {
+            // Stand the movement keys down while something else owns the
+            // keyboard: an app-modal overlay, or a permission dialog the user is
+            // currently answering.
+            if modal_overlay_open() || answering_permission_dialog() {
                 return;
             }
             let in_nav_mode = *nav_mode;
@@ -597,19 +636,18 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     if !((ke.ctrl_key() || ke.meta_key()) && ke.key().eq_ignore_ascii_case("k")) {
                         return;
                     }
-                    // Stand down while a modal/overlay owns the keyboard, matching
-                    // the guard in the container-level handler above so the two
-                    // stay in lockstep.
-                    if gloo::utils::document()
-                        .query_selector(
-                            ".sched-overlay, .share-dialog-overlay, .help-overlay, \
-                             .launch-dialog-backdrop, .modal-overlay, .full-page-modal, \
-                             .health-timer-overlay, div.permission-prompt",
-                        )
-                        .ok()
-                        .flatten()
-                        .is_some()
-                    {
+                    // Stand down while an app-modal overlay owns the keyboard, so
+                    // its Esc / backdrop keys win and Nav mode doesn't flip
+                    // underneath a full-screen dialog.
+                    //
+                    // Deliberately *not* gated on permission dialogs, unlike the
+                    // movement keys above. Ctrl/Cmd+K is an unambiguous chord that
+                    // nothing else binds, and it is the only way into Nav mode, so
+                    // gating it on other UI state is what made the toggle feel
+                    // randomly dead. Entering Nav mode moves focus off the dialog
+                    // (see `ensure_focus_in_dashboard`), which is what releases the
+                    // movement keys.
+                    if modal_overlay_open() {
                         return;
                     }
                     // Own the chord outright: stop the browser's default Cmd+K and
@@ -636,5 +674,44 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
     UseKeyboardNav {
         nav_mode: *nav_mode,
         on_keydown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MODAL_OVERLAY_SELECTOR;
+
+    /// Every activated session keeps its pane — and any permission dialog in it —
+    /// mounted while merely `display: none`. Matching permission dialogs by
+    /// existence therefore tripped on invisible background sessions and killed
+    /// Cmd+K dashboard-wide. Permission dialogs are gated on *focus* instead, so
+    /// they must never be reintroduced into this existence-tested selector.
+    #[test]
+    fn modal_overlay_selector_excludes_per_pane_permission_dialogs() {
+        assert!(
+            !MODAL_OVERLAY_SELECTOR.contains("permission-prompt"),
+            "permission dialogs are per-pane and stay mounted in hidden panes; \
+             gate them on focus via answering_permission_dialog() instead"
+        );
+    }
+
+    /// The singleton overlays that genuinely own the keyboard must all stay
+    /// covered, so nav keys don't fire underneath them.
+    #[test]
+    fn modal_overlay_selector_covers_every_app_modal() {
+        for class in [
+            ".sched-overlay",
+            ".share-dialog-overlay",
+            ".help-overlay",
+            ".launch-dialog-backdrop",
+            ".modal-overlay",
+            ".full-page-modal",
+            ".health-timer-overlay",
+        ] {
+            assert!(
+                MODAL_OVERLAY_SELECTOR.contains(class),
+                "{class} missing from the modal-overlay guard"
+            );
+        }
     }
 }
