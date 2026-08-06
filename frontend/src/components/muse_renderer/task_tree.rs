@@ -191,12 +191,20 @@ impl TaskTree {
             }
             t if t.starts_with("task.lifecycle.") => self.apply_lifecycle(payload),
             "tool.result" => self.apply_tool_result(payload),
-            // The run's final answer text — the agent's actual reply. Render it
-            // as prose, not a footer count. Later terminal records (retries)
-            // overwrite, so the last answer wins.
-            "run.terminal.completed" => {
-                if let Some(text) = str_field(payload, "text").filter(|t| !t.trim().is_empty()) {
-                    self.answer = Some(text);
+            // The run's final answer — the agent's actual reply. Match the whole
+            // `run.terminal.*` family, not just `.completed`: the terminal state
+            // is encoded in the suffix (completed / failed / cancelled / future
+            // suffixes), and a failed run's reply must render as text — not a
+            // footer count — on exactly the turns the user most needs to read
+            // it. Prefer `text`; fall back to `reason` when a failed run carries
+            // only that. Last terminal wins, and a blank retry keeps the prior
+            // answer (better a stale reply than a blank card) — deliberate.
+            t if t.starts_with("run.terminal.") => {
+                let answer = str_field(payload, "text")
+                    .filter(|t| !t.trim().is_empty())
+                    .or_else(|| str_field(payload, "reason").filter(|r| !r.trim().is_empty()));
+                if answer.is_some() {
+                    self.answer = answer;
                 }
             }
             other => {
@@ -466,6 +474,24 @@ mod tests {
             "payload": {"terminal": "completed", "text": "   "},
         }));
         assert_eq!(tree.answer(), None);
+    }
+
+    /// A FAILED terminal (a different `run.terminal.*` suffix) still renders as
+    /// text: its `reason` becomes the answer when it carries no `text`. This is
+    /// the turn the user most needs to read, and matching only `.completed`
+    /// would drop it to the footer.
+    #[test]
+    fn failed_terminal_falls_back_to_reason() {
+        let mut tree = TaskTree::new();
+        tree.apply(&json!({
+            "payload_type": "run.terminal.failed",
+            "payload": {"terminal": "failed", "reason": "model hit its context limit"},
+        }));
+        assert_eq!(tree.answer(), Some("model hit its context limit"));
+        assert!(
+            tree.other_records().next().is_none(),
+            "a failed terminal must render, not footer-count"
+        );
     }
 
     /// A frame the model cannot interpret must not break the tree built by
