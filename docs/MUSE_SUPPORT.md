@@ -21,7 +21,7 @@ Muse is a third protocol shape, distinct from both existing agents:
 |---|---|---|---|
 | Wire | role-tagged JSON messages | thread/turn/item events | **event-sourced journal** (envelope + payload) |
 | Process model | spawn per turn, `--resume`/session id | long-lived app-server, many turns | **spawn per turn**, `muse exec --session-id <uuid>` |
-| Ordering/dedup | uuid bookkeeping | implicit | **`sequence` strictly increasing per stream — free** |
+| Ordering/dedup | uuid bookkeeping | implicit | per-record `id` (unique); `sequence` orders **within a turn only** — see the correction below |
 | Tools | content blocks in messages | first-class items | **task streams** with a lifecycle state machine |
 | Approvals | `control_request` round-trip | `ServerMessage::Request` round-trip | **none headless** — policy decisions are journaled (`side_effect_intent.policy_decision`), not asked |
 | Streaming text | assistant deltas | `agent_message` items | `run.output.delta` (ephemeral) reconciled by `run.terminal.completed`'s full final text |
@@ -121,9 +121,9 @@ Codex one:
   - `tool.result` → tool outcome event
   - `MusePayload::Unknown` → passthrough event `{label: payload_type,
     body: payload}`
-- Sequence/causation plumbing: store `(stream_id, sequence)` per event —
-  it is the native dedup/ordering key across reconnects; `causation_id`
-  groups a whole turn.
+- Identity plumbing — **corrected by measurement, see below**: key events on
+  the record `id`, group a turn by `causation_id`, and use `sequence` only
+  to order records *within* one turn.
 - Tests: **echo-provider round-trips as the integration suite** (spawn
   real `muse`, no credentials) + the muse-codes committed corpus replayed
   through the classifier as fixtures.
@@ -138,9 +138,10 @@ sdk repo's `muse-schema-drift.yml` does).
   supervisor; session id minted portal-side and passed via
   `--session-id` (muse accepts caller-supplied uuids — same pattern as
   claude's `--session-id`).
-- Persistence: transcript rows from durable events only; store
-  `(stream_id, sequence, causation_id)` alongside for replay-exact
-  reconstruction. DB migration: agent column already stores a string —
+- Persistence: transcript rows from durable events only; store the record
+  `id` as the unique key (see the sequence-collision correction below),
+  with `causation_id` for turn grouping and `sequence` for intra-turn
+  order. DB migration: agent column already stores a string —
   confirm no enum constraint blocks `"muse"`.
 - Turn semantics: a turn = submit → spawn → terminal record → exit. Child
   exit without a terminal record surfaces as a typed failure (the
@@ -195,6 +196,29 @@ existing login-buttons plan.
   requirement on launcher hosts, credential paths.
 - Boot provenance line gains the muse-codes rev.
 
+## Measured corrections (echo-provider experiments, 2026-08-06)
+
+Two assumptions in the first draft of this document were tested against the
+real CLI before any classifier code was written. One held; one did not.
+
+**`sequence` is NOT unique across turns — do not key persistence on it.**
+Three turns on a single `--session-id` produced: turn 1 `seq 1..33`, turn 2
+`seq 2..34`, turn 3 `seq 3..35` — all carrying the same `stream.id` (the
+session id). Consecutive turns therefore collide on **32 of 33** sequence
+values. An earlier draft of this plan called `(stream_id, sequence)` the
+"native dedup/ordering key"; that would have silently overwritten or
+dropped prior-turn records. What is actually unique is the record **`id`**
+(99/99 distinct across the three turns), with `causation_id` identifying
+the turn. Key on `id`; group by `causation_id`; treat `sequence` as
+intra-turn ordering only.
+
+**Interrupt-as-kill is safe.** A run SIGKILLed 60 ms in (before it emitted
+any output) left the session store usable: the next turn on the same
+session id ran to a clean `run.terminal.completed`. No corruption, and no
+"session resumed / possible gap" seam is required. (A first attempt killed
+at 350 ms proved nothing — the echo run had already completed in ~250 ms —
+and was re-run rather than counted as a pass.)
+
 ## Risks / open questions
 
 - **Beta CLI, day-one protocol**: Muse Code is days old; expect wire
@@ -205,10 +229,9 @@ existing login-buttons plan.
 - **Multi-turn `--session-id` semantics** are verified flag-level but not
   yet exercised across many turns with a live provider — PR 3 should
   include a two-turn meta-provider staging test before enabling broadly.
-- **Interrupt = kill**: acceptable per the journal's restart-safety, but
-  confirm muse tolerates mid-run kills without corrupting its session
-  store before shipping PR 3 (cheap echo-provider test: kill mid-run,
-  resume same session id).
+- ~~**Interrupt = kill**: confirm muse tolerates mid-run kills.~~
+  **Resolved** — measured safe; see corrections above. Keep the echo
+  kill/respawn test in plan-PR-2's suite as a regression guard.
 - **Sandbox variance across launcher fleet**: the bubblewrap requirement
   makes muse the first agent whose *tool* capability depends on host
   packages. The PR 1 degraded-state cell is the mitigation; deploy docs
