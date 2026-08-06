@@ -1673,3 +1673,14 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+.muse-task-card .message-body {
+    padding-top: 0.15rem;
+}
+
+.muse-journal-footer {
+    margin-top: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-tertiary, #666);
+}

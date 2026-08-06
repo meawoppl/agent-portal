@@ -77,12 +77,42 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 };
             }
 
+            // A run of muse journal records renders as ONE task-tree card:
+            // the group's records replay through the reducer and the tree
+            // draws once, instead of ~100 raw-JSON bubbles per turn. This is
+            // also what makes reload work — grouping runs over persisted
+            // history, so the tree rebuilds from the transcript itself.
+            if *category == GroupCategory::Muse {
+                let mut tree = crate::components::muse_renderer::TaskTree::default();
+                for message in messages {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
+                        tree.apply(&value);
+                    }
+                }
+                // Nothing structural and nothing to footnote — a group of
+                // records the reducer consumed without visible effect (e.g.
+                // pure identity bookkeeping) renders no card at all.
+                if tree.is_empty() && tree.other_records().next().is_none() {
+                    return html! {};
+                }
+                return html! {
+                    <div class="claude-message assistant-message muse-task-card" title={ts.unwrap_or_default()}>
+                        <div class="message-header">
+                            <span class="message-type-badge assistant">{ "Muse" }</span>
+                        </div>
+                        <div class="message-body">
+                            { crate::components::muse_renderer::render_task_tree(&tree) }
+                        </div>
+                    </div>
+                };
+            }
+
             let wrapper_class = match category {
                 GroupCategory::User => "user-message",
                 GroupCategory::Portal => "portal-message",
                 GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
                 // Handled above with an early return; arm kept for exhaustiveness.
-                GroupCategory::Thinking => "assistant-message",
+                GroupCategory::Thinking | GroupCategory::Muse => "assistant-message",
             };
             let visible = visible_group_indices(*category, messages);
             // Render each member first, dropping the ones that produce nothing
