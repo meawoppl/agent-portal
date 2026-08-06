@@ -20,7 +20,7 @@
 //! List requests share the [`ArchiveRuntime::scan_rows`] cache; per-session
 //! reads always hit the store for the freshest bytes.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -35,7 +35,10 @@ use tokio_util::io::ReaderStream;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-use shared::api::{HistorySessionSummary, HistorySessionsResponse};
+use shared::api::{
+    HistoryOwnerRollup, HistorySessionSummary, HistorySessionsResponse, HistoryTotals,
+    DEFAULT_HISTORY_PAGE_SIZE, MAX_HISTORY_PAGE_SIZE,
+};
 
 use crate::archive::{
     decode_transcript, manifest_key, scan, transcript_key, ArchiveRuntime, SessionArchiveManifest,
@@ -142,6 +145,11 @@ pub struct HistoryListQuery {
     pub to: Option<String>,
     /// Session-name substring (case-insensitive).
     pub q: Option<String>,
+    /// Page size. Defaults to [`DEFAULT_HISTORY_PAGE_SIZE`], clamped to
+    /// [`MAX_HISTORY_PAGE_SIZE`] so a caller can't request the whole archive.
+    pub limit: Option<usize>,
+    /// Row offset into the filtered, sorted result set.
+    pub offset: Option<usize>,
 }
 
 /// GET /api/history/sessions — archived sessions visible to the caller,
@@ -167,16 +175,107 @@ pub async fn list_history_sessions(
     let rows = on_blocking(move || scan_runtime.scan_rows()).await?;
     let live_member_ids = live_member_session_ids(&app_state, user.id)?;
 
-    let mut kept: Vec<&scan::FlatRow> = rows
+    // Visibility first: everything below operates on rows this caller may see.
+    let visible: Vec<&scan::FlatRow> = rows
         .iter()
-        .filter(|r| row_visible(r, &user, &live_member_ids) && filters.matches(r))
+        .filter(|r| row_visible(r, &user, &live_member_ids))
         .collect();
-    kept.sort_by_key(|r| std::cmp::Reverse(r.manifest.last_activity));
+
+    // Owner rollup deliberately ignores the `user` filter — see the field doc on
+    // `HistorySessionsResponse::owners`. Admin-only, since it drives an
+    // admin-only control and would otherwise be dead weight in the payload.
+    let owners = if user.is_admin {
+        let without_user = scan::Filters {
+            user: None,
+            ..filters.clone()
+        };
+        owner_rollups(visible.iter().copied().filter(|r| without_user.matches(r)))
+    } else {
+        Vec::new()
+    };
+
+    let mut kept: Vec<&scan::FlatRow> =
+        visible.into_iter().filter(|r| filters.matches(r)).collect();
+    // Tie-break on name so equal timestamps don't reorder between page fetches —
+    // an unstable sort here would let a row repeat on one page and vanish from
+    // the next.
+    kept.sort_by(|a, b| {
+        b.manifest
+            .last_activity
+            .cmp(&a.manifest.last_activity)
+            .then_with(|| a.manifest.session_name.cmp(&b.manifest.session_name))
+    });
+
+    let totals = HistoryTotals {
+        session_count: kept.len() as i64,
+        message_count: kept.iter().map(|r| r.message_count()).sum(),
+        // `+ 0.0` normalises negative zero: Rust's `Sum for f64` folds from
+        // `-0.0`, so an empty (or all-zero) result set otherwise serialises as
+        // `-0.0` and renders as "$-0.00".
+        total_cost_usd: kept.iter().map(|r| r.manifest.total_cost_usd).sum::<f64>() + 0.0,
+    };
+    let total = kept.len() as i64;
+
+    let limit = q
+        .limit
+        .unwrap_or(DEFAULT_HISTORY_PAGE_SIZE)
+        .clamp(1, MAX_HISTORY_PAGE_SIZE);
+    let offset = q.offset.unwrap_or(0).min(kept.len());
 
     Ok(Json(HistorySessionsResponse {
-        sessions: kept.into_iter().map(session_summary).collect(),
+        sessions: kept
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(session_summary)
+            .collect(),
         is_admin: user.is_admin,
+        total,
+        totals,
+        owners,
     }))
+}
+
+/// Per-owner session count and spend, ordered by spend descending so the admin
+/// tiles lead with the biggest consumers.
+fn owner_rollups<'a>(rows: impl Iterator<Item = &'a scan::FlatRow>) -> Vec<HistoryOwnerRollup> {
+    let mut by_user: BTreeMap<String, HistoryOwnerRollup> = BTreeMap::new();
+    for row in rows {
+        let m = &row.manifest;
+        let entry = by_user
+            .entry(m.user_id.to_string())
+            .or_insert_with(|| HistoryOwnerRollup {
+                user_id: m.user_id.to_string(),
+                label: owner_label(m),
+                session_count: 0,
+                total_cost_usd: 0.0,
+            });
+        entry.session_count += 1;
+        entry.total_cost_usd += m.total_cost_usd;
+    }
+    let mut out: Vec<HistoryOwnerRollup> = by_user.into_values().collect();
+    out.sort_by(|a, b| {
+        b.total_cost_usd
+            .partial_cmp(&a.total_cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.label.cmp(&b.label))
+    });
+    out
+}
+
+/// Display name → email → raw id, matching what the browser used to derive
+/// client-side from a summary row.
+fn owner_label(m: &archive_format::SessionArchiveManifest) -> String {
+    m.owner_name
+        .clone()
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| {
+            if m.owner_email.is_empty() {
+                m.user_id.to_string()
+            } else {
+                m.owner_email.clone()
+            }
+        })
 }
 
 fn parse_date_param(
