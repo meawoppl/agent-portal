@@ -1,81 +1,70 @@
-//! Client-side filtering and sorting for the history browser.
+//! Filter state for the history browser, and its translation to query params.
 //!
-//! The whole visible session list is fetched once (the backend has already
-//! scoped it to the caller) and filtered in the browser, keeping the controls
-//! responsive while typing.
-
-use shared::api::HistorySessionSummary;
+//! Filtering, sorting and paging all happen server-side: `/api/history/sessions`
+//! returns one page of already-filtered rows plus the whole-set totals. This
+//! module therefore only models the control state and how to ask for it — it
+//! deliberately does **not** filter rows in the browser, because the client only
+//! ever holds a single page and filtering that would silently narrow one page
+//! instead of the archive.
 
 /// Active filter selections from the browser controls. Empty/`None` fields
 /// are "no constraint".
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SessionFilter {
-    /// Exact `user_id` match (admin-only control).
+    /// Exact `user_id` match (admin-only control). Sent as `user`, which the
+    /// backend matches as an email substring *or* a UUID prefix — a full UUID
+    /// is a prefix of itself, so an exact id works.
     pub user_id: Option<String>,
     /// Exact `agent_type` match (e.g. "claude", "codex").
     pub agent_type: Option<String>,
-    /// Inclusive lower bound on `last_activity` (ISO date/datetime prefix).
+    /// Inclusive lower bound on `last_activity` (`YYYY-MM-DD` or RFC3339).
     pub from: Option<String>,
-    /// Inclusive upper bound on `last_activity` (ISO date prefix; compared as
-    /// `< to~` — `~` sorts above any ISO time char — so a bare `YYYY-MM-DD`
-    /// includes that whole day).
+    /// Inclusive upper bound on `last_activity`; the backend widens a bare
+    /// `YYYY-MM-DD` to the end of that day.
     pub to: Option<String>,
     /// Case-insensitive substring match on `session_name`.
     pub query: Option<String>,
 }
 
 impl SessionFilter {
-    fn matches(&self, s: &HistorySessionSummary) -> bool {
-        if let Some(user) = non_empty(&self.user_id) {
-            if s.user_id != *user {
-                return false;
+    /// Build the `/api/history/sessions` query string for this filter and page.
+    ///
+    /// Values are percent-encoded; blank/whitespace-only fields are omitted
+    /// rather than sent empty, so a cleared control is a removed constraint
+    /// instead of a match-nothing one.
+    pub fn to_query(&self, offset: usize, limit: usize) -> String {
+        let mut parts = vec![format!("limit={limit}"), format!("offset={offset}")];
+        for (key, value) in [
+            ("user", &self.user_id),
+            ("agent", &self.agent_type),
+            ("from", &self.from),
+            ("to", &self.to),
+            ("q", &self.query),
+        ] {
+            if let Some(v) = non_empty(value) {
+                parts.push(format!("{key}={}", encode_component(v)));
             }
         }
-        if let Some(agent) = non_empty(&self.agent_type) {
-            if s.agent_type != *agent {
-                return false;
-            }
-        }
-        if let Some(from) = non_empty(&self.from) {
-            if s.last_activity.as_str() < from.as_str() {
-                return false;
-            }
-        }
-        if let Some(to) = non_empty(&self.to) {
-            let upper = format!("{to}~");
-            if s.last_activity.as_str() >= upper.as_str() {
-                return false;
-            }
-        }
-        if let Some(q) = non_empty(&self.query) {
-            if !s.session_name.to_lowercase().contains(&q.to_lowercase()) {
-                return false;
-            }
-        }
-        true
+        parts.join("&")
     }
 }
 
-fn non_empty(opt: &Option<String>) -> Option<&String> {
-    opt.as_ref().filter(|s| !s.trim().is_empty())
+fn non_empty(opt: &Option<String>) -> Option<&str> {
+    opt.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// Filter then sort by `last_activity` descending (newest first). Ties break
-/// on `session_name` for a stable, human-predictable order.
-pub fn filter_and_sort(
-    sessions: &[HistorySessionSummary],
-    filter: &SessionFilter,
-) -> Vec<HistorySessionSummary> {
-    let mut out: Vec<HistorySessionSummary> = sessions
-        .iter()
-        .filter(|s| filter.matches(s))
-        .cloned()
-        .collect();
-    out.sort_by(|a, b| {
-        b.last_activity
-            .cmp(&a.last_activity)
-            .then_with(|| a.session_name.cmp(&b.session_name))
-    });
+/// Percent-encode everything outside the unreserved set. Hand-rolled to keep
+/// `shared`/frontend free of a URL-encoding dependency for five short values.
+fn encode_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
     out
 }
 
@@ -83,71 +72,48 @@ pub fn filter_and_sort(
 mod tests {
     use super::*;
 
-    fn session(name: &str, user: &str, agent: &str, last: &str) -> HistorySessionSummary {
-        HistorySessionSummary {
-            session_id: format!("sess-{name}"),
-            user_id: user.into(),
-            owner_email: format!("{user}@x.io"),
-            owner_name: None,
-            session_name: name.into(),
-            agent_type: agent.into(),
-            status: "archived".into(),
-            hostname: "host".into(),
-            created_at: last.into(),
-            last_activity: last.into(),
-            total_cost_usd: 0.0,
-            message_count: 0,
-            media_count: 0,
-            models: vec![],
-        }
-    }
-
-    fn corpus() -> Vec<HistorySessionSummary> {
-        vec![
-            session("alpha", "u1", "claude", "2026-07-01T10:00:00"),
-            session("beta", "u2", "codex", "2026-07-03T10:00:00"),
-            session("gamma", "u1", "codex", "2026-07-02T10:00:00"),
-        ]
+    #[test]
+    fn empty_filter_sends_only_paging() {
+        assert_eq!(
+            SessionFilter::default().to_query(0, 50),
+            "limit=50&offset=0"
+        );
     }
 
     #[test]
-    fn sorts_by_last_activity_desc() {
-        let out = filter_and_sort(&corpus(), &SessionFilter::default());
-        let names: Vec<_> = out.iter().map(|s| s.session_name.as_str()).collect();
-        assert_eq!(names, vec!["beta", "gamma", "alpha"]);
-    }
-
-    #[test]
-    fn filters_by_user_and_agent() {
-        let filter = SessionFilter {
+    fn set_fields_are_appended_in_a_stable_order() {
+        let f = SessionFilter {
             user_id: Some("u1".into()),
             agent_type: Some("codex".into()),
-            ..Default::default()
+            from: Some("2026-07-01".into()),
+            to: Some("2026-07-31".into()),
+            query: Some("refactor".into()),
         };
-        let out = filter_and_sort(&corpus(), &filter);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].session_name, "gamma");
+        assert_eq!(
+            f.to_query(100, 50),
+            "limit=50&offset=100&user=u1&agent=codex&from=2026-07-01&to=2026-07-31&q=refactor"
+        );
     }
 
     #[test]
-    fn filters_by_date_range_inclusive_of_day() {
-        let filter = SessionFilter {
-            from: Some("2026-07-02".into()),
-            to: Some("2026-07-03".into()),
-            ..Default::default()
-        };
-        let out = filter_and_sort(&corpus(), &filter);
-        let names: Vec<_> = out.iter().map(|s| s.session_name.as_str()).collect();
-        assert_eq!(names, vec!["beta", "gamma"]);
-    }
-
-    #[test]
-    fn blank_filters_are_no_constraint() {
-        let filter = SessionFilter {
+    fn blank_and_whitespace_fields_are_omitted_not_sent_empty() {
+        let f = SessionFilter {
             user_id: Some("   ".into()),
-            query: Some("".into()),
+            query: Some(String::new()),
             ..Default::default()
         };
-        assert_eq!(filter_and_sort(&corpus(), &filter).len(), 3);
+        assert_eq!(f.to_query(0, 50), "limit=50&offset=0");
+    }
+
+    #[test]
+    fn special_characters_are_percent_encoded() {
+        let f = SessionFilter {
+            query: Some("fix & ship/now?".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            f.to_query(0, 50),
+            "limit=50&offset=0&q=fix%20%26%20ship%2Fnow%3F"
+        );
     }
 }

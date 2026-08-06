@@ -225,3 +225,43 @@
     padding: 0.75rem 1rem;
     margin: 0.5rem 0;
 }
+
+/* --- Pagination --- */
+
+/* Bounds the rendered table only; the endpoint still returns every visible
+   session so the stats strip can total the whole filter. Hidden by the
+   component when there is a single page. */
+.history-root .history-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.history-root .history-page-button {
+    background: var(--bg-darker, #16161e);
+    color: var(--text, #c0caf5);
+    border: 1px solid var(--border, #292e42);
+    border-radius: 6px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.history-root .history-page-button:hover:not(:disabled) {
+    border-color: var(--accent, #7aa2f7);
+    color: var(--accent, #7aa2f7);
+}
+
+.history-root .history-page-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.history-root .history-page-status {
+    font-size: 0.8rem;
+    color: var(--text-dim, #7f849c);
+    font-variant-numeric: tabular-nums;
+}

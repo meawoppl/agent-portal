@@ -10,13 +10,64 @@
 
 use serde::{Deserialize, Serialize};
 
-/// `GET /api/history/sessions` response.
+/// Rows per page when the caller doesn't say.
+pub const DEFAULT_HISTORY_PAGE_SIZE: usize = 50;
+/// Upper bound on `limit`, so a caller can't ask for the whole archive again.
+pub const MAX_HISTORY_PAGE_SIZE: usize = 200;
+
+/// `GET /api/history/sessions` response — **one page** of rows plus the
+/// whole-result-set facts the UI needs alongside it.
+///
+/// The page alone isn't enough to render the browser: the stats strip totals the
+/// entire filtered set, and the admin user dropdown lists every owner. Deriving
+/// either from `sessions` would silently start describing one page, so both are
+/// computed server-side over all matching rows and returned here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistorySessionsResponse {
-    /// Visible archived sessions, most recently active first.
+    /// This page of archived sessions, most recently active first.
     pub sessions: Vec<HistorySessionSummary>,
     /// Whether the caller is an admin (drives the all-users filter UI).
     pub is_admin: bool,
+    /// Rows matching the filter *before* paging — drives the page count.
+    #[serde(default)]
+    pub total: i64,
+    /// Aggregates over every matching row, not just this page.
+    #[serde(default)]
+    pub totals: HistoryTotals,
+    /// Per-owner rollup, admin-only, computed over rows matching every filter
+    /// **except** `user`.
+    ///
+    /// That one exclusion lets a single list serve both consumers: the dropdown
+    /// shows every owner (so picking one doesn't shrink the options), and the
+    /// per-user tiles stay correct because selecting a user just narrows this
+    /// list to that entry.
+    #[serde(default)]
+    pub owners: Vec<HistoryOwnerRollup>,
+}
+
+/// Totals across every row matching the active filter.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct HistoryTotals {
+    #[serde(default)]
+    pub session_count: i64,
+    #[serde(default)]
+    pub message_count: i64,
+    #[serde(default)]
+    pub total_cost_usd: f64,
+}
+
+/// One owner's slice of the filtered set (admin stats tiles + user dropdown).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryOwnerRollup {
+    pub user_id: String,
+    /// Display name, falling back to email then id — resolved server-side so
+    /// the label is stable even when the owner has no session on this page.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub session_count: i64,
+    #[serde(default)]
+    pub total_cost_usd: f64,
 }
 
 /// One archived session the caller may view.

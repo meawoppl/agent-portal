@@ -99,7 +99,10 @@ pub fn collect_rows(
 }
 
 /// Row filters. All are optional; an unset filter matches everything.
-#[derive(Default)]
+///
+/// `Clone` so a caller can derive a variant with one field relaxed — the
+/// history list builds an owner rollup from the same filters minus `user`.
+#[derive(Default, Clone)]
 pub struct Filters {
     /// Substring match against `owner_email`, or a session/user UUID prefix.
     pub user: Option<String>,
