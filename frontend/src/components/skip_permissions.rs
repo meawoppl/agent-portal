@@ -21,6 +21,9 @@ pub fn skip_permissions_args(agent_type: AgentType) -> &'static [&'static str] {
     match agent_type {
         AgentType::Claude => CLAUDE_SKIP_PERMISSIONS_ARGS,
         AgentType::Codex => CODEX_SKIP_PERMISSIONS_ARGS,
+        // Muse decides tool policy itself in headless runs and exposes no
+        // skip-permissions flag; the checkbox is hidden for it.
+        AgentType::Muse => &[],
     }
 }
 
@@ -29,6 +32,7 @@ pub fn skip_permissions_label(agent_type: AgentType) -> &'static str {
     match agent_type {
         AgentType::Claude => "--dangerously-skip-permissions",
         AgentType::Codex => "-c approval_policy=never -c sandbox_mode=danger-full-access",
+        AgentType::Muse => "(not applicable — Muse manages tool policy itself)",
     }
 }
 

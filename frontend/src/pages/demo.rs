@@ -755,6 +755,7 @@ fn radio_messages(
     let peer_label = match peer_agent_type {
         AgentType::Claude => "Claude",
         AgentType::Codex => "Codex",
+        AgentType::Muse => "Muse",
     };
     let mut messages = vec![
         user(
@@ -777,7 +778,10 @@ fn radio_messages(
     ];
 
     match own_agent_type {
-        AgentType::Claude => {
+        // The demo transcript is hand-authored per agent; Muse has no
+        // scripted cards yet, so it reuses the Claude script (the demo is
+        // illustrative, not a protocol fixture).
+        AgentType::Claude | AgentType::Muse => {
             messages.push(assistant_text(
                 "2026-07-20T04:01:15.000000Z",
                 "Claude Sonnet 4.5",

@@ -158,7 +158,10 @@ impl TurnMetrics {
             return snapshot;
         }
         match self.agent_type {
-            AgentType::Codex => self.input_tokens,
+            // Muse: no token-usage events exist in the observed 0.1.0 stream;
+            // whatever the proxy reports (typically 0 until usage lands on
+            // the wire) passes through flat, Codex-style.
+            AgentType::Codex | AgentType::Muse => self.input_tokens,
             // Claude fallback (older proxy, or no usable assistant usage this
             // turn): the disjoint buckets sum to the prompt. Correct for a
             // single-call turn and an over-count for a multi-call one — the

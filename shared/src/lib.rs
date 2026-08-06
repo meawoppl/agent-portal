@@ -174,6 +174,8 @@ pub enum AgentType {
     #[default]
     Claude,
     Codex,
+    /// Meta Muse Code (`muse` CLI) — journal-stream agent, spawn-per-turn.
+    Muse,
 }
 
 impl AgentType {
@@ -181,22 +183,38 @@ impl AgentType {
         match self {
             AgentType::Claude => "claude",
             AgentType::Codex => "codex",
+            AgentType::Muse => "muse",
         }
     }
 
     /// The command that installs this agent's CLI, as structured data so the
     /// launcher (which runs it) and the frontend (which displays it for the
-    /// user to confirm) agree on exactly one thing. Both ship as global npm
-    /// packages, the most portable option that avoids piping a remote script
-    /// into a shell on the user's host.
+    /// user to confirm) agree on exactly one thing. Claude and Codex ship as
+    /// global npm packages, the most portable option that avoids piping a
+    /// remote script into a shell on the user's host.
+    ///
+    /// Muse is the exception: at 0.1.0 Meta ships **only** an installer
+    /// script (no npm/Homebrew package, and no self-update subcommand), so
+    /// its command is that pipeline wrapped in `bash -c`. The arguments are
+    /// static — there is no interpolation and so no injection surface — and
+    /// the confirmation modal renders the whole line via
+    /// [`AgentInstallCommand::display`], so the user sees they are piping a
+    /// remote script to a shell before they approve it. Switch this to a
+    /// package manager the moment Meta publishes one.
     pub fn install_command(self) -> AgentInstallCommand {
-        let package = match self {
-            AgentType::Claude => "@anthropic-ai/claude-code",
-            AgentType::Codex => "@openai/codex",
-        };
-        AgentInstallCommand {
-            program: "npm",
-            args: vec!["install", "-g", package],
+        match self {
+            AgentType::Claude => AgentInstallCommand {
+                program: "npm",
+                args: vec!["install", "-g", "@anthropic-ai/claude-code"],
+            },
+            AgentType::Codex => AgentInstallCommand {
+                program: "npm",
+                args: vec!["install", "-g", "@openai/codex"],
+            },
+            AgentType::Muse => AgentInstallCommand {
+                program: "bash",
+                args: vec!["-c", "curl -fsSL https://dev.meta.ai/install.sh | bash"],
+            },
         }
     }
 }
@@ -235,6 +253,7 @@ impl std::str::FromStr for AgentType {
         match s.trim().to_ascii_lowercase().as_str() {
             "claude" => Ok(AgentType::Claude),
             "codex" => Ok(AgentType::Codex),
+            "muse" => Ok(AgentType::Muse),
             other => Err(format!("unknown agent type: {}", other)),
         }
     }
@@ -498,6 +517,14 @@ pub struct AgentInstall {
     /// `<bin> --version` stdout, trimmed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Sandbox readiness for agents whose TOOL execution depends on host
+    /// packages (muse: bubblewrap on Linux). `None` = no sandbox concept
+    /// for this agent (claude/codex — serialization unchanged);
+    /// `Some(false)` = installed-but-degraded: runs complete but every
+    /// tool call fails; `Some(true)` = ready. Degraded is NEVER modeled
+    /// as `installed: false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_ok: Option<bool>,
     /// Sign-in state for this agent on the host. `#[serde(default)]` =
     /// `Unknown`, so an older launcher that only reports install state
     /// deserializes cleanly (the matrix shows its login cells as unknown).
@@ -987,6 +1014,56 @@ pub struct AppConfig {
 }
 
 #[cfg(test)]
+mod agent_install_serde_tests {
+    use super::*;
+
+    fn install(agent_type: AgentType, sandbox_ok: Option<bool>) -> AgentInstall {
+        AgentInstall {
+            agent_type,
+            installed: true,
+            resolved_path: Some("/usr/bin/x".to_string()),
+            version: Some("1.0".to_string()),
+            sandbox_ok,
+            login: AgentLoginStatus::Unknown,
+        }
+    }
+
+    /// Agents with no sandbox concept must serialize EXACTLY as before the
+    /// field existed — absent, not `null`. Otherwise every existing
+    /// AgentInstall consumer sees a new key.
+    #[test]
+    fn sandbox_ok_absent_from_claude_and_codex_json() {
+        for agent in [AgentType::Claude, AgentType::Codex] {
+            let json = serde_json::to_value(install(agent, None)).unwrap();
+            assert!(
+                json.get("sandbox_ok").is_none(),
+                "{agent:?} JSON must not carry a sandbox_ok key: {json}"
+            );
+        }
+    }
+
+    /// Muse carries the field when it has something to say.
+    #[test]
+    fn sandbox_ok_present_for_muse_when_known() {
+        let json = serde_json::to_value(install(AgentType::Muse, Some(false))).unwrap();
+        assert_eq!(json["sandbox_ok"], serde_json::json!(false));
+    }
+
+    /// Payloads written by an older launcher (no such key) still parse.
+    #[test]
+    fn old_payload_without_sandbox_ok_deserializes() {
+        let old = serde_json::json!({
+            "agent_type": "claude",
+            "installed": true,
+            "version": "1.0",
+            "login": {"state": "unknown"}
+        });
+        let parsed: AgentInstall = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.sandbox_ok, None);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1283,5 +1360,41 @@ mod tests {
         );
         assert_eq!(compact.leaf_message_count, Some(7));
         assert_eq!(compact.duration_ms, Some(1234));
+    }
+}
+
+#[cfg(test)]
+mod muse_install_command_tests {
+    use super::*;
+
+    /// Muse ships only an installer script at 0.1.0 — no npm/Homebrew
+    /// package — so its install command is a `bash -c` pipeline. The args
+    /// are static (no interpolation, no injection surface) and the whole
+    /// line is rendered for the user to confirm before it runs.
+    #[test]
+    fn muse_install_is_the_vendor_script_and_displays_verbatim() {
+        let cmd = AgentType::Muse.install_command();
+        assert_eq!(cmd.program, "bash");
+        assert_eq!(
+            cmd.display(),
+            "bash -c curl -fsSL https://dev.meta.ai/install.sh | bash"
+        );
+        assert!(
+            cmd.display().contains("dev.meta.ai/install.sh"),
+            "the confirm modal must show the remote script being piped"
+        );
+    }
+
+    /// The npm agents are untouched by muse's exception.
+    #[test]
+    fn npm_agents_unchanged() {
+        assert_eq!(
+            AgentType::Claude.install_command().display(),
+            "npm install -g @anthropic-ai/claude-code"
+        );
+        assert_eq!(
+            AgentType::Codex.install_command().display(),
+            "npm install -g @openai/codex"
+        );
     }
 }
