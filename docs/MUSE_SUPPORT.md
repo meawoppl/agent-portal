@@ -1,0 +1,204 @@
+# Muse Code Support Plan
+
+This document plans the changes needed to run Meta Muse Code sessions in
+agent-portal alongside Claude Code and Codex, as a sequence of independently
+shippable PRs. The SDK layer already exists:
+[muse-codes](https://crates.io/crates/muse-codes) (same
+[repository](https://github.com/meawoppl/rust-code-agent-sdks) as
+claude-codes / codex-codes), and the integration advisement in
+[#1560](https://github.com/meawoppl/agent-portal/issues/1560) is the
+protocol-level source for this plan.
+
+Crate pin for all PRs below: `muse-codes >= 0.1.3` (tested against Muse
+Code 0.1.0, build `0.1.0-R708.1`). Pin the rev in `Cargo.lock`, name it in
+the commit, log it at launcher boot — the standing provenance contract.
+
+## Protocol Comparison
+
+Muse is a third protocol shape, distinct from both existing agents:
+
+| | Claude Code | Codex | Muse Code |
+|---|---|---|---|
+| Wire | role-tagged JSON messages | thread/turn/item events | **event-sourced journal** (envelope + payload) |
+| Process model | spawn per turn, `--resume`/session id | long-lived app-server, many turns | **spawn per turn**, `muse exec --session-id <uuid>` |
+| Ordering/dedup | uuid bookkeeping | implicit | **`sequence` strictly increasing per stream — free** |
+| Tools | content blocks in messages | first-class items | **task streams** with a lifecycle state machine |
+| Approvals | `control_request` round-trip | `ServerMessage::Request` round-trip | **none headless** — policy decisions are journaled (`side_effect_intent.policy_decision`), not asked |
+| Streaming text | assistant deltas | `agent_message` items | `run.output.delta` (ephemeral) reconciled by `run.terminal.completed`'s full final text |
+| Model identity | init message | thread config | **in-band**: `run.model.configured` at run start |
+| Credential-free testing | no | no | **yes** — `--provider echo` emits the full event stream |
+
+Envelope (every stdout line, typed as `MuseRecord`): `schema_version`,
+`stream {kind: session|run|task, id}`, `sequence`, `recorded_at` (µs),
+`record_type` (reconciliation|event|status), `durability`
+(durable|ephemeral), `causation_id`, `payload_type`, raw `payload` lifted
+on demand via `typed_payload()` → `MusePayload` (20 typed payload kinds;
+`MusePayload::Unknown` preserves anything new with its dotted type label).
+
+**Render rules that fall out of the journal shape** (from #1560):
+
+- Durable events are the transcript; ephemeral/status records
+  (`run.output.delta`, `task.lifecycle.status`) are streaming UI only —
+  never persisted as transcript rows.
+- Tasks render as a collapsible tree keyed on `task_id`
+  (`task.stream.linked` opens a node; `task.lifecycle.*` walks
+  `proposed → accepted → started → (scheduled → side_effect_intent →)
+  completed | cancelled | rejected | failed`; `tool.result` rows carry
+  `correlation_facts {outcome, tool_name}` and optional `edit_facts`).
+- Unknown frames must still name themselves: render `payload_type` as the
+  label plus raw JSON body (the `conversation_reset` lesson).
+
+**Out of scope, by design boundary**: the on-disk session journal
+(`~/.local/share/muse/sessions/**/session.jsonl`) uses a *different* nested
+wrapper format. It is a replay/forensics concern, not the live-session
+proxy path. Do not conflate the two; if wanted later it is a separate
+module in muse-codes, not an extension of `MuseRecord`.
+
+## PR sequence
+
+Each PR is independently shippable and verifiable; later PRs depend on
+earlier ones as noted. Echo-provider runs make every PR testable in CI with
+zero credentials — use that everywhere.
+
+### PR 1 — `shared`: `AgentType::Muse` + launcher probe
+
+Smallest possible enum-and-probe change, unblocks everything else.
+
+- `shared`: add `Muse` to `AgentType` (`as_str() = "muse"`, parse, serde).
+  Audit every `match` on `AgentType` — the compiler finds the sites
+  (~58 references across backend/launcher/frontend today); most gain a
+  `Muse` arm that mirrors Claude's (spawn-per-turn family), a few
+  short-circuit (no approval relay).
+- `launcher`: extend `ProbeAgents` to detect the `muse` binary
+  (`muse --version` → `"Muse Code 0.1.0 (0.1.0-R708.1)"`), and the login
+  cell via `muse_codes::auth::credentials_present()` + `AuthFile` parse —
+  label is `"logged in (meta)"` (+ optional `via env` when `META_API_KEY`
+  set); no account name exists at the CLI level (0.1.0 has no whoami).
+- **Probe the sandbox**: `muse` tool execution requires bubblewrap on
+  Linux. A host where `muse` is installed but the sandbox probe fails
+  should surface as *installed-but-degraded* in the computer×agent matrix,
+  not as healthy. (Observed failure mode: runs complete, every tool call
+  returns `tool.result` with `outcome: failure` — confusing without the
+  matrix warning.)
+- Coordinates with the login-matrix work (Settings pane PR1): the matrix
+  cell shapes for muse land here.
+
+Verify: probe unit tests; matrix renders the muse column on a host with and
+without the binary.
+
+### PR 2 — `muse-session-lib`: the session proxy crate
+
+New workspace member mirroring `codex-session-lib`'s module layout
+(`agent.rs`, `classifier.rs`, `events.rs`, `handler.rs`, `io_task.rs`,
+`helpers.rs`), but modeled on the **Claude process pattern**, not the
+Codex one:
+
+- `MuseAgent`: one `muse exec --json --session-id <uuid>` spawn per user
+  turn via `MuseExecBuilder` (cwd, provider, model); `ExecRun` streams
+  `MuseRecord`s; process ends at `run.terminal.*`; next turn respawns with
+  the same session id. Kill-on-drop covers interrupts (there is no
+  interrupt protocol — killing the child *is* the interrupt; the journal's
+  restart-safety makes this clean).
+- `classifier.rs`: `MuseRecord` → portal event records. Mapping table:
+  - `turn.input.user` → user-message echo (dedup against the submitted
+    prompt, like claude's replay ack)
+  - `run.output.delta` → streaming text frame (ephemeral)
+  - `run.terminal.completed` → final assistant message (reconcile: replace
+    accumulated deltas with terminal `text`) + turn end
+  - `run.model.configured` → session header metadata (model/profile)
+  - `task.*` family → task-tree events (see PR 4)
+  - `tool.result` → tool outcome event
+  - `MusePayload::Unknown` → passthrough event `{label: payload_type,
+    body: payload}`
+- Sequence/causation plumbing: store `(stream_id, sequence)` per event —
+  it is the native dedup/ordering key across reconnects; `causation_id`
+  groups a whole turn.
+- Tests: **echo-provider round-trips as the integration suite** (spawn
+  real `muse`, no credentials) + the muse-codes committed corpus replayed
+  through the classifier as fixtures.
+
+Depends on PR 1 (AgentType). Verify: `cargo test -p muse-session-lib` incl.
+live echo runs in CI (install muse in the workflow the same way the
+sdk repo's `muse-schema-drift.yml` does).
+
+### PR 3 — backend: session lifecycle + persistence
+
+- Route `AgentType::Muse` sessions to `muse-session-lib` in the session
+  supervisor; session id minted portal-side and passed via
+  `--session-id` (muse accepts caller-supplied uuids — same pattern as
+  claude's `--session-id`).
+- Persistence: transcript rows from durable events only; store
+  `(stream_id, sequence, causation_id)` alongside for replay-exact
+  reconstruction. DB migration: agent column already stores a string —
+  confirm no enum constraint blocks `"muse"`.
+- Turn semantics: a turn = submit → spawn → terminal record → exit. Child
+  exit without a terminal record surfaces as a typed failure (the
+  muse-codes client already folds exit code + stderr into the error).
+- No approval relay: muse's `side_effect_intent.policy_decision` is
+  recorded and rendered but never blocks (no round-trip exists headless).
+
+Depends on PR 2. Verify: backend integration test drives a full
+echo-provider session through the HTTP/WS surface.
+
+### PR 4 — frontend: rendering
+
+- Streaming pane: deltas stream, terminal text reconciles (mirror the
+  claude delta/result pattern).
+- **Task tree component** (the genuinely new UI): collapsible nodes keyed
+  on `task_id`, lifecycle badge per state (incl. `cancelled`/`rejected`
+  with reasons), `status` events as transient progress lines (they carry
+  model-stream retry telemetry), `output` chunks inside the node,
+  `tool.result` rows with outcome/tool-name and `edit_facts` diffs when
+  present.
+- Session header: model/profile/provider from `run.model.configured`.
+- Unknown passthrough renderer: label + JSON body, matrix-style graceful.
+- Policy decisions rendered as audit rows (distinct styling from
+  approvals, since the user was never asked).
+
+Depends on PR 3. Verify: storybook/fixture renders from the committed
+muse-codes corpus (all 20 payload types appear in it).
+
+### PR 5 — login flow (folds into Settings-pane PR2)
+
+Muse's is the easiest of the three flows: `DeviceLoginFlow::start()` →
+`device_code(timeout)` → relay `{verification_url, code}` (serde) to the
+browser → `wait_approved(timeout)` → matrix cell flips. Plus
+`auth_set(api_key)` as the CI/API-key path (key travels stdin, never
+argv). Cancellation = drop. All five relay-contract constraints already
+hold (serde presentables, parkable handle, reaping drop, caller timeouts,
+version pins).
+
+Depends on PR 1; independent of PRs 2–4. Lands as the muse arm of the
+existing login-buttons plan.
+
+### PR 6 — e2e, docs, deploy
+
+- End-to-end: browser-driven echo-provider session on a staging launcher
+  (create session → prompt → task tree renders → terminal text). This is
+  the only agent where full e2e needs no vendor credentials — make it the
+  CI gate.
+- Meta-provider smoke test stays manual/staging (needs a real credential;
+  keep it out of CI).
+- Docs: DEVELOPING/DEPLOYING notes — muse install (installer script,
+  no self-updater at 0.1.0: re-run installer to update), bubblewrap
+  requirement on launcher hosts, credential paths.
+- Boot provenance line gains the muse-codes rev.
+
+## Risks / open questions
+
+- **Beta CLI, day-one protocol**: Muse Code is days old; expect wire
+  drift. Mitigation already in place: the sdk repo's nightly fingerprint
+  workflow files issues on stream changes, and `MusePayload::Unknown`
+  means new payload types render (labeled) instead of breaking. Portal
+  should treat Unknown-rendering as normal operation, not an error state.
+- **Multi-turn `--session-id` semantics** are verified flag-level but not
+  yet exercised across many turns with a live provider — PR 3 should
+  include a two-turn meta-provider staging test before enabling broadly.
+- **Interrupt = kill**: acceptable per the journal's restart-safety, but
+  confirm muse tolerates mid-run kills without corrupting its session
+  store before shipping PR 3 (cheap echo-provider test: kill mid-run,
+  resume same session id).
+- **Sandbox variance across launcher fleet**: the bubblewrap requirement
+  makes muse the first agent whose *tool* capability depends on host
+  packages. The PR 1 degraded-state cell is the mitigation; deploy docs
+  must list the package.
