@@ -26,6 +26,7 @@ pub mod buffer;
 pub mod error;
 pub mod git_metadata;
 pub mod heartbeat;
+pub mod install;
 pub mod io;
 pub mod output_buffer;
 pub mod probe;

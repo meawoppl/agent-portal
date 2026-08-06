@@ -15,6 +15,7 @@
 //! that opens [`AgentLoginModal`], which drives the launcher-side login flow; a
 //! successful sign-in re-probes the matrix.
 
+use crate::pages::settings::agent_install::{host_label, AgentInstallModal};
 use crate::pages::settings::agent_login::AgentLoginModal;
 use crate::utils::{self, On401};
 use shared::api::ProbeAgentsResponse;
@@ -30,6 +31,16 @@ struct LoginTarget {
     launcher_id: Uuid,
     agent_type: AgentType,
     agent_name: String,
+}
+
+/// Which cell's install modal is open, plus the host label so the modal can
+/// say *where* the install runs.
+#[derive(Clone, PartialEq)]
+struct InstallTarget {
+    launcher_id: Uuid,
+    agent_type: AgentType,
+    agent_name: String,
+    host: String,
 }
 
 /// Columns of the matrix, in display order. Mirrors `AgentType`.
@@ -54,6 +65,8 @@ pub fn agents_panel() -> Html {
     let refresh = use_state(|| 0u32);
     // The open sign-in modal, if any.
     let login_target = use_state(|| None::<LoginTarget>);
+    // The open install modal, if any.
+    let install_target = use_state(|| None::<InstallTarget>);
 
     {
         let launchers = launchers.clone();
@@ -106,6 +119,11 @@ pub fn agents_panel() -> Html {
         Callback::from(move |target: LoginTarget| login_target.set(Some(target)))
     };
 
+    let on_install = {
+        let install_target = install_target.clone();
+        Callback::from(move |target: InstallTarget| install_target.set(Some(target)))
+    };
+
     let body = match (*launchers).clone() {
         None => html! { <p class="setting-description">{ "Loading…" }</p> },
         Some(list) if list.is_empty() => html! {
@@ -123,13 +141,13 @@ pub fn agents_panel() -> Html {
                     </tr>
                 </thead>
                 <tbody>
-                    { for list.iter().map(|l| render_row(l, &probes, &on_sign_in)) }
+                    { for list.iter().map(|l| render_row(l, &probes, &on_sign_in, &on_install)) }
                 </tbody>
             </table>
         },
     };
 
-    let modal = (*login_target).clone().map(|target| {
+    let login_modal = (*login_target).clone().map(|target| {
         let on_close = {
             let login_target = login_target.clone();
             Callback::from(move |_| login_target.set(None))
@@ -149,6 +167,27 @@ pub fn agents_panel() -> Html {
         }
     });
 
+    let install_modal = (*install_target).clone().map(|target| {
+        let on_close = {
+            let install_target = install_target.clone();
+            Callback::from(move |_| install_target.set(None))
+        };
+        let on_success = {
+            let refresh = refresh.clone();
+            Callback::from(move |_| refresh.set(*refresh + 1))
+        };
+        html! {
+            <AgentInstallModal
+                launcher_id={target.launcher_id}
+                agent_type={target.agent_type}
+                agent_name={target.agent_name}
+                host={target.host}
+                {on_close}
+                {on_success}
+            />
+        }
+    });
+
     html! {
         <section class="agents-section">
             <div class="section-header">
@@ -160,7 +199,8 @@ pub fn agents_panel() -> Html {
                 </p>
             </div>
             { body }
-            { for modal }
+            { for login_modal }
+            { for install_modal }
         </section>
     }
 }
@@ -169,6 +209,7 @@ fn render_row(
     launcher: &LauncherInfo,
     probes: &HashMap<Uuid, ProbeState>,
     on_sign_in: &Callback<LoginTarget>,
+    on_install: &Callback<InstallTarget>,
 ) -> Html {
     let state = probes.get(&launcher.launcher_id);
     html! {
@@ -180,7 +221,7 @@ fn render_row(
                 }
             </td>
             { for AGENTS.iter().map(|(agent, name)| {
-                render_cell(state, *agent, name, launcher.launcher_id, on_sign_in)
+                render_cell(state, *agent, name, launcher, on_sign_in, on_install)
             }) }
         </tr>
     }
@@ -190,8 +231,9 @@ fn render_cell(
     state: Option<&ProbeState>,
     agent: AgentType,
     agent_name: &str,
-    launcher_id: Uuid,
+    launcher: &LauncherInfo,
     on_sign_in: &Callback<LoginTarget>,
+    on_install: &Callback<InstallTarget>,
 ) -> Html {
     match state {
         None => html! { <td class="agents-cell loading">{ "…" }</td> },
@@ -200,7 +242,7 @@ fn render_cell(
         }
         Some(ProbeState::Loaded(agents)) => match agents.get(&agent) {
             Some(install) => {
-                render_install_cell(install, agent, agent_name, launcher_id, on_sign_in)
+                render_install_cell(install, agent, agent_name, launcher, on_sign_in, on_install)
             }
             // Probe ran but didn't report this agent at all — treat as unknown.
             None => html! { <td class="agents-cell unknown">{ "—" }</td> },
@@ -212,13 +254,23 @@ fn render_install_cell(
     install: &AgentInstall,
     agent: AgentType,
     agent_name: &str,
-    launcher_id: Uuid,
+    launcher: &LauncherInfo,
     on_sign_in: &Callback<LoginTarget>,
+    on_install: &Callback<InstallTarget>,
 ) -> Html {
     if !install.installed {
+        let target = InstallTarget {
+            launcher_id: launcher.launcher_id,
+            agent_type: agent,
+            agent_name: agent_name.to_string(),
+            host: host_label(launcher),
+        };
+        let on_install = on_install.clone();
+        let onclick = Callback::from(move |_: MouseEvent| on_install.emit(target.clone()));
         return html! {
             <td class="agents-cell not-installed">
                 <span class="agents-badge missing">{ "not installed" }</span>
+                <button class="agents-signin" {onclick}>{ "Install" }</button>
             </td>
         };
     }
@@ -227,7 +279,7 @@ fn render_install_cell(
         <td class="agents-cell installed">
             <span class="agents-badge installed">{ "installed" }</span>
             <span class={classes!("agents-login", login_class)}>{ login_text }</span>
-            { for sign_in_button(&install.login, agent, agent_name, launcher_id, on_sign_in) }
+            { for sign_in_button(&install.login, agent, agent_name, launcher.launcher_id, on_sign_in) }
         </td>
     }
 }
