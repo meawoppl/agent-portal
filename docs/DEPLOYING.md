@@ -38,7 +38,7 @@ SESSION_SECRET=generate-a-random-32-char-secret-here
 # ALLOWED_EMAILS=user1@gmail.com,user2@example.com
 
 # Optional - Message retention (data cleanup)
-# MESSAGE_RETENTION_COUNT=100    # Max messages per session (default: 100)
+# MESSAGE_RETENTION_COUNT=1000   # Max messages per session (default: 1000)
 # MESSAGE_RETENTION_DAYS=30      # Delete messages older than N days (default: 30, 0=disabled)
 
 # Optional - Session cleanup
@@ -181,7 +181,7 @@ Admins can access the admin dashboard at `/admin` which provides:
 - **HTTPS**: Use HTTPS in production (handled by reverse proxy)
 - **Environment Secrets**: Never commit `.env` to version control
 - **Database**: Use SSL/TLS for database connections in production
-- **Data Retention**: Message data is automatically deleted based on `MESSAGE_RETENTION_DAYS` (default 30) and per-session limits (`MESSAGE_RETENTION_COUNT`, default 100). Adjust these values based on your compliance requirements.
+- **Data Retention**: Message data is automatically deleted based on `MESSAGE_RETENTION_DAYS` (default 30) and per-session limits (`MESSAGE_RETENTION_COUNT`, default 1000). Adjust these values based on your compliance requirements.
 
 ## Platform Support
 
