@@ -188,6 +188,7 @@ async fn run_shim_loop(
     let our_stdout_for_reader = our_stdout.clone();
     let permissions_for_reader = permissions.clone();
     let filtering_for_reader = filtering_active.clone();
+    let session_id_for_reader = config.session_id;
 
     // Claude stdout reader task: reads lines, forwards to stdout and queues for portal.
     //
@@ -251,6 +252,17 @@ async fn run_shim_loop(
 
             // Dispatch for portal forwarding (independent of VS Code decision).
             match parsed {
+                // Suggestions are transient composer UI, not durable transcript
+                // messages. Keep them out of the replay/output buffer.
+                Some(ClaudeOutput::PromptSuggestion(suggestion)) => {
+                    let payload = serde_json::to_value(ClaudeOutput::PromptSuggestion(suggestion))
+                        .unwrap_or_default();
+                    let _ = perm_request_tx.send(ProxyToServer::Ephemeral {
+                        session_id: session_id_for_reader,
+                        payload,
+                    });
+                    continue;
+                }
                 // Protocol noise the portal doesn't need.
                 Some(ClaudeOutput::ControlResponse(_)) => continue,
                 // Permission request: forward CanUseTool as typed PermissionRequest

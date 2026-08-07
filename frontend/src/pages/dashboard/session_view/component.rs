@@ -828,11 +828,15 @@ impl SessionView {
                 true
             }
             WsEvent::Ephemeral(payload) => {
-                if let Ok(shared::ClaudeOutput::PromptSuggestion(suggestion)) =
-                    serde_json::from_value(payload.clone())
+                if payload.get("type").and_then(|value| value.as_str()) == Some("prompt_suggestion")
                 {
-                    if let Some(dispatcher) = &self.input_bar_dispatcher {
-                        dispatcher.emit(InputBarInbound::PromptSuggestion(suggestion.suggestion));
+                    if let Ok(shared::ClaudeOutput::PromptSuggestion(suggestion)) =
+                        serde_json::from_value(payload.clone())
+                    {
+                        if let Some(dispatcher) = &self.input_bar_dispatcher {
+                            dispatcher
+                                .emit(InputBarInbound::PromptSuggestion(suggestion.suggestion));
+                        }
                     }
                     return false;
                 }
@@ -1059,13 +1063,6 @@ impl SessionView {
             ));
         }
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
-            if let shared::ClaudeOutput::PromptSuggestion(suggestion) = &claude_msg {
-                if let Some(dispatcher) = &self.input_bar_dispatcher {
-                    dispatcher.emit(InputBarInbound::PromptSuggestion(
-                        suggestion.suggestion.clone(),
-                    ));
-                }
-            }
             // Live task events use the server-assigned row timestamp when the
             // backend supplied it, falling back to browser time only for
             // pre-metadata/error frames.

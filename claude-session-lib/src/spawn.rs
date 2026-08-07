@@ -146,7 +146,10 @@ pub async fn claude_supports_prompt_suggestions(claude_path: &Path) -> bool {
     // failures fail open (omit the additive flag) and are not cached, so a
     // later launch can probe again after host pressure recovers.
     let mut probe = Command::new(claude_path);
-    probe.arg("--help").kill_on_drop(true);
+    probe
+        .arg("--help")
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
     let output = match tokio::time::timeout(Duration::from_secs(2), probe.output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {
