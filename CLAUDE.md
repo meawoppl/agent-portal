@@ -480,6 +480,22 @@ The `--watch` flag continuously polls and displays check status until all checks
 
 To find the run ID, use `gh pr view <pr-number> --json statusCheckRollup` and look at the `detailsUrl` which contains the run ID.
 
+### Let CI catch the mechanical stuff — spend your cycles on the approach
+
+CI runs `cargo fmt --check`, `cargo clippy`, the test suite, and the WASM build
+on every PR and gates the merge on them. So when **reviewing a PR** (or judging
+someone else's diff), do **not** burn your budget re-running `fmt`/`clippy`/tests
+locally to confirm the code is formatted or compiles — CI will catch any of that
+before it can merge, and a green pipeline is more authoritative than your local
+run anyway. Spend those cycles on the things CI *can't* judge: **is the approach
+right, does the solution actually solve the stated problem, are there edge cases
+/ regressions / wrong abstractions, and does it truly close its issue?** That is
+where a human-or-agent reviewer adds value a linter never will.
+
+This is about where to spend *review/analysis* effort, not a license to skip
+local checks when **you are the author** shipping a change — run `cargo fmt`
+before pushing (see below) so you don't waste a CI round-trip on a trivial red.
+
 ## Important Constraints
 
 ### WASM Compatibility Checklist
