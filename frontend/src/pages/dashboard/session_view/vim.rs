@@ -370,6 +370,11 @@ fn handle_normal(
             let end = (cursor + n).min(text.len());
             edit_range(state, textarea, event, &text, Op::Delete, cursor, end)
         }
+        "s" => {
+            let n = state.take_count();
+            let end = (cursor + n).min(text.len());
+            edit_range(state, textarea, event, &text, Op::Change, cursor, end)
+        }
         "D" => {
             let le = line_end(&text, cursor);
             edit_range(state, textarea, event, &text, Op::Delete, cursor, le)
@@ -748,7 +753,7 @@ fn edit_range(
                 state.mode = VimMode::Insert;
                 move_cursor(textarea, &v, c);
             } else {
-                place_block(textarea, &v, clamp_normal_cursor(&v, c));
+                place_block(textarea, &v, c);
             }
             VimHandled::Consumed { rerender: true }
         }
@@ -798,7 +803,7 @@ fn linewise_op(
             };
             let (v, c) = delete_lines(text, ls, le);
             set_text(textarea, &v);
-            place_block(textarea, &v, clamp_normal_cursor(&v, c));
+            place_block(textarea, &v, c);
             VimHandled::Consumed { rerender: true }
         }
         Op::Change => {
@@ -880,7 +885,7 @@ fn move_cursor(textarea: &HtmlTextAreaElement, text: &[char], idx: usize) {
 /// Place the NORMAL-mode block caret: a one-char selection covering the cell at
 /// `idx`, or a collapsed caret at end-of-line / empty input.
 fn place_block(textarea: &HtmlTextAreaElement, text: &[char], idx: usize) {
-    let idx = idx.min(text.len());
+    let idx = clamp_normal_cursor(text, idx);
     let start = char_idx_to_utf16(text, idx);
     let at_eol = idx >= text.len() || text[idx] == '\n';
     let end = if at_eol {
@@ -1554,6 +1559,13 @@ mod tests {
         assert!(empty.is_empty());
         assert_eq!(clamp_normal_cursor(&empty, cursor), 0);
         assert_eq!(clamp_normal_cursor(&chars("\nnext"), 0), 0);
+    }
+
+    #[test]
+    fn normal_cursor_clamp_keeps_dollar_motion_on_last_character() {
+        let text = chars("ab\ncd");
+        assert_eq!(clamp_normal_cursor(&text, line_end(&text, 0)), 1);
+        assert_eq!(clamp_normal_cursor(&text, line_end(&text, 3)), 4);
     }
 
     #[test]
