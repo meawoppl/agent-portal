@@ -516,7 +516,11 @@ mod reminder_screen {
         assert!(c.classify(linked("t1")).is_empty());
         // A real work task (not reminder.* / model.meta.response) releases its
         // held link and stays visible.
-        let out = c.classify(lifecycle("proposed", "t1", json!({"task_kind": "tool.bash"})));
+        let out = c.classify(lifecycle(
+            "proposed",
+            "t1",
+            json!({"task_kind": "tool.bash"}),
+        ));
         let types: Vec<_> = out
             .iter()
             .map(|o| match o {
