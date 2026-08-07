@@ -63,6 +63,10 @@ pub enum WsEvent {
         parent_tool_use_id: Option<String>,
         tool_name: String,
         elapsed_time_seconds: f64,
+        /// Which `Task` sub-agent is running, when this is sub-agent progress (#1474).
+        subagent_type: Option<String>,
+        /// Retry state, present only while the sub-agent is retrying (#1474).
+        subagent_retry: Option<shared::SubagentRetryStatus>,
     },
     /// Neutral ephemeral live-status frame (`ServerToClient::Ephemeral`).
     /// Drives a transient per-session live-status line (muse's streamed
@@ -250,12 +254,16 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             parent_tool_use_id,
             tool_name,
             elapsed_time_seconds,
+            subagent_type,
+            subagent_retry,
         } => {
             on_event.emit(WsEvent::ToolProgress {
                 tool_use_id,
                 parent_tool_use_id,
                 tool_name,
                 elapsed_time_seconds,
+                subagent_type,
+                subagent_retry,
             });
         }
         ServerToClient::Ephemeral { payload } => {

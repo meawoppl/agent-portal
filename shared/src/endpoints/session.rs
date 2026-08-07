@@ -5,8 +5,8 @@ use ws_bridge::WsEndpoint;
 use super::types::{
     FileDownloadRequestFields, FileDownloadResponseFields, FileUploadChunkFields,
     FileUploadResultFields, FileUploadStartFields, ForwardPortFields, ForwardStatusFields,
-    PermissionResponseFields, RegisterFields, SessionLimitContinuationFields, TunnelCloseFields,
-    TunnelDataFields, TunnelOpenFields, TunnelRefusedFields, TunnelStreamFields,
+    PermissionResponseFields, RegisterFields, SessionLimitContinuationFields, SubagentRetryStatus,
+    TunnelCloseFields, TunnelDataFields, TunnelOpenFields, TunnelRefusedFields, TunnelStreamFields,
     TunnelWindowFields,
 };
 use crate::{AgentType, PermissionSuggestion, SendMode, SessionStatus, TurnMetrics};
@@ -147,6 +147,15 @@ pub enum ProxyToServer {
         parent_tool_use_id: Option<String>,
         tool_name: String,
         elapsed_time_seconds: f64,
+        /// Which `Task` sub-agent this progress belongs to, when the running
+        /// tool is a sub-agent (#1474). `None` for ordinary tool calls. Older
+        /// proxies omit it, so it defaults rather than failing the frame.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_type: Option<String>,
+        /// Set only while a sub-agent's API call is being retried (#1474);
+        /// absent on a normal heartbeat.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_retry: Option<SubagentRetryStatus>,
     },
 
     /// A neutral ephemeral live-status frame — the agent-agnostic generalization

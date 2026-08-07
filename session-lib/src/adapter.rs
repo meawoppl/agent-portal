@@ -17,6 +17,8 @@
 //!
 //! See `docs/design/session-adapter.md` and `docs/design/agent-runtime.md`.
 
+use shared::SubagentRetryStatus;
+
 /// One unit of agent stdout, as opaque wire JSON. The classifier parses it.
 pub type RawUnit = serde_json::Value;
 
@@ -58,6 +60,12 @@ pub enum AgentOutput {
         parent_tool_use_id: Option<String>,
         tool_name: String,
         elapsed_time_seconds: f64,
+        /// The `Task` sub-agent this progress belongs to, when Claude reports
+        /// one (#1474) — e.g. which agent a long-running `Task` is running.
+        subagent_type: Option<String>,
+        /// Sub-agent retry state, present only while an attempt is being
+        /// retried after an error (#1474).
+        subagent_retry: Option<SubagentRetryStatus>,
     },
     /// Live-status output that must stream to the UI but must **never** be
     /// buffered or persisted.
@@ -198,6 +206,17 @@ impl AgentOutputClassifier for ClaudeAdapter {
                 parent_tool_use_id: tp.parent_tool_use_id,
                 tool_name: tp.tool_name,
                 elapsed_time_seconds: tp.elapsed_time_seconds,
+                subagent_type: tp.subagent_type,
+                // Map the SDK's retry struct onto the portal's wire shape,
+                // keeping only what the live pill renders (#1474). `heartbeat`
+                // is deliberately not carried: every frame on this channel is
+                // already a keepalive tick as far as the strip is concerned, so
+                // the flag has no user-facing meaning today.
+                subagent_retry: tp.subagent_retry.map(|r| SubagentRetryStatus {
+                    attempt: r.attempt,
+                    max_retries: r.max_retries,
+                    error_category: r.error_category,
+                }),
             }],
             // Everything else (System, User, Assistant, Error, RateLimitEvent)
             // is user-visible.
@@ -389,11 +408,16 @@ mod tests {
                 parent_tool_use_id,
                 tool_name,
                 elapsed_time_seconds,
+                subagent_type,
+                subagent_retry,
             } => {
                 assert_eq!(tool_use_id, "toolu_01abc-heartbeat-0");
                 assert_eq!(parent_tool_use_id.as_deref(), Some("toolu_01abc"));
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(*elapsed_time_seconds, 30.0);
+                // An ordinary tool heartbeat carries neither sub-agent field.
+                assert_eq!(*subagent_type, None);
+                assert_eq!(*subagent_retry, None);
             }
             other => panic!("expected ToolProgress, got {other:?}"),
         }
@@ -402,6 +426,48 @@ mod tests {
             !matches!(&out[0], AgentOutput::Visible(_)),
             "tool_progress must never classify as Visible — it would be persisted"
         );
+    }
+
+    #[test]
+    fn classify_tool_progress_carries_subagent_type_and_retry() {
+        // A `Task` sub-agent mid-retry (#1474): the classifier maps the SDK's
+        // `subagent_type` / `subagent_retry` onto the portal's live-status
+        // shape so the strip can say which agent is running and that it is
+        // retrying rather than hung.
+        let raw = json!({
+            "type": "tool_progress",
+            "tool_name": "Task",
+            "elapsed_time_seconds": 90.0,
+            "parent_tool_use_id": "toolu_01abc",
+            "tool_use_id": "toolu_01abc-heartbeat-2",
+            "session_id": "01890000-0000-7000-8000-000000000001",
+            "uuid": "01890000-0000-7000-8000-000000000002",
+            "subagent_type": "code-reviewer",
+            "subagent_retry": {
+                "agent_id": "agent_1",
+                "attempt": 2,
+                "max_retries": 3,
+                "retry_delay_ms": 5000,
+                "error_status": 529,
+                "error_category": "overloaded"
+            }
+        });
+        let mut adapter = ClaudeAdapter;
+        let out = adapter.classify(raw);
+        match &out[0] {
+            AgentOutput::ToolProgress {
+                subagent_type,
+                subagent_retry,
+                ..
+            } => {
+                assert_eq!(subagent_type.as_deref(), Some("code-reviewer"));
+                let retry = subagent_retry.as_ref().expect("retry state");
+                assert_eq!(retry.attempt, 2);
+                assert_eq!(retry.max_retries, 3);
+                assert_eq!(retry.error_category, "overloaded");
+            }
+            other => panic!("expected ToolProgress, got {other:?}"),
+        }
     }
 
     #[test]

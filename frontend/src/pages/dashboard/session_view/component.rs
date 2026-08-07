@@ -809,11 +809,22 @@ impl SessionView {
                 parent_tool_use_id,
                 tool_name,
                 elapsed_time_seconds,
+                subagent_type,
+                subagent_retry,
             } => {
                 // Ephemeral live status: refresh the running-tool strip. Never
                 // touches `messages` (no persistence, no replay watermark).
                 let key = running_tool_key(&tool_use_id, parent_tool_use_id.as_deref());
-                upsert_tool_progress(&mut self.active_tools, key, tool_name, elapsed_time_seconds);
+                upsert_tool_progress(
+                    &mut self.active_tools,
+                    ActiveToolProgress {
+                        key,
+                        tool_name,
+                        elapsed_seconds: elapsed_time_seconds,
+                        subagent_type,
+                        subagent_retry,
+                    },
+                );
                 true
             }
             WsEvent::Ephemeral(payload) => {
@@ -1086,9 +1097,24 @@ impl SessionView {
                         <div class="active-tool-pill" key={tool.key.clone()}>
                             <span class="active-tool-spinner" />
                             <span class="active-tool-name">{ tool.tool_name.clone() }</span>
+                            // Which Task sub-agent is running (#1474) — a long
+                            // `Task` otherwise reads as an anonymous stall.
+                            if let Some(subagent) = tool.subagent_type.as_deref() {
+                                <span class="active-tool-subagent">{ subagent }</span>
+                            }
                             <span class="active-tool-status">
                                 { format!("running — {}", format_tool_elapsed(tool.elapsed_seconds)) }
                             </span>
+                            // Only while the sub-agent is retrying: says the
+                            // turn is flaky-but-progressing, not hung.
+                            if let Some(retry) = tool.subagent_retry.as_ref() {
+                                <span class="active-tool-retry">
+                                    { format!(
+                                        "retrying {}/{} — {}",
+                                        retry.attempt, retry.max_retries, retry.error_category
+                                    ) }
+                                </span>
+                            }
                         </div>
                     }
                 }) }

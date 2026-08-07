@@ -159,6 +159,10 @@ pub enum SessionEvent {
         parent_tool_use_id: Option<String>,
         tool_name: String,
         elapsed_time_seconds: f64,
+        /// The `Task` sub-agent this progress belongs to, when there is one (#1474).
+        subagent_type: Option<String>,
+        /// Sub-agent retry state, present only mid-retry (#1474).
+        subagent_retry: Option<shared::SubagentRetryStatus>,
     },
 
     /// Claude reported a hard session limit with a reset time.

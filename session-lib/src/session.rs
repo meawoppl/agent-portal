@@ -284,12 +284,16 @@ impl<A: Agent> Session<A> {
                             parent_tool_use_id,
                             tool_name,
                             elapsed_time_seconds,
+                            subagent_type,
+                            subagent_retry,
                         } => {
                             return Some(SessionEvent::ToolProgress {
                                 tool_use_id,
                                 parent_tool_use_id,
                                 tool_name,
                                 elapsed_time_seconds,
+                                subagent_type,
+                                subagent_retry,
                             });
                         }
                         // Internal ack / nothing for the consumer — skip it and
