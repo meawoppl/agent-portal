@@ -370,6 +370,11 @@ fn handle_normal(
             let end = (cursor + n).min(text.len());
             edit_range(state, textarea, event, &text, Op::Delete, cursor, end)
         }
+        "s" => {
+            let n = state.take_count();
+            let end = (cursor + n).min(text.len());
+            edit_range(state, textarea, event, &text, Op::Change, cursor, end)
+        }
         "D" => {
             let le = line_end(&text, cursor);
             edit_range(state, textarea, event, &text, Op::Delete, cursor, le)
@@ -880,7 +885,7 @@ fn move_cursor(textarea: &HtmlTextAreaElement, text: &[char], idx: usize) {
 /// Place the NORMAL-mode block caret: a one-char selection covering the cell at
 /// `idx`, or a collapsed caret at end-of-line / empty input.
 fn place_block(textarea: &HtmlTextAreaElement, text: &[char], idx: usize) {
-    let idx = idx.min(text.len());
+    let idx = clamp_normal_cursor(text, idx);
     let start = char_idx_to_utf16(text, idx);
     let at_eol = idx >= text.len() || text[idx] == '\n';
     let end = if at_eol {
@@ -1338,6 +1343,20 @@ fn remove_range(text: &[char], start: usize, end: usize) -> (Vec<char>, usize) {
     (v, c)
 }
 
+/// Keep a NORMAL-mode block cursor on a real character after deletion. When a
+/// deletion leaves the cursor at end-of-line/end-of-buffer, native Vim steps
+/// left within that line; otherwise the collapsed EOL caret makes the next
+/// repeated edit operate on an empty range forever.
+fn clamp_normal_cursor(text: &[char], cursor: usize) -> usize {
+    let cursor = cursor.min(text.len());
+    let at_eol = cursor >= text.len() || text[cursor] == '\n';
+    if at_eol && cursor > line_start(text, cursor) {
+        cursor - 1
+    } else {
+        cursor
+    }
+}
+
 /// Delete whole lines `[ls, le]` where `le` is the end (exclusive of the final
 /// newline) of the last line to remove. Mirrors vim `dd`/`Ndd`.
 fn delete_lines(text: &[char], ls: usize, le: usize) -> (Vec<char>, usize) {
@@ -1511,6 +1530,50 @@ mod tests {
         let (v, c) = remove_range(&chars("ab"), 2, 3);
         assert_eq!(s(&v), "ab");
         assert_eq!(c, 2);
+    }
+
+    #[test]
+    fn repeated_x_at_end_of_line_steps_left_and_keeps_deleting() {
+        let mut text = chars("abcdef");
+        let mut cursor = 5;
+        for _ in 0..3 {
+            (text, cursor) = remove_range(&text, cursor, cursor + 1);
+            cursor = clamp_normal_cursor(&text, cursor);
+        }
+        assert_eq!(s(&text), "abc");
+        assert_eq!(cursor, 2);
+    }
+
+    #[test]
+    fn normal_cursor_clamp_does_not_cross_a_line_boundary() {
+        let (text, cursor) = remove_range(&chars("abc\ndef"), 2, 3);
+        assert_eq!(s(&text), "ab\ndef");
+        assert_eq!(clamp_normal_cursor(&text, cursor), 1);
+        // The start of the next/empty line never steps into the prior line.
+        assert_eq!(clamp_normal_cursor(&text, 3), 3);
+    }
+
+    #[test]
+    fn normal_cursor_clamp_handles_empty_buffer_and_empty_line() {
+        let (empty, cursor) = remove_range(&chars("x"), 0, 1);
+        assert!(empty.is_empty());
+        assert_eq!(clamp_normal_cursor(&empty, cursor), 0);
+        assert_eq!(clamp_normal_cursor(&chars("\nnext"), 0), 0);
+    }
+
+    #[test]
+    fn normal_cursor_clamp_keeps_dollar_motion_on_last_character() {
+        let text = chars("ab\ncd");
+        assert_eq!(clamp_normal_cursor(&text, line_end(&text, 0)), 1);
+        assert_eq!(clamp_normal_cursor(&text, line_end(&text, 3)), 4);
+    }
+
+    #[test]
+    fn deleting_last_line_places_cursor_on_remaining_text() {
+        let text = chars("first\nlast");
+        let (remaining, cursor) = delete_lines(&text, 6, text.len());
+        assert_eq!(s(&remaining), "first");
+        assert_eq!(clamp_normal_cursor(&remaining, cursor), 0);
     }
 
     /// `dw` = operator-motion range over `w`, then `remove_range`.
