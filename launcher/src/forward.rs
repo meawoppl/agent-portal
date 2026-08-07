@@ -28,10 +28,8 @@ fn api_base() -> Result<(String, String)> {
 
 /// The calling agent's own portal session id (reuses `message`'s resolver, so
 /// Claude / Codex / explicit-override all work).
-fn session_id() -> Result<String> {
-    crate::message::sender_session_id().ok_or_else(|| {
-        anyhow!("run this from inside an agent session (no portal session id found)")
-    })
+async fn session_id(client: &reqwest::Client, base: &str, token: &str) -> Result<String> {
+    crate::message::current_session_id(client, base, token).await
 }
 
 /// Outcome of a best-effort local probe of the origin the forward points at.
@@ -176,8 +174,8 @@ pub async fn open(port: u16) -> Result<()> {
         return Err(anyhow!("port must be 1-65535"));
     }
     let (base, token) = api_base()?;
-    let session = session_id()?;
     let client = reqwest::Client::new();
+    let session = session_id(&client, &base, &token).await?;
 
     // Probe the origin locally first (same host as the CLI) so we can report
     // exactly what the tunnel will see, before the round-trip to register.
@@ -216,8 +214,8 @@ pub async fn open(port: u16) -> Result<()> {
 /// `agent-portal forward list` — active forwards for this session.
 pub async fn list() -> Result<()> {
     let (base, token) = api_base()?;
-    let session = session_id()?;
     let client = reqwest::Client::new();
+    let session = session_id(&client, &base, &token).await?;
 
     let resp = client
         .get(format!("{base}/api/agent/sessions/{session}/forwards"))
@@ -250,8 +248,8 @@ pub async fn list() -> Result<()> {
 /// `agent-portal forward close` — revoke the session's forward.
 pub async fn close() -> Result<()> {
     let (base, token) = api_base()?;
-    let session = session_id()?;
     let client = reqwest::Client::new();
+    let session = session_id(&client, &base, &token).await?;
 
     let resp = client
         .delete(format!("{base}/api/agent/sessions/{session}/forwards"))

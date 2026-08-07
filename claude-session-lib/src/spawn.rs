@@ -59,9 +59,10 @@ pub(crate) async fn spawn_claude(
     let mut cmd = Command::new(claude_path);
     cmd.args(&args);
     cmd.current_dir(&config.working_directory);
-    // Note: no need to inject a session-id env var — Claude Code already
-    // exports `CLAUDE_CODE_SESSION_ID` (equal to the `--session-id` we pass) to
-    // the tools it spawns, which `agent-portal message` reads for attribution.
+    // Claude exports `CLAUDE_CODE_SESSION_ID` to tools it spawns. This is the
+    // id passed here initially, but it is process-environment state and can go
+    // stale when `/clear` rolls Claude to another conversation. The launcher
+    // CLI therefore treats an explicit `PORTAL_SESSION_ID` as authoritative.
 
     // Log the full command for diagnostics.
     tracing::info!(

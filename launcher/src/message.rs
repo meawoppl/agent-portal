@@ -12,27 +12,96 @@ use shared::api::{AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessa
 const SHORT_SESSION_ID_LEN: usize = 8;
 
 /// The calling agent's own portal session id, read from whatever the agent
-/// already exposes — no portal-side injection needed:
+/// already exposes:
 ///
-/// - Claude Code sets `CLAUDE_CODE_SESSION_ID` to the id we spawn it with
-///   (`--session-id <portal id>`), so it already *is* the portal session id.
+/// - `PORTAL_SESSION_ID` is the explicit portal-side override and therefore
+///   always wins. In particular, Claude keeps its process environment across
+///   `/clear`, so `CLAUDE_CODE_SESSION_ID` can still name the pre-clear
+///   conversation while a caller deliberately supplies the current portal id.
+/// - Claude Code sets `CLAUDE_CODE_SESSION_ID` to the id we spawn it with. It
+///   is a useful fallback, but is only a spawn-time value.
 /// - Codex sets `CODEX_THREAD_ID`, which is *not* the portal id, so we reverse
 ///   it through the launcher's `codex_threads.json` map to the portal session.
-/// - `PORTAL_SESSION_ID` is honored as a manual/explicit override.
 ///
 /// Returns `None` when none apply (e.g. a human shell), in which case the
 /// recipient falls back to user attribution.
-pub(crate) fn sender_session_id() -> Option<String> {
+pub(crate) fn sender_session_id(
+    sessions: &[shared::api::AgentSessionInfo],
+) -> Result<Option<String>> {
     let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
 
-    if let Some(id) = env("CLAUDE_CODE_SESSION_ID").or_else(|| env("PORTAL_SESSION_ID")) {
-        return Some(id);
+    if let Some(id) = env("PORTAL_SESSION_ID") {
+        return Ok(Some(id));
     }
     if let Some(thread_id) = env("CODEX_THREAD_ID") {
-        return crate::process_manager::session_id_for_codex_thread(&thread_id)
-            .map(|id| id.to_string());
+        return Ok(
+            crate::process_manager::session_id_for_codex_thread(&thread_id)
+                .map(|id| id.to_string()),
+        );
     }
-    None
+    let Some(claude_id) = env("CLAUDE_CODE_SESSION_ID") else {
+        return Ok(None);
+    };
+    let cwd = std::env::current_dir()
+        .context("could not determine the current working directory")?
+        .to_string_lossy()
+        .into_owned();
+    let hostname = claude_session_lib::hostname_or_unknown();
+    resolve_claude_session_id(&claude_id, &cwd, &hostname, sessions).map(Some)
+}
+
+/// Validate Claude's spawn-time id against the authenticated session list. If
+/// `/clear` replaced it, recover only when the caller's host + working
+/// directory identify exactly one live Claude session. Refusing ambiguity is
+/// important: guessing could mutate or attribute output to another session.
+fn resolve_claude_session_id(
+    claude_id: &str,
+    cwd: &str,
+    hostname: &str,
+    sessions: &[shared::api::AgentSessionInfo],
+) -> Result<String> {
+    if sessions
+        .iter()
+        .any(|session| session.id.to_string() == claude_id)
+    {
+        return Ok(claude_id.to_string());
+    }
+    let candidates: Vec<_> = sessions
+        .iter()
+        .filter(|session| {
+            session.agent_type == "claude"
+                && session.status == shared::SessionStatus::Active.as_str()
+                && session.working_directory == cwd
+                && session.hostname == hostname
+        })
+        .collect();
+    match candidates.as_slice() {
+        [session] => Ok(session.id.to_string()),
+        [] => Err(anyhow!(
+            "Claude's session id {claude_id} is stale and no active portal session matches this host and working directory; set PORTAL_SESSION_ID explicitly"
+        )),
+        _ => Err(anyhow!(
+            "Claude's session id {claude_id} is stale and {} active portal sessions match this host and working directory; set PORTAL_SESSION_ID explicitly",
+            candidates.len()
+        )),
+    }
+}
+
+pub(crate) async fn current_session_id(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+) -> Result<String> {
+    if let Some(id) = std::env::var("PORTAL_SESSION_ID")
+        .ok()
+        .filter(|v| !v.is_empty())
+    {
+        return Ok(id);
+    }
+    let sessions = fetch_sessions(client, base, token).await?;
+    sender_session_id(&sessions.sessions)?.ok_or_else(|| {
+        anyhow!("run this from inside an agent session (no portal session id found)")
+    })
 }
 
 /// Resolve the HTTP API base URL and auth token from the launcher config.
@@ -168,7 +237,7 @@ pub async fn list() -> Result<()> {
         println!("No sessions found.");
         return Ok(());
     }
-    let self_id = sender_session_id();
+    let self_id = sender_session_id(&data.sessions)?;
     for s in &data.sessions {
         let marker = if self_id.as_deref() == Some(&s.id.to_string()) {
             " (this session)"
@@ -212,7 +281,7 @@ pub async fn send(agent_id: &str, message: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let sessions = fetch_sessions(&client, &base, &token).await?;
     let resolved_agent_id = resolve_session_id(agent_id, &sessions.sessions)?;
-    let from = sender_session_id();
+    let from = sender_session_id(&sessions.sessions)?;
     // Non-idempotent POST: retry the pre-delivery transient (404 target lookup
     // against a stale session index) and transport errors, but NOT 5xx — the
     // server may already have delivered, and a replay would double-send.
@@ -320,12 +389,53 @@ mod tests {
             id: Uuid::parse_str(id).expect("valid uuid"),
             session_name: "session".to_string(),
             working_directory: "/repo".to_string(),
-            agent_type: "codex".to_string(),
+            agent_type: "claude".to_string(),
             status: "active".to_string(),
             hostname: "host".to_string(),
             awaiting_permission: false,
             last_activity: String::new(),
         }
+    }
+
+    #[test]
+    fn stale_claude_id_resolves_to_unique_live_session_on_same_host_and_cwd() {
+        let sessions = vec![session("0c24805b-0000-0000-0000-000000000000")];
+        assert_eq!(
+            resolve_claude_session_id(
+                "80740e1d-0000-0000-0000-000000000000",
+                "/repo",
+                "host",
+                &sessions
+            )
+            .expect("unique replacement"),
+            sessions[0].id.to_string()
+        );
+    }
+
+    #[test]
+    fn existing_claude_id_wins_without_inference() {
+        let sessions = vec![session("80740e1d-0000-0000-0000-000000000000")];
+        assert_eq!(
+            resolve_claude_session_id(&sessions[0].id.to_string(), "/other", "other", &sessions)
+                .expect("existing id"),
+            sessions[0].id.to_string()
+        );
+    }
+
+    #[test]
+    fn stale_claude_id_refuses_ambiguous_live_sessions() {
+        let sessions = vec![
+            session("0c24805b-0000-0000-0000-000000000000"),
+            session("1c24805b-0000-0000-0000-000000000000"),
+        ];
+        let error = resolve_claude_session_id(
+            "80740e1d-0000-0000-0000-000000000000",
+            "/repo",
+            "host",
+            &sessions,
+        )
+        .expect_err("ambiguous sessions must not be guessed");
+        assert!(error.to_string().contains("2 active portal sessions"));
     }
 
     #[test]

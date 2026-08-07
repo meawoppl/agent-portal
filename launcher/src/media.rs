@@ -109,15 +109,12 @@ pub async fn show(path_str: &str) -> Result<()> {
         ));
     }
 
-    let session_id = crate::message::sender_session_id().ok_or_else(|| {
-        anyhow!(
-            "could not determine the calling session — `agent-portal show` must be run \
-             from inside an agent session's shell"
-        )
-    })?;
     let (base, token) = crate::message::api_base()?;
 
     let client = reqwest::Client::new();
+    let session_id = crate::message::current_session_id(&client, &base, &token)
+        .await
+        .context("could not determine the calling session for `agent-portal show`")?;
     let resp = client
         .post(format!("{base}/api/agent/sessions/{session_id}/media"))
         .bearer_auth(&token)
