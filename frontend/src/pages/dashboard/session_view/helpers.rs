@@ -510,6 +510,14 @@ pub(crate) struct ActiveToolProgress {
     pub key: String,
     pub tool_name: String,
     pub elapsed_seconds: f64,
+    /// The `Task` sub-agent behind this tool, when Claude reports one (#1474).
+    /// Renders as a qualifier on the pill so a long `Task` says *which* agent
+    /// is running.
+    pub subagent_type: Option<String>,
+    /// Retry state while the sub-agent is retrying after an error (#1474).
+    /// Present only mid-retry, so a flaky sub-agent turn is legible instead of
+    /// looking like an unexplained stall.
+    pub subagent_retry: Option<shared::SubagentRetryStatus>,
 }
 
 /// Derive the correlation key for a heartbeat: the *running* tool's id.
@@ -530,24 +538,31 @@ pub(crate) fn running_tool_key(tool_use_id: &str, parent_tool_use_id: Option<&st
     }
 }
 
-/// Upsert a heartbeat into the ordered active-tool list: refresh the elapsed
-/// time of an existing entry in place (preserving display order) or append a
-/// new one. Order-preserving so the strip doesn't reshuffle every 30s.
+/// Upsert a heartbeat into the ordered active-tool list: refresh an existing
+/// entry in place (preserving display order) or append a new one.
+/// Order-preserving so the strip doesn't reshuffle every 30s.
+///
+/// The two sub-agent fields (#1474) merge differently, on purpose:
+///
+/// - `subagent_type` is **sticky**. It identifies *which* `Task` agent is
+///   running, which cannot change for a given tool id, so a later frame that
+///   omits it keeps the known label rather than flickering it away.
+/// - `subagent_retry` is **replaced every frame**, including with `None`.
+///   It is transient state, and its absence is meaningful: it means the
+///   sub-agent is no longer retrying, so the badge must clear.
 pub(crate) fn upsert_tool_progress(
     list: &mut Vec<ActiveToolProgress>,
-    key: String,
-    tool_name: String,
-    elapsed_seconds: f64,
+    incoming: ActiveToolProgress,
 ) {
-    if let Some(existing) = list.iter_mut().find(|t| t.key == key) {
-        existing.tool_name = tool_name;
-        existing.elapsed_seconds = elapsed_seconds;
+    if let Some(existing) = list.iter_mut().find(|t| t.key == incoming.key) {
+        existing.tool_name = incoming.tool_name;
+        existing.elapsed_seconds = incoming.elapsed_seconds;
+        if incoming.subagent_type.is_some() {
+            existing.subagent_type = incoming.subagent_type;
+        }
+        existing.subagent_retry = incoming.subagent_retry;
     } else {
-        list.push(ActiveToolProgress {
-            key,
-            tool_name,
-            elapsed_seconds,
-        });
+        list.push(incoming);
     }
 }
 
@@ -1242,13 +1257,32 @@ mod tests {
         assert_eq!(running_tool_key("toolu_01abc", None), "toolu_01abc");
     }
 
+    /// A plain tool heartbeat (no sub-agent fields) — the common case.
+    fn progress(key: &str, tool_name: &str, elapsed_seconds: f64) -> ActiveToolProgress {
+        ActiveToolProgress {
+            key: key.into(),
+            tool_name: tool_name.into(),
+            elapsed_seconds,
+            subagent_type: None,
+            subagent_retry: None,
+        }
+    }
+
+    fn retry(attempt: u64, max_retries: u64) -> shared::SubagentRetryStatus {
+        shared::SubagentRetryStatus {
+            attempt,
+            max_retries,
+            error_category: "overloaded".into(),
+        }
+    }
+
     #[test]
     fn upsert_tool_progress_refreshes_in_place_preserving_order() {
         let mut list = Vec::new();
-        upsert_tool_progress(&mut list, "a".into(), "Bash".into(), 30.0);
-        upsert_tool_progress(&mut list, "b".into(), "Read".into(), 30.0);
+        upsert_tool_progress(&mut list, progress("a", "Bash", 30.0));
+        upsert_tool_progress(&mut list, progress("b", "Read", 30.0));
         // Refresh "a": elapsed updates, order stays [a, b].
-        upsert_tool_progress(&mut list, "a".into(), "Bash".into(), 60.0);
+        upsert_tool_progress(&mut list, progress("a", "Bash", 60.0));
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].key, "a");
         assert_eq!(list[0].elapsed_seconds, 60.0);
@@ -1256,18 +1290,52 @@ mod tests {
     }
 
     #[test]
+    fn upsert_keeps_known_subagent_type_when_a_later_frame_omits_it() {
+        // `subagent_type` identifies which Task agent is running and cannot
+        // change for a tool id, so a frame without it must not blank the label.
+        let mut list = Vec::new();
+        let mut first = progress("a", "Task", 30.0);
+        first.subagent_type = Some("code-reviewer".into());
+        upsert_tool_progress(&mut list, first);
+        upsert_tool_progress(&mut list, progress("a", "Task", 60.0));
+        assert_eq!(list[0].subagent_type.as_deref(), Some("code-reviewer"));
+        assert_eq!(list[0].elapsed_seconds, 60.0);
+    }
+
+    #[test]
+    fn upsert_clears_retry_when_the_next_frame_is_not_retrying() {
+        // Retry state is transient: its ABSENCE means the sub-agent stopped
+        // retrying, so the badge has to clear or it would stick forever.
+        let mut list = Vec::new();
+        let mut retrying = progress("a", "Task", 30.0);
+        retrying.subagent_retry = Some(retry(2, 3));
+        upsert_tool_progress(&mut list, retrying);
+        assert!(list[0].subagent_retry.is_some());
+
+        upsert_tool_progress(&mut list, progress("a", "Task", 60.0));
+        assert!(
+            list[0].subagent_retry.is_none(),
+            "a non-retrying frame must clear the retry badge"
+        );
+    }
+
+    #[test]
+    fn upsert_advances_the_retry_attempt() {
+        let mut list = Vec::new();
+        let mut first = progress("a", "Task", 30.0);
+        first.subagent_retry = Some(retry(1, 3));
+        upsert_tool_progress(&mut list, first);
+        let mut second = progress("a", "Task", 60.0);
+        second.subagent_retry = Some(retry(2, 3));
+        upsert_tool_progress(&mut list, second);
+        assert_eq!(list[0].subagent_retry.as_ref().unwrap().attempt, 2);
+    }
+
+    #[test]
     fn clear_completed_tools_drops_matching_tool_result() {
         let mut list = vec![
-            ActiveToolProgress {
-                key: "toolu_01".into(),
-                tool_name: "Bash".into(),
-                elapsed_seconds: 90.0,
-            },
-            ActiveToolProgress {
-                key: "toolu_02".into(),
-                tool_name: "Read".into(),
-                elapsed_seconds: 30.0,
-            },
+            progress("toolu_01", "Bash", 90.0),
+            progress("toolu_02", "Read", 30.0),
         ];
         let user_result = serde_json::json!({
             "type": "user",
@@ -1289,11 +1357,7 @@ mod tests {
 
     #[test]
     fn clear_completed_tools_clears_all_on_turn_result() {
-        let mut list = vec![ActiveToolProgress {
-            key: "toolu_01".into(),
-            tool_name: "Bash".into(),
-            elapsed_seconds: 90.0,
-        }];
+        let mut list = vec![progress("toolu_01", "Bash", 90.0)];
         let result = serde_json::json!({
             "type": "result",
             "subtype": "success",
@@ -1311,11 +1375,7 @@ mod tests {
 
     #[test]
     fn clear_completed_tools_is_noop_for_unrelated_message() {
-        let mut list = vec![ActiveToolProgress {
-            key: "toolu_01".into(),
-            tool_name: "Bash".into(),
-            elapsed_seconds: 90.0,
-        }];
+        let mut list = vec![progress("toolu_01", "Bash", 90.0)];
         let assistant = serde_json::json!({
             "type": "assistant",
             "message": {

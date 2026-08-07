@@ -4,7 +4,7 @@ use ws_bridge::WsEndpoint;
 
 use super::types::{
     FileUploadChunkFields, FileUploadResultFields, FileUploadStartFields, PermissionResponseFields,
-    RegisterFields,
+    RegisterFields, SubagentRetryStatus,
 };
 use crate::{AgentType, PermissionSuggestion, SendMode, SessionCost, SessionStatus, TurnMetrics};
 
@@ -341,6 +341,14 @@ pub enum ServerToClient {
         parent_tool_use_id: Option<String>,
         tool_name: String,
         elapsed_time_seconds: f64,
+        /// Which `Task` sub-agent is running, when this progress belongs to one
+        /// (#1474). Drives the sub-agent label on the live tool pill.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_type: Option<String>,
+        /// Present only while the sub-agent is retrying (#1474); drives the
+        /// "retrying n/m" badge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_retry: Option<SubagentRetryStatus>,
     },
 
     /// Neutral ephemeral live-status, fanned out from

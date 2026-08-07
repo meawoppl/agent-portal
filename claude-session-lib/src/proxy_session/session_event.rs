@@ -105,6 +105,8 @@ pub(super) async fn handle_next_event<A: Agent>(
         parent_tool_use_id,
         tool_name,
         elapsed_time_seconds,
+        subagent_type,
+        subagent_retry,
     }) = event
     {
         let msg = ProxyToServer::ToolProgress {
@@ -113,6 +115,8 @@ pub(super) async fn handle_next_event<A: Agent>(
             parent_tool_use_id,
             tool_name,
             elapsed_time_seconds,
+            subagent_type,
+            subagent_retry,
         };
         let mut ws = state.ws_write.lock().await;
         if ws.send(msg).await.is_err() {

@@ -458,6 +458,8 @@ fn handle_proxy_message(
             parent_tool_use_id,
             tool_name,
             elapsed_time_seconds,
+            subagent_type,
+            subagent_retry,
         } => {
             // Ephemeral live-status heartbeat: fan out to the session's web
             // clients only — deliberately NO DB write (unlike SequencedOutput).
@@ -471,6 +473,8 @@ fn handle_proxy_message(
                         parent_tool_use_id,
                         tool_name,
                         elapsed_time_seconds,
+                        subagent_type,
+                        subagent_retry,
                     },
                 );
             }

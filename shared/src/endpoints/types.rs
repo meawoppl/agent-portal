@@ -345,6 +345,29 @@ pub struct FileDownloadResponseFields {
     pub error: Option<String>,
 }
 
+/// Retry state for a sub-agent whose API call is being retried after an error,
+/// carried on the live tool-progress side-channel (#1474).
+///
+/// Mapped from `claude_codes::SubagentRetry` at the classifier boundary rather
+/// than embedding the SDK struct: the portal's `ToolProgress` wire shape has
+/// always flattened the SDK's fields (it carries `tool_use_id` / `tool_name` /
+/// `elapsed_time_seconds`, not a `ToolProgressMessage`), and the SDK type
+/// derives no `PartialEq`, which the frontend's live-status state needs.
+///
+/// Only the display-relevant fields are carried. The SDK's `agent_id`,
+/// `retry_delay_ms` and `error_status` are deliberately dropped — nothing
+/// renders them, and this frame is emitted every ~30s per running tool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentRetryStatus {
+    /// 1-based attempt number currently in flight.
+    pub attempt: u64,
+    /// Total attempts allowed before the sub-agent gives up.
+    pub max_retries: u64,
+    /// Coarse reason the previous attempt failed (e.g. `overloaded`), as
+    /// classified by the CLI. Rendered verbatim, so treat it as opaque.
+    pub error_category: String,
+}
+
 #[cfg(test)]
 mod continuation_reason_tests {
     use super::*;

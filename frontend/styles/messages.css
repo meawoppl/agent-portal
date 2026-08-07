@@ -1593,6 +1593,20 @@
     color: var(--text-muted);
 }
 
+/* Which Task sub-agent is running (#1474) — a qualifier on the tool name, so
+   it reads as "Task code-reviewer running — 1m 30s". */
+.active-tool-subagent {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+/* Sub-agent retry state (#1474). Only rendered mid-retry, and warning-colored
+   so a flaky turn is distinguishable at a glance from a healthy slow one. */
+.active-tool-retry {
+    color: var(--warning, #e0af68);
+    font-weight: 500;
+}
+
 /* Transient live-status line (neutral ephemeral channel; muse deltas/status). */
 .ephemeral-status-strip {
     display: flex;
