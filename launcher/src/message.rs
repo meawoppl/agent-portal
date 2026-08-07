@@ -237,7 +237,12 @@ pub async fn list() -> Result<()> {
         println!("No sessions found.");
         return Ok(());
     }
-    let self_id = sender_session_id(&data.sessions)?;
+    // Self-marking is cosmetic; a stale/ambiguous caller must still be able to
+    // inspect the session list and use an explicit id.
+    let self_id = sender_session_id(&data.sessions).unwrap_or_else(|error| {
+        eprintln!("warning: could not identify this session: {error}");
+        None
+    });
     for s in &data.sessions {
         let marker = if self_id.as_deref() == Some(&s.id.to_string()) {
             " (this session)"
@@ -281,7 +286,12 @@ pub async fn send(agent_id: &str, message: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let sessions = fetch_sessions(&client, &base, &token).await?;
     let resolved_agent_id = resolve_session_id(agent_id, &sessions.sessions)?;
-    let from = sender_session_id(&sessions.sessions)?;
+    // Sender attribution is best-effort and must not block delivery when more
+    // than one live session shares this host and working directory.
+    let from = sender_session_id(&sessions.sessions).unwrap_or_else(|error| {
+        eprintln!("warning: could not attribute sender session: {error}");
+        None
+    });
     // Non-idempotent POST: retry the pre-delivery transient (404 target lookup
     // against a stale session index) and transport errors, but NOT 5xx — the
     // server may already have delivered, and a replay would double-send.
