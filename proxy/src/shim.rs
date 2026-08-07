@@ -23,7 +23,7 @@ use claude_codes::io::{
     ControlResponsePayload, PermissionResult, UserMessage,
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
-use claude_session_lib::claude_cli_args;
+use claude_session_lib::{claude_cli_args, claude_supports_prompt_suggestions};
 use session_lib::git_metadata::get_git_branch;
 use session_lib::output_buffer::PendingOutputBuffer;
 use shared::ProxyToServer;
@@ -126,6 +126,7 @@ fn spawn_claude(config: &ProxySessionConfig) -> Result<tokio::process::Child> {
         config.session_id,
         config.resume,
         None,
+        claude_supports_prompt_suggestions(std::path::Path::new("claude")),
         &config.claude_args,
     ));
 

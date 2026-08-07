@@ -2,11 +2,14 @@
 //!
 //! Spawns `claude --print --verbose --output-format stream-json
 //! --input-format stream-json --permission-prompt-tool stdio
-//! --replay-user-messages [--session-id <id> | --resume <id> |
+//! --replay-user-messages [--prompt-suggestions true]
+//! [--session-id <id> | --resume <id> |
 //! --resume <source> --fork-session --session-id <new>] [extra...]`
 //! and wraps its handles in a [`ClaudeAsyncClient`].
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use tokio::process::Command;
 
 use claude_codes::AsyncClient as ClaudeAsyncClient;
@@ -20,6 +23,7 @@ pub fn claude_cli_args(
     session_id: uuid::Uuid,
     resume: bool,
     fork_from: Option<uuid::Uuid>,
+    prompt_suggestions: bool,
     extra_args: &[String],
 ) -> Vec<String> {
     let mut args: Vec<String> = [
@@ -32,12 +36,14 @@ pub fn claude_cli_args(
         "--permission-prompt-tool",
         "stdio",
         "--replay-user-messages",
-        "--prompt-suggestions",
-        "true",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
+
+    if prompt_suggestions {
+        args.extend(["--prompt-suggestions".to_string(), "true".to_string()]);
+    }
 
     if let Some(source) = (!resume).then_some(fork_from).flatten() {
         // claude-codes exposes ClaudeCliBuilder::fork_from, but that builder
@@ -79,6 +85,7 @@ pub(crate) async fn spawn_claude(
         config.session_id,
         config.resume,
         config.fork_from_session_id,
+        claude_supports_prompt_suggestions(claude_path),
         &config.extra_args,
     );
 
@@ -123,6 +130,30 @@ pub(crate) async fn spawn_claude(
     Ok((client, pid))
 }
 
+/// Probe the installed CLI once per resolved path before using the additive
+/// prompt-suggestion flag. Older fleet hosts reject unknown flags at startup,
+/// so capability detection must happen before argv construction.
+pub fn claude_supports_prompt_suggestions(claude_path: &Path) -> bool {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let Ok(mut cache) = cache.lock() else {
+        return false;
+    };
+    if let Some(supported) = cache.get(claude_path).copied() {
+        return supported;
+    }
+    let supported = std::process::Command::new(claude_path)
+        .arg("--help")
+        .output()
+        .ok()
+        .is_some_and(|output| {
+            String::from_utf8_lossy(&output.stdout).contains("--prompt-suggestions")
+                || String::from_utf8_lossy(&output.stderr).contains("--prompt-suggestions")
+        });
+    cache.insert(claude_path.to_path_buf(), supported);
+    supported
+}
+
 /// Log the resolved path and version of the claude binary for diagnostics.
 fn log_claude_info(claude_path: &Path) {
     if let Ok(full_path) = which::which(claude_path) {
@@ -164,6 +195,7 @@ mod tests {
             new_id,
             false,
             Some(source),
+            false,
             &["--model".into(), "opus".into()],
         );
         let expected = vec![
@@ -182,7 +214,7 @@ mod tests {
     fn resume_ignores_persisted_fork_source() {
         let source = uuid::Uuid::from_u128(1);
         let own_id = uuid::Uuid::from_u128(2);
-        let args = claude_cli_args(own_id, true, Some(source), &[]);
+        let args = claude_cli_args(own_id, true, Some(source), false, &[]);
         assert_eq!(&args[args.len() - 2..], ["--resume", &own_id.to_string()]);
         assert!(!args.iter().any(|arg| arg == "--fork-session"));
     }
@@ -190,7 +222,7 @@ mod tests {
     #[test]
     fn fresh_non_fork_launch_uses_new_session_id() {
         let own_id = uuid::Uuid::from_u128(2);
-        let args = claude_cli_args(own_id, false, None, &[]);
+        let args = claude_cli_args(own_id, false, None, false, &[]);
         assert_eq!(
             &args[args.len() - 2..],
             ["--session-id", &own_id.to_string()]
@@ -200,11 +232,17 @@ mod tests {
 
     #[test]
     fn enables_typed_prompt_suggestion_frames() {
-        let args = claude_cli_args(uuid::Uuid::nil(), false, None, &[]);
+        let args = claude_cli_args(uuid::Uuid::nil(), false, None, true, &[]);
         let flag = args
             .iter()
             .position(|arg| arg == "--prompt-suggestions")
             .expect("prompt suggestions flag");
         assert_eq!(args.get(flag + 1).map(String::as_str), Some("true"));
+    }
+
+    #[test]
+    fn omits_prompt_suggestion_flag_for_older_claude() {
+        let args = claude_cli_args(uuid::Uuid::nil(), false, false, &[]);
+        assert!(!args.iter().any(|arg| arg == "--prompt-suggestions"));
     }
 }

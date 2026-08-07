@@ -288,18 +288,19 @@ impl Component for InputBar {
                 // Textarea is uncontrolled — the DOM already has the new
                 // value. Track in state so we can restore after re-renders.
                 self.input_text = value;
-                self.pending_suggestion = None;
-                false
+                self.pending_suggestion.take().is_some()
             }
             InputBarMsg::AcceptSuggestion => {
+                let mut accepted = false;
                 if self.get_input_text().is_empty() {
                     if let Some(suggestion) = self.pending_suggestion.take() {
                         self.input_text = suggestion.clone();
                         self.set_input_text(&suggestion);
                         self.focus_textarea();
+                        accepted = true;
                     }
                 }
-                true
+                accepted
             }
             InputBarMsg::SendInput => self.dispatch_text_send(ctx, SendMode::Normal),
             InputBarMsg::SendWiggum => {
@@ -438,12 +439,8 @@ impl Component for InputBar {
 
         let vim_enabled = self.vim_enabled;
         let vim = self.vim.clone();
-        let can_accept_suggestion = self.pending_suggestion.is_some() && self.input_text.is_empty();
+        let has_suggestion = self.pending_suggestion.is_some();
         let handle_keydown = link.callback(move |e: KeyboardEvent| {
-            if e.key() == "Tab" && can_accept_suggestion {
-                e.prevent_default();
-                return InputBarMsg::AcceptSuggestion;
-            }
             // While the dashboard is in Nav mode the composer must be inert: Nav
             // owns single-key shortcuts (1-9 to jump panes, hjkl, w, n, d, G).
             // The textarea keeps DOM focus in Nav mode, so without this a plain
@@ -457,6 +454,19 @@ impl Component for InputBar {
             if !e.ctrl_key() && !e.meta_key() && dashboard_in_nav_mode() {
                 e.prevent_default();
                 return InputBarMsg::Noop;
+            }
+
+            if e.key() == "Tab"
+                && !e.shift_key()
+                && !e.ctrl_key()
+                && !e.meta_key()
+                && has_suggestion
+                && e.target_unchecked_into::<HtmlTextAreaElement>()
+                    .value()
+                    .is_empty()
+            {
+                e.prevent_default();
+                return InputBarMsg::AcceptSuggestion;
             }
 
             if e.ctrl_key() && e.key().to_lowercase() == "m" {
@@ -620,6 +630,7 @@ impl Component for InputBar {
                             type="button"
                             class="prompt-suggestion-accept"
                             title="Accept suggested prompt (Tab)"
+                            aria-label="Accept Claude's suggested prompt with Tab"
                             onclick={link.callback(|_| InputBarMsg::AcceptSuggestion)}
                         >{ "Tab" }</button>
                     }
