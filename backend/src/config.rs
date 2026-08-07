@@ -393,13 +393,22 @@ impl ServerConfig {
             );
         }
 
-        // Message retention settings. The default counts wire records, not
-        // turns: muse journals ~60–90 durable records per turn, so a default of
-        // 100 kept barely one muse turn and the per-session trim evicted the
-        // user's own earlier messages (and split older muse turns) on reload.
-        // 1000 holds ~10+ muse turns and is a no-op for Claude/Codex sessions,
-        // which rarely reach even the old cap. Kept in sync with the frontend
-        // live-buffer cap (`MAX_MESSAGES_PER_SESSION`).
+        // Durable per-session message budget, counted in wire records.
+        //
+        // This is deliberately NOT the same knob as the frontend's render budget
+        // (`MAX_MESSAGES_PER_SESSION`), even though both were 1000 before. They
+        // answer different questions — how much history is kept, versus how much
+        // is drawn — and the portal-slowness incident that lowered the render
+        // budget was not a reason to delete history. Keeping this high is the
+        // conservative side: trimming is irreversible, over-rendering is not.
+        //
+        // One coupling remains and is worth knowing about: `web_client_socket.rs`
+        // sets `initial_replay_limit` from this value, so a cold session open
+        // ships the trailing N records and the frontend discards all but its
+        // render budget. That is wasted bytes, not the cause of the slowness
+        // people reported (measured: the render budget was), so it's an
+        // efficiency fix rather than an urgent one — bound the replay separately
+        // instead of lowering retention to compensate.
         let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 1000);
         let message_retention_days: u32 = parse_or(&mut errors, "MESSAGE_RETENTION_DAYS", 30);
 

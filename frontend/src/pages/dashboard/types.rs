@@ -30,19 +30,29 @@ pub const SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY: &str = "claude-portal-session-
 
 /// Storage key for the opt-in vim editing mode in localStorage
 pub const VIM_MODE_STORAGE_KEY: &str = "claude-portal-vim-mode";
-
-/// Maximum number of messages to keep in the frontend live buffer.
+/// Maximum number of messages held in the frontend live buffer.
 ///
-/// This counts individual wire records, not conversational turns. Claude/Codex
-/// emit a handful of records per turn, but **muse journals ~60–90 durable
-/// records per turn** (each task lifecycle transition, tool result, etc. is its
-/// own record, later grouped into one task-tree card). At the old cap of 100 a
-/// single muse turn nearly filled the buffer and the next turn's flood evicted
-/// the oldest entries — the user's own prior messages — and left partial muse
-/// turns whose task-tree card rebuilt from a truncated record set. Sized to
-/// hold ~10+ muse turns so a turn's records never push the user's messages (or
-/// a neighbouring turn's records) out of view.
-pub const MAX_MESSAGES_PER_SESSION: usize = 1000;
+/// A **rendering** budget, not a history budget. Every buffered record is a live
+/// DOM subtree, so this is what keeps a long session interactive — and it is the
+/// knob that actually governs perceived speed. #1581 raised it to 1000 and the
+/// portal became unusably slow; lowering it back to 100 is what fixed that,
+/// measured rather than assumed (the prod host pins `MESSAGE_RETENTION_COUNT`
+/// via env, so the wire payload was unchanged across that fix — only the DOM
+/// cost moved).
+///
+/// Deliberately decoupled from `MESSAGE_RETENTION_COUNT`, which stays high:
+/// discarding a record from the live view is free, deleting it from the database
+/// is not. They were the same number once and that conflation is what made the
+/// slowness look like it required a history tradeoff. It did not.
+///
+/// #1581's concern — muse journaling ~60-90 records per turn, so a small cap
+/// evicts the user's own earlier messages — is addressed at the source instead:
+/// #1587 screens `reminder.*` scaffolding to `Noop` in the classifier, before
+/// the buffer, the socket and the database, removing 41-47% of muse records
+/// outright. Note the ordering that implies: this cap is only comfortable for
+/// muse sessions **once #1587 has landed**. Until then a muse turn still crowds
+/// the live view, though nothing is lost server-side.
+pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
 /// Type alias for WebSocket sender.
 ///

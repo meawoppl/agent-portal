@@ -898,7 +898,7 @@ When making changes, verify:
 | `SPLASH_TEXT` | Custom splash text on login page | Optional |
 | `ALLOWED_EMAIL_DOMAIN` | Restrict to email domain | Optional |
 | `ALLOWED_EMAILS` | Comma-separated allowed emails | Optional |
-| `MESSAGE_RETENTION_COUNT` | Max messages (wire records) per session | Optional (default: 1000) |
+| `MESSAGE_RETENTION_COUNT` | Durable max messages (wire records) per session; also bounds the initial WS replay. Distinct from the frontend render budget | Optional (default: 1000) |
 | `MESSAGE_RETENTION_DAYS` | Days before message deletion | Optional (default: 30) |
 | `SESSION_MAX_AGE_DAYS` | Days before session deletion | Optional (default: 14) |
 | `PORTAL_STT_BACKEND` | Speech-to-text provider: `disabled` or one of `assemblyai`, `aws`, `azure`, `deepgram`, `google`, `ibm`, `openai`, `revai`, `simplismart`, `speechmatics`. Unset/`disabled` keeps voice on the browser's Web Speech API | Optional (default: disabled) |
