@@ -70,6 +70,67 @@ pub(crate) fn assistant_label(model: &str) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AssistantCompletionState {
+    Interrupted,
+    Resumed,
+}
+
+impl AssistantCompletionState {
+    /// Read completion metadata through claude-codes' typed contract. These
+    /// flags live on each assistant frame, so keeping the affordance with the
+    /// frame body also preserves it when consecutive frames share one card.
+    fn for_message(msg: &AssistantMessage) -> Vec<Self> {
+        let mut states = Vec::with_capacity(2);
+        if msg.aborted == Some(true) {
+            states.push(Self::Interrupted);
+        }
+        if msg.resumed_from_incomplete_thinking == Some(true) {
+            states.push(Self::Resumed);
+        }
+        states
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Interrupted => "interrupted",
+            Self::Resumed => "resumed after truncation",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Interrupted => "Assistant response was interrupted before it completed",
+            Self::Resumed => {
+                "Assistant resumed an incomplete thinking block from the previous response"
+            }
+        }
+    }
+
+    fn class(self) -> &'static str {
+        match self {
+            Self::Interrupted => "interrupted",
+            Self::Resumed => "resumed",
+        }
+    }
+}
+
+fn render_completion_states(msg: &AssistantMessage) -> Html {
+    html! {
+        <div class="assistant-completion-states">
+            { for AssistantCompletionState::for_message(msg).into_iter().map(|state| html! {
+                <span
+                    class={classes!("assistant-completion-badge", state.class())}
+                    title={state.description()}
+                    aria-label={state.description()}
+                >
+                    { state.label() }
+                </span>
+            }) }
+        </div>
+    }
+}
+
 /// Extract concatenated raw text from a list of content blocks.
 /// Used for the message header copy button: pulls out text and thinking
 /// blocks as markdown, ignoring tool_use/tool_result internals.
@@ -145,7 +206,20 @@ pub fn render_assistant_message(
 }
 
 pub fn render_assistant_message_content(msg: &AssistantMessage, session_id: Uuid) -> Option<Html> {
-    render_content_blocks(&msg.message.content, session_id)
+    let completion_states = AssistantCompletionState::for_message(msg);
+    let content = render_content_blocks(&msg.message.content, session_id);
+    if completion_states.is_empty() && content.is_none() {
+        return None;
+    }
+
+    Some(html! {
+        <>
+            if !completion_states.is_empty() {
+                { render_completion_states(msg) }
+            }
+            { content.unwrap_or_default() }
+        </>
+    })
 }
 
 /// Render a run of content blocks, returning `None` when *no* block produces
@@ -275,5 +349,64 @@ fn render_citations(citations: &[Citation]) -> Html {
                 }
             })}
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assistant(extra_fields: &str) -> AssistantMessage {
+        let json = format!(
+            r#"{{
+                "type": "assistant",
+                "message": {{
+                    "id": "msg_test",
+                    "role": "assistant",
+                    "model": "claude-sonnet-4-5-20250929",
+                    "content": []
+                }},
+                "session_id": "01890000-0000-7000-8000-000000000001"
+                {extra_fields}
+            }}"#
+        );
+        serde_json::from_str(&json).expect("valid typed assistant fixture")
+    }
+
+    #[test]
+    fn completion_states_distinguish_interrupted_and_resumed_frames() {
+        let interrupted = assistant(r#", "aborted": true"#);
+        assert_eq!(
+            AssistantCompletionState::for_message(&interrupted),
+            vec![AssistantCompletionState::Interrupted]
+        );
+
+        let resumed = assistant(r#", "resumed_from_incomplete_thinking": true"#);
+        assert_eq!(
+            AssistantCompletionState::for_message(&resumed),
+            vec![AssistantCompletionState::Resumed]
+        );
+    }
+
+    #[test]
+    fn false_or_absent_completion_flags_do_not_mark_normal_frames() {
+        let normal = assistant("");
+        assert!(AssistantCompletionState::for_message(&normal).is_empty());
+
+        let explicitly_false =
+            assistant(r#", "aborted": false, "resumed_from_incomplete_thinking": false"#);
+        assert!(AssistantCompletionState::for_message(&explicitly_false).is_empty());
+    }
+
+    #[test]
+    fn both_typed_flags_are_preserved_when_present() {
+        let message = assistant(r#", "aborted": true, "resumed_from_incomplete_thinking": true"#);
+        assert_eq!(
+            AssistantCompletionState::for_message(&message),
+            vec![
+                AssistantCompletionState::Interrupted,
+                AssistantCompletionState::Resumed
+            ]
+        );
     }
 }

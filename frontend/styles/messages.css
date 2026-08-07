@@ -597,6 +597,33 @@
     cursor: help;
 }
 
+.assistant-completion-states {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 0.45rem;
+}
+
+.assistant-completion-badge {
+    border: 1px solid currentcolor;
+    border-radius: 999px;
+    padding: 0.12rem 0.45rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: help;
+}
+
+.assistant-completion-badge.interrupted {
+    color: #f7768e;
+    background: rgba(247, 118, 142, 0.12);
+}
+
+.assistant-completion-badge.resumed {
+    color: #e0af68;
+    background: rgba(224, 175, 104, 0.12);
+}
+
 .assistant-message .usage-badge {
     display: flex;
     align-items: center;
