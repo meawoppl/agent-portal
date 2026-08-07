@@ -9,11 +9,79 @@
 //! renders it here — so a live turn's ~100 journal records read as one
 //! structural view instead of a hundred raw-JSON bubbles.
 
+use serde::Deserialize;
 use yew::prelude::*;
 
 pub mod task_tree;
 
 pub use task_tree::{TaskNode, TaskState, TaskTree};
+
+/// Muse's `bash`/command tools pack a structured result into the otherwise
+/// opaque `tool.result.text` as a JSON object (muse-codes models `text` as a
+/// provider string — see its `ToolResult` — so this shape is muse's own
+/// encoding, not a typed SDK variant we can match on). When `text`
+/// deserializes into this with a non-empty `command`, we render a command card
+/// like the Claude/Codex bash cards instead of dumping the JSON. Any other
+/// `text` (e.g. `write_file`'s prose summary) fails to parse and falls back to
+/// plain text, so non-command tools are unaffected.
+///
+/// TODO(SDK meawoppl/rust-code-agent-sdks#294): replace this local
+/// deserialize with the typed command-result binding once `muse-codes` exposes
+/// one — this struct mirrors the shape reported there. Adoption tracked in
+/// agent-portal#1595.
+#[derive(Deserialize)]
+struct MuseCommandResult {
+    command: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    output: Option<String>,
+    #[serde(default)]
+    exit_code: Option<i64>,
+    #[serde(default)]
+    truncated: Option<bool>,
+}
+
+/// Recognize a command-execution `text` payload. Cheap guard first (only a JSON
+/// object can be one), then require a non-empty `command` so a stray JSON blob
+/// from some other tool doesn't get drawn as a shell command.
+fn parse_command_result(text: &str) -> Option<MuseCommandResult> {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    serde_json::from_str::<MuseCommandResult>(trimmed)
+        .ok()
+        .filter(|c| !c.command.trim().is_empty())
+}
+
+/// Render a muse command result as a compact card — `$ command`, an optional
+/// description, and the output in a scrollable block — matching how the
+/// Claude/Codex renderers present a shell command, rather than printing the raw
+/// JSON muse packs into `text`.
+fn render_command_card(cmd: &MuseCommandResult) -> Html {
+    let exit = cmd.exit_code.unwrap_or(0);
+    html! {
+        <div class="muse-bash">
+            <div class="muse-bash-command-line">
+                <span class="muse-bash-prompt">{ "$" }</span>
+                <code class="muse-bash-command">{ &cmd.command }</code>
+                if exit != 0 {
+                    <span class="muse-bash-exit">{ format!("exit {exit}") }</span>
+                }
+            </div>
+            if let Some(desc) = cmd.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                <div class="muse-bash-note">{ desc }</div>
+            }
+            if let Some(out) = cmd.output.as_deref().filter(|o| !o.is_empty()) {
+                <pre class="muse-bash-output">{ out }</pre>
+            }
+            if cmd.truncated.unwrap_or(false) {
+                <div class="muse-bash-note">{ "output truncated" }</div>
+            }
+        </div>
+    }
+}
 
 /// Draw a task tree: one stacked card per task showing lifecycle state,
 /// tool outcomes, streamed output, and the policy decision muse applied to
@@ -118,6 +186,12 @@ fn render_task_node(node: &TaskNode) -> Html {
         format!("muse-task-{}", state.label()),
         running.then_some("muse-task-in-progress"),
     );
+    // Muse emits the same content on BOTH a `tool.result` and a
+    // `task.lifecycle.output` chunk (byte-identical), so an output chunk already
+    // shown as a tool result is skipped below — otherwise every command renders
+    // twice (the original bug).
+    let shown_as_result: std::collections::HashSet<&str> =
+        node.tool_results.iter().map(|r| r.text.as_str()).collect();
     html! {
         <div class={item_class} key={node.task_id.clone()}>
             <div class="muse-task-header">
@@ -140,15 +214,29 @@ fn render_task_node(node: &TaskNode) -> Html {
             { for node.tool_results.iter().map(|r| {
                 let outcome = r.outcome.as_deref().unwrap_or("unknown");
                 let tool = r.tool_name.as_deref().unwrap_or("tool");
-                html! {
-                    <div class={classes!("muse-tool-result", format!("muse-tool-{outcome}"))}>
-                        <span class="muse-tool-name">{ tool }</span>
-                        <span class="muse-tool-text">{ &r.text }</span>
-                    </div>
+                if let Some(cmd) = parse_command_result(&r.text) {
+                    html! {
+                        <div class={classes!("muse-tool-command", format!("muse-tool-{outcome}"))}>
+                            { render_command_card(&cmd) }
+                        </div>
+                    }
+                } else {
+                    html! {
+                        <div class={classes!("muse-tool-result", format!("muse-tool-{outcome}"))}>
+                            <span class="muse-tool-name">{ tool }</span>
+                            <span class="muse-tool-text">{ &r.text }</span>
+                        </div>
+                    }
                 }
             }) }
-            { for node.output.iter().map(|chunk| html! {
-                <div class="muse-task-output">{ chunk }</div>
+            { for node.output.iter().filter(|c| !shown_as_result.contains(c.as_str())).map(|chunk| {
+                // A surviving chunk that is itself a command payload still gets
+                // the card treatment rather than a raw dump.
+                if let Some(cmd) = parse_command_result(chunk) {
+                    html! { <div class="muse-tool-command">{ render_command_card(&cmd) }</div> }
+                } else {
+                    html! { <div class="muse-task-output">{ chunk }</div> }
+                }
             }) }
         </div>
     }
@@ -166,6 +254,61 @@ mod tests {
     }
 
     const REMINDER: &str = "reminder.agent.plugin:tbh-reminders:scope-reminder";
+
+    /// Real capture (meawoppl-fc): muse's `bash` tool packs its structured
+    /// result into `tool.result.text` as JSON, and emits the identical string a
+    /// second time as a `task.lifecycle.output` chunk — the two sources of the
+    /// original "raw JSON, rendered twice" bug.
+    const BASH_FIXTURE: &str = include_str!("muse_renderer/fixtures/bash_tool_result.jsonl");
+
+    fn bash_tree() -> TaskTree {
+        let mut tree = TaskTree::default();
+        for line in BASH_FIXTURE.lines().filter(|l| !l.trim().is_empty()) {
+            tree.apply(&serde_json::from_str(line).expect("fixture line is JSON"));
+        }
+        tree
+    }
+
+    #[test]
+    fn bash_text_parses_into_a_command_result() {
+        let tree = bash_tree();
+        let node = tree
+            .nodes()
+            .find(|n| !n.tool_results.is_empty())
+            .expect("a node holds the bash tool result");
+        let cmd = parse_command_result(&node.tool_results[0].text)
+            .expect("bash tool text is a command result, not opaque prose");
+        assert!(cmd.command.starts_with("curl -s -X POST"));
+        assert_eq!(cmd.exit_code, Some(0));
+        assert_eq!(cmd.truncated, Some(false));
+        assert!(cmd.output.as_deref().unwrap().contains("d99dce066453"));
+    }
+
+    #[test]
+    fn prose_tool_text_is_not_mistaken_for_a_command() {
+        // write_file / read_file summaries are plain strings — must stay text.
+        assert!(parse_command_result("wrote 6 bytes to /tmp/hello.txt").is_none());
+        assert!(parse_command_result("Read text file `hello.txt`.\n1|hello").is_none());
+        // A JSON object without a command is not a command card either.
+        assert!(parse_command_result(r#"{"note":"hi"}"#).is_none());
+    }
+
+    #[test]
+    fn bash_output_chunk_duplicates_the_tool_result_so_dedup_fires() {
+        // The de-dup in render_task_node keys on tool_result.text == output
+        // chunk. This proves that equality holds on the real capture, so the
+        // command renders once, not twice.
+        let tree = bash_tree();
+        let node = tree
+            .nodes()
+            .find(|n| !n.tool_results.is_empty())
+            .expect("bash node");
+        let result_text = &node.tool_results[0].text;
+        assert!(
+            node.output.iter().any(|chunk| chunk == result_text),
+            "the output chunk must be byte-identical to the tool result for de-dup to suppress it"
+        );
+    }
 
     #[test]
     fn contentless_reminder_scaffolding_is_hidden() {
