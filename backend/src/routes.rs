@@ -328,6 +328,14 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/settings/profile",
             put(handlers::profile::update_profile),
         )
+        .route(
+            "/api/settings/identities",
+            get(handlers::identities::list_identities),
+        )
+        .route(
+            "/api/settings/identities/{id}",
+            axum::routing::delete(handlers::identities::unlink_identity),
+        )
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
         .route(AUTH_TOKEN_LOGIN, post(handlers::auth::token_login))
