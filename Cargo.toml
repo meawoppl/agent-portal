@@ -79,7 +79,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 claude-codes = { version = "2.1.223", default-features = false, features = ["types"] }
 
 # Codex CLI integration
-muse-codes = { version = "0.1.4", default-features = false, features = ["async-client"] }
+# Temporary git pin: 0.1.5 (full `muse exec` flag parity + MuseExecBuilder::extra_args
+# raw passthrough) is unpublished pending a crates.io release. Flip back to a version
+# pin once 0.1.5 publishes — the API is identical branch→crates.
+muse-codes = { git = "https://github.com/meawoppl/rust-code-agent-sdks", rev = "6682946", default-features = false, features = ["async-client"] }
 codex-codes = { version = "0.146.4", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
