@@ -16,9 +16,6 @@ pub const HIDDEN_SESSIONS_STORAGE_KEY: &str = "claude-portal-hidden-sessions";
 /// Storage key for inactive hidden state in localStorage
 pub const INACTIVE_HIDDEN_STORAGE_KEY: &str = "claude-portal-inactive-hidden";
 
-/// Storage key for cost display visibility in localStorage
-pub const SHOW_COST_STORAGE_KEY: &str = "claude-portal-show-cost";
-
 /// Storage key for session rail orientation in localStorage
 pub const RAIL_ORIENTATION_STORAGE_KEY: &str = "claude-portal-rail-orientation";
 
@@ -141,16 +138,6 @@ pub fn load_inactive_hidden() -> bool {
 /// Save inactive hidden state to localStorage
 pub fn save_inactive_hidden(hidden: bool) {
     save_bool_pref(INACTIVE_HIDDEN_STORAGE_KEY, hidden);
-}
-
-/// Load cost display preference from localStorage (default: hidden)
-pub fn load_show_cost() -> bool {
-    load_bool_pref(SHOW_COST_STORAGE_KEY)
-}
-
-/// Save cost display preference to localStorage
-pub fn save_show_cost(show: bool) {
-    save_bool_pref(SHOW_COST_STORAGE_KEY, show);
 }
 
 /// Load whether vim editing mode is enabled from localStorage (default: off).

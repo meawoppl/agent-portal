@@ -12,7 +12,8 @@ use yew::prelude::*;
 
 /// Return value from the use_client_websocket hook.
 pub struct UseClientWebSocket {
-    /// Total user spend across all sessions
+    /// Total user spend across all sessions (retained for telemetry/reporting screens; no longer shown in top bar)
+    #[allow(dead_code)]
     pub total_spend: f64,
     /// Server shutdown reason (if server is shutting down).
     /// Cleared automatically on the next successful (re)connect.
