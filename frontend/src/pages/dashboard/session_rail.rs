@@ -153,36 +153,17 @@ fn render_pill_section(
     section_key: &str,
 ) -> Html {
     let (broadcast_senders, broadcast_receivers) = broadcast_active_ids;
-    let mut nodes: Vec<Html> = Vec::with_capacity(entries.len());
-    let mut prev_label: Option<String> = None;
-    for (display_idx, (index, session)) in entries.iter().enumerate() {
-        if props.group_by_host {
-            let label = super::session_order::host_group_label(session);
-            if prev_label.as_deref() != Some(label.as_str()) {
-                prev_label = Some(label.clone());
-                let count = entries
-                    .iter()
-                    .filter(|(_, s)| super::session_order::host_group_label(s) == label)
-                    .count();
-                nodes.push(html! {
-                    <div
-                        key={format!("{section_key}-host-{label}")}
-                        class="session-rail-host-header"
-                        title={format!("{label} — {count} session(s)")}
-                    >
-                        <span class="host-header-name">{ label }</span>
-                        <span class="host-header-count">{ format!("({count})") }</span>
-                    </div>
-                });
-            }
-        }
-        nodes.push(html! {
+
+    // One keyed pill. `display_idx` is the pill's position within this section
+    // (across all host groups), so nav numbering stays sequential.
+    let render_pill = |display_idx: usize, index: usize, session: &SessionInfo| -> Html {
+        html! {
             <SessionPill
                 key={session.id.to_string()}
-                index={*index}
+                index={index}
                 display_number={Some(number_offset + display_idx)}
-                session={(*session).clone()}
-                is_focused={*index == props.focused_index}
+                session={session.clone()}
+                is_focused={index == props.focused_index}
                 is_awaiting={props.awaiting_sessions.contains(&session.id)}
                 is_hidden={props.hidden_sessions.contains(&session.id)}
                 is_connected={props.connected_sessions.contains(&session.id)}
@@ -196,9 +177,56 @@ fn render_pill_section(
                 on_select={props.on_select.clone()}
                 on_toggle_menu={on_toggle_menu.clone()}
             />
-        });
+        }
+    };
+
+    // Ungrouped: a flat keyed list of pills, identical to the pre-grouping path.
+    if !props.group_by_host {
+        return entries
+            .iter()
+            .enumerate()
+            .map(|(display_idx, (index, session))| render_pill(display_idx, *index, session))
+            .collect::<Html>();
     }
-    nodes.into_iter().collect::<Html>()
+
+    // Grouped: wrap each contiguous same-host run in a tinted section with a
+    // single centered/leading header (see `.session-rail-host-group` CSS). The
+    // rows are already grouped upstream (`page.rs`), so equal labels are
+    // adjacent; alternating `alt` gives every other group a stronger tint.
+    let mut groups: Vec<Html> = Vec::new();
+    let mut start = 0;
+    while start < entries.len() {
+        let label = super::session_order::host_group_label(entries[start].1);
+        let mut end = start;
+        let mut pills: Vec<Html> = Vec::with_capacity(4);
+        while end < entries.len() && super::session_order::host_group_label(entries[end].1) == label
+        {
+            let (index, session) = entries[end];
+            pills.push(render_pill(end, index, session));
+            end += 1;
+        }
+        let count = end - start;
+        let alt = (groups.len() % 2 == 1).then_some("alt");
+        groups.push(html! {
+            <div
+                key={format!("{section_key}-host-{label}")}
+                class={classes!("session-rail-host-group", alt)}
+            >
+                <div
+                    class="session-rail-host-header"
+                    title={format!("{label} — {count} session(s)")}
+                >
+                    <span class="host-header-name">{ label }</span>
+                    <span class="host-header-count">{ format!("({count})") }</span>
+                </div>
+                <div class="session-rail-host-group-pills">
+                    { pills.into_iter().collect::<Html>() }
+                </div>
+            </div>
+        });
+        start = end;
+    }
+    groups.into_iter().collect::<Html>()
 }
 
 /// Props for the SessionRail component

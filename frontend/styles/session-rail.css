@@ -160,9 +160,7 @@
     display: flex;
     align-items: baseline;
     gap: 0.3rem;
-    flex-shrink: 0;
     padding: 0.1rem 0.5rem;
-    align-self: center;
     color: var(--text-secondary);
     font-size: 0.65rem;
     text-transform: uppercase;
@@ -181,23 +179,55 @@
     opacity: 0.75;
 }
 
-/* Vertical rail: the header becomes a full-width row with a hairline rule and
-   a thin gap above it, so each host group reads as a stacked section. */
-.dashboard-body.rail-left .session-rail-host-header,
-.dashboard-body.rail-right .session-rail-host-header {
-    align-self: stretch;
-    width: 100%;
-    justify-content: flex-start;
-    padding: 0.4rem 0.25rem 0.1rem;
-    border-top: 1px solid var(--border);
-    margin-top: 0.35rem;
+/* Each host group is a single tinted section: one header, then its pills. The
+   alternating tint (`alt` on every other group, set in session_rail.rs) makes
+   adjacent groups easy to tell apart without a hard divider. Base tint is faint
+   so it never competes with the pills' own surfaces. */
+.session-rail-host-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 10px;
+    background: rgba(122, 162, 247, 0.055);
 }
 
-/* The first header in a vertical rail shouldn't carry a top rule/margin. */
-.dashboard-body.rail-left .session-rail-host-header:first-child,
-.dashboard-body.rail-right .session-rail-host-header:first-child {
-    border-top: none;
-    margin-top: 0;
+.session-rail-host-group.alt {
+    background: rgba(122, 162, 247, 0.11);
+}
+
+/* Horizontal rail (top/bottom): hostname centered ABOVE a single row of pills,
+   so each group reads as a captioned cluster. The rail itself still scrolls as
+   one row — the groups are its flex items. */
+.session-rail-host-group .session-rail-host-header {
+    justify-content: center;
+}
+
+.session-rail-host-group-pills {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+/* Vertical rail (left/right): hostname left-aligned above a stacked column of
+   full-width pills. */
+.dashboard-body.rail-left .session-rail-host-group,
+.dashboard-body.rail-right .session-rail-host-group {
+    gap: 0.4rem;
+    padding: 0.4rem 0.45rem 0.5rem;
+}
+
+.dashboard-body.rail-left .session-rail-host-group .session-rail-host-header,
+.dashboard-body.rail-right .session-rail-host-group .session-rail-host-header {
+    justify-content: flex-start;
+    padding: 0.1rem;
+}
+
+.dashboard-body.rail-left .session-rail-host-group-pills,
+.dashboard-body.rail-right .session-rail-host-group-pills {
+    flex-direction: column;
+    gap: 0.4rem;
 }
 
 .session-pill {
