@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn omits_prompt_suggestion_flag_for_older_claude() {
-        let args = claude_cli_args(uuid::Uuid::nil(), false, false, &[]);
+        let args = claude_cli_args(uuid::Uuid::nil(), false, None, false, &[]);
         assert!(!args.iter().any(|arg| arg == "--prompt-suggestions"));
     }
 }
