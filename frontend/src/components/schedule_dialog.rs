@@ -166,7 +166,10 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             form.set(TaskForm {
                 timezone: detected_timezone(),
                 max_runtime_minutes: 30,
-                skip_permissions: true,
+                // Preserve the established auto-enabled setting for Claude and
+                // Codex schedules, but Muse's broader YOLO mode must be an
+                // explicit opt-in because it also disables the sandbox.
+                skip_permissions: session_agent_type != shared::AgentType::Muse,
                 ..Default::default()
             });
             error_msg.set(None);

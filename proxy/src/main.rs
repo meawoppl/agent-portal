@@ -796,7 +796,18 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
         session_name: config.session_name.clone(),
         resume: config.resume,
         claude_path: None,
-        extra_args: config.claude_args.clone(),
+        extra_args: if config.agent_type == shared::AgentType::Muse {
+            config
+                .claude_args
+                .iter()
+                .filter(|arg| arg.as_str() != "--yolo")
+                .cloned()
+                .collect()
+        } else {
+            config.claude_args.clone()
+        },
+        muse_yolo: config.agent_type == shared::AgentType::Muse
+            && config.claude_args.iter().any(|arg| arg == "--yolo"),
         agent_type: config.agent_type,
         codex_thread_id,
     };

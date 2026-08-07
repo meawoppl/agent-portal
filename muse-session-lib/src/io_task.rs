@@ -110,6 +110,7 @@ fn build_exec_builder(config: &SessionConfig, text: &str) -> MuseExecBuilder {
         .provider(Provider::Meta)
         .working_directory(&config.working_directory)
         .session_id(config.session_id.to_string())
+        .yolo(config.muse_yolo)
         .extra_args(config.extra_args.clone())
 }
 
@@ -140,11 +141,8 @@ mod tests {
     fn extra_args_reach_the_muse_argv() {
         let config = SessionConfig {
             working_directory: PathBuf::from("/tmp"),
-            extra_args: vec![
-                "--model".to_string(),
-                "test-model".to_string(),
-                "--yolo".to_string(),
-            ],
+            extra_args: vec!["--model".to_string(), "test-model".to_string()],
+            muse_yolo: true,
             ..Default::default()
         };
         let cmd = build_exec_builder(&config, "hello")

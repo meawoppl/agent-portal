@@ -23,6 +23,10 @@ pub struct SessionConfig {
     /// Extra arguments to pass to the claude CLI
     #[serde(default)]
     pub extra_args: Vec<String>,
+    /// Whether Muse should disable tool approval and sandboxing and trust the
+    /// workspace. Ignored by other agents and safe by default.
+    #[serde(default)]
+    pub muse_yolo: bool,
     /// Which agent CLI to use
     #[serde(default)]
     pub agent_type: shared::AgentType,
@@ -112,6 +116,7 @@ mod tests {
             resume: false,
             claude_path: None,
             extra_args: vec![],
+            muse_yolo: false,
             agent_type: Default::default(),
             codex_thread_id: None,
         }
@@ -128,6 +133,16 @@ mod tests {
         assert_eq!(config.session_name, restored.session_name);
         assert_eq!(config.resume, restored.resume);
         assert_eq!(config.claude_path, restored.claude_path);
+        assert!(!restored.muse_yolo);
+    }
+
+    #[test]
+    fn missing_muse_yolo_defaults_off() {
+        let mut value = serde_json::to_value(sample_config()).unwrap();
+        value.as_object_mut().unwrap().remove("muse_yolo");
+        let restored: SessionConfig = serde_json::from_value(value).unwrap();
+
+        assert!(!restored.muse_yolo);
     }
 
     #[test]
