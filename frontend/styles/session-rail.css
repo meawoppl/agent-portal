@@ -268,7 +268,14 @@
 }
 .pill-watermark.claude { background-image: url('/anthropic-mark.svg'); }
 .pill-watermark.codex  { background-image: url('/openai-mark.png'); }
-.pill-watermark.muse   { background-image: url('/meta-mark.svg'); }
+
+/* Muse watermark 30% larger (64×1.3 = 83.2) — recentered so horizontal center stays at x=16 (left = 16 - 83.2/2 = -25.6) */
+.pill-watermark.muse {
+    background-image: url('/meta-mark.svg');
+    width: 83.2px;
+    height: 83.2px;
+    left: -25.6px;
+}
 
 /* Model-version watermark — the session's compact model number (e.g. "4.8")
    rendered in the same faint grey/opacity treatment as the agent logo. The
