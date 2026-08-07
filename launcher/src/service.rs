@@ -490,15 +490,36 @@ pub fn stop() -> Result<()> {
 
 #[cfg(target_os = "macos")]
 pub fn restart() -> Result<()> {
-    use anyhow::Context;
-    let plist = plist_path()?;
-    let _ = std::process::Command::new("launchctl")
-        .args(["unload", &plist.to_string_lossy()])
-        .output();
-    std::process::Command::new("launchctl")
-        .args(["load", &plist.to_string_lossy()])
+    use anyhow::{bail, Context};
+
+    // Do not unload the job from inside the process that job owns: launchd may
+    // terminate us before we can load it again. kickstart performs the
+    // kill-and-respawn transaction inside launchd instead.
+    let uid = std::process::Command::new("id")
+        .arg("-u")
         .output()
-        .context("Failed to run launchctl load")?;
+        .context("Failed to determine user id for launchctl")?;
+    if !uid.status.success() {
+        bail!(
+            "id -u failed: {}",
+            String::from_utf8_lossy(&uid.stderr).trim()
+        );
+    }
+    let domain = format!(
+        "gui/{}/{}",
+        String::from_utf8_lossy(&uid.stdout).trim(),
+        PLIST_LABEL
+    );
+    let output = std::process::Command::new("launchctl")
+        .args(["kickstart", "-k", &domain])
+        .output()
+        .context("Failed to run launchctl kickstart")?;
+    if !output.status.success() {
+        bail!(
+            "launchctl kickstart failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
     println!("Restarted {}", PLIST_LABEL);
     Ok(())
 }
