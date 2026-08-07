@@ -52,7 +52,14 @@ pub(super) enum BroadcastUnits {
 pub(super) struct RenderedSessionPosition {
     pub id: Uuid,
     pub agent_type: AgentType,
+    /// Center along the travel axis (x horizontal, y vertical), relative to the
+    /// rail container origin — where the orb starts/ends.
     pub center: f64,
+    /// Center on the CROSS axis (y horizontal, x vertical), same origin. The
+    /// broadcast layer is otherwise pinned to the rail's fixed 50%, which the
+    /// host-group headers push the pill row off (#1609); this lets the layer
+    /// ride the pills' actual line instead.
+    pub cross: f64,
 }
 
 #[derive(Clone)]
@@ -188,7 +195,17 @@ pub(super) fn render_broadcasts(
     axis: RailAxis,
     render_time: f64,
 ) -> Html {
-    let views = measure_rendered_positions(rail_ref, rendered_sessions, axis)
+    let measured = measure_rendered_positions(rail_ref, rendered_sessions, axis);
+    // Ride the pills' actual cross-axis line rather than the rail's fixed 50%
+    // (#1609). Every pill row sits at the same cross offset (uniform group
+    // header + row height), so one value positions the whole layer; the CSS
+    // `top/left: 50%` stays as the fallback when we couldn't measure.
+    let layer_style = match (axis, measured.as_ref().and_then(|p| p.first())) {
+        (RailAxis::Horizontal, Some(p)) => format!("top: {:.2}px;", p.cross),
+        (RailAxis::Vertical, Some(p)) => format!("left: {:.2}px;", p.cross),
+        _ => String::new(),
+    };
+    let views = measured
         .map(|positions| broadcasts.view_for_positions(&positions, render_time))
         .unwrap_or_else(|| broadcasts.view_for_sessions(rendered_sessions, render_time));
     if views.is_empty() {
@@ -196,7 +213,11 @@ pub(super) fn render_broadcasts(
     }
 
     html! {
-        <div class={classes!("agent-broadcast-layer", axis.class())} aria-hidden="true">
+        <div
+            class={classes!("agent-broadcast-layer", axis.class())}
+            style={layer_style}
+            aria-hidden="true"
+        >
             { for views.into_iter().map(|view| {
                 let span = (view.end - view.start).max(1.0);
                 let unit = view.units.css_unit();
@@ -253,9 +274,11 @@ fn measure_rendered_positions(
     let rail = rail_ref.cast::<Element>()?;
     let container = rail.parent_element()?;
     let container_rect = container.get_bounding_client_rect();
-    let origin = match axis {
-        RailAxis::Horizontal => container_rect.left(),
-        RailAxis::Vertical => container_rect.top(),
+    // Origins for both axes, same container the broadcast layer is positioned
+    // against, so `center` and `cross` share the layer's coordinate space.
+    let (origin, cross_origin) = match axis {
+        RailAxis::Horizontal => (container_rect.left(), container_rect.top()),
+        RailAxis::Vertical => (container_rect.top(), container_rect.left()),
     };
 
     let mut positions = Vec::with_capacity(rendered_sessions.len());
@@ -263,14 +286,21 @@ fn measure_rendered_positions(
         let selector = format!("[data-session-id=\"{id}\"]");
         let pill = rail.query_selector(&selector).ok().flatten()?;
         let rect = pill.get_bounding_client_rect();
-        let center = match axis {
-            RailAxis::Horizontal => (rect.left() + rect.right()) / 2.0 - origin,
-            RailAxis::Vertical => (rect.top() + rect.bottom()) / 2.0 - origin,
+        let (center, cross) = match axis {
+            RailAxis::Horizontal => (
+                (rect.left() + rect.right()) / 2.0 - origin,
+                (rect.top() + rect.bottom()) / 2.0 - cross_origin,
+            ),
+            RailAxis::Vertical => (
+                (rect.top() + rect.bottom()) / 2.0 - origin,
+                (rect.left() + rect.right()) / 2.0 - cross_origin,
+            ),
         };
         positions.push(RenderedSessionPosition {
             id: *id,
             agent_type: *agent_type,
             center,
+            cross,
         });
     }
     Some(positions)
@@ -437,16 +467,19 @@ mod tests {
                     id: id(1),
                     agent_type: AgentType::Claude,
                     center: 120.0,
+                    cross: 17.0,
                 },
                 RenderedSessionPosition {
                     id: id(2),
                     agent_type: AgentType::Codex,
                     center: 310.0,
+                    cross: 17.0,
                 },
                 RenderedSessionPosition {
                     id: id(3),
                     agent_type: AgentType::Codex,
                     center: 575.0,
+                    cross: 17.0,
                 },
             ],
             1_200.0,
