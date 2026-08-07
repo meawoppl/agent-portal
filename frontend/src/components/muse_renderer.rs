@@ -131,19 +131,68 @@ pub fn render_task_tree(tree: &TaskTree) -> Html {
                 </div>
             }
             if !visible.is_empty() || !footer.is_empty() {
-                <div class="muse-task-tree">
+                // The task tree is the supporting WORK LOG, not the reply. A
+                // long turn stacks dozens of nodes that eclipse the answer
+                // above, so keep it collapsed behind a "N steps" toggle once an
+                // answer exists; when there's no answer yet (in progress, or a
+                // failed run with no reply), leave it open so the turn isn't
+                // an empty card (#muse-worklog-collapse).
+                <MuseWorkLog
+                    count={visible.len()}
+                    default_expanded={tree.answer().is_none()}
+                >
                     // Each task node carries a stable `key={task_id}` (set in
                     // render_task_node) so Yew updates a task in place as it
                     // advances running → completed, instead of positionally
-                    // diffing (which made an updating task appear to jump).
-                    // Mirrors how the Codex item list keys its cards.
+                    // diffing. Mirrors how the Codex item list keys its cards.
                     { for visible.iter().map(|node| render_task_node(node)) }
                     if !footer.is_empty() {
                         <div class="muse-journal-footer">{ footer.join(" · ") }</div>
                     }
-                </div>
+                </MuseWorkLog>
             }
         </>
+    }
+}
+
+/// Collapsible "work log" wrapper around a turn's task nodes. Muse emits many
+/// bookkeeping/tool tasks per turn; rendered inline they bury the actual reply,
+/// so this hides them behind a `▸ N steps` toggle. Defaults open when the turn
+/// has no answer yet (otherwise the card would be empty).
+#[derive(Properties, PartialEq)]
+struct MuseWorkLogProps {
+    count: usize,
+    default_expanded: bool,
+    children: Html,
+}
+
+#[function_component(MuseWorkLog)]
+fn muse_work_log(props: &MuseWorkLogProps) -> Html {
+    let expanded = use_state(|| props.default_expanded);
+    let toggle = {
+        let expanded = expanded.clone();
+        Callback::from(move |_: MouseEvent| expanded.set(!*expanded))
+    };
+    let label = if props.count == 1 {
+        "1 step".to_string()
+    } else {
+        format!("{} steps", props.count)
+    };
+    let header_class = if *expanded {
+        "muse-worklog-toggle expanded"
+    } else {
+        "muse-worklog-toggle"
+    };
+    html! {
+        <div class="muse-worklog">
+            <button type="button" class={header_class} onclick={toggle}>
+                <span class="muse-worklog-caret">{ if *expanded { "▾" } else { "▸" } }</span>
+                <span class="muse-worklog-count">{ label }</span>
+            </button>
+            if *expanded {
+                <div class="muse-task-tree">{ props.children.clone() }</div>
+            }
+        </div>
     }
 }
 
