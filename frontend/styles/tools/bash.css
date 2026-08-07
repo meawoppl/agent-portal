@@ -47,3 +47,70 @@
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+/* ==========================================================================
+   Command-result card (CommandResultCard) — a shell command + its output as
+   one card, styled like the Claude/Codex tool results: green success / red
+   failure, intent line on top, then `$ command`, then collapsible output.
+   Shared component; muse's bash/command results are the first consumer.
+   ========================================================================== */
+.command-result {
+    margin: 0.4rem 0 0.3rem 0.5rem;
+    padding: 0.45rem 0.6rem;
+    background: rgba(34, 197, 94, 0.1);
+    border-left: 3px solid var(--success);
+    border-radius: 0 4px 4px 0;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+}
+
+.command-result.failed {
+    background: rgba(239, 68, 68, 0.1);
+    border-left-color: var(--error);
+}
+
+.command-result-intent {
+    color: var(--text-secondary);
+    font-style: italic;
+    font-size: 0.78rem;
+    margin-bottom: 0.35rem;
+}
+
+.command-result-command {
+    display: flex;
+    gap: 0.4rem;
+    align-items: baseline;
+}
+
+.command-result-prompt {
+    color: var(--success);
+    flex-shrink: 0;
+}
+
+.command-result.failed .command-result-prompt {
+    color: var(--error);
+}
+
+.command-result-line {
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.command-result-exit {
+    color: var(--error);
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.command-result-output {
+    margin: 0.4rem 0 0;
+    padding: 0.4rem 0.55rem;
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.22);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
