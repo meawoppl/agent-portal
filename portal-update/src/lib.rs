@@ -273,11 +273,66 @@ fn install_binary(self_path: &std::path::Path, new_binary: &[u8]) -> Result<()> 
 
     #[cfg(not(windows))]
     {
-        // Atomic rename on Unix
-        fs::rename(&temp_path, self_path).context("Failed to replace binary")?;
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Atomic rename on Unix platforms without the macOS execution
+            // policy validation described below.
+            fs::rename(&temp_path, self_path).context("Failed to replace binary")?;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Keep the previous executable available until the replacement has
+            // proved that the OS will execute it. This matters on macOS, where a
+            // freshly downloaded binary can pass the write/chmod steps but still
+            // be rejected by Gatekeeper on its first exec.
+            let old_path = self_path.with_extension("old");
+            let _ = fs::remove_file(&old_path);
+            fs::copy(self_path, &old_path).context("Failed to back up current binary")?;
+
+            fs::rename(&temp_path, self_path).context("Failed to replace binary")?;
+
+            if let Err(error) = validate_macos_executable(self_path) {
+                fs::rename(&old_path, self_path).context(
+                    "Replacement failed validation and old binary could not be restored",
+                )?;
+                return Err(error.context("Replacement failed validation; restored old binary"));
+            }
+        }
+
         info!("Update installed successfully");
         Ok(())
     }
+}
+
+/// Clear download provenance and prove launchd will be able to execute the
+/// replacement before the running launcher asks launchd to restart it.
+#[cfg(target_os = "macos")]
+fn validate_macos_executable(path: &std::path::Path) -> Result<()> {
+    let xattr = std::process::Command::new("xattr")
+        .arg("-c")
+        .arg(path)
+        .output()
+        .context("Failed to run xattr on replacement binary")?;
+    if !xattr.status.success() {
+        bail!(
+            "xattr -c failed: {}",
+            String::from_utf8_lossy(&xattr.stderr).trim()
+        );
+    }
+
+    let smoke = std::process::Command::new(path)
+        .arg("--help")
+        .output()
+        .context("Failed to execute replacement binary")?;
+    if !smoke.status.success() {
+        bail!(
+            "replacement --help smoke test failed with {}: {}",
+            smoke.status,
+            String::from_utf8_lossy(&smoke.stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 /// How the Windows binary-swap dance failed
