@@ -100,6 +100,8 @@ pub enum InputBarInbound {
     /// after a permission is answered so the user can keep typing without
     /// a stray click.
     FocusTextarea,
+    /// Replace the current Claude-provided next-prompt suggestion.
+    PromptSuggestion(String),
 }
 
 pub enum InputBarMsg {
@@ -107,6 +109,7 @@ pub enum InputBarMsg {
     /// User typed into the textarea. We track the value in state so it can
     /// be restored after a re-render (e.g. on WS reconnect).
     UpdateInput(String),
+    AcceptSuggestion,
     /// User submitted the form (Enter, or click "Send"). Sends with
     /// `SendMode::Normal`.
     SendInput,
@@ -152,6 +155,7 @@ pub struct InputBar {
     drag_hover: bool,
     is_recording: bool,
     interim_transcription: Option<String>,
+    pending_suggestion: Option<String>,
     voice_button_ref: NodeRef,
     was_focused: bool,
     /// Mirror of the `ws_connected` prop from the previous render. The composer
@@ -196,6 +200,7 @@ impl Component for InputBar {
             drag_hover: false,
             is_recording: false,
             interim_transcription: None,
+            pending_suggestion: None,
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
             was_ws_connected: ctx.props().ws_connected,
@@ -269,15 +274,32 @@ impl Component for InputBar {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            InputBarMsg::Inbound(InputBarInbound::FocusTextarea) => {
-                self.focus_textarea();
-                false
-            }
+            InputBarMsg::Inbound(inbound) => match inbound {
+                InputBarInbound::FocusTextarea => {
+                    self.focus_textarea();
+                    false
+                }
+                InputBarInbound::PromptSuggestion(suggestion) => {
+                    self.pending_suggestion = (!suggestion.is_empty()).then_some(suggestion);
+                    true
+                }
+            },
             InputBarMsg::UpdateInput(value) => {
                 // Textarea is uncontrolled — the DOM already has the new
                 // value. Track in state so we can restore after re-renders.
                 self.input_text = value;
+                self.pending_suggestion = None;
                 false
+            }
+            InputBarMsg::AcceptSuggestion => {
+                if self.get_input_text().is_empty() {
+                    if let Some(suggestion) = self.pending_suggestion.take() {
+                        self.input_text = suggestion.clone();
+                        self.set_input_text(&suggestion);
+                        self.focus_textarea();
+                    }
+                }
+                true
             }
             InputBarMsg::SendInput => self.dispatch_text_send(ctx, SendMode::Normal),
             InputBarMsg::SendWiggum => {
@@ -416,7 +438,12 @@ impl Component for InputBar {
 
         let vim_enabled = self.vim_enabled;
         let vim = self.vim.clone();
+        let can_accept_suggestion = self.pending_suggestion.is_some() && self.input_text.is_empty();
         let handle_keydown = link.callback(move |e: KeyboardEvent| {
+            if e.key() == "Tab" && can_accept_suggestion {
+                e.prevent_default();
+                return InputBarMsg::AcceptSuggestion;
+            }
             // While the dashboard is in Nav mode the composer must be inert: Nav
             // owns single-key shortcuts (1-9 to jump panes, hjkl, w, n, d, G).
             // The textarea keeps DOM focus in Nav mode, so without this a plain
@@ -581,13 +608,21 @@ impl Component for InputBar {
                                 && self.vim.borrow().mode == vim::VimMode::Normal)
                                 .then_some("vim-normal")
                         )}
-                        placeholder="Type your message... (Shift+Enter for new line)"
+                        placeholder={self.pending_suggestion.clone().unwrap_or_else(|| "Type your message... (Shift+Enter for new line)".into())}
                         oninput={handle_input}
                         onkeydown={handle_keydown}
                         onpaste={handle_paste}
                         disabled={!ctx.props().ws_connected}
                         rows="1"
                     />
+                    if self.pending_suggestion.is_some() && self.input_text.is_empty() {
+                        <button
+                            type="button"
+                            class="prompt-suggestion-accept"
+                            title="Accept suggested prompt (Tab)"
+                            onclick={link.callback(|_| InputBarMsg::AcceptSuggestion)}
+                        >{ "Tab" }</button>
+                    }
                     { self.render_voice_input(ctx) }
                     { self.render_send_button(ctx) }
                     <div class="drop-hint">{ "Drop files here to upload" }</div>
@@ -642,6 +677,7 @@ impl InputBar {
         self.command_history.push(input.clone());
         self.set_input_text("");
         self.input_text.clear();
+        self.pending_suggestion = None;
         ctx.props().on_message_sent.emit(());
         ctx.props().on_send_text.emit((input, mode));
         true
@@ -661,6 +697,7 @@ impl InputBar {
         let user_input = self.get_input_text().trim().to_string();
         self.set_input_text("");
         self.input_text.clear();
+        self.pending_suggestion = None;
         if !user_input.is_empty() {
             self.command_history.push(user_input.clone());
         }

@@ -32,6 +32,8 @@ pub fn claude_cli_args(
         "--permission-prompt-tool",
         "stdio",
         "--replay-user-messages",
+        "--prompt-suggestions",
+        "true",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -194,5 +196,15 @@ mod tests {
             ["--session-id", &own_id.to_string()]
         );
         assert!(!args.iter().any(|arg| arg == "--fork-session"));
+    }
+
+    #[test]
+    fn enables_typed_prompt_suggestion_frames() {
+        let args = claude_cli_args(uuid::Uuid::nil(), false, None, &[]);
+        let flag = args
+            .iter()
+            .position(|arg| arg == "--prompt-suggestions")
+            .expect("prompt suggestions flag");
+        assert_eq!(args.get(flag + 1).map(String::as_str), Some("true"));
     }
 }

@@ -70,6 +70,17 @@
     border-color: var(--accent);
 }
 
+.session-view-input .prompt-suggestion-accept {
+    align-self: center;
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font: 0.7rem var(--font-mono, monospace);
+    cursor: pointer;
+}
+
 /* Vim NORMAL-mode block cursor. vim.rs keeps a one-character selection at the
    cursor, painted below as a solid vim-style block. caret-color is the accent
    (not transparent): browsers hide the blinking caret while a selection is

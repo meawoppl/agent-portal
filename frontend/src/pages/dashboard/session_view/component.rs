@@ -1051,6 +1051,13 @@ impl SessionView {
             ));
         }
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
+            if let shared::ClaudeOutput::PromptSuggestion(suggestion) = &claude_msg {
+                if let Some(dispatcher) = &self.input_bar_dispatcher {
+                    dispatcher.emit(InputBarInbound::PromptSuggestion(
+                        suggestion.suggestion.clone(),
+                    ));
+                }
+            }
             // Live task events use the server-assigned row timestamp when the
             // backend supplied it, falling back to browser time only for
             // pre-metadata/error frames.
