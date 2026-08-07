@@ -176,15 +176,36 @@ fn init_tracing(session_id_tag: Option<Uuid>, verbose: bool) {
         .unwrap_or_else(|_| default_level.into());
 
     if let Some(sid) = session_id_tag {
-        // Launched by daemon: JSON format with session_id field
-        let fmt_layer = tracing_subscriber::fmt::layer()
-            .json()
-            .with_target(false)
-            .with_span_list(false);
+        // A daemon-launched proxy should preserve tracing severity as journald
+        // PRIORITY and promote session_id to a queryable journal field. JSON on
+        // stdout remains the fallback when the journal socket is unavailable.
+        #[cfg(target_os = "linux")]
+        {
+            let journald = tracing_journald::layer().ok();
+            let fmt_layer = journald.is_none().then(|| {
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_target(false)
+                    .with_span_list(false)
+            });
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .with(journald)
+                .init();
+        }
+
+        #[cfg(not(target_os = "linux"))]
         tracing_subscriber::registry()
             .with(env_filter)
-            .with(fmt_layer)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_target(false)
+                    .with_span_list(false),
+            )
             .init();
+
         tracing::info!(session_id = %sid, "Proxy starting with session tag");
     } else {
         // Interactive: human-readable format

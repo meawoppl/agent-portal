@@ -67,6 +67,9 @@ colored = "2.1"
 # Time
 chrono = { workspace = true, features = ["std", "clock"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+tracing-journald = "0.3"
+
 # Self-update
 portal-update = { path = "../portal-update" }
 session-lib = { path = "../session-lib" }
