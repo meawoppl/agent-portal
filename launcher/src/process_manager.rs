@@ -24,13 +24,10 @@ use crate::path_policy;
 const CRASH_LOOP_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Path to the launcher's sidecar codex-thread map: `session_id -> thread_id`.
-/// Lives next to `launcher.json` in `ProjectDirs` so it ships with the same
+/// Lives next to `launcher.json` in the config dir so it ships with the same
 /// install/uninstall surface and survives across restarts.
 fn codex_threads_path() -> PathBuf {
-    directories::ProjectDirs::from("com", "anthropic", "agent-portal")
-        .map(|p| p.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("/tmp/agent-portal"))
-        .join("codex_threads.json")
+    session_lib::paths::config_dir().join("codex_threads.json")
 }
 
 fn load_codex_threads() -> HashMap<Uuid, String> {

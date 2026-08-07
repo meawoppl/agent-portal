@@ -32,7 +32,7 @@ Once authenticated, all future sessions (terminal and VS Code) reuse the stored 
 
 **Important**: The auth token is stored per-working-directory. The shim uses a cross-directory fallback, so authenticating from *any* directory is sufficient for VS Code sessions to work.
 
-**Config location on macOS**: `~/Library/Application Support/com.anthropic.agent-portal/config.json` (not `~/.config/`). The proxy uses the `directories` crate which follows OS-standard paths.
+**Config location**: `~/.config/agent-portal/config.json` on every platform (Linux and macOS alike; `%APPDATA%\agent-portal\config.json` on Windows). This matches the installer everywhere (#1591).
 
 ### 2. Create the shim script
 

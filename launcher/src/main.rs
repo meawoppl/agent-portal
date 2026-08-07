@@ -257,6 +257,11 @@ async fn main() -> anyhow::Result<()> {
 
     init_tracing();
 
+    // Reconcile the pre-#1591 config location (macOS/Windows `ProjectDirs`)
+    // onto the standardized `~/.config/agent-portal` before anything reads
+    // config, so existing devices keep their auth token instead of logging out.
+    session_lib::paths::migrate_legacy_config_dir();
+
     // Handle subcommands before the daemon startup path
     match args.command {
         Some(Command::Login) => return cmd_login(&args).await,

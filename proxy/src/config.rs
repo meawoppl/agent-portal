@@ -137,12 +137,7 @@ impl Drop for ConfigLock {
 
 impl ProxyConfig {
     pub fn config_path() -> Result<PathBuf> {
-        let config_dir = directories::ProjectDirs::from("com", "anthropic", "agent-portal")
-            .context("Failed to determine config directory")?
-            .config_dir()
-            .to_path_buf();
-
-        Ok(config_dir.join("config.json"))
+        Ok(session_lib::paths::config_dir().join("config.json"))
     }
 
     pub fn load() -> Result<Self> {
