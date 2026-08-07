@@ -1,5 +1,5 @@
 use super::super::shorten_model_name;
-use super::render_image_source;
+use super::media::render_image_source;
 use super::tools::{
     render_code_execution_result, render_container_upload, render_mcp_tool_result,
     render_mcp_tool_use, render_server_tool_use, render_structured_block, render_unknown_block,
