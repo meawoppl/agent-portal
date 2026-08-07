@@ -39,16 +39,20 @@ pub struct SessionConfig {
     /// directly via `--resume`).
     #[serde(default)]
     pub codex_thread_id: Option<String>,
-    /// Source portal session for a whole-history Claude fork. The new session
-    /// keeps `session_id` as its own identity; this id is emitted via
-    /// `--resume <source> --fork-session --session-id <new>`.
+    /// Source portal session for a fork. Fork metadata seeds only the first
+    /// launch (`resume == false`); relaunches resume the fork's own identity.
+    /// Claude emits this via `--resume <source> --fork-session --session-id
+    /// <new>`. The launcher/API layer added by #1457 must preflight that the
+    /// Claude source transcript exists before constructing this config.
     #[serde(default)]
     pub fork_from_session_id: Option<Uuid>,
     /// Source app-server thread for a Codex fork. Resolved launcher-side from
-    /// the source portal session because Codex thread ids are not backend data.
+    /// `fork_from_session_id` because Codex thread ids are not backend data.
+    /// Used only on the first launch; relaunches resume `codex_thread_id`.
     #[serde(default)]
     pub codex_fork_from_thread_id: Option<String>,
     /// Optional inclusive Codex fork cut. Claude only supports whole history.
+    /// Like the source thread, this is ignored on resume launches.
     #[serde(default)]
     pub codex_fork_last_turn_id: Option<String>,
 }

@@ -2,7 +2,8 @@
 //!
 //! Spawns `claude --print --verbose --output-format stream-json
 //! --input-format stream-json --permission-prompt-tool stdio
-//! --replay-user-messages [--session-id <id> | --resume <id>] [extra...]`
+//! --replay-user-messages [--session-id <id> | --resume <id> |
+//! --resume <source> --fork-session --session-id <new>] [extra...]`
 //! and wraps its handles in a [`ClaudeAsyncClient`].
 
 use std::path::Path;
@@ -36,7 +37,7 @@ pub fn claude_cli_args(
     .map(|s| s.to_string())
     .collect();
 
-    if let Some(source) = fork_from {
+    if let Some(source) = (!resume).then_some(fork_from).flatten() {
         args.extend([
             "--resume".to_string(),
             source.to_string(),
@@ -162,5 +163,25 @@ mod tests {
             new_id.to_string(),
         ];
         assert_eq!(&args[args.len() - expected.len()..], expected.as_slice());
+    }
+
+    #[test]
+    fn resume_ignores_persisted_fork_source() {
+        let source = uuid::Uuid::from_u128(1);
+        let own_id = uuid::Uuid::from_u128(2);
+        let args = claude_cli_args(own_id, true, Some(source), &[]);
+        assert_eq!(&args[args.len() - 2..], ["--resume", &own_id.to_string()]);
+        assert!(!args.iter().any(|arg| arg == "--fork-session"));
+    }
+
+    #[test]
+    fn fresh_non_fork_launch_uses_new_session_id() {
+        let own_id = uuid::Uuid::from_u128(2);
+        let args = claude_cli_args(own_id, false, None, &[]);
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["--session-id", &own_id.to_string()]
+        );
+        assert!(!args.iter().any(|arg| arg == "--fork-session"));
     }
 }

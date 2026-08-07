@@ -34,9 +34,15 @@ enum CodexApprovalResponseKind {
 }
 
 fn codex_fork_params(config: &SessionConfig) -> Option<ThreadForkParams> {
+    if config.resume {
+        return None;
+    }
     Some(ThreadForkParams {
         thread_id: config.codex_fork_from_thread_id.clone()?,
         last_turn_id: config.codex_fork_last_turn_id.clone(),
+        // A fork commonly launches in a newly-created git worktree. Unlike a
+        // resume, it must not inherit the source thread's checkout.
+        cwd: Some(config.working_directory.to_string_lossy().into_owned()),
         ..ThreadForkParams::default()
     })
 }
@@ -279,6 +285,17 @@ pub(crate) async fn codex_io_task(
     // (`config.resume == true`) and the proxy persisted a thread id from
     // the previous incarnation.
     let mut resumed_thread: Option<(String, Option<String>)> = None;
+    if !config.resume
+        && config.fork_from_session_id.is_some()
+        && config.codex_fork_from_thread_id.is_none()
+    {
+        let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(
+            "Codex fork requested but the launcher could not resolve the source thread id"
+                .to_string(),
+        )));
+        return;
+    }
+
     if let Some(fork_params) = codex_fork_params(&config) {
         let source = fork_params.thread_id.clone();
         match client.thread_fork(&fork_params).await {
@@ -1145,14 +1162,23 @@ mod tests {
     #[test]
     fn fork_params_keep_parent_thread_and_optional_turn_cut() {
         let config = SessionConfig {
+            fork_from_session_id: Some(uuid::Uuid::from_u128(1)),
             codex_fork_from_thread_id: Some("parent-thread".into()),
             codex_fork_last_turn_id: Some("turn-7".into()),
+            working_directory: "/tmp/fork-worktree".into(),
             ..Default::default()
         };
         let params = codex_fork_params(&config).expect("fork params");
         assert_eq!(params.thread_id, "parent-thread");
         assert_eq!(params.last_turn_id.as_deref(), Some("turn-7"));
+        assert_eq!(params.cwd.as_deref(), Some("/tmp/fork-worktree"));
         assert!(codex_fork_params(&SessionConfig::default()).is_none());
+
+        let resumed = SessionConfig {
+            resume: true,
+            ..config
+        };
+        assert!(codex_fork_params(&resumed).is_none());
     }
 
     /// Neutral `PermissionDecision` → Codex approval response. Ported from the
