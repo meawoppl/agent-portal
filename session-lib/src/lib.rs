@@ -29,6 +29,7 @@ pub mod heartbeat;
 pub mod install;
 pub mod io;
 pub mod output_buffer;
+pub mod paths;
 pub mod probe;
 pub mod session;
 pub mod snapshot;

@@ -260,7 +260,9 @@ chmod +x scripts/*.sh
 If everything is broken, try a full cleanup:
 ```bash
 ./scripts/clean.sh
-rm -rf ~/.config/agent-portal/  # Remove cached auth
+# Remove cached auth/config only — NOT the whole dir, which on an installed
+# machine also holds the `agent-portal` binary (#1591).
+rm -f ~/.config/agent-portal/launcher.json ~/.config/agent-portal/config.json
 cargo clean
 cd frontend && trunk clean && cd ..
 ./scripts/install-deps.sh

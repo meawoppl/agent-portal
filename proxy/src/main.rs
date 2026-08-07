@@ -238,6 +238,11 @@ async fn main() -> Result<()> {
 
     init_tracing(args.session_id_tag, args.verbose);
 
+    // Reconcile the pre-#1591 config location before reading config.json.
+    // Idempotent and best-effort; normally the launcher already did this, but a
+    // standalone proxy run must not read the stale macOS `ProjectDirs` path.
+    session_lib::paths::migrate_legacy_config_dir();
+
     // Skip update checks and UI output entirely in shim mode
     if !args.shim {
         // Apply any pending update, then auto-update before anything else —
