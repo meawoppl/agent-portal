@@ -33,7 +33,11 @@ pub async fn muse_io_task(
     mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
     event_tx: mpsc::UnboundedSender<IoEvent>,
 ) {
-    let mut classifier = MuseClassifier;
+    // One classifier for the whole session, not per turn: the reminder
+    // screen learns task ids from `proposed` records, and a task's records
+    // can only span one turn — but keeping it session-scoped is harmless
+    // and avoids re-learning state mid-stream on a respawn boundary.
+    let mut classifier = MuseClassifier::default();
 
     while let Some(command) = command_rx.recv().await {
         match command {

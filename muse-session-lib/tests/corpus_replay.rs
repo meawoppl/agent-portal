@@ -7,8 +7,8 @@
 //! regression would otherwise show up as silent transcript corruption.
 
 use muse_codes::MuseRecord;
-use muse_session_lib::classify_record;
-use session_lib::adapter::AgentOutput;
+use muse_session_lib::{classify_record, MuseClassifier};
+use session_lib::adapter::{AgentOutput, AgentOutputClassifier};
 use std::collections::HashSet;
 
 fn load(name: &str) -> Vec<MuseRecord> {
@@ -147,5 +147,123 @@ fn wire_durability_decides_routing_on_real_captures() {
     assert!(
         ephemeral > 0 && durable > 0,
         "a live turn should exercise both channels (got {ephemeral} ephemeral, {durable} durable)"
+    );
+}
+
+/// The reminder screen, proven on the real wire: replaying a live capture
+/// through a stateful classifier must Noop every record belonging to a
+/// `reminder.*` task — including the `task.stream.linked` records that
+/// arrive BEFORE the `proposed` that names the kind — while leaving every
+/// real-work record (model tasks, tool tasks, run lifecycle, tool results)
+/// untouched. Measured motivation: reminders are 41–47% of a turn's
+/// durable records and render as nothing.
+#[test]
+fn reminder_scaffolding_screens_to_noop_on_real_captures() {
+    for fixture in ["corpus_meta_tool_use.jsonl", "corpus_meta_subagents.jsonl"] {
+        let records = load(fixture);
+
+        // Ground truth from the capture: task ids proposed as reminder.*.
+        let reminder_ids: HashSet<String> = records
+            .iter()
+            .filter_map(|r| {
+                let ev = r.payload.get("event")?;
+                (ev.get("kind")?.as_str()? == "proposed"
+                    && ev.get("task_kind")?.as_str()?.starts_with("reminder."))
+                .then(|| ev.get("task_id")?.as_str().map(str::to_string))?
+            })
+            .collect();
+        assert!(
+            !reminder_ids.is_empty(),
+            "{fixture}: capture must contain reminders"
+        );
+
+        let mut classifier = MuseClassifier::default();
+        let mut emitted_types = Vec::new();
+        let mut noops = 0usize;
+        for r in &records {
+            for out in classifier.classify(r.clone()) {
+                match out {
+                    AgentOutput::Noop => noops += 1,
+                    AgentOutput::Visible(v) | AgentOutput::Ephemeral(v) => {
+                        // No emitted record may belong to a reminder task.
+                        let tid = v["payload"]["event"]["task_id"]
+                            .as_str()
+                            .or_else(|| v["payload"]["task_id"].as_str());
+                        if let Some(tid) = tid {
+                            assert!(
+                                !reminder_ids.contains(tid),
+                                "{fixture}: reminder record leaked: {}",
+                                v["payload_type"]
+                            );
+                        }
+                        emitted_types.push(v["payload_type"].as_str().unwrap_or("?").to_string());
+                    }
+                    other => panic!("{fixture}: unexpected output {other:?}"),
+                }
+            }
+        }
+
+        // Only the reminder `proposed` records themselves collapse to a Noop
+        // marker; the rest of each reminder's lifecycle Noops too, so the
+        // count must cover every reminder-task record in the capture.
+        let reminder_records = records
+            .iter()
+            .filter(|r| {
+                let p = &r.payload;
+                let tid = p
+                    .get("event")
+                    .and_then(|e| e.get("task_id"))
+                    .and_then(|t| t.as_str())
+                    .or_else(|| p.get("task_id").and_then(|t| t.as_str()));
+                tid.is_some_and(|t| reminder_ids.contains(t))
+            })
+            .count();
+        // Every reminder record becomes exactly one Noop, except held links
+        // which are silently dropped (no output at all).
+        assert!(
+            noops > 0 && noops <= reminder_records,
+            "{fixture}: expected 1..={reminder_records} noops, got {noops}"
+        );
+
+        // Real work survives untouched.
+        for expected in [
+            "run.terminal.completed",
+            "tool.result",
+            "run.model.configured",
+        ] {
+            assert!(
+                emitted_types.iter().any(|t| t == expected),
+                "{fixture}: screening must not touch {expected}"
+            );
+        }
+        // And non-reminder tasks keep their stream.linked records.
+        assert!(
+            emitted_types.iter().any(|t| t == "task.stream.linked"),
+            "{fixture}: real tasks must keep their linked records"
+        );
+    }
+}
+
+/// The screen's arithmetic on the tool-use capture: durable records drop by
+/// roughly the measured reminder share, pinning the buffer-pressure win
+/// that motivated the screen (message cap shrinks 1000 → 200 on the
+/// strength of it).
+#[test]
+fn screening_cuts_the_durable_record_volume() {
+    let records = load("corpus_meta_tool_use.jsonl");
+    let durable_before = records
+        .iter()
+        .filter(|r| r.durability == muse_codes::Durability::Durable)
+        .count();
+    let mut classifier = MuseClassifier::default();
+    let durable_after = records
+        .iter()
+        .flat_map(|r| classifier.classify(r.clone()))
+        .filter(|o| matches!(o, AgentOutput::Visible(_)))
+        .count();
+    assert!(
+        (durable_after as f64) <= (durable_before as f64) * 0.65,
+        "screen should remove the measured ~40%+ reminder share of durable \
+         records (before={durable_before}, after={durable_after})"
     );
 }
