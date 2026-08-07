@@ -38,6 +38,10 @@ pub fn claude_cli_args(
     .collect();
 
     if let Some(source) = (!resume).then_some(fork_from).flatten() {
+        // claude-codes exposes ClaudeCliBuilder::fork_from, but that builder
+        // cannot carry the portal's arbitrary user extra_args. Keep the SDK's
+        // documented flag recipe here until its builder supports passthrough;
+        // this function also remains the single argv seam shared with shim mode.
         args.extend([
             "--resume".to_string(),
             source.to_string(),
@@ -154,13 +158,20 @@ mod tests {
     fn fork_args_keep_source_and_new_identity_distinct() {
         let source = uuid::Uuid::from_u128(1);
         let new_id = uuid::Uuid::from_u128(2);
-        let args = claude_cli_args(new_id, false, Some(source), &[]);
+        let args = claude_cli_args(
+            new_id,
+            false,
+            Some(source),
+            &["--model".into(), "opus".into()],
+        );
         let expected = vec![
             "--resume".to_string(),
             source.to_string(),
             "--fork-session".to_string(),
             "--session-id".to_string(),
             new_id.to_string(),
+            "--model".to_string(),
+            "opus".to_string(),
         ];
         assert_eq!(&args[args.len() - expected.len()..], expected.as_slice());
     }

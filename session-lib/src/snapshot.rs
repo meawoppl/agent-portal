@@ -40,7 +40,11 @@ pub struct SessionConfig {
     #[serde(default)]
     pub codex_thread_id: Option<String>,
     /// Source portal session for a fork. Fork metadata seeds only the first
-    /// launch (`resume == false`); relaunches resume the fork's own identity.
+    /// spawn attempt; the launcher must clear all three fork fields after that
+    /// attempt. `resume == false` alone is not a durable first-launch marker:
+    /// transcript rotation paths also set it false, while backend reconciliation
+    /// can set it true before a never-launched desired session first registers.
+    /// Muse does not implement fork semantics and must be capability-gated out.
     /// Claude emits this via `--resume <source> --fork-session --session-id
     /// <new>`. The launcher/API layer added by #1457 must preflight that the
     /// Claude source transcript exists before constructing this config.
