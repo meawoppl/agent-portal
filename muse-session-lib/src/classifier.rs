@@ -29,12 +29,13 @@ use std::collections::HashSet;
 ///
 /// Mostly stateless — turn grouping is carried on the wire
 /// (`causation_id`), so unlike Codex this needs no request-id ↔ tool map.
-/// The one piece of state is the reminder screen: muse's `tbh-reminders`
-/// plugin journals full task lifecycles for its prompt bookkeeping
-/// (skill/scope/goal/verify reminders), which measured at 41–47% of a
-/// turn's durable records while rendering as nothing. Screening them here
-/// as [`AgentOutput::Noop`] removes them from the buffer, the database,
-/// and the socket in one place.
+/// The state is the screen for muse's content-free bookkeeping tasks:
+/// `tbh-reminders` plugin lifecycles (skill/scope/goal/verify reminders,
+/// measured at 41–47% of a turn's durable records) and `model.meta.response`
+/// lifecycles (one per meta-model call, carrying only a `not_applicable`
+/// side-effect and transient status). Both render as nothing, so screening
+/// them here as [`AgentOutput::Noop`] removes them from the buffer, the
+/// database, and the socket in one place.
 ///
 /// The screen must be stateful because only the `proposed` record names
 /// `task_kind` — every later record for that task carries `task_id` alone.
@@ -47,6 +48,19 @@ use std::collections::HashSet;
 pub struct MuseClassifier {
     /// Task ids whose `proposed` named a `reminder.*` kind.
     reminder_tasks: HashSet<String>,
+    /// Task ids whose `proposed` named `model.meta.response`. Muse journals a
+    /// full task lifecycle every time it calls the meta model, but the record
+    /// carries nothing user-facing: a `side_effect_intent` of
+    /// `model.meta.response — policy: not_applicable` plus two transient
+    /// status lines (`opening/completed meta model stream attempt 1/10`). The
+    /// actual reply lands separately on `run.terminal.*` (rendered as the
+    /// answer). Measured at 0/10 tasks carrying any output across every
+    /// capture, so screen them as [`AgentOutput::Noop`]. Kept as a distinct set
+    /// from `reminder_tasks` because the escape hatch differs: a reminder's
+    /// `side_effect_intent` is a notable policy decision worth surfacing, but a
+    /// meta-response's is the very `not_applicable` line we're removing — so
+    /// only genuine streamed `output` breaks a meta-response task out.
+    meta_response_tasks: HashSet<String>,
     /// `task.stream.linked` records awaiting their task's `proposed`
     /// (insertion order; nearly always a single entry).
     pending_links: Vec<(String, MuseRecord)>,
@@ -91,13 +105,16 @@ impl MuseClassifier {
         if event_kind == Some("proposed") {
             if let Some(id) = task_id {
                 let held = self.take_pending(&id);
-                let is_reminder = event
+                let kind = event
                     .and_then(|e| e.get("task_kind"))
-                    .and_then(|k| k.as_str())
-                    .is_some_and(|k| k.starts_with("reminder."));
-                if is_reminder {
+                    .and_then(|k| k.as_str());
+                if kind.is_some_and(|k| k.starts_with("reminder.")) {
                     // The held link vanishes with its task.
                     self.reminder_tasks.insert(id);
+                    return vec![AgentOutput::Noop];
+                }
+                if kind == Some("model.meta.response") {
+                    self.meta_response_tasks.insert(id);
                     return vec![AgentOutput::Noop];
                 }
                 let mut out = Vec::with_capacity(2);
@@ -119,6 +136,20 @@ impl MuseClassifier {
             // bookkeeping. (The frontend keeps its own content-guard for
             // the same reason.)
             if matches!(event_kind, Some("output" | "side_effect_intent")) {
+                return vec![classify_record(&record)];
+            }
+            return vec![AgentOutput::Noop];
+        }
+
+        if task_id
+            .as_deref()
+            .is_some_and(|id| self.meta_response_tasks.contains(id))
+        {
+            // Narrower hatch than reminders: a meta-response's only
+            // side-effect is the `not_applicable` audit line we're screening,
+            // so only genuine streamed `output` breaks it out — everything
+            // else (status, side_effect_intent, lifecycle) is dropped.
+            if event_kind == Some("output") {
                 return vec![classify_record(&record)];
             }
             return vec![AgentOutput::Noop];
@@ -483,11 +514,9 @@ mod reminder_screen {
     fn real_task_link_is_released_with_its_proposed() {
         let mut c = MuseClassifier::default();
         assert!(c.classify(linked("t1")).is_empty());
-        let out = c.classify(lifecycle(
-            "proposed",
-            "t1",
-            json!({"task_kind": "model.meta.response"}),
-        ));
+        // A real work task (not reminder.* / model.meta.response) releases its
+        // held link and stays visible.
+        let out = c.classify(lifecycle("proposed", "t1", json!({"task_kind": "tool.bash"})));
         let types: Vec<_> = out
             .iter()
             .map(|o| match o {
@@ -513,6 +542,65 @@ mod reminder_screen {
         assert!(
             matches!(out[..], [AgentOutput::Visible(_)]),
             "reminder content must surface, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn meta_response_lifecycle_screens_to_noop_including_side_effect() {
+        // model.meta.response is muse's "I called the meta model" bookkeeping —
+        // its whole lifecycle is dropped, including the `not_applicable`
+        // side_effect_intent that is the visible noise, and the transient
+        // status lines. The reply itself arrives on run.terminal.* separately.
+        let mut c = MuseClassifier::default();
+        assert!(c.classify(linked("m1")).is_empty(), "link held");
+        let proposed = lifecycle(
+            "proposed",
+            "m1",
+            json!({"task_kind": "model.meta.response"}),
+        );
+        assert!(matches!(c.classify(proposed)[..], [AgentOutput::Noop]));
+        let side_effect = lifecycle(
+            "side_effect_intent",
+            "m1",
+            json!({"operation": "model.meta.response", "policy_decision": "not_applicable"}),
+        );
+        assert!(
+            matches!(c.classify(side_effect)[..], [AgentOutput::Noop]),
+            "the not_applicable side-effect is the noise — it must be dropped, unlike a reminder's"
+        );
+        assert!(matches!(
+            c.classify(lifecycle(
+                "status",
+                "m1",
+                json!({"message": "opening meta model stream attempt 1/10"})
+            ))[..],
+            [AgentOutput::Noop]
+        ));
+        assert!(matches!(
+            c.classify(lifecycle("completed", "m1", json!({})))[..],
+            [AgentOutput::Noop]
+        ));
+    }
+
+    #[test]
+    fn meta_response_streamed_output_still_escapes() {
+        // Defensive: no capture shows a meta-response carrying streamed output,
+        // but if muse ever does, it must surface rather than vanish.
+        let mut c = MuseClassifier::default();
+        c.classify(linked("m1"));
+        c.classify(lifecycle(
+            "proposed",
+            "m1",
+            json!({"task_kind": "model.meta.response"}),
+        ));
+        let out = c.classify(lifecycle(
+            "output",
+            "m1",
+            json!({"chunk": "unexpected content"}),
+        ));
+        assert!(
+            matches!(out[..], [AgentOutput::Visible(_)]),
+            "meta-response streamed output must surface, got {out:?}"
         );
     }
 
