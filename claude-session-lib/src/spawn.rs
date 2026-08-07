@@ -15,7 +15,12 @@ use session_lib::snapshot::SessionConfig;
 /// Build the argument list for the `claude` CLI (everything after the binary
 /// path). Shared by the library spawn path and the proxy's shim mode so flag
 /// changes can't drift between the two.
-pub fn claude_cli_args(session_id: uuid::Uuid, resume: bool, extra_args: &[String]) -> Vec<String> {
+pub fn claude_cli_args(
+    session_id: uuid::Uuid,
+    resume: bool,
+    fork_from: Option<uuid::Uuid>,
+    extra_args: &[String],
+) -> Vec<String> {
     let mut args: Vec<String> = [
         "--print",
         "--verbose",
@@ -31,12 +36,21 @@ pub fn claude_cli_args(session_id: uuid::Uuid, resume: bool, extra_args: &[Strin
     .map(|s| s.to_string())
     .collect();
 
-    if resume {
+    if let Some(source) = fork_from {
+        args.extend([
+            "--resume".to_string(),
+            source.to_string(),
+            "--fork-session".to_string(),
+            "--session-id".to_string(),
+            session_id.to_string(),
+        ]);
+    } else if resume {
         args.push("--resume".to_string());
+        args.push(session_id.to_string());
     } else {
         args.push("--session-id".to_string());
+        args.push(session_id.to_string());
     }
-    args.push(session_id.to_string());
 
     args.extend(extra_args.iter().cloned());
     args
@@ -54,7 +68,12 @@ pub(crate) async fn spawn_claude(
 
     log_claude_info(claude_path);
 
-    let args = claude_cli_args(config.session_id, config.resume, &config.extra_args);
+    let args = claude_cli_args(
+        config.session_id,
+        config.resume,
+        config.fork_from_session_id,
+        &config.extra_args,
+    );
 
     let mut cmd = Command::new(claude_path);
     cmd.args(&args);
@@ -123,5 +142,25 @@ fn log_claude_info(claude_path: &Path) {
         Err(e) => {
             tracing::warn!("Failed to run claude --version: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fork_args_keep_source_and_new_identity_distinct() {
+        let source = uuid::Uuid::from_u128(1);
+        let new_id = uuid::Uuid::from_u128(2);
+        let args = claude_cli_args(new_id, false, Some(source), &[]);
+        let expected = vec![
+            "--resume".to_string(),
+            source.to_string(),
+            "--fork-session".to_string(),
+            "--session-id".to_string(),
+            new_id.to_string(),
+        ];
+        assert_eq!(&args[args.len() - expected.len()..], expected.as_slice());
     }
 }

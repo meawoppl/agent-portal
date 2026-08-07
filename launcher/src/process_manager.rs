@@ -383,6 +383,9 @@ async fn run_session_task(
             muse_yolo,
             agent_type: config.agent_type,
             codex_thread_id,
+            fork_from_session_id: None,
+            codex_fork_from_thread_id: None,
+            codex_fork_last_turn_id: None,
         };
 
         let mut session = match AnySession::new(session_config).await {

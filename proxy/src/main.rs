@@ -836,6 +836,9 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
             && config.claude_args.iter().any(|arg| arg == "--yolo"),
         agent_type: config.agent_type,
         codex_thread_id,
+        fork_from_session_id: None,
+        codex_fork_from_thread_id: None,
+        codex_fork_last_turn_id: None,
     };
 
     if config.resume {

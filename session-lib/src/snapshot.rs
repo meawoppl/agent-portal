@@ -39,6 +39,18 @@ pub struct SessionConfig {
     /// directly via `--resume`).
     #[serde(default)]
     pub codex_thread_id: Option<String>,
+    /// Source portal session for a whole-history Claude fork. The new session
+    /// keeps `session_id` as its own identity; this id is emitted via
+    /// `--resume <source> --fork-session --session-id <new>`.
+    #[serde(default)]
+    pub fork_from_session_id: Option<Uuid>,
+    /// Source app-server thread for a Codex fork. Resolved launcher-side from
+    /// the source portal session because Codex thread ids are not backend data.
+    #[serde(default)]
+    pub codex_fork_from_thread_id: Option<String>,
+    /// Optional inclusive Codex fork cut. Claude only supports whole history.
+    #[serde(default)]
+    pub codex_fork_last_turn_id: Option<String>,
 }
 
 /// A pending permission request that hasn't been responded to
@@ -119,6 +131,9 @@ mod tests {
             muse_yolo: false,
             agent_type: Default::default(),
             codex_thread_id: None,
+            fork_from_session_id: None,
+            codex_fork_from_thread_id: None,
+            codex_fork_last_turn_id: None,
         }
     }
 
@@ -143,6 +158,19 @@ mod tests {
         let restored: SessionConfig = serde_json::from_value(value).unwrap();
 
         assert!(!restored.muse_yolo);
+    }
+
+    #[test]
+    fn missing_fork_fields_default_to_none() {
+        let mut value = serde_json::to_value(sample_config()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("fork_from_session_id");
+        object.remove("codex_fork_from_thread_id");
+        object.remove("codex_fork_last_turn_id");
+        let restored: SessionConfig = serde_json::from_value(value).unwrap();
+        assert!(restored.fork_from_session_id.is_none());
+        assert!(restored.codex_fork_from_thread_id.is_none());
+        assert!(restored.codex_fork_last_turn_id.is_none());
     }
 
     #[test]
