@@ -49,7 +49,9 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
     info!("Starting shim mode");
 
     // Spawn claude binary with the same flags as claude-session-lib
-    let mut child = spawn_claude(&config)?;
+    let prompt_suggestions =
+        claude_supports_prompt_suggestions(std::path::Path::new("claude")).await;
+    let mut child = spawn_claude(&config, prompt_suggestions)?;
 
     let claude_stdin = child
         .stdin
@@ -120,13 +122,16 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
 }
 
 /// Spawn the claude binary with piped stdin/stdout/stderr.
-fn spawn_claude(config: &ProxySessionConfig) -> Result<tokio::process::Child> {
+fn spawn_claude(
+    config: &ProxySessionConfig,
+    prompt_suggestions: bool,
+) -> Result<tokio::process::Child> {
     let mut cmd = Command::new("claude");
     cmd.args(claude_cli_args(
         config.session_id,
         config.resume,
         None,
-        claude_supports_prompt_suggestions(std::path::Path::new("claude")),
+        prompt_suggestions,
         &config.claude_args,
     ));
 

@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::process::Command;
 
 use claude_codes::AsyncClient as ClaudeAsyncClient;
@@ -85,7 +86,7 @@ pub(crate) async fn spawn_claude(
         config.session_id,
         config.resume,
         config.fork_from_session_id,
-        claude_supports_prompt_suggestions(claude_path),
+        claude_supports_prompt_suggestions(claude_path).await,
         &config.extra_args,
     );
 
@@ -133,23 +134,32 @@ pub(crate) async fn spawn_claude(
 /// Probe the installed CLI once per resolved path before using the additive
 /// prompt-suggestion flag. Older fleet hosts reject unknown flags at startup,
 /// so capability detection must happen before argv construction.
-pub fn claude_supports_prompt_suggestions(claude_path: &Path) -> bool {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let Ok(mut cache) = cache.lock() else {
-        return false;
-    };
+pub async fn claude_supports_prompt_suggestions(claude_path: &Path) -> bool {
+    static CACHE: OnceLock<tokio::sync::Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()));
+    let mut cache = cache.lock().await;
     if let Some(supported) = cache.get(claude_path).copied() {
         return supported;
     }
-    let supported = std::process::Command::new(claude_path)
-        .arg("--help")
-        .output()
-        .ok()
-        .is_some_and(|output| {
-            String::from_utf8_lossy(&output.stdout).contains("--prompt-suggestions")
-                || String::from_utf8_lossy(&output.stderr).contains("--prompt-suggestions")
-        });
+
+    // A missing or wedged binary must not stall session launch. Transient
+    // failures fail open (omit the additive flag) and are not cached, so a
+    // later launch can probe again after host pressure recovers.
+    let mut probe = Command::new(claude_path);
+    probe.arg("--help").kill_on_drop(true);
+    let output = match tokio::time::timeout(Duration::from_secs(2), probe.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            tracing::warn!("Claude prompt-suggestion capability probe failed: {error}");
+            return false;
+        }
+        Err(_) => {
+            tracing::warn!("Claude prompt-suggestion capability probe timed out");
+            return false;
+        }
+    };
+    let supported = String::from_utf8_lossy(&output.stdout).contains("--prompt-suggestions")
+        || String::from_utf8_lossy(&output.stderr).contains("--prompt-suggestions");
     cache.insert(claude_path.to_path_buf(), supported);
     supported
 }
