@@ -159,6 +159,10 @@ impl Default for VimState {
 }
 
 impl VimState {
+    pub fn mode(&self) -> VimMode {
+        self.mode
+    }
+
     /// Reset the multi-key sequence machine (pending op + count).
     fn clear_pending(&mut self) {
         self.pending = Pending::None;
@@ -1511,6 +1515,17 @@ mod tests {
         let (v, c) = remove_range(&chars("ab"), 2, 3);
         assert_eq!(s(&v), "ab");
         assert_eq!(c, 2);
+    }
+
+    #[test]
+    fn repeated_x_deletes_successive_chars_without_moving_cursor() {
+        let mut text = chars("abcdef");
+        let mut cursor = 2;
+        for _ in 0..3 {
+            (text, cursor) = remove_range(&text, cursor, cursor + 1);
+        }
+        assert_eq!(s(&text), "abf");
+        assert_eq!(cursor, 2);
     }
 
     /// `dw` = operator-motion range over `w`, then `remove_range`.
