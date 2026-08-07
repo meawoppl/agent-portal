@@ -76,10 +76,7 @@ async fn run_turn(
     classifier: &mut MuseClassifier,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) -> Result<(), muse_codes::Error> {
-    let mut builder = MuseExecBuilder::new(text)
-        .provider(Provider::Meta)
-        .working_directory(&config.working_directory);
-    builder = builder.session_id(config.session_id.to_string());
+    let builder = build_exec_builder(config, text);
 
     let mut run = ExecRun::spawn(&builder).await?;
     let _ = event_tx.send(IoEvent::AgentStarted { pid: run.pid() });
@@ -94,6 +91,24 @@ async fn run_turn(
     Ok(())
 }
 
+/// Build the `muse exec` invocation for one turn. Extracted from [`run_turn`] so
+/// the argv is testable without spawning: it is the single place session config
+/// maps onto the muse CLI.
+///
+/// `config.extra_args` is forwarded verbatim (the launch dialog's model picker
+/// emits `--model <id>`, plus anything typed in the extra-args box). The
+/// passthrough sits after the typed flags and before the positional prompt, so
+/// raw tokens can never override structural args. Mirrors how claude
+/// (`args.extend`) and codex (`.extra_args`) pass the same field — muse was
+/// previously the lone agent that dropped it.
+fn build_exec_builder(config: &SessionConfig, text: &str) -> MuseExecBuilder {
+    MuseExecBuilder::new(text)
+        .provider(Provider::Meta)
+        .working_directory(&config.working_directory)
+        .session_id(config.session_id.to_string())
+        .extra_args(config.extra_args.clone())
+}
+
 fn emit(
     classifier: &mut MuseClassifier,
     record: &MuseRecord,
@@ -101,5 +116,60 @@ fn emit(
 ) {
     for decision in classifier.classify(record.clone()) {
         let _ = event_tx.send(IoEvent::Classified(decision));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Live argv check: the launcher's `extra_args` must reach the spawned
+    /// `muse exec` argv (this is the exact seam muse previously dropped). It
+    /// resolves the real `muse` binary via `which`, so it's `#[ignore]`d —
+    /// run it on a host with muse installed via
+    /// `cargo test -p muse-session-lib -- --ignored`. muse-codes' own
+    /// `extra_args_sit_between_typed_flags_and_the_prompt` pins the argv
+    /// position in CI; wirecheck live-verifies the flag surface against the CLI.
+    #[test]
+    #[ignore = "requires the muse binary on PATH; run with --ignored"]
+    fn extra_args_reach_the_muse_argv() {
+        let config = SessionConfig {
+            working_directory: PathBuf::from("/tmp"),
+            extra_args: vec![
+                "--model".to_string(),
+                "test-model".to_string(),
+                "--yolo".to_string(),
+            ],
+            ..Default::default()
+        };
+        let cmd = build_exec_builder(&config, "hello")
+            .build_command()
+            .expect("muse binary should resolve on PATH");
+        let argv: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(argv.contains(&"exec".to_string()), "argv: {argv:?}");
+        for token in ["--model", "test-model", "--yolo"] {
+            assert!(
+                argv.iter().any(|a| a == token),
+                "expected {token:?} in argv: {argv:?}"
+            );
+        }
+        // Passthrough sits before the positional prompt, which stays last.
+        assert_eq!(
+            argv.last().map(String::as_str),
+            Some("hello"),
+            "argv: {argv:?}"
+        );
+        let session_pos = argv.iter().position(|a| a == "--session-id").unwrap();
+        let model_pos = argv.iter().position(|a| a == "--model").unwrap();
+        assert!(
+            session_pos < model_pos,
+            "typed flags precede the raw passthrough; argv: {argv:?}"
+        );
     }
 }
