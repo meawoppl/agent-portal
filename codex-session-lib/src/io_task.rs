@@ -11,8 +11,8 @@ use std::time::Instant;
 use codex_codes::{
     AppServerBuilder, ApplyPatchApprovalResponse, AsyncClient as CodexAsyncClient,
     CommandExecutionRequestApprovalResponse, ExecCommandApprovalResponse, ServerMessage,
-    ServerRequest, ThreadResumeParams, ThreadStartParams, TurnInterruptParams, TurnStartParams,
-    TurnSteerParams, UserInput,
+    ServerRequest, ThreadForkParams, ThreadResumeParams, ThreadStartParams, TurnInterruptParams,
+    TurnStartParams, TurnSteerParams, UserInput,
 };
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
@@ -31,6 +31,20 @@ enum CodexApprovalResponseKind {
     AcceptDecline,
     ExecApprovedDenied,
     ApplyPatchApprovedDenied,
+}
+
+fn codex_fork_params(config: &SessionConfig) -> Option<ThreadForkParams> {
+    if config.resume {
+        return None;
+    }
+    Some(ThreadForkParams {
+        thread_id: config.codex_fork_from_thread_id.clone()?,
+        last_turn_id: config.codex_fork_last_turn_id.clone(),
+        // A fork commonly launches in a newly-created git worktree. Unlike a
+        // resume, it must not inherit the source thread's checkout.
+        cwd: Some(config.working_directory.to_string_lossy().into_owned()),
+        ..ThreadForkParams::default()
+    })
 }
 
 /// The rejection message Codex 0.143.5+ requires on a `denied` approval
@@ -271,7 +285,33 @@ pub(crate) async fn codex_io_task(
     // (`config.resume == true`) and the proxy persisted a thread id from
     // the previous incarnation.
     let mut resumed_thread: Option<(String, Option<String>)> = None;
-    if config.resume {
+    if !config.resume
+        && config.fork_from_session_id.is_some()
+        && config.codex_fork_from_thread_id.is_none()
+    {
+        let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(
+            "Codex fork requested but the launcher could not resolve the source thread id"
+                .to_string(),
+        )));
+        return;
+    }
+
+    if let Some(fork_params) = codex_fork_params(&config) {
+        let source = fork_params.thread_id.clone();
+        match client.thread_fork(&fork_params).await {
+            Ok(resp) => {
+                let model = started_thread_model(resp.model, &configured_model_fallback);
+                tracing::info!("Codex thread {} forked as {}", source, resp.thread.id);
+                resumed_thread = Some((resp.thread.id, model));
+            }
+            Err(e) => {
+                let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(format!(
+                    "Failed to fork Codex thread {source}: {e}"
+                ))));
+                return;
+            }
+        }
+    } else if config.resume {
         if let Some(prior) = config.codex_thread_id.as_ref() {
             let resume_params = ThreadResumeParams {
                 thread_id: prior.clone(),
@@ -1117,6 +1157,28 @@ mod tests {
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn fork_params_keep_parent_thread_and_optional_turn_cut() {
+        let config = SessionConfig {
+            fork_from_session_id: Some(uuid::Uuid::from_u128(1)),
+            codex_fork_from_thread_id: Some("parent-thread".into()),
+            codex_fork_last_turn_id: Some("turn-7".into()),
+            working_directory: "/tmp/fork-worktree".into(),
+            ..Default::default()
+        };
+        let params = codex_fork_params(&config).expect("fork params");
+        assert_eq!(params.thread_id, "parent-thread");
+        assert_eq!(params.last_turn_id.as_deref(), Some("turn-7"));
+        assert_eq!(params.cwd.as_deref(), Some("/tmp/fork-worktree"));
+        assert!(codex_fork_params(&SessionConfig::default()).is_none());
+
+        let resumed = SessionConfig {
+            resume: true,
+            ..config
+        };
+        assert!(codex_fork_params(&resumed).is_none());
     }
 
     /// Neutral `PermissionDecision` → Codex approval response. Ported from the

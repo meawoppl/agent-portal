@@ -125,6 +125,7 @@ fn spawn_claude(config: &ProxySessionConfig) -> Result<tokio::process::Child> {
     cmd.args(claude_cli_args(
         config.session_id,
         config.resume,
+        None,
         &config.claude_args,
     ));
 

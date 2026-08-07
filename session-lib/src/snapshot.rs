@@ -39,6 +39,26 @@ pub struct SessionConfig {
     /// directly via `--resume`).
     #[serde(default)]
     pub codex_thread_id: Option<String>,
+    /// Source portal session for a fork. Fork metadata seeds only the first
+    /// spawn attempt; the launcher must clear all three fork fields after that
+    /// attempt. `resume == false` alone is not a durable first-launch marker:
+    /// transcript rotation paths also set it false, while backend reconciliation
+    /// can set it true before a never-launched desired session first registers.
+    /// Muse does not implement fork semantics and must be capability-gated out.
+    /// Claude emits this via `--resume <source> --fork-session --session-id
+    /// <new>`. The launcher/API layer added by #1457 must preflight that the
+    /// Claude source transcript exists before constructing this config.
+    #[serde(default)]
+    pub fork_from_session_id: Option<Uuid>,
+    /// Source app-server thread for a Codex fork. Resolved launcher-side from
+    /// `fork_from_session_id` because Codex thread ids are not backend data.
+    /// Used only on the first launch; relaunches resume `codex_thread_id`.
+    #[serde(default)]
+    pub codex_fork_from_thread_id: Option<String>,
+    /// Optional inclusive Codex fork cut. Claude only supports whole history.
+    /// Like the source thread, this is ignored on resume launches.
+    #[serde(default)]
+    pub codex_fork_last_turn_id: Option<String>,
 }
 
 /// A pending permission request that hasn't been responded to
@@ -119,6 +139,9 @@ mod tests {
             muse_yolo: false,
             agent_type: Default::default(),
             codex_thread_id: None,
+            fork_from_session_id: None,
+            codex_fork_from_thread_id: None,
+            codex_fork_last_turn_id: None,
         }
     }
 
@@ -143,6 +166,19 @@ mod tests {
         let restored: SessionConfig = serde_json::from_value(value).unwrap();
 
         assert!(!restored.muse_yolo);
+    }
+
+    #[test]
+    fn missing_fork_fields_default_to_none() {
+        let mut value = serde_json::to_value(sample_config()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("fork_from_session_id");
+        object.remove("codex_fork_from_thread_id");
+        object.remove("codex_fork_last_turn_id");
+        let restored: SessionConfig = serde_json::from_value(value).unwrap();
+        assert!(restored.fork_from_session_id.is_none());
+        assert!(restored.codex_fork_from_thread_id.is_none());
+        assert!(restored.codex_fork_last_turn_id.is_none());
     }
 
     #[test]
