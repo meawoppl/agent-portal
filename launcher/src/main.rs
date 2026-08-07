@@ -19,6 +19,30 @@ use clap::{Parser, Subcommand};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+fn init_tracing() {
+    let env_filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+
+    #[cfg(target_os = "linux")]
+    {
+        // A journald layer preserves tracing levels as journal PRIORITY values
+        // and exposes structured fields to journalctl. Keep stdout formatting
+        // when the journal socket is unavailable (for example in a container).
+        let journald = tracing_journald::layer().ok();
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(journald.is_none().then(tracing_subscriber::fmt::layer))
+            .with(journald)
+            .init();
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "agent-portal")]
 #[command(about = "Persistent daemon that launches claude-portal sessions as in-process tasks")]
@@ -231,12 +255,7 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    init_tracing();
 
     // Handle subcommands before the daemon startup path
     match args.command {

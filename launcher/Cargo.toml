@@ -53,6 +53,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 directories = { workspace = true }
 serde_json.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+tracing-journald = "0.3"
+
 [dev-dependencies]
 tempfile = "3.27.0"
 
