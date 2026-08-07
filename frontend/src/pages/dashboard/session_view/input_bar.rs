@@ -132,10 +132,6 @@ pub enum InputBarMsg {
     /// Vim mode changed the mode or edited the text in the DOM. Re-render (to
     /// refresh the mode indicator) and re-sync the tracked text mirror.
     VimSync,
-    /// Vim edited the uncontrolled textarea without changing modes. Mirror the
-    /// DOM value without re-rendering: a render between repeated NORMAL-mode
-    /// edits can disturb the one-character selection used as the block cursor.
-    VimMirror,
     /// No-op (used by keydown / paste handlers that need to return a message
     /// but don't want to mutate state).
     Noop,
@@ -400,10 +396,6 @@ impl Component for InputBar {
                 self.input_text = self.get_input_text();
                 true
             }
-            InputBarMsg::VimMirror => {
-                self.input_text = self.get_input_text();
-                false
-            }
             InputBarMsg::Noop => false,
         }
     }
@@ -450,9 +442,7 @@ impl Component for InputBar {
             // below so behavior stays identical to the non-vim path.
             if vim_enabled {
                 let textarea: HtmlTextAreaElement = e.target_unchecked_into();
-                let mut vim_state = vim.borrow_mut();
-                let mode_before = vim_state.mode();
-                match vim::handle_key(&mut vim_state, &textarea, &e) {
+                match vim::handle_key(&mut vim.borrow_mut(), &textarea, &e) {
                     vim::VimHandled::Consumed { rerender } => {
                         // Stop the event from bubbling to the dashboard's
                         // `use_keyboard_nav` hook. Without this, keys vim owns
@@ -464,11 +454,7 @@ impl Component for InputBar {
                         // session interrupt.
                         e.stop_propagation();
                         return if rerender {
-                            if vim_state.mode() == mode_before {
-                                InputBarMsg::VimMirror
-                            } else {
-                                InputBarMsg::VimSync
-                            }
+                            InputBarMsg::VimSync
                         } else {
                             InputBarMsg::Noop
                         };
