@@ -2,7 +2,6 @@
 
 use super::page_bootstrap::use_dashboard_bootstrap;
 use super::page_focus::use_dashboard_focus;
-use super::page_spend::use_spend_badge_animation;
 use super::page_state::{
     active_session_ids, DashboardSessionAction, DashboardSessionState, DashboardUiAction,
     DashboardUiState,
@@ -12,7 +11,7 @@ use super::session_rail::{ActivityRef, AgentMessageBroadcast, BroadcastRef, Sess
 use super::session_view::SessionView;
 use super::types::{
     load_group_by_host, load_hidden_sessions, load_inactive_hidden, load_rail_position,
-    load_show_cost, save_hidden_sessions, save_inactive_hidden, save_show_cost,
+    save_hidden_sessions, save_inactive_hidden,
 };
 use crate::components::{
     ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, TurnMetricsHeaderPill,
@@ -55,9 +54,7 @@ pub fn dashboard_page() -> Html {
     let sessions = sessions_hook.sessions.clone();
     let loading = sessions_hook.loading;
 
-    // Use the client websocket hook for spend updates
     let ws_hook = use_client_websocket();
-    let total_user_spend = ws_hook.total_spend;
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
     let update_available = ws_hook.update_available.clone();
     let bootstrap = use_dashboard_bootstrap();
@@ -93,7 +90,6 @@ pub fn dashboard_page() -> Html {
     let ui_state = use_reducer_eq(|| {
         DashboardUiState::new(
             load_inactive_hidden(),
-            load_show_cost(),
             load_rail_position(),
             load_group_by_host(),
         )
@@ -107,7 +103,6 @@ pub fn dashboard_page() -> Html {
     // SessionRail reads this on its own 100 ms tick instead.
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
     let agent_message_broadcasts = use_memo((), |_| BroadcastRef::default());
-    let spend_animation = use_spend_badge_animation(total_user_spend);
 
     // Get DB-authoritative sessions in a total, deterministic display order
     // (see `session_order`). A disconnected, unpaused session is
@@ -520,15 +515,6 @@ pub fn dashboard_page() -> Html {
         })
     };
 
-    let on_toggle_show_cost = {
-        let ui_state = ui_state.clone();
-        Callback::from(move |_: MouseEvent| {
-            let new_val = !ui_state.show_cost;
-            save_show_cost(new_val);
-            ui_state.dispatch(DashboardUiAction::SetShowCost(new_val));
-        })
-    };
-
     let on_message_sent = {
         let session_state = session_state.clone();
         Callback::from(move |current_session_id: Uuid| {
@@ -676,33 +662,6 @@ pub fn dashboard_page() -> Html {
                 <h1>{ app_title.clone() }</h1>
                 <div class="header-actions">
                     <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
-                    {
-                        if total_user_spend > 0.0 {
-                            let spend_class = classes!(
-                                "total-spend-badge",
-                                spend_animation.tier_class,
-                                if spend_animation.animating { Some("spend-animating") } else { None },
-                            );
-                            html! {
-                                <>
-                                    if ui_state.show_cost {
-                                        <span class={spend_class} title="Total spend across all sessions">
-                                            { utils::format_dollars(total_user_spend) }
-                                        </span>
-                                    }
-                                    <button
-                                        class="cost-toggle-btn"
-                                        onclick={on_toggle_show_cost.clone()}
-                                        title={if ui_state.show_cost { "Hide cost" } else { "Show cost" }}
-                                    >
-                                        { if ui_state.show_cost { "$" } else { "$?" } }
-                                    </button>
-                                </>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
                     {
                         if waiting_count > 0 {
                             html! {

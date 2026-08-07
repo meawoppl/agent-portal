@@ -2,7 +2,6 @@
 //! per-turn metrics footer, and the fast-mode labelling shared with the
 //! system init bar.
 
-use super::super::shorten_model_name;
 use super::errors::try_render_api_error;
 use shared::fmt::format_duration;
 use yew::prelude::*;
@@ -40,20 +39,10 @@ pub fn render_result_message(
     let api_ms = msg.duration_api_ms;
     let turns = msg.num_turns;
 
-    let mut timing_tooltip = format!(
+    let timing_tooltip = format!(
         "Total: {}ms | API: {}ms | Turns: {}",
         duration_ms, api_ms, turns
     );
-
-    if let Some(model_usage) = msg.model_usage.as_ref() {
-        for (model, entry) in model_usage {
-            timing_tooltip.push_str(&format!(
-                " | {}: ${:.4}",
-                shorten_model_name(model).unwrap_or_else(|| model.clone()),
-                entry.cost_usd
-            ));
-        }
-    }
 
     let errors_tooltip = if !msg.errors.is_empty() {
         msg.errors.join("\n")
@@ -73,17 +62,6 @@ pub fn render_result_message(
 
     let extra_badges = html! {
         <>
-            {
-                    if msg.total_cost_usd > 0.0 {
-                    html! {
-                        <span class="stat-item cost" title="Total cost">
-                            { format!("${:.2}", msg.total_cost_usd) }
-                        </span>
-                    }
-                } else {
-                    html! {}
-                }
-            }
             {
                 if msg.stop_reason.as_deref() == Some("max_tokens") {
                     html! {

@@ -5,7 +5,7 @@
 //! `result-stats-bar` card, e.g.
 //!
 //! ```text
-//! 47.2 tok/s · TTFT 1.31s · 2.1k in / 547 out · cache 84% hit · max gap 0.4s · $0.014
+//! 47.2 tok/s · TTFT 1.31s · 2.1k in / 547 out · cache 84% hit · max gap 0.4s
 //! ```
 //!
 //! Each chip is a `<span class="turn-metric-chip">` so we can color the
@@ -42,14 +42,12 @@
 //!   decimal. Only rendered when the gap is `> 1000ms` — sub-1s gaps are
 //!   the steady-state hum and showing them would just clutter the chip
 //!   strip with `"max gap 0.2s"` on every successful turn.
-//! - **Cost**: `total_cost_usd` rendered as `$X.XXX` for values below $1.00
-//!   and `$X.XX` at $1.00 and above. Omitted when `None` (Codex turns).
 
 use shared::TurnMetrics;
 use yew::prelude::*;
 
 use crate::components::turn_metrics_display::{
-    compact_count, format_cache_hit, format_cost, format_max_gap, format_tok_per_sec, format_ttft,
+    compact_count, format_cache_hit, format_max_gap, format_tok_per_sec, format_ttft,
 };
 
 /// Build the full chip list for a `TurnMetrics` row, in render order. Each
@@ -81,9 +79,6 @@ pub fn build_chip_list(metrics: &TurnMetrics) -> Vec<String> {
         chips.push(s);
     }
     if let Some(s) = format_max_gap(metrics.max_inter_token_gap_ms) {
-        chips.push(s);
-    }
-    if let Some(s) = format_cost(metrics.total_cost_usd) {
         chips.push(s);
     }
     chips
@@ -296,29 +291,6 @@ mod tests {
         assert_eq!(format_max_gap(None), None);
     }
 
-    // ---- format_cost ----
-
-    #[test]
-    fn cost_none() {
-        // Codex turns: cost is None.
-        assert_eq!(format_cost(None), None);
-    }
-
-    #[test]
-    fn cost_sub_dollar_uses_three_decimals() {
-        assert_eq!(format_cost(Some(0.014)), Some("$0.014".to_string()));
-    }
-
-    #[test]
-    fn cost_at_dollar_uses_two_decimals() {
-        assert_eq!(format_cost(Some(1.00)), Some("$1.00".to_string()));
-    }
-
-    #[test]
-    fn cost_above_dollar_uses_two_decimals() {
-        assert_eq!(format_cost(Some(1.234)), Some("$1.23".to_string()));
-    }
-
     // ---- end-to-end chip-list builder ----
 
     fn sample_metrics() -> TurnMetrics {
@@ -361,7 +333,7 @@ mod tests {
     /// list is the exact order + content the spec calls out:
     ///
     /// ```text
-    /// 47.2 tok/s · TTFT 1.31s · 16 in / 547 out · cache 84% hit · max gap 1.5s · $0.014
+    /// 47.2 tok/s · TTFT 1.31s · 16 in / 547 out · cache 84% hit · max gap 1.5s
     /// ```
     #[test]
     fn end_to_end_full_chip_list() {
@@ -375,7 +347,6 @@ mod tests {
                 "16 in / 547 out".to_string(),
                 "cache 84% hit".to_string(),
                 "max gap 1.5s".to_string(),
-                "$0.014".to_string(),
             ],
         );
     }

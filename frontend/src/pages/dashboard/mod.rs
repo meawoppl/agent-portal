@@ -9,7 +9,6 @@
 mod page;
 mod page_bootstrap;
 mod page_focus;
-mod page_spend;
 mod page_state;
 mod permission_dialog;
 mod session_order;
