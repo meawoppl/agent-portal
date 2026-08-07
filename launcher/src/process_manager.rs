@@ -359,13 +359,31 @@ async fn run_session_task(
             None
         };
 
+        // The portal's established dangerous-permissions wire format is the
+        // agent argument list. Consume Muse's token here and carry it as typed
+        // config so the backend uses MuseExecBuilder::yolo rather than a raw
+        // passthrough argument.
+        let muse_yolo = config.agent_type == shared::AgentType::Muse
+            && config.claude_args.iter().any(|arg| arg == "--yolo");
+        let extra_args = if config.agent_type == shared::AgentType::Muse {
+            config
+                .claude_args
+                .iter()
+                .filter(|arg| arg.as_str() != "--yolo")
+                .cloned()
+                .collect()
+        } else {
+            config.claude_args.clone()
+        };
+
         let session_config = SessionConfig {
             session_id: config.session_id,
             working_directory: PathBuf::from(&config.working_directory),
             session_name: config.session_name.clone(),
             resume: config.resume,
             claude_path: None,
-            extra_args: config.claude_args.clone(),
+            extra_args,
+            muse_yolo,
             agent_type: config.agent_type,
             codex_thread_id,
         };

@@ -15,15 +15,14 @@ const CODEX_SKIP_PERMISSIONS_ARGS: &[&str] = &[
     "-c",
     "sandbox_mode=danger-full-access",
 ];
+const MUSE_SKIP_PERMISSIONS_ARGS: &[&str] = &["--yolo"];
 
 /// CLI arguments appended when the user checks the skip-permissions box.
 pub fn skip_permissions_args(agent_type: AgentType) -> &'static [&'static str] {
     match agent_type {
         AgentType::Claude => CLAUDE_SKIP_PERMISSIONS_ARGS,
         AgentType::Codex => CODEX_SKIP_PERMISSIONS_ARGS,
-        // Muse decides tool policy itself in headless runs and exposes no
-        // skip-permissions flag; the checkbox is hidden for it.
-        AgentType::Muse => &[],
+        AgentType::Muse => MUSE_SKIP_PERMISSIONS_ARGS,
     }
 }
 
@@ -32,7 +31,7 @@ pub fn skip_permissions_label(agent_type: AgentType) -> &'static str {
     match agent_type {
         AgentType::Claude => "--dangerously-skip-permissions",
         AgentType::Codex => "-c approval_policy=never -c sandbox_mode=danger-full-access",
-        AgentType::Muse => "(not applicable — Muse manages tool policy itself)",
+        AgentType::Muse => "YOLO mode (--yolo: disables approval and sandbox)",
     }
 }
 
@@ -47,6 +46,12 @@ pub fn strip_skip_permissions_args(args: &[String], agent_type: AgentType) -> (b
         let arg = args[i].as_str();
 
         if arg == "--dangerously-skip-permissions" {
+            has_skip = true;
+            i += 1;
+            continue;
+        }
+
+        if agent_type == AgentType::Muse && arg == "--yolo" {
             has_skip = true;
             i += 1;
             continue;
@@ -117,7 +122,7 @@ mod tests {
 
     #[test]
     fn strip_recognizes_exactly_what_skip_permissions_args_emits() {
-        for agent_type in [AgentType::Claude, AgentType::Codex] {
+        for agent_type in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
             let emitted: Vec<String> = skip_permissions_args(agent_type)
                 .iter()
                 .map(|a| a.to_string())
