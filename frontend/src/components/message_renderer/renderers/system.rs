@@ -80,7 +80,7 @@ fn render_init_bar(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html
     let fast_off_label = init
         .as_ref()
         .and_then(|m| m.fast_mode_disabled_reason.as_ref())
-        .map(super::fast_mode_disabled_label);
+        .map(super::result::fast_mode_disabled_label);
 
     html! {
         <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>

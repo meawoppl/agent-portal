@@ -1,5 +1,5 @@
 use super::super::types::PortalMessage;
-use super::{render_image_source, render_video_source};
+use super::media::{render_image_source, render_video_source};
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
 use std::collections::HashMap;
