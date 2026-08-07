@@ -5,8 +5,9 @@ use axum::{
 use diesel::prelude::*;
 use serde::Deserialize;
 use shared::api::{
-    DirectoryListingResponse, InstallAgentResponse, LaunchRequest, ProbeAgentsResponse,
-    StartAgentLoginRequest, StartAgentLoginResponse, SubmitAgentLoginCodeRequest,
+    DirectoryListingResponse, ForkDirectoryMode, ForkSessionRequest, ForkSessionResponse,
+    InstallAgentResponse, LaunchRequest, ProbeAgentsResponse, StartAgentLoginRequest,
+    StartAgentLoginResponse, SubmitAgentLoginCodeRequest,
 };
 use shared::{
     AgentLoginOutcome, AgentType, LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole,
@@ -99,6 +100,8 @@ pub async fn launch_session(
             client_version: Some(version),
             agent_type: req.agent_type,
             claude_args: req.claude_args.clone(),
+            forked_from_session_id: None,
+            fork_point_turn_id: None,
         },
     )?;
     app_state
@@ -120,6 +123,8 @@ pub async fn launch_session(
         resume: Some(false),
         create_worktree: req.create_worktree,
         worktree_branch,
+        fork_from_session_id: None,
+        fork_point_turn_id: None,
     };
 
     if !app_state
@@ -182,6 +187,8 @@ pub(crate) struct DesiredSessionDraft {
     client_version: Option<String>,
     agent_type: shared::AgentType,
     claude_args: Vec<String>,
+    forked_from_session_id: Option<Uuid>,
+    fork_point_turn_id: Option<String>,
 }
 
 pub(crate) fn create_desired_session(
@@ -222,6 +229,17 @@ pub(crate) fn create_desired_session(
         .values(&new_session)
         .execute(&mut conn)?;
 
+    if draft.forked_from_session_id.is_some() || draft.fork_point_turn_id.is_some() {
+        diesel::update(sessions::table.find(draft.session_id))
+            .set((
+                sessions::forked_from_session_id.eq(draft.forked_from_session_id),
+                sessions::fork_point_turn_id.eq(draft.fork_point_turn_id),
+                sessions::fork_launch_pending.eq(true),
+                sessions::fork_create_worktree.eq(false),
+            ))
+            .execute(&mut conn)?;
+    }
+
     diesel::insert_into(session_members::table)
         .values(NewSessionMember {
             session_id: draft.session_id,
@@ -231,6 +249,185 @@ pub(crate) fn create_desired_session(
         .execute(&mut conn)?;
 
     Ok(())
+}
+
+/// POST /api/sessions/:session_id/fork — create a divergent session on the
+/// source session's launcher, where the agent-native conversation state lives.
+pub async fn fork_session(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path(source_id): Path<Uuid>,
+    Json(req): Json<ForkSessionRequest>,
+) -> Result<Json<ForkSessionResponse>, AppError> {
+    use crate::schema::sessions;
+
+    let mut conn = app_state.conn()?;
+    let source = sessions::table
+        .find(source_id)
+        .filter(sessions::user_id.eq(user_id))
+        .first::<crate::models::Session>(&mut conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Source session not found"))?;
+
+    let launcher_id = source.launcher_id.ok_or(AppError::BadRequest(
+        "Proxy-direct sessions cannot be forked",
+    ))?;
+    if !app_state
+        .session_manager
+        .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_FORK_SESSION)
+    {
+        return Err(AppError::BadRequest(
+            "Source launcher is offline or does not support session forking",
+        ));
+    }
+    let agent_type = source.agent_type.parse().unwrap_or(AgentType::Claude);
+    if agent_type == AgentType::Muse {
+        return Err(AppError::BadRequest("Muse sessions cannot be forked"));
+    }
+    if agent_type != AgentType::Codex && req.fork_point_turn_id.is_some() {
+        return Err(AppError::BadRequest(
+            "Fork-at-turn is only supported for Codex sessions",
+        ));
+    }
+
+    let create_worktree = req.directory_mode == ForkDirectoryMode::Worktree;
+    if create_worktree
+        && !app_state
+            .session_manager
+            .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE)
+    {
+        return Err(AppError::BadRequest(
+            "Source launcher does not support git worktree launches",
+        ));
+    }
+    let working_directory = match req.directory_mode {
+        ForkDirectoryMode::Worktree | ForkDirectoryMode::Same => source.working_directory.clone(),
+        ForkDirectoryMode::Other => req
+            .working_directory
+            .filter(|path| !path.trim().is_empty())
+            .ok_or(AppError::BadRequest(
+                "working_directory is required for other-directory forks",
+            ))?,
+    };
+    let name = normalize_custom_name(Some(&req.name))
+        .unwrap_or_else(|| format!("{} (fork)", source.session_name));
+    let mut claude_args: Vec<String> =
+        serde_json::from_value(source.claude_args.clone()).unwrap_or_default();
+    if let Some(model) = req.model.filter(|model| !model.trim().is_empty()) {
+        claude_args = apply_model_override(claude_args, agent_type, model);
+    }
+
+    let (hostname, version) = {
+        let launcher = app_state
+            .session_manager
+            .launchers
+            .get(&launcher_id)
+            .ok_or(AppError::BadRequest("Source launcher is offline"))?;
+        (launcher.hostname.clone(), launcher.version.clone())
+    };
+    // Mint before persisting the desired row so an auth failure cannot leave
+    // behind an orphaned, never-launchable fork.
+    let auth_token = mint_launch_token(&app_state, user_id)?;
+    let request_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    create_desired_session(
+        &app_state,
+        DesiredSessionDraft {
+            session_id,
+            user_id,
+            working_directory: working_directory.clone(),
+            session_name: name.clone(),
+            hostname,
+            launcher_id: Some(launcher_id),
+            client_version: Some(version),
+            agent_type,
+            claude_args: claude_args.clone(),
+            forked_from_session_id: Some(source_id),
+            fork_point_turn_id: req.fork_point_turn_id.clone(),
+        },
+    )?;
+    if create_worktree {
+        diesel::update(sessions::table.find(session_id))
+            .set(sessions::fork_create_worktree.eq(true))
+            .execute(&mut conn)?;
+    }
+    if let Some(prompt) = req
+        .divergence_prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+    {
+        app_state.session_manager.set_last_input_sender(
+            session_id,
+            user_id,
+            "Fork divergence prompt".to_string(),
+        );
+        app_state.session_manager.enqueue_input(
+            &app_state.db_pool,
+            &session_id.to_string(),
+            session_id,
+            serde_json::Value::String(prompt.to_string()),
+            None,
+            None,
+        );
+    }
+    app_state
+        .session_manager
+        .register_launch_session(request_id, session_id);
+    let launch = ServerToLauncher::LaunchSession {
+        request_id,
+        user_id,
+        auth_token,
+        working_directory,
+        session_name: Some(name.clone()),
+        claude_args,
+        agent_type,
+        scheduled_task_id: None,
+        resume_session_id: Some(session_id),
+        resume: Some(false),
+        create_worktree,
+        worktree_branch: create_worktree.then_some(name),
+        fork_from_session_id: Some(source_id),
+        fork_point_turn_id: req.fork_point_turn_id,
+    };
+    if !app_state
+        .session_manager
+        .send_to_launcher(&launcher_id, launch)
+    {
+        app_state.session_manager.cancel_launch_session(request_id);
+        diesel::delete(sessions::table.find(session_id)).execute(&mut conn)?;
+        return Err(AppError::Internal(
+            "Failed to send fork request to launcher".to_string(),
+        ));
+    }
+    Ok(Json(ForkSessionResponse {
+        request_id,
+        session_id,
+    }))
+}
+
+fn apply_model_override(args: Vec<String>, agent_type: AgentType, model: String) -> Vec<String> {
+    let mut next = Vec::with_capacity(args.len() + 2);
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--model"
+            || (arg == "-c"
+                && iter
+                    .as_slice()
+                    .first()
+                    .is_some_and(|value| value.starts_with("model=")))
+        {
+            let _ = iter.next();
+        } else {
+            next.push(arg);
+        }
+    }
+    match agent_type {
+        AgentType::Claude => next.extend(["--model".to_string(), model]),
+        AgentType::Codex => next.extend(["-c".to_string(), format!("model={model}")]),
+        AgentType::Muse => {}
+    }
+    next
 }
 
 fn resolve_launch_target(
@@ -783,5 +980,22 @@ mod tests {
         let ts = branch.trim_start_matches("session-");
         assert_eq!(ts.len(), 15, "unexpected timestamp in {branch}");
         assert!(ts.chars().all(|c| c.is_ascii_digit() || c == '-'));
+    }
+
+    #[test]
+    fn fork_model_override_replaces_agent_specific_model_only() {
+        let claude = apply_model_override(
+            vec!["--model".into(), "old".into(), "--verbose".into()],
+            AgentType::Claude,
+            "new".into(),
+        );
+        assert_eq!(claude, ["--verbose", "--model", "new"]);
+
+        let codex = apply_model_override(
+            vec!["-c".into(), "model=old".into(), "--yolo".into()],
+            AgentType::Codex,
+            "new".into(),
+        );
+        assert_eq!(codex, ["--yolo", "-c", "model=new"]);
     }
 }

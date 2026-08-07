@@ -355,6 +355,8 @@ pub async fn resume_session(
         resume: Some(true),
         create_worktree: false,
         worktree_branch: None,
+        fork_from_session_id: None,
+        fork_point_turn_id: None,
     };
 
     if !app_state
@@ -697,6 +699,10 @@ mod tests {
             archived_at: None,
             last_model: None,
             launcher_version: launcher_version.map(str::to_string),
+            forked_from_session_id: None,
+            fork_point_turn_id: None,
+            fork_launch_pending: false,
+            fork_create_worktree: false,
         }
     }
 

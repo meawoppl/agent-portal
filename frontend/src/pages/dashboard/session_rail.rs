@@ -3,7 +3,7 @@
 //! Dropdown pattern matches the send button: always in DOM, toggled by .open class,
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
-use crate::components::{ScheduleDialog, ShareDialog};
+use crate::components::{ForkDialog, ScheduleDialog, ShareDialog};
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
 use shared::{PrRef, SessionInfo};
@@ -276,6 +276,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let copied_id = use_state(|| false);
     let share_session_id = use_state(|| None::<Uuid>);
     let schedule_session = use_state(|| None::<SessionInfo>);
+    let fork_session = use_state(|| None::<SessionInfo>);
     let stop_has_tasks = use_scheduled_task_blocker(*menu_session, props.sessions.clone());
 
     // Independent 100 ms tick that drives sparkline redraws.
@@ -418,6 +419,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let on_schedule = {
         let schedule_session = schedule_session.clone();
         Callback::from(move |session| schedule_session.set(Some(session)))
+    };
+    let on_fork = {
+        let fork_session = fork_session.clone();
+        Callback::from(move |session| fork_session.set(Some(session)))
     };
 
     let on_toggle_pill_menu = {
@@ -580,6 +585,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 on_delete={props.on_delete.clone()}
                 on_share={on_share}
                 on_schedule={on_schedule}
+                on_fork={on_fork}
             />
             {
                 if let Some(session_id) = *share_session_id {
@@ -595,6 +601,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     let schedule_session = schedule_session.clone();
                     let on_close = Callback::from(move |_| schedule_session.set(None));
                     html! { <ScheduleDialog session={session.clone()} {on_close} /> }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if let Some(ref session) = *fork_session {
+                    let fork_session = fork_session.clone();
+                    let on_close = Callback::from(move |_| fork_session.set(None));
+                    html! { <ForkDialog session={session.clone()} {on_close} /> }
                 } else {
                     html! {}
                 }

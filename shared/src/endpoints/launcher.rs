@@ -280,6 +280,13 @@ pub enum ServerToLauncher {
         /// derives a timestamped default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         worktree_branch: Option<String>,
+        /// Source portal session whose local agent state should seed this
+        /// brand-new session. Additive and first-spawn-only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fork_from_session_id: Option<Uuid>,
+        /// Codex-only optional native turn id. Claude ignores it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fork_point_turn_id: Option<String>,
     },
 
     /// Request to stop a session and remove the launcher's persisted

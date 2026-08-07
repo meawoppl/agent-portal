@@ -513,6 +513,8 @@ mod tests {
             resume: None,
             create_worktree: false,
             worktree_branch: None,
+            fork_from_session_id: None,
+            fork_point_turn_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"LaunchSession""#));

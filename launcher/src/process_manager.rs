@@ -113,6 +113,8 @@ pub struct SpawnParams {
     /// Optional branch name for the worktree. When omitted a timestamped
     /// default (`session-<YYYYMMDD-HHMMSS>`) is derived.
     pub worktree_branch: Option<String>,
+    pub fork_from_session_id: Option<Uuid>,
+    pub fork_point_turn_id: Option<String>,
 }
 
 pub struct ProcessManager {
@@ -165,6 +167,26 @@ impl ProcessManager {
         // Resolve (and validate) the base directory the request targets. It
         // must exist and live under the launcher user's home directory.
         let base_dir = path_policy::ensure_existing_dir_under_home(&params.working_directory)?;
+
+        if let Some(source_id) = params.fork_from_session_id {
+            match params.agent_type {
+                shared::AgentType::Claude => {
+                    if claude_transcript_status(&base_dir, source_id) == TranscriptStatus::Missing {
+                        anyhow::bail!(
+                            "Cannot fork: source Claude transcript is missing on this launcher"
+                        );
+                    }
+                }
+                shared::AgentType::Codex => {
+                    if load_codex_thread_id(source_id).is_none() {
+                        anyhow::bail!(
+                            "Cannot fork: source Codex session has no persisted thread (it may have no turns yet)"
+                        );
+                    }
+                }
+                shared::AgentType::Muse => anyhow::bail!("Muse sessions cannot be forked"),
+            }
+        }
 
         // When the request opts into a worktree, create it from the repo that
         // contains `base_dir` and run the session there instead. Otherwise the
@@ -234,6 +256,8 @@ impl ProcessManager {
             // thread/resume. No-op for claude sessions (the codex io-task
             // is the only emitter).
             codex_thread_id_sink: Some(make_codex_thread_id_sink(session_id)),
+            fork_from_session_id: params.fork_from_session_id,
+            fork_point_turn_id: params.fork_point_turn_id,
         };
 
         let exit_tx = self.exit_tx.clone();
@@ -383,10 +407,15 @@ async fn run_session_task(
             muse_yolo,
             agent_type: config.agent_type,
             codex_thread_id,
-            fork_from_session_id: None,
-            codex_fork_from_thread_id: None,
-            codex_fork_last_turn_id: None,
+            fork_from_session_id: config.fork_from_session_id,
+            codex_fork_from_thread_id: config.fork_from_session_id.and_then(load_codex_thread_id),
+            codex_fork_last_turn_id: config.fork_point_turn_id.clone(),
         };
+
+        // Fork metadata seeds one spawn attempt only. Rotation/retry paths may
+        // set resume=false again and must never silently re-fork (#1537).
+        config.fork_from_session_id = None;
+        config.fork_point_turn_id = None;
 
         let mut session = match AnySession::new(session_config).await {
             Ok(s) => s,

@@ -77,6 +77,10 @@ pub struct ProxySessionConfig {
     /// Persist-back closure for the codex app-server thread id; see
     /// [`CodexThreadIdSink`] doc.
     pub codex_thread_id_sink: Option<CodexThreadIdSink>,
+    /// First-spawn-only source session for Claude/Codex fork semantics.
+    pub fork_from_session_id: Option<Uuid>,
+    /// Optional Codex native turn id; `None` forks the latest turn.
+    pub fork_point_turn_id: Option<String>,
 }
 
 /// The local hostname, or `"unknown"` when the OS lookup fails.

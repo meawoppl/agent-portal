@@ -171,6 +171,8 @@ mod tests {
             paused: false,
             claude_args: Vec::new(),
             last_model: None,
+            forked_from_session_id: None,
+            fork_point_turn_id: None,
         }
     }
 
