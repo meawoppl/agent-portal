@@ -9,7 +9,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fs;
 use tracing::info;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use tracing::warn;
 
 /// GitHub repository for releases
@@ -298,6 +298,13 @@ fn install_binary(self_path: &std::path::Path, new_binary: &[u8]) -> Result<()> 
                 )?;
                 return Err(error.context("Replacement failed validation; restored old binary"));
             }
+            if let Err(error) = fs::remove_file(&old_path) {
+                warn!(
+                    "Validated update installed, but failed to remove backup {}: {}",
+                    old_path.display(),
+                    error
+                );
+            }
         }
 
         info!("Update installed successfully");
@@ -309,7 +316,9 @@ fn install_binary(self_path: &std::path::Path, new_binary: &[u8]) -> Result<()> 
 /// replacement before the running launcher asks launchd to restart it.
 #[cfg(target_os = "macos")]
 fn validate_macos_executable(path: &std::path::Path) -> Result<()> {
-    let xattr = std::process::Command::new("xattr")
+    // launchd supplies a deliberately small PATH; use the platform's stable
+    // absolute path so command lookup cannot unnecessarily reject an update.
+    let xattr = std::process::Command::new("/usr/bin/xattr")
         .arg("-c")
         .arg(path)
         .output()
