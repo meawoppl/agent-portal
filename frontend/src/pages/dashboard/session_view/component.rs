@@ -828,6 +828,18 @@ impl SessionView {
                 true
             }
             WsEvent::Ephemeral(payload) => {
+                if payload.get("type").and_then(|value| value.as_str()) == Some("prompt_suggestion")
+                {
+                    if let Ok(shared::ClaudeOutput::PromptSuggestion(suggestion)) =
+                        serde_json::from_value(payload.clone())
+                    {
+                        if let Some(dispatcher) = &self.input_bar_dispatcher {
+                            dispatcher
+                                .emit(InputBarInbound::PromptSuggestion(suggestion.suggestion));
+                        }
+                    }
+                    return false;
+                }
                 // Transient live status: replace the strip line. Never touches
                 // `messages` (no persistence, no replay watermark). A frame we
                 // can't summarize is ignored rather than clearing a good line.

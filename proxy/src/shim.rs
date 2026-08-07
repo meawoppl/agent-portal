@@ -23,7 +23,7 @@ use claude_codes::io::{
     ControlResponsePayload, PermissionResult, UserMessage,
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
-use claude_session_lib::claude_cli_args;
+use claude_session_lib::{claude_cli_args, claude_supports_prompt_suggestions};
 use session_lib::git_metadata::get_git_branch;
 use session_lib::output_buffer::PendingOutputBuffer;
 use shared::ProxyToServer;
@@ -49,7 +49,9 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
     info!("Starting shim mode");
 
     // Spawn claude binary with the same flags as claude-session-lib
-    let mut child = spawn_claude(&config)?;
+    let prompt_suggestions =
+        claude_supports_prompt_suggestions(std::path::Path::new("claude")).await;
+    let mut child = spawn_claude(&config, prompt_suggestions)?;
 
     let claude_stdin = child
         .stdin
@@ -120,12 +122,16 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
 }
 
 /// Spawn the claude binary with piped stdin/stdout/stderr.
-fn spawn_claude(config: &ProxySessionConfig) -> Result<tokio::process::Child> {
+fn spawn_claude(
+    config: &ProxySessionConfig,
+    prompt_suggestions: bool,
+) -> Result<tokio::process::Child> {
     let mut cmd = Command::new("claude");
     cmd.args(claude_cli_args(
         config.session_id,
         config.resume,
         None,
+        prompt_suggestions,
         &config.claude_args,
     ));
 
@@ -182,6 +188,7 @@ async fn run_shim_loop(
     let our_stdout_for_reader = our_stdout.clone();
     let permissions_for_reader = permissions.clone();
     let filtering_for_reader = filtering_active.clone();
+    let session_id_for_reader = config.session_id;
 
     // Claude stdout reader task: reads lines, forwards to stdout and queues for portal.
     //
@@ -245,6 +252,17 @@ async fn run_shim_loop(
 
             // Dispatch for portal forwarding (independent of VS Code decision).
             match parsed {
+                // Suggestions are transient composer UI, not durable transcript
+                // messages. Keep them out of the replay/output buffer.
+                Some(ClaudeOutput::PromptSuggestion(suggestion)) => {
+                    let payload = serde_json::to_value(ClaudeOutput::PromptSuggestion(suggestion))
+                        .unwrap_or_default();
+                    let _ = perm_request_tx.send(ProxyToServer::Ephemeral {
+                        session_id: session_id_for_reader,
+                        payload,
+                    });
+                    continue;
+                }
                 // Protocol noise the portal doesn't need.
                 Some(ClaudeOutput::ControlResponse(_)) => continue,
                 // Permission request: forward CanUseTool as typed PermissionRequest

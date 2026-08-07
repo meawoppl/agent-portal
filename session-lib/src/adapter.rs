@@ -218,6 +218,10 @@ impl AgentOutputClassifier for ClaudeAdapter {
                     error_category: r.error_category,
                 }),
             }],
+            // Prompt suggestions are composer state, not transcript content.
+            // Route them over the non-persisted side-channel so they neither
+            // consume retention rows nor render as unknown-message cards.
+            ClaudeOutput::PromptSuggestion(_) => vec![AgentOutput::Ephemeral(raw)],
             // Everything else (System, User, Assistant, Error, RateLimitEvent)
             // is user-visible.
             _ => vec![AgentOutput::Visible(raw)],
@@ -261,6 +265,21 @@ mod tests {
         assert_eq!(
             adapter.classify(raw.clone()),
             vec![AgentOutput::Visible(raw)]
+        );
+    }
+
+    #[test]
+    fn classify_prompt_suggestion_is_ephemeral() {
+        let raw = json!({
+            "type": "prompt_suggestion",
+            "suggestion": "Run tests",
+            "uuid": "u5",
+            "session_id": "s5"
+        });
+        let mut adapter = ClaudeAdapter;
+        assert_eq!(
+            adapter.classify(raw.clone()),
+            vec![AgentOutput::Ephemeral(raw)]
         );
     }
 
