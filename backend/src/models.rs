@@ -117,6 +117,12 @@ pub struct Session {
     /// at session-create time (see `NewSessionWithId::launcher_version`).
     /// `None` for proxy-direct (non-launcher) sessions.
     pub launcher_version: Option<String>,
+    pub forked_from_session_id: Option<Uuid>,
+    pub fork_point_turn_id: Option<String>,
+    /// True until the forked proxy first registers. Reconcile must replay the
+    /// fork recipe while this is true rather than resume the empty new id.
+    pub fork_launch_pending: bool,
+    pub fork_create_worktree: bool,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)

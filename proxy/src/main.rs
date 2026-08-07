@@ -425,6 +425,8 @@ async fn main() -> Result<()> {
         agent_type,
         scheduled_task_id: None,
         codex_thread_id_sink: Some(codex_thread_id_sink),
+        fork_from_session_id: None,
+        fork_point_turn_id: None,
     };
 
     // Branch: shim mode or normal proxy mode

@@ -195,6 +195,12 @@ pub struct SessionArchiveManifest {
     /// auto-update does not refresh it. `None` for non-launcher sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launcher_version: Option<String>,
+    /// Portal session whose agent-native history seeded this fork.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from_session_id: Option<Uuid>,
+    /// Optional Codex native turn id used as the divergence point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_point_turn_id: Option<String>,
     /// The scheduled (cron) task that spawned this session
     /// (`sessions.scheduled_task_id`), linking an archived session back to
     /// the automation that created it. `None` for interactively-launched
@@ -395,6 +401,8 @@ mod tests {
             media: None,
             launcher_id: None,
             launcher_version: None,
+            forked_from_session_id: None,
+            fork_point_turn_id: None,
             scheduled_task_id: None,
             claude_args: Vec::new(),
             archived_by_version: None,
