@@ -1766,58 +1766,8 @@
     overflow-wrap: anywhere;
 }
 
-/* Command (bash) tool result rendered as a card rather than raw JSON — muse
-   packs a structured result into `tool.result.text` as JSON; the renderer
-   parses it and draws this. Reads like the Claude/Codex bash cards: a `$`
-   command line over a scrollable output block. */
 .muse-tool-command {
     margin: 0.2rem 0 0.2rem 0.5rem;
-}
-
-.muse-bash-command-line {
-    display: flex;
-    gap: 0.4rem;
-    align-items: baseline;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-}
-
-.muse-bash-prompt {
-    color: var(--accent, #7aa2f7);
-    flex-shrink: 0;
-}
-
-.muse-bash-command {
-    color: var(--text-primary);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.muse-bash-exit {
-    color: var(--error, #f7768e);
-    flex-shrink: 0;
-}
-
-.muse-bash-note {
-    color: var(--text-muted);
-    font-style: italic;
-    font-size: 0.72rem;
-    margin: 0.1rem 0 0 0.9rem;
-}
-
-.muse-bash-output {
-    margin: 0.2rem 0 0 0.9rem;
-    padding: 0.35rem 0.5rem;
-    color: var(--text-secondary);
-    background: var(--bg-darker, rgba(0, 0, 0, 0.25));
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    line-height: 1.45;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    max-height: 20rem;
-    overflow-y: auto;
 }
 
 .muse-task-card .message-body {

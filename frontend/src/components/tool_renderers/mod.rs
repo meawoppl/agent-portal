@@ -1,8 +1,11 @@
 mod bash;
+mod command_result;
 mod edit;
 mod interactive;
 mod search;
 mod task;
+
+pub(crate) use self::command_result::CommandResultCard;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;

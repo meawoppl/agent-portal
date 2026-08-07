@@ -55,31 +55,26 @@ fn parse_command_result(text: &str) -> Option<MuseCommandResult> {
         .filter(|c| !c.command.trim().is_empty())
 }
 
-/// Render a muse command result as a compact card — `$ command`, an optional
-/// description, and the output in a scrollable block — matching how the
-/// Claude/Codex renderers present a shell command, rather than printing the raw
-/// JSON muse packs into `text`.
+/// Render a muse command result via the shared [`CommandResultCard`] — the same
+/// green/collapsible treatment the Claude/Codex tool results use — rather than
+/// printing the raw JSON muse packs into `text`. Intent first, then the `$`
+/// command line, then the collapsible output.
 fn render_command_card(cmd: &MuseCommandResult) -> Html {
-    let exit = cmd.exit_code.unwrap_or(0);
+    use crate::components::tool_renderers::CommandResultCard;
+    // muse truncates long output itself and flags it; surface that as a note
+    // appended to the output so the card doesn't imply it saw everything.
+    let output = match (cmd.output.as_deref(), cmd.truncated) {
+        (Some(o), Some(true)) => Some(format!("{o}\n[output truncated]")),
+        (Some(o), _) => Some(o.to_string()),
+        (None, _) => None,
+    };
     html! {
-        <div class="muse-bash">
-            <div class="muse-bash-command-line">
-                <span class="muse-bash-prompt">{ "$" }</span>
-                <code class="muse-bash-command">{ &cmd.command }</code>
-                if exit != 0 {
-                    <span class="muse-bash-exit">{ format!("exit {exit}") }</span>
-                }
-            </div>
-            if let Some(desc) = cmd.description.as_deref().filter(|d| !d.trim().is_empty()) {
-                <div class="muse-bash-note">{ desc }</div>
-            }
-            if let Some(out) = cmd.output.as_deref().filter(|o| !o.is_empty()) {
-                <pre class="muse-bash-output">{ out }</pre>
-            }
-            if cmd.truncated.unwrap_or(false) {
-                <div class="muse-bash-note">{ "output truncated" }</div>
-            }
-        </div>
+        <CommandResultCard
+            command={AttrValue::from(cmd.command.clone())}
+            description={cmd.description.clone().map(AttrValue::from)}
+            output={output.map(AttrValue::from)}
+            exit_code={cmd.exit_code}
+        />
     }
 }
 
