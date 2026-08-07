@@ -92,6 +92,23 @@ pub fn spawn_stale_session_cleanup(
             .filter(|(id, _)| !connected_keys.contains(&id.to_string()))
             .collect();
 
+        // Re-read the live set right before the write and drop anything that
+        // reconnected during the query window. Registration is the only writer
+        // that sets Active, and it is one-shot — so a proxy that registered
+        // between the snapshot above and this UPDATE would otherwise have its
+        // Active write clobbered back to Disconnected permanently (#1605). The
+        // `status.eq(Active)` guard on the UPDATE closes the remaining sliver:
+        // a row a concurrent registration flips can't be demoted here.
+        let reconnected: std::collections::HashSet<String> = manager
+            .registered_session_keys()
+            .into_iter()
+            .map(|k| k.to_string())
+            .collect();
+        let stale: Vec<(uuid::Uuid, String)> = stale
+            .into_iter()
+            .filter(|(id, _)| !reconnected.contains(&id.to_string()))
+            .collect();
+
         if stale.is_empty() {
             tracing::info!("No stale sessions to clean up after reconnect grace period");
             return;
@@ -99,9 +116,13 @@ pub fn spawn_stale_session_cleanup(
 
         let stale_ids: Vec<uuid::Uuid> = stale.iter().map(|(id, _)| *id).collect();
 
-        match diesel::update(sessions::table.filter(sessions::id.eq_any(&stale_ids)))
-            .set(sessions::status.eq(shared::SessionStatus::Disconnected.as_str()))
-            .execute(&mut conn)
+        match diesel::update(
+            sessions::table
+                .filter(sessions::id.eq_any(&stale_ids))
+                .filter(sessions::status.eq(shared::SessionStatus::Active.as_str())),
+        )
+        .set(sessions::status.eq(shared::SessionStatus::Disconnected.as_str()))
+        .execute(&mut conn)
         {
             Ok(updated) => {
                 tracing::info!(
@@ -121,6 +142,62 @@ pub fn spawn_stale_session_cleanup(
             }
         }
     });
+}
+
+/// Periodically heal the `sessions.status` column against live truth (#1605).
+///
+/// `status` is written to `Disconnected` by five paths but back to `Active`
+/// only on proxy registration, which is one-shot — so a single spurious
+/// `Disconnected` write (a lost sweep race, a backend restart the proxy
+/// outran) strands a live session as greyed-out forever, since nothing sets it
+/// back. `SessionManager` holds the authoritative live set, so promote any row
+/// it says is connected but the column calls `Disconnected` back to `Active`.
+///
+/// Promote-only by design: the demote direction (Active → Disconnected) is
+/// already handled correctly by the generation-guarded socket teardown and the
+/// startup sweep, and running it on a tick would both race those paths and
+/// re-fire `SessionDisconnected` pushes. This side only ever moves a
+/// demonstrably-live session toward `Active`, so it cannot disturb `Replaced`
+/// or a genuinely-gone session.
+pub async fn reconcile_session_status(app_state: Arc<AppState>) {
+    let live: Vec<uuid::Uuid> = app_state
+        .session_manager
+        .registered_session_keys()
+        .into_iter()
+        .filter_map(|k| uuid::Uuid::parse_str(&k.to_string()).ok())
+        .collect();
+    if live.is_empty() {
+        return;
+    }
+
+    let pool = app_state.db_pool.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        use diesel::prelude::*;
+        use schema::sessions;
+
+        let mut conn = pool.get()?;
+        let updated = diesel::update(
+            sessions::table
+                .filter(sessions::status.eq(shared::SessionStatus::Disconnected.as_str()))
+                .filter(sessions::id.eq_any(&live)),
+        )
+        .set((
+            sessions::status.eq(shared::SessionStatus::Active.as_str()),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)?;
+        anyhow::Ok(updated)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(n)) if n > 0 => {
+            tracing::info!("Reconciled {n} live session(s) from disconnected back to active");
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::error!("session status reconcile failed: {e}"),
+        Err(e) => tracing::error!("session status reconcile task panicked: {e}"),
+    }
 }
 
 /// Archive terminal sessions to long-term storage (#1258 phase 1).

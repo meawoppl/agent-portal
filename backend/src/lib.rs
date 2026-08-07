@@ -260,6 +260,14 @@ pub async fn run() -> anyhow::Result<()> {
         app_state.clone(),
         background::run_retention_cleanup,
     );
+    // Heal sessions.status against live SessionManager truth so a live session
+    // can't stay greyed-out forever after a spurious disconnect write (#1605).
+    background::spawn_periodic(
+        "session status reconcile task (every 30 seconds)",
+        Duration::from_secs(30),
+        app_state.clone(),
+        background::reconcile_session_status,
+    );
     if app_state.session_max_age_days > 0 {
         background::spawn_periodic(
             &format!(
