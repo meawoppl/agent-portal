@@ -192,10 +192,6 @@
     background: rgba(122, 162, 247, 0.055);
 }
 
-.session-rail-host-group.alt {
-    background: rgba(122, 162, 247, 0.11);
-}
-
 /* Horizontal rail (top/bottom): hostname centered ABOVE a single row of pills,
    so each group reads as a captioned cluster. The rail itself still scrolls as
    one row — the groups are its flex items. */

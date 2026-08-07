@@ -192,7 +192,9 @@ fn render_pill_section(
     // Grouped: wrap each contiguous same-host run in a tinted section with a
     // single centered/leading header (see `.session-rail-host-group` CSS). The
     // rows are already grouped upstream (`page.rs`), so equal labels are
-    // adjacent; alternating `alt` gives every other group a stronger tint.
+    // adjacent. One uniform dim tint per group — the header plus that faint
+    // background delimit each section on their own; alternating shades just
+    // read as noise (#1610).
     let mut groups: Vec<Html> = Vec::new();
     let mut start = 0;
     while start < entries.len() {
@@ -206,11 +208,10 @@ fn render_pill_section(
             end += 1;
         }
         let count = end - start;
-        let alt = (groups.len() % 2 == 1).then_some("alt");
         groups.push(html! {
             <div
                 key={format!("{section_key}-host-{label}")}
-                class={classes!("session-rail-host-group", alt)}
+                class="session-rail-host-group"
             >
                 <div
                     class="session-rail-host-header"
