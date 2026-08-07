@@ -20,7 +20,7 @@
 - **Launcher selection UI**: LaunchDialog shows launcher cards with
   name, hostname, and running session count; user picks target launcher.
 
-- **Config file**: Launcher reads `~/.config/agent-portal/launcher.json`;
+- **Config file**: Launcher reads the path printed by `agent-portal config-path`;
   CLI args override config values.
 - **Service management**: `agent-portal service install` / `uninstall` / `status`
   subcommands manage systemd (Linux) and launchd (macOS) services.

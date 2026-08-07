@@ -59,7 +59,6 @@ url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 
 # Config file management
-directories = { workspace = true }
 
 # Terminal colors
 colored = "2.1"

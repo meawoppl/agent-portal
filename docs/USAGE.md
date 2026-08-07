@@ -54,7 +54,7 @@ To authenticate, visit: https://your-portal.com/api/auth/device
 Enter code: ABC-123
 ```
 
-Open the URL in your browser, sign in with Google, and enter the code. Credentials are cached in `~/.config/agent-portal/config.json`.
+Open the URL in your browser, sign in with Google, and enter the code. Credentials are cached in the platform-native config directory (`~/.config/agent-portal/config.json` on Linux and `~/Library/Application Support/org.meawoppl.agent-portal/config.json` on macOS).
 
 ### CLI Options
 

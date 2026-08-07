@@ -111,10 +111,7 @@ impl PendingOutputBuffer {
 
     /// Get the path for a session's buffer file
     fn buffer_path(session_id: Uuid) -> Result<PathBuf> {
-        let config_dir = directories::ProjectDirs::from("com", "anthropic", "agent-portal")
-            .context("Failed to determine config directory")?
-            .config_dir()
-            .to_path_buf();
+        let config_dir = crate::config_paths::config_dir()?;
 
         // Create buffers subdirectory
         let buffers_dir = config_dir.join("buffers");

@@ -27,9 +27,11 @@ const CRASH_LOOP_THRESHOLD: std::time::Duration = std::time::Duration::from_secs
 /// Lives next to `launcher.json` in `ProjectDirs` so it ships with the same
 /// install/uninstall surface and survives across restarts.
 fn codex_threads_path() -> PathBuf {
-    directories::ProjectDirs::from("com", "anthropic", "agent-portal")
-        .map(|p| p.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("/tmp/agent-portal"))
+    session_lib::config_paths::config_dir()
+        .unwrap_or_else(|e| {
+            warn!("{}; falling back to /tmp/agent-portal", e);
+            PathBuf::from("/tmp/agent-portal")
+        })
         .join("codex_threads.json")
 }
 

@@ -23,6 +23,7 @@
 pub mod adapter;
 pub mod agent;
 pub mod buffer;
+pub mod config_paths;
 pub mod error;
 pub mod git_metadata;
 pub mod heartbeat;

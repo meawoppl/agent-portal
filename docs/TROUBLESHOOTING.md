@@ -260,7 +260,9 @@ chmod +x scripts/*.sh
 If everything is broken, try a full cleanup:
 ```bash
 ./scripts/clean.sh
-rm -rf ~/.config/agent-portal/  # Remove cached auth
+# Remove only the credential file. On Linux this is
+# ~/.config/agent-portal/config.json.
+rm ~/Library/Application\ Support/org.meawoppl.agent-portal/config.json
 cargo clean
 cd frontend && trunk clean && cd ..
 ./scripts/install-deps.sh

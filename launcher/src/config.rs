@@ -26,9 +26,10 @@ pub struct ExpectedSession {
 }
 
 fn config_dir() -> PathBuf {
-    directories::ProjectDirs::from("com", "anthropic", "agent-portal")
-        .map(|p| p.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("/tmp/agent-portal"))
+    session_lib::config_paths::config_dir().unwrap_or_else(|e| {
+        tracing::warn!("{}; falling back to /tmp/agent-portal", e);
+        PathBuf::from("/tmp/agent-portal")
+    })
 }
 
 fn config_path() -> PathBuf {

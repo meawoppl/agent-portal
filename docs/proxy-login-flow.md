@@ -252,7 +252,8 @@ In dev mode:
 Credentials are stored in:
 
 ```
-~/.config/agent-portal/config.json
+Linux: ~/.config/agent-portal/config.json
+macOS: ~/Library/Application Support/org.meawoppl.agent-portal/config.json
 ```
 
 Structure:

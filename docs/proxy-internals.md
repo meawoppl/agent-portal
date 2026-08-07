@@ -138,7 +138,7 @@ let mut claude_session = Session::new(claude_config).await?;
 
 Config is stored in the OS-standard config directory (via the `directories` crate):
 - Linux: `~/.config/agent-portal/config.json`
-- macOS: `~/Library/Application Support/com.anthropic.agent-portal/config.json`
+- macOS: `~/Library/Application Support/org.meawoppl.agent-portal/config.json`
 
 ```json
 {

@@ -61,6 +61,8 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Print the launcher configuration file path
+    ConfigPath,
     /// Authenticate with the backend server via browser
     Login,
     /// Update agent-portal to the latest version (restarts service if running)
@@ -240,6 +242,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Handle subcommands before the daemon startup path
     match args.command {
+        Some(Command::ConfigPath) => {
+            println!("{}", config::config_path_display());
+            return Ok(());
+        }
         Some(Command::Login) => return cmd_login(&args).await,
         Some(Command::Update) => return cmd_update().await,
         Some(Command::Service { action }) => {

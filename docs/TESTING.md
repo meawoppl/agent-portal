@@ -128,7 +128,10 @@ Terminal 4 should show:
 
 ```bash
 # Check config file was created
+# Linux
 cat ~/.config/agent-portal/config.json
+# macOS
+cat ~/Library/Application\ Support/org.meawoppl.agent-portal/config.json
 
 # Should show:
 {
@@ -190,7 +193,8 @@ cargo run -p proxy
 - [ ] Proxy shows OAuth device flow on first run
 - [ ] Can open device URL and complete OAuth
 - [ ] Proxy receives auth token after OAuth
-- [ ] Config file created at `~/.config/agent-portal/config.json`
+- [ ] Config file created at `~/.config/agent-portal/config.json` (Linux) or
+      `~/Library/Application Support/org.meawoppl.agent-portal/config.json` (macOS)
 - [ ] Config contains auth token
 - [ ] Second run uses cached auth (no OAuth prompt)
 - [ ] Web UI shows login with Google
@@ -227,6 +231,7 @@ chmod 700 ~/.config/agent-portal
 
 Delete config and re-authenticate:
 ```bash
+# Linux (use the macOS path above on macOS)
 rm ~/.config/agent-portal/config.json
 cargo run -p proxy
 ```

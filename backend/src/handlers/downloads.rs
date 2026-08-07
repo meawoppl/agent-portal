@@ -44,7 +44,6 @@ set -e
 CONFIG_DIR="${{HOME}}/.config/agent-portal"
 BIN_NAME="agent-portal"
 BIN_PATH="${{CONFIG_DIR}}/${{BIN_NAME}}"
-CONFIG_FILE="${{CONFIG_DIR}}/launcher.json"
 GITHUB_RELEASE_URL="https://github.com/meawoppl/agent-portal/releases/download/latest"
 BACKEND_URL="{backend_url}"
 
@@ -138,6 +137,12 @@ else
     echo "Binary installed successfully!"
     echo ""
 fi
+
+# Ask the installed binary for its platform-native config location. Keeping
+# the executable in ~/.config preserves existing PATH/service installations;
+# config data follows the OS convention selected by the binary.
+CONFIG_FILE="$("${{BIN_PATH}}" config-path)"
+mkdir -p "$(dirname "${{CONFIG_FILE}}")"
 
 # Write config with backend URL (preserve existing config if present)
 if [ -f "${{CONFIG_FILE}}" ]; then

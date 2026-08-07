@@ -75,7 +75,8 @@ $ claude-portal --reauth  # Force new authentication
 ### Config File Location
 
 The config file is stored at:
-- **Linux/Mac**: `~/.config/agent-portal/config.json`
+- **Linux**: `~/.config/agent-portal/config.json`
+- **macOS**: `~/Library/Application Support/org.meawoppl.agent-portal/config.json`
 - **Windows**: `%APPDATA%\agent-portal\config.json`
 
 ### Config File Format
@@ -152,14 +153,18 @@ claude-portal
 ### View config file
 
 ```bash
-# Linux/Mac
+# Linux
 cat ~/.config/agent-portal/config.json | jq
+
+# macOS
+cat ~/Library/Application\ Support/org.meawoppl.agent-portal/config.json | jq
 ```
 
 ### Manually edit config
 
 ```bash
 # Open in editor
+# Linux (use the macOS path above on macOS)
 vim ~/.config/agent-portal/config.json
 ```
 

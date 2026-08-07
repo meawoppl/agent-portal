@@ -32,7 +32,7 @@ Once authenticated, all future sessions (terminal and VS Code) reuse the stored 
 
 **Important**: The auth token is stored per-working-directory. The shim uses a cross-directory fallback, so authenticating from *any* directory is sufficient for VS Code sessions to work.
 
-**Config location on macOS**: `~/Library/Application Support/com.anthropic.agent-portal/config.json` (not `~/.config/`). The proxy uses the `directories` crate which follows OS-standard paths.
+**Config location on macOS**: `~/Library/Application Support/org.meawoppl.agent-portal/config.json` (not `~/.config/`). Existing `com.anthropic.agent-portal` data is migrated automatically.
 
 ### 2. Create the shim script
 
@@ -111,7 +111,7 @@ The shim crashed before launching claude. Common causes:
 The shim launched claude but couldn't register with the portal. Check:
 
 1. **Auth token exists**: Check the config file for `auth_token` entries:
-   - macOS: `cat ~/Library/Application\ Support/com.anthropic.agent-portal/config.json`
+   - macOS: `cat ~/Library/Application\ Support/org.meawoppl.agent-portal/config.json`
    - Linux: `cat ~/.config/agent-portal/config.json`
 2. **Backend is reachable**: `curl https://your-portal-server/` should return HTML
 3. **WebSocket connects**: Check stderr output (visible in VS Code output panel > Claude Code)
