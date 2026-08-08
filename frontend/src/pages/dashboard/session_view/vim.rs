@@ -366,14 +366,12 @@ fn handle_normal(
 
         // Deletes / changes -------------------------------------------------
         "x" => {
-            let n = state.take_count();
-            let end = (cursor + n).min(text.len());
-            edit_range(state, textarea, event, &text, Op::Delete, cursor, end)
+            let (start, end) = counted_delete_range(&text, cursor, state.take_count());
+            edit_range(state, textarea, event, &text, Op::Delete, start, end)
         }
         "s" => {
-            let n = state.take_count();
-            let end = (cursor + n).min(text.len());
-            edit_range(state, textarea, event, &text, Op::Change, cursor, end)
+            let (start, end) = counted_delete_range(&text, cursor, state.take_count());
+            edit_range(state, textarea, event, &text, Op::Change, start, end)
         }
         "D" => {
             let le = line_end(&text, cursor);
@@ -1090,9 +1088,19 @@ fn end_of_word(text: &[char], cursor: usize) -> usize {
 }
 
 /// Target index for a plain motion key, or `None` if `key` isn't a motion.
+// `h` is clamped to `line_start` so it never walks onto the previous line's
+// last character (even though `place_block` later clamps, the target itself
+// must stay on the current line — see #1617).
 fn simple_motion_target(key: &str, text: &[char], cursor: usize) -> Option<usize> {
     Some(match key {
-        "h" => cursor.saturating_sub(1),
+        "h" => {
+            let ls = line_start(text, cursor);
+            if cursor > ls {
+                cursor - 1
+            } else {
+                cursor
+            }
+        }
         "l" => (cursor + 1).min(text.len()),
         "j" => line_down(text, cursor),
         "k" => line_up(text, cursor),
@@ -1105,7 +1113,18 @@ fn simple_motion_target(key: &str, text: &[char], cursor: usize) -> Option<usize
     })
 }
 
+/// Range for a counted `x`/`s` in NORMAL mode, clamped to `line_end` so it
+/// never spans the newline and joins the next line (see #1617).
+fn counted_delete_range(text: &[char], cursor: usize, count: usize) -> (usize, usize) {
+    let le = line_end(text, cursor);
+    let end = (cursor + count).min(le).min(text.len());
+    (cursor, end)
+}
+
 /// Charwise `[start, end)` range spanned by an operator motion (`dw`, `d$`, …).
+// `h` is clamped to `line_start` for the same reason as `simple_motion_target`
+// (see #1617) — `dh` at column zero must be a no-op, not a delete of the
+// previous line's last character.
 fn operator_motion_range(key: &str, text: &[char], cursor: usize) -> Option<(usize, usize)> {
     let n = text.len();
     Some(match key {
@@ -1114,7 +1133,11 @@ fn operator_motion_range(key: &str, text: &[char], cursor: usize) -> Option<(usi
         "e" => (cursor, (end_of_word(text, cursor) + 1).min(n)),
         "0" => (line_start(text, cursor), cursor),
         "$" => (cursor, line_end(text, cursor)),
-        "h" => (cursor.saturating_sub(1), cursor),
+        "h" => {
+            let ls = line_start(text, cursor);
+            let start = if cursor > ls { cursor - 1 } else { cursor };
+            (start, cursor)
+        }
         "l" => (cursor, (cursor + 1).min(n)),
         _ => return None,
     })
@@ -1978,5 +2001,83 @@ mod tests {
         assert_eq!(char_idx_to_utf16(&t, 3), 4);
         assert_eq!(utf16_to_char_idx(&t, 3), 2);
         assert_eq!(utf16_to_char_idx(&t, 1), 1);
+    }
+
+    // --- #1617: counted x/s and h stay within the current line -------------
+
+    #[test]
+    fn counted_x_clamped_to_line_end() {
+        // "ab\ncd", cursor at 1 (b), count 5 would reach past newline if not clamped.
+        let t = chars("ab\ncd");
+        // cursor 1, line_end 2, count 5 -> range [1,2) leaves "\ncd" intact.
+        assert_eq!(counted_delete_range(&t, 1, 5), (1, 2));
+        let (v, c) = remove_range(&t, 1, 2);
+        assert_eq!(s(&v), "a\ncd");
+        assert_eq!(c, 1);
+        // Single-char `x` at end of line is still valid (deletes 'b').
+        assert_eq!(counted_delete_range(&t, 1, 1), (1, 2));
+        // At newline itself, nothing to delete on this line.
+        assert_eq!(counted_delete_range(&t, 2, 3), (2, 2));
+    }
+
+    #[test]
+    fn counted_x_on_last_line_clamped_to_buffer_end() {
+        let t = chars("hello");
+        // cursor 3, no newline, count 10 -> clamps to buffer end, not past it.
+        assert_eq!(counted_delete_range(&t, 3, 10), (3, 5));
+        assert_eq!(counted_delete_range(&t, 3, 1), (3, 4));
+    }
+
+    #[test]
+    fn h_at_column_zero_stays() {
+        let t = chars("ab\ncd");
+        // Line 2 starts at 3.
+        assert_eq!(simple_motion_target("h", &t, 3), Some(3));
+        assert_eq!(simple_motion_target("h", &t, 0), Some(0));
+        // One char in, h steps left within the line.
+        assert_eq!(simple_motion_target("h", &t, 4), Some(3));
+    }
+
+    #[test]
+    fn h_with_count_stays_within_line() {
+        let t = chars("ab\ncdef");
+        // cursor at 5 (e on second line "cdef", ls=3), count 10 via repeated h
+        let mut target = 5;
+        for _ in 0..10 {
+            target = simple_motion_target("h", &t, target).unwrap();
+        }
+        assert_eq!(target, 3); // floored at line_start, never -1 into "ab"
+    }
+
+    #[test]
+    fn dh_at_column_zero_is_noop() {
+        let t = chars("ab\ncd");
+        assert_eq!(operator_motion_range("h", &t, 3), Some((3, 3)));
+        let (start, end) = operator_motion_range("h", &t, 3).unwrap();
+        let (v, c) = remove_range(&t, start, end);
+        assert_eq!(s(&v), "ab\ncd");
+        assert_eq!(c, 3);
+        // One char in, dh deletes the char before cursor.
+        assert_eq!(operator_motion_range("h", &t, 4), Some((3, 4)));
+        let (v, c) = remove_range(&t, 3, 4);
+        assert_eq!(s(&v), "ab\nd");
+        assert_eq!(c, 3);
+    }
+
+    #[test]
+    fn counted_h_via_operator_motion_never_crosses_line() {
+        // Mirrors the simple-motion count loop but through the operator path:
+        // `d3h` at column 1 of second line should only delete to line_start.
+        let t = chars("ab\ncde");
+        // cursor at 4 (d), ls=3, so h range is [3,4); repeated application
+        // for count=3 should not walk into previous line's '\n'.
+        let ls = line_start(&t, 4);
+        assert_eq!(ls, 3);
+        // Simulate counted `3h` as three h steps: h clamped each time.
+        let mut cur = 4;
+        for _ in 0..3 {
+            cur = simple_motion_target("h", &t, cur).unwrap();
+        }
+        assert_eq!(cur, 3);
     }
 }
