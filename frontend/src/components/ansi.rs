@@ -471,4 +471,101 @@ mod tests {
         assert_eq!(segs[0].style.fg, Some(AnsiColor::Standard(3)));
         assert_eq!(segs[1].text, " tail");
     }
+
+    #[test]
+    fn extended_color_missing_param_is_tolerated() {
+        // 38;5 without the index - must not panic, just ignores
+        let segs = styled("\x1b[38;5mX\x1b[0m");
+        // No color set, style remains default for X, then reset segment
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "X");
+        assert!(segs[0].style.fg.is_none());
+    }
+
+    #[test]
+    fn extended_truecolor_missing_components_fills_zeros() {
+        // 38;2 without full r;g;b - parser fills missing with 0
+        let segs = styled("\x1b[38;2;255mZ\x1b[0m");
+        assert_eq!(segs[0].style.fg, Some(AnsiColor::Rgb(255, 0, 0)));
+        let segs2 = styled("\x1b[48;2;10;20mBG\x1b[0m");
+        assert_eq!(segs2[0].style.bg, Some(AnsiColor::Rgb(10, 20, 0)));
+    }
+
+    #[test]
+    fn background_256_and_truecolor() {
+        let segs = styled("\x1b[48;5;196mX\x1b[0m");
+        assert_eq!(segs[0].style.bg, Some(AnsiColor::Indexed(196)));
+        let segs2 = styled("\x1b[48;2;0;255;0mY\x1b[0m");
+        assert_eq!(segs2[0].style.bg, Some(AnsiColor::Rgb(0, 255, 0)));
+    }
+
+    #[test]
+    fn large_unknown_sgr_ignored() {
+        let segs = styled("\x1b[9999mhi\x1b[0m");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "hi");
+        assert!(segs[0].style.is_default());
+    }
+
+    #[test]
+    fn osc_with_st_terminator_is_stripped() {
+        let segs = styled("a\x1b]0;title\x1b\\b");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "ab");
+    }
+
+    #[test]
+    fn lone_esc_and_unknown_two_byte_stripped() {
+        let segs = styled("a\x1bb\x1b[c");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "a");
+    }
+
+    #[test]
+    fn cr_only_line_collapses() {
+        let segs = styled("foo\rbar\nnext");
+        assert_eq!(segs[0].text, "bar\nnext");
+        // bare \r without \n also collapses per-line
+        let segs2 = styled("a\rb");
+        assert_eq!(segs2[0].text, "b");
+    }
+
+    #[test]
+    fn sgr_with_empty_param_between_semicolons_treated_as_reset() {
+        // ESC[;31m - leading empty param parses as 0 (reset) then 31
+        let segs = styled("\x1b[;31mred\x1b[0m");
+        assert_eq!(segs[0].style.fg, Some(AnsiColor::Standard(1)));
+    }
+
+    #[test]
+    fn style_reset_clears_extended_colors() {
+        let segs = styled("\x1b[38;5;196mA\x1b[0mB");
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].style.fg, Some(AnsiColor::Indexed(196)));
+        assert!(segs[1].style.is_default());
+        assert_eq!(segs[1].text, "B");
+    }
+
+    #[test]
+    fn bright_bg_and_standard_reset() {
+        let segs = styled("\x1b[102mX\x1b[49mY");
+        // 102 is bright green bg (8+2)
+        assert_eq!(segs[0].style.bg, Some(AnsiColor::Standard(10)));
+        // 49 resets bg only
+        assert!(segs[1].style.bg.is_none());
+    }
+
+    #[test]
+    fn incomplete_csi_at_eof_is_dropped() {
+        let segs = styled("ok\x1b[31");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "ok");
+    }
+
+    #[test]
+    fn utf8_emoji_around_sgr() {
+        let segs = styled("\x1b[31m🔥\x1b[0m 🎉");
+        assert_eq!(segs[0].text, "🔥");
+        assert_eq!(segs[1].text, " 🎉");
+    }
 }
