@@ -64,6 +64,27 @@ pub enum MessageGroup {
 }
 
 impl MessageGroup {
+    pub(crate) fn muse_causation_id(&self) -> Option<String> {
+        let MessageGroup::IdentityGroup {
+            category: GroupCategory::Muse,
+            messages,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        messages.iter().find_map(|message| {
+            serde_json::from_str::<serde_json::Value>(&message.content)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("causation_id")
+                        .and_then(|id| id.as_str())
+                        .map(str::to_string)
+                })
+        })
+    }
+
     /// Stable key for this group derived from the first message's identity.
     ///
     /// A positional index would change whenever an earlier group gets added

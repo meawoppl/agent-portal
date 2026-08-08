@@ -137,11 +137,11 @@ pub struct TaskTree {
     order: Vec<String>,
     /// Turn this tree belongs to (`causation_id`), set by the first record.
     pub causation_id: Option<String>,
-    /// The run's final answer text (`run.terminal.completed` → `payload.text`),
-    /// in markdown. This is the agent's actual reply — rendered as prose above
-    /// the task tree, the same way a Claude/Codex assistant message renders —
-    /// rather than being dropped into the footer as a bare count.
+    /// The run's answer text in markdown. Live `run.output.delta` chunks build
+    /// it while the turn runs; a durable `run.terminal.*` record replaces the
+    /// stream with the canonical final text.
     answer: Option<String>,
+    answer_is_terminal: bool,
     /// Count per `payload_type` of records the tree does not render
     /// structurally (`run.model.configured`, `command.received`, future
     /// vocabulary). Surfaced as a muted footer so nothing on the wire silently
@@ -203,6 +203,13 @@ impl TaskTree {
             }
             t if t.starts_with("task.lifecycle.") => self.apply_lifecycle(payload),
             "tool.result" => self.apply_tool_result(payload),
+            "run.output.delta" => {
+                if !self.answer_is_terminal {
+                    if let Some(chunk) = str_field(payload, "text") {
+                        self.answer.get_or_insert_default().push_str(&chunk);
+                    }
+                }
+            }
             // The run's final answer — the agent's actual reply. Match the whole
             // `run.terminal.*` family, not just `.completed`: the terminal state
             // is encoded in the suffix (completed / failed / cancelled / future
@@ -217,6 +224,7 @@ impl TaskTree {
                     .or_else(|| str_field(payload, "reason").filter(|r| !r.trim().is_empty()));
                 if answer.is_some() {
                     self.answer = answer;
+                    self.answer_is_terminal = true;
                 }
             }
             other => {
@@ -256,7 +264,10 @@ impl TaskTree {
         }
         match kind.as_str() {
             "proposed" => node.task_kind = str_field(ev, "task_kind"),
-            "status" => node.status = str_field(ev, "message"),
+            // A late ephemeral heartbeat must not resurrect progress UI on a
+            // task whose durable lifecycle has already reached a terminal
+            // state (notably after a reconnect/history replay).
+            "status" if !node.state.is_terminal() => node.status = str_field(ev, "message"),
             "output" => {
                 if let Some(chunk) = str_field(ev, "chunk") {
                     node.output.push(chunk);
@@ -496,6 +507,18 @@ mod tests {
             "live status must clear at terminal state"
         );
         assert!(node.reason.is_some(), "the failure reason must be kept");
+
+        tree.apply(&json!({
+            "payload_type": "task.lifecycle.status",
+            "causation_id": "turn-1",
+            "payload": {"task_id": "t1", "event": {
+                "kind": "status", "task_id": "t1", "message": "stale reconnect heartbeat"
+            }},
+        }));
+        assert!(
+            tree.get("t1").expect("node").status.is_none(),
+            "late status must not resurrect on a terminal task"
+        );
     }
 
     /// The run's final answer text is captured as prose, not dumped into the
@@ -519,6 +542,35 @@ mod tests {
         );
         // An answer-only turn (no tasks) is still a card worth rendering.
         assert!(!tree.is_empty(), "a tree with an answer is not empty");
+    }
+
+    #[test]
+    fn streamed_answer_accumulates_then_terminal_replaces_it() {
+        let mut tree = TaskTree::new();
+        tree.apply(&serde_json::json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": "live "}
+        }));
+        tree.apply(&serde_json::json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": "answer"}
+        }));
+        assert_eq!(tree.answer(), Some("live answer"));
+        assert!(tree.other_records().next().is_none());
+
+        tree.apply(&serde_json::json!({
+            "payload_type": "run.terminal.completed",
+            "causation_id": "turn-1",
+            "payload": {"text": "canonical answer"}
+        }));
+        tree.apply(&serde_json::json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": " stale"}
+        }));
+        assert_eq!(tree.answer(), Some("canonical answer"));
     }
 
     /// A blank terminal text leaves no answer (and no empty prose block).

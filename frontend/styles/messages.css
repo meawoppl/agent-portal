@@ -1642,52 +1642,17 @@
    collapse and drop the status, since a finished task's last progress
    message is stale by definition. */
 
-/* The agent's actual reply, rendered as markdown prose — the primary content
-   of a muse turn, sitting above the task-tree work log. */
+/* The agent's actual reply closes the turn after its work, matching the
+   Claude/Codex tool-then-answer reading order. */
 .muse-answer {
-    margin-bottom: 0.5rem;
-}
-
-.muse-answer:last-child {
-    margin-bottom: 0;
-}
-
-/* Collapsible "work log" wrapper: keeps a turn's task nodes from burying the
-   reply above. The toggle is a quiet disclosure, not a control that competes
-   with the answer. */
-.muse-worklog {
-    margin: 0.35rem 0 0;
-}
-
-.muse-worklog-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.15rem 0.3rem;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.muse-worklog-toggle:hover {
-    color: var(--text-secondary);
-}
-
-.muse-worklog-caret {
-    font-size: 0.7rem;
-    line-height: 1;
+    margin-top: 0.5rem;
 }
 
 .muse-task-tree {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    margin: 0.35rem 0;
+    margin: 0.35rem 0 0;
     font-size: 0.8rem;
 }
 

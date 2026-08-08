@@ -32,6 +32,10 @@ pub struct MessageGroupRendererProps {
     /// tool call splits a thinking run instead of re-racing each chip from 0.
     #[prop_or(0)]
     pub thinking_start: i64,
+    /// Ephemeral records for this Muse turn. Replayed after persisted records
+    /// so the one card advances live without writing token deltas to history.
+    #[prop_or_default]
+    pub muse_live_events: Vec<serde_json::Value>,
 }
 
 #[function_component(MessageGroupRenderer)]
@@ -88,6 +92,13 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
                         tree.apply(&value);
                     }
+                }
+                // Muse's classifier routes each record to exactly one side:
+                // Durable → persisted messages, Ephemeral → this overlay.
+                // Applying both sets cannot double-count output chunks unless
+                // that classifier invariant changes.
+                for event in &props.muse_live_events {
+                    tree.apply(event);
                 }
                 // Nothing structural and nothing to footnote — a group of
                 // records the reducer consumed without visible effect (e.g.
