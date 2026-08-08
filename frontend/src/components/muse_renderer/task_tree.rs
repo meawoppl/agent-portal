@@ -87,8 +87,8 @@ pub struct ToolOutcome {
     /// `"success"` / `"failure"` as reported in `correlation_facts`.
     pub outcome: Option<String>,
     pub text: String,
-    /// Present for file-editing tools.
-    pub has_edit_facts: bool,
+    /// Typed path from Muse's `edit_facts`, when the tool changed a file.
+    pub edit_path: Option<String>,
 }
 
 /// A node in the task tree.
@@ -282,7 +282,9 @@ impl TaskTree {
             tool_name: facts.and_then(|f| str_field(f, "tool_name")),
             outcome: facts.and_then(|f| str_field(f, "outcome")),
             text: str_field(payload, "text").unwrap_or_default(),
-            has_edit_facts: payload.get("edit_facts").is_some_and(|v| !v.is_null()),
+            edit_path: payload
+                .get("edit_facts")
+                .and_then(|facts| str_field(facts, "path")),
         };
         if let Some(id) = self.tool_result_target(outcome.tool_name.as_deref()) {
             self.node_mut(&id).tool_results.push(outcome);
@@ -417,6 +419,28 @@ mod tests {
                 .any(|r| r.tool_name.is_some() && r.outcome.is_some()),
             "correlation_facts (tool_name/outcome) must survive into the model"
         );
+    }
+
+    #[test]
+    fn edit_facts_keep_the_typed_file_path() {
+        let mut tree = TaskTree::new();
+        tree.apply(&json!({
+            "payload_type": "task.lifecycle.proposed",
+            "payload": {"event": {
+                "kind": "proposed", "task_id": "edit-1", "task_kind": "tool.edit_file"
+            }}
+        }));
+        tree.apply(&json!({
+            "payload_type": "tool.result",
+            "payload": {
+                "call_id": "call-1",
+                "correlation_facts": {"tool_name": "edit_file", "outcome": "success"},
+                "edit_facts": {"path": "src/main.rs", "added": 1, "removed": 1},
+                "text": "edit_file edited\n--- original\n+++ updated\n@@\n-old\n+new"
+            }
+        }));
+        let result = &tree.get("edit-1").expect("edit task").tool_results[0];
+        assert_eq!(result.edit_path.as_deref(), Some("src/main.rs"));
     }
 
     /// Records arrive over two channels and can interleave out of order. A

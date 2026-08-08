@@ -78,6 +78,91 @@ fn render_command_card(cmd: &MuseCommandResult) -> Html {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct MuseReadResult<'a> {
+    path: &'a str,
+    content: &'a str,
+}
+
+/// Muse's read result is a provider-owned prose envelope around the file
+/// contents. Keep this tiny adapter here, then hand the normalized fields to
+/// the same Read card Claude uses. The tool-name gate prevents unrelated prose
+/// containing the same words from being misclassified.
+fn parse_read_result<'a>(tool_name: Option<&str>, text: &'a str) -> Option<MuseReadResult<'a>> {
+    if tool_name != Some("read_file") {
+        return None;
+    }
+    let rest = text.strip_prefix("Read text file `")?;
+    let (path, content) = rest
+        .split_once("`.\n")
+        .or_else(|| rest.split_once("`.\r\n"))
+        .or_else(|| rest.strip_suffix("`.").map(|path| (path, "")))?;
+    Some(MuseReadResult { path, content })
+}
+
+/// Extract the unified diff Muse places after its short edit summary. The
+/// path is carried separately in typed `edit_facts` and is never scraped from
+/// the prose result.
+fn parse_edit_diff(tool_name: Option<&str>, text: &str) -> Option<String> {
+    if tool_name != Some("edit_file") {
+        return None;
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let header = lines
+        .iter()
+        .position(|line| line.trim_start() == "--- original")?;
+    let indent = lines[header].len() - lines[header].trim_start().len();
+    Some(
+        lines[header..]
+            .iter()
+            .map(|line| line.get(indent..).unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
+    use crate::components::diff::{DiffCard, DiffSource};
+    use crate::components::tool_renderers::ReadToolCard;
+
+    let outcome = result.outcome.as_deref().unwrap_or("unknown");
+    let tool = result.tool_name.as_deref().unwrap_or("tool");
+    if let Some(cmd) = parse_command_result(&result.text) {
+        return html! {
+            <div class={classes!("muse-tool-command", format!("muse-tool-{outcome}"))}>
+                { render_command_card(&cmd) }
+            </div>
+        };
+    }
+    if let Some(read) = parse_read_result(result.tool_name.as_deref(), &result.text) {
+        return html! {
+            <div class={classes!("muse-tool-card", format!("muse-tool-{outcome}"))}>
+                <ReadToolCard
+                    file_path={AttrValue::from(read.path.to_string())}
+                    content={AttrValue::from(read.content.to_string())}
+                />
+            </div>
+        };
+    }
+    if let Some(diff) = parse_edit_diff(result.tool_name.as_deref(), &result.text) {
+        return html! {
+            <div class={classes!("muse-tool-card", format!("muse-tool-{outcome}"))}>
+                <DiffCard
+                    source={DiffSource::Unified { text: diff }}
+                    file_path={result.edit_path.clone().map(AttrValue::from)}
+                    kind="update"
+                />
+            </div>
+        };
+    }
+    html! {
+        <div class={classes!("muse-tool-result", format!("muse-tool-{outcome}"))}>
+            <span class="muse-tool-name">{ tool }</span>
+            <span class="muse-tool-text">{ &result.text }</span>
+        </div>
+    }
+}
+
 /// Draw a task tree: one stacked card per task showing lifecycle state,
 /// tool outcomes, streamed output, and the policy decision muse applied to
 /// any side effect (muse decides tool policy itself and never prompts, so
@@ -255,24 +340,7 @@ fn render_task_node(node: &TaskNode) -> Html {
                     { format!("{op} — policy: {decision}") }
                 </div>
             }
-            { for node.tool_results.iter().map(|r| {
-                let outcome = r.outcome.as_deref().unwrap_or("unknown");
-                let tool = r.tool_name.as_deref().unwrap_or("tool");
-                if let Some(cmd) = parse_command_result(&r.text) {
-                    html! {
-                        <div class={classes!("muse-tool-command", format!("muse-tool-{outcome}"))}>
-                            { render_command_card(&cmd) }
-                        </div>
-                    }
-                } else {
-                    html! {
-                        <div class={classes!("muse-tool-result", format!("muse-tool-{outcome}"))}>
-                            <span class="muse-tool-name">{ tool }</span>
-                            <span class="muse-tool-text">{ &r.text }</span>
-                        </div>
-                    }
-                }
-            }) }
+            { for node.tool_results.iter().map(render_muse_tool_result) }
             { for node.output.iter().filter(|c| !shown_as_result.contains(c.as_str())).map(|chunk| {
                 // A surviving chunk that is itself a command payload still gets
                 // the card treatment rather than a raw dump.
@@ -338,6 +406,25 @@ mod tests {
     }
 
     #[test]
+    fn read_file_result_is_normalized_for_the_shared_read_card() {
+        let text =
+            "Read text file `frontend/src/lib.rs`.\n    (9 line(s) above)\n  10|fn main() {}";
+        let read = parse_read_result(Some("read_file"), text).expect("Muse read envelope");
+        assert_eq!(read.path, "frontend/src/lib.rs");
+        assert_eq!(read.content, "    (9 line(s) above)\n  10|fn main() {}");
+        assert!(parse_read_result(Some("write_file"), text).is_none());
+    }
+
+    #[test]
+    fn edit_file_result_yields_a_unified_diff_body() {
+        let text = "edit_file edited\n    changed lines: lines 3-4\n    --- original\n    +++ updated\n    @@\n    -old\n    +new";
+        let diff = parse_edit_diff(Some("edit_file"), text).expect("Muse edit diff");
+        assert!(diff.starts_with("--- original\n"));
+        assert!(diff.contains("-old\n+new"));
+        assert!(parse_edit_diff(Some("read_file"), text).is_none());
+    }
+
+    #[test]
     fn bash_output_chunk_duplicates_the_tool_result_so_dedup_fires() {
         // The de-dup in render_task_node keys on tool_result.text == output
         // chunk. This proves that equality holds on the real capture, so the
@@ -372,7 +459,7 @@ mod tests {
             tool_name: Some("write_file".to_string()),
             outcome: Some("success".to_string()),
             text: "wrote hello.txt".to_string(),
-            has_edit_facts: true,
+            edit_path: Some("hello.txt".to_string()),
         });
         assert!(
             !is_hidden_scaffolding(&n),
