@@ -12,6 +12,9 @@
 use serde::Deserialize;
 use yew::prelude::*;
 
+use super::expandable::ExpandableText;
+use super::tool_renderers::OUTPUT_PREVIEW_CHARS;
+
 pub mod task_tree;
 
 pub use task_tree::{TaskNode, TaskState, TaskTree};
@@ -155,10 +158,18 @@ fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
             </div>
         };
     }
+    // Non-command tool results (search, list, …) contract past the shared
+    // preview threshold like the Claude/Codex tool output does — a bounded
+    // search alone can be 80 matches long (#1628).
     html! {
         <div class={classes!("muse-tool-result", format!("muse-tool-{outcome}"))}>
             <span class="muse-tool-name">{ tool }</span>
-            <span class="muse-tool-text">{ &result.text }</span>
+            <ExpandableText
+                full_text={result.text.clone()}
+                max_len={OUTPUT_PREVIEW_CHARS}
+                tag="span"
+                class={classes!("muse-tool-text")}
+            />
         </div>
     }
 }
@@ -312,7 +323,14 @@ fn render_task_node(node: &TaskNode) -> Html {
                 if let Some(cmd) = parse_command_result(chunk) {
                     html! { <div class="muse-tool-command">{ render_command_card(&cmd) }</div> }
                 } else {
-                    html! { <div class="muse-task-output">{ chunk }</div> }
+                    html! {
+                        <ExpandableText
+                            full_text={chunk.clone()}
+                            max_len={OUTPUT_PREVIEW_CHARS}
+                            tag="div"
+                            class={classes!("muse-task-output")}
+                        />
+                    }
                 }
             }) }
         </div>

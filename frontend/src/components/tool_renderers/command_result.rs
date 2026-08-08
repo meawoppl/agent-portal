@@ -10,8 +10,9 @@ use yew::prelude::*;
 
 /// How much output to show before the `ExpandableText` toggle collapses it —
 /// matches the "show a bit, click for the rest" behavior of the other agents'
-/// tool output.
-const OUTPUT_PREVIEW_CHARS: usize = 600;
+/// tool output. Shared with the muse renderer so its non-command tool results
+/// contract at the same threshold (#1628).
+pub(crate) const OUTPUT_PREVIEW_CHARS: usize = 600;
 
 #[derive(Properties, PartialEq)]
 pub struct CommandResultCardProps {
