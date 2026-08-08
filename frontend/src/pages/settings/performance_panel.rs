@@ -97,6 +97,7 @@ mod tests {
         build_auxiliary_token_series, build_cache_hit_series, build_cost_per_token_series,
         build_stop_reason_series,
     };
+    use crate::test_fixtures::MetricBucketBuilder;
 
     fn mk_bucket(
         ts: DateTime<Utc>,
@@ -105,31 +106,14 @@ mod tests {
         ttft_p50: Option<i64>,
         throughput_p50: Option<f64>,
         stop_counts: Vec<(&str, i64)>,
-    ) -> MetricBucket {
-        let mut counts = BTreeMap::new();
-        for (k, v) in stop_counts {
-            counts.insert(k.to_string(), v);
-        }
-        MetricBucket {
-            bucket_start: ts,
-            agent_type: AgentType::Claude,
-            model: model.map(|s| s.to_string()),
-            service_tier: tier.map(|s| s.to_string()),
-            turn_count: 1,
-            error_count: 0,
-            ttft_p50_ms: ttft_p50,
-            ttft_p95_ms: None,
-            throughput_p50_tps: throughput_p50,
-            throughput_p95_tps: None,
-            input_tokens_sum: 1000,
-            output_tokens_sum: 200,
-            cache_read_tokens_sum: 500,
-            cache_creation_tokens_sum: 100,
-            thinking_tokens_sum: 0,
-            subagent_tokens_sum: 0,
-            total_cost_usd_sum: Some(0.05),
-            stop_reason_counts: counts,
-        }
+    ) -> shared::api::MetricBucket {
+        MetricBucketBuilder::new(ts)
+            .model(model)
+            .service_tier(tier)
+            .ttft_p50(ttft_p50)
+            .throughput_p50(throughput_p50)
+            .stop_counts(stop_counts)
+            .build()
     }
 
     #[test]

@@ -148,9 +148,7 @@ pub fn render_turn_metrics_footer(metrics: Option<&TurnMetrics>) -> Html {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use shared::AgentType;
-    use uuid::Uuid;
 
     // ---- compact_count ----
 
@@ -294,38 +292,9 @@ mod tests {
     // ---- end-to-end chip-list builder ----
 
     fn sample_metrics() -> TurnMetrics {
-        TurnMetrics {
-            id: Some(Uuid::nil()),
-            session_id: Uuid::nil(),
-            user_message_id: None,
-            agent_type: AgentType::Claude,
-            model: Some("claude-opus-4-7".to_string()),
-            service_tier: Some("standard".to_string()),
-            started_at: Utc::now(),
-            first_token_at: None,
-            completed_at: None,
-            // 547 output / 11.59s gen ≈ 47.2 tok/s.
-            ttft_ms: Some(1310),
-            total_duration_ms: Some(12900),
-            generation_duration_ms: Some(11590),
-            // 1500ms — above the 1000ms threshold so the chip renders.
-            max_inter_token_gap_ms: Some(1500),
-            // 84% of 2100 = ~1764; pick numbers that give exactly 84%.
-            // (cache_read 84, fresh 16, cache_creation 0) → 84% of 100.
-            input_tokens: 16,
-            output_tokens: 547,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 84,
-            thinking_tokens: 0,
-            subagent_tokens: 0,
-            stop_reason: Some("end_turn".to_string()),
-            is_error: false,
-            tool_call_count: 0,
-            stream_restarts: 0,
-            total_cost_usd: Some(0.014),
-            model_context_window: None,
-            context_snapshot_tokens: None,
-        }
+        // Builder defaults mirror this Claude-shaped sample (see
+        // `crate::test_fixtures::TurnMetricsBuilder`).
+        crate::test_fixtures::TurnMetricsBuilder::new().build()
     }
 
     /// End-to-end builder test: assemble a representative `TurnMetrics`
@@ -355,34 +324,20 @@ mod tests {
     /// chip list is just tok/s, TTFT, and the tokens chip.
     #[test]
     fn end_to_end_codex_shape_drops_chips() {
-        let m = TurnMetrics {
-            id: Some(Uuid::nil()),
-            session_id: Uuid::nil(),
-            user_message_id: None,
-            agent_type: AgentType::Codex,
-            model: None,
-            service_tier: None,
-            started_at: Utc::now(),
-            first_token_at: None,
-            completed_at: None,
-            ttft_ms: Some(800),
-            total_duration_ms: Some(4200),
-            generation_duration_ms: Some(3400),
-            max_inter_token_gap_ms: Some(200), // sub-1s → drops
-            input_tokens: 0,
-            output_tokens: 200,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0, // all zero → cache chip drops
-            thinking_tokens: 0,
-            subagent_tokens: 0,
-            stop_reason: None,
-            is_error: false,
-            tool_call_count: 0,
-            stream_restarts: 0,
-            total_cost_usd: None, // None → cost chip drops
-            model_context_window: None,
-            context_snapshot_tokens: None,
-        };
+        let m = crate::test_fixtures::TurnMetricsBuilder::new()
+            .agent_type(AgentType::Codex)
+            .model(None)
+            .service_tier(None)
+            .ttft_ms(Some(800))
+            .generation_duration_ms(Some(3400))
+            .max_gap_ms(Some(200)) // sub-1s → drops
+            .input_tokens(0)
+            .output_tokens(200)
+            .cache_creation(0)
+            .cache_read(0) // all zero → cache chip drops
+            .total_cost_usd(None) // None → cost chip drops
+            .stop_reason(None)
+            .build();
         let chips = build_chip_list(&m);
         assert_eq!(
             chips,

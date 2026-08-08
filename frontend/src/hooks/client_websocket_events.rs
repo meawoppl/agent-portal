@@ -99,41 +99,24 @@ pub(crate) fn insert_recent_metric(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
-    use shared::AgentType;
+    use crate::test_fixtures::TurnMetricsBuilder;
     use uuid::Uuid;
 
     /// Build a minimal `TurnMetrics` with the fields the recent-buffer
     /// insertion path actually reads (`id`, `started_at`).
     fn sample(id: Option<Uuid>, started_secs: i64) -> TurnMetrics {
-        TurnMetrics {
-            id,
-            session_id: Uuid::nil(),
-            user_message_id: None,
-            agent_type: AgentType::Claude,
-            model: None,
-            service_tier: None,
-            started_at: Utc.timestamp_opt(started_secs, 0).unwrap(),
-            first_token_at: None,
-            completed_at: None,
-            ttft_ms: None,
-            total_duration_ms: None,
-            generation_duration_ms: None,
-            max_inter_token_gap_ms: None,
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0,
-            thinking_tokens: 0,
-            subagent_tokens: 0,
-            context_snapshot_tokens: None,
-            stop_reason: None,
-            is_error: false,
-            tool_call_count: 0,
-            stream_restarts: 0,
-            total_cost_usd: None,
-            model_context_window: None,
-        }
+        TurnMetricsBuilder::new()
+            .id(id)
+            .started_secs(started_secs)
+            .model(None)
+            .service_tier(None)
+            .input_tokens(0)
+            .output_tokens(0)
+            .cache_read(0)
+            .cache_creation(0)
+            .total_cost_usd(None)
+            .stop_reason(None)
+            .build()
     }
 
     #[test]
