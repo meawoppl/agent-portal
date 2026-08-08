@@ -3,6 +3,8 @@ mod launcher;
 mod session;
 mod tunnel;
 mod types;
+#[cfg(test)]
+mod wire_goldens;
 
 pub use client::*;
 pub use launcher::*;
@@ -16,11 +18,6 @@ mod tests {
     use super::*;
     use crate::{AgentType, SendMode, SessionMode};
     use uuid::Uuid;
-
-    #[test]
-    fn session_endpoint_path() {
-        assert_eq!(SessionEndpoint::PATH, "/ws/session");
-    }
 
     #[test]
     fn session_exited_reason_defaults_for_old_launchers() {
@@ -143,93 +140,6 @@ mod tests {
     }
 
     #[test]
-    fn client_endpoint_path() {
-        assert_eq!(ClientEndpoint::PATH, "/ws/client");
-    }
-
-    #[test]
-    fn launcher_endpoint_path() {
-        assert_eq!(LauncherEndpoint::PATH, "/ws/launcher");
-    }
-
-    #[test]
-    fn proxy_to_server_register_roundtrip() {
-        let msg = ProxyToServer::Register(RegisterFields {
-            session_id: Uuid::nil(),
-            session_name: "test".into(),
-            auth_token: None,
-            working_directory: "/tmp".into(),
-            resuming: false,
-            git_branch: None,
-            replay_after: None,
-            client_version: None,
-            replaces_session_id: None,
-            hostname: None,
-            launcher_id: None,
-            agent_type: AgentType::Claude,
-            repo_url: None,
-            scheduled_task_id: None,
-            claude_args: Vec::new(),
-            capabilities: Vec::new(),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"Register""#));
-        let parsed: ProxyToServer = serde_json::from_str(&json).unwrap();
-        match parsed {
-            ProxyToServer::Register(reg) => {
-                assert_eq!(reg.session_name, "test");
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
-
-    #[test]
-    fn server_to_proxy_sequenced_input_roundtrip() {
-        let msg = ServerToProxy::SequencedInput {
-            session_id: Uuid::nil(),
-            seq: 5,
-            content: serde_json::json!({"text": "hello"}),
-            send_mode: Some(SendMode::Wiggum),
-            client_msg_id: None,
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"SequencedInput""#));
-        let parsed: ServerToProxy = serde_json::from_str(&json).unwrap();
-        match parsed {
-            ServerToProxy::SequencedInput { seq, send_mode, .. } => {
-                assert_eq!(seq, 5);
-                assert_eq!(send_mode, Some(SendMode::Wiggum));
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
-
-    #[test]
-    fn portal_meta_round_trips_and_omits_empty_fields() {
-        use crate::endpoints::client::{DeliveryMeta, MessageSource, PortalMeta};
-        use crate::InputDeliveryStage;
-
-        // Default (all-none) serializes to `{}` — no stray keys on the wire.
-        assert_eq!(serde_json::to_string(&PortalMeta::default()).unwrap(), "{}");
-
-        let meta = PortalMeta {
-            created_at: Some("2026-06-26T12:00:00.000000".to_string()),
-            source: Some(MessageSource::Agent {
-                session_id: Uuid::nil(),
-                agent_type: "codex".to_string(),
-            }),
-            delivery: Some(DeliveryMeta {
-                client_msg_id: Uuid::nil(),
-                stage: Some(InputDeliveryStage::ProxyReceived),
-                message: None,
-            }),
-        };
-        let json = serde_json::to_string(&meta).unwrap();
-        let back: PortalMeta = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, meta);
-    }
-
-    #[test]
     fn message_source_is_a_tagged_sum() {
         use crate::endpoints::client::MessageSource;
         let human = MessageSource::Human {
@@ -287,165 +197,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn client_to_server_claude_input_roundtrip() {
-        let id = uuid::Uuid::from_u128(7);
-        let msg = ClientToServer::AgentInput {
-            content: serde_json::json!({"text": "hi"}),
-            send_mode: None,
-            client_msg_id: Some(id),
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"ClaudeInput""#));
-        let parsed: ClientToServer = serde_json::from_str(&json).unwrap();
-        match parsed {
-            ClientToServer::AgentInput {
-                send_mode,
-                client_msg_id,
-                ..
-            } => {
-                assert!(send_mode.is_none());
-                assert_eq!(client_msg_id, Some(id));
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
-
-    /// Older clients omit `client_msg_id`; the field must default to `None`.
-    #[test]
-    fn client_input_without_client_msg_id_defaults_none() {
-        let json = r#"{"type":"ClaudeInput","content":{"text":"hi"}}"#;
-        let parsed: ClientToServer = serde_json::from_str(json).unwrap();
-        match parsed {
-            ClientToServer::AgentInput { client_msg_id, .. } => {
-                assert_eq!(client_msg_id, None);
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
-
-    #[test]
-    fn input_progress_roundtrips_with_stage() {
-        use crate::InputDeliveryStage;
-        let id = uuid::Uuid::from_u128(42);
-        for (stage, tag) in [
-            (InputDeliveryStage::ServerReceived, "server_received"),
-            (InputDeliveryStage::ProxyReceived, "proxy_received"),
-            (InputDeliveryStage::AgentAccepted, "agent_accepted"),
-            (InputDeliveryStage::Failed, "failed"),
-        ] {
-            let msg = ServerToClient::InputProgress {
-                client_msg_id: id,
-                stage,
-                message: None,
-            };
-            let json = serde_json::to_string(&msg).unwrap();
-            assert!(json.contains(&format!(r#""stage":"{tag}""#)), "{json}");
-            match serde_json::from_str::<ServerToClient>(&json).unwrap() {
-                ServerToClient::InputProgress {
-                    client_msg_id,
-                    stage: parsed_stage,
-                    ..
-                } => {
-                    assert_eq!(client_msg_id, id);
-                    assert_eq!(parsed_stage, stage);
-                }
-                _ => panic!("Wrong variant"),
-            }
-        }
-    }
-
-    #[test]
-    fn server_to_client_output_roundtrip() {
-        let msg = ServerToClient::AgentOutput {
-            content: serde_json::json!({"type": "assistant", "text": "hello"}),
-            agent_type: AgentType::Codex,
-            meta: Some(crate::PortalMeta {
-                created_at: Some("2026-05-18T12:34:56.789012".to_string()),
-                ..Default::default()
-            }),
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
-        match parsed {
-            ServerToClient::AgentOutput {
-                content,
-                agent_type,
-                meta,
-            } => {
-                assert_eq!(content["text"], "hello");
-                assert_eq!(agent_type, AgentType::Codex);
-                assert_eq!(
-                    meta.and_then(|m| m.created_at).as_deref(),
-                    Some("2026-05-18T12:34:56.789012")
-                );
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
-
-    /// Pre-#784 wire JSON for `ServerToClient::ClaudeOutput` (no `meta`) must
-    /// still parse — `meta` defaults to `None` and the frontend keeps its prior
-    /// reconnect watermark. Same backward-compat slack we extend for `agent_type`.
-    #[test]
-    fn wire_compat_pre_784_omits_meta() {
-        let json = r#"{"type":"ClaudeOutput","content":{"hello":"world"}}"#;
-        let parsed: ServerToClient = serde_json::from_str(json).unwrap();
-        match parsed {
-            ServerToClient::AgentOutput { meta, .. } => {
-                assert!(meta.is_none());
-            }
-            _ => panic!("Wrong variant"),
-        }
-
-        // Empty HistoryBatch without `last_created_at` must also parse.
-        let json = r#"{"type":"HistoryBatch"}"#;
-        let parsed: ServerToClient = serde_json::from_str(json).unwrap();
-        match parsed {
-            ServerToClient::HistoryBatch {
-                entries,
-                last_created_at,
-            } => {
-                assert!(entries.is_empty());
-                assert!(last_created_at.is_none());
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
-
-    /// `HistoryBatch` carries the latest server-assigned timestamp in
-    /// `last_created_at` so the frontend sets its reconnect watermark directly
-    /// (closes #784). Each `entry` is raw content + its typed `meta` sidecar.
-    #[test]
-    fn history_batch_roundtrip_with_last_created_at() {
-        let msg = ServerToClient::HistoryBatch {
-            entries: vec![crate::endpoints::client::HistoryEntry {
-                content: serde_json::json!({"type": "assistant", "text": "hi"}),
-                meta: None,
-            }],
-            last_created_at: Some("2026-05-18T00:00:00.000000".to_string()),
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ServerToClient = serde_json::from_str(&json).unwrap();
-        match parsed {
-            ServerToClient::HistoryBatch {
-                entries,
-                last_created_at,
-            } => {
-                assert_eq!(entries.len(), 1);
-                assert_eq!(entries[0].content["text"], "hi");
-                assert_eq!(
-                    last_created_at.as_deref(),
-                    Some("2026-05-18T00:00:00.000000")
-                );
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
-
-    /// Pre-2.5.42 wire JSON for `SequencedOutput` (no `agent_type`) must still
-    /// parse, defaulting to `AgentType::Claude`. Same for `ClaudeOutput` and
-    /// the backend → frontend `ServerToClient::ClaudeOutput` shape.
     #[test]
     fn wire_compat_pre_2_5_42_omits_agent_type() {
         let json = r#"{"type":"SequencedOutput","seq":3,"content":{"hello":"world"}}"#;
@@ -576,15 +327,6 @@ mod tests {
             }
             _ => panic!("Wrong variant"),
         }
-    }
-
-    #[test]
-    fn wire_compat_server_shutdown() {
-        let json = r#"{"type":"ServerShutdown","reason":"update","reconnect_delay_ms":5000}"#;
-        // Must parse in all three server->X enums
-        let _: ServerToProxy = serde_json::from_str(json).unwrap();
-        let _: ServerToClient = serde_json::from_str(json).unwrap();
-        let _: ServerToLauncher = serde_json::from_str(json).unwrap();
     }
 
     #[test]
