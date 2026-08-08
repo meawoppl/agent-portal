@@ -250,16 +250,45 @@ pub async fn list() -> Result<()> {
             ""
         };
         println!(
-            "{}  {}  [{}/{}]  {}{}",
+            "{}  {} / {} / {}  {}  {}{}",
             display_session_id(s, &data.sessions),
+            full_agent_name(s),
+            if session_is_connected(s) {
+                "connected"
+            } else {
+                "disconnected"
+            },
+            if s.busy.unwrap_or(false) {
+                "busy"
+            } else {
+                "idle"
+            },
             s.session_name,
-            s.agent_type,
-            s.status,
             s.working_directory,
             marker
         );
     }
     Ok(())
+}
+
+fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
+    let Some(model) = session.model.as_deref().filter(|model| !model.is_empty()) else {
+        return session.agent_type.clone();
+    };
+    if model.starts_with(&session.agent_type) {
+        model.to_string()
+    } else {
+        format!("{}-{model}", session.agent_type)
+    }
+}
+
+/// New backends report live proxy presence explicitly. Falling back to the
+/// legacy status keeps a newly-updated CLI useful against an older backend
+/// during rolling deploys.
+fn session_is_connected(session: &shared::api::AgentSessionInfo) -> bool {
+    session
+        .connected
+        .unwrap_or_else(|| session.status == shared::SessionStatus::Active.as_str())
 }
 
 async fn fetch_sessions(
@@ -402,6 +431,9 @@ mod tests {
             agent_type: "claude".to_string(),
             status: "active".to_string(),
             hostname: "host".to_string(),
+            model: None,
+            connected: Some(true),
+            busy: Some(false),
             awaiting_permission: false,
             last_activity: String::new(),
         }
@@ -456,6 +488,28 @@ mod tests {
         ];
 
         assert_eq!(display_session_id(&sessions[0], &sessions), "12345678");
+    }
+
+    #[test]
+    fn full_agent_name_keeps_full_model_and_avoids_duplicate_prefix() {
+        let mut codex = session("12345678-0000-0000-0000-000000000000");
+        codex.agent_type = "codex".to_string();
+        codex.model = Some("gpt-5.4-sol".to_string());
+        assert_eq!(full_agent_name(&codex), "codex-gpt-5.4-sol");
+
+        let mut claude = codex;
+        claude.agent_type = "claude".to_string();
+        claude.model = Some("claude-opus-4-8".to_string());
+        assert_eq!(full_agent_name(&claude), "claude-opus-4-8");
+    }
+
+    #[test]
+    fn connection_presence_falls_back_to_legacy_status() {
+        let mut old_wire = session("12345678-0000-0000-0000-000000000000");
+        old_wire.connected = None;
+        assert!(session_is_connected(&old_wire));
+        old_wire.status = "disconnected".to_string();
+        assert!(!session_is_connected(&old_wire));
     }
 
     #[test]
