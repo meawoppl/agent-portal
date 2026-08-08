@@ -110,6 +110,15 @@ fn build_exec_builder(config: &SessionConfig, text: &str) -> MuseExecBuilder {
         .provider(Provider::Meta)
         .working_directory(&config.working_directory)
         .session_id(config.session_id.to_string())
+        // Exported so shell tools muse spawns inherit it — `agent-portal
+        // message send` resolves the sender from this var (its first arm in
+        // `sender_session_id`; claude/codex have agent-specific fallbacks
+        // there, muse has none). Without it, inter-agent sends from muse fall
+        // back to the backend's untyped "[portal message from <user>]" string
+        // and the recipient renders a raw user message instead of the typed
+        // agent-message card. Muse is spawn-per-turn against one stable portal
+        // session id, so the var cannot go stale the way claude's /clear does.
+        .env("PORTAL_SESSION_ID", config.session_id.to_string())
         .yolo(config.muse_yolo)
         .extra_args(config.extra_args.clone())
 }
@@ -172,6 +181,24 @@ mod tests {
         assert!(
             session_pos < model_pos,
             "typed flags precede the raw passthrough; argv: {argv:?}"
+        );
+
+        // Sender attribution: shell tools muse spawns must inherit the portal
+        // session id so `agent-portal message send` attributes the sender.
+        let envs: Vec<(String, String)> = cmd
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| {
+                Some((
+                    k.to_string_lossy().into_owned(),
+                    v?.to_string_lossy().into_owned(),
+                ))
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "PORTAL_SESSION_ID" && *v == config.session_id.to_string()),
+            "PORTAL_SESSION_ID must be exported to the muse child; envs: {envs:?}"
         );
     }
 }
