@@ -5,7 +5,7 @@ mod interactive;
 mod search;
 mod task;
 
-pub(crate) use self::command_result::CommandResultCard;
+pub(crate) use self::command_result::{CommandResultCard, OUTPUT_PREVIEW_CHARS};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
