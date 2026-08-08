@@ -106,6 +106,18 @@ pub struct AgentSessionInfo {
     pub agent_type: String,
     pub status: String,
     pub hostname: String,
+    /// Full last-observed model identifier. `None` before the first turn that
+    /// reports one; callers fall back to `agent_type`.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Live proxy presence, independent of the eventually-consistent database
+    /// status string retained above for wire compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected: Option<bool>,
+    /// True while the latest significant transcript event belongs to an
+    /// in-progress turn. Meaningful only while `connected` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy: Option<bool>,
     /// True when the session has a pending permission request waiting on the
     /// user — the "agent is blocked on you" signal mobile widgets surface.
     #[serde(default)]
