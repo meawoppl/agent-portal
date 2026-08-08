@@ -249,6 +249,15 @@ fn is_hidden_scaffolding(node: &TaskNode) -> bool {
         && node.side_effect.is_none()
 }
 
+/// Whether a side-effect policy decision deserves a line on the task card.
+/// Muse's routine decisions (`allow:policy`, `not_applicable`) are stamped on
+/// effectively every task and carry no information; a denial is the anomaly
+/// the audit line exists for. Anything outside the known-boring vocabulary
+/// renders too, so future decision kinds surface instead of vanishing.
+fn side_effect_is_noteworthy(decision: &str) -> bool {
+    !(decision == "not_applicable" || decision.starts_with("allow"))
+}
+
 fn render_task_node(node: &TaskNode) -> Html {
     let state = node.state;
     let kind = node.task_kind.as_deref().unwrap_or("task");
@@ -281,7 +290,17 @@ fn render_task_node(node: &TaskNode) -> Html {
             if let Some(reason) = node.reason.as_deref() {
                 <div class="muse-task-reason">{ reason }</div>
             }
-            if let Some((op, decision)) = node.side_effect.as_ref() {
+            // The side-effect audit line is noise when muse allowed the
+            // operation — every routine card reads "… — policy: allow:policy"
+            // / "not_applicable" and merely repeats the header's task kind. It
+            // only carries signal when muse REFUSED something, so render it
+            // for denials (and any unrecognized future vocabulary — unknown
+            // decisions fail visible, not silent).
+            if let Some((op, decision)) = node
+                .side_effect
+                .as_ref()
+                .filter(|(_, decision)| side_effect_is_noteworthy(decision))
+            {
                 <div class="muse-task-side-effect">
                     { format!("{op} — policy: {decision}") }
                 </div>
@@ -425,5 +444,23 @@ mod tests {
         assert!(!is_hidden_scaffolding(&node(None)));
         // Must START with `reminder.` — a kind that merely contains it stays.
         assert!(!is_hidden_scaffolding(&node(Some("agent.reminder.thing"))));
+    }
+
+    #[test]
+    fn routine_policy_decisions_are_not_noteworthy() {
+        // The two decisions muse stamps on every routine task (observed in
+        // the captured fixtures) must stay off the card.
+        assert!(!side_effect_is_noteworthy("allow:policy"));
+        assert!(!side_effect_is_noteworthy("allow:user"));
+        assert!(!side_effect_is_noteworthy("not_applicable"));
+    }
+
+    #[test]
+    fn denials_and_unknown_decisions_stay_visible() {
+        assert!(side_effect_is_noteworthy("deny:policy"));
+        assert!(side_effect_is_noteworthy("ask:user"));
+        // Unknown future vocabulary fails visible, including a missing value.
+        assert!(side_effect_is_noteworthy("quarantine"));
+        assert!(side_effect_is_noteworthy(""));
     }
 }
