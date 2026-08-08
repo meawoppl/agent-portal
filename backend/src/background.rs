@@ -200,6 +200,39 @@ pub async fn reconcile_session_status(app_state: Arc<AppState>) {
     }
 }
 
+// Pure decision helper extracted from ensure_session_archived so the
+// fresh-archive guard stays unit-testable without I/O. The DB update
+// remains the source of truth; this mirrors the `archived_at >= last_activity` check.
+
+/// Whether a session's archive is fresh (covers `last_activity`).
+/// Mirrors the guard in `ensure_session_archived`.
+pub(crate) fn is_archive_fresh(
+    archived_at: Option<chrono::NaiveDateTime>,
+    last_activity: chrono::NaiveDateTime,
+) -> bool {
+    archived_at.is_some_and(|a| a >= last_activity)
+}
+
+pub(crate) fn load_archive_eligible(
+    conn: &mut diesel::PgConnection,
+    cutoff: chrono::NaiveDateTime,
+    limit: i64,
+) -> diesel::QueryResult<Vec<models::Session>> {
+    use diesel::prelude::*;
+    use schema::sessions;
+    sessions::table
+        .filter(sessions::status.ne(shared::SessionStatus::Active.as_str()))
+        .filter(sessions::last_activity.lt(cutoff))
+        .filter(
+            sessions::archived_at
+                .is_null()
+                .or(sessions::archived_at.lt(sessions::last_activity.nullable())),
+        )
+        .order(sessions::last_activity.asc())
+        .limit(limit)
+        .load(conn)
+}
+
 /// Archive terminal sessions to long-term storage (#1258 phase 1).
 ///
 /// Selection is idempotent: a session is eligible when it is not active,
@@ -233,24 +266,12 @@ pub fn archive_pending_sessions(
     pool: &DbPool,
     runtime: &crate::archive::ArchiveRuntime,
 ) -> anyhow::Result<(usize, usize)> {
-    use diesel::prelude::*;
-    use schema::sessions;
-
     let mut conn = pool.get()?;
     let cutoff = chrono::Utc::now().naive_utc()
         - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
 
-    let eligible: Vec<models::Session> = sessions::table
-        .filter(sessions::status.ne(shared::SessionStatus::Active.as_str()))
-        .filter(sessions::last_activity.lt(cutoff))
-        .filter(
-            sessions::archived_at
-                .is_null()
-                .or(sessions::archived_at.lt(sessions::last_activity.nullable())),
-        )
-        .order(sessions::last_activity.asc())
-        .limit(crate::archive::ARCHIVE_SWEEP_BATCH)
-        .load(&mut conn)?;
+    let eligible: Vec<models::Session> =
+        load_archive_eligible(&mut conn, cutoff, crate::archive::ARCHIVE_SWEEP_BATCH)?;
 
     let mut archived = 0;
     let mut failed = 0;
@@ -679,10 +700,7 @@ pub(crate) fn ensure_session_archived(
     use diesel::prelude::*;
     use schema::sessions;
 
-    let fresh = session
-        .archived_at
-        .is_some_and(|archived| archived >= session.last_activity);
-    if fresh {
+    if is_archive_fresh(session.archived_at, session.last_activity) {
         return true;
     }
     match archive_one_session(conn, runtime, session) {
@@ -1025,5 +1043,313 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
         Err(e) => {
             tracing::error!("Failed to delete leaked launch tokens: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod background_decision_tests {
+    use super::is_archive_fresh;
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    fn dt(y: i32, m: u32, d: u32, h: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(h, 0, 0)
+            .unwrap()
+    }
+
+    #[test]
+    fn is_archive_fresh_matches_ensure_guard() {
+        let last = dt(2026, 1, 9, 10);
+        assert!(!is_archive_fresh(None, last));
+        assert!(!is_archive_fresh(Some(dt(2026, 1, 8, 0)), last));
+        assert!(is_archive_fresh(Some(last), last));
+        assert!(is_archive_fresh(Some(dt(2026, 1, 10, 0)), last));
+    }
+}
+
+#[cfg(test)]
+mod archive_pending_sessions_db_tests {
+    use crate::models::NewSessionWithId;
+    use crate::schema::sessions;
+    use chrono::NaiveDateTime;
+    use diesel::prelude::*;
+    use uuid::Uuid;
+
+    fn insert_session(
+        conn: &mut diesel::PgConnection,
+        user_id: Uuid,
+        status: &str,
+        last_activity: NaiveDateTime,
+        archived_at: Option<NaiveDateTime>,
+    ) -> Uuid {
+        let id = Uuid::new_v4();
+        let new_session = NewSessionWithId {
+            id,
+            user_id,
+            session_name: format!("test-{id}"),
+            session_key: id.to_string(),
+            working_directory: "/tmp".to_string(),
+            status: status.to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "test-host".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(Vec::new()),
+            launcher_version: None,
+        };
+        diesel::insert_into(sessions::table)
+            .values(&new_session)
+            .execute(conn)
+            .expect("insert session");
+        // Override timestamps set by DB defaults to the exact values for the predicate.
+        diesel::update(sessions::table.find(id))
+            .set((
+                sessions::last_activity.eq(last_activity),
+                sessions::archived_at.eq(archived_at),
+                sessions::updated_at.eq(last_activity),
+            ))
+            .execute(conn)
+            .expect("set timestamps");
+        id
+    }
+
+    #[test]
+    fn archive_pending_selects_only_eligible_via_real_diesel_filter() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+        conn.begin_test_transaction().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "archive-eligible");
+
+        // Cutoff is now - ARCHIVE_IDLE_SECS (3600s). Use wide margins so the test
+        // is not flaky around the second the query captures `now`.
+        let now = chrono::Utc::now().naive_utc();
+        let idle = now - chrono::Duration::hours(2);
+        let recent = now - chrono::Duration::minutes(30);
+        let stale_archived = idle - chrono::Duration::hours(1);
+        let fresh_archived = idle + chrono::Duration::minutes(10);
+        let cutoff_exact = now - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
+
+        // Seven cases spanning the predicate.
+        let active_never = insert_session(&mut conn, user.id, "active", idle, None);
+        let recent_inactive = insert_session(&mut conn, user.id, "disconnected", recent, None);
+        let never_archived = insert_session(&mut conn, user.id, "disconnected", idle, None);
+        let stale = insert_session(
+            &mut conn,
+            user.id,
+            "disconnected",
+            idle,
+            Some(stale_archived),
+        );
+        let fresh = insert_session(
+            &mut conn,
+            user.id,
+            "disconnected",
+            idle,
+            Some(fresh_archived),
+        );
+        let boundary = insert_session(&mut conn, user.id, "disconnected", cutoff_exact, None);
+        let unknown_status = insert_session(&mut conn, user.id, "paused", idle, None);
+
+        // Use the SAME shared fn as production — filter drift cannot escape the test.
+        let cutoff = now - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
+        let eligible: Vec<Uuid> = crate::background::load_archive_eligible(&mut conn, cutoff, 100)
+            .expect("query eligible")
+            .into_iter()
+            .map(|s| s.id)
+            .filter(|id| {
+                [
+                    active_never,
+                    recent_inactive,
+                    never_archived,
+                    stale,
+                    fresh,
+                    boundary,
+                    unknown_status,
+                ]
+                .contains(id)
+            })
+            .collect();
+
+        assert!(!eligible.contains(&active_never), "active never eligible");
+        assert!(
+            !eligible.contains(&recent_inactive),
+            "recent (< cutoff) not eligible"
+        );
+        assert!(
+            eligible.contains(&never_archived),
+            "never-archived idle should be eligible"
+        );
+        assert!(eligible.contains(&stale), "stale should be eligible");
+        assert!(!eligible.contains(&fresh), "fresh should not be eligible");
+        assert!(
+            !eligible.contains(&boundary),
+            "==cutoff is exclusive (lt), not eligible"
+        );
+        assert!(
+            eligible.contains(&unknown_status),
+            "unknown non-active status follows inactive path"
+        );
+        assert_eq!(
+            eligible.len(),
+            3,
+            "exactly never+stale+unknown should be selected"
+        );
+    }
+}
+
+#[cfg(test)]
+mod retention_archive_hold_tests {
+    use crate::archive::{ArchiveConfig, ArchiveRuntime};
+    use crate::handlers::retention::RetentionConfig;
+    use crate::models::NewSessionWithId;
+    use crate::schema::{messages, sessions};
+    use diesel::prelude::*;
+    use uuid::Uuid;
+
+    fn make_session(conn: &mut diesel::PgConnection, user_id: Uuid) -> Uuid {
+        let id = Uuid::new_v4();
+        let new_session = NewSessionWithId {
+            id,
+            user_id,
+            session_name: format!("ret-{id}"),
+            session_key: id.to_string(),
+            working_directory: "/tmp".to_string(),
+            status: "disconnected".to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "h".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(Vec::new()),
+            launcher_version: None,
+        };
+        diesel::insert_into(sessions::table)
+            .values(&new_session)
+            .execute(conn)
+            .expect("insert session");
+        id
+    }
+
+    fn insert_old_message(
+        conn: &mut diesel::PgConnection,
+        session_id: Uuid,
+        user_id: Uuid,
+        created_at: chrono::NaiveDateTime,
+    ) {
+        let mid = Uuid::new_v4();
+        diesel::insert_into(messages::table)
+            .values((
+                messages::id.eq(mid),
+                messages::session_id.eq(session_id),
+                messages::role.eq("user"),
+                messages::content.eq("hello"),
+                messages::created_at.eq(created_at),
+                messages::user_id.eq(user_id),
+                messages::agent_type.eq("claude"),
+            ))
+            .execute(conn)
+            .expect("insert message");
+    }
+
+    #[test]
+    fn retention_archive_disabled_holds_nothing_and_allows_trim() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+        conn.begin_test_transaction().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "retention-disabled");
+        let sid = make_session(&mut conn, user.id);
+        let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
+        insert_old_message(&mut conn, sid, user.id, old);
+
+        let config = RetentionConfig::new(100, 30);
+        // Archive disabled -> held set empty per `run_retention_cleanup` None branch.
+        let held: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+        // Verify the candidate would be trimmed if not held.
+        let (age_deleted, _) =
+            crate::handlers::retention::run_retention_cleanup(&mut conn, vec![], config, &held);
+        assert!(
+            age_deleted >= 1,
+            "with no held, old message should be deleted"
+        );
+    }
+
+    #[test]
+    fn retention_pre_archive_success_allows_trim_via_local_backend() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+        conn.begin_test_transaction().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "retention-local-ok");
+        let sid = make_session(&mut conn, user.id);
+        let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
+        insert_old_message(&mut conn, sid, user.id, old);
+
+        let tmp = tempfile::tempdir().expect("tmp");
+        let cfg = ArchiveConfig {
+            backend: crate::archive::ArchiveBackendConfig::Local {
+                root: tmp.path().to_path_buf(),
+            },
+            transcripts: true,
+            media: true,
+        };
+        let runtime = ArchiveRuntime::new(cfg).expect("runtime");
+
+        let config = RetentionConfig::new(100, 30);
+        let held = crate::background::archive_retention_candidates(&mut conn, &runtime, &config);
+        assert!(
+            held.is_empty(),
+            "successful local archive should not hold trim, got {held:?}"
+        );
+    }
+
+    #[test]
+    fn retention_pre_archive_failure_holds_trim() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+        conn.begin_test_transaction().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "retention-fail");
+        let sid = make_session(&mut conn, user.id);
+        let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
+        insert_old_message(&mut conn, sid, user.id, old);
+
+        // Unwritable / invalid local path should make archive_one_session fail.
+        // When running as root, permission bits are ignored, so use a file as the
+        // path — LocalArchiveStore will fail to create a directory there.
+        let tmp_file = tempfile::NamedTempFile::new().expect("tmp file");
+        let cfg = ArchiveConfig {
+            backend: crate::archive::ArchiveBackendConfig::Local {
+                root: tmp_file.path().to_path_buf(),
+            },
+            transcripts: true,
+            media: true,
+        };
+        let runtime = match ArchiveRuntime::new(cfg) {
+            Ok(r) => r,
+            Err(e) => panic!("ArchiveRuntime::new failed for file-as-dir: {e}"),
+        };
+
+        let config = RetentionConfig::new(100, 30);
+        let held = crate::background::archive_retention_candidates(&mut conn, &runtime, &config);
+        // File-as-dir fails ENOTDIR for any user including root (not a permission check),
+        // unlike chmod which root bypasses — so this holds reliably.
+        assert!(held.contains(&sid), "failed archive should hold {sid}");
+        let (age_deleted, _) =
+            crate::handlers::retention::run_retention_cleanup(&mut conn, vec![], config, &held);
+        assert_eq!(age_deleted, 0, "held session must not be trimmed");
     }
 }
