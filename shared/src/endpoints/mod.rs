@@ -3,8 +3,11 @@ mod launcher;
 mod session;
 mod tunnel;
 mod types;
+// The `_tests` suffix matters: scripts/check-no-json-macro.py allows `json!`
+// only in `*_tests.rs` files, `tests/` dirs, or in-file `#[cfg(test)] mod`
+// wrappers — it cannot see this declaration-site gate.
 #[cfg(test)]
-mod wire_goldens;
+mod wire_goldens_tests;
 
 pub use client::*;
 pub use launcher::*;
@@ -16,7 +19,7 @@ pub use ws_bridge::WsEndpoint;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AgentType, SendMode, SessionMode};
+    use crate::{AgentType, SessionMode};
     use uuid::Uuid;
 
     #[test]
