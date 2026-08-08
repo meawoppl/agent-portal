@@ -69,7 +69,7 @@ pub async fn list_agent_sessions(
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
 
-    use crate::schema::{pending_permission_requests, session_members, sessions};
+    use crate::schema::{messages, pending_permission_requests, session_members, sessions};
     let rows: Vec<Session> = sessions::table
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(session_members::user_id.eq(user_id))
@@ -89,21 +89,76 @@ pub async fn list_agent_sessions(
         .into_iter()
         .collect();
 
+    // One row per session: the newest event capable of changing turn state.
+    // Portal/system chatter is deliberately excluded so a reconnect notice or
+    // heartbeat cannot turn an otherwise-busy session idle. PostgreSQL's
+    // DISTINCT ON keeps this a single batched query rather than N+1 lookups.
+    let latest_signals: std::collections::HashMap<Uuid, (String, String)> = messages::table
+        .filter(messages::session_id.eq_any(&session_ids))
+        .filter(messages::role.eq_any(["user", "assistant", "result", "unknown", "error"]))
+        .distinct_on(messages::session_id)
+        .select((
+            messages::session_id,
+            messages::agent_type,
+            messages::content,
+        ))
+        .order((messages::session_id, messages::created_at.desc()))
+        .load::<(Uuid, String, String)>(&mut conn)?
+        .into_iter()
+        .map(|(id, agent_type, content)| (id, (agent_type, content)))
+        .collect();
+
     let sessions = rows
         .into_iter()
-        .map(|s| AgentSessionInfo {
-            id: s.id,
-            awaiting_permission: awaiting.contains(&s.id),
-            last_activity: s.last_activity.and_utc().to_rfc3339(),
-            session_name: s.session_name,
-            working_directory: s.working_directory,
-            agent_type: s.agent_type,
-            status: s.status,
-            hostname: s.hostname,
+        .map(|s| {
+            let connected = app_state
+                .session_manager
+                .sessions
+                .contains_key(s.id.to_string().as_str());
+            let busy = connected
+                && latest_signals
+                    .get(&s.id)
+                    .is_some_and(|(agent_type, content)| turn_signal_is_busy(agent_type, content));
+            AgentSessionInfo {
+                connected,
+                busy,
+                id: s.id,
+                awaiting_permission: awaiting.contains(&s.id),
+                last_activity: s.last_activity.and_utc().to_rfc3339(),
+                session_name: s.session_name,
+                working_directory: s.working_directory,
+                agent_type: s.agent_type,
+                status: s.status,
+                hostname: s.hostname,
+                model: s.last_model,
+            }
         })
         .collect();
 
     Ok(Json(AgentSessionsResponse { sessions }))
+}
+
+/// Interpret the latest significant durable event as turn state. The wire
+/// protocols have different terminal vocabulary, but all three expose typed
+/// or stable top-level discriminators; malformed future frames fail safe to
+/// "busy" while connected instead of advertising an agent as idle mid-turn.
+fn turn_signal_is_busy(agent_type: &str, content: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+        return true;
+    };
+    let kind = value.get("type").and_then(|value| value.as_str());
+    match agent_type {
+        "claude" => kind != Some("result") && kind != Some("error"),
+        "codex" => !matches!(kind, Some("turn.completed" | "turn.failed" | "error")),
+        "muse" => !value
+            .get("payload_type")
+            .and_then(|value| value.as_str())
+            .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        _ => !matches!(
+            kind,
+            Some("result" | "turn.completed" | "turn.failed" | "error")
+        ),
+    }
 }
 
 /// POST /api/agent/sessions/{id}/message — inject a message into a session as
@@ -398,4 +453,33 @@ fn pending_input_count(
         .count()
         .get_result(conn)?;
     Ok(count.max(0) as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::turn_signal_is_busy;
+
+    #[test]
+    fn turn_state_covers_all_agent_terminal_shapes() {
+        assert!(turn_signal_is_busy("claude", r#"{"type":"assistant"}"#));
+        assert!(!turn_signal_is_busy("claude", r#"{"type":"result"}"#));
+        assert!(turn_signal_is_busy("codex", r#"{"type":"item.started"}"#));
+        assert!(!turn_signal_is_busy(
+            "codex",
+            r#"{"type":"turn.completed"}"#
+        ));
+        assert!(turn_signal_is_busy(
+            "muse",
+            r#"{"type":"muse_record","payload_type":"tool.result"}"#
+        ));
+        assert!(!turn_signal_is_busy(
+            "muse",
+            r#"{"type":"muse_record","payload_type":"run.terminal.completed"}"#
+        ));
+    }
+
+    #[test]
+    fn malformed_in_progress_signal_fails_busy() {
+        assert!(turn_signal_is_busy("codex", "not-json"));
+    }
 }
