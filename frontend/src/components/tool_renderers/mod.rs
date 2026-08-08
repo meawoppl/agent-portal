@@ -81,20 +81,41 @@ fn render_read_tool(input: &Value) -> Html {
         _ => None,
     };
 
+    html! { <ReadToolCard file_path={read.file_path} range={range_info} /> }
+}
+
+/// Shared Read card used by Claude's typed tool input and Muse's typed task
+/// result adapter. Agent-specific parsing stays at the edge; the visual shell,
+/// path treatment, range label, and expandable body stay identical.
+#[derive(Properties, PartialEq)]
+pub(crate) struct ReadToolCardProps {
+    pub file_path: AttrValue,
+    #[prop_or_default]
+    pub range: Option<AttrValue>,
+    #[prop_or_default]
+    pub content: Option<AttrValue>,
+}
+
+#[function_component(ReadToolCard)]
+pub(crate) fn read_tool_card(props: &ReadToolCardProps) -> Html {
     html! {
         <div class="tool-use read-tool">
             <div class="tool-use-header">
                 <span class="tool-icon">{ "📖" }</span>
                 <span class="tool-name">{ "Read" }</span>
-                <span class="read-file-path">{ read.file_path }</span>
-                {
-                    if let Some(range) = range_info {
-                        html! { <span class="tool-meta">{ range }</span> }
-                    } else {
-                        html! {}
-                    }
+                <span class="read-file-path">{ &props.file_path }</span>
+                if let Some(range) = &props.range {
+                    <span class="tool-meta">{ range }</span>
                 }
             </div>
+            if let Some(content) = &props.content {
+                <ExpandableText
+                    full_text={content.clone()}
+                    max_len={4000}
+                    class="read-tool-content"
+                    tag="pre"
+                />
+            }
         </div>
     }
 }

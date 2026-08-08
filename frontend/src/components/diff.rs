@@ -118,7 +118,7 @@ fn render_diff_html(lines: &[DiffLine<'_>]) -> Html {
 /// space on context lines).
 fn parse_unified_diff(diff: &str) -> Vec<DiffLine<'_>> {
     diff.lines()
-        .filter(|l| !l.starts_with("--- ") && !l.starts_with("+++ ") && !l.starts_with("@@ "))
+        .filter(|l| !l.starts_with("--- ") && !l.starts_with("+++ ") && !l.starts_with("@@"))
         .filter_map(|l| match l.as_bytes().first() {
             Some(b'+') => Some(DiffLine::Added(&l[1..])),
             Some(b'-') => Some(DiffLine::Removed(&l[1..])),
@@ -242,6 +242,12 @@ mod tests {
                 ("ctx", "line three"),
             ]
         );
+    }
+
+    #[test]
+    fn parses_muse_hunk_header_without_ranges() {
+        let parsed = parse_unified_diff("--- original\n+++ updated\n@@\n-old\n+new\n");
+        assert_eq!(classify(&parsed), vec![("rem", "old"), ("add", "new")]);
     }
 
     #[test]

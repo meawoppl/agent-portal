@@ -5,6 +5,30 @@
     border-left-color: var(--accent);
 }
 
+.read-file-path {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.read-tool-content {
+    max-height: 400px;
+    margin: 0 0.75rem 0.5rem;
+    padding: 0.5rem 0.75rem;
+    overflow: auto;
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    white-space: pre;
+}
+
 .file-path {
     color: var(--accent);
     font-size: 0.85rem;
