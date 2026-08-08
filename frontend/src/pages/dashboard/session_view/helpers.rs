@@ -641,8 +641,8 @@ pub(crate) fn format_tool_elapsed(seconds: f64) -> String {
 /// frame still names itself instead of showing nothing. Returns `None` only
 /// when the frame carries no usable signal at all.
 ///
-/// This is an interim, agent-neutral render; the rich per-agent view (muse's
-/// task tree) is built on top of this same live stream in a follow-up.
+/// Muse records bypass this summary and replay into their task tree; this is
+/// the conservative fallback for other ephemeral producers.
 pub(crate) fn ephemeral_summary(payload: &serde_json::Value) -> Option<String> {
     let inner = payload.get("payload");
     // Streaming output text (muse `run.output.delta`).
@@ -671,6 +671,106 @@ pub(crate) fn ephemeral_summary(payload: &serde_json::Value) -> Option<String> {
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(str::to_string)
+}
+
+/// Transient Muse records for the currently-running turn. Durable journal
+/// records remain the source of truth; this buffer is only replayed over the
+/// matching durable tree so status and streamed answer text update in place.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct MuseLiveTurn {
+    pub(crate) causation_id: Option<String>,
+    pub(crate) events: Vec<serde_json::Value>,
+}
+
+impl MuseLiveTurn {
+    const MAX_EVENTS: usize = 256;
+
+    pub(crate) fn push(&mut self, event: serde_json::Value) {
+        let causation_id = event
+            .get("causation_id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        if causation_id.is_some() && causation_id != self.causation_id {
+            self.events.clear();
+            self.causation_id = causation_id;
+        }
+
+        let payload_type = event.get("payload_type").and_then(|value| value.as_str());
+        // Status is replacement state, not history. Keeping only the newest
+        // line per task avoids a heartbeat-heavy turn growing without bound.
+        if payload_type == Some("task.lifecycle.status") {
+            let task_id = muse_task_id(&event);
+            if let Some(existing) = self.events.iter_mut().rev().find(|candidate| {
+                candidate
+                    .get("payload_type")
+                    .and_then(|value| value.as_str())
+                    == Some("task.lifecycle.status")
+                    && muse_task_id(candidate) == task_id
+            }) {
+                *existing = event;
+                return;
+            }
+        }
+
+        // Output deltas are one logical assistant response. Coalesce adjacent
+        // chunks so rendering cost follows turns, not token count.
+        if payload_type == Some("run.output.delta") {
+            if let (Some(chunk), Some(previous)) = (
+                event
+                    .get("payload")
+                    .and_then(|payload| payload.get("text"))
+                    .and_then(|value| value.as_str()),
+                self.events.last_mut(),
+            ) {
+                if previous
+                    .get("payload_type")
+                    .and_then(|value| value.as_str())
+                    == Some("run.output.delta")
+                {
+                    if let Some(text) = previous
+                        .get_mut("payload")
+                        .and_then(|payload| payload.get_mut("text"))
+                        .and_then(|value| value.as_str())
+                    {
+                        let mut joined = text.to_string();
+                        joined.push_str(chunk);
+                        previous["payload"]["text"] = serde_json::Value::String(joined);
+                        return;
+                    }
+                }
+            }
+        }
+
+        self.events.push(event);
+        if self.events.len() > Self::MAX_EVENTS {
+            self.events.remove(0);
+        }
+    }
+
+    pub(crate) fn clear_if_terminal(&mut self, durable: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(durable) else {
+            return;
+        };
+        let terminal = value
+            .get("payload_type")
+            .and_then(|value| value.as_str())
+            .is_some_and(|kind| kind.starts_with("run.terminal."));
+        let same_turn = value.get("causation_id").and_then(|value| value.as_str())
+            == self.causation_id.as_deref();
+        if terminal && same_turn {
+            self.events.clear();
+            self.causation_id = None;
+        }
+    }
+}
+
+fn muse_task_id(value: &serde_json::Value) -> Option<&str> {
+    let payload = value.get("payload")?;
+    payload
+        .get("event")
+        .and_then(|event| event.get("task_id"))
+        .or_else(|| payload.get("task_id"))
+        .and_then(|value| value.as_str())
 }
 
 #[cfg(test)]
@@ -709,6 +809,63 @@ mod tests {
     #[test]
     fn ephemeral_summary_none_when_no_signal() {
         assert_eq!(ephemeral_summary(&json!({"payload": {}})), None);
+    }
+
+    #[test]
+    fn muse_live_turn_coalesces_output_and_replaces_task_status() {
+        let mut live = MuseLiveTurn::default();
+        live.push(json!({
+            "payload_type": "task.lifecycle.status",
+            "causation_id": "turn-1",
+            "payload": {"event": {"task_id": "task-1", "message": "starting"}}
+        }));
+        live.push(json!({
+            "payload_type": "task.lifecycle.status",
+            "causation_id": "turn-1",
+            "payload": {"event": {"task_id": "task-1", "message": "running"}}
+        }));
+        live.push(json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": "hello "}
+        }));
+        live.push(json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": "world"}
+        }));
+
+        assert_eq!(live.events.len(), 2);
+        assert_eq!(live.events[0]["payload"]["event"]["message"], "running");
+        assert_eq!(live.events[1]["payload"]["text"], "hello world");
+    }
+
+    #[test]
+    fn muse_live_turn_resets_on_new_causation_and_terminal() {
+        let mut live = MuseLiveTurn::default();
+        live.push(json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": "old"}
+        }));
+        live.push(json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-2",
+            "payload": {"text": "new"}
+        }));
+        assert_eq!(live.events.len(), 1);
+        assert_eq!(live.causation_id.as_deref(), Some("turn-2"));
+
+        live.clear_if_terminal(
+            &json!({
+                "payload_type": "run.terminal.completed",
+                "causation_id": "turn-2",
+                "payload": {"text": "done"}
+            })
+            .to_string(),
+        );
+        assert!(live.events.is_empty());
+        assert!(live.causation_id.is_none());
     }
 
     #[test]

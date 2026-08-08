@@ -30,6 +30,7 @@ use super::helpers::{
     enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed,
     is_claude_awaiting, parse_iso_ms_utc, reconcile_pending_sends, running_tool_key,
     update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
+    MuseLiveTurn,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -265,12 +266,13 @@ pub struct SessionView {
     /// ends. Kept out of the memoized message-render props on purpose (see the
     /// `helpers` tool-progress section).
     active_tools: Vec<ActiveToolProgress>,
-    /// Latest neutral ephemeral live-status line (`WsEvent::Ephemeral`), shown
-    /// as a transient strip at the transcript tail while a turn runs and
-    /// cleared when a durable message arrives. Never persisted. Muse's streamed
-    /// deltas / task status flow here; the rich per-agent view is layered on
-    /// top of this same stream separately.
+    /// Latest non-Muse neutral ephemeral status line, shown as a transient
+    /// transcript-tail strip and cleared by durable output. Muse owns the
+    /// richer turn-local overlay below instead.
     ephemeral_status: Option<String>,
+    /// Muse's current ephemeral turn, replayed over the matching persisted
+    /// task tree so live work updates the same card instead of a bottom bar.
+    muse_live_turn: MuseLiveTurn,
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
@@ -351,6 +353,7 @@ impl Component for SessionView {
             continuation_statuses: HashMap::new(),
             active_tools: Vec::new(),
             ephemeral_status: None,
+            muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
         }
     }
@@ -629,6 +632,23 @@ impl Component for SessionView {
         // Seed each thinking chip's odometer with the prior burst's max in
         // its turn so tool-call splits don't re-race the count from 0.
         let thinking_starts = thinking_chip_starts(&groups);
+        let live_muse_group = self.muse_live_turn.causation_id.as_deref().and_then(|id| {
+            groups
+                .iter()
+                .rposition(|group| group.muse_causation_id().as_deref() == Some(id))
+        });
+        let unmatched_muse_tree = if ctx.props().session.agent_type == shared::AgentType::Muse
+            && !self.muse_live_turn.events.is_empty()
+            && live_muse_group.is_none()
+        {
+            let mut tree = crate::components::muse_renderer::TaskTree::default();
+            for event in &self.muse_live_turn.events {
+                tree.apply(event);
+            }
+            Some(tree)
+        } else {
+            None
+        };
         let launcher_version = ctx
             .props()
             .session
@@ -676,12 +696,23 @@ impl Component for SessionView {
                                 let key = group.key(i);
                                 let metrics = group_metrics.get(i).cloned().flatten();
                                 let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
-                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
+                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                             }).collect::<Html>()
                         }
                         { for self.pending_sends.iter().enumerate().map(|(i, message)| {
                             html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
                         })}
+                        if let Some(tree) = unmatched_muse_tree {
+                            <div class="claude-message muse-message muse-task-card muse-live-card">
+                                <div class="message-header">
+                                    <span class="message-type-badge muse">{ "Muse" }</span>
+                                </div>
+                                <div class="message-body">
+                                    { crate::components::muse_renderer::render_task_tree(&tree) }
+                                </div>
+                            </div>
+                        }
                         { self.render_active_tools() }
                         { self.render_ephemeral_status() }
                     </div>
@@ -737,6 +768,12 @@ impl SessionView {
                 false
             }
             WsEvent::HistoryBatch(messages, last_created_at) => {
+                // A reconnect batch is the authoritative state since the last
+                // watermark. Discard pre-disconnect Muse ephemera before
+                // replaying it; a terminal record may have landed while this
+                // browser was offline and therefore never visited the normal
+                // live-output cleanup path.
+                self.muse_live_turn = MuseLiveTurn::default();
                 self.messages.extend(messages);
                 retain_newest_items(&mut self.messages, MAX_MESSAGES_PER_SESSION);
                 // Set the reconnect-replay watermark to the server-assigned
@@ -840,12 +877,16 @@ impl SessionView {
                     }
                     return false;
                 }
-                // Transient live status: replace the strip line. Never touches
+                if ctx.props().session.agent_type == shared::AgentType::Muse
+                    && payload.get("type").and_then(|value| value.as_str()) == Some("muse_record")
+                {
+                    self.muse_live_turn.push(payload);
+                    return true;
+                }
+                // Non-Muse transient status: replace the strip line. Never touches
                 // `messages` (no persistence, no replay watermark). A frame we
                 // can't summarize is ignored rather than clearing a good line.
-                // Durable muse structure renders as the transcript's task-tree
-                // card (`GroupCategory::Muse`); this strip carries only the
-                // between-records heartbeat.
+                // Muse was routed into its task-tree overlay above.
                 match ephemeral_summary(&payload) {
                     Some(summary) => {
                         self.ephemeral_status = Some(summary);
@@ -1085,8 +1126,11 @@ impl SessionView {
         // tool_result for the running tool, or a turn `result` that ends the
         // turn entirely. (The live heartbeat side-channel only adds entries.)
         clear_completed_tools(&mut self.active_tools, &output.content);
-        // A durable message supersedes the transient live-status line.
+        // Generic status is superseded by any durable message. Muse live
+        // records instead stay overlaid on their matching group until the
+        // durable terminal record makes the whole turn replayable.
         self.ephemeral_status = None;
+        self.muse_live_turn.clear_if_terminal(&output.content);
 
         push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
         true
@@ -1135,10 +1179,9 @@ impl SessionView {
     }
 
     /// Transient live-status strip fed by the neutral `WsEvent::Ephemeral`
-    /// channel (muse's streamed deltas / task status). One line, replaced per
+    /// channel for agents without a richer live renderer. One line, replaced per
     /// frame, cleared when a durable message arrives. Renders nothing when
-    /// idle. Deliberately minimal — a placeholder the per-agent live view
-    /// (muse's task tree) replaces, not a base to extend.
+    /// idle. Deliberately minimal rather than a second transcript model.
     fn render_ephemeral_status(&self) -> Html {
         let Some(status) = self.ephemeral_status.as_deref() else {
             return html! {};
