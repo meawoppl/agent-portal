@@ -28,6 +28,7 @@ pub(super) struct SessionRailMenuProps {
     pub on_delete: Callback<Uuid>,
     pub on_share: Callback<Uuid>,
     pub on_schedule: Callback<SessionInfo>,
+    pub on_fork: Callback<SessionInfo>,
 }
 
 #[function_component(SessionRailMenu)]
@@ -89,6 +90,11 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         let on_schedule = props.on_schedule.clone();
         let session = session.clone();
         move || on_schedule.emit(session.clone())
+    });
+    let open_fork = close_then(props.on_close.clone(), {
+        let on_fork = props.on_fork.clone();
+        let session = session.clone();
+        move || on_fork.emit(session.clone())
     });
 
     let on_hide = close_then(props.on_close.clone(), {
@@ -261,6 +267,19 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     } else {
         html! {}
     };
+    let fork_option = if session.my_role == SessionRole::Owner
+        && session.launcher_id.is_some()
+        && session.agent_type != shared::AgentType::Muse
+    {
+        menu_option(
+            classes!("fork"),
+            "Fork Session…",
+            "Branch conversation and workspace",
+            open_fork,
+        )
+    } else {
+        html! {}
+    };
 
     html! {
         <>
@@ -271,6 +290,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
                 on_copy_id,
             ) }
             { share_option }
+            { fork_option }
             { schedule_option }
             { repo_option }
             { pause_option }

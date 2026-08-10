@@ -423,3 +423,16 @@
 .jump-to-live-pill:active {
     transform: translateX(-50%) translateY(0);
 }
+.fork-lineage-card {
+    margin: 0.75rem 1rem;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid rgba(122, 162, 247, 0.35);
+    border-radius: 8px;
+    background: rgba(122, 162, 247, 0.08);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.fork-lineage-card a {
+    color: var(--accent-blue);
+}

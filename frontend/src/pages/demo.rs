@@ -291,6 +291,8 @@ fn demo_session(spec: DemoSessionSpec) -> SessionInfo {
             spec.last_model.unwrap_or("demo").to_string(),
         ],
         last_model: spec.last_model.map(str::to_string),
+        forked_from_session_id: None,
+        fork_point_turn_id: None,
     }
 }
 

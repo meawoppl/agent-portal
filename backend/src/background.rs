@@ -504,6 +504,8 @@ fn archive_one_session(
             media,
             launcher_id: session.launcher_id,
             launcher_version: session.launcher_version.clone(),
+            forked_from_session_id: session.forked_from_session_id,
+            fork_point_turn_id: session.fork_point_turn_id.clone(),
             scheduled_task_id: session.scheduled_task_id,
             // `claude_args` is stored as a JSONB string array; recover it as
             // Vec<String>, tolerating a malformed/absent value as empty.

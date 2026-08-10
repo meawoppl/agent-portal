@@ -359,6 +359,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         )
         .route("/api/launch", post(handlers::launchers::launch_session))
         .route(
+            "/api/sessions/{session_id}/fork",
+            post(handlers::launchers::fork_session),
+        )
+        .route(
             "/api/launchers/{launcher_id}/update",
             post(handlers::launchers::update_launcher),
         )
