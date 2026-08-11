@@ -371,13 +371,31 @@
    aspect ratio, so the shrink-to-fit frame above sizes to the image while the
    image's `max-width: 100%` sizes to the frame. Browsers resolve that cycle at
    zero and the diagram renders 0x0: invisible, with no `onerror` to trigger the
-   "media expired" fallback. `min-width` breaks the cycle with a definite basis
-   without capping SVGs that *do* carry a size (a matplotlib plot still renders
-   at its full natural width). `min(100%, ...)` keeps it from overflowing a
-   narrow phone column. Frame class is set by `needs_size_fallback` in
-   frontend/src/components/message_renderer/renderers.rs. */
+   "media expired" fallback.
+
+   A `min-width: min(100%, 320px)` floor used to break that cycle, but the floor
+   then became the *actual* width: on any viewport wider than 320px the `min()`
+   resolves to 320px, so a 1380-wide diagram arrived as a 320px sliver. Give the
+   frame a definite full-width basis instead and let the image fill it — the
+   same reasoning the lightbox rule below already applies: an SVG is vector, so
+   scaling one up stays crisp. SVGs that *do* carry a pixel size now scale to
+   the column rather than stopping at their natural width, which is the wanted
+   behavior for a figure in a transcript. Frame class is set by
+   `needs_size_fallback` in
+   frontend/src/components/message_renderer/renderers/media.rs. */
 .tool-result-image.svg {
-    min-width: min(100%, 320px);
+    width: 100%;
+}
+
+.tool-result-image.svg img {
+    width: 100%;
+    height: auto;
+    /* `height: auto` keeps the aspect ratio, so the 600px cap above (which
+       stops large raster screenshots dominating the transcript) would letterbox
+       a tall diagram inside a full-width box instead of shrinking it. Cap
+       against the viewport instead; the lightbox is one click away for
+       anything taller. */
+    max-height: 80vh;
 }
 
 /* Video shown via `agent-portal show`. Sizing mirrors `.tool-result-image`
