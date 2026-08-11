@@ -316,11 +316,25 @@ pub async fn send(agent_id: &str, message: &str) -> Result<()> {
     let sessions = fetch_sessions(&client, &base, &token).await?;
     let resolved_agent_id = resolve_session_id(agent_id, &sessions.sessions)?;
     // Sender attribution is best-effort and must not block delivery when more
-    // than one live session shares this host and working directory.
-    let from = sender_session_id(&sessions.sessions).unwrap_or_else(|error| {
-        eprintln!("warning: could not attribute sender session: {error}");
-        None
-    });
+    // than one live session shares this host and working directory. But it
+    // must never degrade SILENTLY: an unattributed agent send falls back to
+    // the backend's plain "[portal message from <user>]" string and renders
+    // in the recipient's transcript as if the human typed it.
+    let from = match sender_session_id(&sessions.sessions) {
+        Ok(Some(id)) => Some(id),
+        Ok(None) => {
+            eprintln!(
+                "warning: sender session not identified (no PORTAL_SESSION_ID or \
+                 recognized agent env) — this message will be attributed to your \
+                 user account, not to this agent session"
+            );
+            None
+        }
+        Err(error) => {
+            eprintln!("warning: could not attribute sender session: {error}");
+            None
+        }
+    };
     // Non-idempotent POST: retry the pre-delivery transient (404 target lookup
     // against a stale session index) and transport errors, but NOT 5xx — the
     // server may already have delivered, and a replay would double-send.

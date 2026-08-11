@@ -253,7 +253,17 @@ pub(crate) async fn codex_io_task(
 
     let mut builder = AppServerBuilder::new()
         .command(codex_path)
-        .working_directory(&config.working_directory);
+        .working_directory(&config.working_directory)
+        // Exported so shell tools codex spawns inherit it — `agent-portal
+        // message send` reads this as its first sender-attribution arm.
+        // Without it, attribution depends on `CODEX_THREAD_ID` plus the
+        // launcher's persisted thread map, which goes stale across thread
+        // rotation (fork / new thread) and then sends silently degrade to the
+        // backend's untyped "[portal message from <user>]" fallback. The
+        // portal session id is stable for this app-server's whole life, so it
+        // can't go stale the way the thread mapping does. Mirrors the muse
+        // fix (#1635).
+        .env("PORTAL_SESSION_ID", config.session_id.to_string());
     for (k, v) in &overrides {
         builder = builder.config_override(k, v);
     }
