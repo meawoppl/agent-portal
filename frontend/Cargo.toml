@@ -20,6 +20,9 @@ codex-codes = { workspace = true }
 # model picker (same types-only, WASM-compat configuration).
 claude-codes = { workspace = true }
 
+# Typed Muse journal payloads (types-only so the frontend remains WASM-safe).
+muse-codes = { workspace = true }
+
 # Yew framework
 yew = { workspace = true }
 yew-router = { workspace = true }

@@ -9,7 +9,7 @@
 //! renders it here — so a live turn's ~100 journal records read as one
 //! structural view instead of a hundred raw-JSON bubbles.
 
-use serde::Deserialize;
+use muse_codes::CommandResult;
 use yew::prelude::*;
 
 use super::expandable::ExpandableText;
@@ -19,41 +19,16 @@ pub mod task_tree;
 
 pub use task_tree::{TaskNode, TaskState, TaskTree};
 
-/// Muse's `bash`/command tools pack a structured result into the otherwise
-/// opaque `tool.result.text` as a JSON object (muse-codes models `text` as a
-/// provider string — see its `ToolResult` — so this shape is muse's own
-/// encoding, not a typed SDK variant we can match on). When `text`
-/// deserializes into this with a non-empty `command`, we render a command card
-/// like the Claude/Codex bash cards instead of dumping the JSON. Any other
-/// `text` (e.g. `write_file`'s prose summary) fails to parse and falls back to
-/// plain text, so non-command tools are unaffected.
-///
-/// TODO(SDK meawoppl/rust-code-agent-sdks#294): replace this local
-/// deserialize with the typed command-result binding once `muse-codes` exposes
-/// one — this struct mirrors the shape reported there. Adoption tracked in
-/// agent-portal#1595.
-#[derive(Deserialize)]
-struct MuseCommandResult {
-    command: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    output: Option<String>,
-    #[serde(default)]
-    exit_code: Option<i64>,
-    #[serde(default)]
-    truncated: Option<bool>,
-}
-
 /// Recognize a command-execution `text` payload. Cheap guard first (only a JSON
-/// object can be one), then require a non-empty `command` so a stray JSON blob
-/// from some other tool doesn't get drawn as a shell command.
-fn parse_command_result(text: &str) -> Option<MuseCommandResult> {
+/// object can be one), then use muse-codes' provider-owned typed binding. The
+/// non-empty command guard prevents a stray future JSON blob from being drawn
+/// as a shell command.
+fn parse_command_result(text: &str) -> Option<CommandResult> {
     let trimmed = text.trim_start();
     if !trimmed.starts_with('{') {
         return None;
     }
-    serde_json::from_str::<MuseCommandResult>(trimmed)
+    serde_json::from_str::<CommandResult>(trimmed)
         .ok()
         .filter(|c| !c.command.trim().is_empty())
 }
@@ -62,21 +37,21 @@ fn parse_command_result(text: &str) -> Option<MuseCommandResult> {
 /// green/collapsible treatment the Claude/Codex tool results use — rather than
 /// printing the raw JSON muse packs into `text`. Intent first, then the `$`
 /// command line, then the collapsible output.
-fn render_command_card(cmd: &MuseCommandResult) -> Html {
+fn render_command_card(cmd: &CommandResult) -> Html {
     use crate::components::tool_renderers::CommandResultCard;
     // muse truncates long output itself and flags it; surface that as a note
     // appended to the output so the card doesn't imply it saw everything.
-    let output = match (cmd.output.as_deref(), cmd.truncated) {
-        (Some(o), Some(true)) => Some(format!("{o}\n[output truncated]")),
-        (Some(o), _) => Some(o.to_string()),
-        (None, _) => None,
+    let output = if cmd.truncated {
+        format!("{}\n[output truncated]", cmd.output)
+    } else {
+        cmd.output.clone()
     };
     html! {
         <CommandResultCard
             command={AttrValue::from(cmd.command.clone())}
-            description={cmd.description.clone().map(AttrValue::from)}
-            output={output.map(AttrValue::from)}
-            exit_code={cmd.exit_code}
+            description={Some(AttrValue::from(cmd.description.clone()))}
+            output={Some(AttrValue::from(output))}
+            exit_code={Some(i64::from(cmd.exit_code))}
         />
     }
 }
@@ -374,9 +349,9 @@ mod tests {
         let cmd = parse_command_result(&node.tool_results[0].text)
             .expect("bash tool text is a command result, not opaque prose");
         assert!(cmd.command.starts_with("curl -s -X POST"));
-        assert_eq!(cmd.exit_code, Some(0));
-        assert_eq!(cmd.truncated, Some(false));
-        assert!(cmd.output.as_deref().unwrap().contains("d99dce066453"));
+        assert_eq!(cmd.exit_code, 0);
+        assert!(!cmd.truncated);
+        assert!(cmd.output.contains("d99dce066453"));
     }
 
     #[test]

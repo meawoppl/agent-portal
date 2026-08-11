@@ -2480,6 +2480,7 @@ dependencies = [
  "gloo-net 0.6.0",
  "js-sys",
  "log",
+ "muse-codes",
  "pulldown-cmark 0.13.3",
  "serde",
  "serde_json",
@@ -4525,8 +4526,8 @@ dependencies = [
 
 [[package]]
 name = "muse-codes"
-version = "0.1.5"
-source = "git+https://github.com/meawoppl/rust-code-agent-sdks?rev=6682946#6682946bd6871723ec54aac5ab235610201d3870"
+version = "0.1.7"
+source = "git+https://github.com/meawoppl/rust-code-agent-sdks?rev=2137be7#2137be743254668381a34a3aa97f9ec463d7b4d5"
 dependencies = [
  "log",
  "serde",
