@@ -622,6 +622,8 @@ fn launcher_server_to_launcher_launch_roundtrip_golden() {
         resume: None,
         create_worktree: false,
         worktree_branch: None,
+        fork_from_session_id: None,
+        fork_point_turn_id: None,
     };
     let v = serde_json::to_value(&msg).unwrap();
     assert_eq!(v["type"], "LaunchSession");
