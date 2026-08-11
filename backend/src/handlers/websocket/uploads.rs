@@ -45,6 +45,8 @@ fn send_upload_failure(tx: &super::WebClientSender, upload_id: String, error: &s
             upload_id,
             success: false,
             error: Some(error.to_string()),
+            size: None,
+            disposition: None,
         },
     ));
 }
@@ -360,6 +362,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn drop_upload_with(
         total_chunks: u32,
         total_size: u64,

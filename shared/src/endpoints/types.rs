@@ -242,12 +242,104 @@ pub struct FileUploadChunkFields {
 /// client — which withholds the prompt referencing the file until every
 /// upload it names has committed. The backend also synthesizes failures it
 /// can detect itself (proxy offline, size-cap abort).
+/// For drops (`disposition: Drop`), `size` carries the byte count for the
+/// durable placeholder (never the buffer bytes themselves).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileUploadResultFields {
     pub upload_id: String,
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<FileUploadDisposition>,
+}
+
+/// Durable, content-free placeholder for a successful secure drop (#1636).
+///
+/// Persisted as a `messages` row and broadcast/replayed/archived like any
+/// other message, but its schema cannot carry content: only the generated
+/// display name (`secure file drop`), byte count, timestamp, and `upload_id`
+/// for optimistic reconciliation. Never includes user buffer bytes, original
+/// filename, temp path, or injected notice.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecureDropPlaceholderFields {
+    pub upload_id: String,
+    pub size: u64,
+    pub timestamp: String,
+    pub display_name: String,
+}
+
+/// Stored `messages.content` JSON for a secure drop placeholder.
+/// `type` is always `"secure_drop"` — made explicit so the schema cannot
+/// be confused with other message types and cannot carry arbitrary bytes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecureDropStoredContent {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub upload_id: String,
+    pub size: u64,
+    pub timestamp: String,
+    pub display_name: String,
+}
+
+impl SecureDropStoredContent {
+    pub fn from_placeholder(p: &SecureDropPlaceholderFields) -> Self {
+        Self {
+            type_: "secure_drop".to_string(),
+            upload_id: p.upload_id.clone(),
+            size: p.size,
+            timestamp: p.timestamp.clone(),
+            display_name: p.display_name.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod secure_drop_tests {
+    use super::*;
+
+    #[test]
+    fn placeholder_schema_is_content_free() {
+        let placeholder = SecureDropPlaceholderFields {
+            upload_id: "test-id".to_string(),
+            size: 312,
+            timestamp: "2026-08-11T00:00:00.000000Z".to_string(),
+            display_name: "secure file drop".to_string(),
+        };
+        let stored = SecureDropStoredContent::from_placeholder(&placeholder);
+        let val = serde_json::to_value(&stored).unwrap();
+        assert_eq!(val["type"], "secure_drop");
+        assert_eq!(val["upload_id"], "test-id");
+        assert_eq!(val["size"], 312);
+        assert!(val.get("data").is_none());
+        assert!(val.get("filename").is_none());
+        assert!(val.get("path").is_none());
+        assert!(val.get("content").is_none());
+        let val2 = serde_json::to_value(&placeholder).unwrap();
+        assert!(val2.get("data").is_none());
+        assert!(val2.get("path").is_none());
+    }
+
+    #[test]
+    fn file_upload_result_with_drop_carries_size_and_disposition() {
+        let fields = FileUploadResultFields {
+            upload_id: "u1".to_string(),
+            success: true,
+            error: None,
+            size: Some(312),
+            disposition: Some(FileUploadDisposition::Drop),
+        };
+        let val = serde_json::to_value(&fields).unwrap();
+        assert_eq!(val["upload_id"], "u1");
+        assert_eq!(val["size"], 312);
+        assert_eq!(val["disposition"], "drop");
+        let old_json = serde_json::json!({"upload_id":"u1","success":true});
+        let parsed: FileUploadResultFields = serde_json::from_value(old_json).unwrap();
+        assert!(parsed.size.is_none());
+        assert!(parsed.disposition.is_none());
+    }
 }
 
 // ---- Port forwarding (docs/PORT_FORWARDING.md) ------------------------------

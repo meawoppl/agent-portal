@@ -4,7 +4,7 @@ use ws_bridge::WsEndpoint;
 
 use super::types::{
     FileUploadChunkFields, FileUploadResultFields, FileUploadStartFields, PermissionResponseFields,
-    RegisterFields, SubagentRetryStatus,
+    RegisterFields, SecureDropPlaceholderFields, SubagentRetryStatus,
 };
 use crate::{AgentType, PermissionSuggestion, SendMode, SessionCost, SessionStatus, TurnMetrics};
 
@@ -250,6 +250,12 @@ pub enum ServerToClient {
     /// detect itself); the client withholds the prompt referencing the
     /// file until every named upload commits.
     FileUploadResult(FileUploadResultFields),
+
+    /// Durable, content-free placeholder for a successful secure drop (#1636).
+    /// Broadcast to all viewers and persisted for replay/archive. Contains
+    /// only generated display name, size, timestamp, and upload_id — never
+    /// buffer bytes, filename, or temp path.
+    SecureDropPlaceholder(SecureDropPlaceholderFields),
 
     /// Session metadata changed
     SessionUpdate {

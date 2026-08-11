@@ -55,4 +55,5 @@ pub const LAUNCHER_HEARTBEAT_INTERVAL_SECS: u64 = 30;
 pub const DEFAULT_MAX_DROP_KB: u32 = 64;
 
 /// TTL for drop files on the proxy host before best-effort cleanup (seconds).
-pub const DROP_TTL_SECS: u64 = 600;
+/// 30 minutes — long enough for queued/long tool turns to consume it.
+pub const DROP_TTL_SECS: u64 = 1800;
