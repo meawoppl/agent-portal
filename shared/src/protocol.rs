@@ -48,3 +48,12 @@ pub const MAX_UPLOAD_TOTAL_CHUNKS: u32 = 65_536;
 /// reconciling desired sessions (see `LauncherToServer::LauncherHeartbeat`
 /// handling in the backend's launcher socket).
 pub const LAUNCHER_HEARTBEAT_INTERVAL_SECS: u64 = 30;
+
+/// Default max size for a secret-safe drop fileupload disposition
+/// (composer buffer delivered as a 0600 temp file). Small — this path is
+/// for credentials, not datasets. Overridden by `PORTAL_MAX_DROP_KB`.
+pub const DEFAULT_MAX_DROP_KB: u32 = 64;
+
+/// TTL for drop files on the proxy host before best-effort cleanup (seconds).
+/// 30 minutes — long enough for queued/long tool turns to consume it.
+pub const DROP_TTL_SECS: u64 = 1800;

@@ -250,6 +250,8 @@ pub struct ServerConfig {
     pub message_retention_days: u32,
     pub session_max_age_days: u32,
     pub max_image_mb: u32,
+    /// Max size for a secret-safe drop (composer buffer as file) in KB (default 64).
+    pub max_drop_kb: u32,
     pub image_store_max_bytes: u64,
     pub image_store_ttl: std::time::Duration,
     /// Per-file cap for videos shown via `agent-portal show` (default 100 MB).
@@ -415,6 +417,11 @@ impl ServerConfig {
         let session_max_age_days: u32 = parse_or(&mut errors, "SESSION_MAX_AGE_DAYS", 14);
 
         let max_image_mb: u32 = parse_or(&mut errors, "PORTAL_MAX_IMAGE_MB", 10);
+        let max_drop_kb: u32 = parse_or(
+            &mut errors,
+            "PORTAL_MAX_DROP_KB",
+            shared::protocol::DEFAULT_MAX_DROP_KB,
+        );
 
         // Image store eviction caps — both required to bound memory on long
         // image-heavy sessions (see issue #787). Defaults are 256 MiB / 1 h.
@@ -455,6 +462,7 @@ impl ServerConfig {
             session_max_age_days
         );
         tracing::info!("Max image size: {} MB", max_image_mb);
+        tracing::info!("Max drop size: {} KB", max_drop_kb);
         tracing::info!("Max audio size: {} MB", max_audio_mb);
         tracing::info!(
             "Max video size: {} MB, media store cap: {} MB",
@@ -576,6 +584,7 @@ impl ServerConfig {
             message_retention_days,
             session_max_age_days,
             max_image_mb,
+            max_drop_kb,
             image_store_max_bytes,
             image_store_ttl,
             max_video_mb,

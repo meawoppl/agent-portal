@@ -66,6 +66,10 @@ pub const PROXY_CAPABILITY_TUNNEL_BINARY_V1: &str = "session.tunnel_binary_v1";
 /// [`PROXY_CAPABILITY_TUNNEL_BINARY_V1`] too, so a v1 backend keeps working.
 pub const PROXY_CAPABILITY_TUNNEL_BINARY_V2: &str = "session.tunnel_binary_v2";
 
+/// Proxy capability advertised by versions that support the secret-safe
+/// composer-buffer-as-file drop (0600 file + 0700 per-session dir + TTL).
+pub const PROXY_CAPABILITY_SECURE_DROP_V1: &str = "session.secure_drop_v1";
+
 /// Split [`VERSION`] into `(major, minor, patch)` numeric components.
 /// `None` on the (impossible-by-construction) malformed string.
 pub fn version_parts() -> Option<(u64, u64, u64)> {

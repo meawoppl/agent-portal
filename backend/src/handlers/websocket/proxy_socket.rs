@@ -517,8 +517,70 @@ fn handle_proxy_message(
             if let Some(key) = session_key {
                 session_manager.broadcast_to_web_clients(
                     key,
-                    shared::ServerToClient::FileUploadResult(result),
+                    shared::ServerToClient::FileUploadResult(result.clone()),
                 );
+            }
+            // For successful drops, persist and broadcast a content-free
+            // placeholder visible to all viewers. The placeholder's schema
+            // cannot carry buffer bytes, filename, or path — only the
+            // generated display name, size, timestamp, and upload_id for
+            // optimistic reconciliation. It is stored as a messages row so
+            // replay/archive include it.
+            if result.disposition == Some(shared::FileUploadDisposition::Drop) && result.success {
+                if let (Some(session_id), Some(key)) = (*db_session_id, session_key) {
+                    let size = result.size.unwrap_or(0);
+                    let now = chrono::Utc::now();
+                    let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+                    let placeholder = shared::SecureDropPlaceholderFields {
+                        upload_id: result.upload_id.clone(),
+                        size,
+                        timestamp: timestamp.clone(),
+                        display_name: "secure file drop".to_string(),
+                    };
+                    // Persist as messages row (content-free).
+                    let stored = shared::SecureDropStoredContent::from_placeholder(&placeholder);
+                    let content_str = match serde_json::to_value(&stored) {
+                        Ok(v) => v.to_string(),
+                        Err(e) => {
+                            warn!("failed to serialize secure drop placeholder: {}", e);
+                            String::new()
+                        }
+                    };
+                    // Best-effort DB insert; failure is logged but still broadcasts.
+                    // Lookup session owner for messages.user_id FK.
+                    if !content_str.is_empty() {
+                        if let Ok(mut conn) = db_pool.get() {
+                            let content_str_clone = content_str.clone();
+                            let _ = (|| -> Result<(), diesel::result::Error> {
+                                use crate::schema::messages;
+                                use crate::schema::sessions;
+                                let owner: Uuid = sessions::table
+                                    .filter(sessions::id.eq(session_id))
+                                    .select(sessions::user_id)
+                                    .first(&mut conn)
+                                    .unwrap_or(session_id);
+                                let new_msg = crate::models::NewMessage {
+                                    session_id,
+                                    role: "user".to_string(),
+                                    content: content_str_clone,
+                                    user_id: owner,
+                                    agent_type: "claude".to_string(),
+                                    provenance_kind: Some("portal".to_string()),
+                                    provenance_session_id: None,
+                                    provenance_agent_type: None,
+                                };
+                                diesel::insert_into(messages::table)
+                                    .values(&new_msg)
+                                    .execute(&mut conn)?;
+                                Ok(())
+                            })();
+                        }
+                    }
+                    session_manager.broadcast_to_web_clients(
+                        key,
+                        shared::ServerToClient::SecureDropPlaceholder(placeholder),
+                    );
+                }
             }
         }
         ProxyToServer::SessionStatus { .. } => {}

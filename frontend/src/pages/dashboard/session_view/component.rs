@@ -879,7 +879,13 @@ impl SessionView {
                 self.forwards_refresh = self.forwards_refresh.wrapping_add(1);
                 true
             }
-            WsEvent::UploadResult(fields) => self.handle_upload_result(fields),
+            WsEvent::UploadResult(fields) => {
+                // Forward to the input bar for drop handling (secret-safe path).
+                if let Some(ref dispatcher) = self.input_bar_dispatcher {
+                    dispatcher.emit(InputBarInbound::FileUploadResult(fields.clone()));
+                }
+                self.handle_upload_result(fields)
+            }
             WsEvent::ToolProgress {
                 tool_use_id,
                 parent_tool_use_id,

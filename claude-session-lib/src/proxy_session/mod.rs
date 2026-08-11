@@ -351,6 +351,8 @@ struct ConnectionState {
     working_directory: String,
     /// Active file uploads being received in chunks
     active_uploads: std::collections::HashMap<String, FileReceiveState>,
+    /// Channel to inject drop notices into the agent (secret-safe path).
+    drop_notice_tx: mpsc::UnboundedSender<PortalInput>,
     /// Agent type for tagging per-message wire output (proxy emission side)
     agent_type: shared::AgentType,
     /// Shared git metadata state for branch / PR / repo refreshes.
@@ -385,11 +387,13 @@ pub async fn run_connection_loop<A: Agent>(
             ConnectionResult::ClaudeExited => {
                 info!("Claude process exited, shutting down");
                 session.persist_buffer().await;
+                cleanup_drop_session_dir(session.config.session_id).await;
                 return Ok(LoopResult::NormalExit);
             }
             ConnectionResult::SessionNotFound => {
                 warn!("Session not found, need to restart with fresh session");
                 session.persist_buffer().await;
+                cleanup_drop_session_dir(session.config.session_id).await;
                 return Ok(LoopResult::SessionNotFound);
             }
             ConnectionResult::Disconnected(duration) => {
@@ -433,6 +437,7 @@ pub async fn run_connection_loop<A: Agent>(
             ConnectionResult::SessionTerminated => {
                 info!("Session terminated by server, not reconnecting");
                 session.persist_buffer().await;
+                cleanup_drop_session_dir(session.config.session_id).await;
                 return Ok(LoopResult::NormalExit);
             }
             ConnectionResult::RegistrationRejected => {
@@ -441,6 +446,7 @@ pub async fn run_connection_loop<A: Agent>(
                      not reconnecting"
                 );
                 session.persist_buffer().await;
+                cleanup_drop_session_dir(session.config.session_id).await;
                 return Ok(LoopResult::RegistrationRejected);
             }
         }
@@ -673,7 +679,10 @@ pub async fn register_session(
         // backend mints a `tunnel_data_ticket` only for proxies that advertise
         // this; if we fail to dial the data socket, tunneling silently stays on
         // this control socket.
-        capabilities: vec![shared::PROXY_CAPABILITY_TUNNEL_BINARY_V1.to_string()],
+        capabilities: vec![
+            shared::PROXY_CAPABILITY_TUNNEL_BINARY_V1.to_string(),
+            shared::PROXY_CAPABILITY_SECURE_DROP_V1.to_string(),
+        ],
     });
 
     if conn.send(register_msg).await.is_err() {
@@ -878,6 +887,7 @@ async fn run_message_loop<A: Agent>(
         file_download_rx,
         working_directory: config.working_directory.clone(),
         active_uploads: std::collections::HashMap::new(),
+        drop_notice_tx: session.input_tx.clone(),
         agent_type: config.agent_type,
         git_metadata,
         git_refresh: GitRefreshTrigger::default(),
@@ -1090,11 +1100,15 @@ fn is_codex_compaction_event(value: &serde_json::Value) -> bool {
 /// Handle a file upload event (start or chunk)
 /// Report an upload's terminal outcome to the backend (relayed to the web
 /// client, which gates the prompt referencing the file on it — #939).
+/// For drops, `size` and `disposition` are included so the backend can
+/// persist a metadata-only placeholder without ever seeing the bytes.
 async fn send_upload_result(
     state: &ConnectionState,
     upload_id: String,
     success: bool,
     error: Option<String>,
+    size: Option<u64>,
+    disposition: Option<shared::FileUploadDisposition>,
 ) {
     let mut ws = state.ws_write.lock().await;
     if let Err(e) = ws
@@ -1103,6 +1117,8 @@ async fn send_upload_result(
                 upload_id,
                 success,
                 error,
+                size,
+                disposition,
             },
         ))
         .await
@@ -1114,16 +1130,153 @@ async fn send_upload_result(
 /// Abort an in-flight upload: drop its state, best-effort delete the
 /// partial temp file, and report the failure.
 async fn fail_upload(state: &mut ConnectionState, upload_id: String, reason: String) {
+    let is_drop = state
+        .active_uploads
+        .get(&upload_id)
+        .map(|s| s.is_drop)
+        .unwrap_or(false);
+    let disposition = if is_drop {
+        Some(shared::FileUploadDisposition::Drop)
+    } else {
+        None
+    };
     if let Some(recv_state) = state.active_uploads.remove(&upload_id) {
         drop(recv_state.file_handle);
-        let _ = tokio::fs::remove_file(&recv_state.temp_path).await;
+        if recv_state.is_drop {
+            remove_drop_file_checked(&recv_state.temp_path, state.session_id).await;
+            if let Some(p) = recv_state.drop_final_path {
+                remove_drop_file_checked(&p, state.session_id).await;
+            }
+        } else {
+            let _ = tokio::fs::remove_file(&recv_state.temp_path).await;
+        }
     }
     error!(
         "[upload {}] Failed: {}",
         &upload_id[..8.min(upload_id.len())],
         reason
     );
-    send_upload_result(state, upload_id, false, Some(reason)).await;
+    send_upload_result(state, upload_id, false, Some(reason), None, disposition).await;
+}
+
+fn drop_base_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        if !dir.is_empty() {
+            let p = std::path::PathBuf::from(&dir);
+            // Validate: absolute, is_dir, not a symlink, and not empty.
+            // Use symlink_metadata to avoid following symlinks.
+            if p.is_absolute() {
+                if let Ok(meta) = std::fs::symlink_metadata(&p) {
+                    if meta.is_dir() && !meta.file_type().is_symlink() {
+                        return p;
+                    }
+                }
+            }
+        }
+    }
+    std::env::temp_dir()
+}
+
+fn drop_session_dir(session_id: Uuid) -> std::path::PathBuf {
+    drop_base_dir().join(format!("portal-drop-{}", session_id))
+}
+
+async fn ensure_drop_session_dir(session_id: Uuid) -> std::io::Result<std::path::PathBuf> {
+    let dir = drop_session_dir(session_id);
+    // Create with 0700 if not exists; ensure we don't follow symlink.
+    // First check if exists and is symlink -> treat as error and fallback is handled by caller.
+    if let Ok(meta) = std::fs::symlink_metadata(&dir) {
+        if meta.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "drop session dir is symlink",
+            ));
+        }
+        if !meta.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "drop session path exists and is not a directory",
+            ));
+        }
+        // Already exists and is a real dir — ensure 0700.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        return Ok(dir);
+    }
+    // Not exists — create with 0700.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Use std::fs::create_dir with explicit mode via umask-safe path:
+        // create then chmod 0700.
+        std::fs::create_dir_all(&dir)?;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(&dir)?;
+    }
+    Ok(dir)
+}
+
+async fn remove_drop_file_checked(path: &std::path::Path, session_id: Uuid) {
+    // Ensure path is within the owned drop session dir and not a symlink.
+    let dir = drop_session_dir(session_id);
+    // Use canonicalize on dir (it exists) and check path starts_with dir without following symlink on file.
+    // For file, use symlink_metadata to ensure not symlink.
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return;
+        }
+    } else {
+        return;
+    }
+    // Ensure parent is exactly the session dir (no escape via ..).
+    if let Some(parent) = path.parent() {
+        // Compare canonicalized parent vs dir canonicalized.
+        if let (Ok(canon_parent), Ok(canon_dir)) =
+            (std::fs::canonicalize(parent), std::fs::canonicalize(&dir))
+        {
+            if canon_parent != canon_dir {
+                return;
+            }
+        } else if parent != dir {
+            // Fallback strict equality if canonicalize fails (dir may not exist yet).
+            return;
+        }
+    } else {
+        return;
+    }
+    let _ = tokio::fs::remove_file(path).await;
+}
+
+async fn cleanup_drop_session_dir(session_id: Uuid) {
+    let dir = drop_session_dir(session_id);
+    // Validate dir is not symlink and is within base.
+    if let Ok(meta) = std::fs::symlink_metadata(&dir) {
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return;
+        }
+    } else {
+        return;
+    }
+    // Ensure dir's parent is the validated base dir.
+    if let Some(parent) = dir.parent() {
+        let base = drop_base_dir();
+        if let (Ok(canon_parent), Ok(canon_base)) =
+            (std::fs::canonicalize(parent), std::fs::canonicalize(&base))
+        {
+            if canon_parent != canon_base {
+                return;
+            }
+        } else if parent != base {
+            return;
+        }
+    }
+    let _ = tokio::fs::remove_dir_all(&dir).await;
 }
 
 async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut ConnectionState) {
@@ -1133,7 +1286,9 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             filename,
             total_chunks,
             total_size,
+            disposition,
         } => {
+            let is_drop = disposition == Some(shared::FileUploadDisposition::Drop);
             // Sanitize filename
             let safe_name: String = filename
                 .rsplit('/')
@@ -1158,18 +1313,62 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                     &upload_id[..8.min(upload_id.len())]
                 );
                 drop(old.file_handle);
-                let _ = tokio::fs::remove_file(&old.temp_path).await;
+                if old.is_drop {
+                    if let Some(final_path) = old.drop_final_path {
+                        remove_drop_file_checked(&final_path, state.session_id).await;
+                    }
+                    remove_drop_file_checked(&old.temp_path, state.session_id).await;
+                } else {
+                    let _ = tokio::fs::remove_file(&old.temp_path).await;
+                    if let Some(final_path) = old.drop_final_path {
+                        let _ = tokio::fs::remove_file(&final_path).await;
+                    }
+                }
             }
 
-            // Write to a hidden temp path; renamed to the real name only on
-            // completion so the agent can never read a truncated file.
-            let temp_name = format!(
-                ".{}.{}.upload",
-                safe_name,
-                &upload_id[..8.min(upload_id.len())]
-            );
-            let temp_path = std::path::Path::new(&state.working_directory).join(&temp_name);
-            match tokio::fs::File::create(&temp_path).await {
+            let short = &upload_id[..8.min(upload_id.len())];
+            let (temp_path, drop_final_path) = if is_drop {
+                let dir = match ensure_drop_session_dir(state.session_id).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let reason = format!("failed to create drop session dir: {}", e);
+                        fail_upload(state, upload_id, reason).await;
+                        return;
+                    }
+                };
+                // Never trust user filename for drop; use full upload_id to avoid 32-bit collision.
+                let final_path = dir.join(format!("portal-drop-{}", upload_id));
+                let temp_path = dir.join(format!(".portal-drop-{}.part", upload_id));
+                (temp_path, Some(final_path))
+            } else {
+                let temp_name = format!(".{}.{}.upload", safe_name, short);
+                let temp_path = std::path::Path::new(&state.working_directory).join(&temp_name);
+                (temp_path, None)
+            };
+
+            // Create file with restrictive permissions for drops (0600).
+            let file_create: Result<tokio::fs::File, std::io::Error> = if is_drop {
+                #[cfg(unix)]
+                {
+                    tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(&temp_path)
+                        .await
+                }
+                #[cfg(not(unix))]
+                {
+                    tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&temp_path)
+                        .await
+                }
+            } else {
+                tokio::fs::File::create(&temp_path).await
+            };
+            match file_create {
                 Ok(fh) => {
                     state.active_uploads.insert(
                         upload_id,
@@ -1183,6 +1382,8 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                             start_time: Instant::now(),
                             last_log_percent: 0,
                             temp_path,
+                            is_drop,
+                            drop_final_path,
                         },
                     );
                 }
@@ -1261,7 +1462,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                     0.0
                 };
 
-                // Flush + close, then commit: rename the temp file to its
+                // Flush + sync, then commit: rename the temp file to its
                 // real name. Only a successful rename counts as delivered.
                 if let Some(mut fh) = recv_state.file_handle.take() {
                     if let Err(e) = fh.flush().await {
@@ -1269,24 +1470,115 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                         fail_upload(state, upload_id, reason).await;
                         return;
                     }
+                    if let Err(e) = fh.sync_all().await {
+                        let reason = format!("sync error: {e}");
+                        fail_upload(state, upload_id, reason).await;
+                        return;
+                    }
                 }
 
+                let is_drop = recv_state.is_drop;
                 let filename = recv_state.filename.clone();
                 let received_bytes = recv_state.received_bytes;
-                let final_path = std::path::Path::new(&state.working_directory).join(&filename);
+                let final_path = if is_drop {
+                    recv_state
+                        .drop_final_path
+                        .clone()
+                        .expect("drop_final_path set for is_drop")
+                } else {
+                    std::path::Path::new(&state.working_directory).join(&filename)
+                };
                 let temp_path = recv_state.temp_path.clone();
+                // Ensure restrictive perms for drops before rename (tmp already 0600).
+                #[cfg(unix)]
+                if is_drop {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = tokio::fs::set_permissions(
+                        &temp_path,
+                        std::fs::Permissions::from_mode(0o600),
+                    )
+                    .await;
+                }
                 if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
                     let reason = format!("rename to {} failed: {e}", final_path.display());
                     fail_upload(state, upload_id, reason).await;
                     return;
                 }
+                #[cfg(unix)]
+                if is_drop {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = tokio::fs::set_permissions(
+                        &final_path,
+                        std::fs::Permissions::from_mode(0o600),
+                    )
+                    .await;
+                }
 
-                info!(
-                    "[upload {}] Complete: {} ({} bytes in {:.1}s, avg {:.1} KB/s)",
-                    upload_id_short, filename, received_bytes, elapsed, rate_kb
-                );
+                if is_drop {
+                    info!(
+                        "[drop {}] Complete: {} ({} bytes in {:.1}s, avg {:.1} KB/s)",
+                        upload_id_short,
+                        final_path.display(),
+                        received_bytes,
+                        elapsed,
+                        rate_kb
+                    );
+                } else {
+                    info!(
+                        "[upload {}] Complete: {} ({} bytes in {:.1}s, avg {:.1} KB/s)",
+                        upload_id_short, filename, received_bytes, elapsed, rate_kb
+                    );
+                }
+                // Inject agent notice for drops: path only, plus reminder not to echo.
+                // Must be proven not to enter messages/replay/archive — it goes
+                // via drop_notice_tx -> Session::send_input, never via output_tx
+                // or messages table. See regression test `drop_notice_does_not_persist`.
+                if is_drop {
+                    let notice = format!(
+                        "[file from user: {} ({} bytes)]\nSystem reminder: The file contains sensitive credentials. Do not echo its contents into output. Prefer `source` or env-var usage over printing.",
+                        final_path.display(),
+                        received_bytes
+                    );
+                    #[derive(serde::Serialize)]
+                    struct DropNoticeEvent<'a> {
+                        #[serde(rename = "type")]
+                        kind: &'a str,
+                        path: String,
+                        size: u64,
+                    }
+                    let display_event = serde_json::to_value(DropNoticeEvent {
+                        kind: "drop_notice",
+                        path: final_path.display().to_string(),
+                        size: received_bytes,
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                    if let Err(e) = state.drop_notice_tx.send(PortalInput {
+                        text: notice,
+                        display_event: Some(display_event),
+                        ack: None,
+                        client_msg_id: None,
+                    }) {
+                        tracing::warn!("drop notice send failed (receiver closed): {}", e);
+                    }
+                    // TTL cleanup: 30 min + session-exit; use checked removal to avoid symlink escape.
+                    let ttl_path = final_path.clone();
+                    let ttl_session = state.session_id;
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(
+                            shared::protocol::DROP_TTL_SECS,
+                        ))
+                        .await;
+                        remove_drop_file_checked(&ttl_path, ttl_session).await;
+                    });
+                }
+                let disposition = if is_drop {
+                    Some(shared::FileUploadDisposition::Drop)
+                } else {
+                    None
+                };
+                let size = if is_drop { Some(received_bytes) } else { None };
                 state.active_uploads.remove(&upload_id);
-                send_upload_result(state, upload_id, true, None).await;
+                send_upload_result(state, upload_id, true, None, size, disposition).await;
             }
         }
     }
@@ -1563,5 +1855,88 @@ mod tests {
             resp.error.as_deref(),
             Some("path escapes working directory")
         );
+    }
+}
+
+#[cfg(test)]
+mod drop_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn drop_notice_is_path_only_and_not_content() {
+        let path = "/tmp/portal-drop-abc123";
+        let size = 312u64;
+        let notice = format!(
+            "[file from user: {} ({} bytes)]\nSystem reminder: The file contains sensitive credentials. Do not echo its contents into output. Prefer `source` or env-var usage over printing.",
+            path, size
+        );
+        assert!(notice.contains(path));
+        assert!(notice.contains("312 bytes"));
+        assert!(notice.contains("System reminder"));
+        // Ensure original buffer bytes are not leaked
+        let buffer = "my secret api key 12345";
+        assert!(!notice.contains(buffer));
+        assert!(!notice.contains("my secret"));
+    }
+
+    #[tokio::test]
+    async fn ensure_drop_session_dir_creates_0700() {
+        let base = tempdir().unwrap();
+        // Override XDG_RUNTIME_DIR to our temp base
+        let orig = std::env::var("XDG_RUNTIME_DIR").ok();
+        std::env::set_var("XDG_RUNTIME_DIR", base.path());
+        let session_id = uuid::Uuid::new_v4();
+        let dir = ensure_drop_session_dir(session_id).await.unwrap();
+        assert!(dir.is_dir());
+        assert!(dir.starts_with(base.path()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o700,
+                "drop session dir should be 0700, got {:o}",
+                mode
+            );
+        }
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+        if let Some(v) = orig {
+            std::env::set_var("XDG_RUNTIME_DIR", v);
+        } else {
+            std::env::remove_var("XDG_RUNTIME_DIR");
+        }
+    }
+
+    #[tokio::test]
+    async fn drop_file_checked_removal_respects_session_dir() {
+        let base = tempdir().unwrap();
+        let orig = std::env::var("XDG_RUNTIME_DIR").ok();
+        std::env::set_var("XDG_RUNTIME_DIR", base.path());
+        let session_id = uuid::Uuid::new_v4();
+        let dir = ensure_drop_session_dir(session_id).await.unwrap();
+        let file_path = dir.join("portal-drop-test123");
+        tokio::fs::write(&file_path, b"secret").await.unwrap();
+        assert!(file_path.exists());
+        // Checked removal should succeed for file inside session dir
+        remove_drop_file_checked(&file_path, session_id).await;
+        assert!(!file_path.exists());
+        // File outside session dir should not be removed via checked path
+        let outside = base.path().join("outside.txt");
+        tokio::fs::write(&outside, b"outside").await.unwrap();
+        let fake_session_file = outside.clone();
+        remove_drop_file_checked(&fake_session_file, session_id).await;
+        assert!(
+            outside.exists(),
+            "checked removal should not delete outside file"
+        );
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&dir);
+        if let Some(v) = orig {
+            std::env::set_var("XDG_RUNTIME_DIR", v);
+        } else {
+            std::env::remove_var("XDG_RUNTIME_DIR");
+        }
     }
 }

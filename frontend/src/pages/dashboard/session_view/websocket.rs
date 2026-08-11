@@ -269,6 +269,18 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         ServerToClient::Ephemeral { payload } => {
             on_event.emit(WsEvent::Ephemeral(payload));
         }
+        ServerToClient::SecureDropPlaceholder(fields) => {
+            // Content-free placeholder visible to all viewers. Rendered as a
+            // system message; schema cannot carry buffer bytes.
+            let stored = shared::SecureDropStoredContent::from_placeholder(&fields);
+            let content = serde_json::to_string(&stored).unwrap_or_else(|_| {
+                format!(
+                    r#"{{"type":"secure_drop","upload_id":"{}","size":{},"timestamp":"{}","display_name":"secure file drop"}}"#,
+                    fields.upload_id, fields.size, fields.timestamp
+                )
+            });
+            on_event.emit(WsEvent::Output(RenderedMessage::new(content, None)));
+        }
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
             // server-pushed frames added since this branch was written).

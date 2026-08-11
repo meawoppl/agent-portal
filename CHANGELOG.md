@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- **Send composer buffer as secure file (#1636).** Composer gains a "Send as secure file" action (button + `Ctrl+Shift+Enter`) that delivers the current buffer to the agent host as a `0600` temp file via the existing chunked upload pipeline (`FileUploadStart/Chunk` with `disposition: drop`). Backend is route-through only for bytes (placeholder is `secure file drop` metadata only, 30-min TTL); `PORTAL_MAX_DROP_KB` default 64 KiB, proxy writes atomically (`tmp + rename` with `fsync`) to per-session `0700` dir under validated `$XDG_RUNTIME_DIR` or `/tmp` as `portal-drop-<id>` with `0600` and injects a path-only notice into the agent (proven not to enter `messages`/replay/archive), auto-deleting after 30 min + session-exit. Frontend preserves buffer on failure, single-flight idempotent, shows placeholder card (size/timestamp, no content) to all viewers and error states; the buffer is never stored in `localStorage` history. Reuses typed `FileUpload*` plumbing, no `serde_json::json!` bodies.
+
 - **Launcher model picker.** The launch dialog gains a "Model" selector fed by
   the SDK crates' model catalogs — `claude_codes::ClaudeModel` (floating
   aliases grouped separately from pinned models) and `codex_codes::CodexModel`

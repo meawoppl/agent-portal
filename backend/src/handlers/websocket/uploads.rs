@@ -10,6 +10,7 @@ use tracing::{info, warn};
 /// counting raw arrivals (the old `received_count: u32` field) let a client
 /// "complete" an upload by re-sending the same `chunk_index` `total_chunks`
 /// times. See #785.
+#[allow(dead_code)]
 pub(super) struct PendingUpload {
     total_chunks: u32,
     /// Total decoded bytes the client declared up front at `Start`. Used to
@@ -17,8 +18,9 @@ pub(super) struct PendingUpload {
     /// total) and to short-circuit the per-server `effective_max_total_bytes`
     /// cap when the client honestly declared a smaller upload.
     total_size: u64,
-    /// Per-server byte cap derived from `PORTAL_MAX_IMAGE_MB` at `Start`
-    /// time. The binding limit on a single upload's running decoded bytes is
+    /// Per-server byte cap derived from `PORTAL_MAX_IMAGE_MB` (or
+    /// `PORTAL_MAX_DROP_KB` for drop disposition) at `Start` time. The binding
+    /// limit on a single upload's running decoded bytes is
     /// `min(total_size, effective_max_total_bytes)` — declaring a smaller
     /// `total_size` doesn't let you exceed the server cap, and the server cap
     /// doesn't let you exceed an honestly-declared `total_size`.
@@ -29,6 +31,10 @@ pub(super) struct PendingUpload {
     /// upload as soon as the cap would be exceeded (rather than only catching
     /// it at finalize time).
     received_bytes: u64,
+    /// Whether this upload is a secret-safe drop (composer buffer as file).
+    /// Tracked so chunk validation uses the drop cap and so logs can be
+    /// disposition-aware without leaking content.
+    is_drop: bool,
 }
 
 /// Tell the uploading web client its upload definitively failed (#939
@@ -39,10 +45,13 @@ fn send_upload_failure(tx: &super::WebClientSender, upload_id: String, error: &s
             upload_id,
             success: false,
             error: Some(error.to_string()),
+            size: None,
+            disposition: None,
         },
     ));
 }
 
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn handle_file_upload_start(
     session_manager: &SessionManager,
@@ -56,6 +65,38 @@ pub(super) fn handle_file_upload_start(
     total_size: u64,
     max_image_mb: u32,
 ) {
+    handle_file_upload_start_with_disposition(
+        session_manager,
+        session_key,
+        tx,
+        pending_uploads,
+        upload_id,
+        filename,
+        content_type,
+        total_chunks,
+        total_size,
+        max_image_mb,
+        shared::protocol::DEFAULT_MAX_DROP_KB,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn handle_file_upload_start_with_disposition(
+    session_manager: &SessionManager,
+    session_key: &Option<SessionId>,
+    tx: &super::WebClientSender,
+    pending_uploads: &mut HashMap<String, PendingUpload>,
+    upload_id: String,
+    filename: String,
+    content_type: String,
+    total_chunks: u32,
+    total_size: u64,
+    max_image_mb: u32,
+    max_drop_kb: u32,
+    disposition: Option<shared::FileUploadDisposition>,
+) {
+    let is_drop = disposition == Some(shared::FileUploadDisposition::Drop);
     if total_chunks == 0 || total_chunks > MAX_UPLOAD_TOTAL_CHUNKS {
         warn!(
             "Invalid total_chunks {} for upload {}",
@@ -65,24 +106,36 @@ pub(super) fn handle_file_upload_start(
         return;
     }
 
-    // Server-side hard cap on total decoded bytes, derived from
-    // `PORTAL_MAX_IMAGE_MB`. Saturating to avoid overflow on absurd configs.
-    let effective_max_total_bytes = (max_image_mb as u64).saturating_mul(1024 * 1024);
+    // Server-side hard cap on total decoded bytes. For drops the cap is
+    // PORTAL_MAX_DROP_KB (KB, not MB) and is intentionally small — this path
+    // is for credentials, not datasets.
+    let effective_max_total_bytes = if is_drop {
+        (max_drop_kb as u64).saturating_mul(1024)
+    } else {
+        (max_image_mb as u64).saturating_mul(1024 * 1024)
+    };
 
     if total_size > effective_max_total_bytes {
         warn!(
-            "Upload {} declared total_size {} > server cap {} bytes; rejecting",
-            upload_id, total_size, effective_max_total_bytes
+            "Upload {} declared total_size {} > server cap {} bytes (is_drop={}); rejecting",
+            upload_id, total_size, effective_max_total_bytes, is_drop
         );
         send_upload_failure(tx, upload_id, "file exceeds server size limit");
         return;
     }
 
     let safe_filename = sanitize_filename(&filename);
-    info!(
-        "File upload started: {} ({} chunks, {} bytes) upload_id={}",
-        safe_filename, total_chunks, total_size, upload_id
-    );
+    if is_drop {
+        info!(
+            "Drop upload started: {} ({} chunks, {} bytes) upload_id={}",
+            safe_filename, total_chunks, total_size, upload_id
+        );
+    } else {
+        info!(
+            "File upload started: {} ({} chunks, {} bytes) upload_id={}",
+            safe_filename, total_chunks, total_size, upload_id
+        );
+    }
 
     // Uploads are connected-only transactions: the in-memory pending queue
     // caps at 100 frames, so "queueing" a multi-thousand-chunk upload for a
@@ -97,6 +150,7 @@ pub(super) fn handle_file_upload_start(
         content_type,
         total_chunks,
         total_size,
+        disposition,
     });
     if !session_manager.send_to_connected_session(key, msg) {
         warn!("Session not connected for file upload start");
@@ -112,6 +166,7 @@ pub(super) fn handle_file_upload_start(
             effective_max_total_bytes,
             received_indices: HashSet::new(),
             received_bytes: 0,
+            is_drop,
         },
     );
 }
@@ -303,6 +358,23 @@ mod tests {
             effective_max_total_bytes: server_cap_bytes,
             received_indices: HashSet::new(),
             received_bytes: 0,
+            is_drop: false,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn drop_upload_with(
+        total_chunks: u32,
+        total_size: u64,
+        server_cap_bytes: u64,
+    ) -> PendingUpload {
+        PendingUpload {
+            total_chunks,
+            total_size,
+            effective_max_total_bytes: server_cap_bytes,
+            received_indices: HashSet::new(),
+            received_bytes: 0,
+            is_drop: true,
         }
     }
 
@@ -519,5 +591,119 @@ mod tests {
             proxy_rx.try_recv().is_err(),
             "aborted chunk was forwarded anyway"
         );
+    }
+
+    #[test]
+    fn drop_start_rejects_when_exceeds_drop_cap() {
+        let mgr = SessionManager::new();
+        let key = SessionId::new("drop-test");
+        let (proxy_tx, _proxy_rx) = crate::handlers::websocket::conn_channel(64);
+        let (client_tx, mut client_rx) = crate::handlers::websocket::conn_channel(64);
+        mgr.register_session(
+            key.clone(),
+            proxy_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let mut pending: HashMap<String, PendingUpload> = HashMap::new();
+        // Declare 100 KB but drop cap is 64 KB -> reject
+        handle_file_upload_start_with_disposition(
+            &mgr,
+            &Some(key),
+            &client_tx,
+            &mut pending,
+            "drop1".into(),
+            "secret.txt".into(),
+            "text/plain".into(),
+            1,
+            100 * 1024,
+            10,
+            64,
+            Some(shared::FileUploadDisposition::Drop),
+        );
+        assert!(pending.is_empty(), "oversized drop should be rejected");
+        let msg = client_rx.try_recv().expect("expected failure result");
+        match msg {
+            shared::ServerToClient::FileUploadResult(f) => {
+                assert!(!f.success);
+                assert!(f.upload_id == "drop1");
+            }
+            other => panic!("unexpected message {:?}", other),
+        }
+    }
+
+    #[test]
+    fn drop_start_accepts_within_cap_and_sets_is_drop() {
+        let mgr = SessionManager::new();
+        let key = SessionId::new("drop-test2");
+        let (proxy_tx, mut proxy_rx) = crate::handlers::websocket::conn_channel(64);
+        let (client_tx, _client_rx) = crate::handlers::websocket::conn_channel(64);
+        mgr.register_session(
+            key.clone(),
+            proxy_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let mut pending: HashMap<String, PendingUpload> = HashMap::new();
+        handle_file_upload_start_with_disposition(
+            &mgr,
+            &Some(key),
+            &client_tx,
+            &mut pending,
+            "drop2".into(),
+            "secret.txt".into(),
+            "text/plain".into(),
+            1,
+            1024,
+            10,
+            64,
+            Some(shared::FileUploadDisposition::Drop),
+        );
+        assert!(pending.contains_key("drop2"));
+        assert!(pending.get("drop2").unwrap().is_drop);
+        let msg = proxy_rx.try_recv().expect("proxy should receive start");
+        match msg {
+            ServerToProxy::FileUploadStart(f) => {
+                assert_eq!(f.upload_id, "drop2");
+                assert_eq!(f.disposition, Some(shared::FileUploadDisposition::Drop));
+            }
+            other => panic!("unexpected {:?}", other),
+        }
+    }
+
+    #[test]
+    fn upload_start_without_disposition_defaults_to_upload() {
+        let mgr = SessionManager::new();
+        let key = SessionId::new("upload-default");
+        let (proxy_tx, mut proxy_rx) = crate::handlers::websocket::conn_channel(64);
+        let (client_tx, _client_rx) = crate::handlers::websocket::conn_channel(64);
+        mgr.register_session(
+            key.clone(),
+            proxy_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let mut pending: HashMap<String, PendingUpload> = HashMap::new();
+        handle_file_upload_start(
+            &mgr,
+            &Some(key),
+            &client_tx,
+            &mut pending,
+            "u3".into(),
+            "file.txt".into(),
+            "text/plain".into(),
+            1,
+            1024,
+            10,
+        );
+        assert!(pending.contains_key("u3"));
+        assert!(!pending.get("u3").unwrap().is_drop);
+        let msg = proxy_rx.try_recv().expect("should forward");
+        match msg {
+            ServerToProxy::FileUploadStart(f) => {
+                assert!(
+                    f.disposition.is_none()
+                        || f.disposition == Some(shared::FileUploadDisposition::Upload)
+                );
+            }
+            other => panic!("unexpected {:?}", other),
+        }
     }
 }

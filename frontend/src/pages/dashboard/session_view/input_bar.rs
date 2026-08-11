@@ -102,6 +102,10 @@ pub enum InputBarInbound {
     FocusTextarea,
     /// Replace the current Claude-provided next-prompt suggestion.
     PromptSuggestion(String),
+    /// A `FileUploadResult` from the backend/proxy, forwarded by the parent.
+    /// The bar checks whether the `upload_id` matches a pending drop it
+    /// initiated, and if so transitions its local placeholder/error state.
+    FileUploadResult(shared::FileUploadResultFields),
 }
 
 pub enum InputBarMsg {
@@ -115,6 +119,8 @@ pub enum InputBarMsg {
     SendInput,
     /// User picked "Wiggum" from the send-mode dropdown.
     SendWiggum,
+    /// User requested secret-safe drop of the composer buffer.
+    SendAsFile,
     HistoryUp,
     HistoryDown,
     ToggleSendModeDropdown,
@@ -126,6 +132,12 @@ pub enum InputBarMsg {
     DragEnter,
     DragLeave,
     UploadDismiss,
+    DropDismiss,
+    /// Drop timed out waiting for proxy ack.
+    DropTimeout,
+    /// WebSocket disconnected mid-drop (handled synchronously in changed()).
+    #[allow(dead_code)]
+    DropDisconnected,
     VoiceRecordingChanged(bool),
     VoiceTranscription(String),
     VoiceInterimTranscription(String),
@@ -152,6 +164,20 @@ pub struct InputBar {
     upload_files: Vec<(String, u64)>,
     upload_departing: bool,
     upload_dismiss_timer: Option<Timeout>,
+    /// Pending secret-safe drop (composer buffer as file). Tracked separately
+    /// from file uploads — it never becomes a message row.
+    drop_upload_id: Option<String>,
+    drop_size: Option<u64>,
+    drop_progress: Option<f32>,
+    drop_success: Option<(String, u64)>,
+    drop_error: Option<String>,
+    drop_departing: bool,
+    drop_dismiss_timer: Option<Timeout>,
+    /// Preserved buffer for failed drops — restored on error/timeout so the
+    /// secret is not lost. Cleared only on successful delivery.
+    pending_drop_buffer: Option<String>,
+    /// Timeout for drop waiting for FileUploadResult; cancelled on success/error.
+    drop_timeout: Option<Timeout>,
     drag_hover: bool,
     is_recording: bool,
     interim_transcription: Option<String>,
@@ -197,6 +223,15 @@ impl Component for InputBar {
             upload_files: Vec::new(),
             upload_departing: false,
             upload_dismiss_timer: None,
+            drop_upload_id: None,
+            drop_size: None,
+            drop_progress: None,
+            drop_success: None,
+            drop_error: None,
+            drop_departing: false,
+            drop_dismiss_timer: None,
+            pending_drop_buffer: None,
+            drop_timeout: None,
             drag_hover: false,
             is_recording: false,
             interim_transcription: None,
@@ -223,10 +258,29 @@ impl Component for InputBar {
         // type in without a stray click (#1405).
         let now_connected = ctx.props().ws_connected;
         let became_connected = now_connected && !self.was_ws_connected;
+        let was_connected = self.was_ws_connected;
         self.was_ws_connected = now_connected;
 
         if became_focused || (became_connected && now_focused) {
             self.focus_after_render = true;
+        }
+        // If WS dropped while a secure drop was in flight, surface error and restore buffer.
+        if !now_connected && was_connected && self.drop_progress.is_some_and(|p| p < 1.0) {
+            // Defer via message to avoid borrowing issues in changed().
+            // We set a flag and handle in update; for now schedule DropDisconnected via link.
+            // changed() can't send messages directly, so we handle disconnect detection
+            // in update via a separate check — record that we should restore on next update.
+            // Instead, handle immediately: restore buffer synchronously.
+            let err = "connection lost — drop not delivered".to_string();
+            self.drop_error = Some(err);
+            self.drop_progress = None;
+            self.drop_upload_id = None;
+            self.drop_size = None;
+            self.drop_timeout = None;
+            if let Some(buf) = self.pending_drop_buffer.take() {
+                self.input_text = buf.clone();
+                self.set_input_text(&buf);
+            }
         }
         true
     }
@@ -283,6 +337,44 @@ impl Component for InputBar {
                     self.pending_suggestion = (!suggestion.is_empty()).then_some(suggestion);
                     true
                 }
+                InputBarInbound::FileUploadResult(fields) => {
+                    // Only handle if this result matches our pending drop.
+                    if let Some(ref pending_id) = self.drop_upload_id {
+                        if *pending_id == fields.upload_id {
+                            // Cancel timeout on any terminal result.
+                            self.drop_timeout = None;
+                            if fields.success {
+                                let size = self.drop_size.unwrap_or(0);
+                                self.drop_progress = Some(1.0);
+                                self.drop_success = Some((fields.upload_id.clone(), size));
+                                self.drop_departing = false;
+                                // Clear preserved buffer only on success.
+                                self.pending_drop_buffer = None;
+                                let link = ctx.link().clone();
+                                self.drop_dismiss_timer = Some(Timeout::new(4_000, move || {
+                                    link.send_message(InputBarMsg::DropDismiss);
+                                }));
+                            } else {
+                                let err = fields.error.unwrap_or_else(|| "drop failed".to_string());
+                                self.drop_error = Some(err);
+                                self.drop_progress = None;
+                                self.drop_upload_id = None;
+                                self.drop_size = None;
+                                // Restore buffer so the secret is not lost.
+                                if let Some(buf) = self.pending_drop_buffer.take() {
+                                    self.input_text = buf.clone();
+                                    self.set_input_text(&buf);
+                                }
+                                let link = ctx.link().clone();
+                                self.drop_dismiss_timer = Some(Timeout::new(4_000, move || {
+                                    link.send_message(InputBarMsg::DropDismiss);
+                                }));
+                            }
+                            return true;
+                        }
+                    }
+                    false
+                }
             },
             InputBarMsg::UpdateInput(value) => {
                 // Textarea is uncontrolled — the DOM already has the new
@@ -307,6 +399,7 @@ impl Component for InputBar {
                 self.send_mode_dropdown_open = false;
                 self.dispatch_text_send(ctx, SendMode::Wiggum)
             }
+            InputBarMsg::SendAsFile => self.dispatch_drop_send(ctx),
             InputBarMsg::HistoryUp => {
                 let current = self.get_input_text();
                 if let Some(cmd) = self.command_history.navigate_up(&current) {
@@ -367,6 +460,37 @@ impl Component for InputBar {
                 self.upload_dismiss_timer = None;
                 true
             }
+            InputBarMsg::DropDismiss => {
+                if self.drop_departing {
+                    // Second phase: clear state
+                    self.drop_progress = None;
+                    self.drop_success = None;
+                    self.drop_error = None;
+                    self.drop_upload_id = None;
+                    self.drop_size = None;
+                    self.pending_drop_buffer = None;
+                    self.drop_departing = false;
+                    self.drop_dismiss_timer = None;
+                    true
+                } else if self.drop_success.is_some() {
+                    self.drop_departing = true;
+                    let link = ctx.link().clone();
+                    self.drop_dismiss_timer = Some(Timeout::new(400, move || {
+                        link.send_message(InputBarMsg::DropDismiss);
+                    }));
+                    true
+                } else {
+                    self.drop_progress = None;
+                    self.drop_success = None;
+                    self.drop_error = None;
+                    self.drop_upload_id = None;
+                    self.drop_size = None;
+                    self.pending_drop_buffer = None;
+                    self.drop_departing = false;
+                    self.drop_dismiss_timer = None;
+                    true
+                }
+            }
             InputBarMsg::DragEnter => {
                 self.drag_hover = true;
                 true
@@ -418,6 +542,44 @@ impl Component for InputBar {
                 // re-render to refresh the mode indicator.
                 self.input_text = self.get_input_text();
                 true
+            }
+            InputBarMsg::DropTimeout => {
+                if self.drop_progress.is_some_and(|p| p < 1.0) {
+                    self.drop_error = Some("drop timed out — proxy did not respond".to_string());
+                    self.drop_progress = None;
+                    self.drop_upload_id = None;
+                    self.drop_size = None;
+                    self.drop_timeout = None;
+                    if let Some(buf) = self.pending_drop_buffer.take() {
+                        self.input_text = buf.clone();
+                        self.set_input_text(&buf);
+                    }
+                    let link = ctx.link().clone();
+                    self.drop_dismiss_timer = Some(Timeout::new(4_000, move || {
+                        link.send_message(InputBarMsg::DropDismiss);
+                    }));
+                    return true;
+                }
+                false
+            }
+            InputBarMsg::DropDisconnected => {
+                if self.drop_progress.is_some_and(|p| p < 1.0) {
+                    self.drop_error = Some("connection lost — drop not delivered".to_string());
+                    self.drop_progress = None;
+                    self.drop_upload_id = None;
+                    self.drop_size = None;
+                    self.drop_timeout = None;
+                    if let Some(buf) = self.pending_drop_buffer.take() {
+                        self.input_text = buf.clone();
+                        self.set_input_text(&buf);
+                    }
+                    let link = ctx.link().clone();
+                    self.drop_dismiss_timer = Some(Timeout::new(4_000, move || {
+                        link.send_message(InputBarMsg::DropDismiss);
+                    }));
+                    return true;
+                }
+                false
             }
             InputBarMsg::Noop => false,
         }
@@ -472,6 +634,11 @@ impl Component for InputBar {
             if e.ctrl_key() && e.key().to_lowercase() == "m" {
                 e.prevent_default();
                 return InputBarMsg::ToggleVoice;
+            }
+
+            if (e.ctrl_key() || e.meta_key()) && e.shift_key() && e.key() == "Enter" {
+                e.prevent_default();
+                return InputBarMsg::SendAsFile;
             }
 
             // Modal editing (opt-in). When vim consumes the key we're done;
@@ -596,6 +763,7 @@ impl Component for InputBar {
         html! {
             <>
                 { self.render_upload_bar() }
+                { self.render_drop_bar() }
                 <form
                     class={drag_hint}
                     onsubmit={handle_submit}
@@ -694,6 +862,100 @@ impl InputBar {
         true
     }
 
+    /// Secret-safe drop: send the current buffer as a 0600 temp file via the
+    /// existing chunked pipeline with disposition `Drop`. The buffer is never
+    /// stored in command history or localStorage, and the placeholder card
+    /// shows only size/timestamp. Preserved on failure, cleared only on success,
+    /// single-flight idempotent.
+    fn dispatch_drop_send(&mut self, ctx: &Context<Self>) -> bool {
+        // Prevent double submission while a drop is in flight.
+        if self.drop_progress.is_some_and(|p| p < 1.0) {
+            return false;
+        }
+        crate::audio::ensure_audio_context();
+        let raw = self.get_input_text();
+        let input = raw.clone();
+        if input.is_empty() {
+            return false;
+        }
+        // Local size guard before we start the chunk loop — matches the
+        // backend's PORTAL_MAX_DROP_KB cap so the user gets an immediate
+        // error rather than a round-trip failure.
+        let size = input.len() as u64;
+        let cap = (shared::protocol::DEFAULT_MAX_DROP_KB as u64) * 1024;
+        if size > cap {
+            self.drop_error = Some(format!(
+                "buffer too large ({} > {} limit for secure drop)",
+                format_file_size(size),
+                format_file_size(cap)
+            ));
+            self.drop_departing = false;
+            let link = ctx.link().clone();
+            self.drop_dismiss_timer = Some(Timeout::new(4_000, move || {
+                link.send_message(InputBarMsg::DropDismiss);
+            }));
+            return true;
+        }
+        // Preserve buffer for potential failure restore; clear UI immediately
+        // but do NOT push secrets into command history / localStorage.
+        self.pending_drop_buffer = Some(input.clone());
+        self.set_input_text("");
+        self.input_text.clear();
+        self.pending_suggestion = None;
+        self.send_mode_dropdown_open = false;
+        let upload_id = Uuid::new_v4().to_string();
+        self.drop_upload_id = Some(upload_id.clone());
+        self.drop_size = Some(size);
+        self.drop_progress = Some(0.0);
+        self.drop_success = None;
+        self.drop_error = None;
+        self.drop_departing = false;
+        ctx.props().on_message_sent.emit(());
+
+        let on_send_frame = ctx.props().on_send_frame.clone();
+        let bytes = input.into_bytes();
+        let total_chunks = bytes.len().div_ceil(UPLOAD_CHUNK_SIZE).max(1) as u32;
+        let total_size = bytes.len() as u64;
+
+        spawn_local(async move {
+            on_send_frame.emit(ClientToServer::FileUploadStart(
+                shared::FileUploadStartFields {
+                    upload_id: upload_id.clone(),
+                    filename: "buffer.txt".to_string(),
+                    content_type: "text/plain".to_string(),
+                    total_chunks,
+                    total_size,
+                    disposition: Some(shared::FileUploadDisposition::Drop),
+                },
+            ));
+            for i in 0..total_chunks {
+                let start = i as usize * UPLOAD_CHUNK_SIZE;
+                let end = ((i as usize + 1) * UPLOAD_CHUNK_SIZE).min(bytes.len());
+                let chunk = &bytes[start..end];
+                let encoded =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, chunk);
+                on_send_frame.emit(ClientToServer::FileUploadChunk(
+                    shared::FileUploadChunkFields {
+                        upload_id: upload_id.clone(),
+                        chunk_index: i,
+                        data: encoded,
+                    },
+                ));
+            }
+            // Progress stays at sending — completion is driven by the inbound
+            // FileUploadResult which the parent forwards to this bar.
+        });
+        self.drop_progress = Some(0.3);
+        // Timeout if proxy does not ack within 30s — restores buffer so secret is not lost.
+        {
+            let link = ctx.link().clone();
+            self.drop_timeout = Some(Timeout::new(30_000, move || {
+                link.send_message(InputBarMsg::DropTimeout);
+            }));
+        }
+        true
+    }
+
     /// Drive the chunk-upload pipeline. Reads the current textarea as
     /// optional accompanying text, clears it, then spawns an async task
     /// that emits `FileUploadStart` / `FileUploadChunk` frames per file
@@ -758,6 +1020,7 @@ impl InputBar {
                         content_type: ct,
                         total_chunks,
                         total_size: file_size,
+                        disposition: None,
                     },
                 ));
 
@@ -873,6 +1136,57 @@ impl InputBar {
         }
     }
 
+    fn render_drop_bar(&self) -> Html {
+        if let Some(ref err) = self.drop_error {
+            let bar_class = if self.drop_departing {
+                "drop-bar departing"
+            } else {
+                "drop-bar error"
+            };
+            return html! {
+                <div class={bar_class}>
+                    <div class="drop-bar-header">{ "Secure drop failed" }</div>
+                    <div class="drop-bar-error">{ err }</div>
+                </div>
+            };
+        }
+        if let Some((_, size)) = self.drop_success {
+            let bar_class = if self.drop_departing {
+                "drop-bar departing"
+            } else {
+                "drop-bar success"
+            };
+            return html! {
+                <div class={bar_class}>
+                    <div class="drop-bar-header">{ "Sent as secure file" }</div>
+                    <div class="drop-bar-detail">{ format!("{} — delivered to agent as a 0600 temp file (auto-deletes after 30 min)", format_file_size(size)) }</div>
+                </div>
+            };
+        }
+        if let Some(progress) = self.drop_progress {
+            let pct = (progress * 100.0).clamp(0.0, 100.0) as u32;
+            let fill_style = format!("width: {}%", pct);
+            let bar_class = if self.drop_departing {
+                "drop-bar departing"
+            } else {
+                "drop-bar"
+            };
+            let detail = self.drop_size.map(format_file_size).unwrap_or_default();
+            return html! {
+                <div class={bar_class}>
+                    <div class="drop-bar-header">{ "Sending securely…" }</div>
+                    if !detail.is_empty() {
+                        <div class="drop-bar-detail">{ detail }</div>
+                    }
+                    <div class="drop-bar-track">
+                        <div class="drop-bar-fill" style={fill_style} />
+                    </div>
+                </div>
+            };
+        }
+        html! {}
+    }
+
     fn render_voice_input(&self, ctx: &Context<Self>) -> Html {
         let link = ctx.link();
         let on_recording_change = link.callback(InputBarMsg::VoiceRecordingChanged);
@@ -934,7 +1248,8 @@ impl InputBar {
             "send-mode-dropdown"
         };
 
-        let is_uploading = self.upload_progress.is_some_and(|p| p < 1.0);
+        let is_drop_pending = self.drop_progress.is_some_and(|p| p < 1.0);
+        let is_uploading = self.upload_progress.is_some_and(|p| p < 1.0) || is_drop_pending;
         let ws_connected = ctx.props().ws_connected;
 
         html! {
@@ -989,6 +1304,14 @@ impl InputBar {
                     >
                         { "Send with attachment(s)" }
                         <span class="option-hint">{ "Upload files + message" }</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="dropdown-option drop"
+                        onclick={link.callback(|_| InputBarMsg::SendAsFile)}
+                    >
+                        { "Send as secure file" }
+                        <span class="option-hint">{ "Buffer → 0600 tmp file (Ctrl+Shift+Enter)" }</span>
                     </button>
                 </div>
             </div>

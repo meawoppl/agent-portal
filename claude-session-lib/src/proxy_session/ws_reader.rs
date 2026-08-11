@@ -14,6 +14,7 @@ pub enum FileUploadEvent {
         filename: String,
         total_chunks: u32,
         total_size: u64,
+        disposition: Option<shared::FileUploadDisposition>,
     },
     /// A chunk of file data (base64-encoded)
     Chunk { upload_id: String, data: String },
@@ -36,6 +37,12 @@ pub(crate) struct FileReceiveState {
     /// Bytes are written here and renamed to `filename` only on completion,
     /// so a consumer (the agent) can never read a truncated file (#939).
     pub(crate) temp_path: std::path::PathBuf,
+    /// Whether this is a secret-safe drop (delivered to a 0600 temp file
+    /// outside the working directory, with TTL cleanup and agent notice).
+    pub(crate) is_drop: bool,
+    /// Final path for drops (only when `is_drop` is true). For normal uploads
+    /// the final path is `working_directory/filename`.
+    pub(crate) drop_final_path: Option<std::path::PathBuf>,
 }
 
 /// A portal input classified by send mode: a plain user input or a
@@ -313,20 +320,33 @@ async fn handle_ws_message(
             content_type: _,
             total_chunks,
             total_size,
+            disposition,
         }) => {
-            info!(
-                "[upload {}] Starting: {} ({} bytes, {} chunks)",
-                &upload_id[..8.min(upload_id.len())],
-                filename,
-                total_size,
-                total_chunks
-            );
+            let is_drop = disposition == Some(shared::FileUploadDisposition::Drop);
+            if is_drop {
+                info!(
+                    "[drop {}] Starting: {} ({} bytes, {} chunks)",
+                    &upload_id[..8.min(upload_id.len())],
+                    filename,
+                    total_size,
+                    total_chunks
+                );
+            } else {
+                info!(
+                    "[upload {}] Starting: {} ({} bytes, {} chunks)",
+                    &upload_id[..8.min(upload_id.len())],
+                    filename,
+                    total_size,
+                    total_chunks
+                );
+            }
             if file_upload_tx
                 .send(FileUploadEvent::Start {
                     upload_id,
                     filename,
                     total_chunks,
                     total_size,
+                    disposition,
                 })
                 .is_err()
             {

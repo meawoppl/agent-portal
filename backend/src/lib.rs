@@ -82,6 +82,8 @@ pub struct AppState {
     pub session_max_age_days: u32,
     /// Maximum image size in MB that proxies should inline (default: 10)
     pub max_image_mb: u32,
+    /// Max size for a secret-safe drop in KB (default: 64)
+    pub max_drop_kb: u32,
     /// In-memory image store for serving images via HTTP instead of WebSocket
     pub image_store: handlers::images::ImageStore,
     /// Per-file cap (MB) for videos shown via `agent-portal show`.
@@ -203,6 +205,7 @@ pub async fn run() -> anyhow::Result<()> {
         message_retention_days: config.message_retention_days,
         session_max_age_days: config.session_max_age_days,
         max_image_mb: config.max_image_mb,
+        max_drop_kb: config.max_drop_kb,
         max_audio_mb: config.max_audio_mb,
         image_store: handlers::images::ImageStore::new(
             config.image_store_max_bytes,
