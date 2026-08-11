@@ -1017,6 +1017,8 @@ async fn run_main_loop<A: Agent>(
                     &state.working_directory,
                     &state.git_metadata,
                     &mut state.wiggum_state,
+                    &state.output_buffer,
+                    state.agent_type,
                     claude_session,
                     wiggum_input,
                 )

@@ -24,13 +24,41 @@ use super::{
 /// Maximum iterations for wiggum mode before auto-stopping
 const WIGGUM_MAX_ITERATIONS: u32 = 50;
 
+/// The instruction suffix appended to every wiggum iteration's prompt. Its
+/// exact wording drives DONE-loop detection, and the activation card quotes
+/// it so the transcript shows what framing was applied (the agent-side echo
+/// deliberately shows only the user's original text — see
+/// `claude_user_echo_value` use below).
+const WIGGUM_FRAMING: &str = "Take action on the directions above until fully complete. If complete, respond only with DONE.";
+
 /// Build the wiggum loop prompt sent to the agent: the original user prompt
 /// plus the instruction suffix whose exact wording drives DONE-loop detection.
 pub fn wiggum_prompt(original: &str) -> String {
-    format!(
-        "{}\n\nTake action on the directions above until fully complete. If complete, respond only with DONE.",
-        original
-    )
+    format!("{original}\n\n{WIGGUM_FRAMING}")
+}
+
+/// Push a wiggum status card into the durable output buffer and send it to
+/// the backend as sequenced output. `Err(())` means the WS send failed —
+/// callers on the hot loop treat that as a disconnect; advisory callers log
+/// and continue.
+async fn send_wiggum_portal(
+    ws_write: &SharedWsWrite,
+    output_buffer: &Arc<Mutex<PendingOutputBuffer>>,
+    agent_type: AgentType,
+    text: String,
+) -> Result<(), ()> {
+    let portal_content = shared::PortalMessage::text(text).to_json();
+    let seq = {
+        let mut buf = output_buffer.lock().await;
+        buf.push(portal_content.clone())
+    };
+    let msg = ProxyToServer::SequencedOutput {
+        seq,
+        content: portal_content,
+        agent_type,
+    };
+    let mut ws = ws_write.lock().await;
+    ws.send(msg).await.map_err(|_| ())
 }
 
 /// Wiggum mode state
@@ -61,6 +89,8 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
     working_directory: &str,
     git_metadata: &GitMetadataState,
     wiggum_state: &mut Option<WiggumState>,
+    output_buffer: &Arc<Mutex<PendingOutputBuffer>>,
+    agent_type: AgentType,
     claude_session: &mut Session<A>,
     wiggum_input: PortalInput,
 ) -> Option<ConnectionResult> {
@@ -68,6 +98,26 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
         "Wiggum mode activated with prompt: {}",
         truncate(&wiggum_input.text, 60)
     );
+    // Make the loop framing visible: since #1284 the transcript echo shows
+    // only the user's original text, so without this card nothing indicates
+    // wiggum engaged or what instructions were appended (the pre-#1284
+    // signal was the CLI echoing the full framed prompt).
+    if send_wiggum_portal(
+        ws_write,
+        output_buffer,
+        agent_type,
+        format!(
+            "**Wiggum** loop engaged (max {WIGGUM_MAX_ITERATIONS} iterations). \
+             Each iteration appends:\n\n> {WIGGUM_FRAMING}"
+        ),
+    )
+    .await
+    .is_err()
+    {
+        // Advisory card only — the loop itself still runs; the durable
+        // buffer holds the card for replay on reconnect.
+        warn!("Failed to send wiggum activation portal message");
+    }
     check_and_send_branch_update_if_branch_changed(
         ws_write,
         session_id,
@@ -208,18 +258,10 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
 
                         // Send a portal message with loop status
                         let portal_text = format_wiggum_status(state);
-                        let portal_content = shared::PortalMessage::text(portal_text).to_json();
-                        let seq = {
-                            let mut buf = output_buffer.lock().await;
-                            buf.push(portal_content.clone())
-                        };
-                        let msg = ProxyToServer::SequencedOutput {
-                            seq,
-                            content: portal_content,
-                            agent_type,
-                        };
-                        let mut ws = ws_write.lock().await;
-                        if ws.send(msg).await.is_err() {
+                        if send_wiggum_portal(ws_write, output_buffer, agent_type, portal_text)
+                            .await
+                            .is_err()
+                        {
                             error!("Failed to send wiggum portal message");
                             return Some(ConnectionResult::Disconnected(
                                 connection_start.elapsed(),
@@ -262,18 +304,10 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                         if state.iteration == 1 { "" } else { "s" },
                         format_duration(total.as_millis() as u64),
                     );
-                    let portal_content = shared::PortalMessage::text(portal_text).to_json();
-                    let seq = {
-                        let mut buf = output_buffer.lock().await;
-                        buf.push(portal_content.clone())
-                    };
-                    let msg = ProxyToServer::SequencedOutput {
-                        seq,
-                        content: portal_content,
-                        agent_type,
-                    };
-                    let mut ws = ws_write.lock().await;
-                    if ws.send(msg).await.is_err() {
+                    if send_wiggum_portal(ws_write, output_buffer, agent_type, portal_text)
+                        .await
+                        .is_err()
+                    {
                         error!("Failed to send wiggum completion portal message");
                     }
                 }
