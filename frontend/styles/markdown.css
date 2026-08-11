@@ -390,6 +390,7 @@
 .tool-result-image.svg img {
     width: 100%;
     height: auto;
+
     /* `height: auto` keeps the aspect ratio, so the 600px cap above (which
        stops large raster screenshots dominating the transcript) would letterbox
        a tall diagram inside a full-width box instead of shrinking it. Cap
