@@ -1,14 +1,17 @@
+mod account_panel;
 mod appearance_panel;
 mod forwarding_panel;
 mod health_timer_panel;
 mod launchers_panel;
 mod notifications_panel;
 mod performance_panel;
+mod profile_panel;
 mod sessions_panel;
 mod sounds_panel;
 mod tokens_panel;
 
 use crate::utils;
+use account_panel::AccountPanel;
 use appearance_panel::AppearancePanel;
 use forwarding_panel::ForwardingPanel;
 use health_timer_panel::HealthTimerPanel;
@@ -23,6 +26,7 @@ use yew::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
+    Account,
     Sessions,
     Tokens,
     Launchers,
@@ -41,7 +45,7 @@ pub struct SettingsPageProps {
 
 #[function_component(SettingsPage)]
 pub fn settings_page(props: &SettingsPageProps) -> Html {
-    let active_tab = use_state(|| SettingsTab::Sessions);
+    let active_tab = use_state(|| SettingsTab::Account);
 
     // Counts for tab badges (updated when panels load their data)
     let session_count = use_state(|| 0usize);
@@ -67,6 +71,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         let active_tab = active_tab.clone();
         Callback::from(move |_: MouseEvent| active_tab.set(tab))
     };
+    let on_account_tab = make_tab_handler(SettingsTab::Account);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
     let on_launchers_tab = make_tab_handler(SettingsTab::Launchers);
@@ -95,6 +100,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
             </header>
 
             <nav class="settings-tabs">
+                <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Account).then_some("active"))}
+                    onclick={on_account_tab}
+                >
+                    { "Account" }
+                </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sessions).then_some("active"))}
                     onclick={on_sessions_tab}
@@ -156,6 +167,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
             </nav>
 
             <main class="settings-content">
+                if *active_tab == SettingsTab::Account {
+                    <AccountPanel />
+                }
                 if *active_tab == SettingsTab::Tokens {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
                 }

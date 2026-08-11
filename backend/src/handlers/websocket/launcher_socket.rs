@@ -777,6 +777,8 @@ fn handle_launcher_message(
                         resume: Some(true),
                         create_worktree: false,
                         worktree_branch: None,
+                        fork_from_session_id: None,
+                        fork_point_turn_id: None,
                     };
                     if !app_state
                         .session_manager
@@ -1118,12 +1120,20 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             .parse()
             .unwrap_or(shared::AgentType::Claude);
 
+        let pending_fork = session.fork_launch_pending;
+        let create_worktree = pending_fork && session.fork_create_worktree;
+
         info!(
-            "Reconcile relaunching session {} ({}) on launcher {}: resume, \
+            "Reconcile relaunching session {} ({}) on launcher {}: {}, \
              launch_failure_count={}, dir={}",
             session.id,
             session.session_name,
             launcher_id,
+            if pending_fork {
+                "initial fork"
+            } else {
+                "resume"
+            },
             session.launch_failure_count,
             session.working_directory
         );
@@ -1138,10 +1148,18 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             agent_type,
             scheduled_task_id: None,
             resume_session_id: Some(session.id),
-            // Reconcile relaunch of an existing desired session: resume it.
-            resume: Some(true),
-            create_worktree: false,
-            worktree_branch: None,
+            // A desired fork may be reconciled before its first proxy registers
+            // (for example after a backend restart). Keep replaying the durable
+            // fork recipe until registration clears `fork_launch_pending`.
+            resume: Some(!pending_fork),
+            create_worktree,
+            worktree_branch: create_worktree.then(|| session.session_name.clone()),
+            fork_from_session_id: pending_fork
+                .then_some(session.forked_from_session_id)
+                .flatten(),
+            fork_point_turn_id: pending_fork
+                .then(|| session.fork_point_turn_id.clone())
+                .flatten(),
         };
 
         if !app_state

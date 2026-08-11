@@ -246,6 +246,8 @@ pub mod test_support {
             media: None,
             launcher_id: None,
             launcher_version: None,
+            forked_from_session_id: None,
+            fork_point_turn_id: None,
             scheduled_task_id: None,
             claude_args: Vec::new(),
             archived_by_version: None,

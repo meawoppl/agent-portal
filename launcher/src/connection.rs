@@ -115,6 +115,7 @@ pub async fn run_launcher_loop(
                         .map(|p| p.to_string_lossy().to_string()),
                     capabilities: vec![
                         shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
+                        shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
                         shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
                         shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
                     ],
@@ -633,6 +634,8 @@ async fn handle_message(
             resume,
             create_worktree,
             worktree_branch,
+            fork_from_session_id,
+            fork_point_turn_id,
             ..
         } => {
             // Check if this is a scheduler-owned launch.
@@ -667,6 +670,8 @@ async fn handle_message(
                     // backend leaves these fields at their defaults for them.
                     create_worktree,
                     worktree_branch,
+                    fork_from_session_id,
+                    fork_point_turn_id,
                 })
                 .await;
 
