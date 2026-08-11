@@ -1,40 +1,63 @@
-// Helper exposed on window for Yew to call after rendering markdown.
-// Uses KaTeX's auto-render extension to find $...$ and $$...$$ in a DOM
-// element and replace them with rendered math.
+// Helper exposed on window for Yew to call for a single math region.
 //
-// The KaTeX library and its auto-render extension are loaded via deferred
-// <script> tags in index.html. On a cold page load, Yew may invoke this
-// helper before those scripts have finished evaluating. The original
-// implementation silently returned in that case, leaving math un-rendered
-// for the lifetime of the page (the Yew effect is keyed on props.text and
-// won't fire again for a message that doesn't change). We queue calls
-// until KaTeX is ready and flush them on first availability.
+// Yew calls this once per `MathSpan` element with that region's LaTeX source.
+// KaTeX renders INTO the supplied element and owns everything inside it; Yew
+// renders that element with no children of its own, so the two never touch the
+// same nodes.
+//
+// This deliberately does NOT use KaTeX's `auto-render` extension. That
+// extension scans a subtree and rewrites matching text nodes in place — when
+// pointed at Yew-rendered markdown it replaced nodes Yew's bundle still
+// referenced, so the next re-render (every streamed token) computed an insert
+// position against a detached node and panicked the WASM app with
+// "failed to insert node before next sibling". It also applied its own
+// delimiter heuristics, which disagreed with the Rust-side scanner that
+// already skips code spans and dollar amounts.
+//
+// KaTeX loads from a deferred <script>, so on a cold page load Yew can call
+// this before the library exists. Such calls leave the LaTeX source visible as
+// text and are queued, then flushed when KaTeX becomes available.
 
 (function () {
-    const KATEX_OPTIONS = {
-        delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '$', right: '$', display: false },
-            { left: '\\(', right: '\\)', display: false },
-            { left: '\\[', right: '\\]', display: true },
-        ],
-        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
-        ignoredClasses: ['md-code-block', 'md-inline-code', 'tool-result-content', 'bash-command-inline'],
-        throwOnError: false,
-        errorColor: '#cc6666',
-    };
+    function options(displayMode) {
+        return {
+            displayMode: !!displayMode,
+            throwOnError: false,
+            errorColor: '#cc6666',
+            // `trust` stays false (the default): \href/\url and friends are
+            // refused, so agent-authored math cannot inject navigable links.
+            trust: false,
+        };
+    }
 
-    const pending = new Set();
+    // element -> {latex, displayMode} for calls that arrived before KaTeX did.
+    const pending = new Map();
     let pollHandle = null;
 
+    function ready() {
+        return typeof window.katex === 'object'
+            && window.katex !== null
+            && typeof window.katex.render === 'function';
+    }
+
+    function renderNow(element, latex, displayMode) {
+        try {
+            window.katex.render(latex, element, options(displayMode));
+            return true;
+        } catch (e) {
+            console.error('[katex] render failed:', e);
+            // Leave the source readable rather than an empty gap.
+            element.textContent = latex;
+            return false;
+        }
+    }
+
     function flush() {
-        if (typeof window.renderMathInElement !== 'function') return;
-        for (const element of pending) {
-            if (!element.isConnected) continue;
-            try {
-                window.renderMathInElement(element, KATEX_OPTIONS);
-            } catch (e) {
-                console.error('[katex] render failed:', e);
+        if (!ready()) return;
+        for (const [element, spec] of pending) {
+            // Elements Yew has since removed are skipped, not resurrected.
+            if (element.isConnected) {
+                renderNow(element, spec.latex, spec.displayMode);
             }
         }
         pending.clear();
@@ -46,44 +69,21 @@
 
     function schedulePoll() {
         if (pollHandle) return;
-        pollHandle = setInterval(function () {
-            if (typeof window.renderMathInElement === 'function') {
-                flush();
-            }
-        }, 50);
+        pollHandle = setInterval(flush, 50);
     }
 
-    window.renderMathInNode = function (element) {
+    window.renderMathIntoNode = function (element, latex, displayMode) {
         if (!element) {
-            console.warn('[katex] renderMathInNode called with no element');
+            console.warn('[katex] renderMathIntoNode called with no element');
             return;
         }
-        // Probe whether this subtree actually contains math delimiters. If
-        // it does, but KaTeX doesn't render, the log makes the failure mode
-        // visible in the browser console for diagnosis.
-        const text = (element.textContent || '');
-        const hasDollar = text.includes('$');
-        const hasParen = text.includes('\\(');
-        const hasBracket = text.includes('\\[');
-        if (typeof window.renderMathInElement === 'function') {
-            try {
-                window.renderMathInElement(element, KATEX_OPTIONS);
-                if (hasDollar || hasParen || hasBracket) {
-                    const after = element.querySelectorAll('.katex').length;
-                    if (after === 0) {
-                        console.warn(
-                            '[katex] no math rendered though delimiters present',
-                            { sample: text.slice(0, 200) }
-                        );
-                    }
-                }
-            } catch (e) {
-                console.error('[katex] render failed:', e);
-            }
-        } else {
-            console.warn('[katex] auto-render not yet loaded — queued');
-            pending.add(element);
-            schedulePoll();
+        if (ready()) {
+            pending.delete(element);
+            renderNow(element, latex, displayMode);
+            return;
         }
+        element.textContent = latex;
+        pending.set(element, { latex: latex, displayMode: displayMode });
+        schedulePoll();
     };
 })();

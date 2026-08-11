@@ -5,11 +5,11 @@
 //! inline code, blockquotes, lists, and tables.
 
 use uuid::Uuid;
-use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
 mod links;
 mod math;
+mod math_span;
 mod parser;
 mod portal_file_link;
 mod renderer;
@@ -23,7 +23,8 @@ use renderer::render_events;
 use links::{find_next_url, is_valid_url};
 #[cfg(test)]
 use math::{
-    extract_math_placeholders, restore_math, restore_math_in_events, MATH_CLOSE, MATH_OPEN,
+    extract_math_placeholders, restore_math, split_math_segments, MathSegment, MATH_CLOSE,
+    MATH_OPEN,
 };
 #[cfg(test)]
 use pulldown_cmark::{Event, Options, Parser, Tag};
@@ -55,29 +56,13 @@ struct MarkdownViewProps {
 
 #[function_component(MarkdownView)]
 fn markdown_view(props: &MarkdownViewProps) -> Html {
-    let node_ref = use_node_ref();
-
-    // After render, call the JS helper to render math in this subtree
-    {
-        let node_ref = node_ref.clone();
-        use_effect_with(props.text.clone(), move |_| {
-            if let Some(node) = node_ref.cast::<web_sys::Element>() {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(func) = js_sys::Reflect::get(&window, &"renderMathInNode".into()) {
-                        if let Ok(func) = func.dyn_into::<js_sys::Function>() {
-                            let _ = func.call1(&window, &node);
-                        }
-                    }
-                }
-            }
-            || ()
-        });
-    }
-
-    let events = parse_markdown_events(&props.text);
+    // Math is typeset per-region by `MathSpan`, not by walking this subtree
+    // after render: KaTeX mutates the DOM, and pointing it at nodes Yew owns
+    // corrupted Yew's bundle and panicked the app on the next re-render.
+    let (events, math) = parse_markdown_events(&props.text);
 
     html! {
-        <span ref={node_ref}>{ render_events(&events, props.session_id) }</span>
+        <span>{ render_events(&events, props.session_id, &math) }</span>
     }
 }
 
@@ -247,6 +232,62 @@ mod tests {
         assert_eq!(restore_math(&out, &blocks), input);
     }
 
+    /// Helper: describe segments compactly so the assertions below read as
+    /// the sequence the renderer will emit.
+    fn segments_of(input: &str) -> Vec<String> {
+        let (out, blocks) = extract_math_placeholders(input);
+        split_math_segments(&out, &blocks)
+            .into_iter()
+            .map(|segment| match segment {
+                MathSegment::Text(text) => format!("text:{text}"),
+                MathSegment::Math { latex, display } => {
+                    let kind = if display { "display" } else { "inline" };
+                    format!("{kind}:{latex}")
+                }
+            })
+            .collect()
+    }
+
+    /// Each math region becomes its own segment so the renderer can give it a
+    /// dedicated element — the property that keeps KaTeX's DOM mutations off
+    /// nodes Yew owns (the `insertBefore` panic).
+    #[test]
+    fn math_segments_split_text_from_math() {
+        assert_eq!(
+            segments_of("So $\\sigma_{1D}$ is small."),
+            vec!["text:So ", "inline:\\sigma_{1D}", "text: is small."]
+        );
+    }
+
+    #[test]
+    fn math_segments_classify_display_mode() {
+        assert_eq!(segments_of("$$a+b$$"), vec!["display:a+b"]);
+        assert_eq!(segments_of("\\[a+b\\]"), vec!["display:a+b"]);
+        assert_eq!(segments_of("\\(a+b\\)"), vec!["inline:a+b"]);
+        assert_eq!(segments_of("$a+b$"), vec!["inline:a+b"]);
+    }
+
+    /// Prose with no math must stay a single text run — the renderer relies on
+    /// this to skip the split entirely for the overwhelmingly common case.
+    #[test]
+    fn math_segments_leave_plain_text_intact() {
+        assert_eq!(segments_of("no math here"), vec!["text:no math here"]);
+        // Dollar amounts are not math, so they never become segments.
+        assert_eq!(
+            segments_of("I have $5 and $10 left."),
+            vec!["text:I have $5 and $10 left."]
+        );
+    }
+
+    /// Adjacent regions must not merge, and a trailing text run must survive.
+    #[test]
+    fn math_segments_handle_multiple_regions() {
+        assert_eq!(
+            segments_of("$a$ and $$b$$ done"),
+            vec!["inline:a", "text: and ", "display:b", "text: done"]
+        );
+    }
+
     #[test]
     fn test_extract_math_skips_dollar_amounts() {
         // "$5 and $10" looks like inline math to a naïve scanner but isn't.
@@ -294,20 +335,19 @@ Where:\n\
         options.insert(Options::ENABLE_STRIKETHROUGH);
         let parser = Parser::new_ext(&pre_processed, options);
         let events: Vec<Event> = parser.collect();
-        let restored = restore_math_in_events(events, &math_blocks);
 
-        // The math content (`\rho`) must land in plain Text events so KaTeX
-        // auto-render can find the delimiters. If it ends up in `Event::Html`
-        // or `Event::InlineHtml`, KaTeX cannot find the math reliably.
-        let math_in_text = restored.iter().any(|e| match e {
-            Event::Text(t) => t.contains("\\rho"),
+        // The placeholders must land in plain Text events, where the renderer
+        // can split them out into their own `MathSpan` elements. If they end
+        // up in `Event::Html`/`Event::InlineHtml` the math is never typeset.
+        let math_in_text = events.iter().any(|e| match e {
+            Event::Text(t) => t.contains(MATH_OPEN),
             _ => false,
         });
-        let math_in_html = restored.iter().any(|e| match e {
-            Event::Html(t) | Event::InlineHtml(t) => t.contains("\\rho"),
+        let math_in_html = events.iter().any(|e| match e {
+            Event::Html(t) | Event::InlineHtml(t) => t.contains(MATH_OPEN),
             _ => false,
         });
-        assert!(math_in_text, "math should reach Event::Text");
+        assert!(math_in_text, "math placeholders should reach Event::Text");
         assert!(!math_in_html, "math should not leak into Event::Html");
     }
 
