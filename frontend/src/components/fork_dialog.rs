@@ -128,36 +128,44 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
     html! {
         <div class="launch-dialog-backdrop" onclick={close.clone()}>
             <div class="launch-dialog fork-dialog" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                <h2>{ "Fork session" }</h2>
-                <p class="dialog-description">
+                <h3>{ "Fork session" }</h3>
+                <p class="launch-info">
                     { format!("Create a new {} session from {}'s latest persisted turn.", props.session.agent_type, props.session.session_name) }
                 </p>
-                <label>{ "Name" }</label>
-                <input value={(*name).clone()} oninput={{ let name = name.clone(); Callback::from(move |e: InputEvent| name.set(e.target_unchecked_into::<HtmlInputElement>().value())) }} />
+                <div class="launch-field">
+                    <label>{ "Name" }</label>
+                    <input value={(*name).clone()} oninput={{ let name = name.clone(); Callback::from(move |e: InputEvent| name.set(e.target_unchecked_into::<HtmlInputElement>().value())) }} />
+                </div>
 
-                <fieldset class="fork-directory-options">
-                    <legend>{ "Working directory" }</legend>
-                    if props.session.repo_url.is_some() {
-                        <label><input type="radio" name="fork-dir" checked={*mode == ForkDirectoryMode::Worktree} onchange={set_mode(ForkDirectoryMode::Worktree)} /> { "New git worktree (recommended)" }</label>
-                    }
-                    <label><input type="radio" name="fork-dir" checked={*mode == ForkDirectoryMode::Same} onchange={set_mode(ForkDirectoryMode::Same)} /> { "Same directory" }</label>
-                    if *mode == ForkDirectoryMode::Same {
-                        <p class="warning-text">{ "Warning: both agents will share one checkout and may overwrite each other's work." }</p>
-                    }
-                    <label><input type="radio" name="fork-dir" checked={*mode == ForkDirectoryMode::Other} onchange={set_mode(ForkDirectoryMode::Other)} /> { "Other directory" }</label>
-                    if *mode == ForkDirectoryMode::Other {
-                        <input placeholder="/path/on/source/launcher" value={(*other_directory).clone()} oninput={{ let value = other_directory.clone(); Callback::from(move |e: InputEvent| value.set(e.target_unchecked_into::<HtmlInputElement>().value())) }} />
-                    }
-                </fieldset>
+                <div class="launch-field">
+                    <label>{ "Working directory" }</label>
+                    <div class="fork-directory-options">
+                        if props.session.repo_url.is_some() {
+                            <label><input type="radio" name="fork-dir" checked={*mode == ForkDirectoryMode::Worktree} onchange={set_mode(ForkDirectoryMode::Worktree)} /> { "New git worktree (recommended)" }</label>
+                        }
+                        <label><input type="radio" name="fork-dir" checked={*mode == ForkDirectoryMode::Same} onchange={set_mode(ForkDirectoryMode::Same)} /> { "Same directory" }</label>
+                        if *mode == ForkDirectoryMode::Same {
+                            <p class="launch-note launch-note-warn">{ "Warning: both agents will share one checkout and may overwrite each other's work." }</p>
+                        }
+                        <label><input type="radio" name="fork-dir" checked={*mode == ForkDirectoryMode::Other} onchange={set_mode(ForkDirectoryMode::Other)} /> { "Other directory" }</label>
+                        if *mode == ForkDirectoryMode::Other {
+                            <input placeholder="/path/on/source/launcher" value={(*other_directory).clone()} oninput={{ let value = other_directory.clone(); Callback::from(move |e: InputEvent| value.set(e.target_unchecked_into::<HtmlInputElement>().value())) }} />
+                        }
+                    </div>
+                </div>
 
-                <label>{ "Model override" }</label>
-                <ModelSelect agent_type={props.session.agent_type} value={(*model).clone()} on_change={{ let model = model.clone(); Callback::from(move |value| model.set(value)) }} />
-                <label>{ "Divergence prompt (optional)" }</label>
-                <textarea value={(*prompt).clone()} oninput={{ let prompt = prompt.clone(); Callback::from(move |e: InputEvent| prompt.set(e.target_unchecked_into::<HtmlTextAreaElement>().value())) }} />
-                if let Some(message) = &*error { <div class="error-message">{ message }</div> }
-                <div class="dialog-actions">
-                    <button type="button" onclick={close}>{ "Cancel" }</button>
-                    <button type="button" class="primary" disabled={*submitting} onclick={submit}>{ if *submitting { "Forking…" } else { "Fork session" } }</button>
+                <div class="launch-field">
+                    <label>{ "Model override" }</label>
+                    <ModelSelect agent_type={props.session.agent_type} value={(*model).clone()} on_change={{ let model = model.clone(); Callback::from(move |value| model.set(value)) }} />
+                </div>
+                <div class="launch-field">
+                    <label>{ "Divergence prompt (optional)" }</label>
+                    <textarea value={(*prompt).clone()} oninput={{ let prompt = prompt.clone(); Callback::from(move |e: InputEvent| prompt.set(e.target_unchecked_into::<HtmlTextAreaElement>().value())) }} />
+                </div>
+                if let Some(message) = &*error { <div class="launch-error">{ message }</div> }
+                <div class="launch-actions">
+                    <button type="button" class="launch-button-cancel" onclick={close}>{ "Cancel" }</button>
+                    <button type="button" class="launch-button" disabled={*submitting} onclick={submit}>{ if *submitting { "Forking…" } else { "Fork session" } }</button>
                 </div>
             </div>
         </div>

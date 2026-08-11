@@ -665,3 +665,52 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
+
+/* Fork dialog (shares the launch-dialog shell + field vocabulary). The
+   radio rows override .launch-field's block labels / full-width inputs,
+   so these rules must stay AFTER the .launch-field block above. */
+.fork-directory-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.fork-directory-options label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.fork-directory-options input[type="radio"] {
+    width: auto;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.fork-directory-options input[type="radio"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.launch-field textarea {
+    width: 100%;
+    min-height: 5rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: 'Courier New', Consolas, monospace;
+    box-sizing: border-box;
+    resize: vertical;
+}
+
+.launch-field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
