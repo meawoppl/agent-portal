@@ -1,8 +1,6 @@
 // TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use pulldown_cmark::Event;
-
 pub(super) const MATH_OPEN: char = '\u{E000}';
 pub(super) const MATH_CLOSE: char = '\u{E001}';
 
@@ -114,25 +112,74 @@ fn emit_placeholder(output: &mut String, math_blocks: &mut Vec<String>, math: &s
     output.push(MATH_CLOSE);
 }
 
-/// Walk the event stream and replace placeholders inside `Event::Text` with
-/// the original math literals so that KaTeX can find the delimiters.
-pub(super) fn restore_math_in_events<'a>(
-    events: Vec<Event<'a>>,
-    math_blocks: &[String],
-) -> Vec<Event<'a>> {
-    events
-        .into_iter()
-        .map(|e| match e {
-            Event::Text(t) => {
-                if t.contains(MATH_OPEN) {
-                    Event::Text(restore_math(&t, math_blocks).into())
-                } else {
-                    Event::Text(t)
-                }
+/// One piece of a parsed text run: literal prose, or a math region that must
+/// be typeset by KaTeX into its own element.
+pub(super) enum MathSegment {
+    Text(String),
+    Math { latex: String, display: bool },
+}
+
+/// Split a text run on math placeholders, resolving each back to its captured
+/// literal and classifying it as inline or display math.
+///
+/// The placeholders (not the restored literals) are what survive markdown
+/// parsing, which is why the split happens here at render time: it lets each
+/// math region become its own DOM element instead of loose text that a
+/// DOM-mutating auto-renderer would have to find and rewrite in place.
+pub(super) fn split_math_segments(text: &str, math_blocks: &[String]) -> Vec<MathSegment> {
+    let mut segments = Vec::new();
+    let mut buf = String::new();
+    let mut chars = text.chars();
+
+    while let Some(c) = chars.next() {
+        if c != MATH_OPEN {
+            buf.push(c);
+            continue;
+        }
+        let mut token = String::new();
+        for tc in chars.by_ref() {
+            if tc == MATH_CLOSE {
+                break;
             }
-            other => other,
-        })
-        .collect()
+            token.push(tc);
+        }
+        let resolved = token
+            .strip_prefix("MATH")
+            .and_then(|idx| idx.parse::<usize>().ok())
+            .and_then(|idx| math_blocks.get(idx))
+            .and_then(|literal| strip_math_delimiters(literal));
+        // A malformed placeholder is dropped, matching `restore_math`.
+        if let Some((latex, display)) = resolved {
+            if !buf.is_empty() {
+                segments.push(MathSegment::Text(std::mem::take(&mut buf)));
+            }
+            segments.push(MathSegment::Math { latex, display });
+        }
+    }
+
+    if !buf.is_empty() {
+        segments.push(MathSegment::Text(buf));
+    }
+    segments
+}
+
+/// Strip the delimiters off a captured literal, yielding the LaTeX source and
+/// whether it typesets in display mode. `$$` is tested before `$` so display
+/// math isn't mistaken for inline math wrapping a `$`-delimited body.
+fn strip_math_delimiters(literal: &str) -> Option<(String, bool)> {
+    for (open, close, display) in [
+        ("$$", "$$", true),
+        ("\\[", "\\]", true),
+        ("\\(", "\\)", false),
+        ("$", "$", false),
+    ] {
+        if let Some(rest) = literal.strip_prefix(open) {
+            if let Some(inner) = rest.strip_suffix(close) {
+                return Some((inner.to_string(), display));
+            }
+        }
+    }
+    None
 }
 
 pub(super) fn restore_math(text: &str, math_blocks: &[String]) -> String {

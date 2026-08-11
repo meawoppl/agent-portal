@@ -573,3 +573,12 @@
     border-top: 1px solid var(--border-color);
 }
 
+
+/* Math regions typeset by KaTeX. The element is rendered childless by Yew
+   (see markdown/math_span.rs) — KaTeX owns everything inside it, which is
+   what keeps its DOM mutations out of Yew's bundle. Display math gets a
+   block wrapper so KaTeX's own `.katex-display` margins lay out predictably
+   inside an inline context. */
+.md-math-display {
+    display: block;
+}

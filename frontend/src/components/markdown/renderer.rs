@@ -5,16 +5,18 @@ use yew::prelude::*;
 use crate::components::copy_button::copy_to_clipboard;
 
 use super::links::linkify_urls;
+use super::math::{restore_math, split_math_segments, MathSegment, MATH_OPEN};
+use super::math_span::MathSpan;
 use super::portal_file_link::PortalFileLink;
 use super::sanitizer::{classify_link_destination, sanitize_raw_html, LinkDestination};
 
 /// Convert pulldown-cmark events to Yew Html.
-pub(super) fn render_events(events: &[Event], session_id: Option<Uuid>) -> Html {
+pub(super) fn render_events(events: &[Event], session_id: Option<Uuid>, math: &[String]) -> Html {
     let mut html_parts: Vec<Html> = Vec::new();
     let mut i = 0;
 
     while i < events.len() {
-        let (html, consumed) = render_event(&events[i..], session_id);
+        let (html, consumed) = render_event(&events[i..], session_id, math);
         html_parts.push(html);
         i += consumed;
     }
@@ -24,14 +26,14 @@ pub(super) fn render_events(events: &[Event], session_id: Option<Uuid>) -> Html 
 
 /// Render a single event or a group of related events.
 /// Returns (Html, number of events consumed).
-fn render_event(events: &[Event], session_id: Option<Uuid>) -> (Html, usize) {
+fn render_event(events: &[Event], session_id: Option<Uuid>, math: &[String]) -> (Html, usize) {
     if events.is_empty() {
         return (html! {}, 0);
     }
 
     match &events[0] {
-        Event::Start(tag) => render_tag(tag, events, session_id),
-        Event::Text(text) => (linkify_urls(text), 1),
+        Event::Start(tag) => render_tag(tag, events, session_id, math),
+        Event::Text(text) => (render_text_run(text, math), 1),
         Event::Code(code) => (
             html! { <code class="md-inline-code">{ linkify_urls(code) }</code> },
             1,
@@ -47,11 +49,38 @@ fn render_event(events: &[Event], session_id: Option<Uuid>) -> (Html, usize) {
     }
 }
 
+/// Render one text run, turning any math placeholders it carries into their
+/// own [`MathSpan`] elements and linkifying the prose around them.
+///
+/// Splitting here — rather than letting a DOM-mutating auto-renderer find math
+/// in the finished DOM — is what keeps KaTeX out of Yew's nodes; see
+/// [`MathSpan`] for why that mattered.
+fn render_text_run(text: &str, math: &[String]) -> Html {
+    if !text.contains(MATH_OPEN) {
+        return linkify_urls(text);
+    }
+    let parts: Vec<Html> = split_math_segments(text, math)
+        .into_iter()
+        .map(|segment| match segment {
+            MathSegment::Text(text) => linkify_urls(&text),
+            MathSegment::Math { latex, display } => html! {
+                <MathSpan latex={latex} display={display} />
+            },
+        })
+        .collect();
+    html! { <>{ for parts }</> }
+}
+
 /// Render a tag and its contents.
-fn render_tag(tag: &Tag, events: &[Event], session_id: Option<Uuid>) -> (Html, usize) {
+fn render_tag(
+    tag: &Tag,
+    events: &[Event],
+    session_id: Option<Uuid>,
+    math: &[String],
+) -> (Html, usize) {
     let end_tag = get_end_tag(tag);
     let (inner_events, total_consumed) = collect_until_end(events, &end_tag);
-    let inner_html = render_events(&inner_events, session_id);
+    let inner_html = render_events(&inner_events, session_id, math);
 
     let html = match tag {
         Tag::Paragraph => html! { <p class="md-paragraph">{ inner_html }</p> },
@@ -109,7 +138,9 @@ fn render_tag(tag: &Tag, events: &[Event], session_id: Option<Uuid>) -> (Html, u
             dest_url, title, ..
         } => {
             let src = dest_url.to_string();
-            let alt = extract_text(&inner_events);
+            // Alt text is a plain attribute, so math can't be typeset into it —
+            // restore the literal source rather than leaking a placeholder.
+            let alt = restore_math(&extract_text(&inner_events), math);
             let title_attr = if title.is_empty() {
                 None
             } else {
@@ -117,7 +148,7 @@ fn render_tag(tag: &Tag, events: &[Event], session_id: Option<Uuid>) -> (Html, u
             };
             html! { <img src={src} alt={alt} title={title_attr} class="md-image" /> }
         }
-        Tag::Table(alignments) => render_table(&inner_events, alignments, session_id),
+        Tag::Table(alignments) => render_table(&inner_events, alignments, session_id, math),
         Tag::TableHead => html! { <thead class="md-table-head">{ inner_html }</thead> },
         Tag::TableRow => html! { <tr class="md-table-row">{ inner_html }</tr> },
         Tag::TableCell => html! { <td class="md-table-cell">{ inner_html }</td> },
@@ -259,6 +290,7 @@ fn render_table(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
     session_id: Option<Uuid>,
+    math: &[String],
 ) -> Html {
     // Tables have: TableHead (with TableRow and TableCells), then TableRows with TableCells.
     // We need to process the events to build proper thead/tbody structure.
@@ -271,14 +303,14 @@ fn render_table(
         match &events[i] {
             Event::Start(Tag::TableHead) => {
                 let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableHead);
-                let head_html = render_table_head(&inner, &alignments, session_id);
+                let head_html = render_table_head(&inner, &alignments, session_id, math);
                 parts.push(head_html);
                 i += consumed;
                 head_processed = true;
             }
             Event::Start(Tag::TableRow) if head_processed => {
                 let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableRow);
-                let row_html = render_table_row(&inner, &alignments, session_id);
+                let row_html = render_table_row(&inner, &alignments, session_id, math);
                 parts.push(row_html);
                 i += consumed;
             }
@@ -308,6 +340,7 @@ fn render_table_cells(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
     session_id: Option<Uuid>,
+    math: &[String],
     is_header: bool,
 ) -> Vec<Html> {
     let mut cells: Vec<Html> = Vec::new();
@@ -318,7 +351,7 @@ fn render_table_cells(
         match &events[i] {
             Event::Start(Tag::TableCell) => {
                 let (inner, consumed) = collect_until_end(&events[i..], &TagEnd::TableCell);
-                let inner_html = render_events(&inner, session_id);
+                let inner_html = render_events(&inner, session_id, math);
                 let align = alignments
                     .get(col)
                     .copied()
@@ -347,8 +380,9 @@ fn render_table_head(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
     session_id: Option<Uuid>,
+    math: &[String],
 ) -> Html {
-    let cells = render_table_cells(events, alignments, session_id, true);
+    let cells = render_table_cells(events, alignments, session_id, math, true);
     html! { <thead class="md-table-head"><tr class="md-table-row">{ for cells }</tr></thead> }
 }
 
@@ -357,8 +391,9 @@ fn render_table_row(
     events: &[Event],
     alignments: &[pulldown_cmark::Alignment],
     session_id: Option<Uuid>,
+    math: &[String],
 ) -> Html {
-    let cells = render_table_cells(events, alignments, session_id, false);
+    let cells = render_table_cells(events, alignments, session_id, math, false);
     html! { <tr class="md-table-row">{ for cells }</tr> }
 }
 
