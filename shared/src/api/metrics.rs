@@ -111,10 +111,10 @@ pub struct TurnMetrics {
     pub total_cost_usd: Option<f64>,
 
     /// The model's context window in tokens, when the agent reports it. Codex
-    /// sends `model_context_window` on its wire, so codex turns carry it here.
-    /// Claude does not report a window, so claude turns leave this `None` and
-    /// [`TurnMetrics::context_window`] derives a nominal size from the model id
-    /// instead. Powers the context-usage gauge.
+    /// sends `model_context_window` directly; Claude carries the CLI-resolved
+    /// value in `ResultMessage.model_usage`. Older proxies leave this `None`,
+    /// so [`TurnMetrics::context_window`] retains the model-id fallback.
+    /// Powers the context-usage gauge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_context_window: Option<i64>,
     /// Context occupancy at the end of the turn, from the LAST real assistant
