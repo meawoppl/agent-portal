@@ -12,7 +12,7 @@ shared = { path = "../shared" }
 # claude-codes types for the Input variant — even Muse sessions read user
 # input through that channel.
 claude-codes = { workspace = true, features = ["async-client"] }
-muse-codes = { workspace = true }
+muse-codes = { workspace = true, features = ["async-client"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
