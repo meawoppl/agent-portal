@@ -15,6 +15,7 @@ pub(crate) use portal_reminder::inject_portal_reminder;
 pub use wiggum::wiggum_prompt;
 pub use ws_reader::{classify_portal_input, RoutedPortalInput};
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -251,6 +252,12 @@ pub struct SessionState<'a, A: Agent> {
     pub backoff: Backoff,
     /// Whether this is the first connection attempt
     pub first_connection: bool,
+    /// Whether the portal-features reminder still needs to ride along with the
+    /// next user input. Lives here, not on `ConnectionState`, because it is
+    /// scoped to the agent PROCESS: a WS reconnect must not re-send it, but a
+    /// respawned agent must get it again. Shared with the per-connection state
+    /// so the input arms can clear it without a write-back.
+    pub reminder_pending: Arc<AtomicBool>,
     /// When the last disconnect occurred (for reporting reconnect duration)
     pub disconnected_at: Option<Instant>,
     /// Wall-clock UTC paired with `disconnected_at` for the reconnect text
@@ -279,6 +286,7 @@ impl<'a, A: Agent> SessionState<'a, A> {
             output_buffer,
             backoff: Backoff::new(),
             first_connection: true,
+            reminder_pending: Arc::new(AtomicBool::new(true)),
             disconnected_at: None,
             disconnected_at_utc: None,
             last_disconnect_graceful: false,
@@ -351,6 +359,8 @@ struct ConnectionState {
     working_directory: String,
     /// Active file uploads being received in chunks
     active_uploads: std::collections::HashMap<String, FileReceiveState>,
+    /// Shared with `SessionState` — see the field there.
+    reminder_pending: Arc<AtomicBool>,
     /// Agent type for tagging per-message wire output (proxy emission side)
     agent_type: shared::AgentType,
     /// Shared git metadata state for branch / PR / repo refreshes.
@@ -878,6 +888,7 @@ async fn run_message_loop<A: Agent>(
         file_download_rx,
         working_directory: config.working_directory.clone(),
         active_uploads: std::collections::HashMap::new(),
+        reminder_pending: session.reminder_pending.clone(),
         agent_type: config.agent_type,
         git_metadata,
         git_refresh: GitRefreshTrigger::default(),
@@ -1000,6 +1011,7 @@ async fn run_main_loop<A: Agent>(
                     state.session_id,
                     &state.working_directory,
                     &state.git_metadata,
+                    &state.reminder_pending,
                     claude_session,
                     input,
                 )
@@ -1017,6 +1029,7 @@ async fn run_main_loop<A: Agent>(
                     &state.working_directory,
                     &state.git_metadata,
                     &mut state.wiggum_state,
+                    &state.reminder_pending,
                     &state.output_buffer,
                     state.agent_type,
                     claude_session,
