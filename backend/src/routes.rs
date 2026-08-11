@@ -328,6 +328,14 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/settings/profile",
             put(handlers::profile::update_profile),
         )
+        .route(
+            "/api/settings/identities",
+            get(handlers::identities::list_identities),
+        )
+        .route(
+            "/api/settings/identities/{id}",
+            axum::routing::delete(handlers::identities::unlink_identity),
+        )
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
         .route(AUTH_TOKEN_LOGIN, post(handlers::auth::token_login))
@@ -358,6 +366,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(handlers::launchers::list_directories),
         )
         .route("/api/launch", post(handlers::launchers::launch_session))
+        .route(
+            "/api/sessions/{session_id}/fork",
+            post(handlers::launchers::fork_session),
+        )
         .route(
             "/api/launchers/{launcher_id}/update",
             post(handlers::launchers::update_launcher),

@@ -28,6 +28,35 @@ pub struct LaunchRequest {
     pub create_worktree: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForkDirectoryMode {
+    Worktree,
+    Same,
+    Other,
+}
+
+/// Request body for `POST /api/sessions/:id/fork`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForkSessionRequest {
+    pub name: String,
+    pub directory_mode: ForkDirectoryMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub divergence_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_point_turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForkSessionResponse {
+    pub request_id: uuid::Uuid,
+    pub session_id: uuid::Uuid,
+}
+
 /// Response from GET /api/launchers/:launcher_id/directories?path=…
 ///
 /// Envelope around the already-shared `DirectoryEntry` payload type.

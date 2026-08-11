@@ -10,7 +10,8 @@
 
 use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
 use crate::components::{
-    group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroupRenderer,
+    group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
+    MessageGroupRenderer,
 };
 use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
@@ -188,6 +189,8 @@ pub enum SessionViewMsg {
     TurnMetricsReceived(Box<TurnMetrics>),
     ScheduleLimitContinuation(Uuid),
     ContinuationStatus(Uuid, String),
+    ShowForkDialog,
+    HideForkDialog,
 }
 
 /// SessionView - Main terminal view for a single session
@@ -276,6 +279,7 @@ pub struct SessionView {
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
+    show_fork_dialog: bool,
 }
 
 impl Component for SessionView {
@@ -355,6 +359,7 @@ impl Component for SessionView {
             ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
+            show_fork_dialog: false,
         }
     }
 
@@ -412,6 +417,14 @@ impl Component for SessionView {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
+            SessionViewMsg::ShowForkDialog => {
+                self.show_fork_dialog = true;
+                true
+            }
+            SessionViewMsg::HideForkDialog => {
+                self.show_fork_dialog = false;
+                true
+            }
             SessionViewMsg::LoadHistory(messages, last_timestamp) => {
                 self.handle_load_history(ctx, messages, last_timestamp);
                 true
@@ -688,9 +701,29 @@ impl Component for SessionView {
                         refresh={self.forwards_refresh}
                     />
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
+                    if ctx.props().session.my_role == shared::SessionRole::Owner
+                        && ctx.props().session.launcher_id.is_some()
+                        && ctx.props().session.agent_type != shared::AgentType::Muse
+                    {
+                        <button
+                            type="button"
+                            class="session-header-action"
+                            onclick={ctx.link().callback(|_| SessionViewMsg::ShowForkDialog)}
+                        >{ "Fork…" }</button>
+                    }
                 </div>
                 <div class="session-view-scroll-area">
                     <div class="session-view-messages" ref={self.messages_ref.clone()}>
+                        if let Some(source_id) = ctx.props().session.forked_from_session_id {
+                            <div class="fork-lineage-card">
+                                { "Forked from " }
+                                <a href={format!("/dashboard?session={source_id}")}>{ &source_id.to_string()[..8] }</a>
+                                if let Some(point) = &ctx.props().session.fork_point_turn_id {
+                                    <span>{ format!(" · turn {point}") }</span>
+                                }
+                                <span>{ " · shared agent history remains on the source launcher" }</span>
+                            </div>
+                        }
                         {
                             groups.into_iter().enumerate().map(|(i, group)| {
                                 let key = group.key(i);
@@ -730,6 +763,12 @@ impl Component for SessionView {
 
                 { self.render_permission_handler(ctx) }
                 { self.render_input_bar(ctx) }
+                if self.show_fork_dialog {
+                    <ForkDialog
+                        session={ctx.props().session.clone()}
+                        on_close={ctx.link().callback(|_| SessionViewMsg::HideForkDialog)}
+                    />
+                }
             </div>
         }
     }

@@ -296,15 +296,21 @@ pub(super) fn classify(
                 });
             }
             if user_is_plain_text(&msg) {
-                // A claude-echoed inter-agent message (`[message from …]`) that
-                // carries no provenance metadata (the codex→claude case) must
+                // A claude-echoed inter-agent message (`[message from …]`) must
                 // render as its own "Message from …" card, not merge into the
                 // "You" group and show its raw `[message from …]` / system-
                 // reminder wrapper. Returning `None` renders it as a `Single`,
-                // where the single-card path detects and cards it. (Source-
-                // tagged agent messages already route through `source_identity`
-                // above.)
-                if source.is_none() && user_message_is_inter_agent(&msg) {
+                // where the single-card path detects and cards it.
+                //
+                // Deliberately NOT gated on `source.is_none()`: the backend
+                // stamps every role="user" row with `meta.source = User(owner)`
+                // — including claude's echo of an injected inter-agent message
+                // — so a source-gated check silently skips exactly the
+                // claude→claude case. (Codex echoes only dodged this because
+                // their `user_echo` wire type maps to role "unknown" and never
+                // gets a source.) If the text parses as an inter-agent wrapper,
+                // the raw form is never the right render, whatever the source.
+                if user_message_is_inter_agent(&msg) {
                     return None;
                 }
                 return Some(source.map_or_else(
@@ -319,13 +325,13 @@ pub(super) fn classify(
         }
         AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
             // A synthetic user echo carrying an inter-agent `[message from …]`
-            // payload with no provenance metadata must render as its own
-            // provenance card, not fold into the "You" group and expose its raw
-            // wrapper — mirroring the `ClaudeMessage::User` arm above. This shape
-            // is how Codex's `UserEchoEvent` (top-level `content` string, no
-            // `session_id`) and older proxies' echoes parse, so the `User`-arm
-            // detection alone missed them.
-            if source.is_none() && optimistic_user_is_inter_agent(&msg) {
+            // payload must render as its own provenance card, not fold into
+            // the "You" group and expose its raw wrapper — mirroring the
+            // `ClaudeMessage::User` arm above (including its ungated source
+            // rationale). This shape is how Codex's `UserEchoEvent` (top-level
+            // `content` string, no `session_id`) and older proxies' echoes
+            // parse, so the `User`-arm detection alone missed them.
+            if optimistic_user_is_inter_agent(&msg) {
                 return None;
             }
             return Some(source.map_or_else(

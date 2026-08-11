@@ -226,6 +226,10 @@ diesel::table! {
         last_model -> Nullable<Varchar>,
         #[max_length = 32]
         launcher_version -> Nullable<Varchar>,
+        forked_from_session_id -> Nullable<Uuid>,
+        fork_point_turn_id -> Nullable<Text>,
+        fork_launch_pending -> Bool,
+        fork_create_worktree -> Bool,
     }
 }
 

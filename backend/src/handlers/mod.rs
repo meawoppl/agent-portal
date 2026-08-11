@@ -10,6 +10,7 @@ pub mod forward_proxy;
 pub mod forwards;
 pub mod helpers;
 pub mod history;
+pub mod identities;
 pub mod images;
 pub mod launchers;
 pub mod media_archive;

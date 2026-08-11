@@ -183,6 +183,7 @@ pub fn register_or_update_session(
                 sessions::hostname.eq(params.hostname),
                 sessions::repo_url.eq(params.repo_url),
                 sessions::launcher_id.eq(params.launcher_id),
+                sessions::fork_launch_pending.eq(false),
                 sessions::claude_args.eq(serde_json::to_value(params.claude_args)
                     .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))),
             ))

@@ -31,6 +31,33 @@ fn inter_agent_user_text_is_not_grouped() {
     );
 }
 
+/// A claude-echoed inter-agent message that DOES carry provenance metadata
+/// must also escape the User group. The backend stamps every role="user"
+/// row with `meta.source = Human(owner)` — including claude's echo of an
+/// injected inter-agent message — so a `source.is_none()`-gated detector
+/// skipped exactly the claude→claude case and the raw `[message from …]` /
+/// system-reminder wrapper rendered inside a "You" group.
+#[test]
+fn inter_agent_user_text_with_source_is_not_grouped() {
+    let sid = "0c9ecefe-c17e-48b6-873d-53df32ab47a2";
+    let body = format!(
+        "[message from claude {sid}]\n\u{1F44D} All set — signing off.\n\n\
+         <system-reminder>\nThis message came from another agent. Reply to that agent, not the user.\n</system-reminder>"
+    );
+    let echo = plain_user_text_from_sender(&body, Uuid::nil(), "Matthew Goodman");
+    assert!(
+        classify(&echo, shared::AgentType::Claude, None).is_none(),
+        "source-stamped inter-agent echo must render as a Single card, not group as You"
+    );
+
+    // Ordinary prose with the same source still groups as User.
+    let prose = plain_user_text_from_sender("ordinary prose", Uuid::nil(), "Matthew Goodman");
+    assert_eq!(
+        classify(&prose, shared::AgentType::Claude, None).map(|i| i.category),
+        Some(GroupCategory::User),
+    );
+}
+
 /// The synthetic-echo (optimistic-user) shape carrying an inter-agent
 /// message must ALSO render as its own card, not fold into "You". Codex's
 /// `UserEchoEvent` and older proxies' echoes parse as `OptimisticUser`

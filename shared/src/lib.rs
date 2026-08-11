@@ -25,6 +25,9 @@ pub const BUILD_TIME: &str = env!("PORTAL_BUILD_TIME");
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::LaunchSession.create_worktree`.
 pub const LAUNCHER_CAPABILITY_CREATE_WORKTREE: &str = "launch.create_worktree";
+/// Launcher capability advertised by versions that can resolve local agent
+/// state and fork a session on the source host.
+pub const LAUNCHER_CAPABILITY_FORK_SESSION: &str = "launch.fork_session";
 
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::Restart` (restart the process without updating the binary).
@@ -628,6 +631,14 @@ pub struct SessionInfo {
     /// keeps older proxies/clients wire-compatible.
     #[serde(default)]
     pub last_model: Option<String>,
+    /// Source portal session for a fork. The agent history remains local to the
+    /// source launcher; this link provides durable portal-side provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from_session_id: Option<Uuid>,
+    /// Agent-native turn id used as the fork point (Codex only). `None` means
+    /// the latest persisted turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_point_turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
