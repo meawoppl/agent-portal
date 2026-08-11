@@ -1,6 +1,24 @@
 //! Settings API request/response types.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// One external login attached to the current portal account (#1535).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedIdentity {
+    pub id: Uuid,
+    pub provider: String,
+    pub email: Option<String>,
+    /// ISO-8601 timestamp; kept as a string so the settings wire type stays
+    /// equally cheap on native and WASM targets.
+    pub linked_at: String,
+}
+
+/// Response for `GET /api/settings/identities`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedIdentitiesResponse {
+    pub identities: Vec<LinkedIdentity>,
+}
 
 /// Response for GET /api/settings/sound
 #[derive(Debug, Clone, Serialize, Deserialize)]
