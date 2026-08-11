@@ -229,7 +229,12 @@ pub(crate) fn agent_message_event_from_agent_facing_text(text: &str) -> Option<A
         return None;
     }
 
-    let text = strip_agent_message_reminder(body).trim_end().to_string();
+    // The reminder bumper is deliberately NOT stripped here any more: it flows
+    // through `MarkdownView`, which collapses `<system-reminder>` blocks into a
+    // clickable bar. Dropping it hid the "reply to that agent" instruction the
+    // recipient was acting on, which made inter-agent behavior hard to explain
+    // from the transcript alone.
+    let text = body.trim_end().to_string();
     if text.is_empty() {
         return None;
     }
@@ -239,13 +244,6 @@ pub(crate) fn agent_message_event_from_agent_facing_text(text: &str) -> Option<A
         from_session_id,
         text,
     })
-}
-
-fn strip_agent_message_reminder(body: &str) -> &str {
-    body.split_once("\n\n<system-reminder>")
-        .or_else(|| body.split_once("\n<system-reminder>"))
-        .map(|(message, _)| message)
-        .unwrap_or(body)
 }
 
 pub(crate) fn render_agent_message_event(
@@ -445,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_message_event_from_agent_facing_text_strips_reminder() {
+    fn agent_message_event_from_agent_facing_text_keeps_reminder_for_the_bar() {
         let event = agent_message_event_from_agent_facing_text(
             "[message from codex e2d342f5-68c6-4134-a5d8-63cb4afcee9e]\n\
 Will do.\n\n\
@@ -460,7 +458,11 @@ This message came from another agent.\n\
             event.from_session_id,
             "e2d342f5-68c6-4134-a5d8-63cb4afcee9e"
         );
-        assert_eq!(event.text, "Will do.");
+        // The bumper is retained, not stripped: `MarkdownView` collapses it
+        // into a clickable system-reminder bar, so keeping it preserves the
+        // instruction the recipient acted on instead of hiding it.
+        assert!(event.text.starts_with("Will do."));
+        assert!(event.text.contains("<system-reminder>"));
     }
 
     #[test]

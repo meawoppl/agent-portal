@@ -1776,3 +1776,17 @@
     font-size: 0.7rem;
     color: var(--text-muted);
 }
+
+/* `<system-reminder>` blocks lifted out of any agent's message text (see
+   markdown/system_reminder.rs). It reuses `.portal-reminder*` for the bar
+   itself so every collapsed notice in the transcript reads as one family;
+   only the body differs, because reminder text is machine-authored and holds
+   literal paths, tags and commands that want a monospace, pre-wrapped face
+   rather than prose treatment. */
+.system-reminder-body {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}

@@ -14,10 +14,12 @@ mod parser;
 mod portal_file_link;
 mod renderer;
 mod sanitizer;
+mod system_reminder;
 
 pub use links::linkify_urls;
 use parser::parse_markdown_events;
 use renderer::render_events;
+use system_reminder::{has_system_reminder, split_system_reminders, Segment, SystemReminderBar};
 
 #[cfg(test)]
 use links::{find_next_url, is_valid_url};
@@ -56,13 +58,35 @@ struct MarkdownViewProps {
 
 #[function_component(MarkdownView)]
 fn markdown_view(props: &MarkdownViewProps) -> Html {
+    // `<system-reminder>` blocks collapse into a clickable bar. Doing it here
+    // rather than in each agent's renderer is the point: every session type's
+    // text already flows through this component, so claude, codex and muse all
+    // get the same treatment from one place.
+    if has_system_reminder(&props.text) {
+        let parts: Vec<Html> = split_system_reminders(&props.text)
+            .into_iter()
+            .map(|segment| match segment {
+                Segment::Text(text) => render_markdown_body(&text, props.session_id),
+                Segment::Reminder(body) => html! {
+                    <SystemReminderBar body={body} />
+                },
+            })
+            .collect();
+        return html! { <span>{ for parts }</span> };
+    }
+
+    render_markdown_body(&props.text, props.session_id)
+}
+
+/// Render one run of ordinary markdown prose (no reminder blocks).
+fn render_markdown_body(text: &str, session_id: Option<Uuid>) -> Html {
     // Math is typeset per-region by `MathSpan`, not by walking this subtree
     // after render: KaTeX mutates the DOM, and pointing it at nodes Yew owns
     // corrupted Yew's bundle and panicked the app on the next re-render.
-    let (events, math) = parse_markdown_events(&props.text);
+    let (events, math) = parse_markdown_events(text);
 
     html! {
-        <span>{ render_events(&events, props.session_id, &math) }</span>
+        <span>{ render_events(&events, session_id, &math) }</span>
     }
 }
 
