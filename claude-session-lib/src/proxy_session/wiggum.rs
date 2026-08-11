@@ -89,6 +89,7 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
     working_directory: &str,
     git_metadata: &GitMetadataState,
     wiggum_state: &mut Option<WiggumState>,
+    reminder_pending: &std::sync::atomic::AtomicBool,
     output_buffer: &Arc<Mutex<PendingOutputBuffer>>,
     agent_type: AgentType,
     claude_session: &mut Session<A>,
@@ -133,8 +134,27 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
     )
     .await;
     let original_prompt = wiggum_input.text.clone();
-    let prompt = wiggum_prompt(&original_prompt);
-    let display_event = claude_user_echo_value(original_prompt.clone(), session_id);
+    // Wiggum is the other way a user input reaches the agent, so it claims the
+    // session-start reminder too (see `fold_session_start_reminder`). The
+    // display event is already the user's own prompt, so it survives.
+    let (prompt, display_event) = {
+        let framed = wiggum_prompt(&original_prompt);
+        let display = claude_user_echo_value(original_prompt.clone(), session_id);
+        if reminder_pending.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let (text, display) = super::portal_reminder::fold_session_start_reminder(
+                framed,
+                Some(display),
+                session_id,
+            );
+            (
+                text,
+                display
+                    .unwrap_or_else(|| claude_user_echo_value(original_prompt.clone(), session_id)),
+            )
+        } else {
+            (framed, display)
+        }
+    };
     *wiggum_state = Some(WiggumState {
         original_prompt,
         iteration: 1,

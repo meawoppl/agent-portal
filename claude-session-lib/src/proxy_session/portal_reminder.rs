@@ -62,6 +62,36 @@ fn agent_facing(body: &str) -> String {
     )
 }
 
+/// Fold the reminder into the session's **first** user input rather than
+/// sending it as an input of its own.
+///
+/// Injecting it standalone at session start would make the agent answer it:
+/// every agent here treats an input as a turn (muse literally spawns a `muse
+/// exec` run per input), so the user would get a reply to a message they never
+/// sent, before they had said anything. Riding along on the first real input
+/// costs no extra turn and reaches every agent type through the one funnel
+/// they all share ([`handle_input`](super::input_delivery::handle_input)).
+///
+/// Returns the agent-facing text plus the display event that must accompany
+/// it. The display event is essential, not cosmetic: the prefixed text now
+/// starts with `<system-reminder>`, and both the claude and codex echo paths
+/// suppress synthesized echoes for exactly that prefix — without an explicit
+/// display event the user's own message would vanish from the transcript.
+pub(super) fn fold_session_start_reminder(
+    text: String,
+    display_event: Option<serde_json::Value>,
+    session_id: uuid::Uuid,
+) -> (String, Option<serde_json::Value>) {
+    let display_event = display_event.or_else(|| {
+        Some(crate::io_task::claude_user_echo_value(
+            text.clone(),
+            session_id,
+        ))
+    });
+    let prefixed = format!("{}\n\n{}", agent_facing(&load_reminder_body()), text);
+    (prefixed, display_event)
+}
+
 /// Inject the reminder into the agent's stdin only. The user-bound copy was
 /// removed (#692): it bloated the scrollback for content the user already
 /// knew, and the agent-side reminder is the part that actually does work
@@ -76,5 +106,61 @@ pub async fn inject_portal_reminder<A: Agent>(claude_session: &mut Session<A>) {
         .await
     {
         error!("Failed to inject portal reminder into agent stdin: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    /// The agent must receive the reminder AND the user's words, in that
+    /// order, from a single input — the point of folding rather than sending
+    /// the reminder as a turn of its own.
+    #[test]
+    fn fold_prefixes_the_reminder_and_keeps_the_prompt() {
+        let (text, _) = fold_session_start_reminder("do the thing".to_string(), None, Uuid::nil());
+
+        assert!(text.starts_with("<system-reminder>"));
+        assert!(text.contains("Agent Portal version"));
+        assert!(text.ends_with("do the thing"));
+        // The reminder body itself came along, not just the envelope.
+        assert!(text.contains("agent-portal show"));
+    }
+
+    /// Regression guard for the transcript: the folded text starts with
+    /// `<system-reminder>`, which both the claude and codex echo paths use as
+    /// their "suppress the synthesized echo" signal. Without a display event
+    /// carrying the user's own words, their message would silently vanish.
+    #[test]
+    fn fold_supplies_a_display_event_so_the_user_message_still_renders() {
+        let (_, display) =
+            fold_session_start_reminder("hello agent".to_string(), None, Uuid::nil());
+
+        let display = display.expect("a display event is required, not optional");
+        assert_eq!(display["type"], "user");
+        assert!(
+            display.to_string().contains("hello agent"),
+            "display event must echo the user's text, got {display}"
+        );
+        assert!(
+            !display.to_string().contains("system-reminder"),
+            "the reminder must not leak into the transcript: {display}"
+        );
+    }
+
+    /// An input that already has a display event (an inter-agent message card)
+    /// keeps it — folding must not overwrite provenance with a plain echo.
+    #[test]
+    fn fold_preserves_an_existing_display_event() {
+        let provenance = serde_json::json!({"type": "portal", "content": [{"agent": "codex"}]});
+        let (text, display) = fold_session_start_reminder(
+            "relayed".to_string(),
+            Some(provenance.clone()),
+            Uuid::nil(),
+        );
+
+        assert_eq!(display, Some(provenance));
+        assert!(text.ends_with("relayed"));
     }
 }

@@ -7,6 +7,8 @@
 //! the connection loop. Display-event echo synthesis now lives in the agent
 //! I/O task so it enters the replay buffer before proxy forwarding.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 use uuid::Uuid;
@@ -27,6 +29,7 @@ pub(super) async fn handle_input<A: Agent>(
     session_id: Uuid,
     working_directory: &str,
     git_metadata: &GitMetadataState,
+    reminder_pending: &AtomicBool,
     claude_session: &mut Session<A>,
     input: PortalInput,
 ) -> Option<ConnectionResult> {
@@ -40,6 +43,19 @@ pub(super) async fn handle_input<A: Agent>(
 
     debug!("sending to agent process: {}", truncate(&input.text, 100));
 
+    // First input of this agent process carries the portal-features reminder.
+    // `swap` makes the claim atomic, so a burst of queued inputs prefixes
+    // exactly one of them.
+    let (text, display_event) = if reminder_pending.swap(false, Ordering::SeqCst) {
+        super::portal_reminder::fold_session_start_reminder(
+            input.text,
+            input.display_event,
+            session_id,
+        )
+    } else {
+        (input.text, input.display_event)
+    };
+
     // Delivery stage: the proxy has the input and is about to hand it to the
     // agent (#939).
     emit_input_progress(
@@ -51,7 +67,7 @@ pub(super) async fn handle_input<A: Agent>(
     .await;
 
     let delivered = match claude_session
-        .enqueue_input_with_display(serde_json::Value::String(input.text), input.display_event)
+        .enqueue_input_with_display(serde_json::Value::String(text), display_event)
     {
         Ok(delivered) => delivered,
         Err(e) => {

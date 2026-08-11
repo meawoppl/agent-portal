@@ -928,7 +928,13 @@ fn emit_user_input_display(
     display_event: Option<Box<serde_json::Value>>,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) {
-    if prompt.starts_with("<system-reminder>") {
+    // Order matters: an explicit display event wins over the reminder-prefix
+    // suppression below. The session-start reminder rides along on the FIRST
+    // user input (see claude-session-lib's `fold_session_start_reminder`), so
+    // that prompt both starts with `<system-reminder>` and carries the user's
+    // own words as its display event — suppressing it here would delete the
+    // user's message from the transcript.
+    if display_event.is_none() && prompt.starts_with("<system-reminder>") {
         return;
     }
     match display_event {
