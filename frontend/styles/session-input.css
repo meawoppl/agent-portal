@@ -498,6 +498,67 @@
     transition: width 1.5s ease;
 }
 
+/* Secure drop bar — mirrors upload-bar but for secret-safe composer drops */
+.drop-bar {
+    padding: 6px 12px;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    max-height: 120px;
+    opacity: 1;
+    overflow: hidden;
+    transition: max-height 0.35s ease, opacity 0.35s ease, padding 0.35s ease;
+}
+
+.drop-bar.departing {
+    max-height: 0;
+    opacity: 0;
+    padding: 0 12px;
+}
+
+.drop-bar-header {
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 2px;
+}
+
+.drop-bar.success .drop-bar-header {
+    color: var(--accent);
+}
+
+.drop-bar.error .drop-bar-header {
+    color: #f7768e;
+}
+
+.drop-bar-detail {
+    padding-left: 8px;
+    line-height: 1.4;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.drop-bar-error {
+    padding-left: 8px;
+    line-height: 1.4;
+    color: #f7768e;
+}
+
+.drop-bar-track {
+    margin-top: 4px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.drop-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 1.5s ease;
+}
+
 /* Drop hint — shown as subtle static label, prominent on drag-hover */
 .session-view-input .drop-hint {
     position: absolute;

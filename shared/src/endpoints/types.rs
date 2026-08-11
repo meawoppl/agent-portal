@@ -192,6 +192,18 @@ pub struct PermissionResponseFields {
     pub reason: Option<String>,
 }
 
+/// Disposition of a file upload start — normal working-directory upload vs
+/// secret-safe drop (composer buffer delivered as a 0600 temp file, never
+/// persisted/broadcast/archived). Wire-compatible: absent defaults to
+/// `Upload` (existing clients/proxies).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FileUploadDisposition {
+    #[default]
+    Upload,
+    Drop,
+}
+
 /// Fields for starting a file upload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileUploadStartFields {
@@ -201,6 +213,18 @@ pub struct FileUploadStartFields {
     pub total_chunks: u32,
     #[serde(default)]
     pub total_size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<FileUploadDisposition>,
+}
+
+impl FileUploadStartFields {
+    pub fn disposition_or_default(&self) -> FileUploadDisposition {
+        self.disposition.unwrap_or_default()
+    }
+
+    pub fn is_drop(&self) -> bool {
+        self.disposition_or_default() == FileUploadDisposition::Drop
+    }
 }
 
 /// Fields for a single file upload chunk.

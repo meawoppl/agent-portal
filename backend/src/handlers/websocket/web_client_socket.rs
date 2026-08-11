@@ -1,6 +1,8 @@
 use super::permissions::{handle_permission_response, replay_pending_permission};
 use super::replay::replay_history;
-use super::uploads::{handle_file_upload_chunk, handle_file_upload_start, PendingUpload};
+use super::uploads::{
+    handle_file_upload_chunk, handle_file_upload_start_with_disposition, PendingUpload,
+};
 use super::{SessionId, SessionManager, WebClientSender};
 use crate::handlers::session_access::is_session_mutator;
 use crate::AppState;
@@ -199,6 +201,7 @@ fn handle_web_client_message(
             content_type,
             total_chunks,
             total_size,
+            disposition,
         }) => {
             // File uploads end up as `ClaudeInput` on the proxy side — they're
             // mutations too, gate them on editor/owner role.
@@ -211,7 +214,7 @@ fn handle_web_client_message(
                     return false;
                 }
             }
-            handle_file_upload_start(
+            handle_file_upload_start_with_disposition(
                 session_manager,
                 session_key,
                 tx,
@@ -222,6 +225,8 @@ fn handle_web_client_message(
                 total_chunks,
                 total_size,
                 app_state.max_image_mb,
+                app_state.max_drop_kb,
+                disposition,
             );
             false
         }
