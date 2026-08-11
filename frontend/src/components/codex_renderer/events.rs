@@ -249,7 +249,7 @@ impl CodexUsage {
     }
 
     pub(super) fn thread_total_tokens(&self) -> Option<u64> {
-        self.total.as_ref().and_then(|u| u.total_tokens)
+        self.total.as_ref().and_then(|usage| usage.total_tokens)
     }
 }
 

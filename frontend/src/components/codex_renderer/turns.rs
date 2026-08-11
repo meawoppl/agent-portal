@@ -2,6 +2,21 @@ use super::events::{CodexError, CodexUsage};
 use shared::fmt::format_duration;
 use yew::prelude::*;
 
+fn context_snapshot(
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    context_window: Option<u64>,
+) -> Option<(u64, u64)> {
+    // Codex reports uncached and cached prompt tokens as disjoint buckets
+    // (the same convention used by CodexUsage::total_tokens). Both occupy the
+    // active context window, so omitting cache hits badly understates normal,
+    // cache-heavy turns.
+    let occupied = input_tokens.saturating_add(cached_input_tokens);
+    (occupied > 0)
+        .then_some(occupied)
+        .zip(context_window.filter(|window| *window > 0))
+}
+
 pub(super) fn render_turn_completed(
     usage: Option<&CodexUsage>,
     duration_ms: Option<u64>,
@@ -16,16 +31,20 @@ pub(super) fn render_turn_completed(
     let total = usage.map(CodexUsage::total_tokens).unwrap_or(0);
     let thread_total = usage.and_then(CodexUsage::thread_total_tokens);
     let context_window = usage.and_then(|u| u.model_context_window);
+    let context_snapshot = context_snapshot(input, cached, context_window);
 
     let mut tooltip = format!(
         "Input: {} | Output: {} | Cached: {} | Reasoning: {} | Total: {}",
         input, output, cached, reasoning, total
     );
+    if let Some((context_tokens, context_window)) = context_snapshot {
+        tooltip.push_str(&format!(
+            " | Context snapshot: {} / {}",
+            context_tokens, context_window
+        ));
+    }
     if let Some(thread_total) = thread_total {
         tooltip.push_str(&format!(" | Thread total: {}", thread_total));
-    }
-    if let Some(context_window) = context_window {
-        tooltip.push_str(&format!(" | Context window: {}", context_window));
     }
     let status_title = turn_id.unwrap_or("Codex turn").to_string();
 
@@ -81,10 +100,10 @@ pub(super) fn render_turn_completed(
                     }
                 }
                 {
-                    if let (Some(thread_total), Some(context_window)) = (thread_total, context_window) {
+                    if let Some((context_tokens, context_window)) = context_snapshot {
                         html! {
-                            <span class="stat-item turns" title="Thread tokens / model context window">
-                                { format!("{} / {} ctx", thread_total, context_window) }
+                            <span class="stat-item turns" title="Current context tokens / model context window">
+                                { format!("{} / {} ctx", context_tokens, context_window) }
                             </span>
                         }
                     } else {
@@ -137,5 +156,20 @@ pub(super) fn render_turn_failed(
             </div>
             { metrics_footer }
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::context_snapshot;
+
+    #[test]
+    fn context_display_uses_current_snapshot_not_lifetime_total() {
+        assert_eq!(
+            context_snapshot(72_000, 18_000, Some(200_000)),
+            Some((90_000, 200_000))
+        );
+        assert_eq!(context_snapshot(0, 0, Some(200_000)), None);
+        assert_eq!(context_snapshot(72_000, 18_000, None), None);
     }
 }

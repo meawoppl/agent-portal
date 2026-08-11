@@ -53,6 +53,26 @@ const SESSION_LIMIT_TEXT: &str = "You've hit your session limit";
 const SESSION_LIMIT_CONTINUE_PROMPT: &str =
     "Continue from where you stopped before the Claude session limit was reached.";
 
+fn reported_model_context_window(
+    entries: Option<&std::collections::BTreeMap<String, claude_codes::io::ModelUsageEntry>>,
+    model: Option<&str>,
+) -> Option<i64> {
+    let model = model?;
+    let entries = entries?;
+    entries
+        .get(model)
+        .or_else(|| {
+            entries
+                .iter()
+                .find_map(|(name, entry)| name.eq_ignore_ascii_case(model).then_some(entry))
+        })
+        .and_then(|entry| {
+            i64::try_from(entry.context_window)
+                .ok()
+                .filter(|window| *window > 0)
+        })
+}
+
 #[derive(Debug)]
 struct EchoDropMarker {
     expected_text: String,
@@ -637,6 +657,17 @@ pub(crate) async fn claude_io_task(
                             state.clear_stale_echo_markers();
                             let usage = r.usage.as_ref();
                             let model = current_model.clone();
+                            // `model_usage` is the CLI-resolved, provider-aware
+                            // source of truth for the window that actually
+                            // served this turn. Prefer it over the backend's
+                            // model-name approximation: it captures native-1M
+                            // capability, beta entitlement, and proxy-host
+                            // environment resolution without duplicating the
+                            // CLI's private capability table (#1529/#1533).
+                            let model_context_window = reported_model_context_window(
+                                r.model_usage.as_ref(),
+                                model.as_deref(),
+                            );
                             let outcome = TurnOutcome {
                                 agent_type: shared::AgentType::Claude,
                                 model,
@@ -671,10 +702,7 @@ pub(crate) async fn claude_io_task(
                                 stop_reason: r.stop_reason.clone(),
                                 is_error: r.is_error,
                                 total_cost_usd: Some(r.total_cost_usd),
-                                // Claude's stream-json carries no window size;
-                                // `TurnMetrics::context_window` derives it from
-                                // the model id instead.
-                                model_context_window: None,
+                                model_context_window,
                             };
                             if let Some(metrics) = turn_tracker.finalize(
                                 Instant::now(),
@@ -1228,6 +1256,48 @@ mod tests {
         let usage = asst.message.usage.as_ref().expect("usage");
         // 10 + 2 + 3 = 15; the output token is deliberately not counted.
         assert_eq!(context_snapshot_tokens(usage), 15);
+    }
+
+    #[test]
+    fn reported_window_uses_cli_resolved_model_usage() {
+        let mut entries = std::collections::BTreeMap::new();
+        entries.insert(
+            "claude-opus-4-8".to_string(),
+            claude_codes::io::ModelUsageEntry {
+                context_window: 1_000_000,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            reported_model_context_window(Some(&entries), Some("claude-opus-4-8")),
+            Some(1_000_000)
+        );
+        // Model identifiers originate at different frames; tolerate casing
+        // drift without guessing between genuinely different model keys.
+        assert_eq!(
+            reported_model_context_window(Some(&entries), Some("CLAUDE-OPUS-4-8")),
+            Some(1_000_000)
+        );
+    }
+
+    #[test]
+    fn reported_window_rejects_missing_or_zero_values() {
+        let mut entries = std::collections::BTreeMap::new();
+        entries.insert(
+            "claude-sonnet-4-6".to_string(),
+            claude_codes::io::ModelUsageEntry::default(),
+        );
+
+        assert_eq!(
+            reported_model_context_window(Some(&entries), Some("claude-sonnet-4-6")),
+            None
+        );
+        assert_eq!(
+            reported_model_context_window(Some(&entries), Some("claude-opus-4-8")),
+            None
+        );
+        assert_eq!(reported_model_context_window(Some(&entries), None), None);
     }
 
     /// CLI-injected frames must never anchor context: the synthetic model, and
