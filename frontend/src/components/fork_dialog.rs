@@ -6,7 +6,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
-use crate::components::ModelSelect;
+use crate::components::{FloatingPane, ModelSelect};
 
 #[derive(Properties, PartialEq)]
 pub struct ForkDialogProps {
@@ -126,8 +126,11 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
     };
 
     html! {
-        <div class="launch-dialog-backdrop" onclick={close.clone()}>
-            <div class="launch-dialog fork-dialog" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+        <FloatingPane
+            overlay_class="launch-dialog-backdrop"
+            pane_class="launch-dialog fork-dialog"
+            on_close={props.on_close.clone()}
+        >
                 <h3>{ "Fork session" }</h3>
                 <p class="launch-info">
                     { format!("Create a new {} session from {}'s latest persisted turn.", props.session.agent_type, props.session.session_name) }
@@ -167,7 +170,6 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
                     <button type="button" class="launch-button-cancel" onclick={close}>{ "Cancel" }</button>
                     <button type="button" class="launch-button" disabled={*submitting} onclick={submit}>{ if *submitting { "Forking…" } else { "Fork session" } }</button>
                 </div>
-            </div>
-        </div>
+        </FloatingPane>
     }
 }

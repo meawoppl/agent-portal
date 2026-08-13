@@ -20,23 +20,17 @@ pub fn escape_listener(on_close: Callback<()>) -> EventListener {
     })
 }
 
-/// Emit `on_close` when Escape is pressed anywhere in the document.
+/// Emit `on_close` when Escape is pressed, attached only while `active`.
 ///
-/// Attaches a bubble-phase document `keydown` listener for the lifetime of
-/// the component and removes it on unmount.
-#[hook]
-pub fn use_escape(on_close: Callback<()>) {
-    use_effect_with((), move |_| {
-        let listener = escape_listener(on_close);
-        move || drop(listener)
-    });
-}
-
-/// Capture-phase variant of [`use_escape`], attached only while `active`.
+/// Capture-phase, and consumes the press (`prevent_default` +
+/// `stop_propagation`) before emitting `on_close`, so it never reaches
+/// bubble-phase handlers such as the keyboard-nav mode toggle.
 ///
-/// Consumes the Escape press (`prevent_default` + `stop_propagation`) before
-/// emitting `on_close`, so it never reaches bubble-phase handlers such as the
-/// keyboard-nav mode toggle.
+/// A bubble-phase `use_escape` used to exist alongside this. It was removed
+/// with #1655: its only caller was the schedule dialog, where Escape closed
+/// the dialog *and* went on to toggle nav mode underneath. Every dialog now
+/// gets this variant via [`FloatingPane`](crate::components::FloatingPane),
+/// so there is no reason to offer the leaky one.
 #[hook]
 pub fn use_escape_capture(active: bool, on_close: Callback<()>) {
     use_effect_with(active, move |is_active| {
