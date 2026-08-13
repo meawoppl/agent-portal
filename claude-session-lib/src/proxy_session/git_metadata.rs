@@ -2,6 +2,7 @@
 
 use claude_codes::io::ContentBlock;
 use claude_codes::ClaudeOutput;
+use muse_codes::io::ToolResult;
 pub(super) use session_lib::git_metadata::{
     get_branch_info, get_open_prs, get_pr_url, GitMetadataState, GitRefreshTrigger,
 };
@@ -82,6 +83,44 @@ pub(super) fn codex_output_has_git_signal(value: &serde_json::Value) -> bool {
             .or_else(|| item.get("aggregated_output"))
             .and_then(|output| output.as_str())
             .is_some_and(text_has_git_signal)
+}
+
+/// Muse's counterpart to [`codex_output_has_git_signal`].
+///
+/// Muse cannot reuse the codex detector: its protocol is an event-sourced
+/// journal, so where codex emits `item.completed` carrying a
+/// `commandExecution`, muse emits `MuseWireEvent { type: "muse_record",
+/// payload_type: "tool.result", payload }`. The codex predicate therefore
+/// returned `false` for every muse record it would ever see, which left muse
+/// sessions refreshing git metadata only on `GitRefreshTrigger`'s
+/// every-100-messages fallback — never in response to an actual git operation
+/// (#1653).
+///
+/// The payload is deserialized into muse-codes' typed [`ToolResult`] rather
+/// than read field-by-field, so a schema change upstream is a compile error
+/// here instead of a predicate that silently stops matching.
+///
+/// Note this does *not* gate on [`ToolResult::is_command_tool`]: compact
+/// results omit `correlation_facts` entirely, and muse-codes documents
+/// `command_result()` as parsing those too. A successful parse into
+/// [`CommandResult`] is itself the evidence that this was a shell command.
+pub(super) fn muse_output_has_git_signal(value: &serde_json::Value) -> bool {
+    if value.get("type").and_then(|t| t.as_str()) != Some("muse_record") {
+        return false;
+    }
+    if value.get("payload_type").and_then(|t| t.as_str()) != Some("tool.result") {
+        return false;
+    }
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+    let Ok(tool_result) = serde_json::from_value::<ToolResult>(payload.clone()) else {
+        return false;
+    };
+    let Some(command) = tool_result.command_result() else {
+        return false;
+    };
+    text_has_git_signal(&command.command) || text_has_git_signal(&command.output)
 }
 
 fn text_has_git_signal(text: &str) -> bool {
@@ -186,6 +225,95 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// Build the `MuseWireEvent` shape the muse classifier puts on the wire
+    /// for a `tool.result` record whose text is a `CommandResult`.
+    fn muse_tool_result(command: &str, output: &str) -> serde_json::Value {
+        let command_result = json!({
+            "chunk_id": "exec-1",
+            "command": command,
+            "description": "do a thing",
+            "exit_code": 0,
+            "terminal_status": "completed",
+            "output": output,
+            "original_output_bytes": 0,
+            "original_output_tokens": 0,
+            "truncated": false,
+        });
+        json!({
+            "type": "muse_record",
+            "payload_type": "tool.result",
+            "stream_id": "run-1",
+            "record_id": "rec-1",
+            "causation_id": "cause-1",
+            "sequence": 1,
+            "durability": "durable",
+            "record_type": "event",
+            "recorded_at": 0,
+            "payload": {
+                "kind": "tool.result",
+                "command_id": "cmd-1",
+                "run_stream": { "kind": "run", "id": "run-1" },
+                "call_id": "call-1",
+                "text": command_result.to_string(),
+                "correlation_facts": { "tool_name": "bash" },
+            }
+        })
+    }
+
+    #[test]
+    fn muse_git_signal_detects_a_git_command() {
+        assert!(muse_output_has_git_signal(&muse_tool_result(
+            "git checkout -b feature/muse-branch",
+            ""
+        )));
+    }
+
+    /// Parity with the codex detector, which also scans command output —
+    /// `gh pr create` prints the PR URL rather than naming it in the command.
+    #[test]
+    fn muse_git_signal_detects_a_signal_in_command_output() {
+        assert!(muse_output_has_git_signal(&muse_tool_result(
+            "make ship",
+            "switched to branch feature/test"
+        )));
+    }
+
+    #[test]
+    fn muse_git_signal_ignores_unrelated_commands() {
+        assert!(!muse_output_has_git_signal(&muse_tool_result(
+            "cargo test --workspace",
+            "test result: ok"
+        )));
+    }
+
+    /// Records that are not command results must not be scanned — a model
+    /// message mentioning "commit" is not a git operation.
+    #[test]
+    fn muse_git_signal_ignores_non_tool_result_records() {
+        let value = json!({
+            "type": "muse_record",
+            "payload_type": "run.output.delta",
+            "stream_id": "run-1",
+            "record_id": "rec-2",
+            "causation_id": "cause-1",
+            "sequence": 2,
+            "durability": "ephemeral",
+            "record_type": "event",
+            "recorded_at": 0,
+            "payload": { "text": "next I will commit this on a new branch" }
+        });
+        assert!(!muse_output_has_git_signal(&value));
+    }
+
+    /// The regression that motivated #1653: the codex predicate is structurally
+    /// incapable of matching a muse record, so muse could never mark a signal.
+    #[test]
+    fn codex_detector_never_matches_muse_records() {
+        let muse = muse_tool_result("git checkout -b feature/muse-branch", "");
+        assert!(!codex_output_has_git_signal(&muse));
+        assert!(muse_output_has_git_signal(&muse));
+    }
 
     #[test]
     fn codex_git_signal_detects_command_events() {

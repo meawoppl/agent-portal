@@ -22,7 +22,9 @@ use session_lib::SessionEvent;
 use shared::ProxyToServer;
 use tracing::error;
 
-use super::git_metadata::{check_and_send_branch_update, codex_output_has_git_signal};
+use super::git_metadata::{
+    check_and_send_branch_update, codex_output_has_git_signal, muse_output_has_git_signal,
+};
 use super::wiggum::handle_session_event_with_wiggum;
 use super::{inject_portal_reminder, is_codex_compaction_event, ConnectionResult, ConnectionState};
 
@@ -47,7 +49,16 @@ pub(super) async fn handle_next_event<A: Agent>(
                 )
                 .await;
             }
-            if codex_output_has_git_signal(value) {
+            // This arm carries codex *and* muse, whose wire shapes have
+            // nothing in common — so the detector is chosen by agent rather
+            // than tried in sequence. Running the codex predicate over muse
+            // records is what left muse refreshing only on the
+            // every-100-messages fallback (#1653).
+            let has_git_signal = match state.agent_type {
+                shared::AgentType::Muse => muse_output_has_git_signal(value),
+                _ => codex_output_has_git_signal(value),
+            };
+            if has_git_signal {
                 state.git_refresh.mark_git_signal();
             }
 

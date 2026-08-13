@@ -9,6 +9,10 @@ license = "MIT"
 session-lib = { path = "../session-lib" }
 shared = { path = "../shared" }
 claude-codes = { workspace = true, features = ["async-client", "auth"] }
+# Types only (no async-client): the proxy session routes muse output too, and
+# its git-signal detection deserializes muse's typed `tool.result` payload
+# rather than poking at JSON field names.
+muse-codes = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
