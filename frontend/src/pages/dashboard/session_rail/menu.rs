@@ -229,7 +229,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         html! {}
     };
 
-    let repo_option = repo_pr_submenu(session);
+    let repo_option = repo_pr_submenu(session, props.on_close.clone());
 
     let share_option = if session.my_role == SessionRole::Owner {
         let on_share = close_then(props.on_close.clone(), {
@@ -310,6 +310,21 @@ fn close_then(on_close: Callback<()>, action: impl Fn() + 'static) -> Callback<M
     })
 }
 
+/// Click handler for the menu's `<a>` options (repo / PR links).
+///
+/// Every *button* option closes the menu via [`close_then`], but the anchors
+/// only stopped propagation, so the menu stayed open behind the newly opened
+/// tab and was still there on the way back.
+///
+/// Deliberately no `prevent_default`: the navigation is the whole point of the
+/// link, and the anchor's own default action is what performs it.
+fn close_on_link_click(on_close: Callback<()>) -> Callback<MouseEvent> {
+    Callback::from(move |e: MouseEvent| {
+        e.stop_propagation();
+        on_close.emit(());
+    })
+}
+
 /// Render one dropdown menu option button with the shared pill-menu shell.
 fn menu_option(extra: Classes, label: &str, hint: &str, onclick: Callback<MouseEvent>) -> Html {
     html! {
@@ -320,7 +335,7 @@ fn menu_option(extra: Classes, label: &str, hint: &str, onclick: Callback<MouseE
     }
 }
 
-fn repo_pr_submenu(session: &SessionInfo) -> Html {
+fn repo_pr_submenu(session: &SessionInfo, on_close: Callback<()>) -> Html {
     let prs = sorted_prs(&session.open_prs);
     if session.repo_url.is_none() && prs.is_empty() {
         return html! {
@@ -334,7 +349,7 @@ fn repo_pr_submenu(session: &SessionInfo) -> Html {
         let href = url.clone();
         html! {
             <a class="pill-menu-option pr-link" href={href} target="_blank"
-               onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+               onclick={close_on_link_click(on_close.clone())}>
                 { "Open Repository" }
                 <span class="option-hint">{ "GitHub" }</span>
             </a>
@@ -351,7 +366,7 @@ fn repo_pr_submenu(session: &SessionInfo) -> Html {
             html! {
                 <a class="pill-menu-option pr-link" href={href} target="_blank"
                    title={branch.clone()}
-                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                   onclick={close_on_link_click(on_close.clone())}>
                     { format!("Open PR #{}", pr.number) }
                     <span class="option-hint">{ branch }</span>
                 </a>
