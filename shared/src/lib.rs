@@ -107,6 +107,10 @@ pub mod fmt;
 // Timezone canonicalization (abbreviation -> IANA) shared across crates
 pub mod timezone;
 
+// `<system-reminder>` splitting, shared by the frontend renderer (collapse to
+// a bar) and backend text classification (strip before summarizing)
+pub mod system_reminder;
+
 // Compact model-version extraction for the session-pill watermark
 pub mod model_version;
 pub use model_version::{compact_model_version, context_window_for};
