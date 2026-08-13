@@ -5,8 +5,7 @@ use crate::components::model_select::{extract_model_arg, model_cli_args};
 use crate::components::skip_permissions::{
     skip_permissions_args, skip_permissions_label, strip_skip_permissions_args,
 };
-use crate::components::ModelSelect;
-use crate::hooks::use_escape;
+use crate::components::{FloatingPane, ModelSelect};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::api::{
@@ -100,7 +99,6 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
     let folder = utils::extract_folder(&working_directory);
 
     // Close on Escape
-    use_escape(props.on_close.clone());
 
     // Fetch launcher version for this session's hostname
     {
@@ -414,12 +412,12 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         })
     };
 
-    let on_overlay_click = props.on_close.reform(|_| ());
-    let on_dialog_click = Callback::from(|e: MouseEvent| e.stop_propagation());
-
     html! {
-        <div class="sched-overlay" onclick={on_overlay_click}>
-            <div class="sched-dialog" onclick={on_dialog_click}>
+        <FloatingPane
+            overlay_class="sched-overlay"
+            pane_class="sched-dialog"
+            on_close={props.on_close.clone()}
+        >
                 <div class="sched-header">
                     <div>
                         <h2 class="sched-title">{ format!("Schedule — {}", folder) }</h2>
@@ -652,7 +650,6 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                         }
                     </div>
                 }
-            </div>
-        </div>
+        </FloatingPane>
     }
 }

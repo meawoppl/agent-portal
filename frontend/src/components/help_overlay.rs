@@ -5,7 +5,7 @@
 //! dismissed with `Esc` (capture-phase, so it never toggles nav mode) or a
 //! backdrop click.
 
-use crate::hooks::use_escape_capture;
+use crate::components::FloatingPane;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 
@@ -134,26 +134,19 @@ const GROUPS: &[ShortcutGroup] = &[
 
 #[function_component(HelpOverlay)]
 pub fn help_overlay(props: &HelpOverlayProps) -> Html {
-    // Capture-phase Escape so it closes the overlay without reaching the
-    // bubble-phase keyboard-nav handler (which would toggle nav mode).
-    use_escape_capture(true, props.on_close.clone());
-
-    let on_backdrop = {
-        let on_close = props.on_close.clone();
-        Callback::from(move |_: MouseEvent| on_close.emit(()))
-    };
-
+    // Escape (capture-phase, so it never toggles nav mode), the backdrop
+    // click, and the focus trap all come from `FloatingPane` (#1655).
     let on_close_button = {
         let on_close = props.on_close.clone();
         Callback::from(move |_: MouseEvent| on_close.emit(()))
     };
 
-    // Stop clicks inside the panel from bubbling to the backdrop (which closes).
-    let stop = Callback::from(|e: MouseEvent| e.stop_propagation());
-
     html! {
-        <div class="help-overlay" onclick={on_backdrop}>
-            <div class="help-dialog" onclick={stop}>
+        <FloatingPane
+            overlay_class="help-overlay"
+            pane_class="help-dialog"
+            on_close={props.on_close.clone()}
+        >
                 <div class="help-dialog-header">
                     <h2>{ "Keyboard Shortcuts" }</h2>
                     <button
@@ -194,7 +187,6 @@ pub fn help_overlay(props: &HelpOverlayProps) -> Html {
                 <div class="help-dialog-footer">
                     <span>{ "Press " }<kbd>{ "Esc" }</kbd>{ " or click outside to close" }</span>
                 </div>
-            </div>
-        </div>
+        </FloatingPane>
     }
 }

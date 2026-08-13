@@ -1,4 +1,4 @@
-use crate::hooks::{use_escape_capture, use_focus_trap};
+use crate::components::FloatingPane;
 use yew::prelude::*;
 
 /// Visual style of the confirm modal. Each variant maps to an existing CSS
@@ -66,51 +66,43 @@ pub struct ConfirmModalProps {
 
 #[function_component(ConfirmModal)]
 pub fn confirm_modal(props: &ConfirmModalProps) -> Html {
-    // Keyboard access (#1384): trap Tab within the modal and focus its first
-    // control (Cancel, rendered first — the safer default for a destructive
-    // action) on open. Enter/Space activate the focused button natively.
-    let container = use_node_ref();
-    use_focus_trap(container.clone());
-
-    // Escape cancels. Capture-phase so it never reaches the bubble-phase
-    // session-interrupt / nav-mode handlers underneath (mirrors the help
-    // overlay). `on_cancel` takes a `MouseEvent`, so synthesize a click for the
-    // keyboard path; the cancel callbacks ignore the event's contents.
-    {
+    // Keyboard access and backdrop dismissal come from `FloatingPane` (#1655),
+    // which traps Tab within the pane and focuses its first control (Cancel,
+    // rendered first — the safer default for a destructive action).
+    //
+    // `on_cancel` takes a `MouseEvent` for its button call sites, so the
+    // pane's `Callback<()>` synthesizes a click; the cancel callbacks ignore
+    // the event's contents.
+    let on_close = {
         let on_cancel = props.on_cancel.clone();
-        use_escape_capture(
-            true,
-            Callback::from(move |()| {
-                if let Ok(ev) = web_sys::MouseEvent::new("click") {
-                    on_cancel.emit(ev);
-                }
-            }),
-        );
-    }
+        Callback::from(move |()| {
+            if let Ok(ev) = web_sys::MouseEvent::new("click") {
+                on_cancel.emit(ev);
+            }
+        })
+    };
 
     html! {
-        <div class="modal-overlay" onclick={props.on_cancel.clone()}>
-            <div
-                ref={container}
-                class={props.style.container_class()}
-                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
-            >
-                if let Some(title) = &props.title {
-                    <h2>{ title }</h2>
-                }
-                <p>{ &props.message }</p>
-                if let Some(warning) = &props.warning {
-                    <p class="modal-warning">{ warning }</p>
-                }
-                <div class={props.style.actions_class()}>
-                    <button type="button" class={props.style.cancel_class()} onclick={props.on_cancel.clone()}>
-                        { "Cancel" }
-                    </button>
-                    <button type="button" class={props.style.confirm_class()} onclick={props.on_confirm.clone()}>
-                        { &props.confirm_label }
-                    </button>
-                </div>
+        <FloatingPane
+            overlay_class="modal-overlay"
+            pane_class={props.style.container_class()}
+            {on_close}
+        >
+            if let Some(title) = &props.title {
+                <h2>{ title }</h2>
+            }
+            <p>{ &props.message }</p>
+            if let Some(warning) = &props.warning {
+                <p class="modal-warning">{ warning }</p>
+            }
+            <div class={props.style.actions_class()}>
+                <button type="button" class={props.style.cancel_class()} onclick={props.on_cancel.clone()}>
+                    { "Cancel" }
+                </button>
+                <button type="button" class={props.style.confirm_class()} onclick={props.on_confirm.clone()}>
+                    { &props.confirm_label }
+                </button>
             </div>
-        </div>
+        </FloatingPane>
     }
 }
