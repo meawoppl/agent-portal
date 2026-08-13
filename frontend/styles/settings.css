@@ -1076,6 +1076,230 @@
 }
 
 /* ==========================================================================
+   Agent installation and login
+   ========================================================================== */
+
+/* Agent installation/login matrix and its shared confirmation modal. */
+.agents-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    overflow-x: auto;
+}
+
+.link-button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.agents-matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.agents-matrix th,
+.agents-matrix td {
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.agents-matrix th,
+.agents-host-alias,
+.agents-cell.unreachable,
+.agents-cell.unknown,
+.agents-cell.loading {
+    color: var(--text-secondary);
+}
+
+.agents-host-name,
+.agent-install-command,
+.agent-login-device-code {
+    font-family: var(--font-mono, monospace);
+}
+
+.agents-host-alias {
+    margin-left: 0.4rem;
+    font-size: 0.8rem;
+}
+
+.agents-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.agents-badge {
+    width: fit-content;
+    padding: 0.05rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.agents-badge.installed,
+.agents-login.logged-in,
+.agent-login-status.success {
+    color: var(--success, #9ece6a);
+}
+
+.agents-badge.installed {
+    background: color-mix(in srgb, var(--success, #9ece6a) 20%, transparent);
+}
+
+.agents-badge.missing,
+.agents-login.logged-out,
+.agent-login-status.error {
+    color: var(--error, #f7768e);
+}
+
+.agents-badge.missing {
+    background: color-mix(in srgb, var(--error, #f7768e) 18%, transparent);
+}
+
+.agents-login {
+    font-size: 0.8rem;
+}
+
+.agents-login.unknown {
+    color: var(--text-secondary);
+}
+
+.agents-signin,
+.agent-login-submit {
+    width: fit-content;
+    padding: 0.25rem 0.65rem;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.agents-signin {
+    margin-top: 0.15rem;
+    font-size: 0.75rem;
+}
+
+.agents-signin:hover,
+.agent-login-submit:hover {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.agent-login-overlay {
+    position: fixed;
+    z-index: 1000;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb(0 0 0 / 55%);
+}
+
+.agent-login-modal {
+    width: min(480px, 92vw);
+    max-height: 90vh;
+    padding: 1rem 1.25rem 1.25rem;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 50%);
+}
+
+.agent-login-header,
+.agent-login-footer,
+.agent-login-code-row {
+    display: flex;
+    align-items: center;
+}
+
+.agent-login-header {
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.agent-login-header h2,
+.agent-login-instr {
+    margin: 0;
+}
+
+.agent-login-close {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 1.4rem;
+    cursor: pointer;
+}
+
+.agent-login-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.agent-login-instr,
+.agent-login-status {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.agent-login-url {
+    color: var(--accent);
+    font-size: 0.85rem;
+    word-break: break-all;
+}
+
+.agent-login-device-code,
+.agent-install-command {
+    padding: 0.5rem 0.6rem;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: var(--bg-primary);
+}
+
+.agent-login-device-code {
+    font-size: 1.4rem;
+    letter-spacing: 0.15rem;
+    text-align: center;
+}
+
+.agent-login-code-row {
+    gap: 0.5rem;
+}
+
+.agent-login-code-input {
+    flex: 1;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.agent-login-submit:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.agent-login-footer {
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+.agent-install-command {
+    display: block;
+    font-size: 0.85rem;
+    word-break: break-all;
+}
+
+/* ==========================================================================
    Appearance panel
    ========================================================================== */
 
