@@ -5,7 +5,7 @@
 //!
 //! A new user's first question is "what do I still need to set up, and where?".
 //! This pane answers it as a **computer × agent** grid: one row per launcher
-//! (host), one column per agent (Claude / Codex), each cell showing whether the
+//! (host), one column per agent (Claude / Codex / Muse), each cell showing whether the
 //! CLI is installed and whether it's signed in (+ the account label when the
 //! agent exposes one). Data comes from the existing per-launcher probe
 //! (`/api/launchers/{id}/probe-agents`), fanned across the user's launchers;
@@ -44,7 +44,11 @@ struct InstallTarget {
 }
 
 /// Columns of the matrix, in display order. Mirrors `AgentType`.
-const AGENTS: [(AgentType, &str); 2] = [(AgentType::Claude, "Claude"), (AgentType::Codex, "Codex")];
+const AGENTS: [(AgentType, &str); 3] = [
+    (AgentType::Claude, "Claude"),
+    (AgentType::Codex, "Codex"),
+    (AgentType::Muse, "Muse"),
+];
 
 /// Per-launcher probe outcome. The whole map is set once, after every probe
 /// resolves, so a launcher is either absent from the map (still loading, whole
@@ -294,7 +298,11 @@ fn sign_in_button(
     launcher_id: Uuid,
     on_sign_in: &Callback<LoginTarget>,
 ) -> Option<Html> {
-    if matches!(login, AgentLoginStatus::LoggedIn { .. }) {
+    // Muse can be installed and its credential state is probed, but the
+    // launcher-side interactive device-flow driver is not wired yet. Do not
+    // offer a button that can only fail; host/env login remains visible after
+    // Refresh and Claude/Codex retain the complete in-portal flow.
+    if agent == AgentType::Muse || matches!(login, AgentLoginStatus::LoggedIn { .. }) {
         return None;
     }
     let target = LoginTarget {
@@ -367,5 +375,19 @@ mod tests {
             login_summary(&AgentLoginStatus::Unknown).1,
             login_summary(&AgentLoginStatus::LoggedOut).1
         );
+    }
+
+    #[test]
+    fn matrix_covers_every_agent_without_offering_broken_muse_login() {
+        assert_eq!(AGENTS.len(), 3);
+        assert!(AGENTS.iter().any(|(agent, _)| *agent == AgentType::Muse));
+        assert!(sign_in_button(
+            &AgentLoginStatus::LoggedOut,
+            AgentType::Muse,
+            "Muse",
+            Uuid::nil(),
+            &Callback::noop(),
+        )
+        .is_none());
     }
 }
