@@ -19,7 +19,8 @@ mod system_reminder;
 pub use links::linkify_urls;
 use parser::parse_markdown_events;
 use renderer::render_events;
-use system_reminder::{has_system_reminder, split_system_reminders, Segment, SystemReminderBar};
+use shared::system_reminder::{has_system_reminder, split_system_reminders, Segment};
+use system_reminder::SystemReminderBar;
 
 #[cfg(test)]
 use links::{find_next_url, is_valid_url};
