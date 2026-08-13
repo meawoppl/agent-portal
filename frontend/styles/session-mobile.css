@@ -155,6 +155,11 @@
         padding: 0.15rem 0.35rem;
     }
 
+    .session-view-header .session-header-action {
+        font-size: 0.7rem;
+        padding: 0.15rem 0.4rem;
+    }
+
     .session-view-header .status {
         font-size: 0.7rem;
         padding: 0.2rem 0.5rem;
