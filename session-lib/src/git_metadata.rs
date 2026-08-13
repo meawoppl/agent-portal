@@ -279,31 +279,21 @@ pub fn get_open_prs(cwd: &str) -> Vec<PrRef> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t")
-            .output()
-            .expect("git runs");
-        assert!(out.status.success(), "git {args:?}: {out:?}");
-    }
+    use crate::git_fixtures::GitFixture;
+    use std::time::Duration;
 
     /// #1067: a sibling worktree with more recent HEAD activity surfaces as
     /// the active branch — in the display composite AND as the PR-lookup
     /// branch — and drops back out when the main checkout is active again.
+    ///
+    /// Activity ordering is set by backdating reflog mtimes rather than
+    /// sleeping past filesystem timestamp granularity: the ranking is exactly
+    /// what the assertions describe, and the test costs no wall-clock time.
     #[test]
     fn branch_info_surfaces_most_recently_active_worktree() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let repo = tmp.path().join("repo");
-        std::fs::create_dir(&repo).unwrap();
-        git(&repo, &["init", "-q", "-b", "main"]);
-        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
-        let cwd = repo.to_str().unwrap();
+        let fixture = GitFixture::new();
+        let root = fixture.root();
+        let cwd = root.to_str().expect("utf-8 tempdir path");
 
         // Single worktree: plain branch, no composite.
         let info = get_branch_info(cwd).expect("in a repo");
@@ -312,32 +302,46 @@ mod tests {
         assert_eq!(info.display(), "main");
         assert_eq!(info.pr_branch(), "main");
 
-        // Add a worktree; its HEAD was just written, so it's the most
-        // recently active checkout.
-        let side = tmp.path().join("side");
-        git(
-            &repo,
-            &[
-                "worktree",
-                "add",
-                "-q",
-                side.to_str().unwrap(),
-                "-b",
-                "feature-side",
-            ],
-        );
+        // Add a worktree, then age the main checkout so the worktree is
+        // unambiguously the more recently active one.
+        let side = fixture.add_worktree("side", "feature-side");
+        fixture.age_head_log(&root, Duration::from_secs(60));
+
         let info = get_branch_info(cwd).expect("in a repo");
         assert_eq!(info.checkout, "main");
         assert_eq!(info.active_worktree.as_deref(), Some("feature-side"));
         assert_eq!(info.display(), "main (+ feature-side)");
         assert_eq!(info.pr_branch(), "feature-side");
 
-        // Activity moves back to the main checkout (HEAD rewritten):
-        // the composite drops away.
-        std::thread::sleep(std::time::Duration::from_millis(1100));
-        git(&repo, &["commit", "-q", "--allow-empty", "-m", "more"]);
+        // Activity moves back to the main checkout: the composite drops away.
+        fixture.age_head_log(&side, Duration::from_secs(120));
         let info = get_branch_info(cwd).expect("in a repo");
         assert_eq!(info.active_worktree, None, "cwd is the active checkout");
         assert_eq!(info.display(), "main");
+    }
+
+    /// A detached HEAD has no branch name to show, so the checkout reads as
+    /// `detached:<short sha>` rather than git's literal `HEAD`.
+    #[test]
+    fn detached_head_reports_a_short_sha() {
+        let fixture = GitFixture::new();
+        fixture.detach_head();
+        let root = fixture.root();
+        let info = get_branch_info(root.to_str().expect("utf-8 path")).expect("in a repo");
+
+        assert!(
+            info.checkout.starts_with("detached:"),
+            "expected a detached marker, got {}",
+            info.checkout
+        );
+        assert_ne!(info.checkout, "detached:", "the short sha must be present");
+    }
+
+    /// Outside a repository there is no branch info at all — the callers use
+    /// `None` to mean "not a git checkout", not "unknown branch".
+    #[test]
+    fn non_repository_has_no_branch_info() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(get_branch_info(tmp.path().to_str().expect("utf-8 path")).is_none());
     }
 }

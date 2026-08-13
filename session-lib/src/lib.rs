@@ -24,6 +24,11 @@ pub mod adapter;
 pub mod agent;
 pub mod buffer;
 pub mod error;
+/// Throwaway git repositories for tests. Behind a feature so consumers can opt
+/// in (`session-lib = { features = ["test-fixtures"] }`) without shipping
+/// `tempfile` into production builds; always on for this crate's own tests.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod git_fixtures;
 pub mod git_metadata;
 pub mod heartbeat;
 pub mod install;
