@@ -27,11 +27,17 @@ which = "8.0.0"
 ws-bridge = { workspace = true, features = ["native-client"] }
 base64 = "0.22.1"
 listeners = "0.6.0"
+# Optional so `git_fixtures` can be shared with other crates' tests via the
+# `test-fixtures` feature without pulling tempfile into production builds.
+tempfile = { version = "3.27.0", optional = true }
 
 # Unix-only: signal the agent's process group on stop/drop so the agent
 # process can't be orphaned when `kill_on_drop` doesn't fire (#927).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[features]
+test-fixtures = ["dep:tempfile"]
 
 [dev-dependencies]
 tempfile = "3.27.0"
