@@ -45,6 +45,10 @@ pub(crate) enum ActivityTag {
     RateLimit,
     /// Parse failure or completely unrecognized wire shape — neutral.
     Unknown,
+    /// Bookkeeping frame with no user-visible content — no tick (keeps
+    /// the rail readable). Distinct from `Unknown` which renders as gray
+    /// `tick-other`; suppressed frames are invisible.
+    Suppressed,
     /// Start of a compaction range (sparkline range marker).
     CompactionStart,
     /// End of a compaction range.
@@ -153,7 +157,11 @@ impl ActivityTag {
             Self::Portal => Some("portal"),
             Self::Error => Some("error"),
             Self::System | Self::RateLimit | Self::Unknown => Some("other"),
-            Self::CompactionStart | Self::CompactionEnd | Self::TaskStart | Self::TaskEnd => None,
+            Self::Suppressed
+            | Self::CompactionStart
+            | Self::CompactionEnd
+            | Self::TaskStart
+            | Self::TaskEnd => None,
         }
     }
 
@@ -164,6 +172,11 @@ impl ActivityTag {
             self,
             Self::CompactionStart | Self::CompactionEnd | Self::TaskStart | Self::TaskEnd
         )
+    }
+
+    /// Bookkeeping frames are suppressed — never rendered as ticks.
+    pub fn is_suppressed(self) -> bool {
+        matches!(self, Self::Suppressed)
     }
 
     pub fn is_compaction_start(self) -> bool {
@@ -298,9 +311,10 @@ fn normalize_iso_utc(iso: &str) -> std::borrow::Cow<'_, str> {
 ///
 /// Tries `shared::ClaudeOutput` first (the typed Claude wire shape, where
 /// system messages disambiguate into the four sparkline range-marker tags),
-/// then falls back to the local lenient `ClaudeMessage`. If both fail and
-/// the wire shape parses as a `CodexEvent`, maps the Codex variant into a
-/// shared [`ActivityTag`] so Codex sessions get a colored sparkline (#TBD).
+/// then falls back to the local lenient `ClaudeMessage`. If both fail, tries
+/// `CodexEvent` and finally `muse_record` shapes, mapping each into a
+/// shared [`ActivityTag`] so Codex and Muse sessions get colored sparklines
+/// with the same palette as Claude (assistant=blue, result=orange, error=red).
 /// Returns [`ActivityTag::Unknown`] when nothing parses.
 pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
     if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(output) {
@@ -335,7 +349,95 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
             return tag;
         }
     }
-    classify_codex_event(output).unwrap_or(ActivityTag::Unknown)
+    if let Some(tag) = classify_codex_event(output) {
+        return tag;
+    }
+    if let Some(tag) = classify_muse_event(output) {
+        return tag;
+    }
+    ActivityTag::Unknown
+}
+
+/// Typed envelope for the frontend's `muse_record` wire frame.
+/// The backend lifts `MuseRecord.payload_type` + `payload` into a `type:
+/// "muse_record"` envelope (`muse-session-lib/src/classifier.rs::to_event`);
+/// this mirrors that envelope without `serde_json::Value` pokes.
+#[derive(serde::Deserialize)]
+struct MuseActivityEnvelope {
+    #[serde(rename = "type")]
+    kind: String,
+    payload_type: String,
+    payload: serde_json::Value,
+}
+
+/// Map a Muse journal record to a cross-agent [`ActivityTag`] so the
+/// sparkline lights up on Muse sessions the same way it does on Claude/Codex.
+/// Muse emits ~100 `muse_record` JSON lines per turn; the reducer already
+/// groups them into one task-tree card, but the sparkline still ticks per
+/// record, so each record gets a color that reuses Claude's palette:
+/// - `task.stream.linked` / `task.lifecycle.*` (proposed/accepted/scheduled/
+///   started/status/output/side_effect_intent) → `Assistant` (blue, agent working)
+/// - `task.lifecycle.*` terminal failed/rejected/cancelled → `Error` (red)
+/// - `task.lifecycle.completed` → `Assistant` (work finished but not turn-end)
+/// - `tool.result` success → `Assistant`, failure → `Error`
+/// - `run.terminal.completed` (carries the final markdown answer) → `Result`
+///   (orange, turn ended — same as Claude `result` / Codex `turn.completed`)
+/// - `run.terminal.*` non-completed → `Error`
+/// - other bookkeeping (`run.model.configured`, `command.received`, etc.)
+///   → `Suppressed` (no tick, keeps the rail readable) — distinct from
+///   returning `None` which would fall through to `Unknown` gray
+fn classify_muse_event(output: &str) -> Option<ActivityTag> {
+    let env = serde_json::from_str::<MuseActivityEnvelope>(output).ok()?;
+    if env.kind != "muse_record" {
+        return None;
+    }
+    let payload_type = env.payload_type;
+    let typed = muse_codes::MusePayload::from_parts(&payload_type, env.payload).ok()?;
+    match typed {
+        muse_codes::MusePayload::TaskStreamLinked(_) => Some(ActivityTag::Assistant),
+        muse_codes::MusePayload::TaskLifecycle(lc) => match lc.event {
+            muse_codes::TaskLifecycleEvent::Failed { .. }
+            | muse_codes::TaskLifecycleEvent::Rejected { .. }
+            | muse_codes::TaskLifecycleEvent::Cancelled { .. } => Some(ActivityTag::Error),
+            // `completed` is a task terminal but not a turn terminal — keep
+            // it as assistant-blue so the rail doesn't strobe orange on
+            // every tool-task; the turn's `run.terminal.completed` provides
+            // the single orange tick.
+            muse_codes::TaskLifecycleEvent::Completed { .. } => Some(ActivityTag::Assistant),
+            _ => Some(ActivityTag::Assistant),
+        },
+        muse_codes::MusePayload::ToolResult(tr) => {
+            // TODO(SDK #310): `ToolResult.correlation_facts` is an open-shaped
+            // `serde_json::Value` — the SDK has no typed `outcome` accessor yet.
+            // Narrow seam: only `.get("outcome")` is poked here; tracked in
+            // https://github.com/meawoppl/rust-code-agent-sdks/issues/310.
+            let outcome = tr
+                .correlation_facts
+                .as_ref()
+                .and_then(|v| v.get("outcome"))
+                .and_then(|o| o.as_str());
+            match outcome {
+                Some("failure") => Some(ActivityTag::Error),
+                _ => Some(ActivityTag::Assistant),
+            }
+        }
+        muse_codes::MusePayload::RunTerminal(rt) => {
+            if rt.terminal == "completed" {
+                Some(ActivityTag::Result)
+            } else {
+                Some(ActivityTag::Error)
+            }
+        }
+        // Bookkeeping / streaming frames — no tick, distinct from "not a
+        // muse_record" (which returns None and falls through to Unknown gray).
+        muse_codes::MusePayload::ModelConfigured(_)
+        | muse_codes::MusePayload::RunStarted(_)
+        | muse_codes::MusePayload::CommandAccepted(_)
+        | muse_codes::MusePayload::SessionRunLinked(_)
+        | muse_codes::MusePayload::TurnInputUser(_)
+        | muse_codes::MusePayload::RunOutputDelta(_)
+        | muse_codes::MusePayload::Unknown { .. } => Some(ActivityTag::Suppressed),
+    }
 }
 
 /// Map a Codex wire frame to a cross-agent [`ActivityTag`] so the sparkline
@@ -1143,6 +1245,69 @@ mod tests {
         assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
         let json = r#"{"type":"turn.started"}"#;
         assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
+    }
+
+    // --- classify_muse_event: Muse ticks reuse Claude palette ---
+
+    #[test]
+    fn classify_muse_task_lifecycle_started_is_assistant() {
+        let json = r#"{"type":"muse_record","payload_type":"task.lifecycle.started","causation_id":"c1","payload":{"kind":"task_lifecycle","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"task_id":"t1","task_stream":{"kind":"task","id":"t1"},"event":{"kind":"started","task_id":"t1"}}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
+        assert_eq!(classify_muse_event(json), Some(ActivityTag::Assistant));
+    }
+
+    #[test]
+    fn classify_muse_task_stream_linked_is_assistant() {
+        let json = r#"{"type":"muse_record","payload_type":"task.stream.linked","causation_id":"c1","payload":{"kind":"task_stream_linked","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"task_id":"t1","task_stream":{"kind":"task","id":"t1"}}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
+    }
+
+    #[test]
+    fn classify_muse_tool_result_success_is_assistant_and_failure_is_error() {
+        let ok = r#"{"type":"muse_record","payload_type":"tool.result","causation_id":"c1","payload":{"kind":"tool_result","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"call_id":"c1","correlation_facts":{"tool_name":"bash","outcome":"success"},"text":"ok"}}"#;
+        let fail = r#"{"type":"muse_record","payload_type":"tool.result","causation_id":"c1","payload":{"kind":"tool_result","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"call_id":"c1","correlation_facts":{"tool_name":"bash","outcome":"failure"},"text":"boom"}}"#;
+        assert_eq!(classify_output_msg_type(ok), ActivityTag::Assistant);
+        assert_eq!(classify_output_msg_type(fail), ActivityTag::Error);
+    }
+
+    #[test]
+    fn classify_muse_run_terminal_completed_is_result_and_failed_is_error() {
+        let completed = r##"{"type":"muse_record","payload_type":"run.terminal.completed","causation_id":"c1","payload":{"kind":"run_terminal","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"terminal":"completed","text":"Answer hello"}}"##;
+        let failed = r#"{"type":"muse_record","payload_type":"run.terminal.failed","causation_id":"c1","payload":{"kind":"run_terminal","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"terminal":"failed","reason":"oops"}}"#;
+        assert_eq!(classify_output_msg_type(completed), ActivityTag::Result);
+        assert_eq!(classify_muse_event(completed), Some(ActivityTag::Result));
+        assert_eq!(classify_output_msg_type(failed), ActivityTag::Error);
+    }
+
+    #[test]
+    fn classify_muse_run_terminal_authoritative_over_payload_type() {
+        // payload_type says completed but payload.terminal says failed — the
+        // typed `RunTerminal.terminal` field must win, not the envelope string.
+        let mismatch = r#"{"type":"muse_record","payload_type":"run.terminal.completed","causation_id":"c1","payload":{"kind":"run_terminal","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"terminal":"failed","reason":"oops"}}"#;
+        assert_eq!(classify_muse_event(mismatch), Some(ActivityTag::Error));
+        assert_eq!(classify_output_msg_type(mismatch), ActivityTag::Error);
+        // Opposite: payload_type says failed but terminal says completed → Result.
+        let mismatch2 = r#"{"type":"muse_record","payload_type":"run.terminal.failed","causation_id":"c1","payload":{"kind":"run_terminal","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"terminal":"completed","text":"hi"}}"#;
+        assert_eq!(classify_muse_event(mismatch2), Some(ActivityTag::Result));
+        assert_eq!(classify_output_msg_type(mismatch2), ActivityTag::Result);
+    }
+
+    #[test]
+    fn classify_muse_lifecycle_failed_is_error() {
+        let json = r#"{"type":"muse_record","payload_type":"task.lifecycle.failed","causation_id":"c1","payload":{"kind":"task_lifecycle","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"task_id":"t1","task_stream":{"kind":"task","id":"t1"},"event":{"kind":"failed","task_id":"t1","reason":"oops"}}}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Error);
+    }
+
+    #[test]
+    fn classify_muse_bookkeeping_has_no_tick() {
+        // run.model.configured / command.received are bookkeeping — suppressed
+        // (no sparkline tick), distinct from Unknown gray.
+        let json = r#"{"type":"muse_record","payload_type":"run.model.configured","causation_id":"c1","payload":{"kind":"model_configured","command_id":"c1","run_stream":{"kind":"run","id":"r1"},"model_id":"m1","display_label":"m1","profile_id":"p1","provider_id":"prov","source":"startup"}}"#;
+        assert_eq!(classify_muse_event(json), Some(ActivityTag::Suppressed));
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Suppressed);
+        assert_eq!(ActivityTag::Suppressed.tick_css(), None);
+        assert!(ActivityTag::Suppressed.is_suppressed());
+        assert!(!ActivityTag::Suppressed.is_range_marker());
     }
 
     // --- reconcile_pending_sends ---

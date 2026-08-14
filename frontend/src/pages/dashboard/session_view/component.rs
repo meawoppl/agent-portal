@@ -1051,7 +1051,7 @@ impl SessionView {
                 }
             }
             let ts_ms = parse_iso_ms_utc(&msg.created_at);
-            if ts_ms.is_finite() {
+            if ts_ms.is_finite() && !tag.is_suppressed() {
                 ctx.props().on_activity.emit((session_id, tag, ts_ms));
             }
         }
@@ -1156,9 +1156,11 @@ impl SessionView {
             .map(parse_iso_ms_utc)
             .filter(|ts| ts.is_finite())
             .unwrap_or_else(js_sys::Date::now);
-        ctx.props()
-            .on_activity
-            .emit((ctx.props().session.id, tag, activity_ts));
+        if !tag.is_suppressed() {
+            ctx.props()
+                .on_activity
+                .emit((ctx.props().session.id, tag, activity_ts));
+        }
         reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
 
         // Retire any active-tool strip entries this message completes: a
