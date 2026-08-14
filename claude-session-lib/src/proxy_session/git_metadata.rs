@@ -123,14 +123,77 @@ pub(super) fn muse_output_has_git_signal(value: &serde_json::Value) -> bool {
     text_has_git_signal(&command.command) || text_has_git_signal(&command.output)
 }
 
+/// Does this text indicate a command that may have moved the branch or PR?
+///
+/// Deliberately narrower than "mentions git". The previous form matched the
+/// bare substrings `branch`, `checkout`, `merge`, `rebase` and `commit`
+/// anywhere in a command *or its output*, so ordinary prose — a commit message
+/// being echoed, a test name containing "merge", any diff mentioning a branch —
+/// marked a signal. Every match costs a metadata refresh, and on the codex path
+/// that refresh used to run inline on the connection loop, so an over-eager
+/// predicate was directly responsible for stalls.
+///
+/// Now a match needs an actual `git`/`gh` invocation *and* a subcommand that
+/// can change what we display, or an unambiguous git output line for the case
+/// where the branch moved without us seeing the command.
 fn text_has_git_signal(text: &str) -> bool {
-    text.contains("git ")
-        || text.contains("gh ")
-        || text.contains("branch")
-        || text.contains("checkout")
-        || text.contains("merge")
-        || text.contains("rebase")
-        || text.contains("commit")
+    const STATE_CHANGING: [&str; 8] = [
+        "checkout", "switch", "commit", "merge", "rebase", "push", "branch", " pr ",
+    ];
+
+    let invoked = text.contains("git ") || text.contains("gh ");
+    if invoked && STATE_CHANGING.iter().any(|sub| text.contains(sub)) {
+        return true;
+    }
+
+    // Case-insensitive: git prints "Switched to branch", but this also sees
+    // aggregated output that has been through a shell or a logger.
+    [
+        "switched to branch",
+        "switched to a new branch",
+        "head is now at",
+    ]
+    .iter()
+    .any(|phrase| contains_ignore_ascii_case(text, phrase))
+}
+
+/// `str::contains`, ignoring ASCII case, without allocating a lowercased copy
+/// of every output frame this runs against.
+fn contains_ignore_ascii_case(haystack: &str, needle_lower: &str) -> bool {
+    let (h, n) = (haystack.as_bytes(), needle_lower.as_bytes());
+    n.len() <= h.len() && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
+}
+
+/// Refresh git metadata in the background, without making the caller wait.
+///
+/// The codex/muse output arm runs inline in the connection's `select!` loop
+/// (unlike claude, whose forwarder owns a task of its own), so awaiting a
+/// refresh there blocks *everything* that loop services — output forwarding,
+/// input delivery, acks, heartbeats — for the length of up to three `gh`
+/// network calls. That is the session-appears-hung-then-floods symptom: the
+/// user's own message is queued behind the same stall, so when `gh` finally
+/// returns the loop drains the backlog and the reply in one wake-up, and the
+/// flood looks like a response to having typed.
+///
+/// Overlapping triggers collapse via [`GitMetadataState::try_begin_refresh`]
+/// rather than queueing one refresh per frame.
+pub(super) fn spawn_branch_update(
+    ws_write: &SharedWsWrite,
+    session_id: Uuid,
+    working_directory: &str,
+    state: &GitMetadataState,
+) {
+    let Some(guard) = state.try_begin_refresh() else {
+        debug!("git metadata refresh already in flight; skipping");
+        return;
+    };
+    let ws_write = ws_write.clone();
+    let working_directory = working_directory.to_string();
+    let state = state.clone();
+    tokio::spawn(async move {
+        check_and_send_branch_update(&ws_write, session_id, &working_directory, &state).await;
+        drop(guard);
+    });
 }
 
 /// Check and send git branch, PR URL, or repo URL update if changed.
@@ -140,15 +203,26 @@ pub(super) async fn check_and_send_branch_update(
     working_directory: &str,
     state: &GitMetadataState,
 ) {
-    let info = get_branch_info(working_directory);
-    let new_branch = info.as_ref().map(|i| i.display());
-    // PR lookup keys on the branch the work ships from — the active
-    // worktree's when one exists (#1067), never the composite display form.
-    let new_pr_url = info
-        .as_ref()
-        .and_then(|i| get_pr_url(working_directory, i.pr_branch()));
-    let new_repo_url = get_repo_url(working_directory);
-    let new_open_prs = get_open_prs(working_directory);
+    // These four shell out to `git` and `gh` with blocking
+    // `std::process::Command`, and three of them are GitHub network round
+    // trips. Run them on the blocking pool: on an async worker thread they
+    // stall every other task sharing it for the duration of the network call.
+    let cwd = working_directory.to_string();
+    let Ok((new_branch, new_pr_url, new_repo_url, new_open_prs)) =
+        tokio::task::spawn_blocking(move || {
+            let info = get_branch_info(&cwd);
+            let branch = info.as_ref().map(|i| i.display());
+            // PR lookup keys on the branch the work ships from — the active
+            // worktree's when one exists (#1067), never the composite display
+            // form.
+            let pr_url = info.as_ref().and_then(|i| get_pr_url(&cwd, i.pr_branch()));
+            (branch, pr_url, get_repo_url(&cwd), get_open_prs(&cwd))
+        })
+        .await
+    else {
+        error!("git metadata refresh task failed to run");
+        return;
+    };
 
     let mut branch_guard = state.current_branch.lock().await;
     let mut pr_guard = state.current_pr_url.lock().await;
@@ -345,6 +419,58 @@ mod tests {
         });
 
         assert!(codex_output_has_git_signal(&value));
+    }
+
+    /// The predicate gates a metadata refresh that makes up to three `gh`
+    /// network calls, so a false positive is not free. These are the shapes
+    /// that used to match on a bare substring and should not.
+    #[test]
+    fn git_signal_ignores_prose_that_merely_mentions_git_words() {
+        for text in [
+            "cargo test --workspace",
+            "test result: ok. 12 passed",
+            "fn merge_sorted(a: &[u8], b: &[u8])",
+            "the commit message explains why",
+            "error: cannot borrow `branch` as mutable",
+            "rebasing the argument is not the point",
+        ] {
+            assert!(
+                !text_has_git_signal(text),
+                "should not signal a refresh: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_signal_matches_real_invocations() {
+        for text in [
+            "git checkout -b feature/x",
+            "git commit -m 'fix'",
+            "git push --force-with-lease",
+            "gh pr create --draft",
+            "git switch main",
+            "git rebase -i main",
+        ] {
+            assert!(text_has_git_signal(text), "should signal: {text:?}");
+        }
+    }
+
+    /// The branch can move without us seeing the command — a script, or a
+    /// command whose text was truncated — so git's own output still counts.
+    #[test]
+    fn git_signal_matches_git_output_in_any_case() {
+        assert!(text_has_git_signal("Switched to branch 'main'"));
+        assert!(text_has_git_signal("switched to a new branch 'x'"));
+        assert!(text_has_git_signal("HEAD is now at 1a2b3c4"));
+    }
+
+    /// A bare mention of `git` with no state-changing subcommand is a read,
+    /// and reads cannot change what the pill displays.
+    #[test]
+    fn git_signal_ignores_read_only_git_commands() {
+        assert!(!text_has_git_signal("git status"));
+        assert!(!text_has_git_signal("git diff --stat"));
+        assert!(!text_has_git_signal("gh run watch"));
     }
 
     #[test]

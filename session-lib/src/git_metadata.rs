@@ -12,6 +12,11 @@ pub struct GitMetadataState {
     pub current_pr_url: Arc<Mutex<Option<String>>>,
     pub current_repo_url: Arc<Mutex<Option<String>>>,
     pub current_open_prs: Arc<Mutex<Vec<PrRef>>>,
+    /// Set while a refresh is running, so overlapping triggers collapse into
+    /// one. A refresh makes up to three `gh` network calls; without this, a
+    /// burst of git-signal frames would queue a refresh per frame and each
+    /// would re-run the same lookups.
+    refresh_in_flight: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl GitMetadataState {
@@ -21,7 +26,34 @@ impl GitMetadataState {
             current_pr_url: Arc::new(Mutex::new(None)),
             current_repo_url: Arc::new(Mutex::new(None)),
             current_open_prs: Arc::new(Mutex::new(Vec::new())),
+            refresh_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Claim the refresh slot, or `None` if one is already running.
+    ///
+    /// The returned guard releases the slot on drop, so a refresh that panics
+    /// or returns early cannot wedge the flag on and disable refreshes for the
+    /// rest of the session.
+    pub fn try_begin_refresh(&self) -> Option<RefreshGuard> {
+        use std::sync::atomic::Ordering;
+        self.refresh_in_flight
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| RefreshGuard {
+                flag: self.refresh_in_flight.clone(),
+            })
+    }
+}
+
+/// Releases [`GitMetadataState`]'s refresh slot on drop.
+pub struct RefreshGuard {
+    flag: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for RefreshGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, std::sync::atomic::Ordering::Release);
     }
 }
 

@@ -23,7 +23,7 @@ use shared::ProxyToServer;
 use tracing::error;
 
 use super::git_metadata::{
-    check_and_send_branch_update, codex_output_has_git_signal, muse_output_has_git_signal,
+    codex_output_has_git_signal, muse_output_has_git_signal, spawn_branch_update,
 };
 use super::wiggum::handle_session_event_with_wiggum;
 use super::{inject_portal_reminder, is_codex_compaction_event, ConnectionResult, ConnectionState};
@@ -40,14 +40,18 @@ pub(super) async fn handle_next_event<A: Agent>(
     // for its image/git/wiggum side-effects.
     if state.agent_type != shared::AgentType::Claude {
         if let Some(SessionEvent::RawOutput(ref value)) = event {
+            // Fire-and-forget: this arm runs inline in the connection's
+            // `select!`, so awaiting a refresh here stalls output forwarding,
+            // input delivery, acks and heartbeats behind up to three `gh`
+            // network calls. The update is emitted as its own `SessionUpdate`
+            // when it completes, so nothing is lost by not waiting.
             if state.git_refresh.should_check_before_message() {
-                check_and_send_branch_update(
+                spawn_branch_update(
                     &state.ws_write,
                     state.session_id,
                     &state.working_directory,
                     &state.git_metadata,
-                )
-                .await;
+                );
             }
             // This arm carries codex *and* muse, whose wire shapes have
             // nothing in common — so the detector is chosen by agent rather
