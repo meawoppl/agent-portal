@@ -81,7 +81,7 @@ claude-codes = { version = "2.1.223", default-features = false, features = ["typ
 # Muse CLI integration
 # Temporary git pin: 0.1.7 carries the typed command-result binding used by
 # the frontend. Flip back to a crates.io version once 0.1.7 publishes.
-muse-codes = { git = "https://github.com/meawoppl/rust-code-agent-sdks", rev = "2137be7", default-features = false }
+muse-codes = { version = "0.1.7", default-features = false }
 codex-codes = { version = "0.146.4", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
