@@ -3,6 +3,7 @@
 mod git_metadata;
 mod heartbeat_watchdog;
 mod input_delivery;
+mod media_display;
 mod output_forwarder;
 mod permission_bridge;
 mod portal_reminder;
@@ -30,6 +31,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 pub use git_metadata::{get_git_branch, get_repo_url};
+pub use media_display::MediaDisplaySink;
 
 use git_metadata::{get_open_prs, get_pr_url, GitMetadataState, GitRefreshTrigger};
 use output_forwarder::spawn_output_forwarder;
@@ -84,6 +86,8 @@ pub struct ProxySessionConfig {
     pub codex_thread_id_sink: Option<CodexThreadIdSink>,
     /// Claude counterpart to `codex_thread_id_sink` (see the type docs).
     pub claude_conversation_id_sink: Option<ClaudeConversationIdSink>,
+    /// Displays an image the agent read; see [`MediaDisplaySink`].
+    pub media_display_sink: Option<MediaDisplaySink>,
     /// First-spawn-only source session for Claude/Codex fork semantics.
     pub fork_from_session_id: Option<Uuid>,
     /// Optional Codex native turn id; `None` forks the latest turn.
@@ -377,6 +381,9 @@ struct ConnectionState {
     /// [`CodexThreadIdSink`] doc. Cloned out of `ProxySessionConfig` so
     /// the per-connection state doesn't need to carry a config reference.
     codex_thread_id_sink: Option<CodexThreadIdSink>,
+    /// Displays images the agent reads; see [`MediaDisplaySink`]. Used by the
+    /// non-Claude arm — Claude's detection runs in the output forwarder.
+    media_display_sink: Option<MediaDisplaySink>,
 }
 
 /// Run the WebSocket connection loop with auto-reconnect
@@ -854,6 +861,7 @@ async fn run_message_loop<A: Agent>(
         session.output_buffer.clone(),
         config.agent_type,
         config.claude_conversation_id_sink.clone(),
+        config.media_display_sink.clone(),
     );
 
     // Spawn WebSocket reader task
@@ -900,6 +908,7 @@ async fn run_message_loop<A: Agent>(
         git_metadata,
         git_refresh: GitRefreshTrigger::default(),
         codex_thread_id_sink: config.codex_thread_id_sink.clone(),
+        media_display_sink: config.media_display_sink.clone(),
     };
 
     // On the very first connection of this session, inject the portal

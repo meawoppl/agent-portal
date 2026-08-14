@@ -413,6 +413,9 @@ async fn main() -> Result<()> {
     // Build session config
     let session_config = ProxySessionConfig {
         claude_conversation_id_sink: None,
+        // Auto-display needs the launcher's upload credentials; a standalone
+        // proxy simply doesn't display images the agent reads.
+        media_display_sink: None,
         backend_url,
         session_id,
         session_name,

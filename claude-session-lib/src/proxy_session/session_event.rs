@@ -25,6 +25,7 @@ use tracing::error;
 use super::git_metadata::{
     codex_output_has_git_signal, muse_output_has_git_signal, spawn_branch_update,
 };
+use super::media_display::codex_output_image_read;
 use super::wiggum::handle_session_event_with_wiggum;
 use super::{inject_portal_reminder, is_codex_compaction_event, ConnectionResult, ConnectionState};
 
@@ -64,6 +65,17 @@ pub(super) async fn handle_next_event<A: Agent>(
             };
             if has_git_signal {
                 state.git_refresh.mark_git_signal();
+            }
+
+            // Codex counterpart to the Claude Read-triggered display. Muse is
+            // excluded deliberately: its journal has no command-execution record
+            // this could key on, so a detector here would be dead code.
+            if state.agent_type == shared::AgentType::Codex {
+                if let Some(sink) = state.media_display_sink.as_ref() {
+                    if let Some(path) = codex_output_image_read(value) {
+                        sink(path);
+                    }
+                }
             }
 
             let is_codex_compaction = is_codex_compaction_event(value);

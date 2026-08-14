@@ -23,6 +23,7 @@ use super::git_metadata::{
     check_and_send_branch_update, claude_output_code_change_published,
     claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
 };
+use super::media_display::{claude_output_image_read, MediaDisplaySink};
 use super::{format_duration, truncate, SharedWsWrite};
 
 /// Spawn the output forwarder task
@@ -41,6 +42,7 @@ pub fn spawn_output_forwarder(
     output_buffer: std::sync::Arc<tokio::sync::Mutex<PendingOutputBuffer>>,
     agent_type: AgentType,
     claude_conversation_id_sink: Option<super::ClaudeConversationIdSink>,
+    media_display_sink: Option<MediaDisplaySink>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut git_refresh = GitRefreshTrigger::default();
@@ -111,6 +113,15 @@ pub fn spawn_output_forwarder(
                         &git_metadata,
                     )
                     .await;
+                }
+
+                // Reading an image displays it: the user otherwise watches the
+                // agent reason about a picture they cannot see.
+                if let Some(sink) = media_display_sink.as_ref() {
+                    if let Some(path) = claude_output_image_read(output) {
+                        debug!("← Read of displayable image: {}", path.display());
+                        sink(path);
+                    }
                 }
 
                 // Is THIS message a git-related bash command (for next iteration)?

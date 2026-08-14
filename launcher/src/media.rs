@@ -81,7 +81,38 @@ fn human_size(bytes: u64) -> String {
 
 /// `agent-portal show <file>` — upload and display media in this session.
 pub async fn show(path_str: &str) -> Result<()> {
-    let path = Path::new(path_str);
+    let client = reqwest::Client::new();
+    let (base, token) = crate::message::api_base()?;
+    let session_id = crate::message::current_session_id(&client, &base, &token)
+        .await
+        .context("could not determine the calling session for `agent-portal show`")?;
+
+    let (data, filename, size, kind) = upload_media(&session_id, Path::new(path_str)).await?;
+    let kind_word = match kind {
+        MediaKind::Image => "image",
+        MediaKind::Video => "video",
+    };
+    println!(
+        "Displayed {kind_word} {filename} ({}) in session {}.",
+        human_size(size),
+        data.session_name
+    );
+    if !data.persisted {
+        println!("warning: media was shown live but not durably persisted for replay");
+    }
+    Ok(())
+}
+
+/// Upload a local file as media for an explicit session.
+///
+/// Split out of [`show`] because the Read-triggered auto-display runs inside the
+/// launcher daemon, which manages many sessions at once and therefore cannot use
+/// `show`'s "resolve the calling session from my own environment" step.
+pub(crate) async fn upload_media(
+    session_id: &str,
+    path: &Path,
+) -> Result<(ShowMediaResponse, String, u64, MediaKind)> {
+    let path_str = path.display().to_string();
     let bytes = std::fs::read(path).with_context(|| format!("could not read file `{path_str}`"))?;
     if bytes.is_empty() {
         return Err(anyhow!("`{path_str}` is empty"));
@@ -112,9 +143,6 @@ pub async fn show(path_str: &str) -> Result<()> {
     let (base, token) = crate::message::api_base()?;
 
     let client = reqwest::Client::new();
-    let session_id = crate::message::current_session_id(&client, &base, &token)
-        .await
-        .context("could not determine the calling session for `agent-portal show`")?;
     let resp = client
         .post(format!("{base}/api/agent/sessions/{session_id}/media"))
         .bearer_auth(&token)
@@ -132,19 +160,7 @@ pub async fn show(path_str: &str) -> Result<()> {
     }
 
     let data: ShowMediaResponse = resp.json().await.context("malformed response")?;
-    let kind_word = match kind {
-        MediaKind::Image => "image",
-        MediaKind::Video => "video",
-    };
-    println!(
-        "Displayed {kind_word} {filename} ({}) in session {}.",
-        human_size(size),
-        data.session_name
-    );
-    if !data.persisted {
-        println!("warning: media was shown live but not durably persisted for replay");
-    }
-    Ok(())
+    Ok((data, filename, size, kind))
 }
 
 #[cfg(test)]
