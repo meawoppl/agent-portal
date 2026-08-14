@@ -14,7 +14,7 @@ use claude_codes::io::{ContentBlock, ControlRequestPayload, ToolUseBlock};
 use claude_codes::ClaudeOutput;
 use shared::{AgentType, ProxyToServer};
 use tokio::sync::mpsc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use session_lib::output_buffer::PendingOutputBuffer;
@@ -28,6 +28,10 @@ use super::{format_duration, truncate, SharedWsWrite};
 /// Spawn the output forwarder task
 ///
 /// Forwards Claude outputs to WebSocket with sequence numbers for reliable delivery.
+// One `tokio::spawn` fed by the connection loop's own locals; bundling them into
+// a struct would exist only to satisfy the lint, since there is no second caller
+// to share it with.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_output_forwarder(
     mut output_rx: mpsc::UnboundedReceiver<serde_json::Value>,
     ws_write: SharedWsWrite,
@@ -36,9 +40,13 @@ pub fn spawn_output_forwarder(
     git_metadata: GitMetadataState,
     output_buffer: std::sync::Arc<tokio::sync::Mutex<PendingOutputBuffer>>,
     agent_type: AgentType,
+    claude_conversation_id_sink: Option<super::ClaudeConversationIdSink>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut git_refresh = GitRefreshTrigger::default();
+        // Last conversation id we reported, so a steady stream of frames
+        // carrying the same id costs one comparison rather than a disk write.
+        let mut reported_conversation: Option<Uuid> = None;
 
         while let Some(value) = output_rx.recv().await {
             // `Session` is now agent-neutral and forwards raw wire JSON. Re-parse
@@ -63,6 +71,29 @@ pub fn spawn_output_forwarder(
 
             if let Some(ref output) = parsed {
                 log_claude_output(output);
+
+                // Claude stamps its current conversation on every frame. It
+                // equals `session_id` until `/clear` rolls claude onto a new
+                // conversation; from then on the portal id names the pre-clear
+                // transcript, so resuming it would silently reinstate the
+                // conversation as it was before the clear. Report the change so
+                // the launcher can persist it and resume the live one.
+                if let Some(current) = output
+                    .session_id()
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                    .filter(|id| *id != session_id)
+                {
+                    if reported_conversation != Some(current) {
+                        reported_conversation = Some(current);
+                        info!(
+                            "Claude conversation diverged from portal session {}: now {}",
+                            session_id, current
+                        );
+                        if let Some(sink) = claude_conversation_id_sink.as_ref() {
+                            sink(current);
+                        }
+                    }
+                }
 
                 // The CLI's own PR-published signal: refresh PR metadata NOW
                 // rather than deferring, since the PR already exists in `gh`

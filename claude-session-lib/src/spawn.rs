@@ -20,13 +20,24 @@ use session_lib::snapshot::SessionConfig;
 /// Build the argument list for the `claude` CLI (everything after the binary
 /// path). Shared by the library spawn path and the proxy's shim mode so flag
 /// changes can't drift between the two.
+/// Build the `claude` argv.
+///
+/// `conversation_id` is claude's own current conversation, when it has diverged
+/// from the portal's `session_id` — which `/clear` causes. It is what `--resume`
+/// and a fork's source must key on: resuming the portal id after a clear
+/// re-opens the pre-clear transcript, and forking it branches from that stale
+/// history rather than from what the user can see. `--session-id` still gets the
+/// portal id, since that is the identity the backend and the dashboard hold.
 pub fn claude_cli_args(
     session_id: uuid::Uuid,
     resume: bool,
+    conversation_id: Option<uuid::Uuid>,
     fork_from: Option<uuid::Uuid>,
     prompt_suggestions: bool,
     extra_args: &[String],
 ) -> Vec<String> {
+    // Where claude's history actually lives right now.
+    let transcript_id = conversation_id.unwrap_or(session_id);
     let mut args: Vec<String> = [
         "--print",
         "--verbose",
@@ -51,6 +62,8 @@ pub fn claude_cli_args(
         // cannot carry the portal's arbitrary user extra_args. Keep the SDK's
         // documented flag recipe here until its builder supports passthrough;
         // this function also remains the single argv seam shared with shim mode.
+        // `source` is the source session's conversation id, resolved
+        // launcher-side — not its portal id, for the same reason as below.
         args.extend([
             "--resume".to_string(),
             source.to_string(),
@@ -60,7 +73,7 @@ pub fn claude_cli_args(
         ]);
     } else if resume {
         args.push("--resume".to_string());
-        args.push(session_id.to_string());
+        args.push(transcript_id.to_string());
     } else {
         args.push("--session-id".to_string());
         args.push(session_id.to_string());
@@ -85,7 +98,10 @@ pub(crate) async fn spawn_claude(
     let args = claude_cli_args(
         config.session_id,
         config.resume,
-        config.fork_from_session_id,
+        config.claude_conversation_id,
+        config
+            .claude_fork_from_conversation_id
+            .or(config.fork_from_session_id),
         claude_supports_prompt_suggestions(claude_path).await,
         &config.extra_args,
     );
@@ -207,6 +223,7 @@ mod tests {
         let args = claude_cli_args(
             new_id,
             false,
+            None,
             Some(source),
             false,
             &["--model".into(), "opus".into()],
@@ -223,11 +240,69 @@ mod tests {
         assert_eq!(&args[args.len() - expected.len()..], expected.as_slice());
     }
 
+    /// The bug this exists to prevent: `/clear` rolls claude onto a new
+    /// conversation, so resuming the portal session id re-opens the *pre-clear*
+    /// transcript and silently discards everything since.
+    #[test]
+    fn resume_uses_claude_conversation_once_it_has_diverged() {
+        let portal_id = uuid::Uuid::from_u128(2);
+        let after_clear = uuid::Uuid::from_u128(99);
+        let args = claude_cli_args(portal_id, true, Some(after_clear), None, false, &[]);
+
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["--resume", &after_clear.to_string()],
+            "resume must open the live conversation, not the portal id"
+        );
+        assert!(
+            !args.contains(&portal_id.to_string()),
+            "the pre-clear transcript id must not appear at all"
+        );
+    }
+
+    /// The overwhelmingly common case: never cleared, so the portal id still
+    /// names claude's conversation and nothing changes.
+    #[test]
+    fn resume_falls_back_to_session_id_when_not_diverged() {
+        let portal_id = uuid::Uuid::from_u128(2);
+        let args = claude_cli_args(portal_id, true, None, None, false, &[]);
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["--resume", &portal_id.to_string()]
+        );
+    }
+
+    /// A fork's source is resolved to the source's conversation by the caller,
+    /// for the same reason: forking a cleared session by its portal id branches
+    /// from history the user can no longer see. The new session still gets the
+    /// portal id as its own `--session-id`.
+    #[test]
+    fn fork_source_is_taken_verbatim_and_new_identity_is_the_portal_id() {
+        let new_portal_id = uuid::Uuid::from_u128(2);
+        let source_conversation = uuid::Uuid::from_u128(77);
+        let args = claude_cli_args(
+            new_portal_id,
+            false,
+            None,
+            Some(source_conversation),
+            false,
+            &[],
+        );
+
+        let resume_at = args.iter().position(|a| a == "--resume").expect("--resume");
+        assert_eq!(args[resume_at + 1], source_conversation.to_string());
+        let session_at = args
+            .iter()
+            .position(|a| a == "--session-id")
+            .expect("--session-id");
+        assert_eq!(args[session_at + 1], new_portal_id.to_string());
+    }
+
     #[test]
     fn resume_ignores_persisted_fork_source() {
         let source = uuid::Uuid::from_u128(1);
         let own_id = uuid::Uuid::from_u128(2);
-        let args = claude_cli_args(own_id, true, Some(source), false, &[]);
+        let args = claude_cli_args(own_id, true, None, Some(source), false, &[]);
         assert_eq!(&args[args.len() - 2..], ["--resume", &own_id.to_string()]);
         assert!(!args.iter().any(|arg| arg == "--fork-session"));
     }
@@ -235,7 +310,7 @@ mod tests {
     #[test]
     fn fresh_non_fork_launch_uses_new_session_id() {
         let own_id = uuid::Uuid::from_u128(2);
-        let args = claude_cli_args(own_id, false, None, false, &[]);
+        let args = claude_cli_args(own_id, false, None, None, false, &[]);
         assert_eq!(
             &args[args.len() - 2..],
             ["--session-id", &own_id.to_string()]
@@ -245,7 +320,7 @@ mod tests {
 
     #[test]
     fn enables_typed_prompt_suggestion_frames() {
-        let args = claude_cli_args(uuid::Uuid::nil(), false, None, true, &[]);
+        let args = claude_cli_args(uuid::Uuid::nil(), false, None, None, true, &[]);
         let flag = args
             .iter()
             .position(|arg| arg == "--prompt-suggestions")
@@ -255,7 +330,7 @@ mod tests {
 
     #[test]
     fn omits_prompt_suggestion_flag_for_older_claude() {
-        let args = claude_cli_args(uuid::Uuid::nil(), false, None, false, &[]);
+        let args = claude_cli_args(uuid::Uuid::nil(), false, None, None, false, &[]);
         assert!(!args.iter().any(|arg| arg == "--prompt-suggestions"));
     }
 }

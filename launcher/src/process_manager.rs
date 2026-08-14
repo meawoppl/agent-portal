@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use claude_session_lib::proxy_session::CodexThreadIdSink;
+use claude_session_lib::proxy_session::{ClaudeConversationIdSink, CodexThreadIdSink};
 use claude_session_lib::{
     claude_transcript_status, run_connection_loop, ClaudeAgent, LoopResult, PortalInput,
     ProxySessionConfig, TranscriptStatus,
@@ -49,6 +49,60 @@ fn save_codex_threads(map: &HashMap<Uuid, String>) -> std::io::Result<()> {
 
 fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
     load_codex_threads().get(&session_id).cloned()
+}
+
+/// Sidecar map of claude's *current* conversation per portal session, the
+/// claude counterpart to `codex_threads.json`.
+///
+/// `/clear` rolls claude onto a new conversation while the portal session id
+/// stays put, so from that point `--resume <portal id>` re-opens the pre-clear
+/// transcript. Persisting the divergence lets a relaunch resume what the user
+/// can actually see. Deliberately a separate file rather than a field in
+/// `launcher.json`: it is derived cache, rewritten from the output stream, and
+/// losing it degrades to the old behavior rather than corrupting config.
+fn claude_conversations_path() -> PathBuf {
+    session_lib::paths::config_dir().join("claude_conversations.json")
+}
+
+fn load_claude_conversations() -> HashMap<Uuid, Uuid> {
+    std::fs::read_to_string(claude_conversations_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn load_claude_conversation_id(session_id: Uuid) -> Option<Uuid> {
+    load_claude_conversations().get(&session_id).copied()
+}
+
+fn make_claude_conversation_id_sink(session_id: Uuid) -> ClaudeConversationIdSink {
+    std::sync::Arc::new(move |conversation_id: Uuid| {
+        let mut map = load_claude_conversations();
+        if map.get(&session_id) == Some(&conversation_id) {
+            return;
+        }
+        map.insert(session_id, conversation_id);
+        let path = claude_conversations_path();
+        let write = path
+            .parent()
+            .map(std::fs::create_dir_all)
+            .unwrap_or(Ok(()))
+            .and_then(|()| {
+                serde_json::to_string_pretty(&map)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })
+            .and_then(|body| std::fs::write(&path, body));
+        match write {
+            Ok(()) => info!(
+                "Claude conversation for session {} recorded as {}",
+                session_id, conversation_id
+            ),
+            Err(e) => warn!(
+                "Failed to persist claude conversation id for session {}: {}",
+                session_id, e
+            ),
+        }
+    })
 }
 
 /// Reverse of the persisted map: given a codex thread id (which a codex agent
@@ -256,6 +310,10 @@ impl ProcessManager {
             // thread/resume. No-op for claude sessions (the codex io-task
             // is the only emitter).
             codex_thread_id_sink: Some(make_codex_thread_id_sink(session_id)),
+            // Claude counterpart: learn the conversation id `/clear` rolls
+            // to, so the next resume opens the live transcript (not the
+            // pre-clear one).
+            claude_conversation_id_sink: Some(make_claude_conversation_id_sink(session_id)),
             fork_from_session_id: params.fork_from_session_id,
             fork_point_turn_id: params.fork_point_turn_id,
         };
@@ -409,6 +467,10 @@ async fn run_session_task(
             codex_thread_id,
             fork_from_session_id: config.fork_from_session_id,
             codex_fork_from_thread_id: config.fork_from_session_id.and_then(load_codex_thread_id),
+            claude_conversation_id: load_claude_conversation_id(config.session_id),
+            claude_fork_from_conversation_id: config
+                .fork_from_session_id
+                .and_then(load_claude_conversation_id),
             codex_fork_last_turn_id: config.fork_point_turn_id.clone(),
         };
 
