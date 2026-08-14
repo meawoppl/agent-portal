@@ -3,6 +3,17 @@ use super::markdown::linkify_urls;
 use shared::fmt::truncate_str;
 use yew::prelude::*;
 
+/// Canonical truncation limits per context — one table to tune instead of
+/// grepping for literal `max_len={500}` etc. (see #1677).
+pub mod limits {
+    /// Tool/command output (bash, file reads with line numbers, etc.)
+    pub const TOOL_OUTPUT: usize = 500;
+    /// Short prose / user prompts
+    pub const PROSE: usize = 300;
+    /// Raw JSON fallback (Codex unrecognized event dump)
+    pub const RAW_JSON: usize = 800;
+}
+
 #[derive(Properties, PartialEq)]
 pub struct ExpandableTextProps {
     pub full_text: AttrValue,
