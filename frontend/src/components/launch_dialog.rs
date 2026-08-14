@@ -34,29 +34,20 @@ const LAST_LAUNCHER_STORAGE_KEY: &str = "claude-portal-last-launcher";
 /// host (or silently falling back to home) on multi-launcher setups.
 const LAST_LAUNCH_DIRS_STORAGE_KEY: &str = "claude-portal-last-launch-dirs";
 
-fn local_storage() -> Option<web_sys::Storage> {
-    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
-}
-
 /// Load the last-used launcher (machine) id. Returns `None` when nothing is
 /// remembered so callers can fall back to the first connected launcher.
 fn load_last_launcher() -> Option<Uuid> {
-    local_storage()
-        .and_then(|s| s.get_item(LAST_LAUNCHER_STORAGE_KEY).ok().flatten())
-        .and_then(|v| Uuid::parse_str(&v).ok())
+    crate::utils::storage_get(LAST_LAUNCHER_STORAGE_KEY).and_then(|v| Uuid::parse_str(&v).ok())
 }
 
 /// Persist the last-used launcher (machine) id.
 fn save_last_launcher(launcher_id: Uuid) {
-    if let Some(storage) = local_storage() {
-        let _ = storage.set_item(LAST_LAUNCHER_STORAGE_KEY, &launcher_id.to_string());
-    }
+    crate::utils::storage_set(LAST_LAUNCHER_STORAGE_KEY, &launcher_id.to_string());
 }
 
 /// Load the whole launcher-id -> directory map (defaults to empty).
 fn load_last_launch_dirs() -> HashMap<String, String> {
-    local_storage()
-        .and_then(|s| s.get_item(LAST_LAUNCH_DIRS_STORAGE_KEY).ok().flatten())
+    crate::utils::storage_get(LAST_LAUNCH_DIRS_STORAGE_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default()
 }
@@ -76,10 +67,8 @@ fn load_last_launch_dir_for(launcher_id: Uuid) -> Option<String> {
 fn save_last_launch_dir_for(launcher_id: Uuid, dir: &str) {
     let mut dirs = load_last_launch_dirs();
     dirs.insert(launcher_id.to_string(), dir.to_string());
-    if let Some(storage) = local_storage() {
-        if let Ok(json) = serde_json::to_string(&dirs) {
-            let _ = storage.set_item(LAST_LAUNCH_DIRS_STORAGE_KEY, &json);
-        }
+    if let Ok(json) = serde_json::to_string(&dirs) {
+        crate::utils::storage_set(LAST_LAUNCH_DIRS_STORAGE_KEY, &json);
     }
 }
 
