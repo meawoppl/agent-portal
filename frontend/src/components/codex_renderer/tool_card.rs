@@ -1,11 +1,9 @@
-use super::item_card_classes;
 use yew::prelude::*;
 
-/// Wraps a per-variant body in the standard tool-style card chrome:
-/// card wrapper (with in-progress styling), message-body, tool-use-section,
-/// and a tool-use-header with icon + name + optional `status` meta line.
-/// Returns `html! {}` when `body` is empty so callers can short-circuit
-/// empty-data cases by handing in a no-op body.
+/// Codex-specific re-export of the shared tool-card chrome. The shared
+/// `crate::components::tool_card::tool_card` now owns the wrapper so the
+/// `codex-item-in-progress` pulse changes in one place (see
+/// `frontend/src/components/tool_card.rs`).
 pub(super) fn tool_card(
     icon: &str,
     name: String,
@@ -13,22 +11,5 @@ pub(super) fn tool_card(
     body: Html,
     completed: bool,
 ) -> Html {
-    html! {
-        <div class={item_card_classes(completed)}>
-            <div class="message-body">
-                <div class="tool-use-section">
-                    <div class="tool-use-header">
-                        <span class="tool-icon">{ icon }</span>
-                        <span class="tool-name">{ name }</span>
-                        { if let Some(s) = status {
-                            html! { <span class="tool-meta">{ s }</span> }
-                        } else {
-                            html! {}
-                        } }
-                    </div>
-                    { body }
-                </div>
-            </div>
-        </div>
-    }
+    crate::components::tool_card::tool_card(icon, name, status, body, completed)
 }
