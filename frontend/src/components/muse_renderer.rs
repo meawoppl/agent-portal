@@ -263,17 +263,19 @@ fn render_task_node(node: &TaskNode) -> Html {
     // twice (the original bug).
     let shown_as_result: std::collections::HashSet<&str> =
         node.tool_results.iter().map(|r| r.text.as_str()).collect();
-    html! {
-        <div class={item_class} key={node.task_id.clone()}>
-            <div class="muse-task-header">
-                <span class={classes!("muse-task-badge", format!("muse-task-{}", state.label()))}>
-                    { state.label() }
-                </span>
-                <span class="muse-task-kind">{ kind }</span>
-                if let Some(status) = node.status.as_deref() {
-                    <span class="muse-task-status">{ status }</span>
-                }
-            </div>
+    let header = html! {
+        <div class="muse-task-header">
+            <span class={classes!("muse-task-badge", format!("muse-task-{}", state.label()))}>
+                { state.label() }
+            </span>
+            <span class="muse-task-kind">{ kind }</span>
+            if let Some(status) = node.status.as_deref() {
+                <span class="muse-task-status">{ status }</span>
+            }
+        </div>
+    };
+    let body = html! {
+        <>
             if let Some(reason) = node.reason.as_deref() {
                 <div class="muse-task-reason">{ reason }</div>
             }
@@ -310,8 +312,14 @@ fn render_task_node(node: &TaskNode) -> Html {
                     }
                 }
             }) }
-        </div>
-    }
+        </>
+    };
+    crate::components::tool_card::keyed_tool_card(
+        item_class,
+        node.task_id.clone().into(),
+        header,
+        body,
+    )
 }
 
 #[cfg(test)]
