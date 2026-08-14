@@ -34,6 +34,12 @@ pub use identity::{ProviderIdentity, PROVIDER_GITHUB, PROVIDER_GOOGLE};
 const MOBILE_TOKEN_TTL_DAYS: u32 = 30;
 const TOKEN_REFRESH_GRACE_MINUTES: i64 = 10;
 
+/// How long a browser keeps the web session cookie.
+///
+/// Matches [`MOBILE_TOKEN_TTL_DAYS`] so both browser and mobile logins expire on
+/// the same clock. See [`session_cookie`] for why this must stay set.
+const WEB_SESSION_TTL_DAYS: i64 = 30;
+
 /// Regular web login via Google.
 pub async fn login(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
     start_login(&oauth::GOOGLE, &app_state, &cookies)
@@ -718,12 +724,24 @@ fn add_session_cookie(cookies: &Cookies, app_state: &AppState, user: &User) {
         .add(session_cookie(user, !app_state.dev_mode));
 }
 
+/// Build the signed web session cookie.
+///
+/// **`max_age` must stay set.** Without it the browser treats `cc_session` as a
+/// session cookie and drops it on quit, logging the user out for good: there is
+/// no refresh path for web sessions — `/api/auth/refresh` gates on
+/// [`require_mobile_token`], so a browser cookie can only ever be replaced by a
+/// full OAuth round trip. Device-flow JWTs are unaffected (they carry their own
+/// TTL and a server-pushed `TokenRefresh`), which is why the CLI stays logged in
+/// while the browser does not.
 fn session_cookie(user: &User, secure: bool) -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE_NAME, user.id.to_string());
     cookie.set_path(routes::ROOT);
     cookie.set_http_only(true);
     cookie.set_secure(secure);
     cookie.set_same_site(SameSite::Lax);
+    cookie.set_max_age(tower_cookies::cookie::time::Duration::days(
+        WEB_SESSION_TTL_DAYS,
+    ));
     cookie
 }
 
@@ -1072,5 +1090,56 @@ mod tests {
         let cookie_user =
             crate::auth::extract_user(&app_state, None, &cookies).expect("session cookie auth");
         assert_eq!(cookie_user.id, user.id);
+    }
+
+    fn sample_user() -> User {
+        let now = chrono::Utc::now().naive_utc();
+        User {
+            id: uuid::Uuid::new_v4(),
+            email: "someone@example.invalid".to_string(),
+            name: None,
+            avatar_url: None,
+            created_at: now,
+            updated_at: now,
+            is_admin: false,
+            disabled: false,
+            ban_reason: None,
+            sound_config: None,
+            notification_prefs: None,
+            nickname: None,
+        }
+    }
+
+    /// Regression guard: an unset `max_age` makes `cc_session` a browser-session
+    /// cookie that dies on quit, and web sessions have no refresh path to
+    /// recover from that.
+    #[test]
+    fn session_cookie_persists_across_browser_restarts() {
+        let cookie = session_cookie(&sample_user(), true);
+
+        let max_age = cookie.max_age().expect("session cookie must set max_age");
+        assert_eq!(max_age.whole_days(), WEB_SESSION_TTL_DAYS);
+    }
+
+    #[test]
+    fn session_cookie_keeps_its_hardening_attributes() {
+        let cookie = session_cookie(&sample_user(), true);
+
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.secure(), Some(true));
+        assert_eq!(cookie.same_site(), Some(SameSite::Lax));
+        assert_eq!(cookie.path(), Some(routes::ROOT));
+    }
+
+    /// Logout must still clear the now-persistent cookie.
+    #[test]
+    fn remove_session_cookie_expires_immediately() {
+        let cookie = remove_session_cookie();
+
+        assert_eq!(cookie.value(), "");
+        assert_eq!(
+            cookie.max_age(),
+            Some(tower_cookies::cookie::time::Duration::ZERO)
+        );
     }
 }
