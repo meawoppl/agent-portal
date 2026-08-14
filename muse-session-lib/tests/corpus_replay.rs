@@ -177,6 +177,25 @@ fn reminder_scaffolding_screens_to_noop_on_real_captures() {
             "{fixture}: capture must contain reminders"
         );
 
+        // Same for model.meta.response tasks, now screened alongside reminders
+        // (#1607): content-free bookkeeping muse journals per meta-model call.
+        let meta_ids: HashSet<String> = records
+            .iter()
+            .filter_map(|r| {
+                let ev = r.payload.get("event")?;
+                (ev.get("kind")?.as_str()? == "proposed"
+                    && ev.get("task_kind")?.as_str()? == "model.meta.response")
+                    .then(|| ev.get("task_id")?.as_str().map(str::to_string))?
+            })
+            .collect();
+        assert!(
+            !meta_ids.is_empty(),
+            "{fixture}: capture must contain model.meta.response tasks"
+        );
+
+        // Both kinds are screened; no record belonging to either may be emitted.
+        let screened_ids: HashSet<String> = reminder_ids.union(&meta_ids).cloned().collect();
+
         let mut classifier = MuseClassifier::default();
         let mut emitted_types = Vec::new();
         let mut noops = 0usize;
@@ -191,8 +210,8 @@ fn reminder_scaffolding_screens_to_noop_on_real_captures() {
                             .or_else(|| v["payload"]["task_id"].as_str());
                         if let Some(tid) = tid {
                             assert!(
-                                !reminder_ids.contains(tid),
-                                "{fixture}: reminder record leaked: {}",
+                                !screened_ids.contains(tid),
+                                "{fixture}: screened record leaked: {}",
                                 v["payload_type"]
                             );
                         }
@@ -203,10 +222,11 @@ fn reminder_scaffolding_screens_to_noop_on_real_captures() {
             }
         }
 
-        // Only the reminder `proposed` records themselves collapse to a Noop
-        // marker; the rest of each reminder's lifecycle Noops too, so the
-        // count must cover every reminder-task record in the capture.
-        let reminder_records = records
+        // Every record belonging to a screened task (reminder.* or
+        // model.meta.response) Noops, except held links which are silently
+        // dropped (no output at all) — so the Noop count is bounded above by
+        // the total screened-task records in the capture.
+        let screened_records = records
             .iter()
             .filter(|r| {
                 let p = &r.payload;
@@ -215,14 +235,12 @@ fn reminder_scaffolding_screens_to_noop_on_real_captures() {
                     .and_then(|e| e.get("task_id"))
                     .and_then(|t| t.as_str())
                     .or_else(|| p.get("task_id").and_then(|t| t.as_str()));
-                tid.is_some_and(|t| reminder_ids.contains(t))
+                tid.is_some_and(|t| screened_ids.contains(t))
             })
             .count();
-        // Every reminder record becomes exactly one Noop, except held links
-        // which are silently dropped (no output at all).
         assert!(
-            noops > 0 && noops <= reminder_records,
-            "{fixture}: expected 1..={reminder_records} noops, got {noops}"
+            noops > 0 && noops <= screened_records,
+            "{fixture}: expected 1..={screened_records} noops, got {noops}"
         );
 
         // Real work survives untouched.
