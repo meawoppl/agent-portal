@@ -31,6 +31,23 @@ fn render_body(text: &str, ansi: bool) -> Html {
     }
 }
 
+/// Label for the collapsed toggle, describing what staying collapsed is hiding.
+///
+/// Reports **lines as well as characters**, because the character count alone
+/// doesn't tell you what expanding will cost: 4000 hidden characters is two
+/// screens of build log or one minified JSON line, and those want different
+/// decisions. The line count is omitted when there is only one line to hide —
+/// its absence then carries the same information, and it keeps the label short
+/// for the inline `span` chips in tool headers, which must stay on one line.
+fn truncation_summary(hidden: &str) -> String {
+    let lines = hidden.lines().count();
+    if lines > 1 {
+        format!("... {} more lines, {} chars", lines, hidden.len())
+    } else {
+        format!("... {} more chars", hidden.len())
+    }
+}
+
 /// Character-based expandable text. Shows truncated content with a clickable
 /// toggle to reveal the full text. If the text fits within `max_len`, renders
 /// as-is with no toggle.
@@ -51,8 +68,6 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
         };
     }
 
-    let remaining = text.len() - props.max_len;
-
     let toggle = {
         let expanded = expanded.clone();
         Callback::from(move |e: MouseEvent| {
@@ -64,10 +79,12 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
     let (display, toggle_label) = if *expanded {
         (text.to_string(), "show less".to_string())
     } else {
-        (
-            truncate_str(text, props.max_len).to_string(),
-            format!("... {} more chars", remaining),
-        )
+        // Measure the hidden remainder from where the text was actually cut:
+        // `truncate_str` backs off to a char boundary, so `max_len` is an upper
+        // bound on the cut, not the cut itself.
+        let shown = truncate_str(text, props.max_len);
+        let summary = truncation_summary(&text[shown.len()..]);
+        (shown.to_string(), summary)
     };
 
     // Block-context wrappers (`pre`, `div`) render the toggle as a `<div>` so
@@ -158,5 +175,45 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
                 }}
             </div>
         </pre>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The case the line count exists for: a wall of build-log output, where
+    /// the character count alone doesn't convey how much scrolling is hidden.
+    #[test]
+    fn reports_lines_and_chars_for_multi_line_remainders() {
+        assert_eq!(
+            truncation_summary("error one\nerror two\nerror three"),
+            "... 3 more lines, 31 chars"
+        );
+    }
+
+    /// A single hidden line stays chars-only: "1 more lines" reads badly, and
+    /// the absence of a line count already says the remainder is one line.
+    #[test]
+    fn omits_the_line_count_for_single_line_remainders() {
+        assert_eq!(truncation_summary("{\"a\":1}"), "... 7 more chars");
+        assert_eq!(truncation_summary(""), "... 0 more chars");
+    }
+
+    /// A trailing newline must not be counted as a further line of content.
+    #[test]
+    fn does_not_count_a_trailing_newline_as_a_line() {
+        assert_eq!(truncation_summary("one\n"), "... 4 more chars");
+        assert_eq!(
+            truncation_summary("one\ntwo\n"),
+            "... 2 more lines, 8 chars"
+        );
+    }
+
+    /// Multi-byte input: the summary must count characters the same way the
+    /// truncation does (bytes), and never panic on a split boundary.
+    #[test]
+    fn handles_multi_byte_remainders() {
+        assert_eq!(truncation_summary("é"), "... 2 more chars");
     }
 }
