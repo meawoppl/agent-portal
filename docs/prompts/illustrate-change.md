@@ -71,12 +71,60 @@ context, and anything that does neither should be deleted.
 - Gradients, drop shadows, rounded-everything, or any decoration that is not
   carrying information.
 
+## Canonical layout
+
+Every diagram uses the same skeleton. This is not stylistic fussiness: these are
+read as a set, and a shared frame means a reader learns the format once and
+spends their attention on the content instead of re-orienting each time.
+
+Canvas: `viewBox="0 0 1200 720"` with matching `width`/`height`.
+
+**Header band, y 0–96.** Two lines, both left-aligned at x=32:
+
+- **Heading**, `y="36"`, 15px, fill `#565f89`, `letter-spacing="0.6"`:
+  `PR #<number> · <the PR's own title>`. Take the title verbatim from
+  `gh pr view`; do not reword it.
+- **Subtitle**, baseline `y="66"` (and `y="90"` if it needs a second line),
+  19px, fill `#c0caf5`: your one-sentence insight. Hard limit two lines — if it
+  will not fit, the sentence is too long, not the band too short.
+- **Rule** beneath: `<line x1="32" y1="96" x2="1168" y2="96" stroke="#565f89"
+  stroke-opacity="0.35" stroke-width="1"/>`.
+
+**Panel band, y 112–690, x 32–1168.** Split into two panels by a vertical
+divider:
+
+```
+<line x1="600" y1="112" x2="600" y2="690"
+      stroke="#565f89" stroke-opacity="0.5" stroke-width="1"
+      stroke-dasharray="6 6"/>
+```
+
+- **BEFORE** occupies x 32–576, **AFTER** x 624–1168.
+- Panel labels at `y="130"`, 12px, `letter-spacing="1.6"`, uppercase: `BEFORE`
+  in `#f7768e`, `AFTER` in `#9ece6a`, each at its panel's left edge.
+- **Mirror the two panels.** Corresponding elements sit at the same `y` on both
+  sides. The whole power of a before/after is that the reader's eye finds the
+  difference by comparison, and that only works if everything else lines up.
+- **Fill the band.** Content should reach roughly y=650. Diagrams that stop at
+  y=450 and leave the bottom third empty look unfinished, and when several are
+  viewed together the ragged baseline is obvious.
+
+**Footer.** Optional single muted note at `y="706"`, 11px, fill `#565f89`, for
+one caveat that did not fit the panels. Nothing else goes below the band.
+
+**When the change is not a before/after** — a new capability with no prior
+state, say — keep the header, rule, and footer exactly as above, drop the
+vertical divider, and use the full x 32–1168 width. Do not invent a fake
+"before" to fill the left half.
+
 ## Visual constraints
 
-The portal renders SVGs on a **dark `#1a1b26` background**, so:
-
-- **No background rectangle.** Transparent, always. A white `<rect>` fill is
-  the single most common way to make a diagram unreadable here.
+- **Background.** Paint it explicitly:
+  `<rect x="0" y="0" width="1200" height="720" fill="#1a1b26"/>` as the **first**
+  child, so it sits behind everything. The portal's own surface is that color so
+  nothing shifts, and the file stays readable when it leaves the portal — checked
+  into the repo, attached to an issue, or opened on a light background, where
+  light-on-transparent text is invisible.
 - Palette — text `#c0caf5`, secondary text and rules `#565f89`, and accents:
   `#7aa2f7` blue, `#9ece6a` green, `#f7768e` red, `#e0af68` orange, `#bb9af7`
   purple, `#7dcfff` teal.
@@ -86,8 +134,6 @@ The portal renders SVGs on a **dark `#1a1b26` background**, so:
 
 Technical:
 
-- `viewBox="0 0 1200 750"` with matching `width`/`height`. Landscape suits the
-  portal and reads on a phone.
 - Set `font-size` explicitly on **every** `<text>`. Use
   `font-family="ui-monospace, SFMono-Regular, Menlo, monospace"` for code
   identifiers and `font-family="system-ui, -apple-system, Segoe UI, sans-serif"`
@@ -96,12 +142,12 @@ Technical:
   wide, so a 20-character label at 14px needs ~170px plus padding. Text
   overflowing its box is the most common way model-authored SVG looks broken;
   budget at least 12px of padding on each side.
+- **Prefix every `id` with the PR number** (`id="pr1643-arrow-green"`). These
+  diagrams get merged into contact sheets, and bare ids like `arrow` collide
+  silently — the first definition wins and later tiles draw the wrong marker.
+- Define arrowheads once with `<marker>` in `<defs>` and reference them, rather
+  than drawing a triangle per arrow.
 - No `<foreignObject>`, no external fonts, no external images, no CSS files.
-  Define arrowheads once with `<marker>` and reference them.
-- Aim for 15–25 meaningful elements. Whitespace is not wasted space; a diagram
-  with room to breathe reads faster than a dense one.
-- Title at the top: your one-sentence insight, not the PR title. Small caption
-  bottom-right: `PR #$PR`.
 
 ## Verify before you show it
 
