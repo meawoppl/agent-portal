@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use claude_session_lib::proxy_session::{ClaudeConversationIdSink, CodexThreadIdSink};
+use claude_session_lib::proxy_session::{
+    ClaudeConversationIdSink, CodexThreadIdSink, MediaDisplaySink,
+};
 use claude_session_lib::{
     claude_transcript_id, claude_transcript_status, run_connection_loop, ClaudeAgent, LoopResult,
     PortalInput, ProxySessionConfig, TranscriptStatus,
@@ -83,6 +85,33 @@ fn load_claude_conversation_id(session_id: Uuid) -> Option<Uuid> {
 /// see [`claude_session_lib::claude_transcript_id`] for why that matters.
 fn resolved_transcript_id(session_id: Uuid) -> Uuid {
     claude_transcript_id(session_id, load_claude_conversation_id(session_id))
+}
+
+/// Upload images the agent reads so they render inline in the transcript.
+///
+/// The detection half lives in `claude_session_lib::proxy_session::media_display`;
+/// the upload lands here because only the launcher holds the session credentials.
+/// Fire-and-forget by construction: the sink is called from the connection's
+/// output path, so it must not block, and a failed display is never worth
+/// interrupting a session over — it is logged and dropped. Deliberately quiet
+/// about the common benign failures (file already moved, oversize, unsupported
+/// container), which are `debug!` rather than `warn!`.
+fn make_media_display_sink(session_id: Uuid) -> MediaDisplaySink {
+    std::sync::Arc::new(move |path: PathBuf| {
+        tokio::spawn(async move {
+            match crate::media::upload_media(&session_id.to_string(), &path).await {
+                Ok((_, filename, _, _)) => {
+                    info!("Displayed {} read by session {}", filename, session_id)
+                }
+                Err(e) => debug!(
+                    "Not displaying {} for session {}: {}",
+                    path.display(),
+                    session_id,
+                    e
+                ),
+            }
+        });
+    })
 }
 
 fn make_claude_conversation_id_sink(session_id: Uuid) -> ClaudeConversationIdSink {
@@ -330,6 +359,7 @@ impl ProcessManager {
             // to, so the next resume opens the live transcript (not the
             // pre-clear one).
             claude_conversation_id_sink: Some(make_claude_conversation_id_sink(session_id)),
+            media_display_sink: Some(make_media_display_sink(session_id)),
             fork_from_session_id: params.fork_from_session_id,
             fork_point_turn_id: params.fork_point_turn_id,
         };
