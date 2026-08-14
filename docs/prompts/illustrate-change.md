@@ -134,14 +134,32 @@ vertical divider, and use the full x 32–1168 width. Do not invent a fake
 
 Technical:
 
-- Set `font-size` explicitly on **every** `<text>`. Use
-  `font-family="ui-monospace, SFMono-Regular, Menlo, monospace"` for code
-  identifiers and `font-family="system-ui, -apple-system, Segoe UI, sans-serif"`
-  for prose.
+- Set `font-size` explicitly on **every** `<text>`, and use exactly two font
+  families: `font-family="monospace"` for code identifiers and
+  `font-family="sans-serif"` for prose.
+
+  **Use the bare generics — do not write a CSS font stack.** A list like
+  `ui-monospace, SFMono-Regular, Menlo, monospace` works in a browser, which
+  walks it, but every fontconfig-based renderer (cairosvg, rsvg, Inkscape)
+  resolves the **first** name and stops. `ui-monospace` exists on no Linux
+  box, so those renderers land on the default sans: the text comes out
+  *proportional* when monospace was intended, and it loses the arrow and math
+  glyphs the monospace font would have had. The portal looks fine and every
+  export is quietly wrong.
+
 - **Size boxes to their text.** Monospace glyphs are about `0.6 × font-size`
   wide, so a 20-character label at 14px needs ~170px plus padding. Text
   overflowing its box is the most common way model-authored SVG looks broken;
-  budget at least 12px of padding on each side.
+  budget at least 12px of padding on each side. (This arithmetic only holds if
+  the font really is monospace — see above.)
+- **Draw arrows, never type them.** `→` `←` `⇒` are absent from the common
+  default sans, so they render as an empty box. An arrow between two things is
+  a `<line>` with a `<marker>`; it also lands where you aimed it, which a text
+  arrow does not.
+- **Stay near ASCII in text.** Safe everywhere: `— – · … ' " × ± ÷ µ § •`,
+  Greek letters, and superscripts. Unsafe: arrows, `≤ ≥ ≠ ≈ − ∂`, geometric
+  shapes (`▸ ▾`), `✓ ✗ ✕`, circled letters, and **emoji** — which belong in no
+  technical diagram regardless of whether they render.
 - **Prefix every `id` with the PR number** (`id="pr1643-arrow-green"`). These
   diagrams get merged into contact sheets, and bare ids like `arrow` collide
   silently — the first definition wins and later tiles draw the wrong marker.
@@ -155,12 +173,16 @@ Write the SVG to a file, then check it — do not trust it unseen:
 
 1. Confirm it parses (`python3 -c "import xml.etree.ElementTree as ET;
    ET.parse('out.svg')"`).
-2. If a rasterizer is available (`rsvg-convert`, `inkscape`, or `magick`),
-   convert to PNG and **read the image back so you can actually look at it**.
-   This is the only reliable way to catch text overflowing a box, elements
-   overlapping, or something drawn off-canvas. It is worth the extra step every
-   time.
-3. Fix what you find and look again.
+2. Run `scripts/check-svg-glyphs.py out.svg`. It resolves each `<text>`
+   element's font the way a rasterizer does and fails on any codepoint that
+   font lacks. A missing glyph raises no error — it silently draws an empty
+   box — so this is not something to eyeball.
+3. If a rasterizer is available (`cairosvg`, `rsvg-convert`, `inkscape`, or
+   `magick`), convert to PNG and **read the image back so you can actually look
+   at it**. This is the only reliable way to catch text overflowing a box,
+   elements overlapping, or something drawn off-canvas. It is worth the extra
+   step every time.
+4. Fix what you find and look again.
 
 Then display it with `agent-portal show out.svg`.
 
