@@ -11,6 +11,17 @@ use muse_session_lib::{classify_record, MuseClassifier};
 use session_lib::adapter::{AgentOutput, AgentOutputClassifier};
 use std::collections::HashSet;
 
+const SUPPRESSED_BOOKKEEPING: [&str; 4] = [
+    "runtime.command.accepted",
+    "session.run.linked",
+    "run.model.configured",
+    "run.lifecycle.started",
+];
+
+fn is_suppressed_bookkeeping(payload_type: &str) -> bool {
+    SUPPRESSED_BOOKKEEPING.contains(&payload_type)
+}
+
 fn load(name: &str) -> Vec<MuseRecord> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -38,6 +49,7 @@ fn every_captured_record_classifies_with_identity() {
             // buffered. Both carry the same identity fields.
             let v = match classify_record(r) {
                 AgentOutput::Visible(v) | AgentOutput::Ephemeral(v) => v,
+                AgentOutput::Noop if is_suppressed_bookkeeping(&r.payload_type) => continue,
                 other => panic!("{fixture}: unexpected classification {other:?}"),
             };
             {
@@ -122,15 +134,15 @@ fn live_capture_covers_provider_only_payloads() {
     }
 }
 
-/// The routing contract on real data: every record the wire marks
-/// `ephemeral` lands on the non-persisting channel, and every durable one
-/// persists. This is the assertion that stops live-status ever reaching
-/// `messages` — a mistake that would take a migration to unwind.
+/// The routing contract on real data: setup bookkeeping is suppressed, while
+/// every other record follows the wire's durability bit. This is the assertion
+/// that stops both useless setup rows and live-status from reaching `messages`.
 #[test]
 fn wire_durability_decides_routing_on_real_captures() {
     let records = load("corpus_meta_tool_use.jsonl");
     let mut ephemeral = 0usize;
     let mut durable = 0usize;
+    let mut suppressed = HashSet::new();
     for r in &records {
         match (r.durability, classify_record(r)) {
             (muse_codes::Durability::Ephemeral, AgentOutput::Ephemeral(v)) => {
@@ -141,12 +153,20 @@ fn wire_durability_decides_routing_on_real_captures() {
                 assert_eq!(v["durability"], "durable");
                 durable += 1;
             }
+            (_, AgentOutput::Noop) if is_suppressed_bookkeeping(&r.payload_type) => {
+                suppressed.insert(r.payload_type.as_str());
+            }
             (d, other) => panic!("{d:?} record mis-routed to {other:?}: {}", r.payload_type),
         }
     }
     assert!(
         ephemeral > 0 && durable > 0,
         "a live turn should exercise both channels (got {ephemeral} ephemeral, {durable} durable)"
+    );
+    assert_eq!(
+        suppressed,
+        SUPPRESSED_BOOKKEEPING.into_iter().collect(),
+        "every typed setup record should be removed before persistence"
     );
 }
 
@@ -244,11 +264,7 @@ fn reminder_scaffolding_screens_to_noop_on_real_captures() {
         );
 
         // Real work survives untouched.
-        for expected in [
-            "run.terminal.completed",
-            "tool.result",
-            "run.model.configured",
-        ] {
+        for expected in ["run.terminal.completed", "tool.result"] {
             assert!(
                 emitted_types.iter().any(|t| t == expected),
                 "{fixture}: screening must not touch {expected}"
