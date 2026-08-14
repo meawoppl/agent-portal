@@ -127,9 +127,12 @@ fn spawn_claude(
     prompt_suggestions: bool,
 ) -> Result<tokio::process::Child> {
     let mut cmd = Command::new("claude");
+    // Shim mode wraps claude directly and keeps no conversation sidecar, so
+    // there is no learned conversation id or fork source to pass.
     cmd.args(claude_cli_args(
         config.session_id,
         config.resume,
+        None,
         None,
         prompt_suggestions,
         &config.claude_args,

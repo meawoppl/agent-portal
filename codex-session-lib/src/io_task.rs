@@ -1181,6 +1181,8 @@ mod tests {
             fork_from_session_id: Some(uuid::Uuid::from_u128(1)),
             codex_fork_from_thread_id: Some("parent-thread".into()),
             codex_fork_last_turn_id: Some("turn-7".into()),
+            claude_conversation_id: None,
+            claude_fork_from_conversation_id: None,
             working_directory: "/tmp/fork-worktree".into(),
             ..Default::default()
         };

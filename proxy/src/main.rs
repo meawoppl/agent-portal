@@ -412,6 +412,7 @@ async fn main() -> Result<()> {
 
     // Build session config
     let session_config = ProxySessionConfig {
+        claude_conversation_id_sink: None,
         backend_url,
         session_id,
         session_name,
@@ -841,6 +842,10 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
         fork_from_session_id: None,
         codex_fork_from_thread_id: None,
         codex_fork_last_turn_id: None,
+        // Standalone proxy mode has no launcher sidecar persisting claude's
+        // conversation id, so resume keeps the historical session-id behavior.
+        claude_conversation_id: None,
+        claude_fork_from_conversation_id: None,
     };
 
     if config.resume {

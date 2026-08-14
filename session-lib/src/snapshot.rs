@@ -35,10 +35,25 @@ pub struct SessionConfig {
     /// Consumed by the codex io-task: when `resume == true` and this is
     /// `Some`, call `thread/resume` to re-attach to the app-server's
     /// existing thread context rather than starting a fresh one.
-    /// Ignored by the claude path (claude's resume keys off `session_id`
-    /// directly via `--resume`).
+    /// Ignored by the claude path, which has its own equivalent in
+    /// [`claude_conversation_id`](Self::claude_conversation_id).
     #[serde(default)]
     pub codex_thread_id: Option<String>,
+    /// Claude's *current* conversation id, learned from its output stream and
+    /// persisted by the launcher — the claude-side counterpart to
+    /// [`codex_thread_id`](Self::codex_thread_id).
+    ///
+    /// Resume used to pass `session_id` straight to `--resume`, which is only
+    /// correct while claude's conversation id still equals the portal's. `/clear`
+    /// rolls claude onto a new conversation, so from that point the portal id
+    /// names the *pre-clear* transcript and every later resume — crash recovery,
+    /// launcher reconcile, pause/resume, a service restart — silently reinstated
+    /// the conversation as it was before the clear, discarding everything since.
+    ///
+    /// When set, this is what `--resume` gets. `None` means the session has not
+    /// diverged (or predates this field), and `session_id` remains correct.
+    #[serde(default)]
+    pub claude_conversation_id: Option<Uuid>,
     /// Source portal session for a fork. Fork metadata seeds only the first
     /// spawn attempt; the launcher must clear all three fork fields after that
     /// attempt. `resume == false` alone is not a durable first-launch marker:
@@ -55,6 +70,12 @@ pub struct SessionConfig {
     /// Used only on the first launch; relaunches resume `codex_thread_id`.
     #[serde(default)]
     pub codex_fork_from_thread_id: Option<String>,
+    /// Source *conversation* for a claude fork, resolved launcher-side from
+    /// `fork_from_session_id`. Same reason as `claude_conversation_id`: if the
+    /// source was `/clear`ed, its portal id names the pre-clear transcript, so
+    /// forking it branches from history the user can no longer see.
+    #[serde(default)]
+    pub claude_fork_from_conversation_id: Option<Uuid>,
     /// Optional inclusive Codex fork cut. Claude only supports whole history.
     /// Like the source thread, this is ignored on resume launches.
     #[serde(default)]
@@ -142,6 +163,8 @@ mod tests {
             fork_from_session_id: None,
             codex_fork_from_thread_id: None,
             codex_fork_last_turn_id: None,
+            claude_conversation_id: None,
+            claude_fork_from_conversation_id: None,
         }
     }
 

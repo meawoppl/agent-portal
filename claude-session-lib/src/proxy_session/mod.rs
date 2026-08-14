@@ -54,6 +54,10 @@ pub type WsRead = ws_bridge::WsReceiver<ServerToProxy>;
 /// `SessionEvent::CodexThreadId` arm. `None` is a no-op (the codex
 /// io-task still emits the event, the loop just doesn't persist it).
 pub type CodexThreadIdSink = Arc<dyn Fn(String) + Send + Sync>;
+/// Learns claude's *current* conversation id, which `/clear` rolls away from
+/// the portal's session id. The launcher persists it so the next `--resume`
+/// re-opens the live transcript instead of the pre-clear one.
+pub type ClaudeConversationIdSink = Arc<dyn Fn(uuid::Uuid) + Send + Sync>;
 
 /// Configuration for a proxy session
 #[derive(Clone)]
@@ -78,6 +82,8 @@ pub struct ProxySessionConfig {
     /// Persist-back closure for the codex app-server thread id; see
     /// [`CodexThreadIdSink`] doc.
     pub codex_thread_id_sink: Option<CodexThreadIdSink>,
+    /// Claude counterpart to `codex_thread_id_sink` (see the type docs).
+    pub claude_conversation_id_sink: Option<ClaudeConversationIdSink>,
     /// First-spawn-only source session for Claude/Codex fork semantics.
     pub fork_from_session_id: Option<Uuid>,
     /// Optional Codex native turn id; `None` forks the latest turn.
@@ -847,6 +853,7 @@ async fn run_message_loop<A: Agent>(
         git_metadata.clone(),
         session.output_buffer.clone(),
         config.agent_type,
+        config.claude_conversation_id_sink.clone(),
     );
 
     // Spawn WebSocket reader task
