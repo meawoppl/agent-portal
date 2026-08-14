@@ -30,6 +30,32 @@ pub fn format_duration(ms: u64) -> String {
     }
 }
 
+/// Formats a byte count as a human-readable size (`"512 B"`, `"1.5 KB"`, `"2.0 MB"`).
+/// Single `B/KB/MB` implementation for the workspace — frontend and launcher
+/// use this via `shared` instead of ad-hoc formatting.
+pub fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+/// Formats a token count with `K`/`M` suffixes for readability.
+/// Takes `i64` to match `usage` counts without casts at call sites (counts can
+/// be negative in tests; `u64` would require casts).
+pub fn format_token_count(count: i64) -> String {
+    if count < 1000 {
+        count.to_string()
+    } else if count < 1_000_000 {
+        format!("{:.1}K", count as f64 / 1000.0)
+    } else {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,5 +102,22 @@ mod tests {
         assert_eq!(format_duration(60000), "1m 0s");
         assert_eq!(format_duration(197_000), "3m 17s");
         assert_eq!(format_duration(3_599_999), "59m 59s");
+    }
+
+    #[test]
+    fn format_file_size_bytes_and_kb_and_mb() {
+        assert_eq!(format_file_size(0), "0 B");
+        assert_eq!(format_file_size(512), "512 B");
+        assert_eq!(format_file_size(1024), "1.0 KB");
+        assert_eq!(format_file_size(1536), "1.5 KB");
+        assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
+    }
+
+    #[test]
+    fn format_token_count_k_and_m() {
+        assert_eq!(format_token_count(999), "999");
+        assert_eq!(format_token_count(1000), "1.0K");
+        assert_eq!(format_token_count(1_500), "1.5K");
+        assert_eq!(format_token_count(1_000_000), "1.0M");
     }
 }
