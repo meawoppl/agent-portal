@@ -10,7 +10,8 @@ pub mod limits {
     pub const TOOL_OUTPUT: usize = 500;
     /// Short prose / user prompts
     pub const PROSE: usize = 300;
-    /// Raw JSON fallback (Codex unrecognized event dump)
+    /// Raw JSON fallback (Codex unrecognized event dump) — reserved for follow-up (#1731)
+    #[allow(dead_code)]
     pub const RAW_JSON: usize = 800;
 }
 
