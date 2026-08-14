@@ -29,6 +29,22 @@ pub enum TranscriptStatus {
     Unknown,
 }
 
+/// Which id names claude's transcript on disk: the conversation it has diverged
+/// onto, else the portal session id.
+///
+/// `/clear` rolls claude to a new conversation while the portal session id stays
+/// put, so from that point the two differ. This is the single rule for resolving
+/// that — [`claude_cli_args`](crate::claude_cli_args) applies it to pick the
+/// `--resume` target, and every "does the transcript exist?" gate must apply it
+/// too. Callers that gate on the portal id while the spawn opens the
+/// conversation id get a check of a *different file than the one about to be
+/// used*, and both directions of that mismatch hurt: `Missing` on a stale
+/// pre-clear file rotates away a live, resumable conversation, while `Present`
+/// on one suppresses the rotation that breaks a doomed `--resume` crash-loop.
+pub fn claude_transcript_id(session_id: Uuid, conversation_id: Option<Uuid>) -> Uuid {
+    conversation_id.unwrap_or(session_id)
+}
+
 /// Encode a working directory the way the `claude` CLI names its project dir:
 /// every `/` and `.` becomes `-`.
 fn encode_project_dir(working_directory: &Path) -> String {

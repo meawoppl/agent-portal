@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use claude_session_lib::proxy_session::{ClaudeConversationIdSink, CodexThreadIdSink};
 use claude_session_lib::{
-    claude_transcript_status, run_connection_loop, ClaudeAgent, LoopResult, PortalInput,
-    ProxySessionConfig, TranscriptStatus,
+    claude_transcript_id, claude_transcript_status, run_connection_loop, ClaudeAgent, LoopResult,
+    PortalInput, ProxySessionConfig, TranscriptStatus,
 };
 use codex_session_lib::CodexAgent;
 use muse_session_lib::MuseAgent;
@@ -73,6 +73,16 @@ fn load_claude_conversations() -> HashMap<Uuid, Uuid> {
 
 fn load_claude_conversation_id(session_id: Uuid) -> Option<Uuid> {
     load_claude_conversations().get(&session_id).copied()
+}
+
+/// The id naming claude's transcript on disk for `session_id` right now, from
+/// the launcher's persisted view of the divergence.
+///
+/// Thin wrapper that feeds the sidecar into the shared rule the argv builder
+/// uses, so a gate and the spawn it guards can never check different files —
+/// see [`claude_session_lib::claude_transcript_id`] for why that matters.
+fn resolved_transcript_id(session_id: Uuid) -> Uuid {
+    claude_transcript_id(session_id, load_claude_conversation_id(session_id))
 }
 
 fn make_claude_conversation_id_sink(session_id: Uuid) -> ClaudeConversationIdSink {
@@ -225,7 +235,13 @@ impl ProcessManager {
         if let Some(source_id) = params.fork_from_session_id {
             match params.agent_type {
                 shared::AgentType::Claude => {
-                    if claude_transcript_status(&base_dir, source_id) == TranscriptStatus::Missing {
+                    // Validate the transcript the fork will actually branch from
+                    // — the source's *conversation* — not its portal id, which
+                    // names the pre-clear transcript once the source has been
+                    // `/clear`ed. See `resolved_transcript_id`.
+                    if claude_transcript_status(&base_dir, resolved_transcript_id(source_id))
+                        == TranscriptStatus::Missing
+                    {
                         anyhow::bail!(
                             "Cannot fork: source Claude transcript is missing on this launcher"
                         );
@@ -410,11 +426,14 @@ async fn run_session_task(
         // one step, instead of crash-looping until claude happens to emit
         // "No conversation found". Claude-only (codex has no transcript file);
         // `Unknown` (path-encoding uncertainty) falls through to a normal spawn.
+        // Asks about the id the spawn below will actually `--resume` (see
+        // `resolved_transcript_id`) — gating on the portal id would rotate away a
+        // live post-`/clear` conversation whose pre-clear file had been cleaned up.
         if config.resume
             && config.agent_type == shared::AgentType::Claude
             && claude_transcript_status(
                 std::path::Path::new(&config.working_directory),
-                config.session_id,
+                resolved_transcript_id(config.session_id),
             ) == TranscriptStatus::Missing
         {
             let old_id = config.session_id;
@@ -554,11 +573,15 @@ async fn run_session_task(
                     // the rotation only when the transcript is confirmed Present:
                     // then the early exit is some other fault, and discarding the
                     // resume would needlessly lose conversation continuity.
+                    // Same id discipline as the pre-flight gate above: ask about
+                    // the conversation we actually resumed, or a stale pre-clear
+                    // file reading `Present` suppresses the rotation and we
+                    // crash-loop on exactly the case this exists to break.
                     if config.resume
                         && config.agent_type == shared::AgentType::Claude
                         && claude_transcript_status(
                             std::path::Path::new(&config.working_directory),
-                            config.session_id,
+                            resolved_transcript_id(config.session_id),
                         ) != TranscriptStatus::Present
                     {
                         let old_id = config.session_id;
