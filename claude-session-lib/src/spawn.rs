@@ -36,8 +36,10 @@ pub fn claude_cli_args(
     prompt_suggestions: bool,
     extra_args: &[String],
 ) -> Vec<String> {
-    // Where claude's history actually lives right now.
-    let transcript_id = conversation_id.unwrap_or(session_id);
+    // Where claude's history actually lives right now. Shared with the
+    // launcher's transcript-existence gates so the file they check is always the
+    // file this resumes.
+    let transcript_id = crate::transcript::claude_transcript_id(session_id, conversation_id);
     let mut args: Vec<String> = [
         "--print",
         "--verbose",
@@ -106,13 +108,7 @@ pub(crate) async fn spawn_claude(
         &config.extra_args,
     );
 
-    let mut cmd = Command::new(claude_path);
-    cmd.args(&args);
-    cmd.current_dir(&config.working_directory);
-    // Claude exports `CLAUDE_CODE_SESSION_ID` to tools it spawns. This is the
-    // id passed here initially, but it is process-environment state and can go
-    // stale when `/clear` rolls Claude to another conversation. The launcher
-    // CLI therefore treats an explicit `PORTAL_SESSION_ID` as authoritative.
+    let mut cmd = build_claude_command(claude_path, &args, config);
 
     // Log the full command for diagnostics.
     tracing::info!(
@@ -120,6 +116,30 @@ pub(crate) async fn spawn_claude(
         claude_path.to_string_lossy(),
         args.join(" ")
     );
+
+    let child = cmd.spawn().map_err(SessionError::SpawnFailed)?;
+    let pid = child.id();
+
+    let client = ClaudeAsyncClient::new(child).map_err(|e| {
+        SessionError::CommunicationError(format!("Failed to create ClaudeAsyncClient: {}", e))
+    })?;
+    Ok((client, pid))
+}
+
+/// Build the fully-configured `claude` [`Command`], short of spawning it.
+/// Factored out of [`spawn_claude`] so the environment and stdio wiring are
+/// assertable in tests without launching a process.
+fn build_claude_command(claude_path: &Path, args: &[String], config: &SessionConfig) -> Command {
+    let mut cmd = Command::new(claude_path);
+    cmd.args(args);
+    cmd.current_dir(&config.working_directory);
+    // Claude exports `CLAUDE_CODE_SESSION_ID` to the tools it spawns, but that
+    // is process-environment state naming claude's *conversation*: `/clear`
+    // rolls it onto an id that is not a portal session at all. Export the portal
+    // id explicitly — `launcher::message` treats it as authoritative and only
+    // falls back to matching on host + working directory, which is ambiguous the
+    // moment two sessions share a directory. Codex and Muse already do this.
+    cmd.env("PORTAL_SESSION_ID", config.session_id.to_string());
 
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -138,13 +158,7 @@ pub(crate) async fn spawn_claude(
     #[cfg(unix)]
     cmd.process_group(0);
 
-    let child = cmd.spawn().map_err(SessionError::SpawnFailed)?;
-    let pid = child.id();
-
-    let client = ClaudeAsyncClient::new(child).map_err(|e| {
-        SessionError::CommunicationError(format!("Failed to create ClaudeAsyncClient: {}", e))
-    })?;
-    Ok((client, pid))
+    cmd
 }
 
 /// Probe the installed CLI once per resolved path before using the additive
@@ -332,5 +346,55 @@ mod tests {
     fn omits_prompt_suggestion_flag_for_older_claude() {
         let args = claude_cli_args(uuid::Uuid::nil(), false, None, None, false, &[]);
         assert!(!args.iter().any(|arg| arg == "--prompt-suggestions"));
+    }
+
+    /// The property the launcher's transcript gates depend on: the id
+    /// `--resume` opens is exactly `claude_transcript_id`. If these ever drift,
+    /// a gate checks the existence of a different file than the spawn uses —
+    /// which is the bug class this whole seam exists to close.
+    #[test]
+    fn resume_target_is_the_shared_transcript_id() {
+        for conversation in [None, Some(uuid::Uuid::from_u128(99))] {
+            let portal_id = uuid::Uuid::from_u128(2);
+            let args = claude_cli_args(portal_id, true, conversation, None, false, &[]);
+            let expected = crate::transcript::claude_transcript_id(portal_id, conversation);
+            assert_eq!(
+                &args[args.len() - 2..],
+                ["--resume", &expected.to_string()],
+                "argv and the gates' transcript id must agree (conversation={conversation:?})"
+            );
+        }
+    }
+
+    /// Tools claude spawns must inherit the *portal* session id. Claude's own
+    /// `CLAUDE_CODE_SESSION_ID` names its conversation, which `/clear` rolls
+    /// onto an id that is not a portal session at all — leaving
+    /// `agent-portal message send` to guess from host + working directory.
+    #[test]
+    fn exports_portal_session_id_to_the_claude_child() {
+        let config = SessionConfig {
+            session_id: uuid::Uuid::from_u128(42),
+            working_directory: std::env::temp_dir(),
+            // A cleared session: claude's own env var would name this instead.
+            claude_conversation_id: Some(uuid::Uuid::from_u128(4242)),
+            ..Default::default()
+        };
+        let cmd = build_claude_command(Path::new("claude"), &[], &config);
+
+        let envs: Vec<(String, String)> = cmd
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| {
+                Some((
+                    k.to_string_lossy().into_owned(),
+                    v?.to_string_lossy().into_owned(),
+                ))
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "PORTAL_SESSION_ID" && *v == config.session_id.to_string()),
+            "PORTAL_SESSION_ID must be the portal id, not the conversation; envs: {envs:?}"
+        );
     }
 }

@@ -21,7 +21,7 @@ pub mod transcript;
 
 pub use agent::ClaudeAgent;
 pub use spawn::{claude_cli_args, claude_supports_prompt_suggestions};
-pub use transcript::{claude_transcript_status, TranscriptStatus};
+pub use transcript::{claude_transcript_id, claude_transcript_status, TranscriptStatus};
 
 // Re-export the proxy session helpers used by the proxy binary.
 pub use proxy_session::{
