@@ -202,11 +202,25 @@ pub fn classify_record(record: &MuseRecord) -> AgentOutput {
     }
 }
 
-/// Route on the wire's own durability flag. Deliberately not a match on
-/// payload types: muse is a days-old beta and will add ephemeral kinds, and
-/// an unlisted one must not default into the transcript — persisting
-/// live-status is expensive to unwind (a migration, not a code change).
-fn classify_payload(record: &MuseRecord, _payload: &MusePayload) -> AgentOutput {
+/// Drop typed run-setup bookkeeping that has no user-facing renderer before it
+/// reaches the buffer, database, or frontend socket. Unknown payloads still
+/// fail open through the durability branch below; only SDK-modeled shapes are
+/// eligible for suppression.
+fn classify_payload(record: &MuseRecord, payload: &MusePayload) -> AgentOutput {
+    if matches!(
+        payload,
+        MusePayload::CommandAccepted(_)
+            | MusePayload::SessionRunLinked(_)
+            | MusePayload::ModelConfigured(_)
+            | MusePayload::RunStarted(_)
+    ) {
+        return AgentOutput::Noop;
+    }
+
+    // Route every remaining record on the wire's own durability flag. Muse is
+    // a young protocol and will add kinds; an unlisted ephemeral type must not
+    // default into the transcript, while an unknown durable type must remain
+    // visible so schema drift is diagnosable.
     match record.durability {
         muse_codes::Durability::Ephemeral => AgentOutput::Ephemeral(to_event(record)),
         muse_codes::Durability::Durable => AgentOutput::Visible(to_event(record)),
@@ -408,9 +422,10 @@ mod tests {
     #[test]
     fn event_carries_composite_identity() {
         let r = env(
-            "run.lifecycle.started",
+            "run.terminal.completed",
             "durable",
-            json!({"kind": "run_started", "command_id": "c", "prompt": "p",
+            json!({"kind": "run_terminal", "command_id": "c", "terminal": "completed",
+                   "reason": null, "text": "done",
                    "run_stream": {"kind": "run", "id": "r"}}),
         );
         let AgentOutput::Visible(v) = classify_record(&r) else {
@@ -426,14 +441,10 @@ mod tests {
     /// classifier is exercised against the actual wire and not only
     /// hand-built envelopes.
     #[test]
-    fn real_captured_line_classifies() {
+    fn real_captured_command_acceptance_is_suppressed() {
         let line = r#"{"schema_version":1,"id":"018f0000-0000-7000-8000-00000000c350","stream":{"kind":"session","id":"34c4f817-8c19-4778-a6fc-a9399ac4d034"},"sequence":1,"recorded_at":1780531400000000,"record_type":"reconciliation","durability":"durable","causation_id":"7af312fb-ae7d-40f7-bd79-21cd328c4583","payload_type":"runtime.command.accepted","payload_schema_version":1,"payload":{"client_id":null,"command_id":"7af312fb-ae7d-40f7-bd79-21cd328c4583","command_kind":"turn.submit","kind":"command_accepted"}}"#;
         let r = record(line);
-        let AgentOutput::Visible(v) = classify_record(&r) else {
-            panic!("command acceptance is durable transcript material");
-        };
-        assert_eq!(v["payload_type"], "runtime.command.accepted");
-        assert_eq!(v["durability"], "durable");
+        assert!(matches!(classify_record(&r), AgentOutput::Noop));
     }
 }
 
