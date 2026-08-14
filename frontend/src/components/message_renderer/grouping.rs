@@ -207,11 +207,15 @@ fn user_is_plain_text(msg: &shared::UserMessage) -> bool {
             .all(|b| matches!(b, shared::ContentBlock::Text(_)))
 }
 
+/// True iff `text` is a claude-echoed inter-agent message
+/// (`[message from <agent> <uuid>]\n…`). Centralized detector so the two
+/// echo shapes and the single-card renderer can't drift.
+fn is_inter_agent_text(text: &str) -> bool {
+    super::renderers::agent_message_event_from_agent_facing_text(text).is_some()
+}
+
 /// True iff a plain-text user message is actually a claude-echoed inter-agent
-/// message (`[message from <agent> <uuid>]\n…`). Such messages must render as
-/// their own provenance card rather than fold into a plain-text "You" run, so
-/// `classify` keeps them out of the User group. Uses the same detector the
-/// single-card renderer uses, so the two decisions can't drift.
+/// message. See [`is_inter_agent_text`].
 fn user_message_is_inter_agent(msg: &shared::UserMessage) -> bool {
     let text = msg
         .message
@@ -223,16 +227,13 @@ fn user_message_is_inter_agent(msg: &shared::UserMessage) -> bool {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    super::renderers::agent_message_event_from_agent_facing_text(&text).is_some()
+    is_inter_agent_text(&text)
 }
 
-/// True iff a synthetic optimistic-user echo (its content is a single string,
-/// e.g. Codex's `UserEchoEvent` or an older proxy's raw echo) is actually an
-/// inter-agent message. The optimistic shape carries no content blocks, so this
-/// runs the detector on the string field directly, but the decision must match
-/// [`user_message_is_inter_agent`] so both echo shapes card identically.
+/// True iff a synthetic optimistic-user echo is actually an inter-agent
+/// message. See [`is_inter_agent_text`].
 fn optimistic_user_is_inter_agent(msg: &super::types::OptimisticUserMessage) -> bool {
-    super::renderers::agent_message_event_from_agent_facing_text(&msg.content).is_some()
+    is_inter_agent_text(&msg.content)
 }
 
 /// Classify a single wire message into the display identity it belongs to,
