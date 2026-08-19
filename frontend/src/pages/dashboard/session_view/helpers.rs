@@ -251,9 +251,21 @@ pub(super) fn autoscroll_transition(current: bool, new_at_bottom: bool) -> Optio
     }
 }
 
-/// Check if a Claude session is awaiting user input by scanning messages
+/// Check if a session is awaiting user input by scanning messages
 /// backwards. Skips noise types (portal, error, system, rate_limit_event)
-/// and returns true if `Result` is found before `User` or `Assistant`.
+/// and returns true if the last meaningful signal is a turn terminator
+/// (`Result` / `turn.completed` / `muse run.terminal.completed`).
+///
+/// TODO(#1676): Make this generic over `AgentFrameKind::is_terminator()`
+/// so Muse `run.terminal.completed` drives the same awaiting orange border
+/// as Claude `Result` and Codex `turn.completed` (currently Muse history
+/// never lights up awaiting). For now this stays Claude-only but is renamed
+/// to `is_awaiting` and documented as the unified entry point.
+pub(crate) fn is_awaiting(messages: impl DoubleEndedIterator<Item = impl AsRef<str>>) -> bool {
+    is_claude_awaiting(messages)
+}
+
+/// Claude-only awaiting check — see `is_awaiting` for the unified wrapper.
 pub(super) fn is_claude_awaiting(
     messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
 ) -> bool {
