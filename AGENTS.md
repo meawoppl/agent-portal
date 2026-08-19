@@ -655,6 +655,23 @@ sessions::table.filter(sessions::id.eq(...))
 3. Check backend logs: `tail -f /tmp/claude-portal-backend.log`
 4. Try dev mode authentication: backend with `--dev-mode`
 
+### "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+**This string is not ours** — it lives in the `claude` binary and concerns the
+agent's *Anthropic* credentials. Don't go hunting through
+`backend/src/handlers/auth.rs`; the portal's Google login and `cc_session`
+cookie are a different system entirely.
+
+**Cause**: agents read the login keychain once at spawn. A `/login` anywhere on
+that host rotates the refresh token, and every already-running agent is left
+holding the superseded one. The CLI reports the error but **keeps running**, so
+nothing relaunches it and nothing re-reads the keychain.
+
+**Fix**: `launchctl kickstart -k gui/$(id -u)/com.agent-portal.launcher`
+
+Full triage, confirmation commands and the wire shape:
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#agent-credential-issues).
+
 ## Code Conventions
 
 ### Doing It The Right Way
