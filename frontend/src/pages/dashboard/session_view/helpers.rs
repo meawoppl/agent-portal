@@ -1067,6 +1067,29 @@ mod tests {
     }
 
     #[test]
+    fn activity_tag_tick_css_matches_css_file() {
+        // Single source-of-truth check: every tick suffix returned by
+        // `tick_css()` must actually exist as a `.sparkline-tick.tick-*` rule
+        // in `frontend/styles/session-rail.css`. This makes a rename in either
+        // file fail loudly in one place.
+        const CSS: &str = include_str!("../../../../styles/session-rail.css");
+        for suffix in ["assistant", "user", "result", "portal", "error", "other"] {
+            let selector = format!(".sparkline-tick.tick-{suffix}");
+            assert!(
+                CSS.contains(&selector),
+                "missing CSS selector {selector} for ActivityTag suffix"
+            );
+        }
+        for suffix in ["compaction", "task"] {
+            let selector = format!(".sparkline-range.tick-{suffix}");
+            assert!(
+                CSS.contains(&selector),
+                "missing CSS selector {selector} for range marker"
+            );
+        }
+    }
+
+    #[test]
     fn activity_tag_range_marker_predicates() {
         assert!(ActivityTag::CompactionStart.is_range_marker());
         assert!(ActivityTag::CompactionEnd.is_range_marker());
