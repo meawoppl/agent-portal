@@ -268,6 +268,24 @@ fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>
     }
 }
 
+/// `/clear` — the seam between two conversations inside one portal session.
+///
+/// Rendered rather than left to fall through to a raw `Unknown` bubble: it is
+/// the one frame that explains why the transcript above it stops being
+/// referenced. It is also where claude's conversation id rotates, which is why
+/// the portal keys resume on the *next* system-init `session_id` rather than on
+/// this frame's `new_conversation_id` — that field matches no session and no
+/// transcript on disk (claude-codes #316), so it is deliberately not shown.
+pub fn render_conversation_reset(_msg: &shared::ConversationResetMessage) -> Html {
+    html! {
+        <div class="claude-message compaction-message compact">
+            <div class="message-header">
+                <span class="message-type-badge compaction">{ "Conversation Reset" }</span>
+            </div>
+        </div>
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

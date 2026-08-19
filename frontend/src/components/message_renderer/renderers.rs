@@ -20,7 +20,7 @@ pub(crate) use portal::{
     render_portal_message_content,
 };
 pub use result::render_result_message;
-pub use system::render_system_message;
+pub use system::{render_conversation_reset, render_system_message};
 pub use user::{
     render_optimistic_user_message, render_optimistic_user_message_content, render_user_message,
     render_user_message_content,

@@ -115,3 +115,24 @@ fn classifier_exhaustive_over_realistic_messages() {
         );
     }
 }
+
+/// `/clear` used to fall through the `_ => Unknown` wildcard and render as a
+/// raw "Unrecognized Message" bubble even though claude-codes has typed it for
+/// months (rust-code-agent-sdks#315).
+#[test]
+fn conversation_reset_parses_to_its_own_variant() {
+    use super::super::types::ClaudeMessage;
+    let json = r#"{
+        "type": "conversation_reset",
+        "new_conversation_id": "11111111-1111-1111-1111-111111111111",
+        "uuid": "22222222-2222-2222-2222-222222222222",
+        "session_id": "33333333-3333-3333-3333-333333333333"
+    }"#;
+    assert!(
+        matches!(
+            ClaudeMessage::parse(json),
+            Ok(ClaudeMessage::ConversationReset(_))
+        ),
+        "conversation_reset must not fall through to Unknown"
+    );
+}

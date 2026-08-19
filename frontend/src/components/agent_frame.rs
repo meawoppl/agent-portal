@@ -154,6 +154,10 @@ impl ClaudeMessage {
             Self::Error(_) => AgentFrameKind::ClaudeError,
             Self::Portal(_) => AgentFrameKind::Portal,
             Self::RateLimitEvent(_) => AgentFrameKind::ClaudeRateLimitEvent,
+            // A `/clear` seam is a session-level event, so it routes and groups
+            // with system frames; `dispatch` still selects its own renderer off
+            // the message variant, not this kind.
+            Self::ConversationReset(_) => AgentFrameKind::ClaudeSystem,
             Self::OptimisticUser(_) => AgentFrameKind::OptimisticUser,
             Self::Unknown => AgentFrameKind::RawJson,
         }

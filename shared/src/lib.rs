@@ -142,9 +142,10 @@ pub use claude_codes::io::{
 
 // Re-export claude-codes output types for typed parsing.
 pub use claude_codes::io::{
-    AnthropicError, AssistantMessage, AssistantUsage, MessageContent, RateLimitEvent,
-    ResultMessage, ServerToolUse, SystemMessage, SystemSubtype, TaskNotificationMessage,
-    TaskProgressMessage, TaskStartedMessage, TaskStatus, TaskType, TaskUsage, UserMessage,
+    AnthropicError, AssistantMessage, AssistantUsage, ConversationResetMessage, MessageContent,
+    RateLimitEvent, ResultMessage, ServerToolUse, SystemMessage, SystemSubtype,
+    TaskNotificationMessage, TaskProgressMessage, TaskStartedMessage, TaskStatus, TaskType,
+    TaskUsage, UserMessage,
 };
 pub use claude_codes::CacheCreationDetails;
 pub use claude_codes::ClaudeOutput;
