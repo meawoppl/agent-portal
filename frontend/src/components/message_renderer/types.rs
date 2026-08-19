@@ -56,6 +56,15 @@ pub struct OptimisticUserMessage {
 }
 
 impl ClaudeMessage {
+    /// Parse a wire JSON line into a typed [`ClaudeMessage`]. Tries the
+    /// canonical `shared::ClaudeOutput` first; falls back to the legacy
+    /// `LocalMessage` (`portal` / `OptimisticUser`) shapes that are not yet
+    /// covered by the shared schema.
+    ///
+    /// TODO(#1675): Inline `portal` + `OptimisticUser` into
+    /// `AgentFrameRegistry::parse` and delete the `LocalMessage` /
+    /// `Unknown` lenient fallback so unknown wire shapes become loud
+    /// `RawJson` instead of silent `Unknown`.
     pub fn parse(json: &str) -> Result<Self, serde_json::Error> {
         if let Ok(output) = serde_json::from_str::<shared::ClaudeOutput>(json) {
             return Ok(match output {
