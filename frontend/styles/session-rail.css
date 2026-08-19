@@ -1117,6 +1117,7 @@
     pointer-events: none;
     background: rgba(192, 202, 245, 0.06);
     overflow: hidden;
+
     /* Broadcast plasma is z-index:1. Keep status readable while the effect
        crosses a pill instead of letting its glow paint over the gauge. */
     z-index: 2;
