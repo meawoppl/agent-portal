@@ -172,7 +172,7 @@ pub async fn list_history_sessions(
     };
 
     let scan_runtime = runtime.clone();
-    let rows = on_blocking(move || scan_runtime.scan_rows()).await?;
+    let rows = on_blocking(move || scan_runtime.scan_rows_cached()).await?;
     let live_member_ids = live_member_session_ids(&app_state, user.id)?;
 
     // Visibility first: everything below operates on rows this caller may see.

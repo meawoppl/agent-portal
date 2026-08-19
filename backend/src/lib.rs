@@ -291,7 +291,12 @@ pub async fn run() -> anyhow::Result<()> {
         app_state.clone(),
         background::run_liveness_sweep,
     );
-    if app_state.archive.is_some() {
+    if let Some(archive) = app_state.archive.as_ref() {
+        // Populate the `/api/history` scan cache off the request path. Without
+        // this the first person to open history after a deploy pays the full
+        // archive scan — an S3 list plus a GET per manifest — before a single
+        // row renders.
+        archive.warm_scan_cache();
         background::spawn_periodic(
             "session archive sweep (every 5 minutes)",
             Duration::from_secs(archive::ARCHIVE_SWEEP_INTERVAL_SECS),
