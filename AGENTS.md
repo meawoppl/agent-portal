@@ -710,6 +710,18 @@ fn custom_answer_input(props: &CustomAnswerInputProps) -> Html {
 See `frontend/src/pages/dashboard/permission_dialog.rs` (`CustomAnswerInput`) for
 the live example.
 
+### Documentation Describes the Current System
+
+Reference documentation and code comments must describe the system as it works
+now. Do not preserve superseded behavior, implementation history, migration
+narratives, or "previously..." commentary merely for context; Git history is
+the archive for that information.
+
+Historical context belongs in current documentation only when it is necessary
+to explain a present-day invariant, compatibility constraint, operational
+hazard, or migration that users still need to perform. Keep that context as
+short as possible and state the current behavior first.
+
 ### Dead Code
 
 **Remove dead code aggressively.** Do not:
