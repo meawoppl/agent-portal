@@ -255,10 +255,12 @@ pub async fn run_archive_sweep(app_state: Arc<AppState>) {
                 );
             }
             if archived > 0 {
-                // The sweep is the only thing that adds sessions to the
-                // archive, so refresh here rather than waiting for
-                // `HISTORY_SCAN_TTL` to notice. Freshness follows the event
-                // that changed the data; the TTL is just the backstop.
+                // `put_session_archive` has exactly one production call site —
+                // the path above — so this sweep is the only thing that changes
+                // what `/api/history` reads. Refreshing here *is* the freshness
+                // mechanism; `HISTORY_SCAN_SELF_HEAL` only covers writers this
+                // process can't see (another instance, or the bucket edited
+                // out of band).
                 if let Some(runtime) = app_state.archive.as_ref() {
                     runtime.warm_scan_cache();
                 }

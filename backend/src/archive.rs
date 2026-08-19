@@ -62,17 +62,23 @@ pub const ARCHIVE_SWEEP_BATCH: i64 = 25;
 // Store
 // ---------------------------------------------------------------------------
 
-/// How long a `/api/history` manifest scan is served before a refresh is
-/// triggered. Bounds S3 list/GET cost; per-session reads (manifest/messages/
-/// media) never cache.
+/// How long a `/api/history` scan may sit unrefreshed before a read kicks a
+/// background rescan. **Not a cache lifetime** — the cache is never evicted,
+/// and never expires out from under a request.
 ///
-/// This is **not** how long a page can be stale, and it is not a latency
-/// budget: [`ArchiveRuntime::scan_rows_cached`] serves the previous scan
-/// immediately and refreshes behind the request, so expiry costs a background
-/// rescan rather than a user-visible wait. Sessions only enter the archive when
-/// the retention sweep runs — minutes apart — so a window measured in seconds
-/// is already far finer than the data changes.
-pub const HISTORY_SCAN_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+/// Refresh is normally *event-driven*: `put_session_archive` has exactly one
+/// production call site, the archive sweep, so the sweep refreshing the cache
+/// after it archives something is the complete story for a single backend
+/// process. This interval exists only for the changes that process cannot
+/// observe — another instance sharing the archive, or an out-of-band write to
+/// the bucket — which would otherwise be invisible until a restart.
+///
+/// It is deliberately long and read-triggered: an idle deployment does no
+/// scanning at all, and an active one pays at most one background scan per
+/// interval. Aligned with [`ARCHIVE_SWEEP_INTERVAL_SECS`] because that is the
+/// cadence at which the data can actually change.
+pub const HISTORY_SCAN_SELF_HEAL: std::time::Duration =
+    std::time::Duration::from_secs(ARCHIVE_SWEEP_INTERVAL_SECS);
 
 /// Store plus the settings the archival sweep needs at write time.
 pub struct ArchiveRuntime {
@@ -80,7 +86,8 @@ pub struct ArchiveRuntime {
     pub config: ArchiveConfig,
     pub stats: ArchiveStats,
     /// `/api/history` scan cache: the flattened manifest rows and when they
-    /// were collected. Shared across requests; see [`HISTORY_SCAN_TTL`].
+    /// were collected. Shared across requests, and never evicted — see
+    /// [`HISTORY_SCAN_SELF_HEAL`].
     scan_cache: std::sync::Mutex<Option<(std::time::Instant, std::sync::Arc<Vec<scan::FlatRow>>)>>,
     /// Set while a background rescan is in flight, so a burst of requests
     /// against an expired cache triggers one scan rather than one per request.
@@ -104,7 +111,7 @@ impl ArchiveRuntime {
     }
 
     /// Return the flattened manifest rows, rescanning if the cache is empty
-    /// or older than [`HISTORY_SCAN_TTL`]. **Blocking** (the S3 backend
+    /// or older than [`HISTORY_SCAN_SELF_HEAL`]. **Blocking** (the S3 backend
     /// blocks on its captured runtime handle) — call on the blocking pool.
     pub fn scan_rows(&self) -> std::io::Result<std::sync::Arc<Vec<scan::FlatRow>>> {
         if let Some((at, rows)) = self
@@ -113,10 +120,23 @@ impl ArchiveRuntime {
             .expect("scan cache lock poisoned")
             .as_ref()
         {
-            if at.elapsed() < HISTORY_SCAN_TTL {
+            if at.elapsed() < HISTORY_SCAN_SELF_HEAL {
                 return Ok(rows.clone());
             }
         }
+        self.rescan()
+    }
+
+    /// Scan and replace the cache **unconditionally**.
+    ///
+    /// Separate from [`Self::scan_rows`] because that one short-circuits on a
+    /// fresh cache, which is the wrong answer for a refresh triggered by an
+    /// actual archive write: the sweep runs far more often than
+    /// [`HISTORY_SCAN_SELF_HEAL`], so routing the post-archive refresh through
+    /// the freshness check made it a no-op in exactly the case it exists for —
+    /// newly archived sessions would not appear until the self-heal window
+    /// elapsed, defeating the point of publishing the change.
+    fn rescan(&self) -> std::io::Result<std::sync::Arc<Vec<scan::FlatRow>>> {
         let rows = std::sync::Arc::new(scan::collect_rows(&self.store, &mut |w| {
             tracing::warn!("history archive scan: {w}");
         })?);
@@ -149,7 +169,7 @@ impl ArchiveRuntime {
 
         match cached {
             Some((at, rows)) => {
-                if at.elapsed() >= HISTORY_SCAN_TTL {
+                if at.elapsed() >= HISTORY_SCAN_SELF_HEAL {
                     self.spawn_scan_refresh();
                 }
                 Ok(rows)
@@ -171,7 +191,7 @@ impl ArchiveRuntime {
         }
         let runtime = self.clone();
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = runtime.scan_rows() {
+            if let Err(e) = runtime.rescan() {
                 // Keep serving the stale rows; the next request retries.
                 tracing::warn!("history archive scan refresh failed: {e}");
             }
@@ -248,7 +268,9 @@ mod tests {
             let mut cache = runtime.scan_cache.lock().expect("lock");
             let (_, rows) = cache.take().expect("primed");
             *cache = Some((
-                std::time::Instant::now() - HISTORY_SCAN_TTL - std::time::Duration::from_secs(1),
+                std::time::Instant::now()
+                    - HISTORY_SCAN_SELF_HEAL
+                    - std::time::Duration::from_secs(1),
                 rows,
             ));
         }
@@ -258,6 +280,40 @@ mod tests {
             std::sync::Arc::ptr_eq(&first, &served),
             "an expired cache must serve the previous scan, not rescan inline"
         );
+    }
+
+    /// Archiving is what makes history change, so it must publish the change:
+    /// the sweep's refresh is the freshness mechanism, not the self-heal timer.
+    #[tokio::test]
+    async fn archiving_refreshes_the_cache() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = local_runtime(dir.path());
+        runtime.scan_rows().expect("prime");
+
+        let before = runtime
+            .scan_cache
+            .lock()
+            .expect("lock")
+            .as_ref()
+            .map(|(at, _)| *at)
+            .expect("primed");
+
+        runtime.warm_scan_cache();
+        // `warm_scan_cache` hands off to the blocking pool; wait for it to land.
+        for _ in 0..200 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let at = runtime
+                .scan_cache
+                .lock()
+                .expect("lock")
+                .as_ref()
+                .map(|(at, _)| *at)
+                .expect("still primed");
+            if at > before {
+                return;
+            }
+        }
+        panic!("archiving did not refresh the scan cache");
     }
 
     /// A cold cache has nothing to serve, so it is the one case that blocks.
