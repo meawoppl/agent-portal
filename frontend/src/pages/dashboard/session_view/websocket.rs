@@ -2,7 +2,6 @@
 
 use crate::utils;
 use futures_util::StreamExt;
-use shared::api::ErrorMessage;
 use shared::{
     ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics, WsEndpoint,
 };
@@ -200,11 +199,12 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             on_event.emit(WsEvent::UploadResult(fields));
         }
         ServerToClient::Error { message } => {
-            let error_msg = ErrorMessage::new(message);
-            let error_json = serde_json::to_string(&error_msg).unwrap_or_default();
             // Error envelopes don't go through the DB so they have no
             // server-assigned `created_at` — leave the watermark unchanged.
-            on_event.emit(WsEvent::Output(RenderedMessage::new(error_json, None)));
+            on_event.emit(WsEvent::Output(RenderedMessage::local(
+                shared::LocalFrame::error(message),
+                None,
+            )));
         }
         ServerToClient::SessionUpdate {
             session_id: _,

@@ -1,7 +1,7 @@
-use super::super::types::PortalMessage;
 use super::media::{render_image_source, render_video_source};
 use crate::components::copy_button::CopyButton;
 use crate::components::markdown::render_markdown_for_session;
+use shared::PortalMessage;
 use std::collections::HashMap;
 use uuid::Uuid;
 use yew::prelude::*;
@@ -432,9 +432,7 @@ mod tests {
 
     #[test]
     fn agent_message_event_reads_typed_portal_event_content() {
-        let msg = PortalMessage {
-            content: agent_message_content(),
-        };
+        let msg = PortalMessage::with_content(agent_message_content());
 
         let event = agent_message_event(&msg).expect("event");
 
@@ -448,11 +446,9 @@ mod tests {
 
     #[test]
     fn agent_message_event_ignores_plain_portal_text() {
-        let msg = PortalMessage {
-            content: vec![shared::PortalContent::Text {
-                text: "[message from claude 1111]\nbody".to_string(),
-            }],
-        };
+        let msg = PortalMessage::with_content(vec![shared::PortalContent::Text {
+            text: "[message from claude 1111]\nbody".to_string(),
+        }]);
 
         assert!(agent_message_event(&msg).is_none());
     }

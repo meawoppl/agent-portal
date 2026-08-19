@@ -117,11 +117,13 @@ pub use model_version::{compact_model_version, context_window_for};
 
 // API client types and trait
 pub mod api;
+pub mod local_frame;
 pub use api::{
     AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ErrorMessage, ModelUsage,
     ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse,
     TurnMetrics, TurnMetricsResponse,
 };
+pub use local_frame::{LocalFrame, UserFrame, ERROR_MESSAGE_TYPE};
 
 /// Default backend URL based on build profile.
 /// Release builds point to `wss://txcl.io`, debug builds to `ws://localhost:3000`.
