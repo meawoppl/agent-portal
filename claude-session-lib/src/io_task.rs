@@ -49,9 +49,29 @@ fn claude_control_response(request_id: &str, decision: PermissionDecision) -> Co
     }
 }
 
-const SESSION_LIMIT_TEXT: &str = "You've hit your session limit";
-const SESSION_LIMIT_CONTINUE_PROMPT: &str =
-    "Continue from where you stopped before the Claude session limit was reached.";
+const USAGE_LIMIT_PREFIX: &str = "You've hit your ";
+const OUT_OF_USAGE_CREDITS_PREFIX: &str = "You're out of usage credits";
+const USAGE_LIMIT_CONTINUE_PROMPT: &str =
+    "Continue from where you stopped before the Claude usage limit was reached.";
+
+// Labels emitted by Claude's current quota formatter. Keep this explicit so
+// normal assistant prose that happens to contain a reset time cannot schedule
+// an automatic continuation.
+const USAGE_LIMIT_LABELS: &[&str] = &[
+    "session limit",
+    "weekly limit",
+    "Opus limit",
+    "Sonnet limit",
+    "Fable 5 limit",
+    "usage credit limit",
+    "usage limit",
+    "limit",
+    "individual spend limit",
+    "individual usage limit",
+    "org's monthly spend limit",
+    "monthly spend limit",
+    "org's monthly usage limit",
+];
 
 fn reported_model_context_window(
     entries: Option<&std::collections::BTreeMap<String, claude_codes::io::ModelUsageEntry>>,
@@ -624,20 +644,19 @@ pub(crate) async fn claude_io_task(
                                         turn_tracker.record_tool_call();
                                     }
                                 }
-                                let first_text =
-                                    asst.message.content.iter().find_map(|b| {
-                                        if let ContentBlock::Text(t) = b {
-                                            Some(t.text.as_str())
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                if let Some(text) = first_text {
+                                for text in asst.message.content.iter().filter_map(|block| {
+                                    if let ContentBlock::Text(text) = block {
+                                        Some(text.text.as_str())
+                                    } else {
+                                        None
+                                    }
+                                }) {
                                     if text.starts_with(RATE_LIMIT_TEXT_PREFIX) {
                                         state.note_rate_limited_turn();
                                     }
-                                    if let Some(reset_at) = parse_session_limit_reset(text) {
+                                    if let Some(reset_at) = parse_usage_limit_reset(text) {
                                         state.note_session_limit(reset_at, text.to_string());
+                                        break;
                                     }
                                 }
                             }
@@ -752,7 +771,7 @@ pub(crate) async fn claude_io_task(
                                     session_id,
                                     reset_at,
                                     source_message,
-                                    prompt: SESSION_LIMIT_CONTINUE_PROMPT.to_string(),
+                                    prompt: USAGE_LIMIT_CONTINUE_PROMPT.to_string(),
                                 });
                             }
                         }
@@ -947,8 +966,9 @@ pub(crate) async fn claude_io_task(
     }
 }
 
-fn parse_session_limit_reset(text: &str) -> Option<String> {
-    if !text.contains(SESSION_LIMIT_TEXT) {
+fn parse_usage_limit_reset(text: &str) -> Option<String> {
+    let text = text.trim();
+    if !is_usage_limit_pause(text) {
         return None;
     }
 
@@ -991,14 +1011,47 @@ fn parse_session_limit_reset(text: &str) -> Option<String> {
     Some(reset_utc.with_timezone(&Utc).to_rfc3339())
 }
 
+fn is_usage_limit_pause(text: &str) -> bool {
+    if text.starts_with(OUT_OF_USAGE_CREDITS_PREFIX) {
+        return true;
+    }
+    let Some(rest) = text.strip_prefix(USAGE_LIMIT_PREFIX) else {
+        return false;
+    };
+    let label = rest.split(" ·").next().unwrap_or(rest).trim();
+    USAGE_LIMIT_LABELS.contains(&label)
+}
+
 fn parse_limit_time(input: &str) -> Option<NaiveTime> {
     let lower = input.trim().to_ascii_lowercase();
-    for fmt in ["%-I:%M%P", "%-I:%M %P", "%-I%P", "%-I %P"] {
+    for fmt in ["%-I:%M%P", "%-I:%M %P"] {
         if let Ok(time) = NaiveTime::parse_from_str(&lower, fmt) {
             return Some(time);
         }
     }
-    None
+
+    // Chrono's 12-hour parser requires a minute component even when the
+    // format omits it. Claude also emits compact hour-only values such as
+    // `5pm`, so normalize those explicitly instead of relying on `%-I%P`.
+    let compact = lower.replace(' ', "");
+    let (hour_text, is_pm) = compact
+        .strip_suffix("am")
+        .map(|hour| (hour, false))
+        .or_else(|| compact.strip_suffix("pm").map(|hour| (hour, true)))?;
+    if hour_text.contains(':') {
+        return None;
+    }
+    let hour_12 = hour_text.parse::<u32>().ok()?;
+    if !(1..=12).contains(&hour_12) {
+        return None;
+    }
+    let hour_24 = match (hour_12, is_pm) {
+        (12, false) => 0,
+        (12, true) => 12,
+        (hour, false) => hour,
+        (hour, true) => hour + 12,
+    };
+    NaiveTime::from_hms_opt(hour_24, 0, 0)
 }
 
 /// Read available stderr output from the Claude process.
@@ -1561,9 +1614,12 @@ mod tests {
     fn parse_limit_time_accepts_the_cli_time_formats() {
         // The CLI renders reset times in a handful of am/pm shapes; each must
         // parse so the continuation timer lands at the right hour.
-        // The CLI always emits a minute component ("resets 3:00pm"); these are
-        // the shapes parse_limit_time must handle.
+        // Claude emits both hour-only ("resets 5pm") and minute-bearing
+        // reset times; accept spacing and case differences too.
         let cases = [
+            ("5pm", NaiveTime::from_hms_opt(17, 0, 0)),
+            ("12am", NaiveTime::from_hms_opt(0, 0, 0)),
+            ("12 pm", NaiveTime::from_hms_opt(12, 0, 0)),
             ("3:00pm", NaiveTime::from_hms_opt(15, 0, 0)),
             ("3:00 pm", NaiveTime::from_hms_opt(15, 0, 0)),
             ("3:00 PM", NaiveTime::from_hms_opt(15, 0, 0)),
@@ -1583,23 +1639,42 @@ mod tests {
     }
 
     #[test]
-    fn parse_session_limit_reset_ignores_unrelated_text() {
-        assert!(parse_session_limit_reset("just a normal assistant reply").is_none());
+    fn parse_usage_limit_reset_ignores_unrelated_text() {
+        assert!(parse_usage_limit_reset("just a normal assistant reply").is_none());
+        assert!(parse_usage_limit_reset(
+            "You've hit your patience · resets 5pm (America/Los_Angeles)"
+        )
+        .is_none());
     }
 
     #[test]
-    fn parse_session_limit_reset_returns_none_without_resets_clause() {
+    fn parse_usage_limit_reset_returns_none_without_resets_clause() {
         // Has the limit banner but no parseable "resets … (TZ)" clause.
-        let text = format!("{SESSION_LIMIT_TEXT}. Try again later.");
-        assert!(parse_session_limit_reset(&text).is_none());
+        assert!(
+            parse_usage_limit_reset("You've hit your session limit. Try again later.").is_none()
+        );
     }
 
     #[test]
-    fn parse_session_limit_reset_yields_future_rfc3339() {
+    fn parse_usage_limit_reset_accepts_current_claude_pause_labels() {
+        for label in USAGE_LIMIT_LABELS {
+            let text = format!("You've hit your {label} · resets 5pm (America/Los_Angeles)");
+            let reset = parse_usage_limit_reset(&text)
+                .unwrap_or_else(|| panic!("should parse quota label {label:?}"));
+            let parsed = chrono::DateTime::parse_from_rfc3339(&reset).expect("valid rfc3339");
+            assert!(parsed.with_timezone(&Utc) > Utc::now());
+        }
+
+        let out_of_credits = "You're out of usage credits · resets 5pm (America/Los_Angeles)";
+        assert!(parse_usage_limit_reset(out_of_credits).is_some());
+    }
+
+    #[test]
+    fn parse_usage_limit_reset_yields_future_rfc3339() {
         // A well-formed banner must produce a valid, future-dated UTC instant
         // (the parser always rolls forward to the next occurrence of the time).
-        let text = format!("{SESSION_LIMIT_TEXT}. Your limit resets 3:00pm (America/New_York).");
-        let reset = parse_session_limit_reset(&text).expect("should parse a reset time");
+        let text = "You've hit your session limit · resets 3:00pm (America/New_York)";
+        let reset = parse_usage_limit_reset(text).expect("should parse a reset time");
         let parsed = chrono::DateTime::parse_from_rfc3339(&reset).expect("valid rfc3339");
         assert!(
             parsed.with_timezone(&Utc) > Utc::now(),
