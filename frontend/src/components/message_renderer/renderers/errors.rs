@@ -206,3 +206,21 @@ fn format_error_type(error_type: &str) -> String {
         other => other.replace('_', " ").to_string(),
     }
 }
+
+/// A portal-generated error ([`shared::ErrorMessage`]) — a failed upload, say.
+///
+/// Rendered with the same treatment as an Anthropic error because to the reader
+/// it is the same thing: something went wrong and the turn did not happen. The
+/// two differ only in wire shape (flat vs. nested), which is an implementation
+/// detail nobody staring at a failed upload cares about.
+pub fn render_local_error(msg: &shared::ErrorMessage, timestamp: Option<&str>) -> Html {
+    html! {
+        <div class="claude-message error-message-display">
+            <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
+                <span class="message-type-badge result error">{ "Error" }</span>
+                <CopyButton text={msg.message.clone()} title="Copy error" />
+            </div>
+            <div class="error-content">{ &msg.message }</div>
+        </div>
+    }
+}

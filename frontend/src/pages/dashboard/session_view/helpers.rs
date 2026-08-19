@@ -206,6 +206,7 @@ pub(super) fn message_type_tag(m: &ClaudeMessage) -> ActivityTag {
         ClaudeMessage::Portal(_) => ActivityTag::Portal,
         ClaudeMessage::RateLimitEvent(_) => ActivityTag::RateLimit,
         ClaudeMessage::ConversationReset(_) => ActivityTag::System,
+        ClaudeMessage::LocalError(_) => ActivityTag::Error,
         ClaudeMessage::Unknown => ActivityTag::Unknown,
     }
 }

@@ -13,7 +13,7 @@ pub(crate) use assistant::assistant_label;
 pub use assistant::{
     render_assistant_message, render_assistant_message_content, render_content_blocks,
 };
-pub use errors::{render_error_message, render_rate_limit_event};
+pub use errors::{render_error_message, render_local_error, render_rate_limit_event};
 pub(crate) use portal::{
     agent_message_event_from_agent_facing_text, portal_text, render_agent_message_body,
     render_agent_message_event, render_agent_message_from_source, render_portal_message,

@@ -118,9 +118,9 @@ pub use model_version::{compact_model_version, context_window_for};
 // API client types and trait
 pub mod api;
 pub use api::{
-    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ModelUsage, ModelUsageEntry,
-    SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse, TurnMetrics,
-    TurnMetricsResponse,
+    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ErrorMessage, ModelUsage,
+    ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse,
+    TurnMetrics, TurnMetricsResponse,
 };
 
 /// Default backend URL based on build profile.

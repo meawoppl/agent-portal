@@ -56,25 +56,37 @@ pub(super) fn handle_file_upload_start(
     total_size: u64,
     max_image_mb: u32,
 ) {
+    // Server-side hard cap on total decoded bytes, derived from
+    // `PORTAL_MAX_IMAGE_MB`. Saturating to avoid overflow on absurd configs.
+    let effective_max_total_bytes = (max_image_mb as u64).saturating_mul(1024 * 1024);
+
+    // Size is checked BEFORE the chunk-count sanity guard, and the order is the
+    // whole point. `total_chunks` is derived from the file size by the sender
+    // (`size / UPLOAD_CHUNK_SIZE`), so an oversized file trips *both* — and
+    // whichever runs first is the error the user sees. Chunk count is an
+    // anti-abuse guard against pathological values; size is the limit a person
+    // can actually act on. Checking chunks first meant anyone uploading a file
+    // past the ceiling got "invalid chunk count", an internal protocol detail
+    // that reads as a portal bug rather than "your file is too big".
+    if total_size > effective_max_total_bytes {
+        warn!(
+            "Upload {} declared total_size {} > server cap {} bytes; rejecting",
+            upload_id, total_size, effective_max_total_bytes
+        );
+        send_upload_failure(
+            tx,
+            upload_id,
+            &format!("file is too large (limit {max_image_mb} MB)"),
+        );
+        return;
+    }
+
     if total_chunks == 0 || total_chunks > MAX_UPLOAD_TOTAL_CHUNKS {
         warn!(
             "Invalid total_chunks {} for upload {}",
             total_chunks, upload_id
         );
         send_upload_failure(tx, upload_id, "invalid chunk count");
-        return;
-    }
-
-    // Server-side hard cap on total decoded bytes, derived from
-    // `PORTAL_MAX_IMAGE_MB`. Saturating to avoid overflow on absurd configs.
-    let effective_max_total_bytes = (max_image_mb as u64).saturating_mul(1024 * 1024);
-
-    if total_size > effective_max_total_bytes {
-        warn!(
-            "Upload {} declared total_size {} > server cap {} bytes; rejecting",
-            upload_id, total_size, effective_max_total_bytes
-        );
-        send_upload_failure(tx, upload_id, "file exceeds server size limit");
         return;
     }
 
