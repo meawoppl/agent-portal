@@ -254,6 +254,15 @@ pub async fn run_archive_sweep(app_state: Arc<AppState>) {
                     failed
                 );
             }
+            if archived > 0 {
+                // The sweep is the only thing that adds sessions to the
+                // archive, so refresh here rather than waiting for
+                // `HISTORY_SCAN_TTL` to notice. Freshness follows the event
+                // that changed the data; the TTL is just the backstop.
+                if let Some(runtime) = app_state.archive.as_ref() {
+                    runtime.warm_scan_cache();
+                }
+            }
         }
         Ok(Err(e)) => tracing::error!("{ARCHIVE_SWEEP_FAILED}: {e}"),
         Err(e) => tracing::error!("archive sweep task panicked: {e}"),

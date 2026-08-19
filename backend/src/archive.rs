@@ -62,10 +62,17 @@ pub const ARCHIVE_SWEEP_BATCH: i64 = 25;
 // Store
 // ---------------------------------------------------------------------------
 
-/// How long a `/api/history` manifest scan is served from cache before
-/// rescanning. Bounds S3 list/GET cost while keeping a local archive
-/// effectively live; per-session reads (manifest/messages/media) never cache.
-pub const HISTORY_SCAN_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long a `/api/history` manifest scan is served before a refresh is
+/// triggered. Bounds S3 list/GET cost; per-session reads (manifest/messages/
+/// media) never cache.
+///
+/// This is **not** how long a page can be stale, and it is not a latency
+/// budget: [`ArchiveRuntime::scan_rows_cached`] serves the previous scan
+/// immediately and refreshes behind the request, so expiry costs a background
+/// rescan rather than a user-visible wait. Sessions only enter the archive when
+/// the retention sweep runs — minutes apart — so a window measured in seconds
+/// is already far finer than the data changes.
+pub const HISTORY_SCAN_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Store plus the settings the archival sweep needs at write time.
 pub struct ArchiveRuntime {
@@ -75,6 +82,9 @@ pub struct ArchiveRuntime {
     /// `/api/history` scan cache: the flattened manifest rows and when they
     /// were collected. Shared across requests; see [`HISTORY_SCAN_TTL`].
     scan_cache: std::sync::Mutex<Option<(std::time::Instant, std::sync::Arc<Vec<scan::FlatRow>>)>>,
+    /// Set while a background rescan is in flight, so a burst of requests
+    /// against an expired cache triggers one scan rather than one per request.
+    scan_refreshing: std::sync::atomic::AtomicBool,
 }
 
 impl ArchiveRuntime {
@@ -89,6 +99,7 @@ impl ArchiveRuntime {
             config,
             stats: ArchiveStats::default(),
             scan_cache: std::sync::Mutex::new(None),
+            scan_refreshing: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -112,6 +123,66 @@ impl ArchiveRuntime {
         *self.scan_cache.lock().expect("scan cache lock poisoned") =
             Some((std::time::Instant::now(), rows.clone()));
         Ok(rows)
+    }
+
+    /// The rows to answer a `/api/history` request with, **without making the
+    /// caller wait for a rescan**.
+    ///
+    /// `/api/history` used to call [`Self::scan_rows`] directly, so every
+    /// request that happened to land on an expired cache paid a full archive
+    /// scan — a list plus a GET per manifest on S3 — before a single row could
+    /// render. With a short window and a user clicking through pages and
+    /// filters, that is a large fraction of requests, and it is why the first
+    /// paint took seconds.
+    ///
+    /// Serve the previous scan immediately and refresh behind the request
+    /// instead. Only a genuinely cold cache blocks, which after
+    /// [`Self::warm_scan_cache`] means only a request that beats startup.
+    pub fn scan_rows_cached(
+        self: &std::sync::Arc<Self>,
+    ) -> std::io::Result<std::sync::Arc<Vec<scan::FlatRow>>> {
+        let cached = self
+            .scan_cache
+            .lock()
+            .expect("scan cache lock poisoned")
+            .clone();
+
+        match cached {
+            Some((at, rows)) => {
+                if at.elapsed() >= HISTORY_SCAN_TTL {
+                    self.spawn_scan_refresh();
+                }
+                Ok(rows)
+            }
+            // Nothing to serve stale: this one has to block.
+            None => self.scan_rows(),
+        }
+    }
+
+    /// Rescan on the blocking pool, at most one at a time.
+    fn spawn_scan_refresh(self: &std::sync::Arc<Self>) {
+        use std::sync::atomic::Ordering;
+        if self
+            .scan_refreshing
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return; // a refresh is already running
+        }
+        let runtime = self.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = runtime.scan_rows() {
+                // Keep serving the stale rows; the next request retries.
+                tracing::warn!("history archive scan refresh failed: {e}");
+            }
+            runtime.scan_refreshing.store(false, Ordering::Release);
+        });
+    }
+
+    /// Populate the cache off the request path at startup, so the first user to
+    /// open history doesn't pay the cold scan.
+    pub fn warm_scan_cache(self: &std::sync::Arc<Self>) {
+        self.spawn_scan_refresh();
     }
 }
 
@@ -144,6 +215,66 @@ impl ArchiveStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn local_runtime(root: &Path) -> std::sync::Arc<ArchiveRuntime> {
+        std::sync::Arc::new(
+            ArchiveRuntime::new(ArchiveConfig {
+                backend: ArchiveBackendConfig::Local {
+                    root: root.to_path_buf(),
+                },
+                transcripts: true,
+                media: false,
+            })
+            .expect("local archive runtime"),
+        )
+    }
+
+    /// The whole point of `scan_rows_cached`: an expired cache must not make
+    /// the caller wait. `/api/history` used to call `scan_rows` directly, so a
+    /// request landing on an expired cache paid a full archive scan — a list
+    /// plus a GET per manifest on S3 — before rendering a single row.
+    ///
+    /// Asserts the stale rows come back *identically* (same `Arc`), which is
+    /// only possible if no rescan happened inline.
+    #[tokio::test]
+    async fn an_expired_cache_is_served_stale_rather_than_rescanned_inline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = local_runtime(dir.path());
+
+        let first = runtime.scan_rows().expect("cold scan");
+
+        // Force expiry without waiting out the TTL.
+        {
+            let mut cache = runtime.scan_cache.lock().expect("lock");
+            let (_, rows) = cache.take().expect("primed");
+            *cache = Some((
+                std::time::Instant::now() - HISTORY_SCAN_TTL - std::time::Duration::from_secs(1),
+                rows,
+            ));
+        }
+
+        let served = runtime.scan_rows_cached().expect("served");
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &served),
+            "an expired cache must serve the previous scan, not rescan inline"
+        );
+    }
+
+    /// A cold cache has nothing to serve, so it is the one case that blocks.
+    #[tokio::test]
+    async fn a_cold_cache_still_populates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = local_runtime(dir.path());
+        assert!(runtime.scan_cache.lock().expect("lock").is_none());
+
+        runtime.scan_rows_cached().expect("cold scan");
+
+        assert!(
+            runtime.scan_cache.lock().expect("lock").is_some(),
+            "a cold call must leave the cache primed for everyone after it"
+        );
+    }
+
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
     use uuid::Uuid;
