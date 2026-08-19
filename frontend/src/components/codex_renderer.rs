@@ -114,7 +114,7 @@ fn render_codex_event(
 /// CSS class set for any item-card wrapper. Adds `codex-item-in-progress` for
 /// pre-completion (`item.started` / `item.updated`) renders so the stylesheet
 /// can pulse the indicator and dim the text.
-fn item_card_classes(completed: bool) -> &'static str {
+pub(crate) fn item_card_classes(completed: bool) -> &'static str {
     if completed {
         "claude-message assistant-message codex-item"
     } else {
