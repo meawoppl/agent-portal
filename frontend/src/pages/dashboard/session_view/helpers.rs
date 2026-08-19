@@ -288,22 +288,7 @@ pub(super) fn is_claude_awaiting(
 /// when the string carries no timezone pins it to UTC so it lines up with
 /// `Date::now()`. Returns `NaN` when unparseable (callers check `is_finite`).
 pub(super) fn parse_iso_ms_utc(iso: &str) -> f64 {
-    js_sys::Date::parse(&normalize_iso_utc(iso))
-}
-
-/// Append a `Z` when an ISO timestamp carries no timezone designator, so it is
-/// read as UTC rather than local time. A designator is a `Z` or a `+`/`-`
-/// offset in the time portion (after `T`); date hyphens don't count. Pure so
-/// the timezone decision is unit-testable without a browser `Date`.
-fn normalize_iso_utc(iso: &str) -> std::borrow::Cow<'_, str> {
-    let has_tz = iso
-        .split_once('T')
-        .is_some_and(|(_, time)| time.contains(['Z', '+', '-']));
-    if has_tz {
-        std::borrow::Cow::Borrowed(iso)
-    } else {
-        std::borrow::Cow::Owned(format!("{iso}Z"))
-    }
+    js_sys::Date::parse(&shared::time::normalize_iso_utc(iso))
 }
 
 /// Derive the [`ActivityTag`] used by `on_activity` / `CheckAwaiting` from a
@@ -970,37 +955,6 @@ mod tests {
         );
         assert!(live.events.is_empty());
         assert!(live.causation_id.is_none());
-    }
-
-    #[test]
-    fn normalize_iso_utc_appends_z_only_when_no_timezone() {
-        // Naive (the backend's message created_at shape) → pinned to UTC.
-        assert_eq!(
-            normalize_iso_utc("2026-05-17T12:34:56.789"),
-            "2026-05-17T12:34:56.789Z"
-        );
-        assert_eq!(
-            normalize_iso_utc("2026-05-17T12:34:56"),
-            "2026-05-17T12:34:56Z"
-        );
-        // Already zoned → untouched (Z or explicit offset).
-        assert_eq!(
-            normalize_iso_utc("2026-05-17T12:34:56Z"),
-            "2026-05-17T12:34:56Z"
-        );
-        assert_eq!(
-            normalize_iso_utc("2026-05-17T12:34:56+00:00"),
-            "2026-05-17T12:34:56+00:00"
-        );
-        assert_eq!(
-            normalize_iso_utc("2026-05-17T12:34:56-05:00"),
-            "2026-05-17T12:34:56-05:00"
-        );
-        // Date hyphens must not be mistaken for an offset.
-        assert_eq!(
-            normalize_iso_utc("2026-05-17T00:00:00"),
-            "2026-05-17T00:00:00Z"
-        );
     }
 
     fn pending(content: &str) -> RenderedMessage {
