@@ -40,6 +40,10 @@ pub enum ClaudeMessage {
     Error(shared::AnthropicError),
     Portal(PortalMessage),
     RateLimitEvent(shared::RateLimitEvent),
+    /// `/clear`. Worth its own variant rather than falling to `Unknown`: it is
+    /// the visible seam between two conversations in one session, and it also
+    /// marks where claude's conversation id rotates (see the render).
+    ConversationReset(shared::ConversationResetMessage),
     OptimisticUser(OptimisticUserMessage),
     Unknown,
 }
@@ -65,6 +69,7 @@ impl ClaudeMessage {
                 shared::ClaudeOutput::Result(msg) => Self::Result(msg),
                 shared::ClaudeOutput::Error(msg) => Self::Error(msg),
                 shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
+                shared::ClaudeOutput::ConversationReset(msg) => Self::ConversationReset(msg),
                 // Wildcard: control frames plus the 2.1.160 wire additions
                 // (stream_event, tool_progress, transcript variants, …) that
                 // have no dedicated renderer yet.
@@ -90,6 +95,7 @@ impl<'de> Deserialize<'de> for ClaudeMessage {
                 shared::ClaudeOutput::Result(msg) => Self::Result(msg),
                 shared::ClaudeOutput::Error(msg) => Self::Error(msg),
                 shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
+                shared::ClaudeOutput::ConversationReset(msg) => Self::ConversationReset(msg),
                 // Wildcard: control frames plus the 2.1.160 wire additions
                 // (stream_event, tool_progress, transcript variants, …) that
                 // have no dedicated renderer yet.

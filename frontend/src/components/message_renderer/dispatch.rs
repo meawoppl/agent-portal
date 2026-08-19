@@ -81,6 +81,9 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             AgentFrame::Claude(ClaudeMessage::RateLimitEvent(msg)) => {
                 renderers::render_rate_limit_event(&msg, ctx.timestamp)
             }
+            AgentFrame::Claude(ClaudeMessage::ConversationReset(msg)) => {
+                renderers::render_conversation_reset(&msg)
+            }
             AgentFrame::Claude(ClaudeMessage::Unknown)
             | AgentFrame::Codex(_)
             | AgentFrame::Muse(_)
@@ -210,7 +213,11 @@ fn render_raw_json(json: &str) -> Html {
 
 /// Base repo for unrecognized-frame reports: the SDK repo, since an unrendered
 /// frame is a typed-model gap there, not a portal bug.
-const REPORT_REPO: &str = "https://github.com/meawoppl/rust-code-agent-sdks";
+// Raw bubbles are overwhelmingly a *portal* render gap — a frame claude-codes
+// already types that `ClaudeMessage` never mapped — so reports belong here, not
+// against the SDK. Pointing this at the SDK repo misrouted at least one report
+// (rust-code-agent-sdks#315, which was a missing `ConversationReset` arm).
+const REPORT_REPO: &str = "https://github.com/meawoppl/agent-portal";
 
 /// Largest raw-JSON snippet to inline in the issue body. GitHub 414s on
 /// over-long URLs and percent-encoding a JSON blob roughly triples its size, so
