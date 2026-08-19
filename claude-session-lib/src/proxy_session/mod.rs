@@ -386,6 +386,28 @@ struct ConnectionState {
     media_display_sink: Option<MediaDisplaySink>,
 }
 
+/// Record the start of an outage, classifying it **once**.
+///
+/// Both the "connection dropped" and "reconnect attempt failed" paths report
+/// `ConnectionResult::Disconnected`, and every retry during a backend restart
+/// takes the latter. Classifying on each call let those retries overwrite a
+/// graceful classification, so any restart outlasting the first backoff — i.e.
+/// every real redeploy — was reported to the user as an "unexpected
+/// disconnect". Only the first call after a live connection is lost decides
+/// what kind of outage this is; later calls just keep waiting.
+fn note_disconnect(
+    disconnected_at: &mut Option<Instant>,
+    disconnected_at_utc: &mut Option<chrono::DateTime<chrono::Utc>>,
+    last_disconnect_graceful: &mut bool,
+    graceful: bool,
+) {
+    if disconnected_at.is_none() {
+        *disconnected_at = Some(Instant::now());
+        *disconnected_at_utc = Some(chrono::Utc::now());
+        *last_disconnect_graceful = graceful;
+    }
+}
+
 /// Run the WebSocket connection loop with auto-reconnect
 pub async fn run_connection_loop<A: Agent>(
     config: &ProxySessionConfig,
@@ -416,11 +438,12 @@ pub async fn run_connection_loop<A: Agent>(
                 return Ok(LoopResult::SessionNotFound);
             }
             ConnectionResult::Disconnected(duration) => {
-                if session.disconnected_at.is_none() {
-                    session.disconnected_at = Some(Instant::now());
-                    session.disconnected_at_utc = Some(chrono::Utc::now());
-                }
-                session.last_disconnect_graceful = false;
+                note_disconnect(
+                    &mut session.disconnected_at,
+                    &mut session.disconnected_at_utc,
+                    &mut session.last_disconnect_graceful,
+                    false,
+                );
                 session.backoff.reset_if_stable(duration);
                 session.persist_buffer().await;
 
@@ -435,11 +458,12 @@ pub async fn run_connection_loop<A: Agent>(
                 session.backoff.advance();
             }
             ConnectionResult::ServerShutdown(delay) => {
-                if session.disconnected_at.is_none() {
-                    session.disconnected_at = Some(Instant::now());
-                    session.disconnected_at_utc = Some(chrono::Utc::now());
-                }
-                session.last_disconnect_graceful = true;
+                note_disconnect(
+                    &mut session.disconnected_at,
+                    &mut session.disconnected_at_utc,
+                    &mut session.last_disconnect_graceful,
+                    true,
+                );
                 // Graceful shutdown - reset backoff and use server's suggested delay
                 session.backoff.reset();
                 session.persist_buffer().await;
@@ -561,6 +585,17 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     {
         let hostname = hostname_or_unknown();
 
+        // A reconnect the server announced. `first_connection` is never one.
+        let expected_cycle = !session.first_connection && session.last_disconnect_graceful;
+        let reconnect_duration = session.disconnected_at.map(|t| {
+            let secs = t.elapsed().as_secs();
+            if secs < 60 {
+                format!("{}s", secs)
+            } else {
+                format!("{}m {}s", secs / 60, secs % 60)
+            }
+        });
+
         let status_line = if session.first_connection {
             "**Session started**".to_string()
         } else {
@@ -601,18 +636,28 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
             }
         };
 
-        let short_id = &session.config.session_id.to_string()[..8];
-        let text = format!(
-            "{} — `{}` on `{}` in `{}` ({} `{}…`)",
-            status_line,
-            session.config.session_name,
-            hostname,
-            session.config.working_directory,
-            config_with_branch.agent_type,
-            short_id,
-        );
-
-        let portal_content = shared::PortalMessage::text(text).to_json();
+        // An expected cycle — the backend told us it was restarting — is
+        // routine and gets a one-line seam chip instead of a full card with
+        // host, cwd and agent id. An unexpected drop keeps the card: that one
+        // is worth interrupting the reader for.
+        let portal_content = if expected_cycle {
+            shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
+                duration: reconnect_duration,
+            }])
+            .to_json()
+        } else {
+            let short_id = &session.config.session_id.to_string()[..8];
+            let text = format!(
+                "{} — `{}` on `{}` in `{}` ({} `{}…`)",
+                status_line,
+                session.config.session_name,
+                hostname,
+                session.config.working_directory,
+                config_with_branch.agent_type,
+                short_id,
+            );
+            shared::PortalMessage::text(text).to_json()
+        };
         let seq = {
             let mut buf = session.output_buffer.lock().await;
             buf.push(portal_content.clone())
@@ -1415,6 +1460,37 @@ pub(crate) use shared::fmt::{format_duration, truncate_str as truncate};
 
 #[cfg(test)]
 mod tests {
+    /// The redeploy bug: the backend announces a restart (graceful), then every
+    /// reconnect attempt fails while it is coming back up. Those retries must
+    /// not relabel the outage — a planned redeploy that takes longer than one
+    /// backoff was being reported to the user as an "unexpected disconnect".
+    #[test]
+    fn retries_during_a_restart_do_not_relabel_a_graceful_outage() {
+        let (mut at, mut at_utc, mut graceful) = (None, None, false);
+
+        note_disconnect(&mut at, &mut at_utc, &mut graceful, true);
+        assert!(graceful, "the server told us it was restarting");
+        let first_seen = at;
+
+        // 35 seconds of failed reconnect attempts, each reporting Disconnected.
+        for _ in 0..8 {
+            note_disconnect(&mut at, &mut at_utc, &mut graceful, false);
+        }
+
+        assert!(graceful, "retries must not turn a restart into a surprise");
+        assert_eq!(at, first_seen, "the outage clock starts at the first drop");
+    }
+
+    /// The converse still has to work: a genuinely unexpected drop stays
+    /// unexpected, and keeps the louder card.
+    #[test]
+    fn an_unannounced_drop_stays_unexpected() {
+        let (mut at, mut at_utc, mut graceful) = (None, None, false);
+        note_disconnect(&mut at, &mut at_utc, &mut graceful, false);
+        assert!(!graceful);
+        assert!(at.is_some());
+    }
+
     use super::*;
     use uuid::Uuid;
 

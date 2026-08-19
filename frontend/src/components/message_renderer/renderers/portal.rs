@@ -56,6 +56,21 @@ fn render_portal_content(
 ) -> Html {
     match content {
         shared::PortalContent::Text { text } => render_markdown_for_session(text, session_id),
+        shared::PortalContent::ConnectionCycle { duration } => {
+            // One line, no badge, no host/cwd/agent id. A planned redeploy is
+            // routine — it should read as a seam in the transcript, not as an
+            // event competing with the conversation for attention.
+            let label = match duration {
+                Some(d) => format!("reconnected after {d}"),
+                None => "reconnected".to_string(),
+            };
+            html! {
+                <div class="connection-cycle">
+                    <span class="connection-cycle-dot" />
+                    { label }
+                </div>
+            }
+        }
         shared::PortalContent::Image {
             media_type,
             data,

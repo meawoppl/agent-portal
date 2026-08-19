@@ -68,3 +68,25 @@ fn portal_run_breaks_on_intervening_assistant() {
         ]
     );
 }
+
+/// An expected cycle must survive the wire as its own typed variant rather
+/// than a prose card — the whole point is that the frontend can render it
+/// thin. Round-tripped because the proxy serializes it and the frontend
+/// deserializes it, with a backend and a DB in between.
+#[test]
+fn connection_cycle_round_trips_as_its_own_variant() {
+    let json = serde_json::to_string(&shared::PortalContent::ConnectionCycle {
+        duration: Some("35s".to_string()),
+    })
+    .expect("serializes");
+    assert!(
+        json.contains("connection_cycle"),
+        "tagged for the frontend: {json}"
+    );
+    match serde_json::from_str::<shared::PortalContent>(&json).expect("round trips") {
+        shared::PortalContent::ConnectionCycle { duration } => {
+            assert_eq!(duration.as_deref(), Some("35s"))
+        }
+        other => panic!("expected ConnectionCycle, got {other:?}"),
+    }
+}
