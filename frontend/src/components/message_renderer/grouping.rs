@@ -232,7 +232,7 @@ fn user_message_is_inter_agent(msg: &shared::UserMessage) -> bool {
 
 /// True iff a synthetic optimistic-user echo is actually an inter-agent
 /// message. See [`is_inter_agent_text`].
-fn optimistic_user_is_inter_agent(msg: &super::types::OptimisticUserMessage) -> bool {
+fn optimistic_user_is_inter_agent(msg: &shared::UserFrame) -> bool {
     is_inter_agent_text(&msg.content)
 }
 

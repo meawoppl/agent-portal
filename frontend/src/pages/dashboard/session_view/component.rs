@@ -15,7 +15,7 @@ use crate::components::{
 };
 use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
-use shared::api::{ErrorMessage, TurnMetricsResponse};
+use shared::api::TurnMetricsResponse;
 use shared::{ClientToServer, DeliveryMeta, PortalMeta, SendMode, SessionInfo, TurnMetrics};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -86,20 +86,8 @@ fn optimistic_user_message(
     created_at: &str,
     client_msg_id: Uuid,
 ) -> RenderedMessage {
-    #[derive(serde::Serialize)]
-    struct OptimisticUserMessage<'a> {
-        #[serde(rename = "type")]
-        message_type: &'static str,
-        content: &'a str,
-    }
-
-    let content = serde_json::to_string(&OptimisticUserMessage {
-        message_type: "user",
-        content,
-    })
-    .unwrap_or_default();
-    RenderedMessage::new(
-        content,
+    RenderedMessage::local(
+        shared::LocalFrame::user(content),
         Some(PortalMeta {
             created_at: Some(created_at.to_string()),
             source: None,
@@ -1019,11 +1007,10 @@ impl SessionView {
     /// referencing the file is deliberately NOT sent — the agent must never
     /// be told about a file that isn't fully on disk.
     fn push_upload_error(&mut self, err: &str) {
-        let error_msg = ErrorMessage::new(format!(
-            "File upload failed: {err} — your message was not sent"
-        ));
-        self.messages.push(RenderedMessage::new(
-            serde_json::to_string(&error_msg).unwrap_or_default(),
+        self.messages.push(RenderedMessage::local(
+            shared::LocalFrame::error(format!(
+                "File upload failed: {err} — your message was not sent"
+            )),
             None,
         ));
     }
@@ -1257,9 +1244,8 @@ impl SessionView {
                 link.send_message(SessionViewMsg::AttemptReconnect);
             }));
         } else {
-            let error_msg = ErrorMessage::new(format!("Connection lost: {}", err));
-            self.messages.push(RenderedMessage::new(
-                serde_json::to_string(&error_msg).unwrap_or_default(),
+            self.messages.push(RenderedMessage::local(
+                shared::LocalFrame::error(format!("Connection lost: {}", err)),
                 None,
             ));
         }

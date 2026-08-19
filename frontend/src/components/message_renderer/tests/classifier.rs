@@ -189,3 +189,35 @@ fn portal_error_routes_to_claude_but_leaves_codex_frames_alone() {
         "Codex owns this shape and must keep it"
     );
 }
+
+/// The invariant that makes the single injection door worth having: **anything
+/// the portal can author, the portal can render.**
+///
+/// `RenderedMessage::local` is the only way a portal-authored frame enters a
+/// transcript, so the set of shapes the renderer must understand is exactly the
+/// set of `LocalFrame` variants. Each one must parse to a real `ClaudeMessage`
+/// variant — never `Unknown`, which is the raw-bubble fallback reserved for
+/// *foreign* agent frames. Add a `LocalFrame` variant without teaching
+/// `parse_local_frame` about it and this fails.
+#[test]
+fn every_local_frame_the_portal_can_author_renders() {
+    use super::super::types::ClaudeMessage;
+
+    let frames = [
+        shared::LocalFrame::Portal(shared::PortalMessage::text("hi".into())),
+        shared::LocalFrame::user("hi"),
+        shared::LocalFrame::error("boom"),
+    ];
+
+    for frame in frames {
+        let tag = frame.message_type();
+        let json = frame.to_json();
+        let parsed = ClaudeMessage::parse(&json)
+            .unwrap_or_else(|e| panic!("{tag} frame must parse: {e} ({json})"));
+        assert!(
+            !matches!(parsed, ClaudeMessage::Unknown),
+            "{tag} frame fell through to Unknown — it would render as a raw \
+             \"Unrecognized Message\" bubble: {json}"
+        );
+    }
+}

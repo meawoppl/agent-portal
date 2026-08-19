@@ -14,8 +14,26 @@ pub struct RenderedMessage {
 }
 
 impl RenderedMessage {
+    /// Wrap an already-serialized frame. Use this for **foreign** frames only
+    /// — agent JSON off the wire or replayed from the database, which is opaque
+    /// by nature. For a frame the portal itself authors, use [`Self::local`],
+    /// which cannot produce a shape the renderer does not understand.
     pub fn new(content: String, meta: Option<shared::PortalMeta>) -> Self {
         Self { content, meta }
+    }
+
+    /// The single door for portal-authored frames.
+    ///
+    /// Everything the portal writes into a transcript goes through here, so the
+    /// set of shapes the renderer must handle is exactly the set of
+    /// [`shared::LocalFrame`] variants — closed, and enumerable by a test.
+    /// Hand-rolling `serde_json::to_string` at a call site is what previously
+    /// let `{"type":"error"}` ship from three sites with no renderer at all.
+    pub fn local(frame: shared::LocalFrame, meta: Option<shared::PortalMeta>) -> Self {
+        Self {
+            content: frame.to_json(),
+            meta,
+        }
     }
 
     pub fn raw_iso(&self) -> Option<&str> {
@@ -38,7 +56,7 @@ pub enum ClaudeMessage {
     Result(shared::ResultMessage),
     User(shared::UserMessage),
     Error(shared::AnthropicError),
-    Portal(PortalMessage),
+    Portal(shared::PortalMessage),
     RateLimitEvent(shared::RateLimitEvent),
     /// `/clear`. Worth its own variant rather than falling to `Unknown`: it is
     /// the visible seam between two conversations in one session, and it also
@@ -50,19 +68,8 @@ pub enum ClaudeMessage {
     /// matched `ClaudeOutput` and fell through to a raw `Unknown` bubble. The
     /// portal was rendering its own errors as unrecognized frames.
     LocalError(shared::ErrorMessage),
-    OptimisticUser(OptimisticUserMessage),
+    OptimisticUser(shared::UserFrame),
     Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PortalMessage {
-    #[serde(default)]
-    pub content: Vec<shared::PortalContent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct OptimisticUserMessage {
-    pub content: String,
 }
 
 impl ClaudeMessage {
@@ -83,7 +90,8 @@ impl ClaudeMessage {
             });
         }
 
-        serde_json::from_str::<LocalMessage>(json).map(Into::into)
+        let value: serde_json::Value = serde_json::from_str(json)?;
+        Ok(parse_local_frame(&value).unwrap_or(Self::Unknown))
     }
 }
 
@@ -108,37 +116,29 @@ impl<'de> Deserialize<'de> for ClaudeMessage {
                 _ => Self::Unknown,
             });
         }
-        serde_json::from_value::<LocalMessage>(value)
-            .map(Into::into)
-            .map_err(serde::de::Error::custom)
+        Ok(parse_local_frame(&value).unwrap_or(Self::Unknown))
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-enum LocalMessage {
-    #[serde(rename = "portal")]
-    Portal(PortalMessage),
-    #[serde(rename = "user")]
-    OptimisticUser(OptimisticUserMessage),
-    // Only the payload: `LocalMessage` is internally tagged on `type`, so
-    // serde consumes that key for the discriminant and a nested
-    // `shared::ErrorMessage` (which also declares `type`) can never see it.
-    #[serde(rename = "error")]
-    LocalError { message: String },
-    #[serde(other)]
-    Unknown,
-}
-
-impl From<LocalMessage> for ClaudeMessage {
-    fn from(value: LocalMessage) -> Self {
-        match value {
-            LocalMessage::Portal(msg) => Self::Portal(msg),
-            LocalMessage::OptimisticUser(msg) => Self::OptimisticUser(msg),
-            LocalMessage::LocalError { message } => {
-                Self::LocalError(shared::ErrorMessage::new(message))
-            }
-            LocalMessage::Unknown => Self::Unknown,
-        }
+/// Parse a frame the **portal itself** authored, dispatching on its `"type"`
+/// tag into the shared [`shared::LocalFrame`] vocabulary.
+///
+/// Dispatching on the tag rather than deserializing an internally-tagged
+/// wrapper is what lets each payload keep its own `type` field: serde would
+/// otherwise consume that key for the discriminant, leaving the nested struct
+/// unable to see its own tag. Every arm here parses a type defined once in
+/// `shared` — there is no frontend-local copy to drift from.
+fn parse_local_frame(value: &serde_json::Value) -> Option<ClaudeMessage> {
+    match value.get("type").and_then(|t| t.as_str())? {
+        shared::PortalMessage::MESSAGE_TYPE => serde_json::from_value(value.clone())
+            .ok()
+            .map(ClaudeMessage::Portal),
+        shared::UserFrame::MESSAGE_TYPE => serde_json::from_value(value.clone())
+            .ok()
+            .map(ClaudeMessage::OptimisticUser),
+        shared::ERROR_MESSAGE_TYPE => serde_json::from_value(value.clone())
+            .ok()
+            .map(ClaudeMessage::LocalError),
+        _ => None,
     }
 }

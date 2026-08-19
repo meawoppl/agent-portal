@@ -1,7 +1,6 @@
 //! User-message renderers: the real Claude `user` wire shape, the synthetic
 //! optimistic echo, and the delivery-progress chip that rides on both.
 
-use super::super::types::OptimisticUserMessage;
 use super::{
     agent_message_event_from_agent_facing_text, render_agent_message_event, render_content_blocks,
 };
@@ -10,6 +9,7 @@ use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
     has_askuserquestion_answers, render_askuserquestion_result,
 };
+use shared::UserFrame as OptimisticUserMessage;
 use uuid::Uuid;
 use yew::prelude::*;
 

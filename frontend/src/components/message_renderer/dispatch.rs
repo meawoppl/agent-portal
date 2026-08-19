@@ -173,7 +173,7 @@ fn message_text(message: &RenderedMessage) -> String {
         match value {
             Value::String(text) => return text,
             Value::Object(_) => {
-                if let Ok(portal) = serde_json::from_value::<super::types::PortalMessage>(value) {
+                if let Ok(portal) = serde_json::from_value::<shared::PortalMessage>(value) {
                     return renderers::portal_text(&portal);
                 }
             }
