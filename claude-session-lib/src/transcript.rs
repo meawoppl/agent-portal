@@ -45,6 +45,22 @@ pub fn claude_transcript_id(session_id: Uuid, conversation_id: Option<Uuid>) -> 
     conversation_id.unwrap_or(session_id)
 }
 
+/// The rotated conversation id carried by a frame, or `None` while claude is
+/// still on the portal session's own id.
+///
+/// This is the *capture* half of the `/clear` handoff, the counterpart to
+/// [`claude_transcript_id`]'s *use* half. `/clear` makes the same claude process
+/// re-init onto a new conversation, and from that point every frame carries the
+/// new id — which is the successor identity. Deliberately reads the frame's own
+/// `session_id` and **not** the `conversation_reset` frame's
+/// `new_conversation_id`: that field was measured live (claude-codes #316) to
+/// match no session and no transcript on disk, and is never referenced again.
+pub fn diverged_conversation_id(frame_session_id: Option<&str>, portal_id: Uuid) -> Option<Uuid> {
+    frame_session_id
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .filter(|id| *id != portal_id)
+}
+
 /// Encode a working directory the way the `claude` CLI names its project dir:
 /// every `/` and `.` becomes `-`.
 fn encode_project_dir(working_directory: &Path) -> String {
@@ -96,6 +112,55 @@ fn status_in_home(home: &Path, working_directory: &Path, session_id: Uuid) -> Tr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `/clear` handoff, walked end to end over the frame sequence measured
+    /// live in claude-codes #316: init on the portal id, a `conversation_reset`
+    /// advertising a `new_conversation_id` that matches nothing, then every
+    /// later frame carrying the true successor.
+    ///
+    /// Pins all three links at once — capture takes the successor and ignores
+    /// the decoy, the argv resumes what capture learned, and the launcher's
+    /// existence gates address the same file the spawn opens.
+    #[test]
+    fn clear_handoff_captures_the_successor_and_uses_it_everywhere() {
+        let portal = Uuid::from_u128(1);
+        let successor = Uuid::from_u128(2);
+        let decoy = Uuid::from_u128(999); // the reset frame's new_conversation_id
+
+        // Before the clear: frames carry the portal id, nothing has diverged.
+        assert_eq!(
+            diverged_conversation_id(Some(&portal.to_string()), portal),
+            None,
+            "no divergence while claude is still on the portal id"
+        );
+
+        // The decoy must never be adopted, even though it is a valid uuid that
+        // differs from the portal id — it is simply never a frame's session_id.
+        // After the clear: subsequent frames carry the successor.
+        let learned = diverged_conversation_id(Some(&successor.to_string()), portal)
+            .expect("post-clear frames announce the successor");
+        assert_eq!(learned, successor);
+        assert_ne!(learned, decoy, "new_conversation_id names nothing on disk");
+
+        // Use half: both the resume target and the existence gates resolve
+        // through the same rule, so they cannot address different files.
+        assert_eq!(claude_transcript_id(portal, Some(learned)), successor);
+        assert_eq!(
+            claude_transcript_id(portal, None),
+            portal,
+            "a session that never cleared still resumes its own id"
+        );
+    }
+
+    /// Garbage in the id position must not be adopted as a conversation: a
+    /// resume keyed on it would fail, and a gate keyed on it would report
+    /// Missing and rotate away a live session.
+    #[test]
+    fn unparseable_or_absent_frame_ids_do_not_diverge() {
+        let portal = Uuid::from_u128(1);
+        assert_eq!(diverged_conversation_id(None, portal), None);
+        assert_eq!(diverged_conversation_id(Some("not-a-uuid"), portal), None);
+    }
 
     fn write(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
