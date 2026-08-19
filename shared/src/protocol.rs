@@ -35,8 +35,12 @@ pub const UPLOAD_CHUNK_SIZE: usize = 1024;
 pub const MAX_UPLOAD_CHUNK_BYTES: usize = 64 * 1024; // 64 KiB
 
 /// Hard ceiling on the number of chunks per upload, enforced by the
-/// backend at `FileUploadStart` time. With `MAX_UPLOAD_CHUNK_BYTES = 64
-/// KiB` this caps any single upload at 4 GiB, but the **binding** limit
+/// backend at `FileUploadStart` time.
+///
+/// The ceiling this implies depends on the *sender's* chunk size, not on
+/// `MAX_UPLOAD_CHUNK_BYTES`: our frontend sends `UPLOAD_CHUNK_SIZE`
+/// (1 KiB) chunks, so 65 536 of them is 64 MiB, not the 4 GiB you get by
+/// assuming maximum-size chunks. Either way the **binding** limit
 /// is the per-server `PORTAL_MAX_IMAGE_MB` byte cap — this constant only
 /// stops obviously-pathological `total_chunks` values from being accepted.
 pub const MAX_UPLOAD_TOTAL_CHUNKS: u32 = 65_536;

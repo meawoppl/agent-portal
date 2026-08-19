@@ -81,6 +81,9 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             AgentFrame::Claude(ClaudeMessage::RateLimitEvent(msg)) => {
                 renderers::render_rate_limit_event(&msg, ctx.timestamp)
             }
+            AgentFrame::Claude(ClaudeMessage::LocalError(msg)) => {
+                renderers::render_local_error(&msg, ctx.timestamp)
+            }
             AgentFrame::Claude(ClaudeMessage::ConversationReset(msg)) => {
                 renderers::render_conversation_reset(&msg)
             }

@@ -77,10 +77,25 @@ impl AgentFrameRegistry {
 
 impl AgentFrame {
     pub fn parse(json: &str, agent_type: shared::AgentType) -> Self {
-        if let Ok(message) = ClaudeMessage::parse(json) {
-            if !matches!(message, ClaudeMessage::Unknown) {
-                return Self::Claude(message);
+        match ClaudeMessage::parse(json) {
+            // A portal-generated error (`{type:"error", message}`) is
+            // agent-agnostic — any session can fail an upload — and its shape
+            // collides with Codex's own error frame. Let the agent-specific
+            // parser win when there is one, and fall back to the portal error
+            // otherwise, so a failed upload renders as an error everywhere
+            // without stealing a frame Codex owns.
+            Ok(ClaudeMessage::LocalError(error)) => {
+                if agent_type == shared::AgentType::Codex {
+                    if let Ok(event) = serde_json::from_str::<CodexEvent>(json) {
+                        if !matches!(event, CodexEvent::Unknown) {
+                            return Self::Codex(event);
+                        }
+                    }
+                }
+                return Self::Claude(ClaudeMessage::LocalError(error));
             }
+            Ok(ClaudeMessage::Unknown) | Err(_) => {}
+            Ok(message) => return Self::Claude(message),
         }
 
         if agent_type == shared::AgentType::Codex {
@@ -158,6 +173,9 @@ impl ClaudeMessage {
             // with system frames; `dispatch` still selects its own renderer off
             // the message variant, not this kind.
             Self::ConversationReset(_) => AgentFrameKind::ClaudeSystem,
+            // Portal-generated errors group with agent errors: same meaning to
+            // the reader, only a different wire shape.
+            Self::LocalError(_) => AgentFrameKind::ClaudeError,
             Self::OptimisticUser(_) => AgentFrameKind::OptimisticUser,
             Self::Unknown => AgentFrameKind::RawJson,
         }

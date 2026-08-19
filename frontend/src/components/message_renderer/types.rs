@@ -44,6 +44,12 @@ pub enum ClaudeMessage {
     /// the visible seam between two conversations in one session, and it also
     /// marks where claude's conversation id rotates (see the render).
     ConversationReset(shared::ConversationResetMessage),
+    /// A portal-generated error ([`shared::ErrorMessage`]) — a failed file
+    /// upload, say. Distinct from [`Self::Error`], which is Anthropic's nested
+    /// `{type:"error", error:{…}}` envelope: this one is flat, so it never
+    /// matched `ClaudeOutput` and fell through to a raw `Unknown` bubble. The
+    /// portal was rendering its own errors as unrecognized frames.
+    LocalError(shared::ErrorMessage),
     OptimisticUser(OptimisticUserMessage),
     Unknown,
 }
@@ -115,6 +121,11 @@ enum LocalMessage {
     Portal(PortalMessage),
     #[serde(rename = "user")]
     OptimisticUser(OptimisticUserMessage),
+    // Only the payload: `LocalMessage` is internally tagged on `type`, so
+    // serde consumes that key for the discriminant and a nested
+    // `shared::ErrorMessage` (which also declares `type`) can never see it.
+    #[serde(rename = "error")]
+    LocalError { message: String },
     #[serde(other)]
     Unknown,
 }
@@ -124,6 +135,9 @@ impl From<LocalMessage> for ClaudeMessage {
         match value {
             LocalMessage::Portal(msg) => Self::Portal(msg),
             LocalMessage::OptimisticUser(msg) => Self::OptimisticUser(msg),
+            LocalMessage::LocalError { message } => {
+                Self::LocalError(shared::ErrorMessage::new(message))
+            }
             LocalMessage::Unknown => Self::Unknown,
         }
     }

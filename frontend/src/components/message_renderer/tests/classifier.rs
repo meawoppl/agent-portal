@@ -136,3 +136,56 @@ fn conversation_reset_parses_to_its_own_variant() {
         "conversation_reset must not fall through to Unknown"
     );
 }
+
+/// The portal's own error envelope is flat (`{type:"error", message:"…"}`),
+/// unlike Anthropic's nested `{type:"error", error:{…}}`. It matched neither
+/// `ClaudeOutput` nor the local-frame fallback, so every failed file upload
+/// rendered as an "Unrecognized Message" raw bubble — the portal reporting its
+/// own errors as frames it did not recognize.
+#[test]
+fn portal_error_envelope_renders_as_an_error_not_an_unknown_frame() {
+    use super::super::types::ClaudeMessage;
+    let json = r#"{"type":"error","message":"File upload failed: file is too large (limit 10 MB) — your message was not sent"}"#;
+    match ClaudeMessage::parse(json) {
+        Ok(ClaudeMessage::LocalError(e)) => {
+            assert!(e.message.contains("too large"), "message preserved: {e:?}")
+        }
+        other => panic!("expected LocalError, got {other:?}"),
+    }
+}
+
+/// Anthropic's nested envelope must keep routing to the existing error arm —
+/// the new flat variant must not shadow it.
+#[test]
+fn anthropic_nested_error_still_parses_as_error() {
+    use super::super::types::ClaudeMessage;
+    let json = r#"{"type":"error","error":{"type":"api_error","message":"boom"}}"#;
+    assert!(
+        matches!(ClaudeMessage::parse(json), Ok(ClaudeMessage::Error(_))),
+        "nested Anthropic errors must not regress to LocalError"
+    );
+}
+
+/// The portal error must render as an error on non-Codex agents too — but
+/// without stealing Codex's own `{type:"error"}` frame, which the exhaustive
+/// sweep above pins. Same JSON, different agent, different owner.
+#[test]
+fn portal_error_routes_to_claude_but_leaves_codex_frames_alone() {
+    use super::super::types::ClaudeMessage;
+    use crate::components::agent_frame::{AgentFrame, AgentFrameRegistry};
+    let json = r#"{"type":"error","message":"File upload failed"}"#;
+    assert!(
+        matches!(
+            AgentFrameRegistry::parse(json, shared::AgentType::Claude),
+            AgentFrame::Claude(ClaudeMessage::LocalError(_))
+        ),
+        "a Claude session must render the portal's own error"
+    );
+    assert!(
+        matches!(
+            AgentFrameRegistry::parse(json, shared::AgentType::Codex),
+            AgentFrame::Codex(_)
+        ),
+        "Codex owns this shape and must keep it"
+    );
+}
