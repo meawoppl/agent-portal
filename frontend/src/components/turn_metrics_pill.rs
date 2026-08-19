@@ -50,9 +50,9 @@ impl SparklineMetric {
     }
 }
 
-/// Pick the (model, service_tier) pair of the *most recent* turn in the
-/// buffer. Returns `None` when the buffer is empty or the newest turn has
-/// neither field populated.
+/// Pick the newest usable `(model, service_tier)` pair in the buffer. Turns
+/// from an agent that reports neither field are skipped instead of making the
+/// whole header status disappear.
 ///
 /// The buffer is sorted oldest → newest, so the newest turn is the last
 /// element. The pair is the (model, tier) tuple — both `Option` because
@@ -61,11 +61,10 @@ impl SparklineMetric {
 pub(crate) fn pick_most_recent_model_tier(
     buf: &[TurnMetrics],
 ) -> Option<(Option<String>, Option<String>)> {
-    let last = buf.last()?;
-    if last.model.is_none() && last.service_tier.is_none() {
-        return None;
-    }
-    Some((last.model.clone(), last.service_tier.clone()))
+    buf.iter()
+        .rev()
+        .find(|metric| metric.model.is_some() || metric.service_tier.is_some())
+        .map(|metric| (metric.model.clone(), metric.service_tier.clone()))
 }
 
 /// Build a human-readable label from a (model, tier) pair. The model name
@@ -315,6 +314,17 @@ mod tests {
     fn pick_pair_returns_none_when_newest_has_no_model_or_tier() {
         let buf = vec![mk(None, None, 0)];
         assert!(pick_most_recent_model_tier(&buf).is_none());
+    }
+
+    #[test]
+    fn pick_pair_skips_newest_row_without_model_metadata() {
+        let buf = vec![
+            mk(Some("claude-opus-4-8"), Some("priority"), 0),
+            mk(None, None, 1),
+        ];
+        let pair = pick_most_recent_model_tier(&buf).unwrap();
+        assert_eq!(pair.0.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(pair.1.as_deref(), Some("priority"));
     }
 
     #[test]
