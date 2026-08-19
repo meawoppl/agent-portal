@@ -31,7 +31,7 @@ pub(super) fn render_web_search_result(content: &Value) -> Html {
             <div class="tool-use-header">
                 <span class="tool-badge server">{ "Web Search Result" }</span>
             </div>
-            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
+            <ExpandableText full_text={preview} max_len={crate::components::expandable::limits::PROSE} class="tool-result-content" />
         </div>
     }
 }
@@ -43,7 +43,7 @@ pub(super) fn render_code_execution_result(content: &Value) -> Html {
             <div class="tool-use-header">
                 <span class="tool-badge code-exec">{ "Code Execution" }</span>
             </div>
-            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" />
+            <ExpandableText full_text={preview} max_len={crate::components::expandable::limits::RAW_JSON} class="tool-result-content" />
         </div>
     }
 }

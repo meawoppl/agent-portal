@@ -58,7 +58,7 @@ pub(super) fn render_command_execution(it: &CommandExecutionItem, completed: boo
         <>
             <ExpandableText
                 full_text={cmd.to_string()}
-                max_len=500
+                max_len={crate::components::expandable::limits::TOOL_OUTPUT}
                 tag="pre"
                 class={classes!("tool-input-content")}
             />
