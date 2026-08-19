@@ -176,27 +176,7 @@ pub fn storage_remove(key: &str) {
     }
 }
 
-/// Human-readable file size: `"512 B"`, `"1.5 KB"`, `"2.0 MB"`.
-pub fn format_file_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
-}
-
-/// Format token count with K/M suffix for readability
-pub fn format_token_count(count: i64) -> String {
-    if count >= 1_000_000 {
-        format!("{:.1}M", count as f64 / 1_000_000.0)
-    } else if count >= 1_000 {
-        format!("{:.1}K", count as f64 / 1_000.0)
-    } else {
-        count.to_string()
-    }
-}
+pub use shared::fmt::{format_file_size, format_token_count};
 
 #[cfg(test)]
 mod tests {
