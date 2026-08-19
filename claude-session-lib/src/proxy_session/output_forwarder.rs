@@ -80,10 +80,8 @@ pub fn spawn_output_forwarder(
                 // transcript, so resuming it would silently reinstate the
                 // conversation as it was before the clear. Report the change so
                 // the launcher can persist it and resume the live one.
-                if let Some(current) = output
-                    .session_id()
-                    .and_then(|id| Uuid::parse_str(id).ok())
-                    .filter(|id| *id != session_id)
+                if let Some(current) =
+                    crate::transcript::diverged_conversation_id(output.session_id(), session_id)
                 {
                     if reported_conversation != Some(current) {
                         reported_conversation = Some(current);
