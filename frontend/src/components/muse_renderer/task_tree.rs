@@ -659,6 +659,58 @@ mod tests {
         );
     }
 
+    /// Muse 0.2.1 omits `correlation_facts` on a **pre-execution rejection** —
+    /// a tool call refused before it runs, e.g. the stringified-scalar rejects
+    /// seen on meawoppl-fc (`invalid type: string "false", expected a
+    /// boolean`). With no `tool_name` there is nothing to kind-match, so the
+    /// fallback decides where the failure is rendered, and the preference for
+    /// a non-reminder task is what keeps it on the visible work rather than on
+    /// scaffolding the view hides.
+    ///
+    /// Covered here because that fallback became load-bearing on 0.2.1 rather
+    /// than theoretical (rust-code-agent-sdks#325). The existing fallback test
+    /// only exercises the degenerate case where a reminder is the *sole*
+    /// running task.
+    #[test]
+    fn a_rejection_without_correlation_facts_lands_on_real_work_not_scaffolding() {
+        let mut tree = TaskTree::new();
+        for (id, kind) in [
+            ("r1", "reminder.agent.plugin:tbh-reminders:scope-reminder"),
+            ("t1", "tool.bash"),
+        ] {
+            tree.apply(&json!({
+                "payload_type": "task.lifecycle.proposed",
+                "payload": {"task_id": id, "event": {
+                    "kind": "proposed", "task_id": id, "task_kind": kind
+                }},
+            }));
+            tree.apply(&json!({
+                "payload_type": "task.lifecycle.started",
+                "payload": {"task_id": id, "event": {"kind": "started", "task_id": id}},
+            }));
+        }
+
+        // No `correlation_facts`: the 0.2.1 pre-execution rejection shape.
+        tree.apply(&json!({
+            "payload_type": "tool.result",
+            "payload": {
+                "call_id": "c1",
+                "text": "invalid type: string \"false\", expected a boolean at line 1 column 102"
+            },
+        }));
+
+        assert_eq!(
+            tree.get("t1").expect("tool task").tool_results.len(),
+            1,
+            "a rejection with no correlation_facts must attach to the running \
+             tool task, not the reminder scaffolding the view hides"
+        );
+        assert!(
+            tree.get("r1").expect("reminder").tool_results.is_empty(),
+            "scaffolding must not absorb the rejection"
+        );
+    }
+
     /// A frame the model cannot interpret must not break the tree built by
     /// the rest of the turn.
     #[test]
