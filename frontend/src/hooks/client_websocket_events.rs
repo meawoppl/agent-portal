@@ -1,4 +1,6 @@
 use shared::{ServerToClient, TurnMetrics};
+use std::collections::HashMap;
+use uuid::Uuid;
 use yew::UseStateHandle;
 
 /// Cap for the dashboard's recent-turn ring buffer. Matches the server-side
@@ -12,6 +14,7 @@ pub(crate) fn handle_server_message(
     total_spend: &UseStateHandle<f64>,
     shutdown_reason: &UseStateHandle<Option<String>>,
     recent_turn_metrics: &UseStateHandle<Vec<TurnMetrics>>,
+    latest_session_metrics: &UseStateHandle<HashMap<Uuid, TurnMetrics>>,
     launch_event_counter: &UseStateHandle<u32>,
     launcher_event_counter: &UseStateHandle<u32>,
 ) {
@@ -34,12 +37,16 @@ pub(crate) fn handle_server_message(
             shutdown_reason.set(Some(reason));
         }
         ServerToClient::TurnMetrics(metrics) => {
+            let metrics = *metrics;
             let next = insert_recent_metric(
                 (**recent_turn_metrics).clone(),
-                *metrics,
+                metrics.clone(),
                 RECENT_TURN_BUFFER_CAP,
             );
             recent_turn_metrics.set(next);
+            let mut latest = (**latest_session_metrics).clone();
+            insert_latest_session_metric(&mut latest, metrics);
+            latest_session_metrics.set(latest);
         }
         ServerToClient::LaunchSessionResult { success, error, .. } => {
             // Push signal from the backend that the launcher finished registering
@@ -59,6 +66,23 @@ pub(crate) fn handle_server_message(
             launcher_event_counter.set(launcher_event_counter.wrapping_add(1));
         }
         _ => {}
+    }
+}
+
+pub(crate) fn insert_latest_session_metric(
+    latest: &mut HashMap<Uuid, TurnMetrics>,
+    incoming: TurnMetrics,
+) {
+    // An agent/version that cannot report a context window must not erase the
+    // last usable gauge. The bounded trend ring still retains that raw turn.
+    if incoming.context_fraction().is_none() {
+        return;
+    }
+    let replace = latest
+        .get(&incoming.session_id)
+        .is_none_or(|existing| incoming.started_at >= existing.started_at);
+    if replace {
+        latest.insert(incoming.session_id, incoming);
     }
 }
 
@@ -160,5 +184,47 @@ mod tests {
         assert_eq!(buf.len(), 3);
         let secs: Vec<i64> = buf.iter().map(|m| m.started_at.timestamp()).collect();
         assert_eq!(secs, vec![30, 40, 50]);
+    }
+
+    #[test]
+    fn latest_per_session_survives_unrelated_ring_eviction() {
+        let quiet = Uuid::new_v4();
+        let busy = Uuid::new_v4();
+        let mut latest = HashMap::new();
+        let mut quiet_metric = sample(Some(Uuid::new_v4()), 10);
+        quiet_metric.session_id = quiet;
+        quiet_metric.model_context_window = Some(200_000);
+        quiet_metric.context_snapshot_tokens = Some(50_000);
+        insert_latest_session_metric(&mut latest, quiet_metric);
+
+        let mut ring = Vec::new();
+        for t in 20..=80 {
+            let mut metric = sample(Some(Uuid::new_v4()), t);
+            metric.session_id = busy;
+            metric.model_context_window = Some(200_000);
+            metric.context_snapshot_tokens = Some(t * 100);
+            insert_latest_session_metric(&mut latest, metric.clone());
+            ring = insert_recent_metric(ring, metric, 50);
+        }
+
+        assert!(ring.iter().all(|metric| metric.session_id != quiet));
+        assert_eq!(latest.get(&quiet).unwrap().started_at.timestamp(), 10);
+    }
+
+    #[test]
+    fn unknown_context_does_not_erase_last_usable_status() {
+        let session_id = Uuid::new_v4();
+        let mut latest = HashMap::new();
+        let mut usable = sample(Some(Uuid::new_v4()), 10);
+        usable.session_id = session_id;
+        usable.model_context_window = Some(200_000);
+        usable.context_snapshot_tokens = Some(50_000);
+        insert_latest_session_metric(&mut latest, usable);
+
+        let mut unknown = sample(Some(Uuid::new_v4()), 20);
+        unknown.session_id = session_id;
+        insert_latest_session_metric(&mut latest, unknown);
+
+        assert_eq!(latest.get(&session_id).unwrap().started_at.timestamp(), 10);
     }
 }

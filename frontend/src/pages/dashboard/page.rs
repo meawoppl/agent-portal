@@ -107,26 +107,19 @@ pub fn dashboard_page() -> Html {
     // Get DB-authoritative sessions in a total, deterministic display order
     // (see `session_order`). A disconnected, unpaused session is
     // desired-running and should stay visible while the launcher reconciles it.
-    // Live model overlay for the pill's model watermark. The dashboard already
-    // receives every session's per-turn `TurnMetrics` (which carries `model`)
-    // on the user channel, so a mid-session model change — e.g. a Fable 5
-    // session falling back to Opus 4.8 — flips the pill's watermark instantly,
-    // before the next `/api/sessions` poll reads the persisted `last_model`
-    // back. Latest turn wins: the buffer is ordered oldest→newest, so a plain
-    // `collect` lets later entries overwrite earlier ones per session.
+    // Live model overlay for the pill's model watermark. The persisted
+    // `last_model` remains the durable fallback when this trend window rolls.
     let live_models: HashMap<Uuid, String> = ws_hook
         .recent_turn_metrics
         .iter()
         .filter_map(|m| m.model.clone().map(|model| (m.session_id, model)))
         .collect();
 
-    // Per-session context-window fill, same source and "latest turn wins"
-    // ordering as `live_models` above. Feeds each pill's top context bar; a
-    // turn whose window is unknown (e.g. an unrecognized model) is skipped, so
-    // that session simply shows no bar.
+    // Per-session context-window fill from the dedicated durable latest-value
+    // map. Rows without a usable window never erase a prior known gauge.
     let context_fractions: HashMap<Uuid, f64> = ws_hook
-        .recent_turn_metrics
-        .iter()
+        .latest_session_metrics
+        .values()
         .filter_map(|m| m.context_fraction().map(|frac| (m.session_id, frac)))
         .collect();
 

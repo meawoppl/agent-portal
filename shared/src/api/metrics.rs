@@ -194,14 +194,18 @@ impl TurnMetrics {
     }
 }
 
-/// Response from `GET /api/sessions/{id}/turn-metrics`.
-///
-/// Rows are ordered `started_at ASC` so the SessionView's join walk (pair Nth
-/// terminator message with Nth metrics row) works without a second sort.
+/// Turn-metrics response shared by the per-session and dashboard endpoints.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TurnMetricsResponse {
+    /// Trend/history rows. The per-session endpoint returns the whole session;
+    /// the dashboard endpoint returns its bounded newest-turn window.
     #[serde(default)]
     pub metrics: Vec<TurnMetrics>,
+    /// Newest context-capable row for every existing session owned by the user.
+    /// Kept separate from `metrics` so a busy session cannot evict a quiet
+    /// session's current context gauge from the bounded trend window.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub latest_by_session: Vec<TurnMetrics>,
 }
 
 /// One bucket in the `GET /api/metrics/turns` response. Aggregates `turn_metrics`
