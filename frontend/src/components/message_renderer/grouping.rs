@@ -571,12 +571,23 @@ pub fn group_messages(
 /// Events that don't carry an `item_id` (turn-level events, deltas, errors)
 /// always pass through — they're standalone signals, not lifecycle stages of
 /// a per-item card.
+/// Returns each surviving index paired with the codex `item_id` it renders,
+/// when it has one.
+///
+/// The id is handed back rather than recomputed by the caller for two reasons.
+/// It avoids a second parse of every message on the hot render path (#967) —
+/// and, more importantly, it is the card's **stable identity**. Keying the
+/// rendered card on the surviving message's timestamp instead means the key
+/// changes every time a later lifecycle frame for the same item wins the
+/// dedup, so Yew tears the card down and rebuilds it — resetting every
+/// expandable inside, which is how an expanded bash-output preview closed
+/// itself as a turn progressed.
 pub(super) fn visible_group_indices(
     category: GroupCategory,
     messages: &[RenderedMessage],
-) -> Vec<usize> {
+) -> Vec<(usize, Option<String>)> {
     if !matches!(category, GroupCategory::Codex) {
-        return (0..messages.len()).collect();
+        return (0..messages.len()).map(|i| (i, None)).collect();
     }
     use crate::components::codex_renderer::codex_event_item_id;
     use std::collections::HashMap;
@@ -599,6 +610,6 @@ pub(super) fn visible_group_indices(
             Some(id) => last_idx.get(id.as_str()) == Some(i),
             None => true,
         })
-        .map(|(i, _)| i)
+        .map(|(i, id)| (i, id.clone()))
         .collect()
 }

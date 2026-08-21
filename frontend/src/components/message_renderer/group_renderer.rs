@@ -132,7 +132,8 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             // item that the body's `gap` still spaces into a blank row.
             let parts: Vec<Html> = visible
                 .iter()
-                .filter_map(|&i| {
+                .filter_map(|(i, item_id)| {
+                    let i = *i;
                     let message = &messages[i];
                     let content = dispatch::render_identity_group_part(
                         message,
@@ -141,10 +142,16 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                         &props.continuation_statuses,
                         props.on_schedule_continuation.clone(),
                     )?;
-                    let key = message
-                        .raw_iso()
-                        .map(|iso| format!("m-{}", iso))
-                        .unwrap_or_else(|| format!("m{}", i));
+                    // Prefer the codex item id: it is stable across the
+                    // item's whole lifecycle, whereas the surviving message's
+                    // timestamp changes each time a later frame wins the dedup
+                    // — recreating the card and collapsing anything expanded
+                    // inside it.
+                    let key = item_id
+                        .as_ref()
+                        .map(|id| format!("i-{id}"))
+                        .or_else(|| message.raw_iso().map(|iso| format!("m-{iso}")))
+                        .unwrap_or_else(|| format!("m{i}"));
                     Some(html! { <div {key} class="grouped-message-part">{ content }</div> })
                 })
                 .collect();
