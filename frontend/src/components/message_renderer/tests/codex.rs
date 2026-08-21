@@ -7,6 +7,12 @@ use super::fixtures::{
     group_for_codex_tests, portal_text_message, rendered_vec,
 };
 
+/// The surviving indices only — most assertions here are about *which*
+/// messages render, not the ids that key them.
+fn indices(visible: &[(usize, Option<String>)]) -> Vec<usize> {
+    visible.iter().map(|(i, _)| *i).collect()
+}
+
 #[test]
 fn codex_event_classifies_into_codex_group() {
     let msg = codex_item_started_agent_message("hi");
@@ -71,7 +77,10 @@ fn codex_command_lifecycle_dedupes_to_completed() {
         codex_command_event("item.started", "cmd_1", "in_progress"),
         codex_command_event("item.completed", "cmd_1", "completed"),
     ];
-    let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
+    let visible = indices(&visible_group_indices(
+        GroupCategory::Codex,
+        &rendered_vec(&messages),
+    ));
     assert_eq!(
         visible,
         vec![1],
@@ -90,7 +99,10 @@ fn codex_command_started_updated_completed_dedupes_to_completed() {
         codex_command_event("item.updated", "cmd_1", "in_progress"),
         codex_command_event("item.completed", "cmd_1", "completed"),
     ];
-    let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
+    let visible = indices(&visible_group_indices(
+        GroupCategory::Codex,
+        &rendered_vec(&messages),
+    ));
     assert_eq!(visible, vec![2]);
 }
 
@@ -104,7 +116,10 @@ fn codex_two_distinct_items_each_keep_one_card() {
         codex_command_event("item.started", "cmd_b", "in_progress"),
         codex_command_event("item.completed", "cmd_b", "completed"),
     ];
-    let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
+    let visible = indices(&visible_group_indices(
+        GroupCategory::Codex,
+        &rendered_vec(&messages),
+    ));
     // Indices 1 (cmd_a completed) and 3 (cmd_b completed) remain.
     assert_eq!(visible, vec![1, 3]);
 }
@@ -124,7 +139,10 @@ fn codex_non_item_events_always_visible() {
         turn_completed.clone(),
         codex_command_event("item.completed", "cmd_1", "completed"),
     ];
-    let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
+    let visible = indices(&visible_group_indices(
+        GroupCategory::Codex,
+        &rendered_vec(&messages),
+    ));
     // turn.completed (index 1) is kept; the started (index 0) drops in
     // favor of the completed (index 2).
     assert_eq!(visible, vec![1, 2]);
@@ -145,7 +163,7 @@ fn visible_group_indices_is_codex_only() {
         GroupCategory::Portal,
         GroupCategory::User,
     ] {
-        let visible = visible_group_indices(cat, &rendered_vec(&messages));
+        let visible = indices(&visible_group_indices(cat, &rendered_vec(&messages)));
         assert_eq!(
             visible,
             vec![0, 1],
@@ -171,6 +189,49 @@ fn codex_items_without_id_do_not_collapse() {
         "item": {"type": "agent_message", "text": "second"},
     })
     .to_string();
-    let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&[no_id_a, no_id_b]));
+    let visible = indices(&visible_group_indices(
+        GroupCategory::Codex,
+        &rendered_vec(&[no_id_a, no_id_b]),
+    ));
     assert_eq!(visible, vec![0, 1]);
+}
+
+/// The reported bug: an expanded bash-output preview closed itself as new
+/// messages arrived, on codex sessions but not claude ones.
+///
+/// Codex re-emits one tool call as `item.started` → `item.updated` →
+/// `item.completed`, and the dedup keeps only the newest. Keying the rendered
+/// card on the surviving message's timestamp therefore changed the key at
+/// every stage, so Yew tore the card down and rebuilt it — resetting the
+/// `ExpandableText` inside. Claude has no progressive re-emission, which is
+/// why it never churned.
+///
+/// The `item_id` is stable across the whole lifecycle, so the surviving entry
+/// must carry it and it must not change stage to stage.
+#[test]
+fn a_codex_card_keeps_one_identity_across_its_lifecycle() {
+    let stages = ["item.started", "item.updated", "item.completed"];
+    let mut keys = Vec::new();
+
+    // Replay the turn as it actually arrives: one more frame each time.
+    for upto in 1..=stages.len() {
+        let messages: Vec<_> = stages[..upto]
+            .iter()
+            .map(|stage| codex_command_event(stage, "cmd_1", "in_progress"))
+            .collect();
+        let visible = visible_group_indices(GroupCategory::Codex, &rendered_vec(&messages));
+        assert_eq!(visible.len(), 1, "one card per item at stage {upto}");
+        keys.push(
+            visible[0]
+                .1
+                .clone()
+                .unwrap_or_else(|| panic!("surviving codex card must carry its item id")),
+        );
+    }
+
+    assert!(
+        keys.windows(2).all(|w| w[0] == w[1]),
+        "the card's identity must not move as its lifecycle advances \
+         (an expanded preview would collapse): {keys:?}"
+    );
 }
