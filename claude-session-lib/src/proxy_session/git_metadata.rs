@@ -137,12 +137,30 @@ pub(super) fn muse_output_has_git_signal(value: &serde_json::Value) -> bool {
 /// can change what we display, or an unambiguous git output line for the case
 /// where the branch moved without us seeing the command.
 fn text_has_git_signal(text: &str) -> bool {
-    const STATE_CHANGING: [&str; 8] = [
-        "checkout", "switch", "commit", "merge", "rebase", "push", "branch", " pr ",
+    const STATE_CHANGING: [&str; 7] = [
+        "checkout", "switch", "commit", "merge", "rebase", "push", "branch",
+    ];
+
+    /// PR subcommands that change something worth re-reading. Deliberately not
+    /// a bare `" pr "`: that also matched every read-only `gh pr checks` /
+    /// `view` / `list` / `diff` / `status`, so browsing PR state triggered a
+    /// refresh — three `gh` round trips — that could not have found anything
+    /// new. `gh pr checks <n> --watch` is the worst of it, re-emitting output
+    /// every interval and marking a signal on each frame.
+    const PR_STATE_CHANGING: [&str; 6] = [
+        "pr create",
+        "pr merge",
+        "pr edit",
+        "pr close",
+        "pr reopen",
+        "pr ready",
     ];
 
     let invoked = text.contains("git ") || text.contains("gh ");
-    if invoked && STATE_CHANGING.iter().any(|sub| text.contains(sub)) {
+    if invoked
+        && (STATE_CHANGING.iter().any(|sub| text.contains(sub))
+            || PR_STATE_CHANGING.iter().any(|sub| text.contains(sub)))
+    {
         return true;
     }
 
@@ -333,6 +351,44 @@ mod tests {
                 "correlation_facts": { "tool_name": "bash" },
             }
         })
+    }
+
+    /// The command that exposed the stall: `gh pr checks <n> --watch` re-emits
+    /// output every interval and changes nothing, so it must not mark a git
+    /// signal. A bare `" pr "` match did, turning a CI watch into a refresh
+    /// per frame — three `gh` round trips each, which the claude arm awaited
+    /// inline in the output forwarder.
+    #[test]
+    fn read_only_gh_pr_commands_are_not_git_signals() {
+        for cmd in [
+            "gh pr checks 1788 --watch --interval 15",
+            "/bin/bash -lc 'gh pr checks 1788 --watch --interval 15'",
+            "gh pr view 42",
+            "gh pr list --state open",
+            "gh pr diff 7",
+        ] {
+            assert!(
+                !text_has_git_signal(cmd),
+                "read-only PR browsing must not trigger a refresh: {cmd:?}"
+            );
+        }
+    }
+
+    /// Narrowing the PR match must not lose the case it existed for: creating
+    /// or merging a PR genuinely changes what the pill should show.
+    #[test]
+    fn state_changing_gh_pr_commands_are_still_git_signals() {
+        for cmd in [
+            "gh pr create --fill",
+            "gh pr merge 1788 --squash --auto",
+            "gh pr ready 1788",
+            "gh pr close 1788",
+        ] {
+            assert!(
+                text_has_git_signal(cmd),
+                "PR mutation must still trigger a refresh: {cmd:?}"
+            );
+        }
     }
 
     #[test]

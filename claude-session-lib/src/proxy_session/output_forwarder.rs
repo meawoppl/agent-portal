@@ -20,8 +20,8 @@ use uuid::Uuid;
 use session_lib::output_buffer::PendingOutputBuffer;
 
 use super::git_metadata::{
-    check_and_send_branch_update, claude_output_code_change_published,
-    claude_output_has_git_signal, GitMetadataState, GitRefreshTrigger,
+    claude_output_code_change_published, claude_output_has_git_signal, spawn_branch_update,
+    GitMetadataState, GitRefreshTrigger,
 };
 use super::media_display::{claude_output_image_read, MediaDisplaySink};
 use super::{format_duration, truncate, SharedWsWrite};
@@ -61,14 +61,22 @@ pub fn spawn_output_forwarder(
 
             // Branch/PR update from the PREVIOUS message's git command (deferred
             // so the command has finished). Runs each frame regardless of parse.
+            //
+            // Fire-and-forget, for the same reason the codex arm is (#1690):
+            // awaiting here stalls *this* task, and this task is the one
+            // forwarding output to the backend. The refresh shells out to `git`
+            // and `gh` — three GitHub round trips, none of them with a timeout —
+            // so a slow network turned every claude output frame into a
+            // serialized wait, which reads as a frozen session that dumps a
+            // burst of messages the moment something else nudges the loop.
+            //
+            // `gh pr checks <n> --watch` is the pathological case: it re-emits
+            // output every interval, and every frame contains both `gh ` and
+            // ` pr `, so the git-signal predicate fires on all of them. The
+            // in-flight guard inside `spawn_branch_update` coalesces that flood
+            // into one refresh instead of one per frame.
             if git_refresh.should_check_before_message() {
-                check_and_send_branch_update(
-                    &ws_write,
-                    session_id,
-                    &working_directory,
-                    &git_metadata,
-                )
-                .await;
+                spawn_branch_update(&ws_write, session_id, &working_directory, &git_metadata);
             }
 
             if let Some(ref output) = parsed {
@@ -104,13 +112,12 @@ pub fn spawn_output_forwarder(
                         "← code_change_published: {} {} ({})",
                         published.provider, published.url, published.repo
                     );
-                    check_and_send_branch_update(
-                        &ws_write,
-                        session_id,
-                        &working_directory,
-                        &git_metadata,
-                    )
-                    .await;
+                    spawn_branch_update(&ws_write, session_id, &working_directory, &git_metadata);
+                    // The refresh above is coalesced away if one is already in
+                    // flight, and that one may have started before the PR
+                    // existed. Mark a signal so the next frame retries rather
+                    // than leaving the just-published PR unreported.
+                    git_refresh.mark_git_signal();
                 }
 
                 // Reading an image displays it: the user otherwise watches the
