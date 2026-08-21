@@ -555,6 +555,31 @@ mod tests {
         assert!(segs[1].style.bg.is_none());
     }
 
+    /// Clippy's diagnostics, which is what most CI output in this portal is.
+    /// It emits bold + **bright** blue for the `-->` location arrow
+    /// (`ESC[1m ESC[94m --> ESC[0m`). Bright *backgrounds* were covered; bright
+    /// foregrounds — the half that actually shows up — were not.
+    #[test]
+    fn clippy_bold_bright_foreground_renders() {
+        let segs = styled("\x1b[1m\x1b[94m--> \x1b[0msrc/main.rs:1:1");
+
+        assert!(segs[0].style.bold, "bold must survive");
+        assert_eq!(
+            segs[0].style.fg,
+            // 94 is bright blue: 8 + (94 - 90).
+            Some(AnsiColor::Standard(12)),
+            "bright foreground must map into the bright half of the palette"
+        );
+        assert_eq!(segs[0].text, "--> ");
+
+        let tail = segs.last().expect("text after the reset");
+        assert!(
+            tail.style.is_default(),
+            "ESC[0m must clear both the weight and the colour"
+        );
+        assert_eq!(tail.text, "src/main.rs:1:1");
+    }
+
     #[test]
     fn incomplete_csi_at_eof_is_dropped() {
         let segs = styled("ok\x1b[31");
