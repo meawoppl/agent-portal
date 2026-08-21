@@ -50,6 +50,12 @@ pub fn render_markdown_for_session(text: &str, session_id: Uuid) -> Html {
     }
 }
 
+/// Render one machine-authored reminder using the same collapsed treatment as
+/// a `<system-reminder>` block embedded in markdown.
+pub(crate) fn render_system_reminder(body: &str) -> Html {
+    html! { <SystemReminderBar body={body.to_string()} /> }
+}
+
 #[derive(Properties, PartialEq)]
 struct MarkdownViewProps {
     text: String,
