@@ -811,14 +811,11 @@ impl PortalMessage {
         else {
             return None;
         };
-        let reply_session_id = short_reply_session_id(from_session_id);
+        let reminder = agent_message_reply_reminder(from_session_id);
         Some(format!(
             "[message from {from_agent_type} {from_session_id}]\n{text}\n\n\
 <system-reminder>\n\
-This message came from another agent. Reply to that agent, not the user.\n\
-Sender session id: {from_session_id}\n\
-Reply with:\n\
-agent-portal message send {reply_session_id} \"your reply\"\n\
+{reminder}\n\
 </system-reminder>"
         ))
     }
@@ -826,6 +823,21 @@ agent-portal message send {reply_session_id} \"your reply\"\n\
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_default()
     }
+}
+
+/// Body of the reminder shown and sent with an inter-agent message.
+///
+/// The agent-facing prompt and the typed transcript card share this text so
+/// Claude's echoed-input path and Codex's synthetic-input path explain the
+/// same reply workflow without maintaining two copies.
+pub fn agent_message_reply_reminder(from_session_id: &str) -> String {
+    let reply_session_id = short_reply_session_id(from_session_id);
+    format!(
+        "This message came from another agent. Reply to that agent, not the user.\n\
+Sender session id: {from_session_id}\n\
+Reply with:\n\
+agent-portal message send {reply_session_id} \"your reply\""
+    )
 }
 
 fn short_reply_session_id(session_id: &str) -> String {

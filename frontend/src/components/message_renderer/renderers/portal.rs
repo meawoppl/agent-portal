@@ -211,6 +211,7 @@ fn render_agent_message_event_card(
         .next()
         .unwrap_or(&event.from_session_id);
     let label = agent_label(&event.from_agent_type);
+    let reply_reminder = agent_message_reply_reminder(event);
     html! {
         <div class="claude-message user-message other-agent-message agent-message-event">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
@@ -222,9 +223,20 @@ fn render_agent_message_event_card(
             </div>
             <div class="message-body">
                 { render_agent_message_body(&event.text, session_id) }
+                {
+                    reply_reminder
+                        .as_deref()
+                        .map(crate::components::markdown::render_system_reminder)
+                        .unwrap_or_default()
+                }
             </div>
         </div>
     }
+}
+
+fn agent_message_reply_reminder(event: &AgentMessageEvent) -> Option<String> {
+    (!shared::system_reminder::has_system_reminder(&event.text))
+        .then(|| shared::agent_message_reply_reminder(&event.from_session_id))
 }
 
 pub(crate) fn render_agent_message_body(text: &str, session_id: Uuid) -> Html {
@@ -511,6 +523,20 @@ This message came from another agent.\n\
         // instruction the recipient acted on instead of hiding it.
         assert!(event.text.starts_with("Will do."));
         assert!(event.text.contains("<system-reminder>"));
+        assert!(agent_message_reply_reminder(&event).is_none());
+    }
+
+    #[test]
+    fn typed_agent_message_adds_reply_reminder_for_synthetic_echoes() {
+        let event = AgentMessageEvent {
+            from_agent_type: "claude".to_string(),
+            from_session_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            text: "hello from typed display event".to_string(),
+        };
+
+        let reminder = agent_message_reply_reminder(&event).expect("reply reminder");
+        assert!(reminder.contains("Reply to that agent, not the user"));
+        assert!(reminder.contains("agent-portal message send 11111111"));
     }
 
     #[test]
