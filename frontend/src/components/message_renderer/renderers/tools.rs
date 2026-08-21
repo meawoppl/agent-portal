@@ -43,7 +43,7 @@ pub(super) fn render_code_execution_result(content: &Value) -> Html {
             <div class="tool-use-header">
                 <span class="tool-badge code-exec">{ "Code Execution" }</span>
             </div>
-            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" />
+            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" ansi=true />
         </div>
     }
 }
@@ -83,7 +83,7 @@ pub(super) fn render_mcp_tool_result(content: &Value, is_error: bool) -> Html {
                     { if is_error { "MCP Error" } else { "MCP Result" } }
                 </span>
             </div>
-            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" />
+            <ExpandableText full_text={preview} max_len={500} class="tool-result-content" ansi=true />
         </div>
     }
 }

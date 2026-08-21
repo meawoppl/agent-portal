@@ -144,6 +144,7 @@ fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
                 max_len={OUTPUT_PREVIEW_CHARS}
                 tag="span"
                 class={classes!("muse-tool-text")}
+                ansi=true
             />
         </div>
     }
@@ -304,6 +305,7 @@ fn render_task_node(node: &TaskNode) -> Html {
                             max_len={OUTPUT_PREVIEW_CHARS}
                             tag="div"
                             class={classes!("muse-task-output")}
+                            ansi=true
                         />
                     }
                 }
