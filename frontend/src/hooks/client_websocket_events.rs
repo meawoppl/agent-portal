@@ -1,7 +1,8 @@
 use shared::{ServerToClient, TurnMetrics};
 use std::collections::HashMap;
+use std::rc::Rc;
 use uuid::Uuid;
-use yew::UseStateHandle;
+use yew::{Reducible, UseReducerHandle, UseStateHandle};
 
 /// Cap for the dashboard's recent-turn ring buffer. Matches the server-side
 /// `RECENT_TURN_LIMIT` window: REST hydration returns at most this many, and
@@ -9,14 +10,92 @@ use yew::UseStateHandle;
 /// insertion so a long-lived dashboard session can't grow unboundedly.
 pub const RECENT_TURN_BUFFER_CAP: usize = 50;
 
+/// The client-WS state that is updated **relative to its previous value**.
+///
+/// A reducer rather than four `use_state` handles, and that is load-bearing.
+/// `UseStateHandle` derefs to an `Rc` snapshot taken in the render that created
+/// it, so a handle cloned into the long-lived WS task reads the *mount-time*
+/// value forever. Every `read → modify → set` from that task therefore rebuilt
+/// from an empty map, collapsing `latest_session_metrics` to a single entry on
+/// each frame — the context bar vanishing for every session but the one that
+/// just reported. The counters had it worse and quieter: `stale + 1` is the
+/// same number every time, so they ticked once and never changed again,
+/// silently retiring the refetch-on-launch trigger they exist for.
+///
+/// `dispatch` applies the action against live state, which is the whole point.
+/// It also makes the merge a pure function, so the invariant the old design
+/// could only assert in a doc comment is now a test.
+#[derive(Default, PartialEq)]
+pub(crate) struct ClientWsState {
+    pub recent_turn_metrics: Vec<TurnMetrics>,
+    pub latest_session_metrics: HashMap<Uuid, TurnMetrics>,
+    pub launch_event_counter: u32,
+    pub launcher_event_counter: u32,
+}
+
+pub(crate) enum ClientWsAction {
+    /// One live `ServerToClient::TurnMetrics` frame.
+    TurnMetrics(Box<TurnMetrics>),
+    /// One-shot REST seed: trend rows plus the per-session latest rows.
+    Hydrate {
+        trend: Vec<TurnMetrics>,
+        latest: Vec<TurnMetrics>,
+    },
+    LaunchEvent,
+    LauncherEvent,
+}
+
+impl Reducible for ClientWsState {
+    type Action = ClientWsAction;
+
+    fn reduce(self: Rc<Self>, action: Self::Action) -> Rc<Self> {
+        let mut next = ClientWsState {
+            recent_turn_metrics: self.recent_turn_metrics.clone(),
+            latest_session_metrics: self.latest_session_metrics.clone(),
+            launch_event_counter: self.launch_event_counter,
+            launcher_event_counter: self.launcher_event_counter,
+        };
+        match action {
+            ClientWsAction::TurnMetrics(metrics) => {
+                next.recent_turn_metrics = insert_recent_metric(
+                    next.recent_turn_metrics,
+                    (*metrics).clone(),
+                    RECENT_TURN_BUFFER_CAP,
+                );
+                insert_latest_session_metric(&mut next.latest_session_metrics, *metrics);
+            }
+            ClientWsAction::Hydrate { trend, latest } => {
+                for metric in trend {
+                    insert_latest_session_metric(&mut next.latest_session_metrics, metric.clone());
+                    next.recent_turn_metrics = insert_recent_metric(
+                        next.recent_turn_metrics,
+                        metric,
+                        RECENT_TURN_BUFFER_CAP,
+                    );
+                }
+                // New backends send each session's newest usable context row
+                // explicitly; seeding from the trend rows above keeps the prior
+                // best-effort behavior against an old backend.
+                for metric in latest {
+                    insert_latest_session_metric(&mut next.latest_session_metrics, metric);
+                }
+            }
+            ClientWsAction::LaunchEvent => {
+                next.launch_event_counter = next.launch_event_counter.wrapping_add(1);
+            }
+            ClientWsAction::LauncherEvent => {
+                next.launcher_event_counter = next.launcher_event_counter.wrapping_add(1);
+            }
+        }
+        Rc::new(next)
+    }
+}
+
 pub(crate) fn handle_server_message(
     msg: ServerToClient,
     total_spend: &UseStateHandle<f64>,
     shutdown_reason: &UseStateHandle<Option<String>>,
-    recent_turn_metrics: &UseStateHandle<Vec<TurnMetrics>>,
-    latest_session_metrics: &UseStateHandle<HashMap<Uuid, TurnMetrics>>,
-    launch_event_counter: &UseStateHandle<u32>,
-    launcher_event_counter: &UseStateHandle<u32>,
+    live: &UseReducerHandle<ClientWsState>,
 ) {
     match msg {
         ServerToClient::UserSpendUpdate {
@@ -37,16 +116,7 @@ pub(crate) fn handle_server_message(
             shutdown_reason.set(Some(reason));
         }
         ServerToClient::TurnMetrics(metrics) => {
-            let metrics = *metrics;
-            let next = insert_recent_metric(
-                (**recent_turn_metrics).clone(),
-                metrics.clone(),
-                RECENT_TURN_BUFFER_CAP,
-            );
-            recent_turn_metrics.set(next);
-            let mut latest = (**latest_session_metrics).clone();
-            insert_latest_session_metric(&mut latest, metrics);
-            latest_session_metrics.set(latest);
+            live.dispatch(ClientWsAction::TurnMetrics(metrics));
         }
         ServerToClient::LaunchSessionResult { success, error, .. } => {
             // Push signal from the backend that the launcher finished registering
@@ -58,12 +128,12 @@ pub(crate) fn handle_server_message(
                     error.as_deref().unwrap_or("(no detail)")
                 );
             }
-            launch_event_counter.set(launch_event_counter.wrapping_add(1));
+            live.dispatch(ClientWsAction::LaunchEvent);
         }
         ServerToClient::LaunchersChanged => {
             // A launcher connected, dropped, or was evicted: tick so open
             // launcher lists refetch at the moment the change is visible.
-            launcher_event_counter.set(launcher_event_counter.wrapping_add(1));
+            live.dispatch(ClientWsAction::LauncherEvent);
         }
         _ => {}
     }
@@ -141,6 +211,76 @@ mod tests {
             .total_cost_usd(None)
             .stop_reason(None)
             .build()
+    }
+
+    /// A session with a usable context window, for the reducer tests.
+    fn gauged(session: Uuid, started_secs: i64) -> TurnMetrics {
+        let mut m = sample(Some(Uuid::new_v4()), started_secs);
+        m.session_id = session;
+        m.model_context_window = Some(200_000);
+        m.input_tokens = 1_000;
+        m
+    }
+
+    /// The bug this reducer exists to prevent, and the invariant the field's
+    /// own doc comment always claimed: "context status must not disappear when
+    /// another session is busy".
+    ///
+    /// The previous design read → modified → set a `UseStateHandle` captured by
+    /// the long-lived WS task. That handle derefs to the snapshot from the
+    /// render that made it, so every frame rebuilt the map from the mount-time
+    /// value and collapsed it to a single entry — session A's context bar
+    /// vanishing the moment session B reported a turn.
+    #[test]
+    fn a_busy_session_does_not_evict_another_sessions_gauge() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let state = Rc::new(ClientWsState::default());
+
+        let state = state.reduce(ClientWsAction::TurnMetrics(Box::new(gauged(a, 100))));
+        let state = state.reduce(ClientWsAction::TurnMetrics(Box::new(gauged(b, 200))));
+        // ...and B stays chatty.
+        let state = state.reduce(ClientWsAction::TurnMetrics(Box::new(gauged(b, 300))));
+
+        assert!(
+            state.latest_session_metrics.contains_key(&a),
+            "the quiet session kept its context gauge"
+        );
+        assert!(state.latest_session_metrics.contains_key(&b));
+        assert_eq!(state.latest_session_metrics.len(), 2);
+        assert_eq!(state.recent_turn_metrics.len(), 3, "trend ring accumulates");
+    }
+
+    /// The same stale-snapshot bug made the launch/launcher counters tick
+    /// exactly once — `stale + 1` is the same number every frame, and these
+    /// counters are documented as meaningful only when they *change*, so the
+    /// refetch they trigger silently stopped firing after the first event.
+    #[test]
+    fn event_counters_keep_advancing() {
+        let state = Rc::new(ClientWsState::default());
+        let state = state.reduce(ClientWsAction::LaunchEvent);
+        let state = state.reduce(ClientWsAction::LaunchEvent);
+        let state = state.reduce(ClientWsAction::LauncherEvent);
+
+        assert_eq!(state.launch_event_counter, 2, "two launches, two ticks");
+        assert_eq!(state.launcher_event_counter, 1);
+    }
+
+    /// REST hydration and the live stream must compose: a session seeded at
+    /// mount keeps its gauge once live frames start arriving for others.
+    #[test]
+    fn hydration_then_live_frames_compose() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let state = Rc::new(ClientWsState::default()).reduce(ClientWsAction::Hydrate {
+            trend: vec![gauged(a, 100)],
+            latest: vec![gauged(a, 100)],
+        });
+        assert!(state.latest_session_metrics.contains_key(&a));
+
+        let state = state.reduce(ClientWsAction::TurnMetrics(Box::new(gauged(b, 200))));
+        assert!(
+            state.latest_session_metrics.contains_key(&a),
+            "hydrated gauge survives the first live frame from another session"
+        );
     }
 
     #[test]
