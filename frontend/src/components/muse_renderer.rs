@@ -105,6 +105,30 @@ fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
 
     let outcome = result.outcome.as_deref().unwrap_or("unknown");
     let tool = result.tool_name.as_deref().unwrap_or("tool");
+    // Use same BashTool as Claude/Codex for tool.bash — keeps command styling
+    // (expandable $ command, description, timeout/background badges, linkify)
+    // identical across sessions. Muse's CommandResult JSON already carries the
+    // command+output, so we render BashTool for the input plus CommandResultCard
+    // for the output, just like other sessions' Bash tool_use + result.
+    if result.tool_name.as_deref() == Some("bash") {
+        if let Some(cmd) = parse_command_result(&result.text) {
+            use crate::components::tool_renderers::bash::render_bash_tool;
+            // Reuse BashTool SOT for the input command (description, timeout, etc.)
+            let bash_input = serde_json::to_value(shared::BashInput {
+                command: cmd.command.clone(),
+                description: Some(cmd.description.clone()),
+                timeout: None,
+                run_in_background: None,
+            })
+            .unwrap_or(serde_json::Value::Null);
+            return html! {
+                <div class={classes!("muse-tool-command", format!("muse-tool-{outcome}"))}>
+                    { render_bash_tool(&bash_input) }
+                    { render_command_card(&cmd) }
+                </div>
+            };
+        }
+    }
     if let Some(cmd) = parse_command_result(&result.text) {
         return html! {
             <div class={classes!("muse-tool-command", format!("muse-tool-{outcome}"))}>
