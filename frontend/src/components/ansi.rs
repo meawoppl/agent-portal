@@ -48,22 +48,22 @@ impl AnsiColor {
 /// The 16 standard SGR colors, mapped to Tokyo-Night terminal hues so they read
 /// on the `#1a1b26` surface. Index 0–7 standard, 8–15 bright.
 const STANDARD_HEX: [&str; 16] = [
-    "#414868", // 0 black
-    "#f7768e", // 1 red
-    "#9ece6a", // 2 green
-    "#e0af68", // 3 yellow
-    "#7aa2f7", // 4 blue
-    "#bb9af7", // 5 magenta
-    "#7dcfff", // 6 cyan
-    "#a9b1d6", // 7 white
-    "#565f89", // 8 bright black (grey)
-    "#ff899d", // 9 bright red
-    "#9fe044", // 10 bright green
-    "#faba4a", // 11 bright yellow
-    "#8db0ff", // 12 bright blue
-    "#c7a9ff", // 13 bright magenta
-    "#a4daff", // 14 bright cyan
-    "#c0caf5", // 15 bright white
+    "#414868",                      // 0 black
+    shared::palette::ACCENT_RED,    // 1 red
+    shared::palette::ACCENT_GREEN,  // 2 green
+    shared::palette::ACCENT_ORANGE, // 3 yellow
+    shared::palette::ACCENT_BLUE,   // 4 blue
+    shared::palette::ACCENT_PURPLE, // 5 magenta
+    shared::palette::ACCENT_TEAL,   // 6 cyan
+    "#a9b1d6",                      // 7 white
+    shared::palette::MUTED_GRAY,    // 8 bright black (grey)
+    "#ff899d",                      // 9 bright red
+    "#9fe044",                      // 10 bright green
+    "#faba4a",                      // 11 bright yellow
+    "#8db0ff",                      // 12 bright blue
+    "#c7a9ff",                      // 13 bright magenta
+    "#a4daff",                      // 14 bright cyan
+    shared::palette::TEXT_LIGHT,    // 15 bright white
 ];
 
 /// Resolve an xterm-256 index to a hex string: 0–15 the standard slots, 16–231
