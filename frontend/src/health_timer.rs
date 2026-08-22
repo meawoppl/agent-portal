@@ -66,10 +66,7 @@ impl HealthTimerSettings {
 }
 
 pub fn load_health_timer_settings() -> HealthTimerSettings {
-    let Some(storage) = local_storage() else {
-        return HealthTimerSettings::default();
-    };
-    let Ok(Some(raw)) = storage.get_item(STORAGE_KEY) else {
+    let Some(raw) = crate::utils::storage_get(STORAGE_KEY) else {
         return HealthTimerSettings::default();
     };
     serde_json::from_str::<HealthTimerSettings>(&raw)
@@ -78,10 +75,8 @@ pub fn load_health_timer_settings() -> HealthTimerSettings {
 }
 
 pub fn save_health_timer_settings(settings: &HealthTimerSettings) {
-    if let Some(storage) = local_storage() {
-        if let Ok(raw) = serde_json::to_string(&settings.clone().normalized()) {
-            let _ = storage.set_item(STORAGE_KEY, &raw);
-        }
+    if let Ok(raw) = serde_json::to_string(&settings.clone().normalized()) {
+        crate::utils::storage_set(STORAGE_KEY, &raw);
     }
     notify_settings_changed();
 }
@@ -92,10 +87,6 @@ pub fn save_health_timer_settings_reset(settings: &HealthTimerSettings) {
 
 fn default_cadence_minutes() -> u32 {
     DEFAULT_CADENCE_MINUTES
-}
-
-fn local_storage() -> Option<web_sys::Storage> {
-    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
 }
 
 #[cfg(not(test))]
