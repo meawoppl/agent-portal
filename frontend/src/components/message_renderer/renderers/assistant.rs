@@ -257,7 +257,7 @@ fn render_block(block: &ContentBlock, session_id: Uuid) -> Option<Html> {
                 Some(ToolResultContent::Text(s)) => {
                     html! {
                         <div class={class}>
-                            <ExpandableText full_text={s.clone()} max_len={500} class="tool-result-content" ansi=true />
+                            <ExpandableText full_text={s.clone()} max_len={crate::components::expandable::limits::TOOL_OUTPUT} class="tool-result-content" ansi=true />
                         </div>
                     }
                 }

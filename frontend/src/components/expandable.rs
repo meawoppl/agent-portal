@@ -13,6 +13,8 @@ pub mod limits {
     /// Raw JSON fallback (Codex unrecognized event dump) — reserved for follow-up (#1731)
     #[allow(dead_code)]
     pub const RAW_JSON: usize = 800;
+    /// Collab agent prompt (prose input, preserved at 500 to avoid truncating prompts)
+    pub const AGENT_PROMPT: usize = 500;
 }
 
 #[derive(Properties, PartialEq)]
