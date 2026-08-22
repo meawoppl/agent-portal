@@ -211,6 +211,38 @@ impl CodexIoState {
     }
 }
 
+/// Config-key prefix for codex's shell-environment policy.
+const SHELL_ENV_POLICY: &str = "shell_environment_policy.";
+
+/// Layer the portal's default `-c` overrides onto the caller's.
+///
+/// Today that is one entry: keep `NO_COLOR` out of the shells codex spawns, so
+/// tool output arrives with its ANSI colour intact for the transcript renderer
+/// (#1496, extended to the remaining output surfaces in #1715).
+///
+/// `exclude` is the mechanism that genuinely **removes** the key — codex applies
+/// exclude patterns and then spawns the child with `env_clear()` plus the
+/// filtered map, so the variable is absent rather than present-and-empty.
+/// Deliberately not `set = { NO_COLOR = "" }`, which leaves the name defined
+/// with an empty value: no-color.org says to ignore it when empty, but plenty of
+/// tools test only for presence, so that spelling colourises inconsistently.
+///
+/// Skipped entirely when the caller already expresses **any** shell-env policy.
+/// The operator's intent should win, and codex's schema makes `filters` mutually
+/// exclusive with the `exclude` / `include_only` arrays — injecting ours beside a
+/// caller's `filters` would turn a working launch into a config error.
+fn with_portal_config_defaults(mut overrides: Vec<(String, String)>) -> Vec<(String, String)> {
+    if !overrides
+        .iter()
+        .any(|(k, _)| k.starts_with(SHELL_ENV_POLICY))
+    {
+        overrides.push((
+            format!("{SHELL_ENV_POLICY}exclude"),
+            r#"["NO_COLOR"]"#.to_string(),
+        ));
+    }
+    overrides
+}
 /// Background task for Codex sessions.
 pub(crate) async fn codex_io_task(
     config: SessionConfig,
@@ -250,6 +282,8 @@ pub(crate) async fn codex_io_task(
         }
         trailing.push(tok.clone());
     }
+
+    let overrides = with_portal_config_defaults(overrides);
 
     let mut builder = AppServerBuilder::new()
         .command(codex_path)
@@ -1169,6 +1203,61 @@ fn trailing_codex_model(args: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    fn keys(v: &[(String, String)]) -> Vec<&str> {
+        v.iter().map(|(k, _)| k.as_str()).collect()
+    }
+
+    fn pairs(kv: &[(&str, &str)]) -> Vec<(String, String)> {
+        kv.iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    /// The default: strip `NO_COLOR` so codex's shells emit colour the
+    /// transcript renderer can style. `exclude` removes the key outright;
+    /// `set = { NO_COLOR = "" }` would leave it defined-but-empty, which some
+    /// tools honour and others ignore.
+    #[test]
+    fn portal_defaults_exclude_no_color() {
+        let out = with_portal_config_defaults(Vec::new());
+        assert_eq!(
+            out,
+            pairs(&[("shell_environment_policy.exclude", r#"["NO_COLOR"]"#)])
+        );
+    }
+
+    /// Unrelated caller overrides are preserved and still get the default.
+    #[test]
+    fn unrelated_overrides_are_untouched() {
+        let out = with_portal_config_defaults(pairs(&[("model", "gpt-5.6-sol")]));
+        assert_eq!(
+            keys(&out),
+            vec!["model", "shell_environment_policy.exclude"]
+        );
+    }
+
+    /// A caller who set their own exclude list owns it — ours must not append
+    /// a second, conflicting entry for the same key.
+    #[test]
+    fn a_caller_supplied_exclude_wins() {
+        let given = pairs(&[("shell_environment_policy.exclude", r#"["FOO"]"#)]);
+        assert_eq!(with_portal_config_defaults(given.clone()), given);
+    }
+
+    /// The launch-breaking case. codex's schema makes `filters` mutually
+    /// exclusive with the `exclude` / `include_only` arrays, so injecting our
+    /// default beside a caller's `filters` would turn a working launch into a
+    /// config error — worse than not applying the default at all.
+    #[test]
+    fn a_caller_using_the_keyed_filters_form_is_left_alone() {
+        let given = pairs(&[(
+            "shell_environment_policy.filters",
+            r#"{NO_COLOR="exclude"}"#,
+        )]);
+        assert_eq!(with_portal_config_defaults(given.clone()), given);
+    }
+
     use super::*;
 
     fn strings(values: &[&str]) -> Vec<String> {
