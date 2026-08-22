@@ -312,6 +312,7 @@ fn normalize_iso_utc(iso: &str) -> std::borrow::Cow<'_, str> {
 /// (live wire) so a classification change lands in one place.
 ///
 /// Tries `shared::ClaudeOutput` first (the typed Claude wire shape, where
+/// TODO(#1724): lenient `ClaudeMessage` fallback still needed for portal frames (`shared::ClaudeOutput` doesn't handle `portal` type) — keep until portal frames are typed in shared (see #1676). Not trivial to remove now, defer.
 /// system messages disambiguate into the four sparkline range-marker tags),
 /// then falls back to the local lenient `ClaudeMessage`. If both fail, tries
 /// `CodexEvent` and finally `muse_record` shapes, mapping each into a
