@@ -94,45 +94,27 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     let total_spend = use_state(|| 0.0f64);
     let shutdown_reason = use_state(|| None::<String>);
     let update_available = use_state(|| None::<String>);
-    let recent_turn_metrics = use_state(Vec::<TurnMetrics>::new);
-    let latest_session_metrics = use_state(HashMap::<Uuid, TurnMetrics>::new);
-    let launch_event_counter = use_state(|| 0u32);
-    let launcher_event_counter = use_state(|| 0u32);
+    // Everything updated *relative to its previous value* lives in one reducer.
+    // A `use_state` handle captured by the long-lived WS task below reads the
+    // mount-time snapshot forever, so `read → modify → set` from that task
+    // silently discards every update since mount. See `ClientWsState`.
+    let live = use_reducer(client_websocket_events::ClientWsState::default);
 
     // One-shot REST hydration on hook mount. Fires alongside (not gated on)
     // the WS connect — the dashboard pill shows immediately if the user
     // has any prior turns, and the WS path keeps it fresh once it lands.
     {
-        let recent_turn_metrics = recent_turn_metrics.clone();
-        let latest_session_metrics = latest_session_metrics.clone();
+        let live = live.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
                 if let Ok(parsed) =
                     utils::fetch_json::<TurnMetricsResponse>("/api/metrics/recent", On401::Ignore)
                         .await
                 {
-                    let mut ring = (*recent_turn_metrics).clone();
-                    let mut latest = (*latest_session_metrics).clone();
-                    for metric in parsed.metrics {
-                        client_websocket_events::insert_latest_session_metric(
-                            &mut latest,
-                            metric.clone(),
-                        );
-                        ring = client_websocket_events::insert_recent_metric(
-                            ring,
-                            metric,
-                            client_websocket_events::RECENT_TURN_BUFFER_CAP,
-                        );
-                    }
-                    recent_turn_metrics.set(ring);
-
-                    // New backends include each session's newest usable context
-                    // row explicitly. Seeding from the trend rows above keeps
-                    // the prior best-effort behavior against an old backend.
-                    for metric in parsed.latest_by_session {
-                        client_websocket_events::insert_latest_session_metric(&mut latest, metric);
-                    }
-                    latest_session_metrics.set(latest);
+                    live.dispatch(client_websocket_events::ClientWsAction::Hydrate {
+                        trend: parsed.metrics,
+                        latest: parsed.latest_by_session,
+                    });
                 }
             });
             || ()
@@ -143,19 +125,13 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         let total_spend = total_spend.clone();
         let shutdown_reason = shutdown_reason.clone();
         let update_available = update_available.clone();
-        let recent_turn_metrics = recent_turn_metrics.clone();
-        let latest_session_metrics = latest_session_metrics.clone();
-        let launch_event_counter = launch_event_counter.clone();
-        let launcher_event_counter = launcher_event_counter.clone();
+        let live = live.clone();
 
         use_effect_with((), move |_| {
             let total_spend = total_spend.clone();
             let shutdown_reason = shutdown_reason.clone();
             let update_available = update_available.clone();
-            let recent_turn_metrics = recent_turn_metrics.clone();
-            let latest_session_metrics = latest_session_metrics.clone();
-            let launch_event_counter = launch_event_counter.clone();
-            let launcher_event_counter = launcher_event_counter.clone();
+            let live = live.clone();
 
             spawn_local(async move {
                 let mut attempt: u32 = 0;
@@ -198,10 +174,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                         msg,
                                         &total_spend,
                                         &shutdown_reason,
-                                        &recent_turn_metrics,
-                                        &latest_session_metrics,
-                                        &launch_event_counter,
-                                        &launcher_event_counter,
+                                        &live,
                                     ),
                                     Err(e) => {
                                         log::error!("Client WebSocket error: {:?}", e);
@@ -238,10 +211,10 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         total_spend: *total_spend,
         shutdown_reason: (*shutdown_reason).clone(),
         update_available: (*update_available).clone(),
-        recent_turn_metrics: (*recent_turn_metrics).clone(),
-        latest_session_metrics: (*latest_session_metrics).clone(),
-        launch_event_counter: *launch_event_counter,
-        launcher_event_counter: *launcher_event_counter,
+        recent_turn_metrics: live.recent_turn_metrics.clone(),
+        latest_session_metrics: live.latest_session_metrics.clone(),
+        launch_event_counter: live.launch_event_counter,
+        launcher_event_counter: live.launcher_event_counter,
     }
 }
 
