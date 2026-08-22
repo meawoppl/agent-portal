@@ -257,6 +257,10 @@ pub struct SessionRailProps {
     /// Server version string for comparing against client versions
     #[prop_or_default]
     pub server_version: String,
+    /// Threaded through to the close-session confirm hint: with archiving off,
+    /// closing a session destroys its transcript rather than filing it.
+    #[prop_or_default]
+    pub archive_enabled: bool,
     pub on_select: Callback<usize>,
     pub on_leave: Callback<Uuid>,
     pub on_delete: Callback<Uuid>,
@@ -273,6 +277,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let menu_session = use_state(|| None::<Uuid>);
     let menu_pos = use_state(|| (0i32, 0i32));
     let stop_confirm = use_state(|| false);
+    let delete_confirm = use_state(|| false);
     let copied_id = use_state(|| false);
     let share_session_id = use_state(|| None::<Uuid>);
     let schedule_session = use_state(|| None::<SessionInfo>);
@@ -359,6 +364,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     {
         let menu_session = menu_session.clone();
         let stop_confirm = stop_confirm.clone();
+        let delete_confirm = delete_confirm.clone();
         let rail_ref = rail_ref.clone();
         let is_open = (*menu_session).is_some();
         use_effect_with(is_open, move |is_open| {
@@ -373,6 +379,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                                 if !container.contains(Some(&target)) {
                                     menu_session.set(None);
                                     stop_confirm.set(false);
+                                    delete_confirm.set(false);
                                 }
                             }
                         }
@@ -406,6 +413,11 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         Callback::from(move |value| stop_confirm.set(value))
     };
 
+    let set_delete_confirm = {
+        let delete_confirm = delete_confirm.clone();
+        Callback::from(move |value| delete_confirm.set(value))
+    };
+
     let set_copied_id = {
         let copied_id = copied_id.clone();
         Callback::from(move |value| copied_id.set(value))
@@ -429,10 +441,12 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         let menu_session = menu_session.clone();
         let menu_pos = menu_pos.clone();
         let stop_confirm = stop_confirm.clone();
+        let delete_confirm = delete_confirm.clone();
         let copied_id = copied_id.clone();
         Callback::from(move |(session_id, e): (Uuid, MouseEvent)| {
             e.stop_propagation();
             stop_confirm.set(false);
+            delete_confirm.set(false);
             copied_id.set(false);
             if *menu_session == Some(session_id) {
                 menu_session.set(None);
@@ -504,10 +518,12 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let on_container_click = {
         let menu_session = menu_session.clone();
         let stop_confirm = stop_confirm.clone();
+        let delete_confirm = delete_confirm.clone();
         Callback::from(move |_: MouseEvent| {
             if (*menu_session).is_some() {
                 menu_session.set(None);
                 stop_confirm.set(false);
+                delete_confirm.set(false);
             }
         })
     };
@@ -574,9 +590,12 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 is_connected={is_menu_session_connected}
                 stop_has_tasks={stop_has_tasks}
                 confirming_stop={*stop_confirm}
+                confirming_delete={*delete_confirm}
+                archive_enabled={props.archive_enabled}
                 copied_id={*copied_id}
                 on_close={close_menu}
                 on_set_stop_confirm={set_stop_confirm}
+                on_set_delete_confirm={set_delete_confirm}
                 on_set_copied_id={set_copied_id}
                 on_stop={props.on_stop.clone()}
                 on_toggle_hidden={props.on_toggle_hidden.clone()}

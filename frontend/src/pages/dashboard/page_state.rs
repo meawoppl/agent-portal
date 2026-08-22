@@ -188,7 +188,6 @@ pub(super) struct DashboardUiState {
     /// Opt-in: group the session rail's pills into per-host sections.
     pub group_by_host: bool,
     pub pending_leave: Option<Uuid>,
-    pub pending_delete: Option<Uuid>,
 }
 
 impl DashboardUiState {
@@ -202,7 +201,6 @@ impl DashboardUiState {
             rail_position,
             group_by_host,
             pending_leave: None,
-            pending_delete: None,
         }
     }
 }
@@ -222,8 +220,6 @@ pub(super) enum DashboardUiAction {
     SetGroupByHost(bool),
     RequestLeave(Uuid),
     ClearPendingLeave,
-    RequestDelete(Uuid),
-    ClearPendingDelete,
 }
 
 impl Reducible for DashboardUiState {
@@ -271,12 +267,6 @@ impl Reducible for DashboardUiState {
             }
             DashboardUiAction::ClearPendingLeave => {
                 state.pending_leave = None;
-            }
-            DashboardUiAction::RequestDelete(session_id) => {
-                state.pending_delete = Some(session_id);
-            }
-            DashboardUiAction::ClearPendingDelete => {
-                state.pending_delete = None;
             }
         }
 
@@ -501,18 +491,14 @@ mod tests {
     }
 
     #[test]
+    /// Leave still routes through a modal, so the reducer still tracks it.
+    /// Closing a session does not: the rail menu arms and fires it locally.
     fn ui_reducer_tracks_pending_confirmations() {
         let state = DashboardUiState::new(false, RailPosition::Top, false);
         let state = reduce_ui(state, DashboardUiAction::RequestLeave(id(1)));
-        let state = state.reduce(DashboardUiAction::RequestDelete(id(2)));
-
         assert_eq!(state.pending_leave, Some(id(1)));
-        assert_eq!(state.pending_delete, Some(id(2)));
 
         let state = state.reduce(DashboardUiAction::ClearPendingLeave);
-        let state = state.reduce(DashboardUiAction::ClearPendingDelete);
-
         assert_eq!(state.pending_leave, None);
-        assert_eq!(state.pending_delete, None);
     }
 }

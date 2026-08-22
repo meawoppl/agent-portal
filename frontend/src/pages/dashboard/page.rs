@@ -210,10 +210,27 @@ pub fn dashboard_page() -> Html {
 
     // Request deletion of a session (shows the confirm modal). Shared by the
     // rail context menu and the nav-mode `d` shortcut.
+    // The rail menu confirms this itself (click once to arm, again to fire), so
+    // there is no modal round-trip: delete straight away and let the pill leave
+    // the rail when the refresh lands.
     let on_delete = {
-        let ui_state = ui_state.clone();
+        let refresh = sessions_hook.refresh.clone();
         Callback::from(move |session_id: Uuid| {
-            ui_state.dispatch(DashboardUiAction::RequestDelete(session_id));
+            let refresh = refresh.clone();
+            spawn_local(async move {
+                let api_endpoint = utils::api_url(&format!("/api/sessions/{}", session_id));
+                match Request::delete(&api_endpoint).send().await {
+                    Ok(response) if response.status() == 204 => {
+                        refresh.emit(());
+                    }
+                    Ok(response) => {
+                        log::error!("Failed to delete session: status {}", response.status());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to delete session: {:?}", e);
+                    }
+                }
+            });
         })
     };
 
@@ -353,39 +370,6 @@ pub fn dashboard_page() -> Html {
                         log::error!("Failed to get current user ID for leave");
                     }
                     ui_state.dispatch(DashboardUiAction::ClearPendingLeave);
-                });
-            }
-        })
-    };
-
-    let on_cancel_delete = {
-        let ui_state = ui_state.clone();
-        Callback::from(move |_| {
-            ui_state.dispatch(DashboardUiAction::ClearPendingDelete);
-        })
-    };
-
-    let on_confirm_delete = {
-        let ui_state = ui_state.clone();
-        let refresh = sessions_hook.refresh.clone();
-        Callback::from(move |_| {
-            if let Some(session_id) = ui_state.pending_delete {
-                let refresh = refresh.clone();
-                let ui_state = ui_state.clone();
-                spawn_local(async move {
-                    let api_endpoint = utils::api_url(&format!("/api/sessions/{}", session_id));
-                    match Request::delete(&api_endpoint).send().await {
-                        Ok(response) if response.status() == 204 => {
-                            refresh.emit(());
-                        }
-                        Ok(response) => {
-                            log::error!("Failed to delete session: status {}", response.status());
-                        }
-                        Err(e) => {
-                            log::error!("Failed to delete session: {:?}", e);
-                        }
-                    }
-                    ui_state.dispatch(DashboardUiAction::ClearPendingDelete);
                 });
             }
         })
@@ -763,6 +747,7 @@ pub fn dashboard_page() -> Html {
                         on_select={focus.on_select_session.clone()}
                         on_leave={on_leave.clone()}
                         on_delete={on_delete.clone()}
+                        archive_enabled={archive_enabled}
                         on_toggle_hidden={on_toggle_hidden.clone()}
                         on_toggle_inactive_hidden={on_toggle_inactive_hidden.clone()}
                         on_stop={on_stop.clone()}
@@ -876,37 +861,6 @@ pub fn dashboard_page() -> Html {
                         </div>
                     </div>
                 </>
-            }
-
-            // Close confirmation modal. With the archive enabled a close is
-            // archive-then-delete (the transcript stays readable in History);
-            // without it, the old permanent-delete warning still applies.
-            {
-                if let Some(session_id) = ui_state.pending_delete {
-                    let session_name = sessions.iter()
-                        .find(|s| s.id == session_id)
-                        .map(|s| s.session_name.as_str())
-                        .unwrap_or("this session");
-                    let warning = if archive_enabled {
-                        "The session is removed from your dashboard; its transcript stays available in History."
-                    } else {
-                        "History archiving is disabled: all message history and session metadata will be permanently removed."
-                    };
-
-                    html! {
-                        <ConfirmModal
-                            title="Close Session?"
-                            message={format!("Are you sure you want to close \"{}\"?", session_name)}
-                            {warning}
-                            confirm_label="Close"
-                            style={ConfirmModalStyle::Danger}
-                            on_confirm={on_confirm_delete.clone()}
-                            on_cancel={on_cancel_delete.clone()}
-                        />
-                    }
-                } else {
-                    html! {}
-                }
             }
 
             // Admin modal — full-page overlay preserves dashboard state
