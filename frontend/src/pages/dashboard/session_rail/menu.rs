@@ -17,9 +17,14 @@ pub(super) struct SessionRailMenuProps {
     pub is_connected: bool,
     pub stop_has_tasks: bool,
     pub confirming_stop: bool,
+    pub confirming_delete: bool,
+    /// Drives the armed close hint: with archiving off, closing a session is
+    /// destructive rather than a dashboard tidy-up.
+    pub archive_enabled: bool,
     pub copied_id: bool,
     pub on_close: Callback<()>,
     pub on_set_stop_confirm: Callback<bool>,
+    pub on_set_delete_confirm: Callback<bool>,
     pub on_set_copied_id: Callback<bool>,
     pub on_stop: Callback<Uuid>,
     pub on_toggle_hidden: Callback<Uuid>,
@@ -112,10 +117,25 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         move || on_leave.emit(session_id)
     });
 
-    let on_delete = close_then(props.on_close.clone(), {
+    // Two-click confirm rather than a modal, matching Stop directly above.
+    // The second click fires the close and dismisses the menu immediately —
+    // the pill then leaves the rail on its own when the refresh lands, so
+    // there is nothing to wait on and nothing to dismiss.
+    let on_delete = {
         let on_delete = props.on_delete.clone();
-        move || on_delete.emit(session_id)
-    });
+        let on_close = props.on_close.clone();
+        let on_set_delete_confirm = props.on_set_delete_confirm.clone();
+        let confirming_delete = props.confirming_delete;
+        Callback::from(move |_: MouseEvent| {
+            if confirming_delete {
+                on_delete.emit(session_id);
+                on_set_delete_confirm.emit(false);
+                on_close.emit(());
+            } else {
+                on_set_delete_confirm.emit(true);
+            }
+        })
+    };
 
     let hide_label = if is_hidden {
         "Show Session"
@@ -247,10 +267,22 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     };
 
     let delete_option = if session.my_role == SessionRole::Owner {
+        // The armed hint carries what the confirm modal used to: with archiving
+        // on this is a dashboard tidy-up, with it off the transcript is gone.
+        let (delete_label, delete_hint) = if props.confirming_delete {
+            let hint = if props.archive_enabled {
+                "Transcript stays in History"
+            } else {
+                "Archiving is off — history is deleted permanently"
+            };
+            ("Click again to confirm", hint)
+        } else {
+            ("Close Session", "Remove from dashboard")
+        };
         menu_option(
-            classes!("stop"),
-            "Close Session",
-            "Remove from dashboard",
+            classes!("stop", props.confirming_delete.then_some("confirming")),
+            delete_label,
+            delete_hint,
             on_delete,
         )
     } else {
