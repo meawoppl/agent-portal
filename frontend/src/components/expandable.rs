@@ -10,9 +10,12 @@ pub mod limits {
     pub const TOOL_OUTPUT: usize = 500;
     /// Short prose / user prompts
     pub const PROSE: usize = 300;
-    /// Raw JSON fallback (Codex unrecognized event dump) — reserved for follow-up (#1731)
-    #[allow(dead_code)]
+    /// Raw JSON fallback (unrecognized event and structured payload dumps)
     pub const RAW_JSON: usize = 800;
+    /// Collab agent prompt (prose input, preserved at 500 to avoid truncating prompts)
+    pub const AGENT_PROMPT: usize = 500;
+    /// Compact WebFetch prompt preview shown beside the fetched URL
+    pub const WEBFETCH_PROMPT: usize = 100;
 }
 
 #[derive(Properties, PartialEq)]

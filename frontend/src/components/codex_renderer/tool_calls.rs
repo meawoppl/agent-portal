@@ -69,7 +69,7 @@ pub(super) fn render_command_execution(it: &CommandExecutionItem, completed: boo
                         <div class={class}>
                             <ExpandableText
                                 full_text={out.to_string()}
-                                max_len=500
+                                max_len={crate::components::expandable::limits::TOOL_OUTPUT}
                                 tag="pre"
                                 class={classes!("tool-result-content")}
                                 ansi=true
@@ -192,7 +192,7 @@ pub(super) fn render_collab_agent_tool_call(
                     html! {
                         <ExpandableText
                             full_text={prompt.to_string()}
-                            max_len=500
+                            max_len={crate::components::expandable::limits::AGENT_PROMPT}
                             tag="pre"
                             class={classes!("tool-input-content")}
                         />

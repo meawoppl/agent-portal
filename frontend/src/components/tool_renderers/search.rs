@@ -108,7 +108,7 @@ pub fn render_webfetch_tool(input: &Value) -> Html {
             </div>
             {
                 if let Some(p) = prompt {
-                    html! { <ExpandableText full_text={p.to_string()} max_len={100} class="webfetch-prompt" tag="div" /> }
+                    html! { <ExpandableText full_text={p.to_string()} max_len={crate::components::expandable::limits::WEBFETCH_PROMPT} class="webfetch-prompt" tag="div" /> }
                 } else {
                     html! {}
                 }

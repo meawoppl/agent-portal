@@ -95,7 +95,7 @@ pub(super) fn render_container_upload(data: &Value) -> Html {
             <div class="tool-use-header">
                 <span class="tool-badge container">{ "Container Upload" }</span>
             </div>
-            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
+            <ExpandableText full_text={preview} max_len={crate::components::expandable::limits::RAW_JSON} class="tool-result-content" />
         </div>
     }
 }
@@ -107,7 +107,7 @@ pub(super) fn render_unknown_block(value: &Value) -> Html {
             <div class="tool-use-header">
                 <span class="tool-badge unknown">{ "Unknown Block" }</span>
             </div>
-            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
+            <ExpandableText full_text={preview} max_len={crate::components::expandable::limits::RAW_JSON} class="tool-result-content" />
         </div>
     }
 }
@@ -145,7 +145,7 @@ pub(super) fn render_structured_block(block: &shared::ContentBlock) -> Html {
             // Tool/command output can carry ANSI SGR color (cargo, git, test
             // runners, …); render it styled rather than as raw escape bytes
             // (#1496). Non-ANSI text is unaffected — it parses to one plain run.
-            html! { <ExpandableText full_text={t.text.clone()} max_len={500} class="tool-result-content" ansi=true /> }
+            html! { <ExpandableText full_text={t.text.clone()} max_len={crate::components::expandable::limits::TOOL_OUTPUT} class="tool-result-content" ansi=true /> }
         }
         other => {
             let json = serde_json::to_string_pretty(other).unwrap_or_default();
