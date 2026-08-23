@@ -107,7 +107,7 @@ pub(super) fn render_unknown_block(value: &Value) -> Html {
             <div class="tool-use-header">
                 <span class="tool-badge unknown">{ "Unknown Block" }</span>
             </div>
-            <ExpandableText full_text={preview} max_len={crate::components::expandable::limits::RAW_JSON} class="tool-result-content" />
+            <ExpandableText full_text={preview} max_len={300} class="tool-result-content" />
         </div>
     }
 }
