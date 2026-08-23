@@ -107,10 +107,15 @@ mod tests {
     #[test]
     fn format_file_size_bytes_and_kb_and_mb() {
         assert_eq!(format_file_size(0), "0 B");
+        assert_eq!(format_file_size(1), "1 B");
         assert_eq!(format_file_size(512), "512 B");
+        assert_eq!(format_file_size(1023), "1023 B");
         assert_eq!(format_file_size(1024), "1.0 KB");
         assert_eq!(format_file_size(1536), "1.5 KB");
+        assert_eq!(format_file_size(1024 * 1024 - 1), "1024.0 KB");
         assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_file_size(2 * 1024 * 1024), "2.0 MB");
+        assert_eq!(format_file_size(5 * 1024 * 1024 + 512 * 1024), "5.5 MB");
     }
 
     #[test]
@@ -118,6 +123,8 @@ mod tests {
         assert_eq!(format_token_count(999), "999");
         assert_eq!(format_token_count(1000), "1.0K");
         assert_eq!(format_token_count(1_500), "1.5K");
+        assert_eq!(format_token_count(999_999), "1000.0K");
         assert_eq!(format_token_count(1_000_000), "1.0M");
+        assert_eq!(format_token_count(2_345_678), "2.3M");
     }
 }

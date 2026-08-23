@@ -182,33 +182,6 @@ pub use shared::fmt::{format_file_size, format_token_count};
 mod tests {
     use super::*;
 
-    // --- format_file_size ---
-
-    #[test]
-    fn format_file_size_renders_bytes_under_one_kib() {
-        assert_eq!(format_file_size(0), "0 B");
-        assert_eq!(format_file_size(1), "1 B");
-        assert_eq!(format_file_size(512), "512 B");
-        assert_eq!(format_file_size(1023), "1023 B");
-    }
-
-    #[test]
-    fn format_file_size_renders_kib_between_one_kib_and_one_mib() {
-        // 1024 is the boundary — exactly at it we cross to KB.
-        assert_eq!(format_file_size(1024), "1.0 KB");
-        assert_eq!(format_file_size(1536), "1.5 KB");
-        assert_eq!(format_file_size(1024 * 1024 - 1), "1024.0 KB");
-    }
-
-    #[test]
-    fn format_file_size_renders_mib_at_or_above_one_mib() {
-        assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
-        assert_eq!(format_file_size(2 * 1024 * 1024), "2.0 MB");
-        assert_eq!(format_file_size(5 * 1024 * 1024 + 512 * 1024), "5.5 MB");
-    }
-
-    // --- format_token_count ---
-
     #[test]
     fn format_dollars_adds_commas_and_keeps_two_decimals() {
         assert_eq!(format_dollars(0.0), "$0.00");
@@ -220,15 +193,5 @@ mod tests {
     #[test]
     fn format_dollars_handles_negative_amounts() {
         assert_eq!(format_dollars(-1_234.5), "$-1,234.50");
-    }
-
-    #[test]
-    fn format_token_count_magnitudes() {
-        assert_eq!(format_token_count(999), "999");
-        assert_eq!(format_token_count(1_000), "1.0K");
-        assert_eq!(format_token_count(1_500), "1.5K");
-        assert_eq!(format_token_count(999_999), "1000.0K");
-        assert_eq!(format_token_count(1_000_000), "1.0M");
-        assert_eq!(format_token_count(2_345_678), "2.3M");
     }
 }
