@@ -52,7 +52,22 @@ pub enum AgentFrameKind {
     CodexReasoningTextDelta,
     CodexThreadCompacted,
     MuseRecord,
+    MuseRunTerminalCompleted,
+    MuseRunTerminalFailed,
     RawJson,
+}
+
+impl AgentFrameKind {
+    pub fn is_terminator(self) -> bool {
+        matches!(
+            self,
+            Self::ClaudeResult
+                | Self::CodexTurnCompleted
+                | Self::CodexTurnFailed
+                | Self::MuseRunTerminalCompleted
+                | Self::MuseRunTerminalFailed
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,7 +136,14 @@ impl AgentFrame {
         match self {
             Self::Claude(message) => message.kind(),
             Self::Codex(event) => event.kind(),
-            Self::Muse(_) => AgentFrameKind::MuseRecord,
+            Self::Muse(value) => {
+                let pt = value.get("payload_type").and_then(|v| v.as_str());
+                match pt {
+                    Some("run.terminal.completed") => AgentFrameKind::MuseRunTerminalCompleted,
+                    Some("run.terminal.failed") => AgentFrameKind::MuseRunTerminalFailed,
+                    _ => AgentFrameKind::MuseRecord,
+                }
+            }
             Self::RawJson => AgentFrameKind::RawJson,
         }
     }
@@ -153,7 +175,9 @@ impl FrameRenderer {
             | AgentFrameKind::CodexReasoningSummaryPartAdded
             | AgentFrameKind::CodexReasoningTextDelta
             | AgentFrameKind::CodexThreadCompacted => Self::Codex,
-            AgentFrameKind::MuseRecord => Self::Muse,
+            AgentFrameKind::MuseRecord
+            | AgentFrameKind::MuseRunTerminalCompleted
+            | AgentFrameKind::MuseRunTerminalFailed => Self::Muse,
             AgentFrameKind::RawJson => Self::RawJson,
         }
     }

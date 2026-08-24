@@ -107,7 +107,6 @@ pub mod fmt;
 // Timezone canonicalization (abbreviation -> IANA) shared across crates
 pub mod timezone;
 
-// ISO timestamp normalization (timezone-less → UTC)
 pub mod time;
 
 // `<system-reminder>` splitting, shared by the frontend renderer (collapse to

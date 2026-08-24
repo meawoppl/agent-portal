@@ -441,12 +441,9 @@ fn group_label(
 /// stays `None` on the proxy-emit side until a future PR wires up the
 /// per-turn linkage, so a key-based join would fail on every row today.
 pub fn is_turn_terminator(message: &RenderedMessage) -> bool {
-    matches!(
-        AgentFrameRegistry::parse(&message.content, shared::AgentType::Codex).kind(),
-        AgentFrameKind::ClaudeResult
-            | AgentFrameKind::CodexTurnCompleted
-            | AgentFrameKind::CodexTurnFailed
-    )
+    AgentFrameRegistry::parse(&message.content, shared::AgentType::Codex)
+        .kind()
+        .is_terminator()
 }
 
 /// True iff the group is a `Single` carrying a turn terminator. Identity

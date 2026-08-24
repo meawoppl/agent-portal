@@ -28,10 +28,9 @@ use yew::prelude::*;
 use super::forward_chips::ForwardChips;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools,
-    enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed,
-    is_claude_awaiting, parse_iso_ms_utc, reconcile_pending_sends, running_tool_key,
-    update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
-    MuseLiveTurn,
+    enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, is_awaiting,
+    parse_iso_ms_utc, reconcile_pending_sends, running_tool_key, update_pending_send_delivery,
+    upsert_tool_progress, ActiveToolProgress, ActivityTag, MuseLiveTurn,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -289,7 +288,7 @@ impl Component for SessionView {
             )
             .await
             {
-                let is_awaiting = is_claude_awaiting(data.messages.iter().map(|m| &m.content));
+                let is_awaiting = is_awaiting(data.messages.iter().map(|m| &m.content));
                 on_awaiting_change.emit((session_id, is_awaiting));
 
                 last_message_time = data.messages.last().map(|m| m.created_at.clone());
@@ -464,20 +463,7 @@ impl Component for SessionView {
                 false
             }
             SessionViewMsg::CheckAwaiting => {
-                let is_codex = ctx.props().session.agent_type == shared::AgentType::Codex;
-                let is_result_awaiting = if is_codex {
-                    // For Codex: search backwards for terminal events
-                    // turn.completed / turn.failed = awaiting, item.* = working
-                    self.messages
-                        .iter()
-                        .rev()
-                        .find_map(|msg| {
-                            crate::components::codex_renderer::is_codex_terminal_event(&msg.content)
-                        })
-                        .unwrap_or(false)
-                } else {
-                    is_claude_awaiting(self.messages.iter().map(|m| &m.content))
-                };
+                let is_result_awaiting = is_awaiting(self.messages.iter().map(|m| &m.content));
                 let is_awaiting = is_result_awaiting || self.has_pending_permission;
                 let session_id = ctx.props().session.id;
                 ctx.props()
