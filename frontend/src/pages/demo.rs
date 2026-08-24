@@ -116,7 +116,7 @@ pub fn demo_page() -> Html {
         scenario.session.agent_type,
         Some(current_user_id.as_str()),
     );
-    let thinking_starts = thinking_chip_starts(&groups);
+    let thinking_starts = thinking_chip_starts(&groups, scenario.session.agent_type);
 
     html! {
         <main class="focus-flow-container demo-portal-page">

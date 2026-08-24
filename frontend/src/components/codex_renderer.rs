@@ -11,7 +11,7 @@ mod tests;
 mod tool_calls;
 mod tool_card;
 mod turns;
-pub use events::{codex_event_item_id, is_codex_terminal_event, CodexEvent, CodexItem};
+pub use events::{codex_event_item_id, CodexEvent, CodexItem};
 use lifecycle::{render_context_compacted, render_context_compaction_item, render_turn_plan};
 use messages::{
     render_agent_message, render_agent_message_content, render_error_block, render_reasoning,

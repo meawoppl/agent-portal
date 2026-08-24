@@ -22,21 +22,47 @@ fn turn_terminator_detection_covers_claude_and_codex() {
     })
     .to_string();
 
-    for json in [claude_result, codex_completed, codex_failed] {
+    for (json, agent_type) in [
+        (claude_result, shared::AgentType::Claude),
+        (codex_completed, shared::AgentType::Codex),
+        (codex_failed, shared::AgentType::Codex),
+    ] {
         assert!(
-            group_is_turn_terminator(&MessageGroup::Single(rendered(json))),
+            group_is_turn_terminator(&MessageGroup::Single(rendered(json)), agent_type),
             "single terminator frame should be recognized"
         );
     }
-    assert!(!group_is_turn_terminator(&MessageGroup::Single(rendered(
-        plain_user_text("hello")
-    ))));
-    assert!(!group_is_turn_terminator(&MessageGroup::IdentityGroup {
-        category: GroupCategory::User,
-        label: "You".to_string(),
-        badge_class: "user".to_string(),
-        messages: vec![rendered(plain_user_text("hello"))],
-    }));
+    // Muse terminal also terminates, but only when parsed as Muse.
+    let muse_completed = serde_json::json!({
+        "type": "muse_record",
+        "payload_type": "run.terminal.completed",
+        "payload": { "status": "completed" },
+    })
+    .to_string();
+    assert!(group_is_turn_terminator(
+        &MessageGroup::Single(rendered(muse_completed.clone())),
+        shared::AgentType::Muse
+    ));
+    assert!(
+        !group_is_turn_terminator(
+            &MessageGroup::Single(rendered(muse_completed)),
+            shared::AgentType::Claude
+        ),
+        "Muse terminal should not be terminator when parsed as Claude"
+    );
+    assert!(!group_is_turn_terminator(
+        &MessageGroup::Single(rendered(plain_user_text("hello"))),
+        shared::AgentType::Claude
+    ));
+    assert!(!group_is_turn_terminator(
+        &MessageGroup::IdentityGroup {
+            category: GroupCategory::User,
+            label: "You".to_string(),
+            badge_class: "user".to_string(),
+            messages: vec![rendered(plain_user_text("hello"))],
+        },
+        shared::AgentType::Claude
+    ));
 }
 
 /// One canonical wire shape per realistic message kind paired with the

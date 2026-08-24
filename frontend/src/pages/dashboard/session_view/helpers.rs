@@ -258,40 +258,31 @@ pub(super) fn autoscroll_transition(current: bool, new_at_bottom: bool) -> Optio
 /// `run.terminal.failed`. The last meaningful signal determines the
 /// pill color — a terminator means awaiting (orange), an assistant/user
 /// or live item means working. Noise types are skipped.
-pub(crate) fn is_awaiting(messages: impl DoubleEndedIterator<Item = impl AsRef<str>>) -> bool {
-    use crate::components::agent_frame::AgentFrame;
+pub(crate) fn is_awaiting(
+    messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
+    agent_type: shared::AgentType,
+) -> bool {
+    use crate::components::agent_frame::{AgentFrameKind, AgentFrameRegistry};
 
     for msg in messages.rev() {
-        let s = msg.as_ref();
-
-        // Try Claude shape first.
-        if let Ok(m) = ClaudeMessage::parse(s) {
-            match m {
-                ClaudeMessage::Result(_) => return true,
-                ClaudeMessage::Assistant(_)
-                | ClaudeMessage::User(_)
-                | ClaudeMessage::OptimisticUser(_) => return false,
-                _ => {}
-            }
+        let frame = AgentFrameRegistry::parse(msg.as_ref(), agent_type);
+        let kind = frame.kind();
+        if kind.is_terminator() {
+            return true;
         }
-        // Try Codex event.
-        let codex = crate::components::codex_renderer::is_codex_terminal_event(s);
-
-        if let Some(is_term) = codex {
-            return is_term;
-        }
-        // Try Muse record.
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(s) {
-            if val.get("type").and_then(|v| v.as_str()) == Some("muse_record") {
-                let frame = AgentFrame::Muse(val);
-                let kind = frame.kind();
-
-                if kind.is_terminator() {
-                    return true;
-                }
-                // Any other muse record is a working signal.
-                return false;
-            }
+        if matches!(
+            kind,
+            AgentFrameKind::ClaudeAssistant
+                | AgentFrameKind::ClaudeUser
+                | AgentFrameKind::OptimisticUser
+                | AgentFrameKind::CodexThreadStarted
+                | AgentFrameKind::CodexTurnStarted
+                | AgentFrameKind::CodexItemStarted
+                | AgentFrameKind::CodexItemUpdated
+                | AgentFrameKind::CodexItemCompleted
+                | AgentFrameKind::MuseRecord
+        ) {
+            return false;
         }
     }
     false
@@ -1439,7 +1430,7 @@ mod tests {
             r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
             r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"01890000-0000-7000-8000-000000000001","total_cost_usd":0.0}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter()));
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Claude));
     }
 
     #[test]
@@ -1448,7 +1439,7 @@ mod tests {
             r#"{"type":"user","content":"q"}"#.to_string(),
             r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
         ];
-        assert!(!is_awaiting(msgs.iter()));
+        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Claude));
     }
 
     #[test]
@@ -1460,13 +1451,13 @@ mod tests {
             r#"{"type":"portal","content":[{"type":"text","text":"x"}]}"#.to_string(),
             r#"{"type":"error","error":{"type":"api_error","message":"y"}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter()));
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Claude));
     }
 
     #[test]
     fn is_claude_awaiting_false_for_empty_history() {
         let msgs: Vec<String> = vec![];
-        assert!(!is_awaiting(msgs.iter()));
+        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Claude));
     }
 
     #[test]
@@ -1474,7 +1465,7 @@ mod tests {
         let msgs = [
             r#"{"type":"muse_record","payload_type":"run.terminal.completed","payload":{"status":"completed"}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter()));
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Muse));
     }
 
     #[test]
@@ -1482,7 +1473,7 @@ mod tests {
         let msgs = [
             r#"{"type":"muse_record","payload_type":"run.terminal.failed","payload":{"status":"failed"}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter()));
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Muse));
     }
 
     #[test]
@@ -1491,7 +1482,7 @@ mod tests {
             r#"{"type":"muse_record","payload_type":"task.started","payload":{"task_id":"1"}}"#
                 .to_string(),
         ];
-        assert!(!is_awaiting(msgs.iter()));
+        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Muse));
     }
 
     #[test]
@@ -1499,7 +1490,7 @@ mod tests {
         let msgs = [
             r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter()));
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Codex));
     }
 
     // --- extract_user_text ---

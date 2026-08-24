@@ -276,6 +276,7 @@ impl Component for SessionView {
     fn create(ctx: &Context<Self>) -> Self {
         let link = ctx.link().clone();
         let session_id = ctx.props().session.id;
+        let agent_type = ctx.props().session.agent_type;
         let on_awaiting_change = ctx.props().on_awaiting_change.clone();
 
         // Fetch existing messages via REST, then connect WebSocket
@@ -288,7 +289,7 @@ impl Component for SessionView {
             )
             .await
             {
-                let is_awaiting = is_awaiting(data.messages.iter().map(|m| &m.content));
+                let is_awaiting = is_awaiting(data.messages.iter().map(|m| &m.content), agent_type);
                 on_awaiting_change.emit((session_id, is_awaiting));
 
                 last_message_time = data.messages.last().map(|m| m.created_at.clone());
@@ -463,7 +464,10 @@ impl Component for SessionView {
                 false
             }
             SessionViewMsg::CheckAwaiting => {
-                let is_result_awaiting = is_awaiting(self.messages.iter().map(|m| &m.content));
+                let is_result_awaiting = is_awaiting(
+                    self.messages.iter().map(|m| &m.content),
+                    ctx.props().session.agent_type,
+                );
                 let is_awaiting = is_result_awaiting || self.has_pending_permission;
                 let session_id = ctx.props().session.id;
                 ctx.props()
@@ -609,7 +613,7 @@ impl Component for SessionView {
         let group_metrics: Vec<Option<TurnMetrics>> = groups
             .iter()
             .map(|g| {
-                if group_is_turn_terminator(g) {
+                if group_is_turn_terminator(g, ctx.props().session.agent_type) {
                     metrics_iter.next().cloned()
                 } else {
                     None
@@ -618,7 +622,7 @@ impl Component for SessionView {
             .collect();
         // Seed each thinking chip's odometer with the prior burst's max in
         // its turn so tool-call splits don't re-race the count from 0.
-        let thinking_starts = thinking_chip_starts(&groups);
+        let thinking_starts = thinking_chip_starts(&groups, ctx.props().session.agent_type);
         let live_muse_group = self.muse_live_turn.causation_id.as_deref().and_then(|id| {
             groups
                 .iter()

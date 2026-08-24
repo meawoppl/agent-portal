@@ -440,8 +440,8 @@ fn group_label(
 /// pair-by-ordering join is the agreed PR 2 strategy — `user_message_id`
 /// stays `None` on the proxy-emit side until a future PR wires up the
 /// per-turn linkage, so a key-based join would fail on every row today.
-pub fn is_turn_terminator(message: &RenderedMessage) -> bool {
-    AgentFrameRegistry::parse(&message.content, shared::AgentType::Codex)
+pub fn is_turn_terminator(message: &RenderedMessage, agent_type: shared::AgentType) -> bool {
+    AgentFrameRegistry::parse(&message.content, agent_type)
         .kind()
         .is_terminator()
 }
@@ -450,9 +450,9 @@ pub fn is_turn_terminator(message: &RenderedMessage) -> bool {
 /// groups never contain terminators (Result / TurnCompleted / TurnFailed
 /// don't classify into any identity category — see `classify`), so this
 /// helper only needs to inspect the `Single` arm.
-pub fn group_is_turn_terminator(group: &MessageGroup) -> bool {
+pub fn group_is_turn_terminator(group: &MessageGroup, agent_type: shared::AgentType) -> bool {
     match group {
-        MessageGroup::Single(json) => is_turn_terminator(json),
+        MessageGroup::Single(json) => is_turn_terminator(json, agent_type),
         MessageGroup::IdentityGroup { .. } => false,
     }
 }
@@ -472,7 +472,7 @@ pub fn group_is_turn_terminator(group: &MessageGroup) -> bool {
 /// starts from 0 again. Callers clamp the seed to the chip's own target,
 /// so a marker stream that ever restarts low degrades to a static display
 /// rather than a backwards animation.
-pub fn thinking_chip_starts(groups: &[MessageGroup]) -> Vec<i64> {
+pub fn thinking_chip_starts(groups: &[MessageGroup], agent_type: shared::AgentType) -> Vec<i64> {
     let mut running_max = 0i64;
     groups
         .iter()
@@ -487,7 +487,7 @@ pub fn thinking_chip_starts(groups: &[MessageGroup]) -> Vec<i64> {
                 start
             }
             _ => {
-                if group_is_turn_terminator(group) {
+                if group_is_turn_terminator(group, agent_type) {
                     running_max = 0;
                 }
                 0
