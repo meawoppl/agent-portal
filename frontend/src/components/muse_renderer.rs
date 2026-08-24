@@ -107,13 +107,13 @@ fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
     let tool = result.tool_name.as_deref().unwrap_or("tool");
     // Use same BashTool as Claude/Codex for tool.bash — keeps command styling
     // (expandable $ command, description, timeout/background badges, linkify)
-    // identical across sessions. Muse's CommandResult JSON already carries the
-    // command+output, so we render BashTool for the input plus CommandResultCard
-    // for the output, just like other sessions' Bash tool_use + result.
+    // identical across sessions. Muse's CommandResult JSON carries command+output,
+    // so we render BashTool for the input (via typed BashInput seam) and an
+    // output-only CommandResultCard for the result, avoiding duplicate command
+    // rendering that the previous CommandResultCard path produced.
     if result.tool_name.as_deref() == Some("bash") {
         if let Some(cmd) = parse_command_result(&result.text) {
             use crate::components::tool_renderers::bash::render_bash_tool;
-            // Reuse BashTool SOT for the input command (description, timeout, etc.)
             let bash_input = serde_json::to_value(shared::BashInput {
                 command: cmd.command.clone(),
                 description: Some(cmd.description.clone()),
@@ -121,10 +121,30 @@ fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
                 run_in_background: None,
             })
             .unwrap_or(serde_json::Value::Null);
+            // Output-only: reuse CommandResultCard's output pane without re-showing
+            // the `$ command` line that BashTool already rendered.
+            let output = if cmd.truncated {
+                format!("{}\n[output truncated]", cmd.output)
+            } else {
+                cmd.output.clone()
+            };
+            let failed = cmd.exit_code != 0;
             return html! {
                 <div class={classes!("muse-tool-command", format!("muse-tool-{outcome}"))}>
                     { render_bash_tool(&bash_input) }
-                    { render_command_card(&cmd) }
+                    <div class={classes!("command-result", failed.then_some("failed"))}>
+                        if failed {
+                            <span class="command-result-exit">{ format!("exit {}", cmd.exit_code) }</span>
+                        }
+                        if !output.is_empty() {
+                            <crate::components::expandable::ExpandableText
+                                full_text={output}
+                                max_len={crate::components::tool_renderers::OUTPUT_PREVIEW_CHARS}
+                                class={classes!("command-result-output")}
+                                ansi={true}
+                            />
+                        }
+                    </div>
                 </div>
             };
         }
