@@ -251,29 +251,41 @@ pub(super) fn autoscroll_transition(current: bool, new_at_bottom: bool) -> Optio
     }
 }
 
-/// Check if a Claude session is awaiting user input by scanning messages
-/// backwards. Skips noise types (portal, error, system, rate_limit_event)
-/// and returns true if `Result` is found before `User` or `Assistant`.
-pub(super) fn is_claude_awaiting(
+/// Check if a session is awaiting user input by scanning messages
+/// backwards. Uses `AgentFrameKind::is_terminator()` so every agent's
+/// turn-end drives the same awaiting logic: Claude `Result`,
+/// Codex `turn.completed`/`turn.failed`, Muse `run.terminal.completed`/
+/// `run.terminal.failed`. The last meaningful signal determines the
+/// pill color — a terminator means awaiting (orange), an assistant/user
+/// or live item means working. Noise types are skipped.
+pub(crate) fn is_awaiting(
     messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
+    agent_type: shared::AgentType,
 ) -> bool {
-    messages
-        .rev()
-        .find_map(|msg| {
-            ClaudeMessage::parse(msg.as_ref())
-                .ok()
-                .filter(|m| {
-                    matches!(
-                        m,
-                        ClaudeMessage::Result(_)
-                            | ClaudeMessage::Assistant(_)
-                            | ClaudeMessage::User(_)
-                            | ClaudeMessage::OptimisticUser(_)
-                    )
-                })
-                .map(|m| message_type_tag(&m))
-        })
-        .is_some_and(|t| t == ActivityTag::Result)
+    use crate::components::agent_frame::{AgentFrameKind, AgentFrameRegistry};
+
+    for msg in messages.rev() {
+        let frame = AgentFrameRegistry::parse(msg.as_ref(), agent_type);
+        let kind = frame.kind();
+        if kind.is_terminator() {
+            return true;
+        }
+        if matches!(
+            kind,
+            AgentFrameKind::ClaudeAssistant
+                | AgentFrameKind::ClaudeUser
+                | AgentFrameKind::OptimisticUser
+                | AgentFrameKind::CodexThreadStarted
+                | AgentFrameKind::CodexTurnStarted
+                | AgentFrameKind::CodexItemStarted
+                | AgentFrameKind::CodexItemUpdated
+                | AgentFrameKind::CodexItemCompleted
+                | AgentFrameKind::MuseRecord
+        ) {
+            return false;
+        }
+    }
+    false
 }
 
 /// Parse a server ISO timestamp to epoch-ms, treating a timezone-less string
@@ -1409,7 +1421,7 @@ mod tests {
         assert_eq!(pending.len(), 1);
     }
 
-    // --- is_claude_awaiting ---
+    // --- is_awaiting ---
 
     #[test]
     fn is_claude_awaiting_true_when_last_signal_is_result() {
@@ -1418,7 +1430,7 @@ mod tests {
             r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
             r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"01890000-0000-7000-8000-000000000001","total_cost_usd":0.0}"#.to_string(),
         ];
-        assert!(is_claude_awaiting(msgs.iter()));
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Claude));
     }
 
     #[test]
@@ -1427,7 +1439,7 @@ mod tests {
             r#"{"type":"user","content":"q"}"#.to_string(),
             r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
         ];
-        assert!(!is_claude_awaiting(msgs.iter()));
+        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Claude));
     }
 
     #[test]
@@ -1439,13 +1451,46 @@ mod tests {
             r#"{"type":"portal","content":[{"type":"text","text":"x"}]}"#.to_string(),
             r#"{"type":"error","error":{"type":"api_error","message":"y"}}"#.to_string(),
         ];
-        assert!(is_claude_awaiting(msgs.iter()));
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Claude));
     }
 
     #[test]
     fn is_claude_awaiting_false_for_empty_history() {
         let msgs: Vec<String> = vec![];
-        assert!(!is_claude_awaiting(msgs.iter()));
+        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Claude));
+    }
+
+    #[test]
+    fn is_awaiting_true_for_muse_terminal_completed() {
+        let msgs = [
+            r#"{"type":"muse_record","payload_type":"run.terminal.completed","payload":{"status":"completed"}}"#.to_string(),
+        ];
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Muse));
+    }
+
+    #[test]
+    fn is_awaiting_true_for_muse_terminal_failed() {
+        let msgs = [
+            r#"{"type":"muse_record","payload_type":"run.terminal.failed","payload":{"status":"failed"}}"#.to_string(),
+        ];
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Muse));
+    }
+
+    #[test]
+    fn is_awaiting_false_for_muse_working_record() {
+        let msgs = [
+            r#"{"type":"muse_record","payload_type":"task.started","payload":{"task_id":"1"}}"#
+                .to_string(),
+        ];
+        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Muse));
+    }
+
+    #[test]
+    fn is_awaiting_true_for_codex_turn_completed() {
+        let msgs = [
+            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#.to_string(),
+        ];
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Codex));
     }
 
     // --- extract_user_text ---

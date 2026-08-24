@@ -312,25 +312,3 @@ pub fn codex_event_item_id(json: &str) -> Option<String> {
         _ => None,
     }
 }
-
-/// Check if a Codex message indicates "awaiting" (turn complete or turn failed)
-pub fn is_codex_terminal_event(json: &str) -> Option<bool> {
-    let event: CodexEvent = serde_json::from_str(json).ok()?;
-    match event {
-        CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => Some(true),
-        CodexEvent::ItemStarted { .. }
-        | CodexEvent::ItemUpdated { .. }
-        | CodexEvent::ItemCompleted { .. }
-        | CodexEvent::TurnStarted { .. }
-        | CodexEvent::ThreadStarted { .. } => Some(false),
-        CodexEvent::Error { .. }
-        | CodexEvent::TurnDiffUpdated { .. }
-        | CodexEvent::FileChangePatchUpdated { .. }
-        | CodexEvent::TurnPlanUpdated { .. }
-        | CodexEvent::ThreadCompacted { .. }
-        | CodexEvent::PlanDelta { .. }
-        | CodexEvent::ReasoningSummaryPartAdded { .. }
-        | CodexEvent::ReasoningTextDelta { .. }
-        | CodexEvent::Unknown => None,
-    }
-}

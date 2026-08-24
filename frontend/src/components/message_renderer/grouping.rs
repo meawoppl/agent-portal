@@ -432,30 +432,28 @@ fn group_label(
 }
 
 /// True iff `json` parses as a per-turn terminator: Claude's
-/// `ClaudeMessage::Result` or one of Codex's terminator events
-/// (`TurnCompleted` / `TurnFailed`).
+/// `ClaudeMessage::Result`, Codex's `TurnCompleted`/`TurnFailed`, or
+/// Muse's `run.terminal.completed`/`run.terminal.failed` (via
+/// `AgentFrameKind::is_terminator`).
 ///
 /// Used by `SessionView::view()` to pair the Nth terminator card in the
 /// rendered transcript with the Nth row in `SessionView.turn_metrics`. The
 /// pair-by-ordering join is the agreed PR 2 strategy — `user_message_id`
 /// stays `None` on the proxy-emit side until a future PR wires up the
 /// per-turn linkage, so a key-based join would fail on every row today.
-pub fn is_turn_terminator(message: &RenderedMessage) -> bool {
-    matches!(
-        AgentFrameRegistry::parse(&message.content, shared::AgentType::Codex).kind(),
-        AgentFrameKind::ClaudeResult
-            | AgentFrameKind::CodexTurnCompleted
-            | AgentFrameKind::CodexTurnFailed
-    )
+pub fn is_turn_terminator(message: &RenderedMessage, agent_type: shared::AgentType) -> bool {
+    AgentFrameRegistry::parse(&message.content, agent_type)
+        .kind()
+        .is_terminator()
 }
 
 /// True iff the group is a `Single` carrying a turn terminator. Identity
-/// groups never contain terminators (Result / TurnCompleted / TurnFailed
-/// don't classify into any identity category — see `classify`), so this
-/// helper only needs to inspect the `Single` arm.
-pub fn group_is_turn_terminator(group: &MessageGroup) -> bool {
+/// groups never contain terminators (Result / TurnCompleted / TurnFailed /
+/// run.terminal.completed|failed don't classify into any identity category
+/// — see `classify`), so this helper only needs to inspect the `Single` arm.
+pub fn group_is_turn_terminator(group: &MessageGroup, agent_type: shared::AgentType) -> bool {
     match group {
-        MessageGroup::Single(json) => is_turn_terminator(json),
+        MessageGroup::Single(json) => is_turn_terminator(json, agent_type),
         MessageGroup::IdentityGroup { .. } => false,
     }
 }
@@ -475,7 +473,7 @@ pub fn group_is_turn_terminator(group: &MessageGroup) -> bool {
 /// starts from 0 again. Callers clamp the seed to the chip's own target,
 /// so a marker stream that ever restarts low degrades to a static display
 /// rather than a backwards animation.
-pub fn thinking_chip_starts(groups: &[MessageGroup]) -> Vec<i64> {
+pub fn thinking_chip_starts(groups: &[MessageGroup], agent_type: shared::AgentType) -> Vec<i64> {
     let mut running_max = 0i64;
     groups
         .iter()
@@ -490,7 +488,7 @@ pub fn thinking_chip_starts(groups: &[MessageGroup]) -> Vec<i64> {
                 start
             }
             _ => {
-                if group_is_turn_terminator(group) {
+                if group_is_turn_terminator(group, agent_type) {
                     running_max = 0;
                 }
                 0

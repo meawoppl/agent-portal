@@ -2,7 +2,8 @@
 //! detection, and the turn-level / streaming-delta variants.
 
 use super::super::events::CodexUsage;
-use super::super::{codex_event_item_id, is_codex_terminal_event, CodexEvent, CodexItem};
+use super::super::{codex_event_item_id, CodexEvent, CodexItem};
+use crate::components::agent_frame::{AgentFrameKind, AgentFrameRegistry};
 use codex_codes::io::items::{PatchChangeKind, ThreadItem};
 use codex_codes::protocol::ThreadItem as AppServerThreadItem;
 
@@ -204,30 +205,38 @@ fn round_trip_codex_event() {
     );
 }
 
-// --- Terminal event detection ---
+// --- Terminal event detection via AgentFrameKind::is_terminator ---
 
 #[test]
 fn terminal_event_turn_completed() {
     let json = r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":20}}"#;
-    assert_eq!(is_codex_terminal_event(json), Some(true));
+    let kind = AgentFrameRegistry::parse(json, shared::AgentType::Codex).kind();
+    assert!(kind.is_terminator());
+    assert_eq!(kind, AgentFrameKind::CodexTurnCompleted);
 }
 
 #[test]
 fn terminal_event_turn_failed() {
     let json = r#"{"type":"turn.failed","error":{"message":"oops"}}"#;
-    assert_eq!(is_codex_terminal_event(json), Some(true));
+    let kind = AgentFrameRegistry::parse(json, shared::AgentType::Codex).kind();
+    assert!(kind.is_terminator());
+    assert_eq!(kind, AgentFrameKind::CodexTurnFailed);
 }
 
 #[test]
 fn terminal_event_item_completed_is_not_terminal() {
     let json = r#"{"type":"item.completed","item":{"type":"agent_message","id":"m1","text":"hi"}}"#;
-    assert_eq!(is_codex_terminal_event(json), Some(false));
+    let kind = AgentFrameRegistry::parse(json, shared::AgentType::Codex).kind();
+    assert!(!kind.is_terminator());
+    assert_eq!(kind, AgentFrameKind::CodexItemCompleted);
 }
 
 #[test]
 fn terminal_event_unknown_returns_none() {
     let json = r#"{"type":"something.else"}"#;
-    assert_eq!(is_codex_terminal_event(json), None);
+    let kind = AgentFrameRegistry::parse(json, shared::AgentType::Codex).kind();
+    assert!(!kind.is_terminator());
+    assert_eq!(kind, AgentFrameKind::RawJson);
 }
 
 // --- Streaming-delta / plan / diff variants ---

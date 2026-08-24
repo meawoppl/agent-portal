@@ -71,7 +71,7 @@ fn thinking_chip_starts_seed_across_splits_and_reset_on_terminator() {
         thinking_tokens_message(60),
     ];
     let groups = group_for_tests(&messages);
-    let starts = grouping::thinking_chip_starts(&groups);
+    let starts = grouping::thinking_chip_starts(&groups, shared::AgentType::Claude);
     assert_eq!(starts.len(), groups.len());
     // Burst 1 starts at 0; burst 2 is seeded with burst 1's peak; the
     // turn-2 burst starts at 0 again after the Result terminator.
