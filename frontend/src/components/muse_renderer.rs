@@ -41,11 +41,7 @@ fn render_command_card(cmd: &CommandResult) -> Html {
     use crate::components::tool_renderers::CommandResultCard;
     // muse truncates long output itself and flags it; surface that as a note
     // appended to the output so the card doesn't imply it saw everything.
-    let output = if cmd.truncated {
-        format!("{}\n[output truncated]", cmd.output)
-    } else {
-        cmd.output.clone()
-    };
+    let output = command_output(cmd);
     html! {
         <CommandResultCard
             command={AttrValue::from(cmd.command.clone())}
@@ -54,6 +50,22 @@ fn render_command_card(cmd: &CommandResult) -> Html {
             exit_code={Some(i64::from(cmd.exit_code))}
         />
     }
+}
+
+fn command_output(cmd: &CommandResult) -> String {
+    if cmd.truncated {
+        format!("{}\n[output truncated]", cmd.output)
+    } else {
+        cmd.output.clone()
+    }
+}
+
+fn command_is_running(cmd: &CommandResult) -> bool {
+    cmd.terminal_status == "background_running"
+}
+
+fn command_failed(cmd: &CommandResult) -> bool {
+    !command_is_running(cmd) && (cmd.exit_code != 0 || cmd.terminal_status != "completed")
 }
 
 #[derive(Debug, PartialEq)]
@@ -105,35 +117,29 @@ fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
 
     let outcome = result.outcome.as_deref().unwrap_or("unknown");
     let tool = result.tool_name.as_deref().unwrap_or("tool");
-    // Use same BashTool as Claude/Codex for tool.bash — keeps command styling
-    // (expandable $ command, description, timeout/background badges, linkify)
-    // identical across sessions. Muse's CommandResult JSON carries command+output,
-    // so we render BashTool for the input (via typed BashInput seam) and an
-    // output-only CommandResultCard for the result, avoiding duplicate command
-    // rendering that the previous CommandResultCard path produced.
+    // Muse's command result carries both input and output. BashTool renders the
+    // typed input and the adjacent output pane renders only the result, keeping
+    // the command line singular while matching Claude/Codex command styling.
     if result.tool_name.as_deref() == Some("bash") {
         if let Some(cmd) = parse_command_result(&result.text) {
             use crate::components::tool_renderers::bash::render_bash_tool;
+            let is_background = command_is_running(&cmd);
             let bash_input = serde_json::to_value(shared::BashInput {
                 command: cmd.command.clone(),
                 description: Some(cmd.description.clone()),
                 timeout: None,
-                run_in_background: None,
+                run_in_background: is_background.then_some(true),
             })
             .unwrap_or(serde_json::Value::Null);
-            // Output-only: reuse CommandResultCard's output pane without re-showing
-            // the `$ command` line that BashTool already rendered.
-            let output = if cmd.truncated {
-                format!("{}\n[output truncated]", cmd.output)
-            } else {
-                cmd.output.clone()
-            };
-            let failed = cmd.exit_code != 0;
+            let output = command_output(&cmd);
+            let failed = command_failed(&cmd);
             return html! {
                 <div class={classes!("muse-tool-command", format!("muse-tool-{outcome}"))}>
                     { render_bash_tool(&bash_input) }
-                    <div class={classes!("command-result", failed.then_some("failed"))}>
-                        if failed {
+                    <div class={classes!("command-result", failed.then_some("failed"), is_background.then_some("running"))}>
+                        if is_background {
+                            <span class="command-result-exit">{ "running in background" }</span>
+                        } else if failed {
                             <span class="command-result-exit">{ format!("exit {}", cmd.exit_code) }</span>
                         }
                         if !output.is_empty() {
@@ -398,6 +404,37 @@ mod tests {
         assert_eq!(cmd.exit_code, 0);
         assert!(!cmd.truncated);
         assert!(cmd.output.contains("d99dce066453"));
+    }
+
+    #[test]
+    fn bash_terminal_status_distinguishes_running_from_failure() {
+        let tree = bash_tree();
+        let node = tree
+            .nodes()
+            .find(|node| !node.tool_results.is_empty())
+            .expect("bash node");
+        let mut cmd = parse_command_result(&node.tool_results[0].text).expect("command result");
+
+        cmd.terminal_status = "background_running".to_string();
+        assert!(command_is_running(&cmd));
+        assert!(!command_failed(&cmd));
+
+        cmd.terminal_status = "failed".to_string();
+        assert!(!command_is_running(&cmd));
+        assert!(command_failed(&cmd));
+    }
+
+    #[test]
+    fn output_only_body_never_repeats_the_command() {
+        let tree = bash_tree();
+        let node = tree
+            .nodes()
+            .find(|node| !node.tool_results.is_empty())
+            .expect("bash node");
+        let cmd = parse_command_result(&node.tool_results[0].text).expect("command result");
+        let output = command_output(&cmd);
+        assert!(!output.contains(&cmd.command));
+        assert!(output.contains("d99dce066453"));
     }
 
     #[test]
