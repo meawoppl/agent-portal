@@ -41,19 +41,54 @@ pub struct DiffCardProps {
     pub replace_all: bool,
 }
 
+/// Diff lines shown before the card contracts. Matches the `max_lines` on
+/// Claude's Write preview so an added file reads the same from either agent —
+/// a codex `add`/`delete` diff *is* the whole file, so uncapped it dumped the
+/// entire contents into the transcript.
+const DIFF_PREVIEW_LINES: usize = 20;
+
 #[function_component(DiffCard)]
 pub fn diff_card(props: &DiffCardProps) -> Html {
-    let body = match &props.source {
+    let expanded = use_state(|| false);
+
+    let old_new;
+    let unified;
+    let lines: &[DiffLine<'_>] = match &props.source {
         DiffSource::OldNew { old, new } => {
             let old_lines: Vec<&str> = old.lines().collect();
             let new_lines: Vec<&str> = new.lines().collect();
-            let diff = compute_line_diff(&old_lines, &new_lines);
-            render_diff_html(&diff)
+            old_new = compute_line_diff(&old_lines, &new_lines);
+            &old_new
         }
         DiffSource::Unified { text } => {
-            let lines = parse_unified_diff(text);
-            render_diff_html(&lines)
+            unified = parse_unified_diff(text);
+            &unified
         }
+    };
+
+    let hidden = lines.len().saturating_sub(DIFF_PREVIEW_LINES);
+    let shown = if *expanded || hidden == 0 {
+        lines
+    } else {
+        &lines[..DIFF_PREVIEW_LINES]
+    };
+
+    let toggle = {
+        let expanded = expanded.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.stop_propagation();
+            expanded.set(!*expanded);
+        })
+    };
+    let body = html! {
+        <>
+            { render_diff_html(shown) }
+            if hidden > 0 {
+                <div class="write-truncated expandable-toggle" onclick={toggle}>
+                    { if *expanded { "show less".to_string() } else { format!("... {hidden} more lines") } }
+                </div>
+            }
+        </>
     };
 
     html! {
