@@ -432,8 +432,9 @@ fn group_label(
 }
 
 /// True iff `json` parses as a per-turn terminator: Claude's
-/// `ClaudeMessage::Result` or one of Codex's terminator events
-/// (`TurnCompleted` / `TurnFailed`).
+/// `ClaudeMessage::Result`, Codex's `TurnCompleted`/`TurnFailed`, or
+/// Muse's `run.terminal.completed`/`run.terminal.failed` (via
+/// `AgentFrameKind::is_terminator`).
 ///
 /// Used by `SessionView::view()` to pair the Nth terminator card in the
 /// rendered transcript with the Nth row in `SessionView.turn_metrics`. The
@@ -447,9 +448,9 @@ pub fn is_turn_terminator(message: &RenderedMessage, agent_type: shared::AgentTy
 }
 
 /// True iff the group is a `Single` carrying a turn terminator. Identity
-/// groups never contain terminators (Result / TurnCompleted / TurnFailed
-/// don't classify into any identity category — see `classify`), so this
-/// helper only needs to inspect the `Single` arm.
+/// groups never contain terminators (Result / TurnCompleted / TurnFailed /
+/// run.terminal.completed|failed don't classify into any identity category
+/// — see `classify`), so this helper only needs to inspect the `Single` arm.
 pub fn group_is_turn_terminator(group: &MessageGroup, agent_type: shared::AgentType) -> bool {
     match group {
         MessageGroup::Single(json) => is_turn_terminator(json, agent_type),
