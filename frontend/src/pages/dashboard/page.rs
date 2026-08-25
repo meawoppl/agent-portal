@@ -20,6 +20,7 @@ use crate::hooks::{
     use_client_websocket, use_interrupt_hotkey, use_keyboard_nav, use_sessions, KeyboardNavConfig,
 };
 use crate::pages::admin::AdminPage;
+use crate::pages::history::{HistoryBrowserPage, HistoryTranscriptPage};
 use crate::pages::settings::SettingsPage;
 use crate::utils;
 use gloo_net::http::Request;
@@ -294,19 +295,32 @@ pub fn dashboard_page() -> Html {
 
     // Separate `use_navigator` handle: the one above is moved into the
     // deep-link effect closure.
-    let history_navigator = use_navigator();
+    // Overlay, not a route push: navigating away unmounts the dashboard, and
+    // coming back refetches every session and reconnects the WS. Same reason
+    // Settings and Admin are overlays.
     let go_to_history = {
-        let navigator = history_navigator;
-        Callback::from(move |_| {
-            if let Some(navigator) = &navigator {
-                navigator.push(&crate::Route::History);
-            }
-        })
+        let ui_state = ui_state.clone();
+        Callback::from(move |_| ui_state.dispatch(DashboardUiAction::ShowHistory))
     };
 
     let close_admin = {
         let ui_state = ui_state.clone();
         Callback::from(move |_: ()| ui_state.dispatch(DashboardUiAction::CloseAdmin))
+    };
+
+    let close_history = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |_| ui_state.dispatch(DashboardUiAction::CloseHistory))
+    };
+    let open_history_session = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |(user, session): (String, String)| {
+            ui_state.dispatch(DashboardUiAction::OpenHistorySession(user, session))
+        })
+    };
+    let close_history_session = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |_| ui_state.dispatch(DashboardUiAction::CloseHistorySession))
     };
 
     let close_settings = {
@@ -874,6 +888,26 @@ pub fn dashboard_page() -> Html {
             if ui_state.show_settings {
                 <div class="full-page-modal">
                     <SettingsPage on_close={close_settings.clone()} />
+                </div>
+            }
+
+            // History overlay — same full-page treatment as Settings, and it
+            // hosts the transcript view too so opening one never leaves the
+            // dashboard.
+            if ui_state.show_history {
+                <div class="full-page-modal">
+                    if let Some((user, session)) = ui_state.history_session.clone() {
+                        <HistoryTranscriptPage
+                            {user}
+                            {session}
+                            on_back={close_history_session.clone()}
+                        />
+                    } else {
+                        <HistoryBrowserPage
+                            on_close={close_history.clone()}
+                            on_open_session={open_history_session.clone()}
+                        />
+                    }
                 </div>
             }
 

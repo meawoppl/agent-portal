@@ -19,6 +19,10 @@ use crate::Route;
 pub struct HistoryTranscriptProps {
     pub user: String,
     pub session: String,
+    /// Set when embedded in the dashboard overlay: goes back to the list in
+    /// place instead of navigating. `None` keeps the standalone route's link.
+    #[prop_or_default]
+    pub on_back: Option<Callback<()>>,
 }
 
 #[function_component(HistoryTranscriptPage)]
@@ -67,7 +71,13 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
     html! {
         <div class="history-root history-transcript">
             <nav class="history-nav">
-                <Link<Route> to={Route::History}>{ "← All sessions" }</Link<Route>>
+                if let Some(on_back) = props.on_back.clone() {
+                    <button class="link-button" onclick={Callback::from(move |_| on_back.emit(()))}>
+                        { "← All sessions" }
+                    </button>
+                } else {
+                    <Link<Route> to={Route::History}>{ "← All sessions" }</Link<Route>>
+                }
             </nav>
             { header_card(&manifest) }
             { transcript_body(&messages, &props.user, &props.session, agent_type, session_id) }

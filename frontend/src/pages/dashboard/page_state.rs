@@ -182,6 +182,10 @@ pub(super) struct DashboardUiState {
     pub show_launch_dialog: bool,
     pub show_admin: bool,
     pub show_settings: bool,
+    /// History browser, shown as an overlay so the dashboard stays mounted.
+    /// `Some((user, session))` when a transcript is open inside it.
+    pub show_history: bool,
+    pub history_session: Option<(String, String)>,
     pub show_help: bool,
     pub inactive_hidden: bool,
     pub rail_position: RailPosition,
@@ -196,6 +200,8 @@ impl DashboardUiState {
             show_launch_dialog: false,
             show_admin: false,
             show_settings: false,
+            show_history: false,
+            history_session: None,
             show_help: false,
             inactive_hidden,
             rail_position,
@@ -213,6 +219,10 @@ pub(super) enum DashboardUiAction {
     CloseAdmin,
     ShowSettings,
     CloseSettings,
+    ShowHistory,
+    CloseHistory,
+    OpenHistorySession(String, String),
+    CloseHistorySession,
     ShowHelp,
     CloseHelp,
     SetInactiveHidden(bool),
@@ -246,6 +256,19 @@ impl Reducible for DashboardUiState {
             }
             DashboardUiAction::CloseSettings => {
                 state.show_settings = false;
+            }
+            DashboardUiAction::ShowHistory => {
+                state.show_history = true;
+            }
+            DashboardUiAction::CloseHistory => {
+                state.show_history = false;
+                state.history_session = None;
+            }
+            DashboardUiAction::OpenHistorySession(user, session) => {
+                state.history_session = Some((user, session));
+            }
+            DashboardUiAction::CloseHistorySession => {
+                state.history_session = None;
             }
             DashboardUiAction::ShowHelp => {
                 state.show_help = true;
@@ -451,6 +474,24 @@ mod tests {
 
     fn reduce_ui(state: DashboardUiState, action: DashboardUiAction) -> Rc<DashboardUiState> {
         Rc::new(state).reduce(action)
+    }
+
+    /// Closing history drops the open transcript too, so reopening lands on
+    /// the list rather than whatever was last viewed.
+    #[test]
+    fn ui_reducer_tracks_the_history_overlay() {
+        let state = DashboardUiState::new(false, RailPosition::Top, false);
+        let state = reduce_ui(state, DashboardUiAction::ShowHistory);
+        let state = state.reduce(DashboardUiAction::OpenHistorySession(
+            "u".into(),
+            "s".into(),
+        ));
+        assert!(state.show_history);
+        assert_eq!(state.history_session, Some(("u".into(), "s".into())));
+
+        let state = state.reduce(DashboardUiAction::CloseHistory);
+        assert!(!state.show_history);
+        assert_eq!(state.history_session, None);
     }
 
     #[test]

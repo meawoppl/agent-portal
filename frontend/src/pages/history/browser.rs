@@ -22,8 +22,20 @@ const PAGE_SIZE: usize = DEFAULT_HISTORY_PAGE_SIZE;
 /// requests. Short enough to feel immediate on a page-turn click.
 const FETCH_DEBOUNCE_MS: u32 = 250;
 
+/// Embedding hooks. Both default to `None`, which keeps the standalone
+/// `/history` route behaving exactly as before; the dashboard overlay supplies
+/// them so opening history never unmounts the dashboard.
+#[derive(Properties, PartialEq, Default)]
+pub struct HistoryBrowserProps {
+    #[prop_or_default]
+    pub on_close: Option<Callback<()>>,
+    /// Intercepts a row click as `(user_id, session_id)` instead of navigating.
+    #[prop_or_default]
+    pub on_open_session: Option<Callback<(String, String)>>,
+}
+
 #[function_component(HistoryBrowserPage)]
-pub fn history_browser_page() -> Html {
+pub fn history_browser_page(props: &HistoryBrowserProps) -> Html {
     let response = use_state(|| None as Load<HistorySessionsResponse>);
     let filter = use_state(SessionFilter::default);
     let page = use_state(|| 0usize);
@@ -78,7 +90,7 @@ pub fn history_browser_page() -> Html {
                     // would silently describe this page instead.
                     { stats_strip(resp, &filter) }
                     { filter_controls(resp, &filter, &on_filter) }
-                    { session_table(&resp.sessions, resp.is_admin) }
+                    { session_table(&resp.sessions, resp.is_admin, &props.on_open_session) }
                     { pagination_controls(&window, resp.sessions.len(), &page) }
                 </>
             }
@@ -88,7 +100,13 @@ pub fn history_browser_page() -> Html {
     html! {
         <div class="history-root">
             <nav class="history-nav">
-                <Link<Route> to={Route::Dashboard}>{ "← Dashboard" }</Link<Route>>
+                if let Some(on_close) = props.on_close.clone() {
+                    <button class="link-button" onclick={Callback::from(move |_| on_close.emit(()))}>
+                        { "← Dashboard" }
+                    </button>
+                } else {
+                    <Link<Route> to={Route::Dashboard}>{ "← Dashboard" }</Link<Route>>
+                }
             </nav>
             <header class="history-header">
                 <h1>{ "Session History" }</h1>
@@ -322,7 +340,11 @@ fn pagination_controls(window: &PageWindow, total: usize, page: &UseStateHandle<
     }
 }
 
-fn session_table(rows: &[HistorySessionSummary], is_admin: bool) -> Html {
+fn session_table(
+    rows: &[HistorySessionSummary],
+    is_admin: bool,
+    on_open_session: &Option<Callback<(String, String)>>,
+) -> Html {
     if rows.is_empty() {
         return html! {
             <div class="history-empty">{ "No archived sessions match these filters." }</div>
@@ -344,7 +366,7 @@ fn session_table(rows: &[HistorySessionSummary], is_admin: bool) -> Html {
                 </tr>
             </thead>
             <tbody>
-                { for rows.iter().map(|s| html! { <SessionRow session={s.clone()} {is_admin} /> }) }
+                { for rows.iter().map(|s| html! { <SessionRow session={s.clone()} {is_admin} on_open_session={on_open_session.clone()} /> }) }
             </tbody>
         </table>
     }
@@ -354,6 +376,8 @@ fn session_table(rows: &[HistorySessionSummary], is_admin: bool) -> Html {
 struct SessionRowProps {
     session: HistorySessionSummary,
     is_admin: bool,
+    #[prop_or_default]
+    on_open_session: Option<Callback<(String, String)>>,
 }
 
 #[function_component(SessionRow)]
@@ -369,11 +393,19 @@ fn session_row(props: &SessionRowProps) -> Html {
     // handled (`default_prevented`) is left alone.
     let onclick = {
         let route = route.clone();
+        let embed = props.on_open_session.clone();
+        let ids = (s.user_id.clone(), s.session_id.clone());
         Callback::from(move |e: MouseEvent| {
             if e.default_prevented() || e.ctrl_key() || e.meta_key() || e.shift_key() {
                 return;
             }
-            if let Some(navigator) = &navigator {
+            // Embedded: open in place. Standalone: navigate as before. A
+            // modified click still falls through to the anchor either way, so
+            // cmd-click keeps opening a real tab.
+            if let Some(embed) = &embed {
+                e.prevent_default();
+                embed.emit(ids.clone());
+            } else if let Some(navigator) = &navigator {
                 navigator.push(&route);
             }
         })
