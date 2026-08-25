@@ -1130,10 +1130,15 @@
     font-size: 0.8rem;
 }
 
-.agents-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+/* Stack the badge/label/button without `display: flex` — flex on a <td>
+   takes it out of table layout, so the per-agent cells stop forming columns
+   and pile into the first one. */
+.agents-cell > * {
+    display: block;
+}
+
+.agents-cell > * + * {
+    margin-top: 0.25rem;
 }
 
 .agents-badge {
