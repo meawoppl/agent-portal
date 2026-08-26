@@ -31,10 +31,9 @@ use yew::prelude::*;
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
     Account,
-    Agents,
+    Computers,
     Sessions,
     Tokens,
-    Launchers,
     Forwarding,
     Sounds,
     Notifications,
@@ -77,10 +76,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         Callback::from(move |_: MouseEvent| active_tab.set(tab))
     };
     let on_account_tab = make_tab_handler(SettingsTab::Account);
-    let on_agents_tab = make_tab_handler(SettingsTab::Agents);
+    let on_computers_tab = make_tab_handler(SettingsTab::Computers);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
-    let on_launchers_tab = make_tab_handler(SettingsTab::Launchers);
     let on_forwarding_tab = make_tab_handler(SettingsTab::Forwarding);
     let on_sounds_tab = make_tab_handler(SettingsTab::Sounds);
     let on_notifications_tab = make_tab_handler(SettingsTab::Notifications);
@@ -113,10 +111,10 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     { "Account" }
                 </button>
                 <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::Agents).then_some("active"))}
-                    onclick={on_agents_tab}
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Computers).then_some("active"))}
+                    onclick={on_computers_tab}
                 >
-                    { "Agents" }
+                    { "Computers" }
                 </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sessions).then_some("active"))}
@@ -133,12 +131,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     if *expiring_token_count > 0 {
                         <span class="expiring-badge">{ *expiring_token_count }</span>
                     }
-                </button>
-                <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::Launchers).then_some("active"))}
-                    onclick={on_launchers_tab}
-                >
-                    { "Launchers" }
                 </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Forwarding).then_some("active"))}
@@ -182,14 +174,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 if *active_tab == SettingsTab::Account {
                     <AccountPanel />
                 }
-                if *active_tab == SettingsTab::Agents {
+                if *active_tab == SettingsTab::Computers {
+                    <LaunchersPanel />
                     <AgentsPanel />
                 }
                 if *active_tab == SettingsTab::Tokens {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
-                }
-                if *active_tab == SettingsTab::Launchers {
-                    <LaunchersPanel />
                 }
                 if *active_tab == SettingsTab::Forwarding {
                     <ForwardingPanel />
