@@ -3,7 +3,7 @@
 
 use super::super::grouping::{GroupCategory, MessageGroup};
 use super::fixtures::{
-    assistant_with_tool_use, classify_category, group_for_tests, portal_text_message,
+    assistant_with_tool_use, classify_category, group_for_tests, portal_text_message, rendered,
 };
 
 #[test]
@@ -89,4 +89,38 @@ fn connection_cycle_round_trips_as_its_own_variant() {
         }
         other => panic!("expected ConnectionCycle, got {other:?}"),
     }
+}
+
+/// An idle session reconnects on a loop, so these arrive as a run of
+/// near-identical one-liners. The run must collapse to a single summary.
+#[test]
+fn a_run_of_reconnects_collapses_to_one_line() {
+    use super::super::group_renderer::{connection_cycle_run, render_connection_cycle_run};
+
+    let cycles: Vec<_> = ["38s", "38s", "38s", "36s"]
+        .iter()
+        .map(|d| {
+            rendered(
+                shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
+                    duration: Some((*d).to_string()),
+                }])
+                .to_json()
+                .to_string(),
+            )
+        })
+        .collect();
+
+    let durations = connection_cycle_run(&cycles).expect("all members are connection cycles");
+    assert_eq!(durations.len(), 4);
+    // Renders at all, and as one node rather than four.
+    let _ = render_connection_cycle_run(&durations);
+
+    // A group carrying anything else must not collapse.
+    let mut mixed = cycles.clone();
+    mixed.push(rendered(
+        shared::PortalMessage::text("hello".into())
+            .to_json()
+            .to_string(),
+    ));
+    assert!(connection_cycle_run(&mixed).is_none());
 }

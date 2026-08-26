@@ -38,6 +38,61 @@ pub struct MessageGroupRendererProps {
     pub muse_live_events: Vec<serde_json::Value>,
 }
 
+/// The reconnect durations in a group whose members are *all* connection
+/// cycles, or `None` if any member is something else.
+///
+/// An idle session reconnects on a slow loop, so these arrive as a long run of
+/// otherwise-identical one-liners. Collapsing the run to a single line is the
+/// whole point of the frame being typed.
+pub(super) fn connection_cycle_run(
+    messages: &[super::types::RenderedMessage],
+) -> Option<Vec<String>> {
+    let mut durations = Vec::with_capacity(messages.len());
+    for message in messages {
+        let portal: shared::PortalMessage = serde_json::from_str(&message.content).ok()?;
+        match portal.content.as_slice() {
+            [shared::PortalContent::ConnectionCycle { duration }] => {
+                durations.push(duration.clone().unwrap_or_default())
+            }
+            _ => return None,
+        }
+    }
+    (!durations.is_empty()).then_some(durations)
+}
+
+/// One line for a whole run: `reconnected 4x (36-38s)`.
+pub(super) fn render_connection_cycle_run(durations: &[String]) -> Html {
+    let label = match durations {
+        [] => return html! {},
+        [only] if only.is_empty() => "reconnected".to_string(),
+        [only] => format!("reconnected after {only}"),
+        many => {
+            // Durations arrive newest-last and are near-identical; show the
+            // span rather than repeating one value N times.
+            let mut seen: Vec<&str> = many
+                .iter()
+                .map(String::as_str)
+                .filter(|d| !d.is_empty())
+                .collect();
+            seen.sort_unstable();
+            seen.dedup();
+            match (seen.first(), seen.last()) {
+                (Some(lo), Some(hi)) if lo == hi => {
+                    format!("reconnected {}x after {lo}", many.len())
+                }
+                (Some(lo), Some(hi)) => format!("reconnected {}x ({lo}-{hi})", many.len()),
+                _ => format!("reconnected {}x", many.len()),
+            }
+        }
+    };
+    html! {
+        <div class="connection-cycle">
+            <span class="connection-cycle-dot" />
+            { label }
+        </div>
+    }
+}
+
 #[function_component(MessageGroupRenderer)]
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     match &props.group {
@@ -116,6 +171,19 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                         </div>
                     </div>
                 };
+            }
+
+            // A run of reconnect notices collapses to one line.
+            if *category == GroupCategory::Portal {
+                if let Some(durations) = connection_cycle_run(messages) {
+                    return html! {
+                        <div class="claude-message portal-message" title={ts.unwrap_or_default()}>
+                            <div class="message-body">
+                                { render_connection_cycle_run(&durations) }
+                            </div>
+                        </div>
+                    };
+                }
             }
 
             let wrapper_class = match category {
