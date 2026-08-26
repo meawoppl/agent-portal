@@ -179,6 +179,36 @@ pub struct InputBar {
     vim: Rc<RefCell<VimState>>,
 }
 
+/// Browsers name a pasted screenshot `image.png`, so every paste lands on the
+/// same path in the agent's working directory and clobbers the previous one.
+/// Give those a timestamped name; anything pasted with a real filename keeps it.
+fn stamp_generic_paste_name(file: &web_sys::File) -> Option<web_sys::File> {
+    let name = file.name();
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) => (stem, ext),
+        None => (name.as_str(), "png"),
+    };
+    if stem != "image" {
+        return None;
+    }
+
+    let d = js_sys::Date::new_0();
+    let stamped = format!(
+        "portal_pasted_image_{:02}{:02}{:02}_{:02}{:02}{:02}.{ext}",
+        d.get_full_year() % 100,
+        d.get_month() + 1,
+        d.get_date(),
+        d.get_hours(),
+        d.get_minutes(),
+        d.get_seconds(),
+    );
+
+    let parts = js_sys::Array::of1(file.as_ref());
+    let options = web_sys::FilePropertyBag::new();
+    options.set_type(&file.type_());
+    web_sys::File::new_with_blob_sequence_and_options(parts.as_ref(), &stamped, &options).ok()
+}
+
 impl Component for InputBar {
     type Message = InputBarMsg;
     type Properties = InputBarProps;
@@ -554,6 +584,7 @@ impl Component for InputBar {
                     .filter_map(|i: u32| items.get(i))
                     .filter(|item: &web_sys::DataTransferItem| item.kind() == "file")
                     .filter_map(|item: web_sys::DataTransferItem| item.get_as_file().ok().flatten())
+                    .map(|file| stamp_generic_paste_name(&file).unwrap_or(file))
                     .collect();
                 if !files.is_empty() {
                     e.prevent_default();
