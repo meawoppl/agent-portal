@@ -46,6 +46,23 @@ fn render_body(text: &str, ansi: bool) -> Html {
     }
 }
 
+/// Split `text` into the shown preview and the hidden remainder, cutting on a
+/// **line boundary** at or before `max_len`.
+///
+/// Collapsing is about vertical space, so a cut mid-line just leaves a ragged
+/// half-line that costs the same row it was meant to save. Falls back to the
+/// character cut when there is no newline to land on — a single long line still
+/// has to be truncated somewhere.
+fn split_for_preview(text: &str, max_len: usize) -> (&str, &str) {
+    let cut = truncate_str(text, max_len).len();
+    match text[..cut].rfind('\n') {
+        // Never yield an empty preview: a leading newline inside the budget
+        // would otherwise show nothing but the toggle.
+        Some(0) | None => text.split_at(cut),
+        Some(i) => (&text[..i], &text[i + 1..]),
+    }
+}
+
 /// Label for the collapsed toggle, describing what staying collapsed is hiding.
 ///
 /// Reports **lines as well as characters**, because the character count alone
@@ -94,12 +111,8 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
     let (display, toggle_label) = if *expanded {
         (text.to_string(), "show less".to_string())
     } else {
-        // Measure the hidden remainder from where the text was actually cut:
-        // `truncate_str` backs off to a char boundary, so `max_len` is an upper
-        // bound on the cut, not the cut itself.
-        let shown = truncate_str(text, props.max_len);
-        let summary = truncation_summary(&text[shown.len()..]);
-        (shown.to_string(), summary)
+        let (shown, hidden) = split_for_preview(text, props.max_len);
+        (shown.to_string(), truncation_summary(hidden))
     };
 
     // Block-context wrappers (`pre`, `div`) render the toggle as a `<div>` so
@@ -196,6 +209,27 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Collapsing exists to save vertical space, so the cut lands on a line
+    /// boundary rather than leaving a ragged half-line behind.
+    #[test]
+    fn preview_cuts_on_a_line_boundary() {
+        let text = "alpha\nbravo\ncharlie\ndelta";
+        // 14 lands inside "charlie"; back off to the end of "bravo".
+        let (shown, hidden) = split_for_preview(text, 14);
+        assert_eq!(shown, "alpha\nbravo");
+        assert_eq!(hidden, "charlie\ndelta");
+    }
+
+    /// One long line has no boundary to land on, so it still cuts mid-line —
+    /// otherwise the preview would be empty.
+    #[test]
+    fn a_single_long_line_still_truncates() {
+        let text = "no newlines here at all";
+        let (shown, hidden) = split_for_preview(text, 10);
+        assert_eq!(shown, "no newline");
+        assert_eq!(hidden, "s here at all");
+    }
 
     /// The case the line count exists for: a wall of build-log output, where
     /// the character count alone doesn't convey how much scrolling is hidden.
