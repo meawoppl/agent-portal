@@ -130,6 +130,49 @@ fn notify_settings_changed() {
     let _ = window.dispatch_event(&event);
 }
 
+#[derive(Properties, PartialEq)]
+struct HealthTimerDialogProps {
+    message: AttrValue,
+    on_confirm: Callback<MouseEvent>,
+}
+
+/// The modal itself, in its own component so that its hooks (`use_node_ref` +
+/// `use_focus_trap`) are only reached when the modal is actually rendered.
+///
+/// They must **not** live in `HealthTimerReminder`: that component returns early
+/// while the reminder is hidden, so hooks placed after the early return run on
+/// some renders and not others — Yew's `assert_hook_context` then panics with
+/// "Hooks are called conditionally" the moment the timer fires and flips the
+/// component onto the visible path. Conditionally rendering a *child component*
+/// is the supported way to express this; a conditional hook never is.
+#[function_component(HealthTimerDialog)]
+fn health_timer_dialog(props: &HealthTimerDialogProps) -> Html {
+    let dialog_ref = use_node_ref();
+    use_focus_trap(dialog_ref.clone());
+
+    html! {
+        <div class="health-timer-overlay" role="presentation">
+            <section
+                ref={dialog_ref}
+                class="health-timer-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="health-timer-title"
+            >
+                <h2 id="health-timer-title">{ "Health timer" }</h2>
+                <p>{ props.message.clone() }</p>
+                <button
+                    type="button"
+                    class="health-timer-confirm"
+                    onclick={props.on_confirm.clone()}
+                >
+                    { "Confirm" }
+                </button>
+            </section>
+        </div>
+    }
+}
+
 #[function_component(HealthTimerReminder)]
 pub fn health_timer_reminder() -> Html {
     let settings = use_state(load_health_timer_settings);
@@ -192,7 +235,7 @@ pub fn health_timer_reminder() -> Html {
         return html! {};
     }
 
-    let message = settings.reminder_message().to_string();
+    let message = AttrValue::from(settings.reminder_message().to_string());
     let on_confirm = {
         let settings = settings.clone();
         let showing = showing.clone();
@@ -203,26 +246,8 @@ pub fn health_timer_reminder() -> Html {
             showing.set(false);
         })
     };
-    let dialog_ref = use_node_ref();
-    use_focus_trap(dialog_ref.clone());
 
-    html! {
-        <div class="health-timer-overlay" role="presentation">
-            <section
-                ref={dialog_ref}
-                class="health-timer-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="health-timer-title"
-            >
-                <h2 id="health-timer-title">{ "Health timer" }</h2>
-                <p>{ message }</p>
-                <button type="button" class="health-timer-confirm" onclick={on_confirm}>
-                    { "Confirm" }
-                </button>
-            </section>
-        </div>
-    }
+    html! { <HealthTimerDialog {message} {on_confirm} /> }
 }
 
 #[cfg(test)]
