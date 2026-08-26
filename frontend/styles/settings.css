@@ -868,8 +868,31 @@
     gap: 1.25rem;
 }
 
-.health-toggle {
+.health-toggle-button {
     align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid currentcolor;
+    border-radius: 6px;
+    background: transparent;
+    font-size: 0.95rem;
+    cursor: pointer;
+}
+
+.health-toggle-button.on {
+    color: var(--success);
+}
+
+.health-toggle-button.off {
+    color: var(--error);
+}
+
+/* Sized up so the state reads at a glance rather than from the word. */
+.health-toggle-glyph {
+    font-size: 1.05rem;
+    line-height: 1;
 }
 
 .health-setting-field {

@@ -22,10 +22,9 @@ pub fn health_timer_panel() -> Html {
     // Switching the timer on is the one edit that should start the clock.
     let on_enabled_change = {
         let settings = settings.clone();
-        Callback::from(move |e: Event| {
-            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+        Callback::from(move |_: MouseEvent| {
             let mut next = (*settings).clone();
-            next.enabled = input.checked();
+            next.enabled = !next.enabled;
             if next.enabled {
                 save_health_timer_settings_reset(&next);
             } else {
@@ -66,14 +65,20 @@ pub fn health_timer_panel() -> Html {
             </div>
 
             <div class="health-settings-card">
-                <label class="toggle-label health-toggle">
-                    <input
-                        type="checkbox"
-                        checked={settings.enabled}
-                        onchange={on_enabled_change}
-                    />
-                    <span>{ if settings.enabled { "Enabled" } else { "Disabled" } }</span>
-                </label>
+                <button
+                    type="button"
+                    class={classes!(
+                        "health-toggle-button",
+                        if settings.enabled { "on" } else { "off" }
+                    )}
+                    aria-pressed={settings.enabled.to_string()}
+                    onclick={on_enabled_change}
+                >
+                    <span class="health-toggle-glyph">
+                        { if settings.enabled { "\u{2713}" } else { "\u{2715}" } }
+                    </span>
+                    { if settings.enabled { "Enabled" } else { "Disabled" } }
+                </button>
 
                 <label class="health-setting-field">
                     <span>{ "Reminder interval" }</span>
