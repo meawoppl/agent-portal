@@ -41,6 +41,7 @@ web-sys = { workspace = true, features = [
     # download never becomes a top-level navigation (markdown/portal_file_link.rs)
     "Url",
     "BlobPropertyBag",
+    "FilePropertyBag",
     "HtmlAnchorElement",
     "DomRect",
     "HtmlElement",
