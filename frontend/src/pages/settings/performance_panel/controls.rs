@@ -10,10 +10,12 @@ pub(super) struct PerformanceControlsProps<'a> {
     pub window: TimeWindow,
     pub group_by: &'a GroupBy,
     pub axis_scale: AxisScale,
+    pub show_p95: bool,
     pub pairs: &'a [GroupKey],
     pub on_window_change: Callback<TimeWindow>,
     pub on_group_change: Callback<Event>,
     pub on_axis_scale_change: Callback<AxisScale>,
+    pub on_show_p95_change: Callback<MouseEvent>,
 }
 
 pub(super) fn render_performance_controls(props: PerformanceControlsProps<'_>) -> Html {
@@ -85,6 +87,21 @@ pub(super) fn render_performance_controls(props: PerformanceControlsProps<'_>) -
                         </button>
                     }
                 }) }
+            </div>
+
+            <div class="performance-percentile-group">
+                <span class="performance-control-label">{ "Traces:" }</span>
+                <button
+                    type="button"
+                    class={classes!(
+                        "performance-window-button",
+                        props.show_p95.then_some("active"),
+                    )}
+                    aria-pressed={props.show_p95.to_string()}
+                    onclick={props.on_show_p95_change}
+                >
+                    { "p95" }
+                </button>
             </div>
         </div>
     }

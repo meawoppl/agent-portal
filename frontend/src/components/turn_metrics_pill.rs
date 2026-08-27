@@ -334,6 +334,7 @@ mod tests {
         assert_eq!(compact_model_label("gpt-5-mini"), "5-mini");
         // No prefix, no suffix → unchanged.
         assert_eq!(compact_model_label("haiku-4-5"), "haiku-4-5");
+        assert_eq!(compact_model_label("<synthetic>"), "unknown");
     }
 
     #[test]

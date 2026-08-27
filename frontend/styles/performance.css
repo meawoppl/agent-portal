@@ -25,7 +25,8 @@
 }
 
 .performance-window-group,
-.performance-scale-group {
+.performance-scale-group,
+.performance-percentile-group {
     display: flex;
     align-items: center;
     gap: 0.25rem;

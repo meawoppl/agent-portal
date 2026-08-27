@@ -12,6 +12,7 @@ mod pastebin;
 mod path_policy;
 mod process_manager;
 mod scheduler;
+mod seppuku;
 mod service;
 mod worktree;
 
@@ -115,6 +116,8 @@ enum Command {
         /// A port number, `list`, or `close`.
         target: String,
     },
+    /// Terminate the agent session this command is running inside.
+    Seppuku,
 }
 
 #[derive(Subcommand, Debug)]
@@ -301,6 +304,7 @@ async fn main() -> anyhow::Result<()> {
                 },
             };
         }
+        Some(Command::Seppuku) => return seppuku::run().await,
         None => {}
     }
 

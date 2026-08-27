@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use shared::api::MetricBucket;
 use shared::AgentType;
 
-use crate::components::turn_metrics_display::format_agent_model_tier_label;
+use crate::components::turn_metrics_display::{
+    format_agent_model_tier_label, is_displayable_model,
+};
 
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
 /// currently reports no model or tier; keeping the agent in the key lets the
@@ -25,9 +27,15 @@ pub(super) fn distinct_pairs(buckets: &[MetricBucket]) -> Vec<GroupKey> {
 pub(super) fn bucket_group_key(bucket: &MetricBucket) -> GroupKey {
     (
         bucket.agent_type,
-        bucket.model.clone(),
+        visible_model(bucket.model.as_deref()).map(str::to_string),
         bucket.service_tier.clone(),
     )
+}
+
+/// Claude labels its own injected bookkeeping frames with `<synthetic>`.
+/// Those frames are not model executions and must not become a chart group.
+fn visible_model(model: Option<&str>) -> Option<&str> {
+    model.filter(|model| is_displayable_model(model))
 }
 
 /// Format an (agent, model, tier) group as a human-readable label for the

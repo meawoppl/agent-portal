@@ -22,6 +22,9 @@ pub(crate) fn compact_metric_count(value: f64) -> String {
 /// Strip a vendor prefix and trailing dated suffix so a model name fits a
 /// compact dashboard chip.
 pub(crate) fn compact_model_label(model: &str) -> String {
+    if !is_displayable_model(model) {
+        return "unknown".to_string();
+    }
     let trimmed = model
         .strip_prefix("claude-")
         .or_else(|| model.strip_prefix("gpt-"))
@@ -34,6 +37,10 @@ pub(crate) fn compact_model_label(model: &str) -> String {
         }
     }
     parts.join("-")
+}
+
+pub(crate) fn is_displayable_model(model: &str) -> bool {
+    !model.trim().is_empty() && model != "<synthetic>"
 }
 
 /// Build the compact dashboard label for a model/tier pair.
@@ -55,9 +62,13 @@ pub(crate) fn format_agent_model_tier_label(
     tier: &Option<String>,
 ) -> String {
     let base = match (agent_type, model.as_deref()) {
+        (AgentType::Claude, None) => "Claude".to_string(),
         (AgentType::Codex, None) => "Codex".to_string(),
-        (_, Some(model)) => model.to_string(),
-        (agent, None) => format!("{agent} unknown"),
+        (AgentType::Muse, None) => "Muse".to_string(),
+        (_, Some(model)) if is_displayable_model(model) => model.to_string(),
+        (AgentType::Claude, Some(_)) => "Claude".to_string(),
+        (AgentType::Codex, Some(_)) => "Codex".to_string(),
+        (AgentType::Muse, Some(_)) => "Muse".to_string(),
     };
     append_nonstandard_tier(base, tier.as_deref())
 }

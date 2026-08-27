@@ -129,13 +129,14 @@ pub struct TurnMetrics {
 
 impl TurnMetrics {
     /// True when `model` is usable telemetry: present, non-blank, and not the
-    /// literal placeholder `"unknown"`. All three ingest points (Claude
+    /// literal placeholders `"unknown"` and `"<synthetic>"`. The latter is
+    /// Claude's label for CLI-injected bookkeeping, not an executing model. All three ingest points (Claude
     /// proxy, Codex proxy, backend persist) warn-and-drop turn metrics that
     /// fail this check, so the rule must stay identical everywhere.
     pub fn has_known_model(&self) -> bool {
         self.model.as_deref().is_some_and(|value| {
             let value = value.trim();
-            !value.is_empty() && !value.eq_ignore_ascii_case("unknown")
+            !value.is_empty() && !value.eq_ignore_ascii_case("unknown") && value != "<synthetic>"
         })
     }
 
