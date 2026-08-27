@@ -124,6 +124,7 @@ fn render_portal_content(
             alt,
             poster_base64,
             animated,
+            duration,
             schema,
             renderer_version,
             ..
@@ -139,7 +140,13 @@ fn render_portal_content(
                         alt={alt.clone()}
                         poster_base64={poster_base64.clone()}
                         animated={*animated}
-                        live_supported={*schema <= 3 && renderer_version == "1.9.0" && !*animated}
+                        duration={*duration}
+                        renderer_version={renderer_version.clone()}
+                        live_supported={super::media::figure_live_supported(
+                            *schema,
+                            renderer_version,
+                            *animated,
+                        )}
                     />
                 </>
             }
