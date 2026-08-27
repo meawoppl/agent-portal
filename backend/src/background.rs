@@ -1031,6 +1031,34 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
         }
     }
 
+    // Delete revoked credentials past the same window. Neither pass around this
+    // one collects them: launcher-spawned tokens carry no expiry, and
+    // `expires_at < cutoff` is never true for NULL, so every session that ever
+    // ran left a revoked row behind forever — June credentials were still
+    // listed in late August. A revoked token cannot authenticate, so it is kept
+    // only long enough to stay visible in the UI after the fact.
+    //
+    // Aged on `created_at` because there is no `revoked_at` column. A token
+    // revoked long after it was minted is therefore collected sooner than seven
+    // days, which is harmless for a credential that can no longer be used — and
+    // `created_at` is NOT NULL, so this cannot repeat the NULL-comparison bug it
+    // exists to fix.
+    match diesel::delete(
+        schema::proxy_auth_tokens::table
+            .filter(schema::proxy_auth_tokens::revoked.eq(true))
+            .filter(schema::proxy_auth_tokens::created_at.lt(token_cutoff)),
+    )
+    .execute(&mut conn)
+    {
+        Ok(0) => {}
+        Ok(count) => {
+            tracing::info!("Revoked token cleanup: deleted {} tokens", count);
+        }
+        Err(e) => {
+            tracing::error!("Failed to delete revoked tokens: {}", e);
+        }
+    }
+
     // Delete leaked launcher-spawned tokens (#1045). These are minted per
     // launch and only ever bound to a session on a *successful* proxy
     // registration; a launch whose proxy never registers leaves a
