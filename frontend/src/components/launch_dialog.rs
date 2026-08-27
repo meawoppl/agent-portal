@@ -826,9 +826,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         </div>
                     }
 
-                    if *agent_type == AgentType::Codex {
+                    if *agent_type == AgentType::Muse {
                         <div class="launch-note launch-note-warn">
-                            { "Codex support is highly experimental." }
+                            { "Muse support is highly experimental." }
                         </div>
                     }
 
