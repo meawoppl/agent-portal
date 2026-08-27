@@ -1,3 +1,8 @@
+use crate::pages::settings::agent_install::AgentInstallModal;
+use crate::pages::settings::agent_login::AgentLoginModal;
+use crate::pages::settings::agents_panel::{
+    render_cell, InstallTarget, LoginTarget, ProbeState, AGENTS,
+};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::{AppConfig, LauncherInfo};
@@ -240,6 +245,10 @@ struct LauncherRowProps {
     phase: Option<UpdatePhase>,
     /// Which lifecycle the in-flight phase belongs to (drives the status text).
     mode: Option<LifecycleMode>,
+    /// Agent install/sign-in probe for this machine; `None` while loading.
+    probe: Option<ProbeState>,
+    on_sign_in: Callback<LoginTarget>,
+    on_install: Callback<InstallTarget>,
 }
 
 #[function_component(LauncherRow)]
@@ -366,7 +375,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
     let status = match &props.phase {
         Some(UpdatePhase::Succeeded { new_version, .. }) => Some(html! {
             <tr class="launcher-update-status">
-                <td colspan="5">
+                <td colspan="7">
                     <div class="launcher-status launcher-status--success">
                         { format!("Back online — v{new_version}") }
                     </div>
@@ -375,7 +384,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
         }),
         Some(UpdatePhase::SameVersion { version }) => Some(html! {
             <tr class="launcher-update-status">
-                <td colspan="5">
+                <td colspan="7">
                     <div class="launcher-status launcher-status--warning">
                         { format!(
                             "Came back on the same version (v{version}) — update may have failed."
@@ -392,7 +401,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
             };
             Some(html! {
                 <tr class="launcher-update-status">
-                    <td colspan="5">
+                    <td colspan="7">
                         <div class="launcher-status launcher-status--waiting">
                             <span class="spinner-small"></span>
                             { msg }
@@ -407,8 +416,12 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
     html! {
         <>
             <tr class="token-row">
-                <td class="token-name">{ &l.launcher_name }</td>
-                <td>{ &l.hostname }</td>
+                <td class="token-name">
+                    <span class="agents-host-name">{ &l.hostname }</span>
+                    if l.launcher_name != l.hostname {
+                        <span class="agents-host-alias">{ format!("({})", l.launcher_name) }</span>
+                    }
+                </td>
                 <td>{ format!("v{}", &l.version) }</td>
                 <td>{ l.running_sessions }</td>
                 <td class="token-actions">
@@ -440,6 +453,16 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                         </button>
                     </div>
                 </td>
+                { for AGENTS.iter().map(|(agent, name)| {
+                    render_cell(
+                        props.probe.as_ref(),
+                        *agent,
+                        name,
+                        l,
+                        &props.on_sign_in,
+                        &props.on_install,
+                    )
+                }) }
             </tr>
             { status.unwrap_or_default() }
         </>
@@ -503,7 +526,7 @@ fn phantom_launcher_row(props: &PhantomLauncherRowProps) -> Html {
                 <td class="token-actions">{ "—" }</td>
             </tr>
             <tr class="launcher-update-status">
-                <td colspan="5">
+                <td colspan="7">
                     <div class={classes!("launcher-status", status_class)}>
                         { status_body }
                     </div>
@@ -516,6 +539,12 @@ fn phantom_launcher_row(props: &PhantomLauncherRowProps) -> Html {
 #[function_component(LaunchersPanel)]
 pub fn launchers_panel() -> Html {
     let launchers = use_state(Vec::<LauncherInfo>::new);
+    // Agent install/sign-in state per launcher. Merged in here (rather than a
+    // second panel) because both are facts about the same machine, and both
+    // were separately fetching /api/launchers to list it.
+    let probes = use_state(std::collections::HashMap::<Uuid, ProbeState>::new);
+    let login_target = use_state(|| None::<LoginTarget>);
+    let install_target = use_state(|| None::<InstallTarget>);
     let loading = use_state(|| true);
     // Global banner reserved for the POST request itself failing (a live
     // launcher can't be reached). Success/progress is shown per-row.
@@ -523,6 +552,48 @@ pub fn launchers_panel() -> Html {
     // Per-launcher update lifecycle, keyed by launcher id (#710 follow-up).
     let update_states = use_state(HashMap::<Uuid, UpdateEntry>::new);
     // Backend's published target version, for the same-version detection.
+    {
+        let probes = probes.clone();
+        let launchers = launchers.clone();
+        use_effect_with((*launchers).clone(), move |list| {
+            let list = list.clone();
+            spawn_local(async move {
+                let mut collected = std::collections::HashMap::new();
+                for l in &list {
+                    if !l.connected {
+                        collected.insert(l.launcher_id, ProbeState::Unreachable);
+                        continue;
+                    }
+                    let path = format!("/api/launchers/{}/probe-agents", l.launcher_id);
+                    let state = match utils::fetch_json::<shared::api::ProbeAgentsResponse>(
+                        &path,
+                        On401::Ignore,
+                    )
+                    .await
+                    {
+                        Ok(resp) => ProbeState::Loaded(
+                            resp.agents.into_iter().map(|a| (a.agent_type, a)).collect(),
+                        ),
+                        Err(_) => ProbeState::Unreachable,
+                    };
+                    collected.insert(l.launcher_id, state);
+                }
+                probes.set(collected);
+            });
+            || ()
+        });
+    }
+    let _ = &launchers;
+
+    let on_sign_in = {
+        let login_target = login_target.clone();
+        Callback::from(move |t: LoginTarget| login_target.set(Some(t)))
+    };
+    let on_install = {
+        let install_target = install_target.clone();
+        Callback::from(move |t: InstallTarget| install_target.set(Some(t)))
+    };
+
     let server_version = use_state(|| None::<String>);
     // 1s heartbeat driving elapsed-time display and timeout/auto-clear checks.
     let tick = use_state(|| 0u32);
@@ -722,11 +793,11 @@ pub fn launchers_panel() -> Html {
                     <table class="tokens-table">
                         <thead>
                             <tr>
-                                <th>{ "Name" }</th>
-                                <th>{ "Host" }</th>
+                                <th>{ "Computer" }</th>
                                 <th>{ "Version" }</th>
                                 <th>{ "Sessions" }</th>
                                 <th>{ "Actions" }</th>
+                                { for AGENTS.iter().map(|(_, name)| html! { <th>{ *name }</th> }) }
                             </tr>
                         </thead>
                         <tbody>
@@ -747,6 +818,9 @@ pub fn launchers_panel() -> Html {
                                         restart_supported={restart_supported}
                                         phase={phase}
                                         mode={mode}
+                                        probe={probes.get(&l.launcher_id).cloned()}
+                                        on_sign_in={on_sign_in.clone()}
+                                        on_install={on_install.clone()}
                                     />
                                 }
                             }) }
@@ -762,6 +836,37 @@ pub fn launchers_panel() -> Html {
                         </tbody>
                     </table>
                 </div>
+            }
+            if let Some(target) = (*login_target).clone() {
+                <AgentLoginModal
+                    launcher_id={target.launcher_id}
+                    agent_type={target.agent_type}
+                    agent_name={target.agent_name}
+                    on_close={{
+                        let login_target = login_target.clone();
+                        Callback::from(move |_| login_target.set(None))
+                    }}
+                    on_success={{
+                        let tick = tick.clone();
+                        Callback::from(move |_| tick.set(tick.wrapping_add(1)))
+                    }}
+                />
+            }
+            if let Some(target) = (*install_target).clone() {
+                <AgentInstallModal
+                    launcher_id={target.launcher_id}
+                    agent_type={target.agent_type}
+                    agent_name={target.agent_name}
+                    host={target.host}
+                    on_close={{
+                        let install_target = install_target.clone();
+                        Callback::from(move |_| install_target.set(None))
+                    }}
+                    on_success={{
+                        let tick = tick.clone();
+                        Callback::from(move |_| tick.set(tick.wrapping_add(1)))
+                    }}
+                />
             }
         </section>
     }

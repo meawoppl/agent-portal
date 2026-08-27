@@ -15,36 +15,32 @@
 //! that opens [`AgentLoginModal`], which drives the launcher-side login flow; a
 //! successful sign-in re-probes the matrix.
 
-use crate::pages::settings::agent_install::{host_label, AgentInstallModal};
-use crate::pages::settings::agent_login::AgentLoginModal;
-use crate::utils::{self, On401};
-use shared::api::ProbeAgentsResponse;
+use crate::pages::settings::agent_install::host_label;
 use shared::{AgentInstall, AgentLoginStatus, AgentType, LauncherInfo};
 use std::collections::HashMap;
 use uuid::Uuid;
-use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 /// Which cell's sign-in modal is open: (launcher, agent, agent display name).
 #[derive(Clone, PartialEq)]
-struct LoginTarget {
-    launcher_id: Uuid,
-    agent_type: AgentType,
-    agent_name: String,
+pub(super) struct LoginTarget {
+    pub(super) launcher_id: Uuid,
+    pub(super) agent_type: AgentType,
+    pub(super) agent_name: String,
 }
 
 /// Which cell's install modal is open, plus the host label so the modal can
 /// say *where* the install runs.
 #[derive(Clone, PartialEq)]
-struct InstallTarget {
-    launcher_id: Uuid,
-    agent_type: AgentType,
-    agent_name: String,
-    host: String,
+pub(super) struct InstallTarget {
+    pub(super) launcher_id: Uuid,
+    pub(super) agent_type: AgentType,
+    pub(super) agent_name: String,
+    pub(super) host: String,
 }
 
 /// Columns of the matrix, in display order. Mirrors `AgentType`.
-const AGENTS: [(AgentType, &str); 3] = [
+pub(super) const AGENTS: [(AgentType, &str); 3] = [
     (AgentType::Claude, "Claude"),
     (AgentType::Codex, "Codex"),
     (AgentType::Muse, "Muse"),
@@ -54,184 +50,14 @@ const AGENTS: [(AgentType, &str); 3] = [
 /// resolves, so a launcher is either absent from the map (still loading, whole
 /// pane shows "Loading…") or in one of these terminal states.
 #[derive(Clone, PartialEq)]
-enum ProbeState {
+pub(super) enum ProbeState {
     /// Launcher is offline (not connected) — can't be probed.
     Unreachable,
     /// Probe returned; agents keyed by type for O(1) cell lookup.
     Loaded(HashMap<AgentType, AgentInstall>),
 }
 
-#[function_component(AgentsPanel)]
-pub fn agents_panel() -> Html {
-    let launchers = use_state(|| None::<Vec<LauncherInfo>>);
-    let probes = use_state(HashMap::<Uuid, ProbeState>::new);
-    // Bumped by the refresh button (and a successful sign-in) to re-run the fan-out.
-    let refresh = use_state(|| 0u32);
-    // The open sign-in modal, if any.
-    let login_target = use_state(|| None::<LoginTarget>);
-    // The open install modal, if any.
-    let install_target = use_state(|| None::<InstallTarget>);
-
-    {
-        let launchers = launchers.clone();
-        let probes = probes.clone();
-        use_effect_with(*refresh, move |_| {
-            launchers.set(None);
-            probes.set(HashMap::new());
-            spawn_local(async move {
-                let list = utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore)
-                    .await
-                    .unwrap_or_default();
-
-                // Probe sequentially — a settings pane has a handful of hosts,
-                // and this keeps the state update race-free (one set at the end)
-                // without pulling in a join_all.
-                let mut collected: HashMap<Uuid, ProbeState> = HashMap::new();
-                for l in &list {
-                    if !l.connected {
-                        collected.insert(l.launcher_id, ProbeState::Unreachable);
-                        continue;
-                    }
-                    let path = format!("/api/launchers/{}/probe-agents", l.launcher_id);
-                    let state = match utils::fetch_json::<ProbeAgentsResponse>(&path, On401::Ignore)
-                        .await
-                    {
-                        Ok(resp) => ProbeState::Loaded(
-                            resp.agents.into_iter().map(|a| (a.agent_type, a)).collect(),
-                        ),
-                        // A connected launcher that fails to answer (dropped
-                        // mid-probe, timeout) is unreachable for our purposes.
-                        Err(_) => ProbeState::Unreachable,
-                    };
-                    collected.insert(l.launcher_id, state);
-                }
-
-                launchers.set(Some(list));
-                probes.set(collected);
-            });
-            || ()
-        });
-    }
-
-    let on_refresh = {
-        let refresh = refresh.clone();
-        Callback::from(move |_: MouseEvent| refresh.set(*refresh + 1))
-    };
-
-    let on_sign_in = {
-        let login_target = login_target.clone();
-        Callback::from(move |target: LoginTarget| login_target.set(Some(target)))
-    };
-
-    let on_install = {
-        let install_target = install_target.clone();
-        Callback::from(move |target: InstallTarget| install_target.set(Some(target)))
-    };
-
-    let body = match (*launchers).clone() {
-        None => html! { <p class="setting-description">{ "Loading…" }</p> },
-        Some(list) if list.is_empty() => html! {
-            <p class="setting-description">
-                { "No computers connected yet. Install the agent-portal launcher on a \
-                   machine and it'll appear here." }
-            </p>
-        },
-        Some(list) => html! {
-            <table class="agents-matrix">
-                <thead>
-                    <tr>
-                        <th>{ "Computer" }</th>
-                        { for AGENTS.iter().map(|(_, name)| html! { <th>{ *name }</th> }) }
-                    </tr>
-                </thead>
-                <tbody>
-                    { for list.iter().map(|l| render_row(l, &probes, &on_sign_in, &on_install)) }
-                </tbody>
-            </table>
-        },
-    };
-
-    let login_modal = (*login_target).clone().map(|target| {
-        let on_close = {
-            let login_target = login_target.clone();
-            Callback::from(move |_| login_target.set(None))
-        };
-        let on_success = {
-            let refresh = refresh.clone();
-            Callback::from(move |_| refresh.set(*refresh + 1))
-        };
-        html! {
-            <AgentLoginModal
-                launcher_id={target.launcher_id}
-                agent_type={target.agent_type}
-                agent_name={target.agent_name}
-                {on_close}
-                {on_success}
-            />
-        }
-    });
-
-    let install_modal = (*install_target).clone().map(|target| {
-        let on_close = {
-            let install_target = install_target.clone();
-            Callback::from(move |_| install_target.set(None))
-        };
-        let on_success = {
-            let refresh = refresh.clone();
-            Callback::from(move |_| refresh.set(*refresh + 1))
-        };
-        html! {
-            <AgentInstallModal
-                launcher_id={target.launcher_id}
-                agent_type={target.agent_type}
-                agent_name={target.agent_name}
-                host={target.host}
-                {on_close}
-                {on_success}
-            />
-        }
-    });
-
-    html! {
-        <section class="agents-section">
-            <div class="section-header">
-                <h2>{ "Agents" }</h2>
-                <p class="section-description">
-                    { "Install and sign-in state for each agent on every connected \
-                       computer. " }
-                    <button class="link-button" onclick={on_refresh}>{ "Refresh" }</button>
-                </p>
-            </div>
-            { body }
-            { for login_modal }
-            { for install_modal }
-        </section>
-    }
-}
-
-fn render_row(
-    launcher: &LauncherInfo,
-    probes: &HashMap<Uuid, ProbeState>,
-    on_sign_in: &Callback<LoginTarget>,
-    on_install: &Callback<InstallTarget>,
-) -> Html {
-    let state = probes.get(&launcher.launcher_id);
-    html! {
-        <tr>
-            <td class="agents-host">
-                <span class="agents-host-name">{ &launcher.hostname }</span>
-                if launcher.launcher_name != launcher.hostname {
-                    <span class="agents-host-alias">{ format!("({})", launcher.launcher_name) }</span>
-                }
-            </td>
-            { for AGENTS.iter().map(|(agent, name)| {
-                render_cell(state, *agent, name, launcher, on_sign_in, on_install)
-            }) }
-        </tr>
-    }
-}
-
-fn render_cell(
+pub(super) fn render_cell(
     state: Option<&ProbeState>,
     agent: AgentType,
     agent_name: &str,
