@@ -473,7 +473,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                         </table>
                     </div>
                     <p class="section-note">
-                        { "Credentials expired for more than 7 days are automatically deleted." }
+                        { "Credentials revoked or expired more than 7 days ago are automatically deleted." }
                     </p>
                 }
             </section>
