@@ -15,7 +15,6 @@ mod tokens_panel;
 
 use crate::utils;
 use account_panel::AccountPanel;
-use agents_panel::AgentsPanel;
 use appearance_panel::AppearancePanel;
 use forwarding_panel::ForwardingPanel;
 use health_timer_panel::HealthTimerPanel;
@@ -176,7 +175,6 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Computers {
                     <LaunchersPanel />
-                    <AgentsPanel />
                 }
                 if *active_tab == SettingsTab::Tokens {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
