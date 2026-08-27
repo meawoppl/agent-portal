@@ -19,6 +19,7 @@ use tower_cookies::Cookies;
 use tracing::{error, info};
 use uuid::Uuid;
 
+use base64::Engine as _;
 use shared::api::{
     AgentSessionInfo, AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse,
     ShowMediaResponse,
@@ -259,7 +260,7 @@ pub struct ShowMediaQuery {
     filename: Option<String>,
 }
 
-/// POST /api/agent/sessions/{id}/media — display an image or video in a
+/// POST /api/agent/sessions/{id}/media — display media in a
 /// session's transcript (`agent-portal show <file>`). The raw file bytes are
 /// the request body; the declared content type rides in the `Content-Type`
 /// header and the original name in `?filename=`. Images go to the in-memory
@@ -299,6 +300,7 @@ pub async fn show_media(
     let cap_mb = match kind {
         MediaKind::Image => app_state.max_image_mb,
         MediaKind::Video => app_state.max_video_mb,
+        MediaKind::Figure => 10,
     };
     if body.len() as u64 > cap_mb as u64 * 1024 * 1024 {
         return Err(AppError::PayloadTooLarge(format!(
@@ -308,6 +310,7 @@ pub async fn show_media(
             match kind {
                 MediaKind::Image => "images",
                 MediaKind::Video => "videos",
+                MediaKind::Figure => "portable figures",
             },
         )));
     }
@@ -366,6 +369,42 @@ pub async fn show_media(
                     filename.clone(),
                     Some(file_size),
                 ),
+                id,
+            )
+        }
+        MediaKind::Figure => {
+            let mut limits = rizzma::portable::Limits::new();
+            // The poster is persisted in the transcript for durable fallback;
+            // keep that row bounded independently of the 10 MiB artifact cap.
+            limits.max_poster_bytes = 1024 * 1024;
+            let metadata = rizzma::portable::inspect(&body, &limits)
+                .map_err(|_| AppError::BadRequest("invalid portable figure"))?;
+            let meta = metadata.meta.as_ref().ok_or(AppError::BadRequest(
+                "portable figure lacks display metadata",
+            ))?;
+            let poster_base64 = metadata
+                .poster(&body)
+                .map(|poster| base64::engine::general_purpose::STANDARD.encode(poster));
+            let id = app_state
+                .media_store
+                .store_bytes(&content_type, &body, user_id, Some(target_id))
+                .map_err(|e| AppError::Internal(format!("store portable figure: {e}")))?;
+            (
+                PortalMessage::with_content(vec![PortalContent::Figure {
+                    media_type: content_type.clone(),
+                    data: format!("/api/media/{id}"),
+                    file_path: filename.clone(),
+                    file_size: Some(file_size),
+                    schema: metadata.schema,
+                    renderer_version: metadata.renderer.version.clone(),
+                    width_px: meta.width_px,
+                    height_px: meta.height_px,
+                    title: meta.title.clone(),
+                    alt: meta.alt.clone(),
+                    poster_base64,
+                    animated: meta.animated,
+                    duration: meta.duration,
+                }]),
                 id,
             )
         }

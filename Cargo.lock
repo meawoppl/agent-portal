@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal-mobile"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "agent-portal-mobile-status-notification",
  "reqwest 0.12.28",
@@ -251,7 +251,7 @@ checksum = "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c"
 
 [[package]]
 name = "archive-format"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "chrono",
  "object_store",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "a2",
  "anyhow",
@@ -667,6 +667,7 @@ dependencies = [
  "portal-stt",
  "rand 0.8.6",
  "reqwest 0.12.28",
+ "rizzma",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -1067,9 +1068,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.44"
+version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -1170,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1202,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1267,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -2469,7 +2470,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4541,7 +4542,7 @@ dependencies = [
 
 [[package]]
 name = "muse-session-lib"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -5471,7 +5472,7 @@ dependencies = [
 
 [[package]]
 name = "portal-auth"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "anyhow",
  "colored",
@@ -5486,7 +5487,7 @@ dependencies = [
 
 [[package]]
 name = "portal-stt"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "anyhow",
  "aws-credential-types",
@@ -5506,7 +5507,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "anyhow",
  "hex",
@@ -6082,6 +6083,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rizzma"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "505abf76e6c60211ee5b6e113e1630ad394bbe3b16900acabb97858332f198e4"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "png 0.18.1",
+ "serde",
+ "serde_json",
+ "tiny-skia",
+ "ttf-parser",
+]
+
+[[package]]
 name = "route-recognizer"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6506,9 +6522,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
  "memchr",
@@ -6645,7 +6661,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6734,7 +6750,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.13.11"
+version = "2.14.11"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6969,6 +6985,12 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "strict-num"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 
 [[package]]
 name = "string_cache"
@@ -7605,6 +7627,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "tiny-skia"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47ffee5eaaf5527f630fb0e356b90ebdec84d5d18d937c5e440350f88c5a91ea"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "bytemuck",
+ "cfg-if",
+ "log",
+ "png 0.18.1",
+ "tiny-skia-path",
+]
+
+[[package]]
+name = "tiny-skia-path"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edca365c3faccca67d06593c5980fa6c57687de727a03131735bb85f01fdeeb9"
+dependencies = [
+ "arrayref",
+ "bytemuck",
+ "strict-num",
+]
+
+[[package]]
 name = "tinystr"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8102,6 +8150,12 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tungstenite"

@@ -114,6 +114,36 @@ fn render_portal_content(
                 </>
             }
         }
+        shared::PortalContent::Figure {
+            data,
+            file_path,
+            file_size,
+            width_px,
+            height_px,
+            title,
+            alt,
+            poster_base64,
+            animated,
+            schema,
+            renderer_version,
+            ..
+        } => {
+            html! {
+                <>
+                    { render_portal_image_header(file_path.as_deref(), *file_size) }
+                    <super::media::FigureViewer
+                        artifact_url={data.clone()}
+                        width_px={*width_px}
+                        height_px={*height_px}
+                        title={title.clone()}
+                        alt={alt.clone()}
+                        poster_base64={poster_base64.clone()}
+                        animated={*animated}
+                        live_supported={*schema <= 3 && renderer_version == "1.9.0" && !*animated}
+                    />
+                </>
+            }
+        }
         shared::PortalContent::Reminder { title, body } => {
             html! { <PortalReminder title={title.clone()} body={body.clone()} session_id={session_id} /> }
         }

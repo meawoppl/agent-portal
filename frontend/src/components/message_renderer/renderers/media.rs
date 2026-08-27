@@ -3,7 +3,19 @@
 //! placeholder both degrade to.
 
 use crate::hooks::use_escape_capture;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::HtmlIFrameElement;
 use yew::prelude::*;
+
+#[wasm_bindgen(module = "/rizzma-host.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = mountRizzma)]
+    fn mount_rizzma(frame: HtmlIFrameElement, artifact_url: &str) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_name = disposeRizzma)]
+    fn dispose_rizzma(frame: HtmlIFrameElement);
+}
 
 const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
     "image/png",
@@ -152,6 +164,120 @@ pub(super) fn render_video_source(media_type: &str, url: &str, filename: Option<
     }
     html! {
         <VideoViewer src={url.to_string()} {filename} />
+    }
+}
+
+#[derive(Properties, PartialEq)]
+pub(super) struct FigureViewerProps {
+    pub artifact_url: String,
+    pub width_px: u32,
+    pub height_px: u32,
+    #[prop_or_default]
+    pub title: Option<String>,
+    #[prop_or_default]
+    pub alt: Option<String>,
+    #[prop_or_default]
+    pub poster_base64: Option<String>,
+    pub animated: bool,
+    pub live_supported: bool,
+}
+
+/// Sandboxed Rizzma viewer. Runtime assets are pinned and verified by the
+/// portal-owned host module before any realm is created. The iframe has only
+/// `allow-scripts`; it receives bytes through a MessageChannel and has no
+/// network, storage, cookie, or portal-origin access.
+#[function_component(FigureViewer)]
+pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
+    let frame_ref = use_node_ref();
+    let loading = use_state(|| false);
+    let mounted = use_state(|| false);
+    let error = use_state(|| None::<String>);
+
+    {
+        let frame_ref = frame_ref.clone();
+        use_effect_with((), move |_| {
+            move || {
+                if let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() {
+                    dispose_rizzma(frame);
+                }
+            }
+        });
+    }
+
+    let onclick = {
+        let frame_ref = frame_ref.clone();
+        let artifact_url = props.artifact_url.clone();
+        let loading = loading.clone();
+        let mounted = mounted.clone();
+        let error = error.clone();
+        Callback::from(move |_: MouseEvent| {
+            let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() else {
+                error.set(Some("portable-figure frame is unavailable".to_string()));
+                return;
+            };
+            loading.set(true);
+            error.set(None);
+            let loading = loading.clone();
+            let mounted = mounted.clone();
+            let error = error.clone();
+            let promise = mount_rizzma(frame, &artifact_url);
+            wasm_bindgen_futures::spawn_local(async move {
+                match JsFuture::from(promise).await {
+                    Ok(_) => mounted.set(true),
+                    Err(value) => error.set(Some(
+                        value
+                            .as_string()
+                            .unwrap_or_else(|| "portable figure failed to mount".to_string()),
+                    )),
+                }
+                loading.set(false);
+            });
+        })
+    };
+
+    let aspect_ratio = format!("{} / {}", props.width_px.max(1), props.height_px.max(1));
+    let poster = props
+        .poster_base64
+        .as_ref()
+        .map(|data| format!("data:image/png;base64,{data}"));
+    let label = props
+        .alt
+        .clone()
+        .or_else(|| props.title.clone())
+        .unwrap_or_else(|| "Portable figure".to_string());
+
+    html! {
+        <div class="rizzma-figure" style={format!("aspect-ratio: {aspect_ratio}")}>
+            if !*mounted {
+                if let Some(src) = poster {
+                    <img class="rizzma-poster" {src} alt={label.clone()} />
+                } else {
+                    <div class="rizzma-poster-missing">{ label.clone() }</div>
+                }
+            }
+            <iframe
+                ref={frame_ref}
+                class={classes!("rizzma-frame", (!*mounted).then_some("hidden"))}
+                sandbox="allow-scripts"
+                title={label}
+            />
+            if !*mounted {
+                <button class="rizzma-mount" {onclick} disabled={*loading || !props.live_supported}>
+                    if props.animated {
+                        { "Animation poster (playback unavailable)" }
+                    } else if !props.live_supported {
+                        { "Poster (runtime unavailable)" }
+                    } else if *loading {
+                        { "Loading interactive figure…" }
+                    } else {
+                        { "Open interactive figure" }
+                    }
+                </button>
+            }
+            if let Some(message) = &*error {
+                <div class="rizzma-error">{ message }</div>
+            }
+        </div>
     }
 }
 

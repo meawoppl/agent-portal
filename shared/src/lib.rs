@@ -870,6 +870,31 @@ pub enum PortalContent {
         #[serde(default)]
         source_type: Option<String>,
     },
+    /// A Rizzma portable figure. `data` is the served artifact URL. The poster
+    /// is embedded in the durable transcript row so replay still has a useful
+    /// fallback after the TTL-bounded live artifact has expired.
+    Figure {
+        media_type: String,
+        data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_size: Option<u64>,
+        schema: u32,
+        renderer_version: String,
+        width_px: u32,
+        height_px: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alt: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        poster_base64: Option<String>,
+        #[serde(default)]
+        animated: bool,
+        #[serde(default)]
+        duration: f64,
+    },
     /// Collapsible "portal features reminder" emitted at session start and
     /// after compaction boundaries. The body is markdown — rendered through
     /// the same pipeline as text portal messages — and lives behind a
@@ -952,6 +977,25 @@ impl std::fmt::Debug for PortalContent {
                 .field("file_path", file_path)
                 .field("file_size", file_size)
                 .field("source_type", source_type)
+                .finish(),
+            Self::Figure {
+                data,
+                file_path,
+                file_size,
+                schema,
+                renderer_version,
+                animated,
+                duration,
+                ..
+            } => f
+                .debug_struct("Figure")
+                .field("data", data)
+                .field("file_path", file_path)
+                .field("file_size", file_size)
+                .field("schema", schema)
+                .field("renderer_version", renderer_version)
+                .field("animated", animated)
+                .field("duration", duration)
                 .finish(),
             Self::Reminder { title, body } => f
                 .debug_struct("Reminder")

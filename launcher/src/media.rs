@@ -1,4 +1,4 @@
-//! `agent-portal show <file>` (alias `display`): display an image or video in
+//! `agent-portal show <file>` (alias `display`): display media in
 //! the calling session's transcript. A thin client over the backend's
 //! `POST /api/agent/sessions/{id}/media` endpoint, authenticated with the
 //! launcher's stored proxy token and attributed to the session the CLI is
@@ -14,8 +14,9 @@ use anyhow::{anyhow, Context, Result};
 
 use shared::api::ShowMediaResponse;
 use shared::media::{
-    has_gif_magic, has_jpeg_magic, has_mp4_magic, has_png_magic, has_webm_magic, has_webp_magic,
-    looks_like_svg, media_kind, MediaKind, SUPPORTED_FORMATS_HINT,
+    has_gif_magic, has_jpeg_magic, has_mp4_magic, has_png_magic, has_rizzma_magic, has_webm_magic,
+    has_webp_magic, looks_like_svg, media_kind, MediaKind, PORTABLE_FIGURE_TYPE,
+    SUPPORTED_FORMATS_HINT,
 };
 
 /// Detect a supported media content type from `path`'s extension, verified
@@ -37,6 +38,7 @@ pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static 
         Some("svg") => ("image/svg+xml", looks_like_svg(bytes)),
         Some("mp4") => ("video/mp4", has_mp4_magic(bytes)),
         Some("webm") => ("video/webm", has_webm_magic(bytes)),
+        Some("riz") => (PORTABLE_FIGURE_TYPE, has_rizzma_magic(bytes)),
         _ => {
             return Err(format!(
                 "unsupported file type; supported formats: {SUPPORTED_FORMATS_HINT}"
@@ -56,9 +58,13 @@ pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static 
 /// Per-kind size cap (MB) from the environment, defaulting to the documented
 /// values. The backend is authoritative; this is a fast local pre-flight.
 fn cap_mb(kind: MediaKind) -> u64 {
+    if kind == MediaKind::Figure {
+        return 10;
+    }
     let (var, default) = match kind {
         MediaKind::Image => ("PORTAL_MAX_IMAGE_MB", 10),
         MediaKind::Video => ("PORTAL_MAX_VIDEO_MB", 100),
+        MediaKind::Figure => unreachable!("portable-figure cap returned above"),
     };
     std::env::var(var)
         .ok()
@@ -82,6 +88,7 @@ pub async fn show(path_str: &str) -> Result<()> {
     let kind_word = match kind {
         MediaKind::Image => "image",
         MediaKind::Video => "video",
+        MediaKind::Figure => "portable figure",
     };
     println!(
         "Displayed {kind_word} {filename} ({}) in session {}.",
@@ -127,6 +134,7 @@ pub(crate) async fn upload_media(
             match kind {
                 MediaKind::Image => "images",
                 MediaKind::Video => "videos",
+                MediaKind::Figure => "portable figures",
             },
         ));
     }
@@ -171,6 +179,15 @@ mod tests {
             detect_content_type(Path::new("plot.png"), &png_bytes()),
             Ok("image/png")
         );
+    }
+
+    #[test]
+    fn detects_portable_figure_by_extension_and_magic() {
+        assert_eq!(
+            detect_content_type(Path::new("plot.riz"), b"RZFG\x01\0\0\0"),
+            Ok(PORTABLE_FIGURE_TYPE)
+        );
+        assert!(detect_content_type(Path::new("plot.riz"), b"not a figure").is_err());
     }
 
     #[test]

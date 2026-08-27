@@ -2,16 +2,16 @@
 //!
 //! The CLI detects a file's content type (by extension + magic bytes) and the
 //! backend validates the declared `Content-Type`. Both agree on the supported
-//! set and the image/video split through this one module, so the allow-list
+//! set and the image/video/figure split through this one module, so the allow-list
 //! never drifts between the two sides.
 
-/// Whether a supported media type is a still image or a video. Drives storage
-/// (in-memory image store vs. on-disk media store) and rendering (`<img>` vs.
-/// `<video>`).
+/// Kind of supported transcript media. Drives storage and rendering without
+/// making callers infer behavior from a MIME string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaKind {
     Image,
     Video,
+    Figure,
 }
 
 /// Supported image content types (stored in the in-memory image store).
@@ -26,13 +26,19 @@ pub const SUPPORTED_IMAGE_TYPES: &[&str] = &[
 /// Supported video content types (stored on disk, served with Range support).
 pub const SUPPORTED_VIDEO_TYPES: &[&str] = &["video/mp4", "video/webm"];
 
-/// Classify a content type as image or video, or `None` if unsupported.
+/// Rizzma portable figures. The artifact is data; it is only interpreted by a
+/// host-vetted renderer inside a sandboxed realm.
+pub const PORTABLE_FIGURE_TYPE: &str = "application/vnd.rizzma.figure";
+
+/// Classify a supported content type, or return `None`.
 pub fn media_kind(content_type: &str) -> Option<MediaKind> {
     let ct = content_type.trim();
     if SUPPORTED_IMAGE_TYPES.contains(&ct) {
         Some(MediaKind::Image)
     } else if SUPPORTED_VIDEO_TYPES.contains(&ct) {
         Some(MediaKind::Video)
+    } else if ct == PORTABLE_FIGURE_TYPE {
+        Some(MediaKind::Figure)
     } else {
         None
     }
@@ -40,7 +46,7 @@ pub fn media_kind(content_type: &str) -> Option<MediaKind> {
 
 /// Human-readable list of supported formats, for CLI/backend error messages.
 pub const SUPPORTED_FORMATS_HINT: &str =
-    "png, jpg, jpeg, gif, webp, svg (images); mp4, webm (video)";
+    "png, jpg, jpeg, gif, webp, svg (images); mp4, webm (video); riz (portable figure)";
 
 // --- Format probes ---
 //
@@ -73,6 +79,10 @@ pub fn has_mp4_magic(b: &[u8]) -> bool {
 pub fn has_webm_magic(b: &[u8]) -> bool {
     // EBML header (Matroska/WebM).
     b.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
+}
+
+pub fn has_rizzma_magic(b: &[u8]) -> bool {
+    b.starts_with(b"RZFG")
 }
 
 /// SVG is XML text, so there's no single magic number. Skip a UTF-8 BOM and
@@ -111,6 +121,8 @@ pub fn sniff_content_type(bytes: &[u8]) -> Option<&'static str> {
         Some("video/mp4")
     } else if has_webm_magic(bytes) {
         Some("video/webm")
+    } else if has_rizzma_magic(bytes) {
+        Some(PORTABLE_FIGURE_TYPE)
     } else if looks_like_svg(bytes) {
         Some("image/svg+xml")
     } else {
@@ -128,6 +140,7 @@ mod tests {
         assert_eq!(media_kind("image/svg+xml"), Some(MediaKind::Image));
         assert_eq!(media_kind("video/mp4"), Some(MediaKind::Video));
         assert_eq!(media_kind("video/webm"), Some(MediaKind::Video));
+        assert_eq!(media_kind(PORTABLE_FIGURE_TYPE), Some(MediaKind::Figure));
     }
 
     #[test]
@@ -148,6 +161,10 @@ mod tests {
         );
         assert_eq!(sniff_content_type(b"GIF89a...."), Some("image/gif"));
         assert_eq!(sniff_content_type(b"RIFF____WEBPVP8 "), Some("image/webp"));
+        assert_eq!(
+            sniff_content_type(b"RZFG\x01\0\0\0"),
+            Some(PORTABLE_FIGURE_TYPE)
+        );
         assert_eq!(sniff_content_type(b"\0\0\0\x18ftypisom"), Some("video/mp4"));
         assert_eq!(
             sniff_content_type(&[0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0]),
