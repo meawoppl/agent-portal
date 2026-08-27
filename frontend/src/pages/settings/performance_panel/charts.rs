@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use shared::api::MetricBucket;
 use yew::prelude::*;
 
-use crate::components::charts::{AxisScale, BucketKind, LinePlot, StackedArea};
+use crate::components::charts::{AxisScale, BucketKind, LinePlot, LineSeries, StackedArea};
 
 use super::model::{
     bucket_group_key, bucket_param, distinct_bucket_starts, GroupBy, GroupKey, TimeWindow,
@@ -23,6 +23,7 @@ pub(super) fn render_charts(
     pairs: &[GroupKey],
     window: TimeWindow,
     axis_scale: AxisScale,
+    show_p95: bool,
 ) -> Html {
     let bucket_axis = distinct_bucket_starts(buckets);
     // Resolve the bucket-kind from the same wire param we sent on the request,
@@ -43,7 +44,7 @@ pub(super) fn render_charts(
     }
 
     // ------------ a) Throughput trend: p50 (solid) + p95 (dashed) ------------
-    let throughput_series = build_p50_p95_series(
+    let mut throughput_series = build_p50_p95_series(
         &indexed,
         &bucket_axis,
         &active_pairs,
@@ -52,13 +53,15 @@ pub(super) fn render_charts(
     );
 
     // ------------ b) TTFT trend: p50 (solid) + p95 (dashed) seconds ----------
-    let ttft_series = build_p50_p95_series(
+    let mut ttft_series = build_p50_p95_series(
         &indexed,
         &bucket_axis,
         &active_pairs,
         |r| r.ttft_p50_ms.map(|ms| ms as f64 / 1000.0),
         |r| r.ttft_p95_ms.map(|ms| ms as f64 / 1000.0),
     );
+    apply_percentile_visibility(&mut throughput_series, show_p95);
+    apply_percentile_visibility(&mut ttft_series, show_p95);
 
     // ------------ c) Stop-reason stacked area ---------------------------------
     let stop_reason_series = build_stop_reason_series(buckets, &bucket_axis, &active_pairs);
@@ -124,5 +127,11 @@ pub(super) fn render_charts(
                 axis_scale={axis_scale}
             />
         </div>
+    }
+}
+
+pub(super) fn apply_percentile_visibility(series: &mut Vec<LineSeries>, show_p95: bool) {
+    if !show_p95 {
+        series.retain(|series| !series.dashed);
     }
 }

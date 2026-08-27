@@ -362,6 +362,7 @@ mod tests {
             Some("   "),
             Some("unknown"),
             Some("UNKNOWN"),
+            Some("<synthetic>"),
         ] {
             metrics.model = bad.map(str::to_string);
             assert!(!metrics.has_known_model(), "expected {:?} rejected", bad);

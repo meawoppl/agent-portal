@@ -30,6 +30,7 @@ pub fn performance_panel() -> Html {
     let window = use_state(|| TimeWindow::Days30);
     let group_by = use_state(|| GroupBy::All);
     let axis_scale = use_state(|| AxisScale::Linear);
+    let show_p95 = use_state(|| true);
     let metrics = use_performance_metrics(*window);
 
     let pairs = distinct_pairs(&metrics.buckets);
@@ -58,6 +59,11 @@ pub fn performance_panel() -> Html {
         })
     };
 
+    let on_show_p95_change = {
+        let show_p95 = show_p95.clone();
+        Callback::from(move |_| show_p95.set(!*show_p95))
+    };
+
     html! {
         <section class="section-stack">
             <div class="section-header">
@@ -72,13 +78,22 @@ pub fn performance_panel() -> Html {
                 window: *window,
                 group_by: &group_by,
                 axis_scale: *axis_scale,
+                show_p95: *show_p95,
                 pairs: &pairs,
                 on_window_change,
                 on_group_change,
                 on_axis_scale_change,
+                on_show_p95_change,
             }) }
 
-            { render_performance_body(&metrics, &group_by, &pairs, *window, *axis_scale) }
+            { render_performance_body(
+                &metrics,
+                &group_by,
+                &pairs,
+                *window,
+                *axis_scale,
+                *show_p95,
+            ) }
         </section>
     }
 }
@@ -90,6 +105,7 @@ mod tests {
     use shared::{api::MetricBucket, AgentType};
     use std::collections::BTreeMap;
 
+    use super::charts::apply_percentile_visibility;
     use super::model::{
         bucket_group_key, bucket_param, distinct_bucket_starts, pair_color, pair_label, GroupKey,
     };
@@ -97,6 +113,7 @@ mod tests {
         build_auxiliary_token_series, build_cache_hit_series, build_cost_per_token_series,
         build_stop_reason_series,
     };
+    use crate::components::charts::LineSeries;
     use crate::test_fixtures::MetricBucketBuilder;
 
     fn mk_bucket(
@@ -176,9 +193,37 @@ mod tests {
     }
 
     #[test]
-    fn pair_label_unknown_when_no_claude_model() {
+    fn pair_label_uses_agent_when_no_claude_model() {
         let label = pair_label(&(AgentType::Claude, None, None));
-        assert_eq!(label, "claude unknown");
+        assert_eq!(label, "Claude");
+    }
+
+    #[test]
+    fn synthetic_model_is_folded_into_agent_group() {
+        let ts = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let bucket = mk_bucket(ts, Some("<synthetic>"), None, None, None, vec![]);
+        assert_eq!(bucket_group_key(&bucket), (AgentType::Claude, None, None));
+    }
+
+    #[test]
+    fn p95_toggle_removes_only_dashed_series() {
+        let mut series = vec![
+            LineSeries {
+                label: "model p50".to_string(),
+                color: "blue".to_string(),
+                dashed: false,
+                values: vec![Some(1.0)],
+            },
+            LineSeries {
+                label: "model p95".to_string(),
+                color: "blue".to_string(),
+                dashed: true,
+                values: vec![Some(2.0)],
+            },
+        ];
+        apply_percentile_visibility(&mut series, false);
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].label, "model p50");
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub(super) fn render_performance_body(
     pairs: &[GroupKey],
     window: TimeWindow,
     axis_scale: AxisScale,
+    show_p95: bool,
 ) -> Html {
     if metrics.loading {
         html! {
@@ -30,6 +31,13 @@ pub(super) fn render_performance_body(
             </div>
         }
     } else {
-        render_charts(&metrics.buckets, group_by, pairs, window, axis_scale)
+        render_charts(
+            &metrics.buckets,
+            group_by,
+            pairs,
+            window,
+            axis_scale,
+            show_p95,
+        )
     }
 }

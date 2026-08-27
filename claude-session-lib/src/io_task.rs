@@ -300,6 +300,10 @@ fn can_anchor_context(msg: &claude_codes::io::AssistantMessage) -> bool {
     }
     true
 }
+
+fn is_reportable_model(model: &str) -> bool {
+    !model.is_empty() && model != SYNTHETIC_MODEL
+}
 const MAX_RATE_LIMIT_RETRIES: u32 = 30;
 const RATE_LIMIT_BACKOFF_CAP_SECS: u64 = 60;
 
@@ -611,7 +615,7 @@ pub(crate) async fn claude_io_task(
                                 }
                                 // Refresh per-turn model + service tier from
                                 // the most recent assistant frame.
-                                if !asst.message.model.is_empty() {
+                                if is_reportable_model(&asst.message.model) {
                                     current_model = Some(asst.message.model.clone());
                                 }
                                 if let Some(usage) = &asst.message.usage {
@@ -1380,6 +1384,13 @@ mod tests {
                 "should not anchor: {text}"
             );
         }
+    }
+
+    #[test]
+    fn synthetic_model_cannot_replace_turn_model() {
+        assert!(is_reportable_model("claude-opus-4-8"));
+        assert!(!is_reportable_model(""));
+        assert!(!is_reportable_model(SYNTHETIC_MODEL));
     }
 
     /// The exclusion only inspects the FIRST content block, matching the CLI —

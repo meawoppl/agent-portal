@@ -10,6 +10,7 @@ use shared::api::{HistorySessionSummary, HistorySessionsResponse, DEFAULT_HISTOR
 
 use super::fetch::{fetch_json, Load};
 use super::filters::SessionFilter;
+use crate::components::turn_metrics_display::is_displayable_model;
 use crate::Route;
 
 /// Rows requested per page. Must not exceed `MAX_HISTORY_PAGE_SIZE`, which the
@@ -433,8 +434,21 @@ fn session_row(props: &SessionRowProps) -> Html {
             <td class="cell-date">{ short_date(&s.last_activity) }</td>
             <td class="num">{ s.message_count }</td>
             <td class="num">{ format!("${:.2}", s.total_cost_usd) }</td>
-            <td class="cell-models">{ s.models.join(", ") }</td>
+            <td class="cell-models">{ visible_models(&s.models) }</td>
         </tr>
+    }
+}
+
+fn visible_models(models: &[String]) -> String {
+    let visible = models
+        .iter()
+        .filter(|model| is_displayable_model(model))
+        .cloned()
+        .collect::<Vec<_>>();
+    if visible.is_empty() {
+        "—".to_string()
+    } else {
+        visible.join(", ")
     }
 }
 
@@ -500,6 +514,13 @@ mod tests {
         let w = PageWindow::resolve(7, 0, 50);
         assert_eq!(w.page_count, 1);
         assert_eq!(w.shown(), 7);
+    }
+
+    #[test]
+    fn synthetic_models_are_hidden_from_history() {
+        let models = vec!["<synthetic>".to_string(), "claude-opus-4-8".to_string()];
+        assert_eq!(visible_models(&models), "claude-opus-4-8");
+        assert_eq!(visible_models(&["<synthetic>".to_string()]), "—");
     }
 
     #[test]
