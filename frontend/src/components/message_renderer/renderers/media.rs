@@ -5,13 +5,26 @@
 use crate::hooks::use_escape_capture;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::HtmlIFrameElement;
+use web_sys::{HtmlIFrameElement, HtmlInputElement};
 use yew::prelude::*;
 
 #[wasm_bindgen(module = "/rizzma-host.js")]
 extern "C" {
     #[wasm_bindgen(js_name = mountRizzma)]
-    fn mount_rizzma(frame: HtmlIFrameElement, artifact_url: &str) -> js_sys::Promise;
+    fn mount_rizzma(
+        frame: HtmlIFrameElement,
+        artifact_url: &str,
+        renderer_version: &str,
+    ) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_name = playRizzma)]
+    fn play_rizzma(frame: HtmlIFrameElement);
+
+    #[wasm_bindgen(js_name = pauseRizzma)]
+    fn pause_rizzma(frame: HtmlIFrameElement);
+
+    #[wasm_bindgen(js_name = seekRizzma)]
+    fn seek_rizzma(frame: HtmlIFrameElement, time: f64);
 
     #[wasm_bindgen(js_name = disposeRizzma)]
     fn dispose_rizzma(frame: HtmlIFrameElement);
@@ -179,7 +192,21 @@ pub(super) struct FigureViewerProps {
     #[prop_or_default]
     pub poster_base64: Option<String>,
     pub animated: bool,
+    pub duration: f64,
+    pub renderer_version: String,
     pub live_supported: bool,
+}
+
+/// Only exact, host-vetted runtime versions may execute. Rizzma 1.9 supports
+/// static interaction; 1.10 adds seeking on an already-bound session, which
+/// keeps animation controls compatible with pan and zoom.
+pub(super) fn figure_live_supported(schema: u32, renderer_version: &str, animated: bool) -> bool {
+    schema <= 3
+        && match renderer_version {
+            "1.9.0" => !animated,
+            "1.10.0" => true,
+            _ => false,
+        }
 }
 
 /// Sandboxed Rizzma viewer. Runtime assets are pinned and verified by the
@@ -191,6 +218,8 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
     let frame_ref = use_node_ref();
     let loading = use_state(|| false);
     let mounted = use_state(|| false);
+    let playing = use_state(|| false);
+    let position = use_state(|| 0.0_f64);
     let error = use_state(|| None::<String>);
 
     {
@@ -207,6 +236,7 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
     let onclick = {
         let frame_ref = frame_ref.clone();
         let artifact_url = props.artifact_url.clone();
+        let renderer_version = props.renderer_version.clone();
         let loading = loading.clone();
         let mounted = mounted.clone();
         let error = error.clone();
@@ -220,7 +250,7 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
             let loading = loading.clone();
             let mounted = mounted.clone();
             let error = error.clone();
-            let promise = mount_rizzma(frame, &artifact_url);
+            let promise = mount_rizzma(frame, &artifact_url, &renderer_version);
             wasm_bindgen_futures::spawn_local(async move {
                 match JsFuture::from(promise).await {
                     Ok(_) => mounted.set(true),
@@ -232,6 +262,40 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
                 }
                 loading.set(false);
             });
+        })
+    };
+
+    let on_play_pause = {
+        let frame_ref = frame_ref.clone();
+        let playing = playing.clone();
+        Callback::from(move |_: MouseEvent| {
+            let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() else {
+                return;
+            };
+            if *playing {
+                pause_rizzma(frame);
+                playing.set(false);
+            } else {
+                play_rizzma(frame);
+                playing.set(true);
+            }
+        })
+    };
+
+    let on_seek = {
+        let frame_ref = frame_ref.clone();
+        let position = position.clone();
+        Callback::from(move |event: InputEvent| {
+            let value = event
+                .target_unchecked_into::<HtmlInputElement>()
+                .value_as_number();
+            if !value.is_finite() {
+                return;
+            }
+            if let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() {
+                seek_rizzma(frame, value);
+                position.set(value);
+            }
         })
     };
 
@@ -263,21 +327,53 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
             />
             if !*mounted {
                 <button class="rizzma-mount" {onclick} disabled={*loading || !props.live_supported}>
-                    if props.animated {
-                        { "Animation poster (playback unavailable)" }
-                    } else if !props.live_supported {
+                    if !props.live_supported {
                         { "Poster (runtime unavailable)" }
                     } else if *loading {
                         { "Loading interactive figure…" }
+                    } else if props.animated {
+                        { "Play interactive figure" }
                     } else {
                         { "Open interactive figure" }
                     }
                 </button>
             }
+            if *mounted && props.animated {
+                <div class="rizzma-controls">
+                    <button type="button" onclick={on_play_pause}>
+                        { if *playing { "Pause" } else { "Play" } }
+                    </button>
+                    <input
+                        type="range"
+                        min="0"
+                        max={props.duration.max(0.0).to_string()}
+                        step="0.01"
+                        value={(*position).to_string()}
+                        oninput={on_seek}
+                        aria-label="Animation position"
+                    />
+                    <span>{ format!("{:.1}s / {:.1}s", *position, props.duration.max(0.0)) }</span>
+                </div>
+            }
             if let Some(message) = &*error {
                 <div class="rizzma-error">{ message }</div>
             }
         </div>
+    }
+}
+
+#[cfg(test)]
+mod figure_tests {
+    use super::figure_live_supported;
+
+    #[test]
+    fn runtime_capability_distinguishes_static_and_animated_figures() {
+        assert!(figure_live_supported(3, "1.9.0", false));
+        assert!(!figure_live_supported(3, "1.9.0", true));
+        assert!(figure_live_supported(3, "1.10.0", false));
+        assert!(figure_live_supported(3, "1.10.0", true));
+        assert!(!figure_live_supported(4, "1.10.0", false));
+        assert!(!figure_live_supported(3, "1.11.0", false));
     }
 }
 

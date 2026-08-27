@@ -662,3 +662,29 @@
     color: #f7768e;
     font-size: 0.78rem;
 }
+
+.rizzma-controls {
+    position: absolute;
+    inset: auto 0 0;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.45rem 0.6rem;
+    background: rgba(26, 27, 38, 0.94);
+    color: #c0caf5;
+    font-size: 0.78rem;
+}
+
+.rizzma-controls button {
+    border: 1px solid rgba(122, 162, 247, 0.55);
+    border-radius: 3px;
+    padding: 0.25rem 0.55rem;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.rizzma-controls input[type="range"] {
+    flex: 1;
+    min-width: 5rem;
+}

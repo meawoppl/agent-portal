@@ -1,5 +1,13 @@
-const RUNTIME_ROOT = "/rizzma-runtime/1.9.0";
-const MANIFEST_SHA256 = "abf71fea0fa053893f5c530aa7b9401fa212b4d77f6788950a5cf8209e141aa4";
+const RUNTIMES = new Map([
+  ["1.9.0", {
+    root: "/rizzma-runtime/1.9.0",
+    manifestSha256: "abf71fea0fa053893f5c530aa7b9401fa212b4d77f6788950a5cf8209e141aa4",
+  }],
+  ["1.10.0", {
+    root: "/rizzma-runtime/1.10.0",
+    manifestSha256: "30c38615e990a3994c90f1a99ea4dcc42d8595a404ec8e0ea89303a86e930c48",
+  }],
+]);
 const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
 const active = [];
 
@@ -8,15 +16,18 @@ async function sha256(bytes) {
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function verifiedRuntime() {
-  const manifestResponse = await fetch(`${RUNTIME_ROOT}/runtime.json`);
+async function verifiedRuntime(version) {
+  const runtime = RUNTIMES.get(version);
+  if (!runtime) throw new Error("portable-figure runtime is not registered");
+  const manifestResponse = await fetch(`${runtime.root}/runtime.json`);
   if (!manifestResponse.ok) throw new Error("portable-figure runtime manifest is unavailable");
   const manifestBytes = await manifestResponse.arrayBuffer();
-  if (await sha256(manifestBytes) !== MANIFEST_SHA256) {
+  if (await sha256(manifestBytes) !== runtime.manifestSha256) {
     throw new Error("portable-figure runtime manifest failed verification");
   }
   const manifest = JSON.parse(new TextDecoder().decode(manifestBytes));
-  if (manifest.manifest !== 1 || manifest.schema_min !== 1 || manifest.schema_max !== 3) {
+  if (manifest.manifest !== 1 || manifest.version !== version
+      || manifest.schema_min !== 1 || manifest.schema_max !== 3) {
     throw new Error("unsupported portable-figure runtime manifest");
   }
   const expected = new Map([
@@ -35,13 +46,14 @@ async function verifiedRuntime() {
         || !/^[a-f0-9]{64}$/.test(asset.sha256)) {
       throw new Error("portable-figure runtime manifest is invalid");
     }
-    const response = await fetch(`${RUNTIME_ROOT}/${asset.file}`);
+    const response = await fetch(`${runtime.root}/${asset.file}`);
     if (!response.ok) throw new Error(`portable-figure runtime asset ${asset.role} is unavailable`);
     const bytes = await response.arrayBuffer();
     if (bytes.byteLength !== asset.size || await sha256(bytes) !== asset.sha256) {
       throw new Error(`portable-figure runtime asset ${asset.role} failed verification`);
     }
     result[asset.role] = bytes;
+    result[`${asset.role}Sha256`] = asset.sha256;
   }
   return result;
 }
@@ -85,7 +97,8 @@ function childDocument(nonce) {
               const canvas = document.getElementById("figure");
               mounted = await loader.mount(canvas, new Uint8Array(request.artifact), {
                 renderer: {wasm: request.wasm, glue: glueUrl, sha256: request.wasmSha256},
-                maxBytes: ${MAX_ARTIFACT_BYTES}
+                maxBytes: ${MAX_ARTIFACT_BYTES},
+                autoplay: false
               });
               if (disposeSeq !== null) {
                 cleanup();
@@ -94,12 +107,24 @@ function childDocument(nonce) {
                 port.close();
               } else {
                 state = "mounted";
-                port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"mounted"});
+                port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"mounted",
+                  animated:Boolean(mounted.animated), duration:Number(mounted.duration) || 0});
               }
             } catch (error) {
               state = "failed";
               port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"error", message:String(error).slice(0,256)});
             }
+          } else if (request.type === "play" && state === "mounted") {
+            mounted.play();
+            port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"state", playing:true});
+          } else if (request.type === "pause" && state === "mounted") {
+            mounted.pause();
+            port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"state", playing:false});
+          } else if (request.type === "seek" && state === "mounted"
+              && Number.isFinite(request.time)) {
+            mounted.seek(request.time);
+            port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"state",
+              playing:false, time:request.time});
           } else if (request.type === "dispose") {
             if (state === "mounting") { disposeSeq = request.seq; return; }
             cleanup();
@@ -130,7 +155,7 @@ function disposeEntry(entry) {
   if (index >= 0) active.splice(index, 1);
 }
 
-export async function mountRizzma(iframe, artifactUrl) {
+export async function mountRizzma(iframe, artifactUrl, rendererVersion) {
   if (!(iframe instanceof HTMLIFrameElement)) throw new Error("portable-figure frame is missing");
   while (active.length >= 2) disposeEntry(active[0]);
   const artifactResponse = await fetch(artifactUrl, {credentials:"same-origin"});
@@ -143,7 +168,7 @@ export async function mountRizzma(iframe, artifactUrl) {
   if (magic.length !== 4 || String.fromCharCode(...magic) !== "RZFG") {
     throw new Error("portable figure has invalid framing");
   }
-  const runtime = await verifiedRuntime();
+  const runtime = await verifiedRuntime(rendererVersion);
   const nonceBytes = crypto.getRandomValues(new Uint8Array(16));
   const nonce = Array.from(nonceBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   const channel = new MessageChannel();
@@ -161,14 +186,32 @@ export async function mountRizzma(iframe, artifactUrl) {
       if (event.data.type === "ready") {
         const seq = entry.nextSeq++;
         channel.port1.postMessage({nonce, seq, type:"mount", glue, wasm:runtime.renderer,
-          artifact, wasmSha256:"abdf2fc8417acb6871f839884ea3c412fabdee5f2c0c6ea3b0bbb345780d26bf"},
+          artifact, wasmSha256:runtime.rendererSha256},
           [runtime.renderer, artifact]);
       }
-      if (event.data.type === "mounted") { clearTimeout(timeout); resolve(); }
+      if (event.data.type === "mounted") { clearTimeout(timeout); resolve(event.data); }
       if (event.data.type === "error") { clearTimeout(timeout); disposeEntry(entry); reject(new Error(event.data.message)); }
     };
     iframe.contentWindow.postMessage({kind:"rizzma-bootstrap", nonce, loader}, "*", [channel.port2]);
   });
+}
+
+function sendControl(iframe, type, fields = {}) {
+  const entry = active.find((candidate) => candidate.iframe === iframe && !candidate.disposed);
+  if (!entry) return;
+  entry.port.postMessage({nonce:entry.nonce, seq:entry.nextSeq++, type, ...fields});
+}
+
+export function playRizzma(iframe) {
+  sendControl(iframe, "play");
+}
+
+export function pauseRizzma(iframe) {
+  sendControl(iframe, "pause");
+}
+
+export function seekRizzma(iframe, time) {
+  if (Number.isFinite(time)) sendControl(iframe, "seek", {time});
 }
 
 export function disposeRizzma(iframe) {
