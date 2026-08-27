@@ -100,7 +100,7 @@ enum Command {
         #[command(subcommand)]
         action: MessageAction,
     },
-    /// Display an image or video to the user in this session's transcript.
+    /// Display an image, video, or portable figure in this session's transcript.
     #[command(alias = "display")]
     Show {
         /// Path to the media file (png, jpg, gif, webp, svg, mp4, webm).

@@ -22,14 +22,16 @@ const SVG_CSP: &str = "default-src 'none'; img-src data:; style-src 'unsafe-inli
 /// `nosniff` goes on everything, so a browser can't disregard our declared type
 /// and re-interpret the bytes as something executable.
 ///
-/// The CSP is **SVG-only**, because SVG is the one supported format that is a
-/// *document*: XML that can carry a `<script>` element. Inside `<img>` that
+/// The CSP applies to document-like uploads: SVG and portable figures. SVG is
+/// XML that can carry a `<script>` element. Inside `<img>` that
 /// script is inert, but the lightbox's Download link and any direct navigation
 /// to `/api/images/{id}` render the file as a top-level document on the portal's
 /// **own origin**, where its script would run with access to same-origin cookies
 /// and `localStorage`.
 ///
-/// Deliberately not applied to rasters: they can't script, and a blanket
+/// Portable figures are data, not HTML, but receive the same locked-down
+/// direct-navigation treatment so a browser can never reinterpret a future
+/// format revision as executable content. Deliberately not applied to rasters: they can't script, and a blanket
 /// `default-src 'none'` would also govern the image-document view a browser
 /// synthesizes when you open a PNG directly.
 pub fn media_security_headers(content_type: &str) -> HeaderMap {
@@ -38,7 +40,7 @@ pub fn media_security_headers(content_type: &str) -> HeaderMap {
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
-    if is_svg(content_type) {
+    if is_document_media(content_type) {
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(SVG_CSP),
@@ -55,6 +57,16 @@ fn is_svg(content_type: &str) -> bool {
         .unwrap_or_default()
         .trim()
         .eq_ignore_ascii_case("image/svg+xml")
+}
+
+fn is_document_media(content_type: &str) -> bool {
+    is_svg(content_type)
+        || content_type
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .eq_ignore_ascii_case(shared::media::PORTABLE_FIGURE_TYPE)
 }
 
 #[cfg(test)]
@@ -98,6 +110,16 @@ mod tests {
             assert_eq!(h.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
             assert!(!h.contains_key(header::CONTENT_SECURITY_POLICY), "{ct}");
         }
+    }
+
+    #[test]
+    fn portable_figures_are_inert_on_direct_navigation() {
+        let headers = media_security_headers(shared::media::PORTABLE_FIGURE_TYPE);
+        assert_eq!(
+            headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
+        );
+        assert!(headers.contains_key(header::CONTENT_SECURITY_POLICY));
     }
 
     #[test]

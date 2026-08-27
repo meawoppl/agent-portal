@@ -576,6 +576,7 @@ fn collect_session_media(
             let (kind, data) = match content {
                 PortalContent::Image { data, .. } => ("image", data),
                 PortalContent::Video { data, .. } => ("video", data),
+                PortalContent::Figure { data, .. } => ("figure", data),
                 _ => continue,
             };
             let Some(media_id) = parse_media_id(data, kind) else {
@@ -606,12 +607,12 @@ fn collect_session_media(
 }
 
 /// Extract the media id from a served URL (`/api/images/{id}` for `kind`
-/// `"image"`, `/api/media/{id}` for `"video"`); `None` if it isn't a served-url
+/// `"image"`, `/api/media/{id}` for `"video"` or `"figure"`); `None` if it isn't a served-url
 /// reference of that kind.
 fn parse_media_id(data: &str, kind: &str) -> Option<uuid::Uuid> {
     let prefix = match kind {
         "image" => "/api/images/",
-        "video" => "/api/media/",
+        "video" | "figure" => "/api/media/",
         _ => return None,
     };
     data.strip_prefix(prefix)?.parse().ok()

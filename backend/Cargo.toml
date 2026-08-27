@@ -91,6 +91,7 @@ serde_urlencoded = "0.7.1"
 zstd = "0.13"
 object_store = { version = "0.14.0", features = ["aws"] }
 portal-stt = { version = "2.13.11", path = "../portal-stt" }
+rizzma = { version = "1.9.0", default-features = false, features = ["portable"] }
 
 [build-dependencies]
 memory-serve = "2.1"

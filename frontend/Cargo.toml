@@ -46,6 +46,7 @@ web-sys = { workspace = true, features = [
     "DomRect",
     "HtmlElement",
     "HtmlInputElement",
+    "HtmlIFrameElement",
     "HtmlSelectElement",
     "HtmlTextAreaElement",
     "Location",
