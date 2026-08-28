@@ -416,13 +416,13 @@ impl Component for InputBar {
                 self.interim_transcription = None;
                 if !text.is_empty() {
                     let current = self.get_input_text();
-                    let new_value = if current.is_empty() {
+                    let visible_input = if current.is_empty() {
                         text
                     } else {
                         format!("{} {}", current, text)
                     };
-                    self.set_input_text(&new_value);
-                    ctx.link().send_message(InputBarMsg::SendInput);
+                    let agent_input = voice_transcription_prompt(&visible_input);
+                    self.complete_text_send(ctx, visible_input, agent_input, SendMode::Normal);
                 }
                 true
             }
@@ -711,18 +711,30 @@ impl InputBar {
     /// typed `(text, mode)` event up to the parent — which packages it into
     /// `ClientToServer::ClaudeInput` and emits the optimistic local echo.
     fn dispatch_text_send(&mut self, ctx: &Context<Self>, mode: SendMode) -> bool {
-        crate::audio::ensure_audio_context();
         let input = self.get_input_text().trim().to_string();
         if input.is_empty() {
             return false;
         }
-        self.command_history.push(input.clone());
+        self.complete_text_send(ctx, input.clone(), input, mode);
+        true
+    }
+
+    /// Finish a composer send while allowing machine-authored context to ride
+    /// beside the text the user sees and recalls from command history.
+    fn complete_text_send(
+        &mut self,
+        ctx: &Context<Self>,
+        visible_input: String,
+        agent_input: String,
+        mode: SendMode,
+    ) {
+        crate::audio::ensure_audio_context();
+        self.command_history.push(visible_input);
         self.set_input_text("");
         self.input_text.clear();
         self.pending_suggestion = None;
         ctx.props().on_message_sent.emit(());
-        ctx.props().on_send_text.emit((input, mode));
-        true
+        ctx.props().on_send_text.emit((agent_input, mode));
     }
 
     /// Drive the chunk-upload pipeline. Reads the current textarea as
@@ -1050,9 +1062,30 @@ fn build_upload_message(user_input: &str, files: &[(String, u64)]) -> String {
     }
 }
 
+/// Add agent-facing context to text produced by speech recognition. The
+/// reminder stays out of the textarea and command history, while the shared
+/// markdown path renders it as the established compact reminder bumper in the
+/// optimistic and durable transcript.
+fn voice_transcription_prompt(visible_input: &str) -> String {
+    format!(
+        "{visible_input}\n\n<system-reminder>Voice input was transcribed automatically. If a word or name seems wrong in context, consider phonetic interpretations of the transcript.</system-reminder>"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_transcription_adds_a_small_agent_reminder() {
+        let prompt = voice_transcription_prompt("Check the cash layer");
+        assert_eq!(
+            shared::system_reminder::strip_system_reminders(&prompt),
+            "Check the cash layer\n\n"
+        );
+        assert!(prompt.contains("consider phonetic interpretations"));
+        assert!(shared::system_reminder::has_system_reminder(&prompt));
+    }
 
     // --- build_upload_message ---
 
