@@ -1,4 +1,4 @@
-mod bash;
+pub(crate) mod bash;
 mod command_result;
 mod edit;
 mod interactive;
