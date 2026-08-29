@@ -48,20 +48,31 @@ Palette for anything hand-drawn: the portal's Tokyo Night — background
 
 ## Ranked candidates
 
-### 1. The forward chip comes alive → preview window ✅ shipped
+### 1. Agent serves a site → forwards it → it renders in the portal ✅ shipped
 
-`docs/media/feature-port-forward.webp` — 66 KB, 10.6 s. Shot by `cap-forward.js`.
+`docs/media/feature-port-forward.webp` — 400 KB, 11.9 s. Shot by `cap-forward.js`.
 
-**Slot:** Features ▸ Port forwarding. **~9 s, browser capture.**
+**Slot:** Features ▸ Port forwarding. **~12 s, browser capture.**
 
-Agent runs `agent-portal forward 8899`; the header chip appears **flat red**;
-the dev server starts; within one probe interval the chip **breathes green** and
-its tooltip names the process; clicking it genies open the floating preview with
-the real app inside; `Ctrl-C` on the server and the chip goes red again.
+The whole arc, starting **inside the transcript**: the agent is asked to serve a
+directory and forward it, starts a `python3 -m http.server` (tool card), runs
+`agent-portal forward 8899` (tool card, real CLI, real URL in the output), and
+the chip appears in the session header. Clicking it genies open the floating
+preview with the site live inside the portal — and a link click *inside* the
+panel navigates it, which is what proves it is a tunnel and not a screenshot.
 
-This is the single highest-value clip: it demonstrates the tunnel, the health
-probe, the process resolution, and the in-portal preview in one unbroken shot,
-and it is the feature nothing else in this space has.
+The site is the **rizzma crate's rustdoc**: a JS-driven app with search and
+navigation, so it exercises the tunnel rather than serving a static page.
+
+This is the single highest-value clip — it demonstrates the tunnel, the CLI, the
+chip, and the in-portal preview in one unbroken shot, and it is the feature
+nothing else in this space has.
+
+The earlier cut opened on a **flat red** chip (nothing listening) and let the
+probe flip it green when the server came up. Starting from the agent's own
+commands tells a better story, so the health beat is now only in the prose; if
+you re-shoot and want it back, register the forward before starting the server —
+the CLI even prints `origin: nothing is listening on 127.0.0.1:8899` when you do.
 
 ### 2. One agent messages another ✅ shipped
 
@@ -178,8 +189,7 @@ that shows which way data moves, at essentially no file-size cost.
 
 ## Status
 
-**Shipped:** #1, #2, #3, #4 — 730 KB total for four clips, well under the budget
-that was set aside for one.
+**Shipped:** #1, #2, #3, #4 — 1.06 MB total for four clips.
 
 **Next up:** #5 (the install → login → service terminal cast) is the cheapest
 remaining win and the one the Quick Start section still wants. #8 (cost ticker)
