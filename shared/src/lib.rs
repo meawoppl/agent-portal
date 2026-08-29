@@ -39,6 +39,20 @@ pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
 /// undecodable frame (#1366).
 pub const LAUNCHER_CAPABILITY_HEARTBEAT_ACK: &str = "launcher.heartbeat_ack";
 
+/// Tokyo-Night data-visualization palette shared by charts, sparklines, and
+/// terminal colors. CSS theme tokens remain in the stylesheets where the
+/// browser can resolve them directly.
+pub mod palette {
+    pub const ACCENT_BLUE: &str = "#7aa2f7";
+    pub const ACCENT_GREEN: &str = "#9ece6a";
+    pub const ACCENT_RED: &str = "#f7768e";
+    pub const ACCENT_ORANGE: &str = "#e0af68";
+    pub const ACCENT_PURPLE: &str = "#bb9af7";
+    pub const ACCENT_TEAL: &str = "#7dcfff";
+    pub const MUTED_GRAY: &str = "#565f89";
+    pub const TEXT_LIGHT: &str = "#c0caf5";
+}
+
 /// Proxy capability advertised by versions that can open the dedicated binary
 /// data-plane socket for port forwarding (#1506).
 ///

@@ -17,7 +17,7 @@ use yew::prelude::*;
 /// Tokyo-Night accent blue — matches the per-turn footer chip color and the
 /// pill border. Used for both the polyline stroke and the most-recent-point
 /// dot.
-const ACCENT_COLOR: &str = "#7aa2f7";
+use shared::palette::ACCENT_BLUE as ACCENT_COLOR;
 
 /// Fractional vertical margin added inside the SVG viewbox so the polyline
 /// doesn't render flush against the top/bottom edges. With a 20px height, a

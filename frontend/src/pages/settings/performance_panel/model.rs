@@ -53,12 +53,12 @@ pub(super) fn pair_label(pair: &GroupKey) -> String {
 /// across re-renders.
 pub(super) fn pair_color(idx: usize) -> &'static str {
     const PALETTE: &[&str] = &[
-        "#7aa2f7", // accent blue
-        "#bb9af7", // purple
-        "#9ece6a", // green
-        "#e0af68", // yellow
-        "#f7768e", // red (used by max_tokens band)
-        "#7dcfff", // cyan
+        shared::palette::ACCENT_BLUE,
+        shared::palette::ACCENT_PURPLE,
+        shared::palette::ACCENT_GREEN,
+        shared::palette::ACCENT_ORANGE,
+        shared::palette::ACCENT_RED,
+        shared::palette::ACCENT_TEAL,
         "#ff9e64", // orange
     ];
     PALETTE[idx % PALETTE.len()]

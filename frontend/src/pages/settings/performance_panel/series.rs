@@ -61,10 +61,10 @@ pub(super) fn build_stop_reason_series(
     active_pairs: &[GroupKey],
 ) -> Vec<StackedSeries> {
     const REASONS: &[(&str, &str, &str)] = &[
-        ("end_turn", "end_turn", "#9ece6a"),
-        ("tool_use", "tool_use", "#7aa2f7"),
-        ("max_tokens", "max_tokens", "#f7768e"),
-        ("error", "error", "#bb9af7"),
+        ("end_turn", "end_turn", shared::palette::ACCENT_GREEN),
+        ("tool_use", "tool_use", shared::palette::ACCENT_BLUE),
+        ("max_tokens", "max_tokens", shared::palette::ACCENT_RED),
+        ("error", "error", shared::palette::ACCENT_PURPLE),
     ];
     let active_set: std::collections::HashSet<GroupKey> = active_pairs.iter().cloned().collect();
     let mut by_reason: BTreeMap<&'static str, Vec<f64>> = BTreeMap::new();
@@ -113,7 +113,7 @@ pub(super) fn build_stop_reason_series(
     if other_vals.iter().any(|v| *v > 0.0) {
         series.push(StackedSeries {
             label: "other".to_string(),
-            color: "#565f89".to_string(),
+            color: shared::palette::MUTED_GRAY.to_string(),
             values: other_vals,
         });
     }
