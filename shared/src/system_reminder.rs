@@ -1,4 +1,4 @@
-//! Splitting `<system-reminder>` blocks out of message text.
+//! Splitting machine-authored notice blocks out of message text.
 //!
 //! These blocks are out-of-band context for the agent — the portal-features
 //! reminder, the inter-agent "reply to that agent, not the user" bumper, the
@@ -23,10 +23,43 @@
 pub enum Segment {
     Text(String),
     Reminder(String),
+    TaskNotification(String),
 }
 
 const OPEN_TAG: &str = "<system-reminder>";
 const CLOSE_TAG: &str = "</system-reminder>";
+const TASK_OPEN_TAG: &str = "<task-notification>";
+const TASK_CLOSE_TAG: &str = "</task-notification>";
+
+#[derive(Clone, Copy)]
+enum NoticeKind {
+    Reminder,
+    TaskNotification,
+}
+
+impl NoticeKind {
+    fn tags(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Reminder => (OPEN_TAG, CLOSE_TAG),
+            Self::TaskNotification => (TASK_OPEN_TAG, TASK_CLOSE_TAG),
+        }
+    }
+
+    fn segment(self, body: String) -> Segment {
+        match self {
+            Self::Reminder => Segment::Reminder(body),
+            Self::TaskNotification => Segment::TaskNotification(body),
+        }
+    }
+}
+
+fn next_notice(text: &str, include_task_notifications: bool) -> Option<(usize, NoticeKind)> {
+    [NoticeKind::Reminder, NoticeKind::TaskNotification]
+        .into_iter()
+        .filter(|kind| include_task_notifications || matches!(kind, &NoticeKind::Reminder))
+        .filter_map(|kind| text.find(kind.tags().0).map(|offset| (offset, kind)))
+        .min_by_key(|(offset, _)| *offset)
+}
 
 /// Split `text` on `<system-reminder>` blocks.
 ///
@@ -34,12 +67,26 @@ const CLOSE_TAG: &str = "</system-reminder>";
 /// the end of the message: a truncated or malformed block should read as the
 /// literal text it is rather than swallowing everything after it into a bar.
 pub fn split_system_reminders(text: &str) -> Vec<Segment> {
+    split_notices(text, false)
+}
+
+/// Split prose from complete system-reminder and task-notification blocks.
+///
+/// Claude injects both shapes into otherwise ordinary message text. Keeping
+/// their parsing together ensures the frontend never renders raw XML while
+/// classifier-side consumers can remove the same out-of-band material.
+pub fn split_collapsible_notices(text: &str) -> Vec<Segment> {
+    split_notices(text, true)
+}
+
+fn split_notices(text: &str, include_task_notifications: bool) -> Vec<Segment> {
     let mut segments = Vec::new();
     let mut rest = text;
 
-    while let Some(open) = rest.find(OPEN_TAG) {
-        let after_open = open + OPEN_TAG.len();
-        let Some(close_rel) = rest[after_open..].find(CLOSE_TAG) else {
+    while let Some((open, kind)) = next_notice(rest, include_task_notifications) {
+        let (open_tag, close_tag) = kind.tags();
+        let after_open = open + open_tag.len();
+        let Some(close_rel) = rest[after_open..].find(close_tag) else {
             break;
         };
         let close = after_open + close_rel;
@@ -48,16 +95,25 @@ pub fn split_system_reminders(text: &str) -> Vec<Segment> {
         if !before.trim().is_empty() {
             segments.push(Segment::Text(before.to_string()));
         }
-        segments.push(Segment::Reminder(
-            rest[after_open..close].trim().to_string(),
-        ));
-        rest = &rest[close + CLOSE_TAG.len()..];
+        segments.push(kind.segment(rest[after_open..close].trim().to_string()));
+        rest = &rest[close + close_tag.len()..];
     }
 
     if !rest.trim().is_empty() {
         segments.push(Segment::Text(rest.to_string()));
     }
     segments
+}
+
+/// True when `text` holds a complete collapsible notice of either kind.
+pub fn has_collapsible_notice(text: &str) -> bool {
+    [NoticeKind::Reminder, NoticeKind::TaskNotification]
+        .into_iter()
+        .any(|kind| {
+            let (open_tag, close_tag) = kind.tags();
+            text.find(open_tag)
+                .is_some_and(|open| text[open + open_tag.len()..].contains(close_tag))
+        })
 }
 
 /// True when `text` holds at least one complete reminder block — lets the
@@ -81,6 +137,22 @@ pub fn strip_system_reminders(text: &str) -> String {
         .filter_map(|segment| match segment {
             Segment::Text(text) => Some(text),
             Segment::Reminder(_) => None,
+            Segment::TaskNotification(_) => unreachable!("system-reminder-only split"),
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// The prose of `text` with every complete collapsible notice removed.
+pub fn strip_collapsible_notices(text: &str) -> String {
+    if !has_collapsible_notice(text) {
+        return text.to_string();
+    }
+    split_collapsible_notices(text)
+        .into_iter()
+        .filter_map(|segment| match segment {
+            Segment::Text(text) => Some(text),
+            Segment::Reminder(_) | Segment::TaskNotification(_) => None,
         })
         .collect::<Vec<_>>()
         .join("")
@@ -148,6 +220,37 @@ mod tests {
         assert_eq!(
             split_system_reminders("<system-reminder>solo</system-reminder>"),
             vec![Segment::Reminder("solo".to_string())]
+        );
+    }
+
+    #[test]
+    fn splits_task_notification_from_surrounding_prose() {
+        let notification = "<task-notification> <task-id>bmq5w2fik</task-id> <status>completed</status> <summary>Background command completed</summary> </task-notification>";
+        assert_eq!(
+            split_collapsible_notices(&format!("before {notification} after")),
+            vec![
+                Segment::Text("before ".to_string()),
+                Segment::TaskNotification(
+                    "<task-id>bmq5w2fik</task-id> <status>completed</status> <summary>Background command completed</summary>".to_string(),
+                ),
+                Segment::Text(" after".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn strips_both_notice_kinds_from_prose() {
+        let text = "say <system-reminder>context</system-reminder> hello <task-notification><status>completed</status></task-notification> now";
+        assert_eq!(strip_collapsible_notices(text), "say  hello  now");
+    }
+
+    #[test]
+    fn unterminated_task_notification_stays_prose() {
+        let text = "visible <task-notification><status>running</status>";
+        assert!(!has_collapsible_notice(text));
+        assert_eq!(
+            split_collapsible_notices(text),
+            vec![Segment::Text(text.to_string())]
         );
     }
 
