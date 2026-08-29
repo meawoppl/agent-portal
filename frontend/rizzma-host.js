@@ -63,6 +63,12 @@ function childDocument(nonce) {
     let terminal = false;
     let mounted = null;
     let urls = [];
+    let duration = 0;
+    let looping = false;
+    let playing = false;
+    let position = 0;
+    let clockStartedAt = 0;
+    let progressTimer = 0;
     const boot = async (event) => {
       if (terminal || event.source !== parent || event.data?.kind !== "rizzma-bootstrap"
           || event.data?.nonce !== ${JSON.stringify(nonce)} || event.ports.length !== 1) return;
@@ -76,7 +82,39 @@ function childDocument(nonce) {
         let lastSeq = 0;
         let state = "ready";
         let disposeSeq = null;
+        // Rizzma owns the frame clock. Mirror only its playhead at 4 Hz so the
+        // host controls stay responsive without putting cross-realm messages
+        // on every animation frame.
+        const emitPlaybackState = (re) => {
+          const reply = {nonce:${JSON.stringify(nonce)}, type:"state", playing, time:position};
+          if (re !== undefined) reply.re = re;
+          port.postMessage(reply);
+        };
+        const updatePosition = () => {
+          if (!playing) return;
+          const now = performance.now();
+          position += (now - clockStartedAt) / 1000;
+          clockStartedAt = now;
+          if (looping && duration > 0) {
+            position %= duration;
+          } else if (position >= duration) {
+            position = duration;
+            playing = false;
+            clearInterval(progressTimer);
+            progressTimer = 0;
+          }
+        };
+        const startProgress = () => {
+          clearInterval(progressTimer);
+          progressTimer = setInterval(() => {
+            updatePosition();
+            emitPlaybackState();
+          }, 250);
+        };
         const cleanup = () => {
+          clearInterval(progressTimer);
+          progressTimer = 0;
+          playing = false;
           try { mounted?.dispose(); } catch (_) {}
           const canvas = document.getElementById("figure");
           canvas.width = 0; canvas.height = 0;
@@ -95,7 +133,10 @@ function childDocument(nonce) {
               const glueUrl = URL.createObjectURL(new Blob([request.glue], {type:"text/javascript"}));
               urls.push(glueUrl);
               const canvas = document.getElementById("figure");
-              mounted = await loader.mount(canvas, new Uint8Array(request.artifact), {
+              const artifactBytes = new Uint8Array(request.artifact);
+              const metadata = loader.readMetadata(artifactBytes);
+              looping = Boolean(metadata.timeline?.loop);
+              mounted = await loader.mount(canvas, artifactBytes, {
                 renderer: {wasm: request.wasm, glue: glueUrl, sha256: request.wasmSha256},
                 maxBytes: ${MAX_ARTIFACT_BYTES},
                 autoplay: false
@@ -107,24 +148,35 @@ function childDocument(nonce) {
                 port.close();
               } else {
                 state = "mounted";
+                duration = Number(mounted.duration) || 0;
                 port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"mounted",
-                  animated:Boolean(mounted.animated), duration:Number(mounted.duration) || 0});
+                  animated:Boolean(mounted.animated), duration});
+                emitPlaybackState();
               }
             } catch (error) {
               state = "failed";
               port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"error", message:String(error).slice(0,256)});
             }
           } else if (request.type === "play" && state === "mounted") {
+            if (!looping && position >= duration) position = 0;
             mounted.play();
-            port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"state", playing:true});
+            playing = Boolean(mounted.animated);
+            clockStartedAt = performance.now();
+            if (playing) startProgress();
+            emitPlaybackState(request.seq);
           } else if (request.type === "pause" && state === "mounted") {
+            updatePosition();
             mounted.pause();
-            port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"state", playing:false});
+            playing = false;
+            clearInterval(progressTimer);
+            progressTimer = 0;
+            emitPlaybackState(request.seq);
           } else if (request.type === "seek" && state === "mounted"
               && Number.isFinite(request.time)) {
-            mounted.seek(request.time);
-            port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq, type:"state",
-              playing:false, time:request.time});
+            position = Math.max(0, Math.min(duration, request.time));
+            mounted.seek(position);
+            clockStartedAt = performance.now();
+            emitPlaybackState(request.seq);
           } else if (request.type === "dispose") {
             if (state === "mounting") { disposeSeq = request.seq; return; }
             cleanup();
@@ -142,7 +194,7 @@ function childDocument(nonce) {
     addEventListener("message", boot);`;
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; img-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' blob: 'wasm-unsafe-eval'">
-    <style>html,body{margin:0;background:#16161e;color:#c0caf5}canvas{display:block;max-width:100%;height:auto;margin:auto}</style>
+    <style>html,body{width:100%;height:100%;margin:0;background:#16161e;color:#c0caf5}body{display:flex;align-items:center;justify-content:center;overflow:hidden}canvas{display:block;max-width:100%;max-height:100%;width:auto;height:auto}</style>
     <canvas id="figure"></canvas><script nonce="${nonce}">${script}<\/script>`;
 }
 
@@ -190,6 +242,11 @@ export async function mountRizzma(iframe, artifactUrl, rendererVersion) {
           [runtime.renderer, artifact]);
       }
       if (event.data.type === "mounted") { clearTimeout(timeout); resolve(event.data); }
+      if (event.data.type === "state") {
+        iframe.dataset.rizzmaPlaying = event.data.playing ? "true" : "false";
+        iframe.dataset.rizzmaTime = String(Number(event.data.time) || 0);
+        iframe.dispatchEvent(new Event("rizzma-state"));
+      }
       if (event.data.type === "error") { clearTimeout(timeout); disposeEntry(entry); reject(new Error(event.data.message)); }
     };
     iframe.contentWindow.postMessage({kind:"rizzma-bootstrap", nonce, loader}, "*", [channel.port2]);
