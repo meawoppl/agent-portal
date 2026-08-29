@@ -3,6 +3,7 @@
 //! placeholder both degrade to.
 
 use crate::hooks::use_escape_capture;
+use gloo::events::EventListener;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlIFrameElement, HtmlInputElement};
@@ -233,6 +234,35 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
         });
     }
 
+    {
+        let frame_ref = frame_ref.clone();
+        let playing = playing.clone();
+        let position = position.clone();
+        use_effect_with(*mounted, move |is_mounted| {
+            let listener = if *is_mounted {
+                frame_ref.cast::<HtmlIFrameElement>().map(|frame| {
+                    let state_frame = frame.clone();
+                    EventListener::new(&frame, "rizzma-state", move |_| {
+                        playing.set(
+                            state_frame.get_attribute("data-rizzma-playing").as_deref()
+                                == Some("true"),
+                        );
+                        if let Some(value) = state_frame
+                            .get_attribute("data-rizzma-time")
+                            .and_then(|value| value.parse::<f64>().ok())
+                            .filter(|value| value.is_finite())
+                        {
+                            position.set(value);
+                        }
+                    })
+                })
+            } else {
+                None
+            };
+            move || drop(listener)
+        });
+    }
+
     let onclick = {
         let frame_ref = frame_ref.clone();
         let artifact_url = props.artifact_url.clone();
@@ -274,17 +304,14 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
             };
             if *playing {
                 pause_rizzma(frame);
-                playing.set(false);
             } else {
                 play_rizzma(frame);
-                playing.set(true);
             }
         })
     };
 
     let on_seek = {
         let frame_ref = frame_ref.clone();
-        let position = position.clone();
         Callback::from(move |event: InputEvent| {
             let value = event
                 .target_unchecked_into::<HtmlInputElement>()
@@ -294,7 +321,6 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
             }
             if let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() {
                 seek_rizzma(frame, value);
-                position.set(value);
             }
         })
     };
