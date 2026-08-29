@@ -145,6 +145,24 @@ fn push_file_change_paths(
 }
 
 impl ActivityTag {
+    #[cfg(test)]
+    const ALL: [Self; 14] = [
+        Self::Assistant,
+        Self::User,
+        Self::Read,
+        Self::Result,
+        Self::Portal,
+        Self::Error,
+        Self::System,
+        Self::RateLimit,
+        Self::Unknown,
+        Self::Suppressed,
+        Self::CompactionStart,
+        Self::CompactionEnd,
+        Self::TaskStart,
+        Self::TaskEnd,
+    ];
+
     /// CSS class suffix for the sparkline tick — `format!("tick-{}", suffix)`
     /// matches `frontend/styles/session-rail.css:.sparkline-tick.tick-*`.
     /// Returns `None` for range markers (compaction / task), which are
@@ -172,6 +190,25 @@ impl ActivityTag {
             self,
             Self::CompactionStart | Self::CompactionEnd | Self::TaskStart | Self::TaskEnd
         )
+    }
+
+    /// CSS suffix for range markers. Kept beside [`Self::tick_css`] so the
+    /// renderer and stylesheet contract has one typed mapping.
+    pub fn range_css(self) -> Option<&'static str> {
+        match self {
+            Self::CompactionStart | Self::CompactionEnd => Some("compaction"),
+            Self::TaskStart | Self::TaskEnd => Some("task"),
+            Self::Assistant
+            | Self::User
+            | Self::Read
+            | Self::Result
+            | Self::Portal
+            | Self::Error
+            | Self::System
+            | Self::RateLimit
+            | Self::Unknown
+            | Self::Suppressed => None,
+        }
     }
 
     /// Bookkeeping frames are suppressed — never rendered as ticks.
@@ -1030,6 +1067,21 @@ mod tests {
         assert_eq!(ActivityTag::CompactionEnd.tick_css(), None);
         assert_eq!(ActivityTag::TaskStart.tick_css(), None);
         assert_eq!(ActivityTag::TaskEnd.tick_css(), None);
+    }
+
+    #[test]
+    fn activity_tag_tick_css_matches_css_file() {
+        const CSS: &str = include_str!("../../../../styles/session-rail.css");
+        for tag in ActivityTag::ALL {
+            if let Some(suffix) = tag.tick_css() {
+                let selector = format!(".sparkline-tick.tick-{suffix}");
+                assert!(CSS.contains(&selector), "missing CSS selector {selector}");
+            }
+            if let Some(suffix) = tag.range_css() {
+                let selector = format!(".sparkline-range.tick-{suffix}");
+                assert!(CSS.contains(&selector), "missing CSS selector {selector}");
+            }
+        }
     }
 
     #[test]

@@ -140,12 +140,14 @@ pub fn render_activity_sparkline(
     html! {
         <div class="pill-sparkline">
             { [
-                (&view.compaction_ranges, "sparkline-range tick-compaction"),
-                (&view.task_ranges, "sparkline-range tick-task"),
-            ].into_iter().flat_map(|(ranges, class)| ranges.iter().map(move |r| {
+                (&view.compaction_ranges, ActivityTag::CompactionStart),
+                (&view.task_ranges, ActivityTag::TaskStart),
+            ].into_iter().flat_map(|(ranges, tag)| ranges.iter().filter_map(move |r| {
+                let suffix = tag.range_css()?;
                 let width = (r.end_pct - r.start_pct).max(1.0);
                 let style = format!("left: {:.1}%; width: {:.1}%", r.start_pct, width);
-                html! { <span {class} {style} /> }
+                let class = format!("sparkline-range tick-{suffix}");
+                Some(html! { <span {class} {style} /> })
             })).collect::<Html>() }
             { view.ticks.iter().map(|t| {
                 let style = format!("left: {:.1}%", t.pct);
