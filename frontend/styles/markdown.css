@@ -605,9 +605,7 @@
 /* Portable figures are poster-first. A live renderer replaces the poster only
    after the artifact and every executable runtime asset have been verified. */
 .rizzma-figure {
-    position: relative;
     width: min(100%, 960px);
-    max-height: 72vh;
     overflow: hidden;
     border: 1px solid var(--border-color);
     border-radius: 4px;
@@ -615,24 +613,39 @@
     margin-inline: auto;
 }
 
+.rizzma-viewport {
+    position: relative;
+    width: 100%;
+    max-height: 72vh;
+    overflow: hidden;
+}
+
 .rizzma-poster,
 .rizzma-frame {
-    display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     border: 0;
     object-fit: contain;
 }
 
+.rizzma-poster {
+    z-index: 0;
+}
+
+.rizzma-frame {
+    z-index: 1;
+}
+
 .rizzma-frame.hidden {
     visibility: hidden;
-    position: absolute;
-    inset: 0;
 }
 
 .rizzma-poster-missing {
+    position: absolute;
+    inset: 0;
     display: grid;
-    height: 100%;
     place-items: center;
     color: var(--text-muted);
 }
@@ -648,6 +661,7 @@
     background: rgba(26, 27, 38, 0.92);
     color: #c0caf5;
     cursor: pointer;
+    z-index: 2;
 }
 
 .rizzma-mount:disabled {
@@ -662,11 +676,10 @@
     background: rgba(247, 118, 142, 0.16);
     color: #f7768e;
     font-size: 0.78rem;
+    z-index: 3;
 }
 
 .rizzma-controls {
-    position: absolute;
-    inset: auto 0 0;
     display: flex;
     align-items: center;
     gap: 0.55rem;
