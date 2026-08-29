@@ -125,6 +125,8 @@ fn render_portal_content(
             poster_base64,
             animated,
             duration,
+            controls,
+            controls_unsupported,
             schema,
             renderer_version,
             ..
@@ -141,12 +143,14 @@ fn render_portal_content(
                         poster_base64={poster_base64.clone()}
                         animated={*animated}
                         duration={*duration}
+                        controls={controls.clone()}
                         renderer_version={renderer_version.clone()}
-                        live_supported={super::media::figure_live_supported(
-                            *schema,
-                            renderer_version,
-                            *animated,
-                        )}
+                        live_supported={!*controls_unsupported
+                            && super::media::figure_live_supported(
+                                *schema,
+                                renderer_version,
+                                *animated,
+                            )}
                     />
                 </>
             }

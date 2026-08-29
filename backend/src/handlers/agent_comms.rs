@@ -390,6 +390,7 @@ pub async fn show_media(
             let poster_base64 = metadata
                 .poster(&body)
                 .map(|poster| base64::engine::general_purpose::STANDARD.encode(poster));
+            let (controls, controls_unsupported) = portable_figure_controls(&metadata.controls);
             let id = app_state
                 .media_store
                 .store_bytes(&content_type, &body, user_id, Some(target_id))
@@ -409,6 +410,8 @@ pub async fn show_media(
                     poster_base64,
                     animated: meta.animated,
                     duration: meta.duration,
+                    controls,
+                    controls_unsupported,
                 }]),
                 id,
             )
@@ -496,7 +499,33 @@ fn portable_figure_limits() -> rizzma::portable::Limits {
     // The poster is persisted in the transcript for durable fallback; keep
     // that row bounded independently of the canonical artifact cap.
     limits.max_poster_bytes = 1024 * 1024;
+    // Keep Rizzma's finite parser-safety control bounds here. The tighter DOM
+    // policy below intentionally runs after inspection so a figure with a
+    // safe-but-too-large manifest can still degrade to its honest poster.
     limits
+}
+
+fn portable_figure_controls(
+    controls: &[rizzma::portable::ControlRef],
+) -> (Vec<shared::PortableFigureControl>, bool) {
+    if controls.len() > shared::media::PORTABLE_FIGURE_MAX_CONTROLS {
+        return (Vec::new(), true);
+    }
+    let mapped = controls
+        .iter()
+        .map(|control| {
+            (control.label.len() <= shared::media::PORTABLE_FIGURE_MAX_CONTROL_LABEL_BYTES).then(
+                || shared::PortableFigureControl {
+                    label: control.label.clone(),
+                    min: control.min,
+                    max: control.max,
+                    default: control.default,
+                    step: control.step,
+                },
+            )
+        })
+        .collect::<Option<Vec<_>>>();
+    mapped.map_or_else(|| (Vec::new(), true), |controls| (controls, false))
 }
 
 /// Strip the reversible HTML carrier at the trust boundary. Only canonical
@@ -536,7 +565,7 @@ fn pending_input_count(
 
 #[cfg(test)]
 mod tests {
-    use super::{turn_signal_is_busy, unwrap_portable_figure_html};
+    use super::{portable_figure_controls, turn_signal_is_busy, unwrap_portable_figure_html};
     use axum::body::Bytes;
 
     #[test]
@@ -551,6 +580,42 @@ mod tests {
                 .expect("valid carrier");
         assert_eq!(bytes.as_ref(), b"RZFG");
         assert_eq!(filename.as_deref(), Some("Demo.RIZ"));
+    }
+
+    #[test]
+    fn portable_control_manifest_is_typed_bounded_and_ordered() {
+        let controls = vec![
+            rizzma::portable::ControlRef {
+                label: "wavelength".to_string(),
+                min: 0.6,
+                max: 3.0,
+                default: 1.5,
+                step: Some(0.1),
+            },
+            rizzma::portable::ControlRef {
+                label: "width".to_string(),
+                min: 0.3,
+                max: 2.5,
+                default: 0.8,
+                step: None,
+            },
+        ];
+        let (mapped, unsupported) = portable_figure_controls(&controls);
+        assert!(!unsupported);
+        assert_eq!(mapped[0].label, "wavelength");
+        assert_eq!(mapped[0].step, Some(0.1));
+        assert_eq!(mapped[1].label, "width");
+
+        let excessive = vec![controls[0].clone(); shared::media::PORTABLE_FIGURE_MAX_CONTROLS + 1];
+        let (mapped, unsupported) = portable_figure_controls(&excessive);
+        assert!(mapped.is_empty());
+        assert!(unsupported);
+
+        let mut overlong = controls;
+        overlong[0].label = "x".repeat(shared::media::PORTABLE_FIGURE_MAX_CONTROL_LABEL_BYTES + 1);
+        let (mapped, unsupported) = portable_figure_controls(&overlong);
+        assert!(mapped.is_empty());
+        assert!(unsupported);
     }
 
     #[test]

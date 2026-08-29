@@ -1,0 +1,11 @@
+{
+  "manifest": 1,
+  "version": "1.12.0",
+  "schema_min": 1,
+  "schema_max": 4,
+  "assets": [
+    { "role": "renderer", "file": "rizzma_bg.wasm", "mime": "application/wasm", "size": 2165782, "sha256": "fab8a65b65d214c49afe45385ba70eabeb2442f86b88463fc404ca824517b8a0" },
+    { "role": "glue", "file": "rizzma.js", "mime": "text/javascript", "size": 60032, "sha256": "81e34da5397d2346062ef18f1ac611abfbee512d7f6b74fc37a39349314747b7" },
+    { "role": "loader", "file": "rizzma-mount.js", "mime": "text/javascript", "size": 12052, "sha256": "90fd57ce708695afc0559b3ad176f8e5f3848123113cd61551b4541fc13157b9" }
+  ]
+}

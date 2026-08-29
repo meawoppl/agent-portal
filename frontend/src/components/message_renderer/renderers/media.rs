@@ -27,6 +27,9 @@ extern "C" {
     #[wasm_bindgen(js_name = seekRizzma)]
     fn seek_rizzma(frame: HtmlIFrameElement, time: f64);
 
+    #[wasm_bindgen(js_name = setRizzmaControl)]
+    fn set_rizzma_control(frame: HtmlIFrameElement, index: usize, value: f64);
+
     #[wasm_bindgen(js_name = disposeRizzma)]
     fn dispose_rizzma(frame: HtmlIFrameElement);
 }
@@ -194,20 +197,22 @@ pub(super) struct FigureViewerProps {
     pub poster_base64: Option<String>,
     pub animated: bool,
     pub duration: f64,
+    #[prop_or_default]
+    pub controls: Vec<shared::PortableFigureControl>,
     pub renderer_version: String,
     pub live_supported: bool,
 }
 
 /// Only exact, host-vetted runtime versions may execute. Rizzma 1.9 supports
-/// static interaction; 1.10 and 1.11 support seeking on an already-bound
-/// session, which keeps animation controls compatible with pan and zoom.
+/// static interaction; 1.10 and 1.11 add bound-session seeking; 1.12 adds
+/// schema-4 parameter controls.
 pub(super) fn figure_live_supported(schema: u32, renderer_version: &str, animated: bool) -> bool {
-    schema <= 3
-        && match renderer_version {
-            "1.9.0" => !animated,
-            "1.10.0" | "1.11.0" => true,
-            _ => false,
-        }
+    match renderer_version {
+        "1.9.0" => schema <= 3 && !animated,
+        "1.10.0" | "1.11.0" => schema <= 3,
+        "1.12.0" => schema <= 4,
+        _ => false,
+    }
 }
 
 /// Sandboxed Rizzma viewer. Runtime assets are pinned and verified by the
@@ -221,6 +226,15 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
     let mounted = use_state(|| false);
     let playing = use_state(|| false);
     let position = use_state(|| 0.0_f64);
+    let control_values = {
+        let controls = props.controls.clone();
+        use_state(move || {
+            controls
+                .iter()
+                .map(|control| control.default)
+                .collect::<Vec<_>>()
+        })
+    };
     let error = use_state(|| None::<String>);
 
     {
@@ -238,11 +252,12 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
         let frame_ref = frame_ref.clone();
         let playing = playing.clone();
         let position = position.clone();
+        let control_values = control_values.clone();
         use_effect_with(*mounted, move |is_mounted| {
-            let listener = if *is_mounted {
+            let listeners = if *is_mounted {
                 frame_ref.cast::<HtmlIFrameElement>().map(|frame| {
                     let state_frame = frame.clone();
-                    EventListener::new(&frame, "rizzma-state", move |_| {
+                    let state_listener = EventListener::new(&frame, "rizzma-state", move |_| {
                         playing.set(
                             state_frame.get_attribute("data-rizzma-playing").as_deref()
                                 == Some("true"),
@@ -254,12 +269,31 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
                         {
                             position.set(value);
                         }
-                    })
+                    });
+                    let control_frame = frame.clone();
+                    let control_listener =
+                        EventListener::new(&frame, "rizzma-control", move |_| {
+                            let index = control_frame
+                                .get_attribute("data-rizzma-control-index")
+                                .and_then(|value| value.parse::<usize>().ok());
+                            let value = control_frame
+                                .get_attribute("data-rizzma-control-value")
+                                .and_then(|value| value.parse::<f64>().ok())
+                                .filter(|value| value.is_finite());
+                            if let (Some(index), Some(value)) = (index, value) {
+                                let mut next = (*control_values).clone();
+                                if let Some(slot) = next.get_mut(index) {
+                                    *slot = value;
+                                    control_values.set(next);
+                                }
+                            }
+                        });
+                    (state_listener, control_listener)
                 })
             } else {
                 None
             };
-            move || drop(listener)
+            move || drop(listeners)
         });
     }
 
@@ -347,7 +381,7 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
                     }
                 }
                 <iframe
-                    ref={frame_ref}
+                    ref={frame_ref.clone()}
                     class={classes!("rizzma-frame", (!*mounted).then_some("hidden"))}
                     sandbox="allow-scripts"
                     title={label}
@@ -386,6 +420,38 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
                     <span>{ format!("{:.1}s / {:.1}s", *position, props.duration.max(0.0)) }</span>
                 </div>
             }
+            if *mounted && !props.controls.is_empty() {
+                <div class="rizzma-parameter-controls">
+                    { for props.controls.iter().enumerate().map(|(index, control)| {
+                        let frame_ref = frame_ref.clone();
+                        let oninput = Callback::from(move |event: InputEvent| {
+                            let value = event
+                                .target_unchecked_into::<HtmlInputElement>()
+                                .value_as_number();
+                            if value.is_finite() {
+                                if let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() {
+                                    set_rizzma_control(frame, index, value);
+                                }
+                            }
+                        });
+                        let value = control_values.get(index).copied().unwrap_or(control.default);
+                        html! {
+                            <label class="rizzma-parameter" key={index}>
+                                <span>{ control.label.clone() }</span>
+                                <input
+                                    type="range"
+                                    min={control.min.to_string()}
+                                    max={control.max.to_string()}
+                                    step={control.step.map_or_else(|| "any".to_string(), |step| step.to_string())}
+                                    value={value.to_string()}
+                                    {oninput}
+                                />
+                                <output>{ format!("{value:.3}") }</output>
+                            </label>
+                        }
+                    }) }
+                </div>
+            }
         </div>
     }
 }
@@ -403,6 +469,9 @@ mod figure_tests {
         assert!(figure_live_supported(3, "1.11.0", false));
         assert!(figure_live_supported(3, "1.11.0", true));
         assert!(!figure_live_supported(4, "1.10.0", false));
+        assert!(figure_live_supported(4, "1.12.0", false));
+        assert!(figure_live_supported(4, "1.12.0", true));
+        assert!(!figure_live_supported(5, "1.12.0", false));
     }
 }
 
