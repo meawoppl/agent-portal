@@ -702,3 +702,34 @@
     flex: 1;
     min-width: 5rem;
 }
+
+.rizzma-parameter-controls {
+    display: grid;
+    gap: 0.45rem;
+    padding: 0.55rem 0.65rem;
+    border-top: 1px solid var(--border-color);
+    background: rgba(26, 27, 38, 0.94);
+}
+
+.rizzma-parameter {
+    display: grid;
+    grid-template-columns: minmax(6rem, auto) minmax(8rem, 1fr) 4.5rem;
+    align-items: center;
+    gap: 0.6rem;
+    color: #c0caf5;
+    font-size: 0.78rem;
+}
+
+.rizzma-parameter input[type="range"] {
+    min-width: 0;
+}
+
+.rizzma-parameter > span {
+    overflow-wrap: anywhere;
+}
+
+.rizzma-parameter output {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}

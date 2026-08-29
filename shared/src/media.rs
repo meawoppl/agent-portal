@@ -36,6 +36,10 @@ pub const PORTABLE_FIGURE_HTML_TYPE: &str = "application/vnd.rizzma.figure+html"
 
 /// Canonical portable-figure artifact cap.
 pub const PORTABLE_FIGURE_MAX_BYTES: usize = 10 * 1024 * 1024;
+/// Maximum number of host-DOM sliders persisted for one portable figure.
+pub const PORTABLE_FIGURE_MAX_CONTROLS: usize = 16;
+/// Maximum UTF-8 byte length of one persisted control label.
+pub const PORTABLE_FIGURE_MAX_CONTROL_LABEL_BYTES: usize = 128;
 
 /// Transport cap for `.riz.html`. Base64 expands the canonical artifact by
 /// one third and the live tier may also carry a renderer which is discarded

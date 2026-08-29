@@ -924,6 +924,14 @@ pub enum PortalContent {
         animated: bool,
         #[serde(default)]
         duration: f64,
+        /// Host-rendered parameter controls in artifact declaration order.
+        /// Track/grid data remains inside the canonical artifact.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        controls: Vec<PortableFigureControl>,
+        /// True when host policy cannot expose the complete manifest. The
+        /// durable artifact remains available through its honest poster.
+        #[serde(default)]
+        controls_unsupported: bool,
     },
     /// Collapsible "portal features reminder" emitted at session start and
     /// after compaction boundaries. The body is markdown — rendered through
@@ -970,6 +978,18 @@ pub enum PortalContent {
         from_session_id: String,
         text: String,
     },
+}
+
+/// A bounded, declarative slider exposed by a portable figure. The host owns
+/// the DOM control; the sandboxed renderer owns normalization and figure state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PortableFigureControl {
+    pub label: String,
+    pub min: f64,
+    pub max: f64,
+    pub default: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
 }
 
 impl std::fmt::Debug for PortalContent {
@@ -1179,6 +1199,38 @@ mod agent_install_serde_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_figure_controls_are_typed_and_backward_compatible() {
+        let legacy = concat!(
+            r#"{"type":"figure","media_type":"application/vnd.rizzma.figure","#,
+            r#""data":"/api/media/example","schema":3,"renderer_version":"1.11.0","#,
+            r#""width_px":640,"height_px":480}"#
+        );
+        let parsed: PortalContent = serde_json::from_str(legacy).expect("legacy figure");
+        let PortalContent::Figure {
+            controls,
+            controls_unsupported,
+            ..
+        } = parsed
+        else {
+            panic!("figure content");
+        };
+        assert!(controls.is_empty());
+        assert!(!controls_unsupported);
+
+        let control = PortableFigureControl {
+            label: "wavelength".to_string(),
+            min: 0.6,
+            max: 3.0,
+            default: 1.5,
+            step: Some(0.1),
+        };
+        let encoded = serde_json::to_string(&control).expect("serialize control");
+        let decoded: PortableFigureControl =
+            serde_json::from_str(&encoded).expect("deserialize control");
+        assert_eq!(decoded, control);
+    }
 
     #[test]
     fn agent_login_status_defaults_to_unknown_and_round_trips() {

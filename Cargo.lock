@@ -6084,9 +6084,9 @@ dependencies = [
 
 [[package]]
 name = "rizzma"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62437b1845e85ba4eed174d8aedbb69fe9be824eeae0ba793cf5e462c197efd5"
+checksum = "dc26d1a0b13e7b729178e45e4fc973ff8320f81813437e97e31589d952f8f4df"
 dependencies = [
  "base64 0.22.1",
  "chrono",

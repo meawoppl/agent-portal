@@ -2,14 +2,22 @@ const RUNTIMES = new Map([
   ["1.9.0", {
     root: "/rizzma-runtime/1.9.0",
     manifestSha256: "abf71fea0fa053893f5c530aa7b9401fa212b4d77f6788950a5cf8209e141aa4",
+    schemaMax: 3,
   }],
   ["1.10.0", {
     root: "/rizzma-runtime/1.10.0",
     manifestSha256: "30c38615e990a3994c90f1a99ea4dcc42d8595a404ec8e0ea89303a86e930c48",
+    schemaMax: 3,
   }],
   ["1.11.0", {
     root: "/rizzma-runtime/1.11.0",
     manifestSha256: "dad667910c9717baa8020aea9bc5de1f636c88e8bdb9392ed836cac528afed9d",
+    schemaMax: 3,
+  }],
+  ["1.12.0", {
+    root: "/rizzma-runtime/1.12.0",
+    manifestSha256: "1ca5f56aa77ca332750e36ec9908a39510e9ab9eefe2f4bfbde6dc677e192444",
+    schemaMax: 4,
   }],
 ]);
 const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
@@ -31,7 +39,7 @@ async function verifiedRuntime(version) {
   }
   const manifest = JSON.parse(new TextDecoder().decode(manifestBytes));
   if (manifest.manifest !== 1 || manifest.version !== version
-      || manifest.schema_min !== 1 || manifest.schema_max !== 3) {
+      || manifest.schema_min !== 1 || manifest.schema_max !== runtime.schemaMax) {
     throw new Error("unsupported portable-figure runtime manifest");
   }
   const expected = new Map([
@@ -181,6 +189,19 @@ function childDocument(nonce) {
             mounted.seek(position);
             clockStartedAt = performance.now();
             emitPlaybackState(request.seq);
+          } else if (request.type === "control" && state === "mounted"
+              && Number.isSafeInteger(request.index) && request.index >= 0
+              && request.index < mounted.controls.length
+              && Number.isFinite(request.value)) {
+            try {
+              const value = mounted.setControl(request.index, request.value);
+              if (!Number.isFinite(value)) throw new Error("portable-figure control returned an invalid value");
+              port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq,
+                type:"control", index:request.index, value});
+            } catch (error) {
+              port.postMessage({nonce:${JSON.stringify(nonce)}, re:request.seq,
+                type:"error", message:String(error).slice(0,256)});
+            }
           } else if (request.type === "dispose") {
             if (state === "mounting") { disposeSeq = request.seq; return; }
             cleanup();
@@ -251,6 +272,11 @@ export async function mountRizzma(iframe, artifactUrl, rendererVersion) {
         iframe.dataset.rizzmaTime = String(Number(event.data.time) || 0);
         iframe.dispatchEvent(new Event("rizzma-state"));
       }
+      if (event.data.type === "control") {
+        iframe.dataset.rizzmaControlIndex = String(event.data.index);
+        iframe.dataset.rizzmaControlValue = String(event.data.value);
+        iframe.dispatchEvent(new Event("rizzma-control"));
+      }
       if (event.data.type === "error") { clearTimeout(timeout); disposeEntry(entry); reject(new Error(event.data.message)); }
     };
     iframe.contentWindow.postMessage({kind:"rizzma-bootstrap", nonce, loader}, "*", [channel.port2]);
@@ -273,6 +299,12 @@ export function pauseRizzma(iframe) {
 
 export function seekRizzma(iframe, time) {
   if (Number.isFinite(time)) sendControl(iframe, "seek", {time});
+}
+
+export function setRizzmaControl(iframe, index, value) {
+  if (Number.isSafeInteger(index) && index >= 0 && Number.isFinite(value)) {
+    sendControl(iframe, "control", {index, value});
+  }
 }
 
 export function disposeRizzma(iframe) {

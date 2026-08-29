@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Interactive Rizzma parameters.** Schema-4 portable figures expose their
+  bounded, author-declared parameters as host-rendered sliders. Applied values
+  come back from the sandboxed renderer after clamp and step normalization;
+  figures whose complete control manifest exceeds host policy remain honest
+  poster-only artifacts.
+
 - **Message-recency session ordering.** Accepted input records a dedicated
   per-session timestamp, and fresh dashboard loads show the most recently
   messaged sessions first instead of following agent-output activity.
