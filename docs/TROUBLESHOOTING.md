@@ -317,6 +317,101 @@ diesel migration revert
 diesel migration run
 ```
 
+## Agent Credential Issues
+
+### "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+Sessions in the portal stop working and every turn comes back with this text,
+while running `claude` yourself in a terminal on the same machine works fine.
+
+**This message does not come from agent-portal.** It is emitted by the `claude`
+binary itself:
+
+```bash
+grep -a "Failed to authenticate" ~/.local/share/claude/versions/<version>
+```
+
+It is about the agent's **Anthropic** OAuth credentials, and has nothing to do
+with the portal's own Google login or the `cc_session` cookie. Do not go looking
+in `backend/src/handlers/auth.rs` for it.
+
+**Cause: credential rotation under long-lived agent processes.**
+
+The launcher spawns one long-running `claude --print` process per session, and
+each reads its OAuth credentials **once, at spawn time**. On macOS those live
+only in the login keychain (service `Claude Code-credentials`); there is usually
+no `~/.claude/.credentials.json`.
+
+Running `/login` — in a terminal, in any Claude Code session, anywhere on that
+machine — mints a new token pair and **rotates the refresh token**. Processes
+spawned before that rotation are still holding the superseded refresh token in
+memory. When their access token ages out they try to refresh with it, the server
+rejects it as already-rotated, and the CLI reports exactly this message. It then
+**keeps running** rather than exiting, so nothing relaunches it and nothing
+re-reads the keychain. The session stays broken until something restarts it.
+
+A terminal `claude` is unaffected because every invocation is a fresh process
+reading the current keychain entry.
+
+**Confirming it on macOS:**
+
+```bash
+# When were the credentials last written? (mdat = last modified, UTC)
+security find-generic-password -s "Claude Code-credentials" | grep mdat
+
+# When were the portal's agent processes started?
+ps -eo pid,ppid,lstart,etime,command | grep "[c]laude --print"
+```
+
+Agent processes older than that `mdat` timestamp are holding stale credentials.
+The error frame also lands in the session transcript, so you can find affected
+sessions directly:
+
+```bash
+grep -rl "OAuth session expired" ~/.claude/projects/
+```
+
+**Fix — restart the launcher so it respawns agents with current credentials:**
+
+```bash
+agent-portal service restart
+```
+
+The launcher command delegates to the configured service manager (`systemd`
+on Linux and `launchd` on macOS), so callers do not need to reproduce its
+platform-specific service name.
+
+Verify recovery by watching for turns finalizing with `is_error=false`:
+
+```bash
+tail -f ~/Library/Logs/agent-portal/stdout.log | grep turn_metrics
+```
+
+**This recurs after every `/login`** while portal sessions are long-lived — the
+rotation invalidates every already-running agent's copy. Restarting the launcher
+after re-authenticating avoids it.
+
+**The wire shape**, if you are writing detection for this: the CLI streams it as
+a synthetic assistant frame followed by a `Result` with `is_error: true` — the
+same shape as the upstream-429 turn that `RATE_LIMIT_TEXT_PREFIX` keys on in
+`claude-session-lib/src/io_task.rs`.
+
+```json
+{"type":"assistant","isApiErrorMessage":true,
+ "message":{"role":"assistant","model":"<synthetic>",
+   "content":[{"type":"text",
+     "text":"Failed to authenticate: OAuth session expired and could not be refreshed"}]}}
+```
+
+Note the `"<synthetic>"` model, which already excludes the frame from context
+accounting via `can_anchor_context`.
+
+**Related but distinct:** `SESSION_LAUNCH_CRASHLOOP_PAUSED` covers the case
+where the agent host is genuinely logged *out* — launches fail immediately and
+repeatedly, and reconcile parks the session. That path already recovers by
+relaunching. The rotation case above is nastier precisely because the process
+does **not** exit, so no relaunch is ever triggered.
+
 ## Getting Help
 
 If you're still stuck:
