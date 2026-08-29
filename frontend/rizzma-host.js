@@ -7,6 +7,10 @@ const RUNTIMES = new Map([
     root: "/rizzma-runtime/1.10.0",
     manifestSha256: "30c38615e990a3994c90f1a99ea4dcc42d8595a404ec8e0ea89303a86e930c48",
   }],
+  ["1.11.0", {
+    root: "/rizzma-runtime/1.11.0",
+    manifestSha256: "dad667910c9717baa8020aea9bc5de1f636c88e8bdb9392ed836cac528afed9d",
+  }],
 ]);
 const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
 const active = [];

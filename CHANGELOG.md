@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Reversible Rizzma HTML ingestion.** `agent-portal show plot.riz.html`
+  accepts Rizzma's browser-openable carrier, unwraps it with Rizzma's strict
+  budgeted parser, and stores only the validated canonical `.riz` artifact.
+  Embedded wrapper HTML and runtime assets are discarded at the backend trust
+  boundary. Rizzma 1.11 is registered as a pinned live renderer.
+
 - **Launcher model picker.** The launch dialog gains a "Model" selector fed by
   the SDK crates' model catalogs — `claude_codes::ClaudeModel` (floating
   aliases grouped separately from pinned models) and `codex_codes::CodexModel`

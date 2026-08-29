@@ -217,13 +217,15 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             post(handlers::agent_comms::send_agent_message),
         )
         // `agent-portal show <file>`: display media in a session transcript.
-        // Raise the request-body limit to the video cap (the larger of the two
-        // media caps); the handler enforces the exact per-kind cap. Without
+        // Raise the request-body limit to the larger of the configured video
+        // cap and the reversible-figure carrier cap; the handler enforces the
+        // exact per-kind cap. Without
         // this override axum's 2 MB default would reject most media uploads.
         .route(
             "/api/agent/sessions/{id}/media",
             post(handlers::agent_comms::show_media).layer(axum::extract::DefaultBodyLimit::max(
-                app_state.max_video_mb as usize * 1024 * 1024,
+                (app_state.max_video_mb as usize * 1024 * 1024)
+                    .max(shared::media::PORTABLE_FIGURE_HTML_MAX_BYTES),
             )),
         )
         // Serve videos shown via `agent-portal show`, with HTTP Range support.

@@ -14,9 +14,10 @@ use anyhow::{anyhow, Context, Result};
 
 use shared::api::ShowMediaResponse;
 use shared::media::{
-    has_gif_magic, has_jpeg_magic, has_mp4_magic, has_png_magic, has_rizzma_magic, has_webm_magic,
-    has_webp_magic, looks_like_svg, media_kind, MediaKind, PORTABLE_FIGURE_TYPE,
-    SUPPORTED_FORMATS_HINT,
+    has_gif_magic, has_jpeg_magic, has_mp4_magic, has_png_magic, has_rizzma_html_carrier,
+    has_rizzma_magic, has_webm_magic, has_webp_magic, looks_like_svg, media_kind, MediaKind,
+    PORTABLE_FIGURE_HTML_MAX_BYTES, PORTABLE_FIGURE_HTML_TYPE, PORTABLE_FIGURE_MAX_BYTES,
+    PORTABLE_FIGURE_TYPE, SUPPORTED_FORMATS_HINT,
 };
 
 /// Detect a supported media content type from `path`'s extension, verified
@@ -25,6 +26,24 @@ use shared::media::{
 ///
 /// Pure function (no I/O) so it can be unit-tested with byte fixtures.
 pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static str, String> {
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase);
+    if filename
+        .as_deref()
+        .is_some_and(|name| name.ends_with(".riz.html"))
+    {
+        return if has_rizzma_html_carrier(bytes) {
+            Ok(PORTABLE_FIGURE_HTML_TYPE)
+        } else {
+            Err(format!(
+                "file contents don't match its extension (expected {PORTABLE_FIGURE_HTML_TYPE}); \
+                 refusing to display a possibly-corrupt or misnamed file"
+            ))
+        };
+    }
+
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -55,11 +74,15 @@ pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static 
     Ok(content_type)
 }
 
-/// Per-kind size cap (MB) from the environment, defaulting to the documented
-/// values. The backend is authoritative; this is a fast local pre-flight.
-fn cap_mb(kind: MediaKind) -> u64 {
+/// Per-format byte cap. The backend is authoritative; this is a fast local
+/// pre-flight. HTML carriers get transport headroom for base64 and an embedded
+/// runtime, while their decoded artifact remains capped at 10 MiB server-side.
+fn cap_bytes(content_type: &str, kind: MediaKind) -> u64 {
+    if content_type == PORTABLE_FIGURE_HTML_TYPE {
+        return PORTABLE_FIGURE_HTML_MAX_BYTES as u64;
+    }
     if kind == MediaKind::Figure {
-        return 10;
+        return PORTABLE_FIGURE_MAX_BYTES as u64;
     }
     let (var, default) = match kind {
         MediaKind::Image => ("PORTAL_MAX_IMAGE_MB", 10),
@@ -70,6 +93,8 @@ fn cap_mb(kind: MediaKind) -> u64 {
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(default)
+        * 1024
+        * 1024
 }
 
 fn human_size(bytes: u64) -> String {
@@ -126,11 +151,12 @@ pub(crate) async fn upload_media(
         .to_string();
 
     let size = bytes.len() as u64;
-    let limit = cap_mb(kind);
-    if size > limit * 1024 * 1024 {
+    let limit = cap_bytes(content_type, kind);
+    if size > limit {
         return Err(anyhow!(
-            "{filename} is {} — exceeds the {limit} MB limit for {}",
+            "{filename} is {} — exceeds the {} MB transport limit for {}",
             human_size(size),
+            limit / (1024 * 1024),
             match kind {
                 MediaKind::Image => "images",
                 MediaKind::Video => "videos",
@@ -188,6 +214,21 @@ mod tests {
             Ok(PORTABLE_FIGURE_TYPE)
         );
         assert!(detect_content_type(Path::new("plot.riz"), b"not a figure").is_err());
+
+        let wrapper = format!(
+            "<!doctype html>{}AAAA</script>",
+            shared::media::RIZZMA_HTML_CARRIER_OPEN
+        );
+        assert_eq!(
+            detect_content_type(Path::new("plot.riz.html"), wrapper.as_bytes()),
+            Ok(PORTABLE_FIGURE_HTML_TYPE)
+        );
+        assert_eq!(
+            detect_content_type(Path::new("PLOT.RIZ.HTML"), wrapper.as_bytes()),
+            Ok(PORTABLE_FIGURE_HTML_TYPE)
+        );
+        assert!(detect_content_type(Path::new("plot.html"), wrapper.as_bytes()).is_err());
+        assert!(detect_content_type(Path::new("plot.riz.html"), b"not a wrapper").is_err());
     }
 
     #[test]
