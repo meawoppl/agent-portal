@@ -337,33 +337,38 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
         .unwrap_or_else(|| "Portable figure".to_string());
 
     html! {
-        <div class="rizzma-figure" style={format!("aspect-ratio: {aspect_ratio}")}>
-            if !*mounted {
-                if let Some(src) = poster {
-                    <img class="rizzma-poster" {src} alt={label.clone()} />
-                } else {
-                    <div class="rizzma-poster-missing">{ label.clone() }</div>
-                }
-            }
-            <iframe
-                ref={frame_ref}
-                class={classes!("rizzma-frame", (!*mounted).then_some("hidden"))}
-                sandbox="allow-scripts"
-                title={label}
-            />
-            if !*mounted {
-                <button class="rizzma-mount" {onclick} disabled={*loading || !props.live_supported}>
-                    if !props.live_supported {
-                        { "Poster (runtime unavailable)" }
-                    } else if *loading {
-                        { "Loading interactive figure…" }
-                    } else if props.animated {
-                        { "Play interactive figure" }
+        <div class="rizzma-figure">
+            <div class="rizzma-viewport" style={format!("aspect-ratio: {aspect_ratio}")}>
+                if !*mounted {
+                    if let Some(src) = poster {
+                        <img class="rizzma-poster" {src} alt={label.clone()} />
                     } else {
-                        { "Open interactive figure" }
+                        <div class="rizzma-poster-missing">{ label.clone() }</div>
                     }
-                </button>
-            }
+                }
+                <iframe
+                    ref={frame_ref}
+                    class={classes!("rizzma-frame", (!*mounted).then_some("hidden"))}
+                    sandbox="allow-scripts"
+                    title={label}
+                />
+                if !*mounted {
+                    <button class="rizzma-mount" {onclick} disabled={*loading || !props.live_supported}>
+                        if !props.live_supported {
+                            { "Poster (runtime unavailable)" }
+                        } else if *loading {
+                            { "Loading interactive figure…" }
+                        } else if props.animated {
+                            { "Play interactive figure" }
+                        } else {
+                            { "Open interactive figure" }
+                        }
+                    </button>
+                }
+                if let Some(message) = &*error {
+                    <div class="rizzma-error">{ message }</div>
+                }
+            </div>
             if *mounted && props.animated {
                 <div class="rizzma-controls">
                     <button type="button" onclick={on_play_pause}>
@@ -380,9 +385,6 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
                     />
                     <span>{ format!("{:.1}s / {:.1}s", *position, props.duration.max(0.0)) }</span>
                 </div>
-            }
-            if let Some(message) = &*error {
-                <div class="rizzma-error">{ message }</div>
             }
         </div>
     }
