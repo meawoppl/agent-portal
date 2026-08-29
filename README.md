@@ -32,6 +32,9 @@ agent-portal login             # browser device-code sign-in
 agent-portal service install   # run as a systemd / launchd service
 ```
 
+<img src="docs/media/feature-install-cast.webp" width="900"
+     alt="Terminal: the install script downloads the agent-portal binary and prints its next steps, then 'agent-portal login' prints a txcl.io device URL and a code and waits for the browser approval.">
+
 Then open **[txcl.io](https://txcl.io)**, and launch a session on that machine
 straight from the dashboard — pick the directory, agent, model, and whether to
 work in a fresh git worktree.
@@ -73,6 +76,12 @@ Open **http://localhost:3000/** — dev mode logs you in as
 - **History.** Finished sessions stay browsable and searchable as an overlay,
   including transcripts restored from long-term archive.
 
+<img src="docs/media/feature-desktop-phone.webp" width="900"
+     alt="The same session open on a desktop and a phone at once. The question is typed on the phone; it appears on the desktop immediately and both panes stream the agent's answer in step.">
+
+<img src="docs/media/feature-nav-mode.webp" width="900"
+     alt="Ctrl+K enters nav mode: the session pills gain numbers, a key legend appears, arrow keys move between sessions and a number key jumps straight to one.">
+
 ### One dashboard, many agents
 
 - **Three agent CLIs**, each with a renderer that speaks its own protocol:
@@ -88,6 +97,9 @@ Open **http://localhost:3000/** — dev mode logs you in as
 <img src="docs/media/feature-launch-session.webp" width="900"
      alt="The launch dialog: pick the machine, browse to a directory, choose the model, tick 'create git worktree', and click Launch. A session pill slides into the rail and the agent boots and greets you.">
 
+<img src="docs/media/feature-multi-agent.webp" width="900"
+     alt="Switching between a Claude session and a Codex session in the same dashboard, each rendered in its own protocol's shape: Claude's role-tagged cards and turn footer, Codex's thread items with a running tool call and its own permission card.">
+
 ### Rich rendering
 
 - Markdown, syntax-highlighted **diffs**, LaTeX via KaTeX, ANSI colors, and
@@ -102,6 +114,9 @@ Open **http://localhost:3000/** — dev mode logs you in as
 
 <img src="docs/media/feature-permission-card.webp" width="900"
      alt="A prompt is typed and sent; the agent reads the file and proposes a diff, then a 'Permission Required' card appears with Allow / Allow &amp; Remember / Deny. Clicking Allow lets the edit land.">
+
+<img src="docs/media/feature-show-media.webp" width="820"
+     alt="The agent runs 'agent-portal show signals.riz'; a portable figure appears in the transcript as a poster, and clicking play mounts the runtime and animates three travelling waveforms with a scrubber.">
 
 ### Port forwarding
 
@@ -152,6 +167,9 @@ remembers what it looked at yesterday. See
 - **Usage-limit continuations**: when an agent hits a provider limit, the portal
   schedules the resume for you and relaunches the session if the process exited.
 
+<img src="docs/media/feature-turn-metrics.webp" width="900"
+     alt="The header pill plots a sparkline of recent turns; opening its menu offers tok/s, TTFT, max gap, cache hit, thinking and subagent, and picking cache hit re-plots the sparkline.">
+
 ### Voice input
 
 Browser-native (Web Speech API) with no credentials required. Self-hosters can
@@ -188,37 +206,8 @@ requires a *verified* email.
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph machines["Your machines"]
-        subgraph launcher["agent-portal daemon"]
-            subgraph proxy["session (claude-portal)"]
-                cli["claude / codex / muse CLI"]
-            end
-        end
-        devsrv["localhost:8080 dev server"]
-    end
-
-    subgraph server["Portal server"]
-        axum["Axum + WebSocket hub"]
-        db[(PostgreSQL)]
-        archive[("Archive: disk / S3")]
-        axum <--> db
-        axum --> archive
-    end
-
-    subgraph clients["Clients"]
-        yew["Yew WASM frontend"]
-        mobileapp["iOS / Android shell"]
-    end
-
-    launcher <-->|"session + launcher WS"| axum
-    devsrv -.->|"forward tunnel"| launcher
-    yew <-->|"client WS"| axum
-    mobileapp <--> axum
-    axum -->|"serves"| yew
-    axum -->|"push"| mobileapp
-```
+<img src="docs/media/architecture.svg" width="900"
+     alt="Agent Portal data flow. On your machine the agent-portal launcher supervises one agent process per session (claude, codex, muse) and a local dev server on 127.0.0.1:8899. A session WebSocket carries traffic to the portal server — an Axum WebSocket hub with Postgres for transcripts and an optional disk/S3 archive, plus a reverse proxy for forward subdomains. A client WebSocket carries it on to the browser's Yew WebAssembly app, with the phone and shared read-only viewers alongside; the forwarded port is tunnelled back out to the browser and push notifications go to the phone.">
 
 The **launcher** (`agent-portal`) is a persistent daemon, one per machine: it
 starts and supervises sessions, runs scheduled tasks, tunnels forwarded ports,

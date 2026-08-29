@@ -13,6 +13,12 @@ recordings of the running app, not illustrations — and they run against a
 | `cap-permission.js` | `feature-permission-card.webp` | Prompt → Read/diff cards → **Permission Required** form → Allow → edit lands |
 | `cap-forward.js` | `feature-port-forward.webp` | The agent starts an `http.server` on the rizzma rustdoc and runs `agent-portal forward 8899` — both visible as tool cards — then the chip appears and the docs render live in the preview panel, navigable inside the frame |
 | `cap-message.js` | `feature-agent-message.webp` | One session messages another; the message lands as a turn and that agent starts working |
+| `cap-media.js` | `feature-show-media.webp` | `agent-portal show signals.riz` → poster in the transcript → play → the figure animates |
+| `cap-metrics.js` | `feature-turn-metrics.webp` | The header sparkline building over turns, then switching which metric it plots |
+| `cap-nav.js` | `feature-nav-mode.webp` | `Ctrl+K` → numbered pills, key legend, arrows and a number key jumping between sessions |
+| `cap-agents.js` | `feature-multi-agent.webp` | The same dashboard switching between a Claude session and a Codex session, each in its own protocol's shape |
+| `cap-handoff.js` | `feature-desktop-phone.webp` | Desktop and phone panes side by side on one session; the phone asks, both stream the answer |
+| `cap-cast.js` | `feature-install-cast.webp` | Terminal cast of the real install script and `agent-portal login`, replayed from captured output |
 
 ## Setup
 
@@ -80,6 +86,23 @@ and a permission card mid-sequence is noise the permission clip already covers.
 `encode.sh` writes both an animated WebP and an APNG. **Ship the WebP** — same
 quality at roughly a tenth the bytes (283 KB vs 3.0 MB for the permission clip).
 
+## The two clips that are not plain captures
+
+- **`cap-handoff.js`** drives **two browsers** and composites their frames.
+  `record2()` screencasts both on one wall clock and resamples them onto a shared
+  grid; `composite.py` lays the desktop and phone side by side. Two *tabs* in one
+  browser do not work — see the gotchas.
+- **`cap-cast.js`** records `cast.html`, a terminal that types the commands and
+  replays **real captured output**. The text in it came from actually running
+  `curl -fsSL https://txcl.io/api/download/install.sh | bash` and
+  `agent-portal login` against production with a scratch `HOME`. Regenerate it by
+  re-running those two commands and rebuilding the page from their output.
+
+  The cast stops at `⏳ Waiting for authentication...` on purpose: approving the
+  device code needs a real browser login, and `agent-portal service install`
+  would install a user unit named `agent-portal.service` — the same name as the
+  capture machine's own service. Neither is worth faking.
+
 ## How the harness works
 
 - `lib.js::record()` runs `Page.startScreencast` while an `action` callback
@@ -111,6 +134,26 @@ quality at roughly a tenth the bytes (283 KB vs 3.0 MB for the permission clip).
 - **The launcher config lives in `~/.config/agent-portal/`**, not
   `~/.config/claude-portal/`. Writing the token to the wrong one reads as
   "Not authenticated — run `agent-portal login` first".
-- **Check for leaked identity before publishing.** The agent's own config can
-  put your email in a thinking block:
-  `psql -d readme_demo -c "SELECT count(*) FROM messages WHERE content::text ILIKE '%yourdomain%'"`.
+- **Scrub before every launch, and check after.** Claude Code puts the account
+  email in its context and its first-turn thinking often recites it
+  ("6. The user's email is …"). `scrub.sh` strips `oauthAccount` identity fields
+  from the scratch `~/.claude.json`; it must run **immediately before** the
+  launch, because the CLI repopulates the file at startup — scrubbing before the
+  read is what matters. Always verify afterwards:
+  `psql -d readme_demo -c "SELECT count(*) FROM messages WHERE content::text ILIKE '%yourdomain%'"`,
+  and reshoot if it is not zero.
+- **Two tabs in one browser cannot both paint.** A page that is not the front tab
+  serves stale pixels to the screencast — the transcript keeps updating in the
+  DOM while the recording shows the old frame, and no combination of
+  `--disable-renderer-backgrounding` / `--disable-backgrounding-occluded-windows`
+  fixes it. Give each pane its own `puppeteer.launch()`.
+- **A hidden element can survive in the screencast.** Setting `display: none` on
+  the dev-mode banner changed style without changing layout, so the region never
+  repainted and the banner stayed in the frames. `stage()` **removes** the node
+  instead.
+- **Some clicks need to be dispatched in-page.** Headless hit-testing misses the
+  rizzma figure's overlay mount button; `cap-media.js` glides the cursor there
+  and then calls `.click()` in-page. A real click on it does the same thing.
+- **The launcher has a session cap** (20). Re-shoots accumulate in-process
+  sessions even after the database rows are gone; when launches start failing
+  with `At session limit (20/20)`, restart the launcher.

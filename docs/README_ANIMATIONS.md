@@ -1,8 +1,9 @@
 # README feature animations — plan
 
-Four of these clips are **shipped** and embedded in the README; the rest are the
-backlog. Each entry names the README slot it lands in, what the clip must prove,
-and how to capture it, ranked by how much it explains per kilobyte.
+All but one of these are **shipped** and embedded in the README. Each entry names
+the README slot it lands in, what the clip must prove, and how it was captured,
+ranked by how much it explains per kilobyte. The one that is not shipped (#11,
+voice) says why.
 
 The shipped clips are **screen recordings of the real app** — a scratch portal
 instance driven by headless Chrome — not illustrations. The harness that shoots
@@ -11,9 +12,10 @@ the UI moves.
 
 ## House rules
 
-- **Four in the README, the rest in docs.** Every animation is bytes on the
-  landing page. Ship #1–#4 inline plus the terminal cast in Quick Start; link
-  the others from the feature docs they illustrate.
+- **Every animation is bytes on the landing page.** The current set is 2.6 MB
+  across ten clips; keep new ones under ~400 KB and re-encode an old one rather
+  than letting the total creep. `encode.sh` at `-q:v 50`–`60` is the usual knob,
+  and shortening the clip beats lowering quality on text.
 - **Format: animated WebP** for UI capture, **animated SVG** for terminal casts
   and schematics. WebP measured ~10× smaller than APNG at the same quality on
   these clips (283 KB vs 3.0 MB for the permission card), and GIF's 256-color
@@ -116,16 +118,28 @@ worktree" → a session pill slides into the rail → output starts streaming.
 Answers the question a first-time reader actually has: *how does an agent get
 onto my machine, and what do I have to type?* (Nothing.)
 
-### 5. Install → login → service
+### 5. Install → login ✅ shipped
 
+
+`docs/media/feature-install-cast.webp` — 230 KB, 8.6 s. Shot by `cap-cast.js`,
+which records a terminal page replaying **real captured output** from running the
+production install script and `agent-portal login` with a scratch `HOME`. It ends
+at the device-code prompt: approving needs a real browser login, and
+`service install` would clobber the capture machine's own service unit.
 **Slot:** Quick Start. **~8 s, VHS terminal cast, animated SVG.**
 
 `curl … | bash`, `agent-portal login` showing the device code, `agent-portal
 service install` reporting the unit is up. Fully scriptable, cheapest clip on
 the list, and it makes the three-command onboarding feel as short as it is.
 
-### 6. Desktop → phone handoff
+### 6. Desktop and phone, one session ✅ shipped
 
+
+`docs/media/feature-desktop-phone.webp` — 400 KB, 9.7 s. Shot by `cap-handoff.js`.
+Shipped as *both panes live at once* rather than a lid-close metaphor — the phone
+asks the question and both panes stream the answer in step, which is the same
+claim without staging anything. Needs two separate browsers (see the capture
+README).
 **Slot:** Features ▸ Sessions from anywhere. **~10 s, composite.**
 
 A laptop viewport with a session streaming; the lid "closes" (viewport dims);
@@ -136,23 +150,37 @@ The strongest emotional pitch in the product, and the hardest to stage — two
 synchronized captures composited side by side. Consider a schematic animated SVG
 version (watermark → replay) if the real capture proves fiddly.
 
-### 7. `agent-portal show` puts a figure in the transcript
+### 7. `agent-portal show` puts a figure in the transcript ✅ shipped
 
+
+`docs/media/feature-show-media.webp` — 340 KB, 10.3 s. Shot by `cap-media.js`.
+The figure arrives as a poster; pressing play mounts the runtime and the
+waveforms travel.
 **Slot:** Features ▸ Rich rendering (or the media docs). **~6 s.**
 
 Terminal `agent-portal show figure.riz` on the left; the interactive portable
 figure appearing inline in the transcript on the right, with a cursor rotating
 or scrubbing it to show it is live, not a screenshot.
 
-### 8. Cost ticker and sparkline
+### 8. Live turn metrics ✅ shipped
 
+
+`docs/media/feature-turn-metrics.webp` — 91 KB, 6.5 s, tight crop. Shot by
+`cap-metrics.js`. **Retargeted:** there is no cost ticker in the top bar in the
+current UI (`format_cost` is explicitly not shown on messages or the top bar —
+cost lives on the Performance page and in history), so the clip shows the metric
+sparkline building and the picker switching it to cache-hit rate.
 **Slot:** Features ▸ Cost and performance visibility. **~4 s, tight crop.**
 
 The per-session cost badge shaking as it increments, and the rail sparkline
 growing a new bar per turn. Tiny crop, tiny file, high charm.
 
-### 9. Nav mode
+### 9. Nav mode ✅ shipped
 
+
+`docs/media/feature-nav-mode.webp` — 204 KB, 7.5 s. Shot by `cap-nav.js`, with a
+key-cap overlay drawn by the harness because headless capture has no visible
+keyboard.
 **Slot:** Features ▸ Sessions from anywhere. **~6 s, browser capture with a
 key-cap overlay.**
 
@@ -160,24 +188,42 @@ key-cap overlay.**
 input → `Enter` accepts. Keystrokes drawn as key caps in the corner, since the
 motion is meaningless without them.
 
-### 10. Three agents, three renderers
+### 10. Two agents, two renderers ✅ shipped (Muse pending)
 
+
+`docs/media/feature-multi-agent.webp` — 161 KB, 9.5 s. Shot by `cap-agents.js`.
+**Claude and Codex only.** Muse sessions register and spawn
+`muse exec --json` per turn, but in the scratch environment the process never
+emitted a journal record, so there was nothing to film; adding the demo
+directories to muse's `trust.json` did not change it. Worth revisiting — the
+third protocol shape is the point of the clip.
 **Slot:** Features ▸ One dashboard, many agents. **~6 s, cross-fade.**
 
 The same dashboard cross-fading between a Claude session, a Codex session, and a
 Muse session, pausing on the tool card each protocol produces. Shows breadth
 without three separate clips.
 
-### 11. Voice to prompt
+### 11. Voice to prompt ⛔ not shippable headlessly
 
+
+No honest path on a capture box: the Web Speech API needs a real microphone and
+Chrome's speech service, and there is no TTS installed to feed
+`--use-file-for-fake-audio-capture`. Filming the UI and typing the transcript by
+hand would be fabricating the feature's output. Shoot this one by hand, or with a
+configured `PORTAL_STT_BACKEND` and a recorded WAV.
 **Slot:** Features ▸ Voice input. **~6 s.**
 
 Mic button pressed, live waveform, transcript filling in word by word, edit,
 send. Best captured with a sentence full of the jargon the hosted providers get
 right and the browser API mangles (`clippy`, `Diesel`, a branch name).
 
-### 12. Architecture packets in flight
+### 12. Architecture packets in flight ✅ shipped
 
+
+`docs/media/architecture.svg` — 5.7 KB, hand-authored SMIL. Replaces the Mermaid
+diagram in the README: it shows the same structure plus which way data moves —
+session WS up, client WS down, the forward tunnel running the other way, and a
+push peeling off to the phone.
 **Slot:** Architecture. **Hand-written animated SVG, ~15 KB.**
 
 The existing Mermaid diagram, redrawn as an SVG where dots travel the edges:
@@ -189,9 +235,12 @@ that shows which way data moves, at essentially no file-size cost.
 
 ## Status
 
-**Shipped:** #1, #2, #3, #4 — 1.06 MB total for four clips.
+**Shipped:** everything except #11 — ten clips plus the architecture SVG,
+2.6 MB total.
 
-**Next up:** #5 (the install → login → service terminal cast) is the cheapest
-remaining win and the one the Quick Start section still wants. #8 (cost ticker)
-and #9 (nav mode) are both small and need no agent turns. #6 (desktop → phone)
-is the highest-value one left and the most staging work.
+**Open:**
+
+- **#11 voice** needs a machine with a microphone or a configured STT backend.
+- **#10 Muse** — the clip ships with Claude and Codex; Muse still needs to be
+  made to emit in a scratch environment before its renderer can be filmed.
+- The forward clip's red → green health beat is still only in prose (see #1).
