@@ -77,7 +77,7 @@ impl SessionManager {
                     session_id,
                     seq_num: next_seq,
                     content: serde_json::to_string(&content).unwrap_or_default(),
-                    send_mode: send_mode.as_ref().map(|m| m.as_str().to_string()),
+                    send_mode: send_mode.unwrap_or_default().as_str().to_string(),
                     client_msg_id,
                 };
                 match diesel::insert_into(pending_inputs::table)
