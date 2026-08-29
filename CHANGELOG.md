@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Message-recency session ordering.** Accepted input records a dedicated
+  per-session timestamp, and fresh dashboard loads show the most recently
+  messaged sessions first instead of following agent-output activity.
+
 - **Agent SDK refresh.** Claude bindings move to 2.1.234, Codex to 0.150.1,
   and Muse to 0.2.1. Claude transcript paths and Muse tool-result outcomes now
   use their SDK-owned typed APIs, and Claude's reported extended-thinking

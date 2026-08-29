@@ -230,6 +230,7 @@ diesel::table! {
         fork_point_turn_id -> Nullable<Text>,
         fork_launch_pending -> Bool,
         fork_create_worktree -> Bool,
+        last_messaged_at -> Timestamp,
     }
 }
 

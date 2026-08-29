@@ -268,6 +268,7 @@ fn demo_session(spec: DemoSessionSpec) -> SessionInfo {
         working_directory: spec.cwd.to_string(),
         status: SessionStatus::Active,
         last_activity: "2026-07-20T04:00:00.000000Z".to_string(),
+        last_messaged_at: "2026-07-20T03:59:00.000000Z".to_string(),
         created_at: "2026-07-20T03:55:00.000000Z".to_string(),
         updated_at: "2026-07-20T04:00:00.000000Z".to_string(),
         git_branch: Some(spec.branch.to_string()),
