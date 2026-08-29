@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Agent SDK refresh.** Claude bindings move to 2.1.234, Codex to 0.150.1,
+  and Muse to 0.2.1. Claude transcript paths and Muse tool-result outcomes now
+  use their SDK-owned typed APIs, and Claude's reported extended-thinking
+  tokens feed turn metrics instead of always recording zero.
+
 - **Reversible Rizzma HTML ingestion.** `agent-portal show plot.riz.html`
   accepts Rizzma's browser-openable carrier, unwraps it with Rizzma's strict
   budgeted parser, and stores only the validated canonical `.riz` artifact.

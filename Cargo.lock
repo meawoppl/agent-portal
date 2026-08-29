@@ -1152,9 +1152,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.223"
+version = "2.1.234"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bbd0075d21d9437d0db9d4eb9c84c96cc1880ca8f2f1b8459e3605309c9934b"
+checksum = "2e3b042ba5df1a6448cd5bdd4c0c12f77b10ef08ea3a63cfe4120056a824fc23"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1254,9 +1254,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.146.4"
+version = "0.150.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b163a2775c1a881cfffc6fe4ad81af8dd4666756d509f64e8db337c04312298"
+checksum = "766bb584b37591c58a19332932f99ac2526680dc62dad40899b272fa26d9cb24"
 dependencies = [
  "log",
  "serde",
@@ -4528,9 +4528,9 @@ dependencies = [
 
 [[package]]
 name = "muse-codes"
-version = "0.1.7"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6dadbdd5c75d3a4402924e2a26051be89a986daaa26c5234aa945467067bccd"
+checksum = "aeb1d1840d0d6722c6211ef97e6d334f66595388654d5925e91420900b20b5a6"
 dependencies = [
  "log",
  "serde",
