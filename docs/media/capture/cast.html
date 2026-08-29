@@ -1,0 +1,57 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;height:100%;background:#11131c;}
+  body{display:flex;align-items:center;justify-content:center;}
+  .term{width:920px;height:540px;background:#16181f;border:1px solid #262b3a;border-radius:10px;
+        box-shadow:0 18px 50px rgba(0,0,0,.55);overflow:hidden;display:flex;flex-direction:column;}
+  .bar{height:34px;flex:0 0 34px;background:#1b1e28;border-bottom:1px solid #262b3a;display:flex;
+       align-items:center;padding:0 12px;gap:7px;}
+  .dot{width:11px;height:11px;border-radius:50%;}
+  .t{margin-left:10px;color:#6b7392;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;}
+  pre{margin:0;padding:14px 16px;overflow:hidden;flex:1;
+      font:13.5px/1.42 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#c0caf5;
+      white-space:pre-wrap;}
+  .p{color:#9ece6a;}
+  .cur{display:inline-block;width:8px;height:16px;background:#7aa2f7;vertical-align:-3px;
+       animation:b 1s steps(1) infinite;}
+  @keyframes b{50%{opacity:0}}
+</style></head><body>
+<div class="term">
+  <div class="bar"><span class="dot" style="background:#f7768e"></span>
+    <span class="dot" style="background:#e0af68"></span>
+    <span class="dot" style="background:#9ece6a"></span>
+    <span class="t">demo-workstation — bash</span></div>
+  <pre id="o"></pre>
+</div>
+<script>
+const STEPS = [{"type": "cmd", "text": "curl -fsSL \"https://txcl.io/api/download/install.sh\" | bash"}, {"type": "out", "lines": ["Agent Portal Installer", "============================", "", "Detected: Linux x86_64", "Binary: agent-portal-linux-x86_64", "Installing to: /tmp/readme-demo/casthome/.config/agent-portal/agent-portal", "", "Downloading agent-portal from GitHub releases...", "Binary installed successfully!", "", "Configuring backend URL: wss://txcl.io", "", "Adding to PATH...", "PATH already configured or no rc files found.", "", "Installation complete!", "", "Next steps:", "  1. Log in:             agent-portal login", "  2. Install as service: agent-portal service install", "", "Or run directly:         agent-portal"], "pause_after_line": {"7": 1400}}, {"type": "gap"}, {"type": "cmd", "text": "agent-portal login"}, {"type": "out", "lines": ["Authenticating with wss://txcl.io...", "", "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557", "\u2551           \ud83d\udd10 Authentication Required                 \u2551", "\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d", "", "  To authenticate this machine, visit:", "", "    https://txcl.io/api/auth/device?user_code=K5O-CUF", "", "  \ud83d\udccb Code: K5O-CUF", "", "  \u23f3 Waiting for authentication..."], "pause_after_line": {}}];
+const o = document.getElementById('o');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let buf = '';
+const render = (cursor) => {
+  o.innerHTML = buf.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/^\$ /gm, '<span class="p">$ </span>') + (cursor ? '<span class="cur"></span>' : '');
+  o.scrollTop = o.scrollHeight;
+};
+(async () => {
+  await sleep(700);
+  for (const s of STEPS) {
+    if (s.type === 'gap') { buf += '\n'; render(true); await sleep(500); continue; }
+    if (s.type === 'cmd') {
+      buf += '$ ';
+      render(true);
+      for (const ch of s.text) { buf += ch; render(true); await sleep(26 + Math.random()*22); }
+      buf += '\n'; render(true); await sleep(420);
+    } else {
+      for (let i = 0; i < s.lines.length; i++) {
+        buf += s.lines[i] + '\n';
+        render(true);
+        await sleep(s.lines[i].trim() === '' ? 40 : 85);
+        if (s.pause_after_line && s.pause_after_line[i]) await sleep(s.pause_after_line[i]);
+      }
+    }
+  }
+  render(true);
+  await sleep(1500);
+  window.__done = true;
+})();
+</script></body></html>
