@@ -398,7 +398,7 @@ pub struct PendingInput {
     pub seq_num: i64,
     pub content: String,
     pub created_at: NaiveDateTime,
-    pub send_mode: Option<String>,
+    pub send_mode: String,
     /// Browser outbox delivery-tracking id (#1236). Persisted so replay
     /// keeps delivery tracking and resends can be deduplicated across a
     /// backend restart. `None` for non-browser inputs.
@@ -411,7 +411,7 @@ pub struct NewPendingInput {
     pub session_id: Uuid,
     pub seq_num: i64,
     pub content: String,
-    pub send_mode: Option<String>,
+    pub send_mode: String,
     pub client_msg_id: Option<Uuid>,
 }
 

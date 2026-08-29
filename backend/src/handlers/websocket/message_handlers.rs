@@ -98,7 +98,7 @@ pub fn replay_pending_inputs_from_db(
             session_id,
             seq: input.seq_num,
             content,
-            send_mode: input.send_mode.as_deref().and_then(parse_send_mode),
+            send_mode: parse_send_mode(&input.send_mode),
             // Persisted with the row (#1236) so replay keeps delivery
             // tracking: the proxy's InputProgressAck still resolves the
             // browser's outbox entry, and the idempotency gate keeps

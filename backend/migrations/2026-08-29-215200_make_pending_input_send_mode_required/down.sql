@@ -1,0 +1,3 @@
+ALTER TABLE pending_inputs
+ALTER COLUMN send_mode DROP NOT NULL,
+ALTER COLUMN send_mode DROP DEFAULT;
