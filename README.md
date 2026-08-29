@@ -85,6 +85,9 @@ Open **http://localhost:3000/** — dev mode logs you in as
 - **Fork a session** into a new git worktree to try a second approach without
   disturbing the first.
 
+<img src="docs/media/feature-launch-session.webp" width="900"
+     alt="The launch dialog: pick the machine, browse to a directory, choose the model, tick 'create git worktree', and click Launch. A session pill slides into the rail and the agent boots and greets you.">
+
 ### Rich rendering
 
 - Markdown, syntax-highlighted **diffs**, LaTeX via KaTeX, ANSI colors, and
@@ -96,6 +99,9 @@ Open **http://localhost:3000/** — dev mode logs you in as
   transcript.
 - **Downloadable artifacts.** Agents emit `portal://file/...` links that become
   secure download actions.
+
+<img src="docs/media/feature-permission-card.webp" width="900"
+     alt="A prompt is typed and sent; the agent reads the file and proposes a diff, then a 'Permission Required' card appears with Allow / Allow &amp; Remember / Deny. Clicking Allow lets the edit land.">
 
 ### Port forwarding
 
@@ -111,6 +117,9 @@ Open **http://localhost:3000/** — dev mode logs you in as
   (and re-pointing the port resets it to private). Admins can assign
   human-readable subdomains.
 
+<img src="docs/media/feature-port-forward.webp" width="900"
+     alt="A forward chip appears in the session header, flat red because nothing is listening. A dev server starts and the chip turns green, its tooltip naming the python3 process. Clicking it opens a floating panel with the live app rendered inside the portal.">
+
 See [Port Forwarding](docs/PORT_FORWARDING.md).
 
 ### Agents that talk to each other
@@ -123,6 +132,9 @@ agent-portal message send <id> "PR is up — review the auth boundary"
 Messages arrive as a turn in the target session and reply by id, using the
 session's own identity — no credential handling in agent code. One agent
 writing code while another reviews it is a normal working pattern here.
+
+<img src="docs/media/feature-agent-message.webp" width="900"
+     alt="A message sent from one session lands in another as a 'Message from Claude' card; that session's agent picks it up and starts running commands.">
 
 ### Scheduled work
 

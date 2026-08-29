@@ -1,21 +1,25 @@
 # README feature animations — plan
 
-The README's Features section is text today. This document proposes the short
-looping animations that would carry it, ranked by how much each one explains
-per kilobyte, and records the house rules for producing them.
+Four of these clips are **shipped** and embedded in the README; the rest are the
+backlog. Each entry names the README slot it lands in, what the clip must prove,
+and how to capture it, ranked by how much it explains per kilobyte.
 
-Nothing here is built yet. Each entry names the README slot it lands in, what
-the clip must prove, and how to capture it.
+The shipped clips are **screen recordings of the real app** — a scratch portal
+instance driven by headless Chrome — not illustrations. The harness that shoots
+them lives in [`docs/media/capture/`](media/capture/README.md); re-run it when
+the UI moves.
 
 ## House rules
 
 - **Four in the README, the rest in docs.** Every animation is bytes on the
   landing page. Ship #1–#4 inline plus the terminal cast in Quick Start; link
   the others from the feature docs they illustrate.
-- **Format: APNG** (`.png`, animated) or animated WebP for UI capture, **animated
-  SVG** for terminal casts and schematics. GIF's 256-color palette bands badly
-  on the portal's dark gradients. Repo-relative `.mp4` does not render in a
-  GitHub README — don't plan around it.
+- **Format: animated WebP** for UI capture, **animated SVG** for terminal casts
+  and schematics. WebP measured ~10× smaller than APNG at the same quality on
+  these clips (283 KB vs 3.0 MB for the permission card), and GIF's 256-color
+  palette bands badly on the portal's dark gradients. Repo-relative `.mp4` does
+  not render in a GitHub README — don't plan around it. `encode.sh` emits an
+  APNG alongside the WebP if you ever need the fallback.
 - **Budget: ≤ 2 MB and ≤ 10 s each**, 900 px wide (capture at 1800 px / 2× DPR
   and downscale), 12–15 fps. Loop cleanly: first and last frame identical.
 - **Gentle motion.** A README animation cannot honour `prefers-reduced-motion`,
@@ -33,7 +37,7 @@ the clip must prove, and how to capture it.
 | Kind | Tool | Why |
 |------|------|-----|
 | Terminal casts | [VHS](https://github.com/charmbracelet/vhs) | Scripted `.tape` files — deterministic, re-runnable, no hand-timed typing |
-| Browser UI | Playwright script + `ffmpeg`/`gifski` → APNG | Repeatable clicks and waits; no hand-held recording |
+| Browser UI | `puppeteer-core` + CDP `Page.startScreencast` → `ffmpeg` | Repeatable clicks and waits; frame-accurate marks for trimming |
 | Schematics | Hand-written SVG with SMIL/CSS | Kilobytes, crisp at any zoom, animates as an `<img>` on GitHub |
 
 Palette for anything hand-drawn: the portal's Tokyo Night — background
@@ -44,7 +48,9 @@ Palette for anything hand-drawn: the portal's Tokyo Night — background
 
 ## Ranked candidates
 
-### 1. The forward chip comes alive → preview window
+### 1. The forward chip comes alive → preview window ✅ shipped
+
+`docs/media/feature-port-forward.webp` — 66 KB, 10.6 s. Shot by `cap-forward.js`.
 
 **Slot:** Features ▸ Port forwarding. **~9 s, browser capture.**
 
@@ -57,7 +63,11 @@ This is the single highest-value clip: it demonstrates the tunnel, the health
 probe, the process resolution, and the in-portal preview in one unbroken shot,
 and it is the feature nothing else in this space has.
 
-### 2. One agent messages another
+### 2. One agent messages another ✅ shipped
+
+`docs/media/feature-agent-message.webp` — 252 KB, 7.2 s. Shot by `cap-message.js`.
+Shipped as a single dashboard view (message card landing, recipient going to
+work) rather than the split terminal/dashboard composite described below.
 
 **Slot:** Features ▸ Agents that talk to each other. **~7 s, split capture.**
 
@@ -68,7 +78,11 @@ recipient pill, and the message lands as a turn in the other session.
 
 Proves the multi-agent workflow is real plumbing, not a diagram.
 
-### 3. A decision arrives as a form
+### 3. A decision arrives as a form ✅ shipped
+
+`docs/media/feature-permission-card.webp` — 283 KB, 10.4 s. Shot by
+`cap-permission.js`. Runs longer than planned because the beats before the card
+(typing, the agent reading the file, the proposed diff) earn their seconds.
 
 **Slot:** Features ▸ Rich rendering. **~5 s, browser capture.**
 
@@ -79,7 +93,9 @@ cross-fade to an `AskUserQuestion` multi-select card.
 Smallest clip on the list and it lands the "decisions, not walls of text" claim
 instantly.
 
-### 4. Launch a session from the browser
+### 4. Launch a session from the browser ✅ shipped
+
+`docs/media/feature-launch-session.webp` — 129 KB, 11.4 s. Shot by `cap-launch.js`.
 
 **Slot:** Features ▸ One dashboard, many agents. **~8 s, browser capture.**
 
@@ -160,10 +176,12 @@ that shows which way data moves, at essentially no file-size cost.
 
 ---
 
-## Suggested first batch
+## Status
 
-Ship **#5 (Quick Start)**, **#1**, **#3**, and **#4** first: one terminal cast
-and three browser captures, roughly 5 MB total, covering onboarding, the
-showpiece feature, the interaction model, and the "how do I start" question.
-Add **#2** once the rail broadcast animation is easy to trigger on demand in a
-seeded dev instance.
+**Shipped:** #1, #2, #3, #4 — 730 KB total for four clips, well under the budget
+that was set aside for one.
+
+**Next up:** #5 (the install → login → service terminal cast) is the cheapest
+remaining win and the one the Quick Start section still wants. #8 (cost ticker)
+and #9 (nav mode) are both small and need no agent turns. #6 (desktop → phone)
+is the highest-value one left and the most staging work.
