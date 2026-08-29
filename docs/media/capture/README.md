@@ -11,7 +11,7 @@ recordings of the running app, not illustrations — and they run against a
 |--------|------|-------|
 | `cap-launch.js` | `feature-launch-session.webp` | Launch dialog → machine, directory, model, worktree → session appears and the agent boots |
 | `cap-permission.js` | `feature-permission-card.webp` | Prompt → Read/diff cards → **Permission Required** form → Allow → edit lands |
-| `cap-forward.js` | `feature-port-forward.webp` | Forward registered (chip red) → server starts (chip green, names the process) → click → live app in the preview panel |
+| `cap-forward.js` | `feature-port-forward.webp` | The agent starts an `http.server` on the rizzma rustdoc and runs `agent-portal forward 8899` — both visible as tool cards — then the chip appears and the docs render live in the preview panel, navigable inside the frame |
 | `cap-message.js` | `feature-agent-message.webp` | One session messages another; the message lands as a turn and that agent starts working |
 
 ## Setup
@@ -55,6 +55,28 @@ node cap-permission.js                       # writes $DEMO_ROOT/frames/perm/
 ./encode.sh "$DEMO_ROOT/frames/perm-trim" "$DEMO_ROOT/out-permission" 16 900
 ```
 
+The forward clip needs a little more: the agent shells out to the **real**
+`agent-portal forward`, so the CLI needs a token, and it needs something worth
+looking at on the other end.
+
+```bash
+# Something dynamic to serve — rustdoc, with its JS search and navigation
+cargo doc -p rizzma --no-deps
+mkdir -p "$DEMO_ROOT/home/rizzma-figs/target"
+cp -r target/doc "$DEMO_ROOT/home/rizzma-figs/target/doc"
+
+./reset-demo.sh                              # wipe sessions, THEN mint the CLI token
+SID=$(curl -s -X POST "$DEMO_URL/api/launch" -H 'Content-Type: application/json' \
+        -d '{"working_directory":"'"$DEMO_ROOT"'/home/rizzma-figs","launcher_id":"'"$LID"'",
+             "claude_args":["--model","claude-haiku-4-5","--dangerously-skip-permissions"],
+             "agent_type":"claude","name":"rizzma-figs","create_worktree":false}' \
+      | python3 -c "import sys,json;print(json.load(sys.stdin)['session_id'])")
+DEMO_SID=$SID node cap-forward.js
+```
+
+Permissions are skipped for that one on purpose — the clip is about forwarding,
+and a permission card mid-sequence is noise the permission clip already covers.
+
 `encode.sh` writes both an animated WebP and an APNG. **Ship the WebP** — same
 quality at roughly a tenth the bytes (283 KB vs 3.0 MB for the permission clip).
 
@@ -81,6 +103,14 @@ quality at roughly a tenth the bytes (283 KB vs 3.0 MB for the permission clip).
   `cap-forward.js` marks the forward public, which needs no cookie.
 - **Reset between takes.** A worktree branch left behind fails the next launch
   with `a branch named '…' already exists`; `reset.sh` prunes it.
+- **Mint the CLI token *after* wiping sessions.** `proxy_auth_tokens` carries a
+  `session_id` FK, so `TRUNCATE sessions CASCADE` empties the whole token table —
+  a token minted before the wipe leaves `agent-portal forward` failing with a
+  puzzling 401 (`Token not found in database` in the backend log).
+  `reset-demo.sh` does both in the right order.
+- **The launcher config lives in `~/.config/agent-portal/`**, not
+  `~/.config/claude-portal/`. Writing the token to the wrong one reads as
+  "Not authenticated — run `agent-portal login` first".
 - **Check for leaked identity before publishing.** The agent's own config can
   put your email in a thinking block:
   `psql -d readme_demo -c "SELECT count(*) FROM messages WHERE content::text ILIKE '%yourdomain%'"`.

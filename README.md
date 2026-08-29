@@ -118,7 +118,7 @@ Open **http://localhost:3000/** — dev mode logs you in as
   human-readable subdomains.
 
 <img src="docs/media/feature-port-forward.webp" width="900"
-     alt="A forward chip appears in the session header, flat red because nothing is listening. A dev server starts and the chip turns green, its tooltip naming the python3 process. Clicking it opens a floating panel with the live app rendered inside the portal.">
+     alt="An agent is asked to serve a directory of rustdoc and forward the port. In the transcript it starts a python http.server, runs 'agent-portal forward 8899', and prints the URL. A chip appears in the session header; clicking it opens a floating panel with the docs site live inside the portal, and a link click inside the panel navigates it.">
 
 See [Port Forwarding](docs/PORT_FORWARDING.md).
 
