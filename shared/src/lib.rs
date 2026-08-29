@@ -602,6 +602,10 @@ pub struct SessionInfo {
     pub working_directory: String,
     pub status: SessionStatus,
     pub last_activity: String,
+    /// Most recent accepted input sent into this session, initialized to the
+    /// session creation time.
+    #[serde(default)]
+    pub last_messaged_at: String,
     pub created_at: String,
     pub updated_at: String,
     #[serde(default)]

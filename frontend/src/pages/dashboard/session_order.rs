@@ -1,19 +1,9 @@
 //! Deterministic session display ordering + focus resolution (issue #1094).
 //!
-//! Why this exists: the dashboard polls `/api/sessions` every few seconds, and
-//! the backend orders rows by `last_activity DESC` — an activity-sensitive
-//! order that reshuffles between polls. The rail previously sorted only on
-//! folder name then hostname, so multiple agents in the *same* repo/worktree
-//! family (identical folder + host) compared **equal**, and Rust's `sort_by`
-//! gives no order guarantee for equal keys. Combined with focus being tracked
-//! by array *index*, a reshuffled poll could slide the focused index onto a
-//! different session — the "focus bounce" users saw with several same-repo
-//! agents running.
-//!
-//! Fix: a **total** comparator whose final tie-breaker is the unique session
-//! `id`, so the displayed order is a pure function of the *set* of sessions
-//! (independent of the source/poll order), plus focus tracked by `id` and
-//! resolved to an index only at render time via [`resolve_focus_index`].
+//! The rail orders sessions by the user's own messaging recency, then uses
+//! stable identity fields and the unique session id as deterministic
+//! tie-breakers. Focus is tracked by id, so a recency reorder never changes
+//! which session is active.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -23,16 +13,13 @@ use uuid::Uuid;
 
 /// Total, deterministic display-order key for a session.
 ///
-/// Lexicographic tuple, coarsest discriminant first:
-/// 1. top-level folder name (lowercased) — groups sessions by repo
-/// 2. agent type — orders the agents working that repo (e.g. claude, codex)
-/// 3. `id` — unique final tie-breaker, so no two sessions ever compare equal
+/// Sessions sort by `last_messaged_at` newest first, then by folder and agent
+/// with `id` as the unique final tie-breaker.
 ///
-/// Deliberately **does not** key on `git_branch` (or working_directory /
-/// hostname / timestamps). Branch is derived by best-effort detection that can
-/// flap between polls (and is wrong under worktrees — see #1067); keying on it
-/// made pills reorder when the branch reading changed. Folder + agent + id is
-/// the stable identity that doesn't move when branch detection wobbles.
+/// Deliberately **does not** key on `git_branch`, full working directory,
+/// hostname, or agent-driven `last_activity`. Those values may change while
+/// the user is reading another session. Only an accepted input intentionally
+/// advances the recency key.
 ///
 /// Because the key ends in the unique `id`, the order is *total*: the same set
 /// of sessions always sorts identically no matter what order the poll returned
@@ -47,7 +34,9 @@ fn display_sort_key(s: &SessionInfo) -> (String, String, Uuid) {
 
 /// Total ordering comparator for the session rail. See [`display_sort_key`].
 pub(super) fn session_display_cmp(a: &SessionInfo, b: &SessionInfo) -> Ordering {
-    display_sort_key(a).cmp(&display_sort_key(b))
+    b.last_messaged_at
+        .cmp(&a.last_messaged_at)
+        .then_with(|| display_sort_key(a).cmp(&display_sort_key(b)))
 }
 
 /// Label shown for the "no hostname" bucket in the grouped rail.
@@ -81,7 +70,7 @@ fn host_group_key(s: &SessionInfo) -> (bool, String) {
 ///
 /// - host sections are alphabetical, with the empty/unknown-host bucket last;
 /// - sessions **within** a section keep the exact relative order they'd have
-///   ungrouped (so activity-driven polls don't reshuffle within a group);
+///   ungrouped (agent output cannot reshuffle them; accepted input can);
 /// - the order stays *total* (the inner key ends in the unique `id`), so — like
 ///   [`session_display_cmp`] — the displayed sequence is a pure function of the
 ///   session set. That totality is what lets nav-mode numbering, `j`/`k`
@@ -155,6 +144,7 @@ mod tests {
             working_directory: dir.to_string(),
             status: SessionStatus::Active,
             last_activity: String::new(),
+            last_messaged_at: "2026-08-29T00:00:00Z".to_string(),
             created_at: String::new(),
             updated_at: String::new(),
             git_branch: branch.map(|b| b.to_string()),
@@ -174,6 +164,23 @@ mod tests {
             forked_from_session_id: None,
             fork_point_turn_id: None,
         }
+    }
+
+    #[test]
+    fn most_recently_messaged_session_sorts_first() {
+        let mut older = session(Uuid::from_u128(1), "/z/repo", "host", None);
+        older.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
+        let mut newer = session(Uuid::from_u128(2), "/a/repo", "host", None);
+        newer.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
+        let baseline = session(Uuid::from_u128(3), "/0/repo", "host", None);
+
+        let baseline_id = baseline.id;
+        let mut sessions = [older.clone(), baseline, newer.clone()];
+        sessions.sort_by(session_display_cmp);
+
+        assert_eq!(sessions[0].id, newer.id);
+        assert_eq!(sessions[1].id, older.id);
+        assert_eq!(sessions[2].id, baseline_id);
     }
 
     /// The unique-id tie-breaker makes ordering independent of input order:

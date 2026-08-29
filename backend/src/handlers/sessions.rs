@@ -54,7 +54,11 @@ pub async fn list_sessions(
         .filter(session_members::user_id.eq(current_user_id))
         .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
         .select((Session::as_select(), session_members::role))
-        .order(sessions::last_activity.desc())
+        .order((
+            sessions::last_messaged_at.desc(),
+            sessions::created_at.desc(),
+            sessions::id.asc(),
+        ))
         .load(&mut conn)?;
 
     let sessions_with_role = results
@@ -703,6 +707,7 @@ mod tests {
             fork_point_turn_id: None,
             fork_launch_pending: false,
             fork_create_worktree: false,
+            last_messaged_at: "2026-08-29T00:00:00".parse().unwrap(),
         }
     }
 

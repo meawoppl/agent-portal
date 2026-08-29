@@ -56,8 +56,13 @@ impl SessionManager {
         let mut persisted = false;
         let seq = match db_pool.get() {
             Ok(mut conn) => {
+                // The same accepted input owns both values: sequence assignment
+                // and recency ordering cannot drift across separate writes.
                 let next_seq: i64 = match diesel::update(sessions::table.find(session_id))
-                    .set(sessions::input_seq.eq(sessions::input_seq + 1))
+                    .set((
+                        sessions::input_seq.eq(sessions::input_seq + 1),
+                        sessions::last_messaged_at.eq(diesel::dsl::now),
+                    ))
                     .returning(sessions::input_seq)
                     .get_result(&mut conn)
                 {

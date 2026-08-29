@@ -123,6 +123,9 @@ pub struct Session {
     /// fork recipe while this is true rather than resume the empty new id.
     pub fork_launch_pending: bool,
     pub fork_create_worktree: bool,
+    /// Most recent accepted input sent into this session. Unlike
+    /// `last_activity`, agent output does not advance this timestamp.
+    pub last_messaged_at: NaiveDateTime,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)
