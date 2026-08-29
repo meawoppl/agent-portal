@@ -11,7 +11,7 @@
 //! as a clean exit and relaunches every heartbeat — the crash loop this guards
 //! against. See `launcher::process_manager`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use uuid::Uuid;
 
 /// Whether a `claude --resume` target transcript exists on disk.
@@ -61,24 +61,6 @@ pub fn diverged_conversation_id(frame_session_id: Option<&str>, portal_id: Uuid)
         .filter(|id| *id != portal_id)
 }
 
-/// Encode a working directory the way the `claude` CLI names its project dir:
-/// every `/` and `.` becomes `-`.
-fn encode_project_dir(working_directory: &Path) -> String {
-    working_directory
-        .to_string_lossy()
-        .chars()
-        .map(|c| if c == '/' || c == '.' { '-' } else { c })
-        .collect()
-}
-
-/// Resolve `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
-fn transcript_path(home: &Path, working_directory: &Path, session_id: Uuid) -> PathBuf {
-    home.join(".claude")
-        .join("projects")
-        .join(encode_project_dir(working_directory))
-        .join(format!("{}.jsonl", session_id))
-}
-
 /// Classify the resume target for `session_id` in `working_directory`, resolving
 /// the home directory via `dirs::home_dir`.
 pub fn claude_transcript_status(working_directory: &Path, session_id: Uuid) -> TranscriptStatus {
@@ -94,14 +76,17 @@ fn status_in_home(home: &Path, working_directory: &Path, session_id: Uuid) -> Tr
     if !projects.is_dir() {
         return TranscriptStatus::Unknown;
     }
-    let file = transcript_path(home, working_directory, session_id);
+    let session_id = session_id.to_string();
+    let file = claude_codes::transcript::transcript_path(home, working_directory, &session_id);
     if file.is_file() {
         return TranscriptStatus::Present;
     }
     // The transcript is gone. Only call it "missing" when the project dir
     // exists — otherwise our encoding may just be wrong, and we shouldn't
     // discard a resume on a guess.
-    let project_dir = projects.join(encode_project_dir(working_directory));
+    let project_dir = projects.join(claude_codes::transcript::encode_project_dir(
+        working_directory,
+    ));
     if project_dir.is_dir() {
         TranscriptStatus::Missing
     } else {
@@ -167,16 +152,8 @@ mod tests {
         std::fs::write(path, "{}").unwrap();
     }
 
-    #[test]
-    fn encodes_cwd_like_claude() {
-        assert_eq!(
-            encode_project_dir(Path::new("/home/meawoppl/repos/meawoppl.github.io")),
-            "-home-meawoppl-repos-meawoppl-github-io"
-        );
-        assert_eq!(
-            encode_project_dir(Path::new("/home/u/repos/agent-portal")),
-            "-home-u-repos-agent-portal"
-        );
+    fn sdk_transcript_path(home: &Path, wd: &Path, id: Uuid) -> std::path::PathBuf {
+        claude_codes::transcript::transcript_path(home, wd, id.to_string())
     }
 
     #[test]
@@ -184,7 +161,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let wd = Path::new("/home/u/repos/site.io");
         let id = Uuid::new_v4();
-        write(&transcript_path(home.path(), wd, id));
+        write(&sdk_transcript_path(home.path(), wd, id));
         assert_eq!(
             status_in_home(home.path(), wd, id),
             TranscriptStatus::Present
@@ -196,7 +173,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let wd = Path::new("/home/u/repos/site.io");
         // Create the project dir (via a sibling session) but not our id.
-        write(&transcript_path(home.path(), wd, Uuid::new_v4()));
+        write(&sdk_transcript_path(home.path(), wd, Uuid::new_v4()));
         assert_eq!(
             status_in_home(home.path(), wd, Uuid::new_v4()),
             TranscriptStatus::Missing
@@ -207,7 +184,7 @@ mod tests {
     fn unknown_when_project_dir_absent() {
         let home = tempfile::tempdir().unwrap();
         // projects/ exists (another project) but not ours.
-        write(&transcript_path(
+        write(&sdk_transcript_path(
             home.path(),
             Path::new("/some/other/proj"),
             Uuid::new_v4(),

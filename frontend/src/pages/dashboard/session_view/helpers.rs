@@ -442,21 +442,10 @@ fn classify_muse_event(output: &str) -> Option<ActivityTag> {
             muse_codes::TaskLifecycleEvent::Completed { .. } => Some(ActivityTag::Assistant),
             _ => Some(ActivityTag::Assistant),
         },
-        muse_codes::MusePayload::ToolResult(tr) => {
-            // TODO(SDK #310): `ToolResult.correlation_facts` is an open-shaped
-            // `serde_json::Value` — the SDK has no typed `outcome` accessor yet.
-            // Narrow seam: only `.get("outcome")` is poked here; tracked in
-            // https://github.com/meawoppl/rust-code-agent-sdks/issues/310.
-            let outcome = tr
-                .correlation_facts
-                .as_ref()
-                .and_then(|v| v.get("outcome"))
-                .and_then(|o| o.as_str());
-            match outcome {
-                Some("failure") => Some(ActivityTag::Error),
-                _ => Some(ActivityTag::Assistant),
-            }
-        }
+        muse_codes::MusePayload::ToolResult(tr) => match tr.outcome() {
+            Some("failure") => Some(ActivityTag::Error),
+            _ => Some(ActivityTag::Assistant),
+        },
         muse_codes::MusePayload::RunTerminal(rt) => {
             if rt.terminal == "completed" {
                 Some(ActivityTag::Result)

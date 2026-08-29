@@ -202,7 +202,13 @@ impl TaskTree {
                 }
             }
             t if t.starts_with("task.lifecycle.") => self.apply_lifecycle(payload),
-            "tool.result" => self.apply_tool_result(payload),
+            "tool.result" => {
+                if let Ok(muse_codes::MusePayload::ToolResult(result)) =
+                    muse_codes::MusePayload::from_parts(payload_type, payload.clone())
+                {
+                    self.apply_tool_result(&result);
+                }
+            }
             "run.output.delta" => {
                 if !self.answer_is_terminal {
                     if let Some(chunk) = str_field(payload, "text") {
@@ -283,18 +289,15 @@ impl TaskTree {
         }
     }
 
-    fn apply_tool_result(&mut self, payload: &serde_json::Value) {
-        let Some(call_id) = str_field(payload, "call_id") else {
-            return;
-        };
-        let facts = payload.get("correlation_facts");
+    fn apply_tool_result(&mut self, payload: &muse_codes::ToolResult) {
         let outcome = ToolOutcome {
-            call_id,
-            tool_name: facts.and_then(|f| str_field(f, "tool_name")),
-            outcome: facts.and_then(|f| str_field(f, "outcome")),
-            text: str_field(payload, "text").unwrap_or_default(),
+            call_id: payload.call_id.clone(),
+            tool_name: payload.tool_name().map(str::to_string),
+            outcome: payload.outcome().map(str::to_string),
+            text: payload.text.clone(),
             edit_path: payload
-                .get("edit_facts")
+                .edit_facts
+                .as_ref()
                 .and_then(|facts| str_field(facts, "path")),
         };
         if let Some(id) = self.tool_result_target(outcome.tool_name.as_deref()) {
@@ -444,6 +447,9 @@ mod tests {
         tree.apply(&json!({
             "payload_type": "tool.result",
             "payload": {
+                "kind": "tool_result",
+                "command_id": "cmd-1",
+                "run_stream": {"kind": "run", "id": "run-1"},
                 "call_id": "call-1",
                 "correlation_facts": {"tool_name": "edit_file", "outcome": "success"},
                 "edit_facts": {"path": "src/main.rs", "added": 1, "removed": 1},
@@ -649,7 +655,11 @@ mod tests {
         }));
         tree.apply(&json!({
             "payload_type": "tool.result",
-            "payload": {"call_id": "c1", "text": "ok"},
+            "payload": {
+                "kind": "tool_result", "command_id": "cmd-1",
+                "run_stream": {"kind": "run", "id": "run-1"},
+                "call_id": "c1", "text": "ok"
+            },
         }));
         let node = tree.get("r1").expect("node");
         assert_eq!(
@@ -694,6 +704,9 @@ mod tests {
         tree.apply(&json!({
             "payload_type": "tool.result",
             "payload": {
+                "kind": "tool_result",
+                "command_id": "cmd-1",
+                "run_stream": {"kind": "run", "id": "run-1"},
                 "call_id": "c1",
                 "text": "invalid type: string \"false\", expected a boolean at line 1 column 102"
             },

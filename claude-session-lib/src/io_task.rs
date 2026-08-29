@@ -274,6 +274,17 @@ fn context_snapshot_tokens(usage: &claude_codes::io::AssistantUsage) -> i64 {
         + usage.cache_read_input_tokens as i64
 }
 
+/// Extended-thinking share of the result's output tokens. Older Claude
+/// versions omit the breakdown, so mixed deployments preserve the existing
+/// zero fallback. Saturate the wire's `u64` at our metrics schema's `i64`.
+fn result_thinking_tokens(usage: Option<&claude_codes::io::UsageInfo>) -> i64 {
+    usage
+        .and_then(|u| u.output_tokens_details.as_ref())
+        .and_then(|details| details.thinking_tokens)
+        .map(|tokens| i64::try_from(tokens).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
+
 /// Whether an assistant frame may anchor context occupancy, mirroring the CLI's
 /// `lIe`: it must carry usage, not be CLI-injected content, and not be stamped
 /// with the synthetic model.
@@ -711,7 +722,7 @@ pub(crate) async fn claude_io_task(
                                 cache_read_tokens: usage
                                     .map(|u| u.cache_read_input_tokens as i64)
                                     .unwrap_or(0),
-                                thinking_tokens: 0,
+                                thinking_tokens: result_thinking_tokens(usage),
                                 // Per-request occupancy snapshot (#1517), not
                                 // the roll-up in the token fields above.
                                 context_snapshot_tokens: context_anchor_tokens,
@@ -1313,6 +1324,25 @@ mod tests {
         let usage = asst.message.usage.as_ref().expect("usage");
         // 10 + 2 + 3 = 15; the output token is deliberately not counted.
         assert_eq!(context_snapshot_tokens(usage), 15);
+    }
+
+    #[test]
+    fn result_usage_reports_thinking_tokens_with_legacy_fallback() {
+        let usage: claude_codes::io::UsageInfo = serde_json::from_value(serde_json::json!({
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "output_tokens_details": { "thinking_tokens": 12 }
+        }))
+        .expect("usage");
+        assert_eq!(result_thinking_tokens(Some(&usage)), 12);
+
+        let legacy: claude_codes::io::UsageInfo = serde_json::from_value(serde_json::json!({
+            "input_tokens": 10,
+            "output_tokens": 20
+        }))
+        .expect("legacy usage");
+        assert_eq!(result_thinking_tokens(Some(&legacy)), 0);
+        assert_eq!(result_thinking_tokens(None), 0);
     }
 
     #[test]
