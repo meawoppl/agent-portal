@@ -199,13 +199,13 @@ pub(super) struct FigureViewerProps {
 }
 
 /// Only exact, host-vetted runtime versions may execute. Rizzma 1.9 supports
-/// static interaction; 1.10 adds seeking on an already-bound session, which
-/// keeps animation controls compatible with pan and zoom.
+/// static interaction; 1.10 and 1.11 support seeking on an already-bound
+/// session, which keeps animation controls compatible with pan and zoom.
 pub(super) fn figure_live_supported(schema: u32, renderer_version: &str, animated: bool) -> bool {
     schema <= 3
         && match renderer_version {
             "1.9.0" => !animated,
-            "1.10.0" => true,
+            "1.10.0" | "1.11.0" => true,
             _ => false,
         }
 }
@@ -398,8 +398,9 @@ mod figure_tests {
         assert!(!figure_live_supported(3, "1.9.0", true));
         assert!(figure_live_supported(3, "1.10.0", false));
         assert!(figure_live_supported(3, "1.10.0", true));
+        assert!(figure_live_supported(3, "1.11.0", false));
+        assert!(figure_live_supported(3, "1.11.0", true));
         assert!(!figure_live_supported(4, "1.10.0", false));
-        assert!(!figure_live_supported(3, "1.11.0", false));
     }
 }
 

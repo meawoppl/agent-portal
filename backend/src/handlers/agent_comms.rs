@@ -282,7 +282,7 @@ pub async fn show_media(
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
 
     // Declared content type, minus any `; charset=` suffix.
-    let content_type = headers
+    let mut content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(';').next().unwrap_or(s).trim().to_string())
@@ -297,16 +297,19 @@ pub async fn show_media(
     }
 
     // Per-kind size cap.
-    let cap_mb = match kind {
-        MediaKind::Image => app_state.max_image_mb,
-        MediaKind::Video => app_state.max_video_mb,
-        MediaKind::Figure => 10,
+    let cap_bytes = match kind {
+        MediaKind::Image => app_state.max_image_mb as usize * 1024 * 1024,
+        MediaKind::Video => app_state.max_video_mb as usize * 1024 * 1024,
+        MediaKind::Figure if content_type == shared::media::PORTABLE_FIGURE_HTML_TYPE => {
+            shared::media::PORTABLE_FIGURE_HTML_MAX_BYTES
+        }
+        MediaKind::Figure => shared::media::PORTABLE_FIGURE_MAX_BYTES,
     };
-    if body.len() as u64 > cap_mb as u64 * 1024 * 1024 {
+    if body.len() > cap_bytes {
         return Err(AppError::PayloadTooLarge(format!(
-            "{:.1} MB exceeds the {} MB limit for {}",
+            "{:.1} MB exceeds the {} MB transport limit for {}",
             body.len() as f64 / (1024.0 * 1024.0),
-            cap_mb,
+            cap_bytes / (1024 * 1024),
             match kind {
                 MediaKind::Image => "images",
                 MediaKind::Video => "videos",
@@ -327,12 +330,17 @@ pub async fn show_media(
         .first(&mut conn)
         .map_err(|_| AppError::NotFound("session"))?;
 
-    let filename = query
+    let mut filename = query
         .filename
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
+    let mut body = body;
+    if content_type == shared::media::PORTABLE_FIGURE_HTML_TYPE {
+        (body, filename) = unwrap_portable_figure_html(body, filename)?;
+        content_type = shared::media::PORTABLE_FIGURE_TYPE.to_string();
+    }
     let file_size = body.len() as u64;
 
     // Store bytes; build the typed portal content referencing the served URL.
@@ -373,10 +381,7 @@ pub async fn show_media(
             )
         }
         MediaKind::Figure => {
-            let mut limits = rizzma::portable::Limits::new();
-            // The poster is persisted in the transcript for durable fallback;
-            // keep that row bounded independently of the 10 MiB artifact cap.
-            limits.max_poster_bytes = 1024 * 1024;
+            let limits = portable_figure_limits();
             let metadata = rizzma::portable::inspect(&body, &limits)
                 .map_err(|_| AppError::BadRequest("invalid portable figure"))?;
             let meta = metadata.meta.as_ref().ok_or(AppError::BadRequest(
@@ -485,6 +490,38 @@ pub async fn show_media(
     }))
 }
 
+fn portable_figure_limits() -> rizzma::portable::Limits {
+    let mut limits = rizzma::portable::Limits::new();
+    limits.max_total_bytes = shared::media::PORTABLE_FIGURE_MAX_BYTES;
+    // The poster is persisted in the transcript for durable fallback; keep
+    // that row bounded independently of the canonical artifact cap.
+    limits.max_poster_bytes = 1024 * 1024;
+    limits
+}
+
+/// Strip the reversible HTML carrier at the trust boundary. Only canonical
+/// raw artifact bytes continue to validation, storage, archive write-through,
+/// and transcript persistence; wrapper HTML and embedded runtimes die here.
+fn unwrap_portable_figure_html(
+    body: Bytes,
+    filename: Option<String>,
+) -> Result<(Bytes, Option<String>), AppError> {
+    let artifact = rizzma::portable::unwrap_html(&body, &portable_figure_limits())
+        .map_err(|_| AppError::BadRequest("invalid portable-figure HTML wrapper"))?;
+    Ok((
+        Bytes::from(artifact),
+        filename.map(canonical_figure_filename),
+    ))
+}
+
+fn canonical_figure_filename(filename: String) -> String {
+    if filename.to_ascii_lowercase().ends_with(".riz.html") {
+        filename[..filename.len() - ".html".len()].to_string()
+    } else {
+        filename
+    }
+}
+
 fn pending_input_count(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
@@ -499,7 +536,22 @@ fn pending_input_count(
 
 #[cfg(test)]
 mod tests {
-    use super::turn_signal_is_busy;
+    use super::{turn_signal_is_busy, unwrap_portable_figure_html};
+    use axum::body::Bytes;
+
+    #[test]
+    fn riz_html_is_canonicalized_before_storage() {
+        let marker = shared::media::RIZZMA_HTML_CARRIER_OPEN;
+        let html = format!(
+            "<!doctype html>{marker}UlpGRw==</script>\
+             <script id=\"riz-rt-loader\">discard me</script>"
+        );
+        let (bytes, filename) =
+            unwrap_portable_figure_html(Bytes::from(html), Some("Demo.RIZ.HTML".to_string()))
+                .expect("valid carrier");
+        assert_eq!(bytes.as_ref(), b"RZFG");
+        assert_eq!(filename.as_deref(), Some("Demo.RIZ"));
+    }
 
     #[test]
     fn turn_state_covers_all_agent_terminal_shapes() {

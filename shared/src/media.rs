@@ -30,6 +30,23 @@ pub const SUPPORTED_VIDEO_TYPES: &[&str] = &["video/mp4", "video/webm"];
 /// host-vetted renderer inside a sandboxed realm.
 pub const PORTABLE_FIGURE_TYPE: &str = "application/vnd.rizzma.figure";
 
+/// Declared upload type for a reversible `.riz.html` carrier. The backend
+/// unwraps this form and stores only the canonical raw artifact.
+pub const PORTABLE_FIGURE_HTML_TYPE: &str = "application/vnd.rizzma.figure+html";
+
+/// Canonical portable-figure artifact cap.
+pub const PORTABLE_FIGURE_MAX_BYTES: usize = 10 * 1024 * 1024;
+
+/// Transport cap for `.riz.html`. Base64 expands the canonical artifact by
+/// one third and the live tier may also carry a renderer which is discarded
+/// at ingest; the unwrapped artifact remains subject to the canonical cap.
+pub const PORTABLE_FIGURE_HTML_MAX_BYTES: usize = 20 * 1024 * 1024;
+
+/// Exact carrier marker emitted and accepted by Rizzma. This is only a fast
+/// launcher-side preflight; the backend uses Rizzma's strict, budgeted unwrap.
+pub const RIZZMA_HTML_CARRIER_OPEN: &str =
+    r#"<script type="application/vnd.rizzma.figure+base64" id="riz">"#;
+
 /// Classify a supported content type, or return `None`.
 pub fn media_kind(content_type: &str) -> Option<MediaKind> {
     let ct = content_type.trim();
@@ -37,7 +54,7 @@ pub fn media_kind(content_type: &str) -> Option<MediaKind> {
         Some(MediaKind::Image)
     } else if SUPPORTED_VIDEO_TYPES.contains(&ct) {
         Some(MediaKind::Video)
-    } else if ct == PORTABLE_FIGURE_TYPE {
+    } else if ct == PORTABLE_FIGURE_TYPE || ct == PORTABLE_FIGURE_HTML_TYPE {
         Some(MediaKind::Figure)
     } else {
         None
@@ -46,7 +63,7 @@ pub fn media_kind(content_type: &str) -> Option<MediaKind> {
 
 /// Human-readable list of supported formats, for CLI/backend error messages.
 pub const SUPPORTED_FORMATS_HINT: &str =
-    "png, jpg, jpeg, gif, webp, svg (images); mp4, webm (video); riz (portable figure)";
+    "png, jpg, jpeg, gif, webp, svg (images); mp4, webm (video); riz, riz.html (portable figure)";
 
 // --- Format probes ---
 //
@@ -83,6 +100,16 @@ pub fn has_webm_magic(b: &[u8]) -> bool {
 
 pub fn has_rizzma_magic(b: &[u8]) -> bool {
     b.starts_with(b"RZFG")
+}
+
+/// Fast declared-wrapper check used by the launcher before upload. Full HTML
+/// carrier validation and artifact validation remain backend responsibilities.
+pub fn has_rizzma_html_carrier(b: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(b) else {
+        return false;
+    };
+    let mut matches = text.match_indices(RIZZMA_HTML_CARRIER_OPEN);
+    matches.next().is_some() && matches.next().is_none()
 }
 
 /// SVG is XML text, so there's no single magic number. Skip a UTF-8 BOM and
@@ -141,6 +168,21 @@ mod tests {
         assert_eq!(media_kind("video/mp4"), Some(MediaKind::Video));
         assert_eq!(media_kind("video/webm"), Some(MediaKind::Video));
         assert_eq!(media_kind(PORTABLE_FIGURE_TYPE), Some(MediaKind::Figure));
+        assert_eq!(
+            media_kind(PORTABLE_FIGURE_HTML_TYPE),
+            Some(MediaKind::Figure)
+        );
+    }
+
+    #[test]
+    fn reversible_html_carrier_requires_one_exact_marker() {
+        let one = format!("<!doctype html>{RIZZMA_HTML_CARRIER_OPEN}AAAA</script>");
+        assert!(has_rizzma_html_carrier(one.as_bytes()));
+        assert!(!has_rizzma_html_carrier(
+            b"<!doctype html><p>not a figure</p>"
+        ));
+        let two = format!("{one}{RIZZMA_HTML_CARRIER_OPEN}AAAA</script>");
+        assert!(!has_rizzma_html_carrier(two.as_bytes()));
     }
 
     #[test]
