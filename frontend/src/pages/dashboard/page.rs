@@ -577,17 +577,23 @@ pub fn dashboard_page() -> Html {
         .iter()
         .filter(|id| !effective_hidden_sessions.contains(id))
         .count();
-    // SessionView creation starts each session websocket subscription. Keep the
-    // rail order stable, but mount the focused session first so a reload gives
-    // the last-active session the first subscription attempt before background
-    // sessions connect.
+    // SessionView creation starts its REST history query and then its websocket
+    // subscription. This order is deliberately independent of the pill order:
+    // keep the focused session first, then hydrate the sessions the user most
+    // recently messaged before colder background sessions.
     let session_view_order: Vec<usize> = if active_sessions.is_empty() {
         Vec::new()
     } else {
         let focused_index = focus.focused_index.min(active_sessions.len() - 1);
         let mut indices = Vec::with_capacity(active_sessions.len());
         indices.push(focused_index);
-        indices.extend((0..active_sessions.len()).filter(|index| *index != focused_index));
+        let mut background: Vec<usize> = (0..active_sessions.len())
+            .filter(|index| *index != focused_index)
+            .collect();
+        background.sort_by(|a, b| {
+            session_order::history_hydration_cmp(&active_sessions[*a], &active_sessions[*b])
+        });
+        indices.extend(background);
         indices
     };
 

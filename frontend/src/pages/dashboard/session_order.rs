@@ -1,9 +1,8 @@
 //! Deterministic session display ordering + focus resolution (issue #1094).
 //!
-//! The rail orders sessions by the user's own messaging recency, then uses
-//! stable identity fields and the unique session id as deterministic
-//! tie-breakers. Focus is tracked by id, so a recency reorder never changes
-//! which session is active.
+//! The rail uses stable identity fields and the unique session id as
+//! deterministic tie-breakers. History hydration has a separate recency order;
+//! it must not move the session pills.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -13,13 +12,11 @@ use uuid::Uuid;
 
 /// Total, deterministic display-order key for a session.
 ///
-/// Sessions sort by `last_messaged_at` newest first, then by folder and agent
-/// with `id` as the unique final tie-breaker.
+/// Sessions sort by folder and agent with `id` as the unique final tie-breaker.
 ///
 /// Deliberately **does not** key on `git_branch`, full working directory,
-/// hostname, or agent-driven `last_activity`. Those values may change while
-/// the user is reading another session. Only an accepted input intentionally
-/// advances the recency key.
+/// hostname, or timestamps. Those values may change while the user is reading
+/// another session and must not move its pill.
 ///
 /// Because the key ends in the unique `id`, the order is *total*: the same set
 /// of sessions always sorts identically no matter what order the poll returned
@@ -34,9 +31,19 @@ fn display_sort_key(s: &SessionInfo) -> (String, String, Uuid) {
 
 /// Total ordering comparator for the session rail. See [`display_sort_key`].
 pub(super) fn session_display_cmp(a: &SessionInfo, b: &SessionInfo) -> Ordering {
+    display_sort_key(a).cmp(&display_sort_key(b))
+}
+
+/// Background history hydration order, newest user input first.
+///
+/// This is intentionally separate from [`session_display_cmp`]: messaging a
+/// session should make its transcript warm sooner on the next full reload, but
+/// must not rearrange the rail. The unique id makes equal timestamps total and
+/// independent of the REST response order.
+pub(super) fn history_hydration_cmp(a: &SessionInfo, b: &SessionInfo) -> Ordering {
     b.last_messaged_at
         .cmp(&a.last_messaged_at)
-        .then_with(|| display_sort_key(a).cmp(&display_sort_key(b)))
+        .then_with(|| a.id.cmp(&b.id))
 }
 
 /// Label shown for the "no hostname" bucket in the grouped rail.
@@ -70,7 +77,7 @@ fn host_group_key(s: &SessionInfo) -> (bool, String) {
 ///
 /// - host sections are alphabetical, with the empty/unknown-host bucket last;
 /// - sessions **within** a section keep the exact relative order they'd have
-///   ungrouped (agent output cannot reshuffle them; accepted input can);
+///   ungrouped;
 /// - the order stays *total* (the inner key ends in the unique `id`), so — like
 ///   [`session_display_cmp`] — the displayed sequence is a pure function of the
 ///   session set. That totality is what lets nav-mode numbering, `j`/`k`
@@ -167,20 +174,26 @@ mod tests {
     }
 
     #[test]
-    fn most_recently_messaged_session_sorts_first() {
-        let mut older = session(Uuid::from_u128(1), "/z/repo", "host", None);
+    fn most_recently_messaged_session_hydrates_first_without_moving_pills() {
+        let mut older = session(Uuid::from_u128(1), "/work/zeta", "host", None);
         older.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
-        let mut newer = session(Uuid::from_u128(2), "/a/repo", "host", None);
+        let mut newer = session(Uuid::from_u128(2), "/work/alpha", "host", None);
         newer.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
-        let baseline = session(Uuid::from_u128(3), "/0/repo", "host", None);
+        let baseline = session(Uuid::from_u128(3), "/work/0-baseline", "host", None);
 
         let baseline_id = baseline.id;
-        let mut sessions = [older.clone(), baseline, newer.clone()];
-        sessions.sort_by(session_display_cmp);
+        let mut hydration = [older.clone(), baseline.clone(), newer.clone()];
+        hydration.sort_by(history_hydration_cmp);
 
-        assert_eq!(sessions[0].id, newer.id);
-        assert_eq!(sessions[1].id, older.id);
-        assert_eq!(sessions[2].id, baseline_id);
+        assert_eq!(hydration[0].id, newer.id);
+        assert_eq!(hydration[1].id, older.id);
+        assert_eq!(hydration[2].id, baseline_id);
+
+        let mut pills = [older, baseline, newer];
+        pills.sort_by(session_display_cmp);
+        assert_eq!(pills[0].id, baseline_id);
+        assert_eq!(pills[1].working_directory, "/work/alpha");
+        assert_eq!(pills[2].working_directory, "/work/zeta");
     }
 
     /// The unique-id tie-breaker makes ordering independent of input order:
