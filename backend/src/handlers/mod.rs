@@ -30,4 +30,5 @@ pub mod sessions;
 pub mod sound_settings;
 pub mod stt;
 pub mod turn_metrics;
+pub mod visual_pr;
 pub mod websocket;

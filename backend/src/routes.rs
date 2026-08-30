@@ -430,6 +430,23 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/admin/forwards",
             get(handlers::admin_subdomains::list_admin_forwards),
         )
+        // Admin visual PR review (testing feature; see handlers::visual_pr)
+        .route(
+            "/api/admin/visual-prs",
+            get(handlers::visual_pr::list_visual_prs),
+        )
+        .route(
+            "/api/admin/visual-prs/{number}/generate",
+            post(handlers::visual_pr::generate_visual_pr),
+        )
+        .route(
+            "/api/admin/visual-prs/{number}/preview.svg",
+            get(handlers::visual_pr::get_visual_pr_svg),
+        )
+        .route(
+            "/api/admin/visual-prs/{number}/approve",
+            post(handlers::visual_pr::approve_visual_pr),
+        )
         // Add single unified state
         .with_state(app_state)
         // Merge rate-limited route groups

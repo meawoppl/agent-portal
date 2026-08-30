@@ -107,6 +107,9 @@ pub struct AppState {
     pub stt: Option<portal_stt::SttProvider>,
     /// Per-recording cap (MB) for `POST /api/stt/transcribe`.
     pub max_audio_mb: u32,
+    /// Admin visual-PR review runtime (testing feature). Always present;
+    /// disabled internally when `PORTAL_VISUAL_PR_REPO_DIR` is unset.
+    pub visual_prs: handlers::visual_pr::VisualPrState,
 }
 
 impl AppState {
@@ -204,6 +207,7 @@ pub async fn run() -> anyhow::Result<()> {
         session_max_age_days: config.session_max_age_days,
         max_image_mb: config.max_image_mb,
         max_audio_mb: config.max_audio_mb,
+        visual_prs: handlers::visual_pr::VisualPrState::from_env(),
         image_store: handlers::images::ImageStore::new(
             config.image_store_max_bytes,
             config.image_store_ttl,
