@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <!-- ============================================================
+       visual-pr template — see SKILL.md in this directory.
+       Replace everything marked REPLACE. Keep geometry + palette.
+       ============================================================ -->
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7aa2f7"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="arr-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#e0af68"/>
+    </marker>
+  </defs>
+
+  <!-- Header: REPLACE pr number + title -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #0000 · Title of the pull request</text>
+
+  <!-- Thesis: REPLACE — the claim, 1–2 lines, ≤105 chars each -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">First thesis line — what was wrong, stated concretely;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">second thesis line — the mechanism and the guarantee that now holds.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider (keep) -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel: x 55–945 ====================
+       REPLACE the sample components below with the real diagram. -->
+
+  <!-- sample: neutral box (unchanged structure) -->
+  <g>
+    <rect x="80" y="250" width="480" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">ComponentOrTypeName</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">detail line — a real field or behavior</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">muted sub-detail or provenance</text>
+  </g>
+
+  <!-- sample: flow arrow with label -->
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <text x="336" y="450" font-size="22" fill="#565f89">payload or call</text>
+
+  <!-- sample: red dead-end (the defect) -->
+  <line x1="260" y1="505" x2="380" y2="505" stroke="#f7768e" stroke-width="3"/>
+  <text x="320" y="545" font-size="23" fill="#f7768e" text-anchor="middle">what goes wrong, concretely</text>
+  <text x="320" y="577" font-size="22" fill="#565f89" text-anchor="middle">why — one muted line</text>
+
+  <!-- sample: red outcome box -->
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">observable bad outcome</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">its consequence, in red</text>
+  </g>
+
+  <!-- ==================== AFTER panel: x 1040–1945 ====================
+       Mirror the BEFORE structure; highlight only what changed. -->
+
+  <!-- sample: unchanged box (identical to BEFORE twin) -->
+  <g>
+    <rect x="1065" y="250" width="480" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">ComponentOrTypeName</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">detail line — a real field or behavior</text>
+    <text x="1089" y="366" font-size="22" fill="#565f89">muted sub-detail or provenance</text>
+  </g>
+
+  <!-- sample: green flow into the new mechanism -->
+  <line x1="1305" y1="400" x2="1305" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <!-- sample: green box (the new mechanism) -->
+  <g>
+    <rect x="1065" y="495" width="620" height="160" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="535" font-size="26" fill="#9ece6a">new_function_or_component</text>
+    <text x="1089" y="575" font-size="23" fill="#a9b1d6">what it does — exact filter / expression</text>
+    <text x="1089" y="611" font-size="22" fill="#565f89">invariant that makes it safe</text>
+  </g>
+
+  <!-- sample: orange caveat/gate box -->
+  <g>
+    <rect x="1065" y="700" width="620" height="100" fill="#1e202e" stroke="#e0af68" stroke-width="1.5"/>
+    <text x="1089" y="740" font-size="24" fill="#e0af68">gate or caveat</text>
+    <text x="1089" y="776" font-size="22" fill="#a9b1d6">what it protects against</text>
+  </g>
+
+  <!-- sample: green outcome box -->
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">observable fixed outcome</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">the guarantee, in green</text>
+  </g>
+
+  <!-- Footer: REPLACE — one muted scope-caveat line, ≤165 chars -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">What this PR deliberately does not do, or its sharpest real limitation.</text>
+</svg>
