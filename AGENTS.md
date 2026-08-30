@@ -1070,6 +1070,11 @@ use uuid::Uuid;
 - **Titles**: describe the change, not the ticket. Don't reference issue/PR numbers — they're noise in the title.
 - **Bodies**: focus on *what* the change does and *why*. Keep it concise — no commit-by-commit play-by-play.
 - **No attribution footer**: don't add "Generated with Claude Code" (or similar) to PR titles or bodies.
+- **Visual PR summary**: when a PR is ready (right after `gh pr create`), invoke
+  the `visual-pr` skill (`.claude/skills/visual-pr/SKILL.md`). It reads the
+  actual diff and surrounding code, renders a before/after SVG in the house
+  style, validates it, and shows it inline via `agent-portal show`. Generated
+  SVGs live in `/tmp` — never commit them.
 
 ## SHIP Workflow
 
