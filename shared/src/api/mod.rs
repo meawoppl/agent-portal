@@ -14,6 +14,7 @@ mod scheduled_tasks;
 mod sessions;
 mod settings;
 mod users;
+mod visual_prs;
 
 pub use auth::*;
 pub use device_flow::*;
@@ -29,6 +30,7 @@ pub use scheduled_tasks::*;
 pub use sessions::*;
 pub use settings::*;
 pub use users::*;
+pub use visual_prs::*;
 
 #[cfg(test)]
 mod tests {
