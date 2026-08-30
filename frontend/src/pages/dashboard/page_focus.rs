@@ -16,6 +16,14 @@ pub(super) struct DashboardFocus {
     pub jump_to_latest_signal: u32,
 }
 
+fn focused_session_terminated(
+    prior: Option<(Uuid, bool)>,
+    focused_id: Uuid,
+    is_live: bool,
+) -> bool {
+    prior == Some((focused_id, true)) && !is_live
+}
+
 #[hook]
 pub(super) fn use_dashboard_focus(
     active_sessions: Vec<SessionInfo>,
@@ -41,6 +49,64 @@ pub(super) fn use_dashboard_focus(
         *last_focused_index.borrow(),
     );
     *last_focused_index.borrow_mut() = focused_index;
+
+    // When the focused session actually terminates, move to the remaining
+    // session the user messaged most recently. Treat either the persisted
+    // Active status or a live websocket as evidence that the session still
+    // exists: this preserves the #1368 stale-poll protection for a newly
+    // launched session whose row briefly disappears while its socket remains
+    // connected.
+    //
+    // Track liveness per focused id so deliberately selecting an already
+    // disconnected session remains possible. We only move focus on a live ->
+    // not-live transition, which is the lifecycle produced by `seppuku`.
+    {
+        let prior_focus_liveness = use_mut_ref(|| None::<(Uuid, bool)>);
+        let focused_id = session_state.focused_id;
+        let connected_sessions = session_state.connected_sessions.clone();
+        let sessions = active_sessions.clone();
+        let hidden_sessions = effective_hidden_sessions.clone();
+        let session_state = session_state.clone();
+
+        use_effect_with(
+            (
+                focused_id,
+                active_session_ids(&sessions),
+                sessions
+                    .iter()
+                    .map(|session| (session.id, session.status.clone()))
+                    .collect::<Vec<_>>(),
+                connected_sessions.clone(),
+                hidden_sessions.clone(),
+            ),
+            move |_| {
+                if let Some(focused_id) = focused_id {
+                    let is_live = connected_sessions.contains(&focused_id)
+                        || sessions.iter().any(|session| {
+                            session.id == focused_id
+                                && session.status == shared::SessionStatus::Active
+                        });
+
+                    let prior = *prior_focus_liveness.borrow();
+                    *prior_focus_liveness.borrow_mut() = Some((focused_id, is_live));
+                    if focused_session_terminated(prior, focused_id, is_live) {
+                        if let Some(next_id) = session_order::termination_focus_fallback(
+                            &sessions,
+                            focused_id,
+                            &hidden_sessions,
+                            &connected_sessions,
+                        ) {
+                            session_state
+                                .dispatch(DashboardSessionAction::FocusAndActivate(next_id));
+                        }
+                    }
+                } else {
+                    *prior_focus_liveness.borrow_mut() = None;
+                }
+                || ()
+            },
+        );
+    }
 
     // On initial load, focus first non-hidden session and activate all non-hidden sessions.
     {
@@ -184,5 +250,34 @@ pub(super) fn use_dashboard_focus(
         interrupt_signal: *interrupt_signal,
         on_jump_to_latest,
         jump_to_latest_signal: *jump_to_latest_signal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::focused_session_terminated;
+    use uuid::Uuid;
+
+    #[test]
+    fn switches_only_when_the_same_focused_session_transitions_out_of_live() {
+        let focused = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+
+        assert!(focused_session_terminated(
+            Some((focused, true)),
+            focused,
+            false
+        ));
+        assert!(!focused_session_terminated(
+            Some((focused, true)),
+            focused,
+            true
+        ));
+        assert!(!focused_session_terminated(
+            Some((other, false)),
+            focused,
+            false
+        ));
+        assert!(!focused_session_terminated(None, focused, false));
     }
 }

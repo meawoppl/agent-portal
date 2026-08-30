@@ -46,6 +46,41 @@ pub(super) fn history_hydration_cmp(a: &SessionInfo, b: &SessionInfo) -> Orderin
         .then_with(|| a.id.cmp(&b.id))
 }
 
+/// Pick the most recently messaged session to receive focus after the current
+/// session terminates.
+///
+/// Prefer a visible, live session, then any visible session, and finally any
+/// remaining session. This is deliberately independent of rail order (and of
+/// host grouping): "most recently edited" is [`SessionInfo::last_messaged_at`],
+/// not whichever pill happens to render first.
+pub(super) fn termination_focus_fallback(
+    sessions: &[SessionInfo],
+    terminated_id: Uuid,
+    hidden: &HashSet<Uuid>,
+    connected: &HashSet<Uuid>,
+) -> Option<Uuid> {
+    let remaining = || {
+        sessions
+            .iter()
+            .filter(|session| session.id != terminated_id)
+    };
+    let newest = |iter: Box<dyn Iterator<Item = &SessionInfo> + '_>| {
+        iter.min_by(|a, b| history_hydration_cmp(a, b))
+            .map(|session| session.id)
+    };
+
+    newest(Box::new(remaining().filter(|session| {
+        !hidden.contains(&session.id)
+            && (session.status == shared::SessionStatus::Active || connected.contains(&session.id))
+    })))
+    .or_else(|| {
+        newest(Box::new(
+            remaining().filter(|session| !hidden.contains(&session.id)),
+        ))
+    })
+    .or_else(|| newest(Box::new(remaining())))
+}
+
 /// Label shown for the "no hostname" bucket in the grouped rail.
 pub(super) const UNKNOWN_HOST_LABEL: &str = "unknown host";
 
@@ -194,6 +229,52 @@ mod tests {
         assert_eq!(pills[0].id, baseline_id);
         assert_eq!(pills[1].working_directory, "/work/alpha");
         assert_eq!(pills[2].working_directory, "/work/zeta");
+    }
+
+    #[test]
+    fn termination_fallback_uses_message_recency_not_rail_order() {
+        let terminated = session(Uuid::from_u128(1), "/work/a", "host", None);
+        let mut older = session(Uuid::from_u128(2), "/work/z", "host", None);
+        older.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
+        let mut newer = session(Uuid::from_u128(3), "/work/m", "host", None);
+        newer.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
+
+        assert_eq!(
+            termination_focus_fallback(
+                &[terminated.clone(), older, newer.clone()],
+                terminated.id,
+                &HashSet::new(),
+                &HashSet::from([newer.id]),
+            ),
+            Some(newer.id)
+        );
+    }
+
+    #[test]
+    fn termination_fallback_prefers_visible_live_session() {
+        let terminated = session(Uuid::from_u128(1), "/work/a", "host", None);
+        let mut hidden_newest = session(Uuid::from_u128(2), "/work/b", "host", None);
+        hidden_newest.last_messaged_at = "2026-08-29T12:00:00Z".to_string();
+        let mut disconnected = session(Uuid::from_u128(3), "/work/c", "host", None);
+        disconnected.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
+        disconnected.status = SessionStatus::Disconnected;
+        let mut visible_live = session(Uuid::from_u128(4), "/work/d", "host", None);
+        visible_live.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
+
+        assert_eq!(
+            termination_focus_fallback(
+                &[
+                    terminated.clone(),
+                    hidden_newest.clone(),
+                    disconnected,
+                    visible_live.clone(),
+                ],
+                terminated.id,
+                &HashSet::from([hidden_newest.id]),
+                &HashSet::from([visible_live.id]),
+            ),
+            Some(visible_live.id)
+        );
     }
 
     /// The unique-id tie-breaker makes ordering independent of input order:
