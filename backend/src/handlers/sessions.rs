@@ -259,28 +259,32 @@ pub async fn stop_session(
         current_user_id,
     )?;
 
-    let stopped = app_state.session_manager.disconnect_session(session_id);
-    let launcher_stopped = app_state.session_manager.stop_session_on_launcher(
+    // Persist the desired state before touching the live process. Launcher
+    // heartbeat reconciliation starts every unpaused session that is missing
+    // from the launcher's running set, so leaving `paused = false` here makes a
+    // successful stop (including `agent-portal seppuku`) relaunch itself on the
+    // next heartbeat. Writing first also closes the race where reconciliation
+    // could run between killing the process and recording that it must stay
+    // down.
+    use crate::schema::sessions;
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::paused.eq(true),
+            sessions::status.eq(SessionStatus::Disconnected.as_str()),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)?;
+
+    // Stopping is idempotent: the durable do-not-relaunch state is the result.
+    // A missing live proxy/launcher process already satisfies that result.
+    app_state.session_manager.disconnect_session(session_id);
+    app_state.session_manager.stop_session_on_launcher(
         session_id,
         session.launcher_id,
         Some(session.working_directory.clone()),
     );
 
-    if stopped || launcher_stopped {
-        use crate::schema::sessions;
-        diesel::update(sessions::table.find(session_id))
-            .set((
-                sessions::paused.eq(false),
-                sessions::status.eq(SessionStatus::Disconnected.as_str()),
-                sessions::updated_at.eq(diesel::dsl::now),
-            ))
-            .execute(&mut conn)?;
-        Ok(EmptyResponse::ACCEPTED)
-    } else if session.paused {
-        Err(AppError::NotFound("Launcher not connected"))
-    } else {
-        Err(AppError::NotFound("Session not connected"))
-    }
+    Ok(EmptyResponse::ACCEPTED)
 }
 
 pub async fn pause_session(
