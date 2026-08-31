@@ -29,6 +29,25 @@ fn fanout_to_clients(clients: &mut Vec<WebClientSender>, msg: ServerToClient) {
 }
 
 impl SessionManager {
+    /// Number of live proxy connections. Registry representation stays private
+    /// so callers cannot bypass generation-guarded lifecycle operations.
+    pub fn connected_proxy_count(&self) -> usize {
+        self.sessions.len()
+    }
+
+    /// Total number of live user-level web client connections.
+    pub fn connected_web_client_count(&self) -> usize {
+        self.user_clients
+            .iter()
+            .map(|entry| entry.value().len())
+            .sum()
+    }
+
+    /// Whether any user currently has a live web client connection.
+    pub fn has_any_user_clients(&self) -> bool {
+        !self.user_clients.is_empty()
+    }
+
     pub fn add_web_client(&self, session_key: SessionId, sender: WebClientSender) {
         info!("Adding web client for session: {}", session_key);
         self.web_clients

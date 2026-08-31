@@ -196,13 +196,13 @@ pub struct ForwardHealth {
 
 #[derive(Clone)]
 pub struct SessionManager {
-    pub sessions: Arc<DashMap<SessionId, ProxyConnection>>,
-    pub web_clients: Arc<DashMap<SessionId, Vec<WebClientSender>>>,
-    pub user_clients: Arc<DashMap<Uuid, Vec<WebClientSender>>>,
+    sessions: Arc<DashMap<SessionId, ProxyConnection>>,
+    web_clients: Arc<DashMap<SessionId, Vec<WebClientSender>>>,
+    user_clients: Arc<DashMap<Uuid, Vec<WebClientSender>>>,
     last_ack_seq: Arc<DashMap<Uuid, u64>>,
     pending_messages: Arc<DashMap<SessionId, VecDeque<PendingMessage>>>,
     pending_truncations: Arc<DashSet<Uuid>>,
-    pub launchers: Arc<DashMap<Uuid, LauncherConnection>>,
+    launchers: Arc<DashMap<Uuid, LauncherConnection>>,
     /// Dedup index: `(user_id, hostname)` → `launcher_id`. Used to atomically
     /// reject a second launcher connection from the same host for the same
     /// user. Entries here are kept in lockstep with `launchers`: inserted by

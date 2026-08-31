@@ -759,7 +759,7 @@ pub async fn broadcast_user_spend_updates(app_state: Arc<AppState>) {
     use diesel::prelude::*;
     use shared::{ServerToClient, SessionCost};
 
-    if app_state.session_manager.user_clients.is_empty() {
+    if !app_state.session_manager.has_any_user_clients() {
         return;
     }
 
