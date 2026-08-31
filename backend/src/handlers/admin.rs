@@ -164,13 +164,8 @@ pub async fn get_stats(
     .map_err(|e| admin_db_query("Failed to query turn-metrics token stats", e))?;
 
     // Get connected client counts from session manager (no DB query needed)
-    let connected_proxy_clients = app_state.session_manager.sessions.len();
-    let connected_web_clients: usize = app_state
-        .session_manager
-        .user_clients
-        .iter()
-        .map(|r| r.value().len())
-        .sum();
+    let connected_proxy_clients = app_state.session_manager.connected_proxy_count();
+    let connected_web_clients = app_state.session_manager.connected_web_client_count();
 
     Ok(Json(AdminStats {
         total_users: user_stats.total,
@@ -377,8 +372,7 @@ pub async fn list_sessions(
         .map(|(session, user_email)| {
             let is_connected = app_state
                 .session_manager
-                .sessions
-                .contains_key(session.id.to_string().as_str());
+                .is_proxy_connected(session.id.to_string().as_str());
 
             AdminSessionInfo {
                 id: session.id,

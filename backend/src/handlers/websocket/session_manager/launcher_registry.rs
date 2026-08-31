@@ -33,6 +33,55 @@ pub struct LauncherConnection {
 }
 
 impl SessionManager {
+    /// Owner of a connected launcher, if it is still registered.
+    pub fn launcher_owner(&self, launcher_id: Uuid) -> Option<Uuid> {
+        self.launchers
+            .get(&launcher_id)
+            .map(|launcher| launcher.user_id)
+    }
+
+    /// Host identity used when persisting a desired session launch.
+    pub fn launcher_host_version(&self, launcher_id: Uuid) -> Option<(String, String)> {
+        self.launchers
+            .get(&launcher_id)
+            .map(|launcher| (launcher.hostname.clone(), launcher.version.clone()))
+    }
+
+    pub fn launcher_count_for_user(&self, user_id: Uuid) -> usize {
+        self.launchers
+            .iter()
+            .filter(|entry| entry.value().user_id == user_id)
+            .count()
+    }
+
+    pub fn launcher_running_sessions(&self, launcher_id: Uuid) -> Vec<Uuid> {
+        self.launchers
+            .get(&launcher_id)
+            .map(|launcher| launcher.running_sessions.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn find_launcher_for_user_host(&self, user_id: Uuid, hostname: &str) -> Option<Uuid> {
+        self.launchers
+            .iter()
+            .find(|entry| entry.value().user_id == user_id && entry.value().hostname == hostname)
+            .map(|entry| *entry.key())
+    }
+
+    /// Replace the launcher's heartbeat-owned running-session snapshot.
+    /// Returns `false` when the launcher disconnected before the update.
+    pub fn update_launcher_running_sessions(
+        &self,
+        launcher_id: Uuid,
+        running_sessions: Vec<Uuid>,
+    ) -> bool {
+        let Some(mut launcher) = self.launchers.get_mut(&launcher_id) else {
+            return false;
+        };
+        launcher.running_sessions = running_sessions;
+        true
+    }
+
     /// Atomically register a launcher, rejecting a duplicate `(user_id, hostname)`
     /// pair in the same operation.
     ///

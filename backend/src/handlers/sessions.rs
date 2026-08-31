@@ -382,9 +382,8 @@ fn resolve_resume_launcher(app_state: &AppState, session: &Session) -> Option<Uu
     if let Some(launcher_id) = session.launcher_id {
         if app_state
             .session_manager
-            .launchers
-            .get(&launcher_id)
-            .is_some_and(|l| l.user_id == session.user_id)
+            .launcher_owner(launcher_id)
+            .is_some_and(|owner| owner == session.user_id)
         {
             return Some(launcher_id);
         }
@@ -392,12 +391,7 @@ fn resolve_resume_launcher(app_state: &AppState, session: &Session) -> Option<Uu
 
     app_state
         .session_manager
-        .launchers
-        .iter()
-        .find(|entry| {
-            entry.value().user_id == session.user_id && entry.value().hostname == session.hostname
-        })
-        .map(|entry| *entry.key())
+        .find_launcher_for_user_host(session.user_id, &session.hostname)
 }
 
 // ============================================================================

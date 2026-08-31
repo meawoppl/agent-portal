@@ -11,6 +11,11 @@ use uuid::Uuid;
 use super::{ProxyConnection, ProxySender, SessionId, SessionManager};
 
 impl SessionManager {
+    /// Whether a proxy is currently registered for `session_key`.
+    pub fn is_proxy_connected(&self, session_key: &str) -> bool {
+        self.sessions.contains_key(session_key)
+    }
+
     /// Register a proxy connection for a session. Returns a generation number
     /// that must be passed to `unregister_session` to prevent stale cleanup
     /// from removing a newer connection. `cancel` is the socket task's

@@ -114,8 +114,7 @@ pub async fn list_agent_sessions(
         .map(|s| {
             let connected = app_state
                 .session_manager
-                .sessions
-                .contains_key(s.id.to_string().as_str());
+                .is_proxy_connected(s.id.to_string().as_str());
             let busy = connected
                 && latest_signals
                     .get(&s.id)

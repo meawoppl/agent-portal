@@ -291,12 +291,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
 
     // Reject if user already has too many launchers
     const MAX_LAUNCHERS_PER_USER: usize = 10;
-    let user_launcher_count = app_state
-        .session_manager
-        .launchers
-        .iter()
-        .filter(|entry| entry.value().user_id == user_id)
-        .count();
+    let user_launcher_count = app_state.session_manager.launcher_count_for_user(user_id);
 
     if user_launcher_count >= MAX_LAUNCHERS_PER_USER {
         error!(
@@ -627,9 +622,9 @@ fn handle_launcher_message(
         LauncherToServer::LauncherHeartbeat {
             running_sessions, ..
         } => {
-            if let Some(mut launcher) = app_state.session_manager.launchers.get_mut(&launcher_id) {
-                launcher.running_sessions = running_sessions;
-            }
+            app_state
+                .session_manager
+                .update_launcher_running_sessions(launcher_id, running_sessions);
             // Echo the heartbeat so a launcher that supports it can detect a
             // half-open control socket and reconnect (#1366). Gated on the
             // capability so older launchers never receive an undecodable frame.
@@ -1010,10 +1005,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
 
     let running_sessions = app_state
         .session_manager
-        .launchers
-        .get(&launcher_id)
-        .map(|launcher| launcher.running_sessions.clone())
-        .unwrap_or_default();
+        .launcher_running_sessions(launcher_id);
 
     let Ok(mut conn) = app_state.db_pool.get() else {
         warn!("Failed to get DB connection for desired-session reconciliation");

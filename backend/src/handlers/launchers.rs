@@ -46,14 +46,10 @@ pub async fn launch_session(
     Json(req): Json<LaunchRequest>,
 ) -> Result<Json<LaunchResponse>, AppError> {
     let launcher_id = resolve_launch_target(&app_state.session_manager, req.launcher_id, user_id)?;
-    let (hostname, version) = {
-        let launcher = app_state
-            .session_manager
-            .launchers
-            .get(&launcher_id)
-            .ok_or(AppError::NotFound("Launcher not found"))?;
-        (launcher.hostname.clone(), launcher.version.clone())
-    };
+    let (hostname, version) = app_state
+        .session_manager
+        .launcher_host_version(launcher_id)
+        .ok_or(AppError::NotFound("Launcher not found"))?;
     if req.create_worktree
         && !app_state
             .session_manager
@@ -317,14 +313,10 @@ pub async fn fork_session(
         claude_args = apply_model_override(claude_args, agent_type, model);
     }
 
-    let (hostname, version) = {
-        let launcher = app_state
-            .session_manager
-            .launchers
-            .get(&launcher_id)
-            .ok_or(AppError::BadRequest("Source launcher is offline"))?;
-        (launcher.hostname.clone(), launcher.version.clone())
-    };
+    let (hostname, version) = app_state
+        .session_manager
+        .launcher_host_version(launcher_id)
+        .ok_or(AppError::BadRequest("Source launcher is offline"))?;
     // Mint before persisting the desired row so an auth failure cannot leave
     // behind an orphaned, never-launchable fork.
     let auth_token = mint_launch_token(&app_state, user_id)?;
@@ -436,14 +428,13 @@ fn resolve_launch_target(
     user_id: Uuid,
 ) -> Result<Uuid, AppError> {
     if let Some(launcher_id) = requested_launcher_id {
-        let launcher = session_manager
-            .launchers
-            .get(&launcher_id)
+        let owner = session_manager
+            .launcher_owner(launcher_id)
             .ok_or(AppError::NotFound("Launcher not found"))?;
-        if launcher.user_id != user_id {
+        if owner != user_id {
             warn!(
                 "User {} attempted to launch on launcher {} owned by {}",
-                user_id, launcher_id, launcher.user_id
+                user_id, launcher_id, owner
             );
             return Err(AppError::Forbidden);
         }
@@ -470,15 +461,13 @@ pub async fn list_directories(
     Query(query): Query<DirectoryQuery>,
 ) -> Result<Json<DirectoryListingResponse>, AppError> {
     // Verify the launcher belongs to this user
-    let launcher = app_state
+    let owner = app_state
         .session_manager
-        .launchers
-        .get(&launcher_id)
+        .launcher_owner(launcher_id)
         .ok_or(AppError::NotFound("Launcher not found"))?;
-    if launcher.user_id != user_id {
+    if owner != user_id {
         return Err(AppError::Forbidden);
     }
-    drop(launcher);
 
     let request_id = Uuid::new_v4();
     let rx = app_state.session_manager.register_dir_request(request_id);
@@ -558,12 +547,11 @@ pub async fn update_launcher(
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
     {
-        let launcher = app_state
+        let owner = app_state
             .session_manager
-            .launchers
-            .get(&launcher_id)
+            .launcher_owner(launcher_id)
             .ok_or(AppError::NotFound("Launcher not found"))?;
-        if launcher.user_id != user_id {
+        if owner != user_id {
             return Err(AppError::Forbidden);
         }
     }
@@ -593,12 +581,11 @@ pub async fn restart_launcher(
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
     {
-        let launcher = app_state
+        let owner = app_state
             .session_manager
-            .launchers
-            .get(&launcher_id)
+            .launcher_owner(launcher_id)
             .ok_or(AppError::NotFound("Launcher not found"))?;
-        if launcher.user_id != user_id {
+        if owner != user_id {
             return Err(AppError::Forbidden);
         }
     }
@@ -638,12 +625,11 @@ pub async fn probe_agents(
     Path(launcher_id): Path<Uuid>,
 ) -> Result<Json<ProbeAgentsResponse>, AppError> {
     {
-        let launcher = app_state
+        let owner = app_state
             .session_manager
-            .launchers
-            .get(&launcher_id)
+            .launcher_owner(launcher_id)
             .ok_or(AppError::NotFound("Launcher not found"))?;
-        if launcher.user_id != user_id {
+        if owner != user_id {
             return Err(AppError::Forbidden);
         }
     }
@@ -688,12 +674,11 @@ fn require_launcher_owner(
     launcher_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    let launcher = app_state
+    let owner = app_state
         .session_manager
-        .launchers
-        .get(&launcher_id)
+        .launcher_owner(launcher_id)
         .ok_or(AppError::NotFound("Launcher not found"))?;
-    if launcher.user_id != user_id {
+    if owner != user_id {
         return Err(AppError::Forbidden);
     }
     Ok(())
