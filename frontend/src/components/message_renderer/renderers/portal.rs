@@ -178,6 +178,18 @@ fn render_portal_content(
         shared::PortalContent::AgentMessage { text, .. } => {
             render_markdown_for_session(text, session_id)
         }
+        shared::PortalContent::SecretDrop { path, file_size } => {
+            let name = path.rsplit('/').next().unwrap_or("secret file");
+            html! {
+                <div class="portal-secret-drop">
+                    <span aria-hidden="true">{ "🔒" }</span>
+                    <span>{ name }</span>
+                    <span class="portal-secret-drop-size">
+                        { format!("{} bytes · contents not stored in chat", file_size) }
+                    </span>
+                </div>
+            }
+        }
     }
 }
 

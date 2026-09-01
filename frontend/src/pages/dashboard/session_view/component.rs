@@ -151,6 +151,10 @@ pub enum SessionViewMsg {
         content: String,
         upload_ids: Vec<String>,
     },
+    SecretDrop {
+        upload_id: String,
+        file_size: u64,
+    },
     /// The upload-commit wait expired (old proxy or very slow link):
     /// dispatch the held prompt anyway — pre-transactional behavior.
     UploadCommitTimeout,
@@ -192,6 +196,12 @@ struct PendingUploadPrompt {
     _timeout: Timeout,
 }
 
+struct PendingSecretDrop {
+    upload_id: String,
+    file_size: u64,
+    _timeout: Timeout,
+}
+
 pub struct SessionView {
     messages: Vec<RenderedMessage>,
     ws_connected: bool,
@@ -201,10 +211,11 @@ pub struct SessionView {
     outbox: Outbox,
     /// See [`PendingUploadPrompt`].
     pending_upload_prompt: Option<PendingUploadPrompt>,
+    pending_secret_drop: Option<PendingSecretDrop>,
     /// Upload outcomes that arrived before the prompt handoff (a small
     /// file can commit while later files are still streaming). Bounded;
     /// consumed by `handle_upload_prompt`.
-    early_upload_results: std::collections::HashMap<String, Result<(), String>>,
+    early_upload_results: std::collections::HashMap<String, shared::FileUploadResultFields>,
     messages_ref: NodeRef,
     should_autoscroll: bool,
     #[allow(dead_code)]
@@ -328,6 +339,7 @@ impl Component for SessionView {
             ws_sender: None,
             outbox: Outbox::default(),
             pending_upload_prompt: None,
+            pending_secret_drop: None,
             early_upload_results: HashMap::new(),
             messages_ref: NodeRef::default(),
             should_autoscroll: true,
@@ -515,7 +527,15 @@ impl Component for SessionView {
                 content,
                 upload_ids,
             } => self.handle_upload_prompt(ctx, content, upload_ids),
+            SessionViewMsg::SecretDrop {
+                upload_id,
+                file_size,
+            } => self.handle_secret_drop(ctx, upload_id, file_size),
             SessionViewMsg::UploadCommitTimeout => {
+                if self.pending_secret_drop.take().is_some() {
+                    self.push_upload_error("secret upload commit timed out");
+                    return true;
+                }
                 if let Some(pending) = self.pending_upload_prompt.take() {
                     // Old proxy (no upload acks) or a very slow link: fall
                     // back to pre-transactional behavior instead of eating
@@ -927,9 +947,9 @@ impl SessionView {
         let mut remaining: std::collections::HashSet<String> = upload_ids.into_iter().collect();
         let mut early_failure: Option<String> = None;
         remaining.retain(|id| match self.early_upload_results.remove(id) {
-            Some(Ok(())) => false,
-            Some(Err(e)) => {
-                early_failure = Some(e);
+            Some(fields) if fields.success => false,
+            Some(fields) => {
+                early_failure = Some(fields.error.unwrap_or_else(|| "upload failed".to_string()));
                 true
             }
             None => true,
@@ -961,6 +981,35 @@ impl SessionView {
     /// the backend). Resolve the held prompt, or stash the result if the
     /// prompt handoff hasn't happened yet.
     fn handle_upload_result(&mut self, fields: shared::FileUploadResultFields) -> bool {
+        if self
+            .pending_secret_drop
+            .as_ref()
+            .is_some_and(|pending| pending.upload_id == fields.upload_id)
+        {
+            let Some(pending) = self.pending_secret_drop.take() else {
+                return false;
+            };
+            if fields.success {
+                if let Some(path) = fields.path {
+                    let message = shared::PortalMessage::with_content(vec![
+                        shared::PortalContent::SecretDrop {
+                            path,
+                            file_size: pending.file_size,
+                        },
+                    ]);
+                    self.dispatch_agent_input(message.to_json(), None);
+                } else {
+                    self.push_upload_error("secret-drop result did not include a path");
+                }
+            } else {
+                self.push_upload_error(
+                    &fields
+                        .error
+                        .unwrap_or_else(|| "secret upload failed".to_string()),
+                );
+            }
+            return true;
+        }
         if let Some(ref mut pending) = self.pending_upload_prompt {
             if pending.remaining.contains(&fields.upload_id) {
                 if fields.success {
@@ -983,12 +1032,29 @@ impl SessionView {
         }
         // Pre-handoff (or unrelated) result: stash for handle_upload_prompt.
         if self.early_upload_results.len() < 64 {
-            let outcome = if fields.success {
-                Ok(())
-            } else {
-                Err(fields.error.unwrap_or_else(|| "upload failed".to_string()))
-            };
-            self.early_upload_results.insert(fields.upload_id, outcome);
+            self.early_upload_results
+                .insert(fields.upload_id.clone(), fields);
+        }
+        false
+    }
+
+    fn handle_secret_drop(
+        &mut self,
+        ctx: &Context<Self>,
+        upload_id: String,
+        file_size: u64,
+    ) -> bool {
+        let link = ctx.link().clone();
+        let timeout = Timeout::new(45_000, move || {
+            link.send_message(SessionViewMsg::UploadCommitTimeout);
+        });
+        self.pending_secret_drop = Some(PendingSecretDrop {
+            upload_id: upload_id.clone(),
+            file_size,
+            _timeout: timeout,
+        });
+        if let Some(fields) = self.early_upload_results.remove(&upload_id) {
+            return self.handle_upload_result(fields);
         }
         false
     }
@@ -1291,6 +1357,13 @@ impl SessionView {
                 upload_ids,
             }
         });
+        let on_secret_drop =
+            link.callback(
+                |(upload_id, file_size): (String, u64)| SessionViewMsg::SecretDrop {
+                    upload_id,
+                    file_size,
+                },
+            );
         let on_message_sent = link.callback(|_| SessionViewMsg::MessageSent);
         html! {
             <InputBar
@@ -1302,6 +1375,7 @@ impl SessionView {
                 {on_send_text}
                 {on_send_frame}
                 {on_upload_prompt}
+                {on_secret_drop}
                 {on_message_sent}
             />
         }

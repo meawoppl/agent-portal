@@ -199,6 +199,7 @@ fn handle_web_client_message(
             content_type,
             total_chunks,
             total_size,
+            disposition,
         }) => {
             // File uploads end up as `ClaudeInput` on the proxy side — they're
             // mutations too, gate them on editor/owner role.
@@ -222,6 +223,7 @@ fn handle_web_client_message(
                 total_chunks,
                 total_size,
                 app_state.max_image_mb,
+                disposition,
             );
             false
         }

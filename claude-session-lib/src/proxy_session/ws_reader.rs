@@ -14,6 +14,7 @@ pub enum FileUploadEvent {
         filename: String,
         total_chunks: u32,
         total_size: u64,
+        disposition: shared::FileUploadDisposition,
     },
     /// A chunk of file data (base64-encoded)
     Chunk { upload_id: String, data: String },
@@ -36,6 +37,8 @@ pub(crate) struct FileReceiveState {
     /// Bytes are written here and renamed to `filename` only on completion,
     /// so a consumer (the agent) can never read a truncated file (#939).
     pub(crate) temp_path: std::path::PathBuf,
+    pub(crate) final_path: std::path::PathBuf,
+    pub(crate) disposition: shared::FileUploadDisposition,
 }
 
 /// A portal input classified by send mode: a plain user input or a
@@ -313,6 +316,7 @@ async fn handle_ws_message(
             content_type: _,
             total_chunks,
             total_size,
+            disposition,
         }) => {
             info!(
                 "[upload {}] Starting: {} ({} bytes, {} chunks)",
@@ -327,10 +331,39 @@ async fn handle_ws_message(
                     filename,
                     total_chunks,
                     total_size,
+                    disposition,
                 })
                 .is_err()
             {
                 error!("Failed to send file upload start to main loop");
+                return WsMessageResult::Disconnect;
+            }
+        }
+        ServerToProxy::SecretDropStart(shared::FileUploadStartFields {
+            upload_id,
+            filename,
+            content_type: _,
+            total_chunks,
+            total_size,
+            disposition: _,
+        }) => {
+            info!(
+                "[upload {}] Starting private drop ({} bytes, {} chunks)",
+                &upload_id[..8.min(upload_id.len())],
+                total_size,
+                total_chunks
+            );
+            if file_upload_tx
+                .send(FileUploadEvent::Start {
+                    upload_id,
+                    filename,
+                    total_chunks,
+                    total_size,
+                    disposition: shared::FileUploadDisposition::SecretDrop,
+                })
+                .is_err()
+            {
+                error!("Failed to send secret drop start to main loop");
                 return WsMessageResult::Disconnect;
             }
         }

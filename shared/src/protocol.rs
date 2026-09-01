@@ -45,6 +45,10 @@ pub const MAX_UPLOAD_CHUNK_BYTES: usize = 64 * 1024; // 64 KiB
 /// stops obviously-pathological `total_chunks` values from being accepted.
 pub const MAX_UPLOAD_TOTAL_CHUNKS: u32 = 65_536;
 
+/// Secret composer drops are intentionally small: they are for credentials
+/// and environment snippets, not general file transfer.
+pub const MAX_SECRET_DROP_BYTES: u64 = 64 * 1024;
+
 /// Interval (in seconds) between launcher heartbeats on the launcher
 /// WebSocket. The backend has no explicit heartbeat timeout — launcher
 /// liveness is the WebSocket connection itself — but it treats each

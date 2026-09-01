@@ -1169,6 +1169,7 @@ async fn send_upload_result(
     upload_id: String,
     success: bool,
     error: Option<String>,
+    path: Option<String>,
 ) {
     let mut ws = state.ws_write.lock().await;
     if let Err(e) = ws
@@ -1177,6 +1178,7 @@ async fn send_upload_result(
                 upload_id,
                 success,
                 error,
+                path,
             },
         ))
         .await
@@ -1197,7 +1199,7 @@ async fn fail_upload(state: &mut ConnectionState, upload_id: String, reason: Str
         &upload_id[..8.min(upload_id.len())],
         reason
     );
-    send_upload_result(state, upload_id, false, Some(reason)).await;
+    send_upload_result(state, upload_id, false, Some(reason), None).await;
 }
 
 async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut ConnectionState) {
@@ -1207,6 +1209,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             filename,
             total_chunks,
             total_size,
+            disposition,
         } => {
             // Sanitize filename
             let safe_name: String = filename
@@ -1237,13 +1240,34 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
 
             // Write to a hidden temp path; renamed to the real name only on
             // completion so the agent can never read a truncated file.
-            let temp_name = format!(
-                ".{}.{}.upload",
-                safe_name,
-                &upload_id[..8.min(upload_id.len())]
-            );
-            let temp_path = std::path::Path::new(&state.working_directory).join(&temp_name);
-            match tokio::fs::File::create(&temp_path).await {
+            let id = uuid::Uuid::new_v4();
+            let (temp_path, final_path) = match disposition {
+                shared::FileUploadDisposition::Workspace => {
+                    let final_path =
+                        std::path::Path::new(&state.working_directory).join(&safe_name);
+                    let temp_name = format!(".{safe_name}.{id}.upload");
+                    (
+                        std::path::Path::new(&state.working_directory).join(temp_name),
+                        final_path,
+                    )
+                }
+                shared::FileUploadDisposition::SecretDrop => {
+                    let root = std::env::var_os("XDG_RUNTIME_DIR")
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(std::env::temp_dir);
+                    (
+                        root.join(format!(".portal-drop-{id}.upload")),
+                        root.join(format!("portal-drop-{id}")),
+                    )
+                }
+            };
+            let mut options = tokio::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                options.mode(0o600);
+            }
+            match options.open(&temp_path).await {
                 Ok(fh) => {
                     state.active_uploads.insert(
                         upload_id,
@@ -1257,6 +1281,8 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                             start_time: Instant::now(),
                             last_log_percent: 0,
                             temp_path,
+                            final_path,
+                            disposition,
                         },
                     );
                 }
@@ -1347,7 +1373,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
 
                 let filename = recv_state.filename.clone();
                 let received_bytes = recv_state.received_bytes;
-                let final_path = std::path::Path::new(&state.working_directory).join(&filename);
+                let final_path = recv_state.final_path.clone();
                 let temp_path = recv_state.temp_path.clone();
                 if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
                     let reason = format!("rename to {} failed: {e}", final_path.display());
@@ -1359,8 +1385,17 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                     "[upload {}] Complete: {} ({} bytes in {:.1}s, avg {:.1} KB/s)",
                     upload_id_short, filename, received_bytes, elapsed, rate_kb
                 );
+                let is_secret_drop =
+                    recv_state.disposition == shared::FileUploadDisposition::SecretDrop;
+                let secret_path = is_secret_drop.then(|| final_path.display().to_string());
                 state.active_uploads.remove(&upload_id);
-                send_upload_result(state, upload_id, true, None).await;
+                send_upload_result(state, upload_id, true, None, secret_path).await;
+                if is_secret_drop {
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(15 * 60)).await;
+                        let _ = tokio::fs::remove_file(final_path).await;
+                    });
+                }
             }
         }
     }

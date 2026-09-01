@@ -289,6 +289,11 @@ pub enum ServerToProxy {
     /// Start a chunked file upload to the proxy's working directory
     FileUploadStart(FileUploadStartFields),
 
+    /// Start a credential-sized upload into a private runtime temp file. A
+    /// distinct wire variant makes pre-feature proxies fail closed instead of
+    /// ignoring a disposition field and writing the secret into the workspace.
+    SecretDropStart(FileUploadStartFields),
+
     /// A single chunk of a file upload (base64-encoded, ~1KB decoded)
     FileUploadChunk(FileUploadChunkFields),
 

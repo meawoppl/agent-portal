@@ -821,21 +821,26 @@ impl PortalMessage {
     /// Text form to send to the agent for portal event envelopes that have an
     /// agent-facing representation.
     pub fn agent_facing_text(&self) -> Option<String> {
-        let [PortalContent::AgentMessage {
-            from_agent_type,
-            from_session_id,
-            text,
-        }] = self.content.as_slice()
-        else {
-            return None;
-        };
-        let reminder = agent_message_reply_reminder(from_session_id);
-        Some(format!(
-            "[message from {from_agent_type} {from_session_id}]\n{text}\n\n\
+        match self.content.as_slice() {
+            [PortalContent::AgentMessage {
+                from_agent_type,
+                from_session_id,
+                text,
+            }] => {
+                let reminder = agent_message_reply_reminder(from_session_id);
+                Some(format!(
+                    "[message from {from_agent_type} {from_session_id}]\n{text}\n\n\
 <system-reminder>\n\
 {reminder}\n\
 </system-reminder>"
-        ))
+                ))
+            }
+            [PortalContent::SecretDrop { path, file_size }] => Some(format!(
+                "[secret file from user: {path}, {file_size} bytes]\n\
+The file contains sensitive material. Use it directly without printing, echoing, or quoting its contents."
+            )),
+            _ => None,
+        }
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -978,6 +983,14 @@ pub enum PortalContent {
         from_session_id: String,
         text: String,
     },
+    /// Content-free transcript record for a composer buffer delivered through
+    /// the secret-drop upload path. Only the committed path and byte count are
+    /// persisted; the file bytes never enter an AgentInput frame.
+    #[serde(rename = "secret_drop")]
+    SecretDrop {
+        path: String,
+        file_size: u64,
+    },
 }
 
 /// A bounded, declarative slider exposed by a portable figure. The host owns
@@ -1075,6 +1088,11 @@ impl std::fmt::Debug for PortalContent {
                 .field("from_agent_type", from_agent_type)
                 .field("from_session_id", from_session_id)
                 .field("text", text)
+                .finish(),
+            Self::SecretDrop { path, file_size } => f
+                .debug_struct("SecretDrop")
+                .field("path", path)
+                .field("file_size", file_size)
                 .finish(),
         }
     }
@@ -1500,6 +1518,21 @@ mod tests {
             "[message from codex 12345678-0000-0000-0000-000000000000]\nhello from another agent"
         ));
         assert!(text.contains("agent-portal message send 12345678 \"your reply\""));
+    }
+
+    #[test]
+    fn secret_drop_agent_text_contains_only_metadata() {
+        let secret = "super-secret-token";
+        let msg = PortalMessage::with_content(vec![PortalContent::SecretDrop {
+            path: "/tmp/portal-drop-123".to_string(),
+            file_size: secret.len() as u64,
+        }]);
+        let serialized = serde_json::to_string(&msg).unwrap();
+        let agent_text = msg.agent_facing_text().unwrap();
+        assert!(!serialized.contains(secret));
+        assert!(!agent_text.contains(secret));
+        assert!(agent_text.contains("/tmp/portal-drop-123"));
+        assert!(agent_text.contains("without printing"));
     }
 
     #[test]

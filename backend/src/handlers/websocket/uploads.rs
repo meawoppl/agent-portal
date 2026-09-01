@@ -39,6 +39,7 @@ fn send_upload_failure(tx: &super::WebClientSender, upload_id: String, error: &s
             upload_id,
             success: false,
             error: Some(error.to_string()),
+            path: None,
         },
     ));
 }
@@ -55,10 +56,16 @@ pub(super) fn handle_file_upload_start(
     total_chunks: u32,
     total_size: u64,
     max_image_mb: u32,
+    disposition: shared::FileUploadDisposition,
 ) {
     // Server-side hard cap on total decoded bytes, derived from
     // `PORTAL_MAX_IMAGE_MB`. Saturating to avoid overflow on absurd configs.
-    let effective_max_total_bytes = (max_image_mb as u64).saturating_mul(1024 * 1024);
+    let effective_max_total_bytes = match disposition {
+        shared::FileUploadDisposition::Workspace => {
+            (max_image_mb as u64).saturating_mul(1024 * 1024)
+        }
+        shared::FileUploadDisposition::SecretDrop => shared::protocol::MAX_SECRET_DROP_BYTES,
+    };
 
     // Size is checked BEFORE the chunk-count sanity guard, and the order is the
     // whole point. `total_chunks` is derived from the file size by the sender
@@ -76,7 +83,7 @@ pub(super) fn handle_file_upload_start(
         send_upload_failure(
             tx,
             upload_id,
-            &format!("file is too large (limit {max_image_mb} MB)"),
+            &format!("file is too large (limit {effective_max_total_bytes} bytes)"),
         );
         return;
     }
@@ -103,13 +110,18 @@ pub(super) fn handle_file_upload_start(
         send_upload_failure(tx, upload_id, "session not registered");
         return;
     };
-    let msg = ServerToProxy::FileUploadStart(shared::FileUploadStartFields {
+    let fields = shared::FileUploadStartFields {
         upload_id: upload_id.clone(),
         filename: safe_filename,
         content_type,
         total_chunks,
         total_size,
-    });
+        disposition,
+    };
+    let msg = match disposition {
+        shared::FileUploadDisposition::Workspace => ServerToProxy::FileUploadStart(fields),
+        shared::FileUploadDisposition::SecretDrop => ServerToProxy::SecretDropStart(fields),
+    };
     if !session_manager.send_to_connected_session(key, msg) {
         warn!("Session not connected for file upload start");
         send_upload_failure(tx, upload_id, "agent is offline");
