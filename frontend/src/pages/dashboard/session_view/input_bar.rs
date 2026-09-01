@@ -62,6 +62,9 @@ pub struct InputBarProps {
     /// phase 4) — the agent must never be told about a file that isn't
     /// fully on disk.
     pub on_upload_prompt: Callback<(String, Vec<String>)>,
+    /// Composer contents streamed as an opaque secret drop. The callback only
+    /// carries the upload id and byte count; secret bytes stay on upload frames.
+    pub on_secret_drop: Callback<(String, u64)>,
     /// Fires once per submit (text or upload) so the parent can bump its
     /// per-session "I sent something" bookkeeping.
     pub on_message_sent: Callback<()>,
@@ -115,6 +118,7 @@ pub enum InputBarMsg {
     SendInput,
     /// User picked "Wiggum" from the send-mode dropdown.
     SendWiggum,
+    SendSecretDrop,
     HistoryUp,
     HistoryDown,
     ToggleSendModeDropdown,
@@ -337,6 +341,10 @@ impl Component for InputBar {
                 self.send_mode_dropdown_open = false;
                 self.dispatch_text_send(ctx, SendMode::Wiggum)
             }
+            InputBarMsg::SendSecretDrop => {
+                self.start_secret_drop(ctx);
+                true
+            }
             InputBarMsg::HistoryUp => {
                 let current = self.get_input_text();
                 if let Some(cmd) = self.command_history.navigate_up(&current) {
@@ -502,6 +510,11 @@ impl Component for InputBar {
             if e.ctrl_key() && e.key().to_lowercase() == "m" {
                 e.prevent_default();
                 return InputBarMsg::ToggleVoice;
+            }
+
+            if (e.ctrl_key() || e.meta_key()) && e.shift_key() && e.key() == "Enter" {
+                e.prevent_default();
+                return InputBarMsg::SendSecretDrop;
             }
 
             // Modal editing (opt-in). When vim consumes the key we're done;
@@ -742,6 +755,66 @@ impl InputBar {
     /// that emits `FileUploadStart` / `FileUploadChunk` frames per file
     /// via `on_send_frame` and a final `ClaudeInput` carrying the combined
     /// message text.
+    fn start_secret_drop(&mut self, ctx: &Context<Self>) {
+        self.send_mode_dropdown_open = false;
+        let content = self.get_input_text();
+        if content.is_empty() {
+            return;
+        }
+        let bytes = content.into_bytes();
+        if bytes.len() as u64 > shared::protocol::MAX_SECRET_DROP_BYTES {
+            ctx.link()
+                .send_message(InputBarMsg::FileUploadError(format!(
+                    "Secret file is too large (limit {} KiB)",
+                    shared::protocol::MAX_SECRET_DROP_BYTES / 1024
+                )));
+            return;
+        }
+
+        self.set_input_text("");
+        self.input_text.clear();
+        self.pending_suggestion = None;
+        self.upload_progress = Some(0.0);
+        self.upload_files = vec![("secret file".to_string(), bytes.len() as u64)];
+        ctx.props().on_message_sent.emit(());
+
+        let upload_id = Uuid::new_v4().to_string();
+        let total_size = bytes.len() as u64;
+        let total_chunks = bytes.len().div_ceil(UPLOAD_CHUNK_SIZE).max(1) as u32;
+        ctx.props()
+            .on_send_frame
+            .emit(ClientToServer::FileUploadStart(
+                shared::FileUploadStartFields {
+                    upload_id: upload_id.clone(),
+                    filename: "portal-secret".to_string(),
+                    content_type: "application/octet-stream".to_string(),
+                    total_chunks,
+                    total_size,
+                    disposition: shared::FileUploadDisposition::SecretDrop,
+                },
+            ));
+        for i in 0..total_chunks {
+            let start = i as usize * UPLOAD_CHUNK_SIZE;
+            let end = ((i as usize + 1) * UPLOAD_CHUNK_SIZE).min(bytes.len());
+            let encoded = base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &bytes[start..end],
+            );
+            ctx.props()
+                .on_send_frame
+                .emit(ClientToServer::FileUploadChunk(
+                    shared::FileUploadChunkFields {
+                        upload_id: upload_id.clone(),
+                        chunk_index: i,
+                        data: encoded,
+                    },
+                ));
+        }
+        ctx.props().on_secret_drop.emit((upload_id, total_size));
+        ctx.link()
+            .send_message(InputBarMsg::FileUploaded("secret file".to_string()));
+    }
+
     fn start_upload(&mut self, ctx: &Context<Self>, files: Vec<web_sys::File>) {
         self.send_mode_dropdown_open = false;
         self.drag_hover = false;
@@ -801,6 +874,7 @@ impl InputBar {
                         content_type: ct,
                         total_chunks,
                         total_size: file_size,
+                        disposition: shared::FileUploadDisposition::Workspace,
                     },
                 ));
 
@@ -945,6 +1019,7 @@ impl InputBar {
             InputBarMsg::ToggleSendModeDropdown
         });
         let on_wiggum = link.callback(|_| InputBarMsg::SendWiggum);
+        let on_secret_drop = link.callback(|_| InputBarMsg::SendSecretDrop);
 
         let file_input_ref = self.file_input_ref.clone();
         let on_attach_dropdown = Callback::from(move |_: MouseEvent| {
@@ -1032,6 +1107,14 @@ impl InputBar {
                     >
                         { "Send with attachment(s)" }
                         <span class="option-hint">{ "Upload files + message" }</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="dropdown-option secret-drop"
+                        onclick={on_secret_drop}
+                    >
+                        { "Send as secret file" }
+                        <span class="option-hint">{ "Ctrl+Shift+Enter · not stored in chat" }</span>
                     </button>
                 </div>
             </div>

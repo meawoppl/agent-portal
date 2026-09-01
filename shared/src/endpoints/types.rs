@@ -201,6 +201,16 @@ pub struct FileUploadStartFields {
     pub total_chunks: u32,
     #[serde(default)]
     pub total_size: u64,
+    #[serde(default)]
+    pub disposition: FileUploadDisposition,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileUploadDisposition {
+    #[default]
+    Workspace,
+    SecretDrop,
 }
 
 /// Fields for a single file upload chunk.
@@ -224,6 +234,10 @@ pub struct FileUploadResultFields {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Committed host path. Present only for secret drops; ordinary uploads
+    /// continue to construct their workspace-relative prompt client-side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 // ---- Port forwarding (docs/PORT_FORWARDING.md) ------------------------------
