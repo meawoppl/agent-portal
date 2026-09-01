@@ -4,9 +4,12 @@ use crate::pages::settings::agents_panel::{
     render_cell, InstallTarget, LoginTarget, ProbeState, AGENTS,
 };
 use crate::utils::{self, On401};
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use gloo_net::http::Request;
 use shared::{AppConfig, LauncherInfo};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -557,30 +560,61 @@ pub fn launchers_panel() -> Html {
         let launchers = launchers.clone();
         use_effect_with((*launchers).clone(), move |list| {
             let list = list.clone();
+            // Flipped by the cleanup below so a superseded run (launcher list
+            // changed mid-probe) stops writing stale results over fresh ones.
+            let cancelled = Rc::new(Cell::new(false));
+            let cancel_flag = cancelled.clone();
             spawn_local(async move {
-                let mut collected = std::collections::HashMap::new();
+                // Settle what we can synchronously: offline machines are
+                // Unreachable now, and machines that vanished are pruned.
+                // Connected machines keep their previous result while the
+                // fresh probe is in flight, so rows never flash back to the
+                // loading state on a refetch.
+                let listed: HashSet<Uuid> = list.iter().map(|l| l.launcher_id).collect();
+                let mut current = (*probes).clone();
+                current.retain(|id, _| listed.contains(id));
                 for l in &list {
                     if !l.connected {
-                        collected.insert(l.launcher_id, ProbeState::Unreachable);
-                        continue;
+                        current.insert(l.launcher_id, ProbeState::Unreachable);
                     }
-                    let path = format!("/api/launchers/{}/probe-agents", l.launcher_id);
-                    let state = match utils::fetch_json::<shared::api::ProbeAgentsResponse>(
-                        &path,
-                        On401::Ignore,
-                    )
-                    .await
-                    {
-                        Ok(resp) => ProbeState::Loaded(
-                            resp.agents.into_iter().map(|a| (a.agent_type, a)).collect(),
-                        ),
-                        Err(_) => ProbeState::Unreachable,
-                    };
-                    collected.insert(l.launcher_id, state);
                 }
-                probes.set(collected);
+                probes.set(current.clone());
+
+                // Probe every connected machine concurrently and fold each
+                // result in as it lands: fast hosts populate immediately
+                // instead of queueing behind a slow or dead one (each probe
+                // can take up to the server's 5s timeout).
+                let mut pending: FuturesUnordered<_> = list
+                    .iter()
+                    .filter(|l| l.connected)
+                    .map(|l| {
+                        let id = l.launcher_id;
+                        async move {
+                            let path = format!("/api/launchers/{id}/probe-agents");
+                            let state = match utils::fetch_json::<shared::api::ProbeAgentsResponse>(
+                                &path,
+                                On401::Ignore,
+                            )
+                            .await
+                            {
+                                Ok(resp) => ProbeState::Loaded(
+                                    resp.agents.into_iter().map(|a| (a.agent_type, a)).collect(),
+                                ),
+                                Err(_) => ProbeState::Unreachable,
+                            };
+                            (id, state)
+                        }
+                    })
+                    .collect();
+                while let Some((id, state)) = pending.next().await {
+                    if cancelled.get() {
+                        return;
+                    }
+                    current.insert(id, state);
+                    probes.set(current.clone());
+                }
             });
-            || ()
+            move || cancel_flag.set(true)
         });
     }
     let _ = &launchers;
