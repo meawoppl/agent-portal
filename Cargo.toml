@@ -80,7 +80,7 @@ claude-codes = { version = "2.1.234", default-features = false, features = ["typ
 
 # Muse CLI integration
 muse-codes = { version = "0.2.1", default-features = false }
-codex-codes = { version = "0.150.1", default-features = false, features = ["types"] }
+codex-codes = { version = "0.151.0", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
 # bundled HTTP clients (isahc/libcurl and hyper) — we build the message here and
