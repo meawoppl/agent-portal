@@ -1153,6 +1153,16 @@
     font-size: 0.8rem;
 }
 
+/* Reserve the height of the tallest loaded state (badge + login line +
+   sign-in button, plus cell padding under border-box sizing) in EVERY probe
+   state. Probe results percolate in per machine, and without this each
+   arriving result grew its row from a one-line "…" to a three-line stack,
+   reflowing the whole table. td height acts as a minimum, so unexpected
+   content can still grow a cell rather than clip. */
+.agents-cell {
+    height: 5.5rem;
+}
+
 /* Stack the badge/label/button without `display: flex` — flex on a <td>
    takes it out of table layout, so the per-agent cells stop forming columns
    and pile into the first one. */
@@ -1191,8 +1201,16 @@
     background: color-mix(in srgb, var(--error, #f7768e) 18%, transparent);
 }
 
+/* One line, ellipsized (full text in the title tooltip): a long login label
+   ("signed in — user@host (plan) [via]") must not wrap, both because wrapping
+   breaks the reserved-height row stability above and because it widens the
+   auto-layout column when the probe result lands. */
 .agents-login {
     font-size: 0.8rem;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .agents-login.unknown {

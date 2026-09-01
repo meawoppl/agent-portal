@@ -108,7 +108,11 @@ fn render_install_cell(
     html! {
         <td class="agents-cell installed">
             <span class="agents-badge installed">{ "installed" }</span>
-            <span class={classes!("agents-login", login_class)}>{ login_text }</span>
+            // The CSS ellipsizes long login labels; the tooltip carries the
+            // full text.
+            <span class={classes!("agents-login", login_class)} title={login_text.clone()}>
+                { login_text }
+            </span>
             { for sign_in_button(&install.login, agent, agent_name, launcher.launcher_id, on_sign_in) }
         </td>
     }
