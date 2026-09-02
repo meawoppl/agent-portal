@@ -216,23 +216,32 @@ impl AgentType {
 
     /// The command that installs this agent's CLI, as structured data so the
     /// launcher (which runs it) and the frontend (which displays it for the
-    /// user to confirm) agree on exactly one thing. Claude and Codex ship as
-    /// global npm packages, the most portable option that avoids piping a
-    /// remote script into a shell on the user's host.
+    /// user to confirm) agree on exactly one thing.
     ///
-    /// Muse is the exception: at 0.1.0 Meta ships **only** an installer
-    /// script (no npm/Homebrew package, and no self-update subcommand), so
-    /// its command is that pipeline wrapped in `bash -c`. The arguments are
-    /// static — there is no interpolation and so no injection surface — and
-    /// the confirmation modal renders the whole line via
-    /// [`AgentInstallCommand::display`], so the user sees they are piping a
-    /// remote script to a shell before they approve it. Switch this to a
-    /// package manager the moment Meta publishes one.
+    /// Claude uses Anthropic's **native installer** (a standalone binary
+    /// into `~/.local/bin`, which the launcher's service PATH already
+    /// includes — see `launcher::service::path_with_local_bin`). It replaced
+    /// `npm install -g @anthropic-ai/claude-code`, which failed on stock
+    /// hosts two independent ways: the CLI requires node >= 22 (EBADENGINE
+    /// on distro node), and the default global prefix `/usr/local/lib` is
+    /// root-owned (EACCES for the launcher's user). The native binary
+    /// bundles its runtime and installs per-user, so neither applies.
+    ///
+    /// Muse likewise ships only an installer script at 0.1.0 (no
+    /// npm/Homebrew package, no self-update subcommand). For both, the
+    /// pipeline is wrapped in `bash -c` with **static** arguments — no
+    /// interpolation, no injection surface — and the confirmation modal
+    /// renders the whole line via [`AgentInstallCommand::display`], so the
+    /// user sees they are piping a remote script to a shell before they
+    /// approve it.
+    ///
+    /// Codex stays on npm: OpenAI publishes no curl installer, and its npm
+    /// package bundles a native binary (no node-version cliff).
     pub fn install_command(self) -> AgentInstallCommand {
         match self {
             AgentType::Claude => AgentInstallCommand {
-                program: "npm",
-                args: vec!["install", "-g", "@anthropic-ai/claude-code"],
+                program: "bash",
+                args: vec!["-c", "curl -fsSL https://claude.ai/install.sh | bash"],
             },
             AgentType::Codex => AgentInstallCommand {
                 program: "npm",
@@ -1562,13 +1571,30 @@ mod tests {
 }
 
 #[cfg(test)]
-mod muse_install_command_tests {
+mod install_command_tests {
     use super::*;
 
+    /// Claude uses Anthropic's native installer — per-user, bundles its own
+    /// runtime — because `npm install -g` fails on stock hosts (node < 22
+    /// and a root-owned global prefix). The args are static (no
+    /// interpolation, no injection surface) and the whole line is rendered
+    /// for the user to confirm before it runs.
+    #[test]
+    fn claude_install_is_the_native_installer_and_displays_verbatim() {
+        let cmd = AgentType::Claude.install_command();
+        assert_eq!(cmd.program, "bash");
+        assert_eq!(
+            cmd.display(),
+            "bash -c curl -fsSL https://claude.ai/install.sh | bash"
+        );
+        assert!(
+            cmd.display().contains("claude.ai/install.sh"),
+            "the confirm modal must show the remote script being piped"
+        );
+    }
+
     /// Muse ships only an installer script at 0.1.0 — no npm/Homebrew
-    /// package — so its install command is a `bash -c` pipeline. The args
-    /// are static (no interpolation, no injection surface) and the whole
-    /// line is rendered for the user to confirm before it runs.
+    /// package — so its install command is the same `bash -c` pattern.
     #[test]
     fn muse_install_is_the_vendor_script_and_displays_verbatim() {
         let cmd = AgentType::Muse.install_command();
@@ -1583,13 +1609,10 @@ mod muse_install_command_tests {
         );
     }
 
-    /// The npm agents are untouched by muse's exception.
+    /// Codex stays on npm: no vendor curl installer exists, and its npm
+    /// package bundles a native binary (no node-version cliff).
     #[test]
-    fn npm_agents_unchanged() {
-        assert_eq!(
-            AgentType::Claude.install_command().display(),
-            "npm install -g @anthropic-ai/claude-code"
-        );
+    fn codex_stays_on_npm() {
         assert_eq!(
             AgentType::Codex.install_command().display(),
             "npm install -g @openai/codex"
