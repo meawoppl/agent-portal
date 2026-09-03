@@ -56,10 +56,8 @@ pub struct MuseClassifier {
     /// actual reply lands separately on `run.terminal.*` (rendered as the
     /// answer). Measured at 0/10 tasks carrying any output across every
     /// capture, so screen them as [`AgentOutput::Noop`]. Kept as a distinct set
-    /// from `reminder_tasks` because the escape hatch differs: a reminder's
-    /// `side_effect_intent` is a notable policy decision worth surfacing, but a
-    /// meta-response's is the very `not_applicable` line we're removing — so
-    /// only genuine streamed `output` breaks a meta-response task out.
+    /// from `reminder_tasks` because they describe different internal work;
+    /// only genuine streamed `output` breaks either kind of task out.
     meta_response_tasks: HashSet<String>,
     /// `task.stream.linked` records awaiting their task's `proposed`
     /// (insertion order; nearly always a single entry).
@@ -131,11 +129,10 @@ impl MuseClassifier {
             .is_some_and(|id| self.reminder_tasks.contains(id))
         {
             // Escape hatch: no capture shows a reminder carrying content,
-            // but if muse ever puts output or a side-effect decision on
-            // one, it must surface rather than vanish with the
-            // bookkeeping. (The frontend keeps its own content-guard for
-            // the same reason.)
-            if matches!(event_kind, Some("output" | "side_effect_intent")) {
+            // but if Muse ever puts genuine output on one, it must surface.
+            // Policy decisions remain internal bookkeeping; rendering them
+            // produces repeated `reminder.child_run — policy: ...` noise.
+            if event_kind == Some("output") {
                 return vec![classify_record(&record)];
             }
             return vec![AgentOutput::Noop];
@@ -557,6 +554,29 @@ mod reminder_screen {
         assert!(
             matches!(out[..], [AgentOutput::Visible(_)]),
             "reminder content must surface, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn reminder_child_run_policy_is_screened() {
+        let mut c = MuseClassifier::default();
+        c.classify(linked("r1"));
+        c.classify(lifecycle(
+            "proposed",
+            "r1",
+            json!({"task_kind": "reminder.child_run"}),
+        ));
+        let policy = lifecycle(
+            "side_effect_intent",
+            "r1",
+            json!({
+                "operation": "reminder.child_run",
+                "policy_decision": "reminder_child:read_only:subagent_tool_auto_approval"
+            }),
+        );
+        assert!(
+            matches!(c.classify(policy)[..], [AgentOutput::Noop]),
+            "reminder auto-approval policy is internal bookkeeping"
         );
     }
 
