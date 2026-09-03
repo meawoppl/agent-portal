@@ -1255,6 +1255,7 @@
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: 8px;
+
     /* --bg-secondary does not exist in this design system (base.css defines
        --bg-dark/--bg-darker); an undefined var() left the modal transparent. */
     background: var(--bg-dark);

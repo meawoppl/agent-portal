@@ -9,6 +9,7 @@
 
 use claude_codes::ClaudeModel;
 use codex_codes::CodexModel;
+use muse_codes::MuseModel;
 use shared::AgentType;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
@@ -23,8 +24,6 @@ pub fn model_cli_args(agent_type: AgentType, model_value: &str) -> Vec<String> {
     match agent_type {
         AgentType::Claude => vec!["--model".to_string(), model_value.to_string()],
         AgentType::Codex => vec!["-c".to_string(), format!("model={model_value}")],
-        // `muse exec --model <id>`; the catalog is empty until sessions land
-        // (see model_catalog), so this only fires for hand-typed values.
         AgentType::Muse => vec!["--model".to_string(), model_value.to_string()],
     }
 }
@@ -38,10 +37,10 @@ fn model_catalog(agent_type: AgentType) -> Vec<(&'static str, &'static str, bool
             .iter()
             .map(|m| (m.cli_arg(), m.display_name(), m.is_alias()))
             .collect(),
-        // Muse has no published model catalog yet (0.1.0 resolves the model
-        // server-side and reports it in-band via run.model.configured), so
-        // the picker offers nothing and users pass --model by hand.
-        AgentType::Muse => Vec::new(),
+        AgentType::Muse => MuseModel::known()
+            .iter()
+            .map(|m| (m.cli_arg(), m.display_name(), false))
+            .collect(),
         AgentType::Codex => CodexModel::known()
             .iter()
             .filter(|m| !matches!(m, CodexModel::CodexAutoReview))
@@ -64,7 +63,8 @@ pub fn is_known_model(agent_type: AgentType, value: &str) -> bool {
 /// Recognizes only the forms the picker emits, and only when the value is a
 /// model the picker offers:
 ///   * Claude: `--model <value>`
-///   * Codex:  `-c model=<value>`
+///   * Codex: `-c model=<value>`
+///   * Muse: `--model <value>`
 ///
 /// A malformed form (`--model` with no following value), an unknown model value
 /// (`--model some-future-model`), or the absence of any model argument all yield
@@ -74,7 +74,7 @@ pub fn extract_model_arg(args: &[String], agent_type: AgentType) -> (Option<Stri
     let mut i = 0;
     while i < args.len() {
         let matched: Option<String> = match agent_type {
-            AgentType::Claude => {
+            AgentType::Claude | AgentType::Muse => {
                 if args[i] == "--model"
                     && i + 1 < args.len()
                     && is_known_model(agent_type, &args[i + 1])
@@ -94,10 +94,6 @@ pub fn extract_model_arg(args: &[String], agent_type: AgentType) -> (Option<Stri
                     None
                 }
             }
-            // No catalog to validate against yet, so a hand-typed
-            // `--model` stays in the raw args rather than being lifted
-            // into the (empty) picker.
-            AgentType::Muse => None,
         };
 
         if let Some(value) = matched {
@@ -150,9 +146,6 @@ pub fn model_select(props: &ModelSelectProps) -> Html {
 
     let catalog = model_catalog(props.agent_type);
     let options: Html = match props.agent_type {
-        // Empty catalog: the picker renders no options and users pass
-        // `--model` in the raw-args field.
-        AgentType::Muse => html! {},
         AgentType::Claude => html! {
             <>
                 <optgroup label="Aliases — track the newest model">
@@ -165,7 +158,7 @@ pub fn model_select(props: &ModelSelectProps) -> Html {
                 </optgroup>
             </>
         },
-        AgentType::Codex => html! {
+        AgentType::Codex | AgentType::Muse => html! {
             { for catalog.iter().map(|(cli, label, _)| option(cli, label)) }
         },
     };
@@ -202,6 +195,10 @@ mod tests {
             .to_string()
     }
 
+    fn a_known_muse_model() -> String {
+        MuseModel::known()[0].cli_arg().to_string()
+    }
+
     #[test]
     fn extract_claude_model_and_strips_it() {
         let model = a_known_claude_model();
@@ -220,6 +217,15 @@ mod tests {
         );
         assert_eq!(found.as_deref(), Some(model.as_str()));
         assert_eq!(rest, args(&["-c", "foo=bar"]));
+    }
+
+    #[test]
+    fn extract_muse_model_and_strips_it() {
+        let model = a_known_muse_model();
+        let (found, rest) =
+            extract_model_arg(&args(&["--model", &model, "--verbose"]), AgentType::Muse);
+        assert_eq!(found.as_deref(), Some(model.as_str()));
+        assert_eq!(rest, args(&["--verbose"]));
     }
 
     #[test]
@@ -249,6 +255,14 @@ mod tests {
     }
 
     #[test]
+    fn extract_unrecognized_muse_value_is_left_in_args() {
+        let input = args(&["--model", "some-future-model"]);
+        let (found, rest) = extract_model_arg(&input, AgentType::Muse);
+        assert_eq!(found, None);
+        assert_eq!(rest, input);
+    }
+
+    #[test]
     fn extract_dangling_model_flag_is_left_in_args() {
         // `--model` in trailing position with no value (unrecognized position).
         let input = args(&["--verbose", "--model"]);
@@ -267,6 +281,12 @@ mod tests {
         assert_eq!(found.as_deref(), Some(claude.as_str()));
         assert!(rest.is_empty());
 
+        let muse = a_known_muse_model();
+        let (found, rest) =
+            extract_model_arg(&model_cli_args(AgentType::Muse, &muse), AgentType::Muse);
+        assert_eq!(found.as_deref(), Some(muse.as_str()));
+        assert!(rest.is_empty());
+
         let codex = a_known_codex_model();
         let (found, rest) =
             extract_model_arg(&model_cli_args(AgentType::Codex, &codex), AgentType::Codex);
@@ -278,5 +298,6 @@ mod tests {
     fn model_cli_args_empty_is_agent_default() {
         assert!(model_cli_args(AgentType::Claude, "").is_empty());
         assert!(model_cli_args(AgentType::Codex, "").is_empty());
+        assert!(model_cli_args(AgentType::Muse, "").is_empty());
     }
 }
