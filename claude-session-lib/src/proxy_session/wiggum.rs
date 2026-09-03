@@ -544,6 +544,8 @@ mod tests {
             // 2.1.163/2.1.164 additions — also absent here.
             request_sent_wall_ms: None,
             user_message_uuid: None,
+            user_message_uuids: Vec::new(),
+            queued_turn_count: None,
             fast_mode_disabled_reason: None,
         }
     }
