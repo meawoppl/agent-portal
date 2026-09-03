@@ -23,7 +23,7 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             continue;
         }
         if in_code_fence {
-            let Some(c) = text[i..].chars().next() else {
+            let Some(c) = text.get(i..).and_then(|tail| tail.chars().next()) else {
                 break;
             };
             output.push(c);
@@ -38,7 +38,7 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             continue;
         }
         if in_inline_code {
-            let Some(c) = text[i..].chars().next() else {
+            let Some(c) = text.get(i..).and_then(|tail| tail.chars().next()) else {
                 break;
             };
             output.push(c);
@@ -114,7 +114,7 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             }
         }
 
-        let Some(c) = text[i..].chars().next() else {
+        let Some(c) = text.get(i..).and_then(|tail| tail.chars().next()) else {
             break;
         };
         output.push(c);
