@@ -22,7 +22,7 @@ use muse_codes::{ExecRun, MuseExecBuilder, MusePayload, MuseRecord, Provider};
 use session_lib::adapter::AgentOutputClassifier;
 use session_lib::io::{IoCommand, IoEvent};
 use session_lib::snapshot::SessionConfig;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::classifier::MuseClassifier;
 
@@ -44,7 +44,12 @@ pub async fn muse_io_task(
             IoCommand::UserInput {
                 text, delivered, ..
             } => {
-                let outcome = run_turn(&config, &text, &mut classifier, &event_tx).await;
+                let mut delivered = delivered;
+                let outcome =
+                    run_turn(&config, &text, &mut classifier, &event_tx, &mut delivered).await;
+                // Compatibility fallback for a Muse version that completes a
+                // run without emitting the typed acceptance record. Current
+                // Muse releases resolve this earlier at `turn.input.user`.
                 if let Some(tx) = delivered {
                     let _ = tx.send(outcome.map_err(|e| e.to_string()));
                 }
@@ -79,6 +84,7 @@ async fn run_turn(
     text: &str,
     classifier: &mut MuseClassifier,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
+    delivered: &mut Option<oneshot::Sender<Result<(), String>>>,
 ) -> Result<(), muse_codes::Error> {
     let builder = build_exec_builder(config, text);
 
@@ -87,12 +93,30 @@ async fn run_turn(
 
     while let Some(record) = run.next_record().await? {
         let terminal = matches!(record.typed_payload(), Ok(MusePayload::RunTerminal(_)));
+        acknowledge_delivery_if_accepted(&record, delivered);
         emit(classifier, &record, event_tx);
         if terminal {
             break;
         }
     }
     Ok(())
+}
+
+/// Resolve Portal's delivery signal when Muse journals the user's input into
+/// the run. Process spawn and command acceptance happen earlier, but
+/// `turn.input.user` is the first record proving the prompt is in the agent's
+/// stream — the same boundary represented by `AgentAccepted` for other agents.
+fn acknowledge_delivery_if_accepted(
+    record: &MuseRecord,
+    delivered: &mut Option<oneshot::Sender<Result<(), String>>>,
+) -> bool {
+    if !matches!(record.typed_payload(), Ok(MusePayload::TurnInputUser(_))) {
+        return false;
+    }
+    if let Some(tx) = delivered.take() {
+        let _ = tx.send(Ok(()));
+    }
+    true
 }
 
 /// Build the `muse exec` invocation for one turn. Extracted from [`run_turn`] so
@@ -137,6 +161,36 @@ fn emit(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    fn corpus_record(payload_type: &str) -> MuseRecord {
+        include_str!("../tests/corpus_echo_turn.jsonl")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<MuseRecord>(line).ok())
+            .find(|record| record.payload_type == payload_type)
+            .unwrap_or_else(|| panic!("missing {payload_type} in Muse corpus"))
+    }
+
+    #[test]
+    fn turn_input_user_acknowledges_delivery_before_turn_terminal() {
+        let (tx, mut rx) = oneshot::channel();
+        let mut delivered = Some(tx);
+
+        assert!(!acknowledge_delivery_if_accepted(
+            &corpus_record("runtime.command.accepted"),
+            &mut delivered,
+        ));
+        assert!(matches!(
+            rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+
+        assert!(acknowledge_delivery_if_accepted(
+            &corpus_record("turn.input.user"),
+            &mut delivered,
+        ));
+        assert!(delivered.is_none());
+        assert_eq!(rx.try_recv(), Ok(Ok(())));
+    }
 
     /// Live argv check: the launcher's `extra_args` must reach the spawned
     /// `muse exec` argv (this is the exact seam muse previously dropped). It
