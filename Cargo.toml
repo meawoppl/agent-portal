@@ -76,7 +76,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Claude Code integration
-claude-codes = { version = "2.1.240", default-features = false, features = ["types"] }
+claude-codes = { version = "2.1.259", default-features = false, features = ["types"] }
 
 # Muse CLI integration
 muse-codes = { version = "1.0.2", default-features = false, features = ["types"] }
