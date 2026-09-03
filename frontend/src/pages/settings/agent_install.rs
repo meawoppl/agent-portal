@@ -206,9 +206,11 @@ mod tests {
             AgentType::Codex.install_command().display(),
             "npm install -g @openai/codex"
         );
+        // Claude uses the native installer (no node, no root) — see
+        // AgentType::install_command for the full rationale.
         assert_eq!(
             AgentType::Claude.install_command().display(),
-            "npm install -g @anthropic-ai/claude-code"
+            "bash -c curl -fsSL https://claude.ai/install.sh | bash"
         );
     }
 }

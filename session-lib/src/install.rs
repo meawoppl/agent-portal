@@ -1,10 +1,11 @@
 //! Best-effort install of an agent CLI on the launcher host.
 //!
-//! Runs the agent's `AgentType::install_command` (a global npm install)
-//! synchronously and reports whether it exited cleanly, surfacing the command's
-//! own output tail on failure so the user sees why — an npm error, `npm` not on
-//! PATH, a permissions problem. The launcher invokes this under
-//! `spawn_blocking`, exactly like [`crate::probe`].
+//! Runs the agent's `AgentType::install_command` (a vendor installer script or
+//! a global npm install, per agent) synchronously and reports whether it exited
+//! cleanly, surfacing the command's own output tail on failure so the user sees
+//! why — an installer error, the program not on PATH, a permissions problem.
+//! The launcher invokes this under `spawn_blocking`, exactly like
+//! [`crate::probe`].
 
 use shared::AgentType;
 use std::process::Command;
