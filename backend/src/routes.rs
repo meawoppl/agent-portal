@@ -303,6 +303,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
                 .delete(handlers::scheduled_tasks::delete_task_handler),
         )
         .route(
+            "/api/scheduled-tasks/upcoming",
+            get(handlers::scheduled_tasks::upcoming_tasks_handler),
+        )
+        .route(
             "/api/scheduled-tasks/{id}/runs",
             get(handlers::scheduled_tasks::list_runs_handler),
         )

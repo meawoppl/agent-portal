@@ -1519,3 +1519,121 @@
     background: rgba(224, 175, 104, 0.18);
     color: var(--warning, #e0af68);
 }
+
+/* Settings ▸ Schedule */
+.schedule-calendar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+    align-items: start;
+}
+
+.schedule-day {
+    min-width: 0;
+    overflow: hidden;
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.schedule-day.is-today {
+    border-color: rgba(122, 162, 247, 0.65);
+    box-shadow: 0 0 0 1px rgba(122, 162, 247, 0.12);
+}
+
+.schedule-day-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.8rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(122, 162, 247, 0.06);
+}
+
+.schedule-day-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.schedule-day-header span {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.schedule-day-events {
+    display: flex;
+    flex-direction: column;
+    max-height: min(58vh, 36rem);
+    overflow-y: auto;
+}
+
+.schedule-event {
+    display: grid;
+    grid-template-columns: 4.6rem minmax(0, 1fr);
+    gap: 0.7rem;
+    padding: 0.7rem 0.8rem;
+    border-left: 3px solid var(--accent);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.schedule-event.agent-codex { border-left-color: #9ece6a; }
+.schedule-event.agent-muse { border-left-color: #bb9af7; }
+
+.schedule-event time {
+    color: var(--text-teal, #7dcfff);
+    font: 0.78rem var(--font-mono);
+    white-space: nowrap;
+}
+
+.schedule-event-details {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.schedule-event-details strong {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.schedule-event-details span,
+.schedule-day-empty {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.schedule-day-empty {
+    margin: 0;
+    padding: 1.4rem 0.9rem;
+    text-align: center;
+}
+
+.schedule-warning {
+    padding: 0.7rem 0.9rem;
+    color: var(--warning, #e0af68);
+    background: rgba(224, 175, 104, 0.1);
+    border: 1px solid rgba(224, 175, 104, 0.3);
+    border-radius: 8px;
+}
+
+@media (max-width: 768px) {
+    .schedule-calendar {
+        display: flex;
+        margin-inline: -1rem;
+        padding-inline: 1rem;
+        overflow-x: auto;
+        scroll-snap-type: x proximity;
+    }
+
+    .schedule-day {
+        flex: 0 0 min(84vw, 320px);
+        scroll-snap-align: start;
+    }
+}

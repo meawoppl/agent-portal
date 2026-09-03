@@ -6,13 +6,15 @@ use axum::{
     extract::{Path, State},
     Json,
 };
+use chrono::{DateTime, Duration, Utc};
+use croner::Cron;
 use diesel::prelude::*;
 use shared::api::{
     CreateScheduledTaskRequest, ScheduledTaskInfo, ScheduledTaskListResponse,
-    UpdateScheduledTaskRequest,
+    ScheduledTaskOccurrence, UpcomingScheduledTasksResponse, UpdateScheduledTaskRequest,
 };
 use shared::{AgentType, ScheduledTaskConfig, ScheduledTaskFields, ServerToLauncher};
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -60,6 +62,44 @@ fn validate_cron_expression(cron_expression: &str) -> Result<(), AppError> {
         return Err(AppError::BadRequest("Invalid cron expression"));
     }
     Ok(())
+}
+
+const UPCOMING_WINDOW_HOURS: i64 = 72;
+const MAX_UPCOMING_OCCURRENCES: usize = 10_000;
+
+fn upcoming_for_task(
+    task: &ScheduledTask,
+    starts_at: DateTime<Utc>,
+    ends_at: DateTime<Utc>,
+    remaining: usize,
+) -> Vec<ScheduledTaskOccurrence> {
+    let Ok(cron) = Cron::from_str(&task.cron_expression) else {
+        return Vec::new();
+    };
+    let canonical = shared::timezone::canonicalize_timezone(&task.timezone);
+    let timezone = canonical.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC);
+    let mut cursor = starts_at.with_timezone(&timezone);
+    let mut occurrences = Vec::new();
+
+    while occurrences.len() < remaining {
+        let Ok(next) = cron.find_next_occurrence(&cursor, false) else {
+            break;
+        };
+        let next_utc = next.with_timezone(&Utc);
+        if next_utc > ends_at {
+            break;
+        }
+        occurrences.push(ScheduledTaskOccurrence {
+            task_id: task.id,
+            task_name: task.name.clone(),
+            hostname: task.hostname.clone(),
+            agent_type: task.agent_type.parse().unwrap_or(AgentType::Claude),
+            scheduled_for: next_utc.to_rfc3339(),
+        });
+        cursor = next;
+    }
+
+    occurrences
 }
 
 /// Convert a ScheduledTask model to a ScheduledTaskConfig protocol message.
@@ -172,6 +212,39 @@ pub async fn list_tasks_handler(
 
     let infos: Vec<ScheduledTaskInfo> = tasks.into_iter().map(task_to_info).collect();
     Ok(Json(ScheduledTaskListResponse { tasks: infos }))
+}
+
+/// GET /api/scheduled-tasks/upcoming — enabled firings in the next 72 hours.
+pub async fn upcoming_tasks_handler(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+) -> Result<Json<UpcomingScheduledTasksResponse>, AppError> {
+    let mut conn = app_state.conn()?;
+    let tasks: Vec<ScheduledTask> = scheduled_tasks::table
+        .filter(scheduled_tasks::user_id.eq(user_id))
+        .filter(scheduled_tasks::enabled.eq(true))
+        .load(&mut conn)?;
+    let starts_at = Utc::now();
+    let ends_at = starts_at + Duration::hours(UPCOMING_WINDOW_HOURS);
+    let mut occurrences = Vec::new();
+
+    for task in &tasks {
+        let remaining = (MAX_UPCOMING_OCCURRENCES + 1).saturating_sub(occurrences.len());
+        if remaining == 0 {
+            break;
+        }
+        occurrences.extend(upcoming_for_task(task, starts_at, ends_at, remaining));
+    }
+    occurrences.sort_by(|a, b| a.scheduled_for.cmp(&b.scheduled_for));
+    let truncated = occurrences.len() > MAX_UPCOMING_OCCURRENCES;
+    occurrences.truncate(MAX_UPCOMING_OCCURRENCES);
+
+    Ok(Json(UpcomingScheduledTasksResponse {
+        starts_at: starts_at.to_rfc3339(),
+        ends_at: ends_at.to_rfc3339(),
+        occurrences,
+        truncated,
+    }))
 }
 
 /// POST /api/scheduled-tasks
@@ -337,6 +410,29 @@ pub async fn list_runs_handler(
 mod tests {
     use super::*;
 
+    fn task(cron_expression: &str, timezone: &str) -> ScheduledTask {
+        let now = Utc::now().naive_utc();
+        ScheduledTask {
+            id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            name: "Morning check".to_string(),
+            cron_expression: cron_expression.to_string(),
+            timezone: timezone.to_string(),
+            hostname: "workstation".to_string(),
+            working_directory: "/tmp".to_string(),
+            prompt: "check".to_string(),
+            claude_args: serde_json::Value::Array(Vec::new()),
+            agent_type: "codex".to_string(),
+            enabled: true,
+            max_runtime_minutes: 30,
+            last_session_id: None,
+            last_run_at: None,
+            created_at: now,
+            updated_at: now,
+            session_mode: "fresh".to_string(),
+        }
+    }
+
     #[test]
     fn invalid_cron_validation_is_bad_request() {
         let err = validate_cron_expression("* * *").unwrap_err();
@@ -349,5 +445,45 @@ mod tests {
     #[test]
     fn valid_cron_validation_accepts_five_fields() {
         validate_cron_expression("*/5 * * * *").unwrap();
+    }
+
+    #[test]
+    fn upcoming_occurrences_are_bounded_and_chronological() {
+        let starts_at = DateTime::parse_from_rfc3339("2026-09-02T12:34:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let occurrences = upcoming_for_task(
+            &task("0 * * * *", "UTC"),
+            starts_at,
+            starts_at + Duration::hours(3),
+            10,
+        );
+        let times = occurrences
+            .iter()
+            .map(|occurrence| occurrence.scheduled_for.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            times,
+            [
+                "2026-09-02T13:00:00+00:00",
+                "2026-09-02T14:00:00+00:00",
+                "2026-09-02T15:00:00+00:00",
+            ]
+        );
+    }
+
+    #[test]
+    fn upcoming_occurrences_apply_the_task_timezone() {
+        let starts_at = DateTime::parse_from_rfc3339("2026-09-02T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let occurrences = upcoming_for_task(
+            &task("0 9 * * *", "America/Los_Angeles"),
+            starts_at,
+            starts_at + Duration::hours(24),
+            10,
+        );
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].scheduled_for, "2026-09-02T16:00:00+00:00");
     }
 }
