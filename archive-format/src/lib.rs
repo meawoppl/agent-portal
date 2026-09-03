@@ -177,6 +177,15 @@ pub struct SessionArchiveManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<Vec<MediaEntry>>,
 
+    /// Count of *substantive* user messages — records a human actually typed,
+    /// excluding tool-result frames and reinjected notice blocks
+    /// (`shared::user_messages` defines the rule). `None` on manifests written
+    /// before the field existed; backfilled lazily when the session's history
+    /// transcript is next viewed. Additive + optional (same schema-compat
+    /// contract as `media` above), so [`ARCHIVE_SCHEMA_VERSION`] is not bumped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_message_count: Option<i64>,
+
     // --- Provenance (all additive within schema v1) ---
     //
     // These follow the same additive-compat contract as `media` above:
@@ -394,6 +403,7 @@ mod tests {
             last_activity: t,
             archived_at: t,
             message_counts: BTreeMap::from([("user".into(), 2)]),
+            user_message_count: None,
             tokens: ArchiveTokenTotals::default(),
             total_cost_usd: 0.5,
             turns: ArchiveTurnStats::default(),

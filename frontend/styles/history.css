@@ -265,3 +265,18 @@
     color: var(--text-dim, #7f849c);
     font-variant-numeric: tabular-nums;
 }
+
+/* Owner cell as a click-to-filter control: reads as a link inside the row,
+   without disturbing table typography. */
+.history-owner-filter {
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.history-owner-filter:hover {
+    text-decoration: underline;
+}

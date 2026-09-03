@@ -396,6 +396,15 @@ fn archive_one_session(
     for line in &merged_lines {
         *message_counts.entry(line.role.clone()).or_default() += 1;
     }
+    // Substantive user messages (the history "User msgs" column): counted at
+    // archive time for every new/re-archived session; pre-existing manifests
+    // are backfilled lazily when their transcript is next viewed.
+    let user_message_count = merged_lines
+        .iter()
+        .filter(|l| {
+            l.role == "user" && shared::user_messages::is_substantive_user_record(&l.content)
+        })
+        .count() as i64;
 
     // Turn aggregates for the manifest (analytics reads these, never the
     // transcript body).
@@ -501,6 +510,7 @@ fn archive_one_session(
             last_activity: session.last_activity,
             archived_at,
             message_counts,
+            user_message_count: Some(user_message_count),
             tokens: ArchiveTokenTotals {
                 input: session.input_tokens,
                 output: session.output_tokens,

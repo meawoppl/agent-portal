@@ -357,6 +357,7 @@ mod tests {
             last_activity: t,
             archived_at: t,
             message_counts: BTreeMap::from([("user".into(), 2)]),
+            user_message_count: None,
             tokens: ArchiveTokenTotals::default(),
             total_cost_usd: 0.5,
             turns: ArchiveTurnStats::default(),

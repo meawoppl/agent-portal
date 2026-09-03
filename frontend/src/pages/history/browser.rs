@@ -77,6 +77,18 @@ pub fn history_browser_page(props: &HistoryBrowserProps) -> Html {
         })
     };
 
+    // Clicking a user in a session row narrows the table to their sessions —
+    // same state as the dropdown (which mirrors it via `selected`).
+    let on_filter_user = {
+        let filter = filter.clone();
+        let on_filter = on_filter.clone();
+        Callback::from(move |user_id: String| {
+            let mut next = (*filter).clone();
+            next.user_id = Some(user_id);
+            on_filter.emit(next);
+        })
+    };
+
     let body = match &*response {
         None => html! { <div class="history-loading">{ "Loading history…" }</div> },
         Some(Err(e)) => html! {
@@ -91,7 +103,7 @@ pub fn history_browser_page(props: &HistoryBrowserProps) -> Html {
                     // would silently describe this page instead.
                     { stats_strip(resp, &filter) }
                     { filter_controls(resp, &filter, &on_filter) }
-                    { session_table(&resp.sessions, resp.is_admin, &props.on_open_session) }
+                    { session_table(&resp.sessions, resp.is_admin, &props.on_open_session, &on_filter_user) }
                     { pagination_controls(&window, resp.sessions.len(), &page) }
                 </>
             }
@@ -199,19 +211,26 @@ fn filter_controls(
 
     // Admin-only user dropdown. `owners` is computed server-side over every
     // filter except `user`, so selecting a user doesn't shrink the option list.
+    // `selected` mirrors the current filter so a selection made elsewhere
+    // (clicking a user in a row) is reflected here.
     let user_filter = if resp.is_admin {
+        let selected_user = filter.user_id.clone().unwrap_or_default();
         let options = resp
             .owners
             .iter()
             .map(|o| {
-                html! { <option value={o.user_id.clone()}>{ o.label.clone() }</option> }
+                html! {
+                    <option value={o.user_id.clone()} selected={o.user_id == selected_user}>
+                        { o.label.clone() }
+                    </option>
+                }
             })
             .collect::<Html>();
         html! {
             <label>
                 { "User" }
                 <select onchange={on_user}>
-                    <option value="">{ "All users" }</option>
+                    <option value="" selected={selected_user.is_empty()}>{ "All users" }</option>
                     { options }
                 </select>
             </label>
@@ -345,6 +364,7 @@ fn session_table(
     rows: &[HistorySessionSummary],
     is_admin: bool,
     on_open_session: &Option<Callback<(String, String)>>,
+    on_filter_user: &Callback<String>,
 ) -> Html {
     if rows.is_empty() {
         return html! {
@@ -362,12 +382,15 @@ fn session_table(
                     <th>{ "Created" }</th>
                     <th>{ "Last activity" }</th>
                     <th class="num">{ "Msgs" }</th>
+                    <th class="num" title="Messages the user actually typed — tool results and reinjected notices excluded">
+                        { "User msgs" }
+                    </th>
                     <th class="num">{ "Cost" }</th>
                     <th>{ "Models" }</th>
                 </tr>
             </thead>
             <tbody>
-                { for rows.iter().map(|s| html! { <SessionRow session={s.clone()} {is_admin} on_open_session={on_open_session.clone()} /> }) }
+                { for rows.iter().map(|s| html! { <SessionRow session={s.clone()} {is_admin} on_open_session={on_open_session.clone()} on_filter_user={on_filter_user.clone()} /> }) }
             </tbody>
         </table>
     }
@@ -379,6 +402,8 @@ struct SessionRowProps {
     is_admin: bool,
     #[prop_or_default]
     on_open_session: Option<Callback<(String, String)>>,
+    /// Narrow the table to this row's owner (admin User cell click).
+    on_filter_user: Callback<String>,
 }
 
 #[function_component(SessionRow)]
@@ -424,7 +449,27 @@ fn session_row(props: &SessionRowProps) -> Html {
             <td>{ &s.agent_type }</td>
             {
                 if props.is_admin {
-                    html! { <td>{ owner_label(s) }</td> }
+                    // stop_propagation keeps the whole-row click handler from
+                    // opening the session; prevent_default covers the row's
+                    // `default_prevented` guard for good measure.
+                    let on_filter_user = props.on_filter_user.clone();
+                    let user_id = s.user_id.clone();
+                    let onclick = Callback::from(move |e: MouseEvent| {
+                        e.stop_propagation();
+                        e.prevent_default();
+                        on_filter_user.emit(user_id.clone());
+                    });
+                    html! {
+                        <td>
+                            <button
+                                class="link-button history-owner-filter"
+                                title="Show only this user's sessions"
+                                {onclick}
+                            >
+                                { owner_label(s) }
+                            </button>
+                        </td>
+                    }
                 } else {
                     Html::default()
                 }
@@ -433,6 +478,9 @@ fn session_row(props: &SessionRowProps) -> Html {
             <td class="cell-date">{ short_date(&s.created_at) }</td>
             <td class="cell-date">{ short_date(&s.last_activity) }</td>
             <td class="num">{ s.message_count }</td>
+            <td class="num">
+                { s.user_message_count.map(|n| n.to_string()).unwrap_or_else(|| "—".to_string()) }
+            </td>
             <td class="num">{ format!("${:.2}", s.total_cost_usd) }</td>
             <td class="cell-models">{ visible_models(&s.models) }</td>
         </tr>
