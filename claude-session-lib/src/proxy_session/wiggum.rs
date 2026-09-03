@@ -522,6 +522,7 @@ mod tests {
             time_to_request_ms: None,
             num_turns: 1,
             result: Some(result.to_string()),
+            subagent_stats: None,
             session_id: "test-session".to_string(),
             total_cost_usd: 0.0,
             usage: None,

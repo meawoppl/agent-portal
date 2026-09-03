@@ -145,8 +145,22 @@ fn run_flow(
                 message: Some(transcript_tail(&out.transcript)),
             },
             // CodeRejected / LoginTimeout / LoginChildExited all Display as
-            // self-describing text — relay it verbatim (login contract).
-            Err(e) => failed(&e.to_string()),
+            // self-describing text — relay it verbatim (login contract). A
+            // rejected code additionally gets recovery guidance: codes are
+            // single-use, expire within minutes, and are PKCE-bound to the
+            // sign-in window that minted their URL, so the fix is always a
+            // fresh sign-in — never re-pasting the old code.
+            Err(e) => {
+                let mut message = e.to_string();
+                if matches!(e, claude_codes::Error::CodeRejected { .. }) {
+                    message.push_str(
+                        " — the code may have expired, been used already, or come \
+                         from an earlier sign-in window. Start a new sign-in and \
+                         paste the fresh code promptly.",
+                    );
+                }
+                failed(&message)
+            }
         },
         // Disconnected = session dropped (cancel); Timeout = user wandered off.
         // Either way `flow` drops on return → PTY child reaped. Nobody is
