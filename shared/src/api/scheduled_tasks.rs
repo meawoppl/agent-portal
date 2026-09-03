@@ -56,3 +56,24 @@ pub struct ScheduledTaskInfo {
 pub struct ScheduledTaskListResponse {
     pub tasks: Vec<ScheduledTaskInfo>,
 }
+
+/// One enabled scheduled-task firing in the Settings calendar window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScheduledTaskOccurrence {
+    pub task_id: uuid::Uuid,
+    pub task_name: String,
+    pub hostname: String,
+    pub agent_type: crate::AgentType,
+    /// UTC ISO-8601 timestamp. The browser presents it in the viewer's timezone.
+    pub scheduled_for: String,
+}
+
+/// Response for `GET /api/scheduled-tasks/upcoming`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpcomingScheduledTasksResponse {
+    pub starts_at: String,
+    pub ends_at: String,
+    pub occurrences: Vec<ScheduledTaskOccurrence>,
+    /// True when the safety ceiling was reached. The UI must disclose this.
+    pub truncated: bool,
+}

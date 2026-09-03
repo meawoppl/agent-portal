@@ -52,6 +52,8 @@ claude-codes = { workspace = true }
 
 # Time
 chrono = { workspace = true, features = ["std", "clock"] }
+chrono-tz = "0.10"
+croner = "3"
 
 # UUID
 uuid = { workspace = true }
