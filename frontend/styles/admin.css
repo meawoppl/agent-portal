@@ -103,7 +103,9 @@
 }
 
 .admin-stat-card {
-    background: var(--bg-secondary);
+    /* --bg-secondary does not exist (see base.css tokens); the undefined
+       var() rendered the stat cards transparent. */
+    background: var(--bg-darker);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 1.25rem;
