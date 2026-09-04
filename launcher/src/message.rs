@@ -244,31 +244,43 @@ pub async fn list() -> Result<()> {
         None
     });
     for s in &data.sessions {
-        let marker = if self_id.as_deref() == Some(&s.id.to_string()) {
-            " (this session)"
-        } else {
-            ""
-        };
         println!(
-            "{}  {} / {} / {}  {}  {}{}",
-            display_session_id(s, &data.sessions),
-            full_agent_name(s),
-            if session_is_connected(s) {
-                "connected"
-            } else {
-                "disconnected"
-            },
-            if s.busy.unwrap_or(false) {
-                "busy"
-            } else {
-                "idle"
-            },
-            s.session_name,
-            s.working_directory,
-            marker
+            "{}",
+            format_session_row(s, &data.sessions, self_id.as_deref())
         );
     }
     Ok(())
+}
+
+fn format_session_row(
+    session: &shared::api::AgentSessionInfo,
+    all_sessions: &[shared::api::AgentSessionInfo],
+    self_id: Option<&str>,
+) -> String {
+    let marker = if self_id == Some(&session.id.to_string()) {
+        " (this session)"
+    } else {
+        ""
+    };
+    format!(
+        "{}  {} / {} / {}  {}  {}  {}{}",
+        display_session_id(session, all_sessions),
+        full_agent_name(session),
+        if session_is_connected(session) {
+            "connected"
+        } else {
+            "disconnected"
+        },
+        if session.busy.unwrap_or(false) {
+            "busy"
+        } else {
+            "idle"
+        },
+        session.hostname,
+        session.session_name,
+        session.working_directory,
+        marker
+    )
 }
 
 fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
@@ -451,6 +463,20 @@ mod tests {
             awaiting_permission: false,
             last_activity: String::new(),
         }
+    }
+
+    #[test]
+    fn session_list_row_includes_hostname_before_name_and_directory() {
+        let item = session("0c24805b-0000-0000-0000-000000000000");
+
+        assert_eq!(
+            format_session_row(
+                &item,
+                std::slice::from_ref(&item),
+                Some(&item.id.to_string())
+            ),
+            "0c24805b  claude / connected / idle  host  session  /repo (this session)"
+        );
     }
 
     #[test]
