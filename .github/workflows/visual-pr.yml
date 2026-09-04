@@ -35,7 +35,9 @@ jobs:
           path: pr-head
           sparse-checkout: 000-pr-visualization
 
-      - uses: meawoppl/visual-pr@v1
+      # Pin the executable action: a moving v1 tag changed its path contract
+      # after this workflow landed, making every PR's required check fail.
+      - uses: meawoppl/visual-pr@669787fdc7aaf7afc3975dbbab5af65ee50da6da
         with:
           head-path: pr-head
           style: .github/visual-pr/style.json
