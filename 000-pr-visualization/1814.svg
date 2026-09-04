@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1814 · Tell forked agents they are child sessions</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">A fork without a divergence prompt started silently; every child now receives lineage and role context,</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">while an optional UI prompt replaces only the default request to await the user.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="260" width="840" height="155" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="108" y="305" font-size="26" fill="#7aa2f7">ForkSessionRequest.divergence_prompt</text>
+    <text x="108" y="345" font-size="23" fill="#a9b1d6">None or blank</text>
+    <text x="108" y="382" font-size="21" fill="#565f89">the normal default from the UI</text>
+  </g>
+  <line x1="500" y1="415" x2="500" y2="505" stroke="#565f89" stroke-width="2" marker-end="url(#arrow-muted)"/>
+  <g>
+    <rect x="80" y="515" width="840" height="175" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="108" y="562" font-size="26" fill="#c0caf5">No input enqueued</text>
+    <text x="108" y="605" font-size="23" fill="#f7768e">the child inherits history with no explanation of the split</text>
+    <text x="108" y="646" font-size="21" fill="#565f89">source identity, child role, and next action are all absent</text>
+  </g>
+  <line x1="500" y1="690" x2="500" y2="835" stroke="#f7768e" stroke-width="2" stroke-dasharray="5 7" marker-end="url(#arrow-muted)"/>
+  <g>
+    <rect x="80" y="845" width="840" height="165" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="108" y="892" font-size="26" fill="#c0caf5">Ambiguous continuation</text>
+    <text x="108" y="935" font-size="23" fill="#a9b1d6">the agent may act as though it is still the source thread</text>
+    <text x="108" y="976" font-size="21" fill="#565f89">a custom prompt worked, but supplying one was required</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="260" width="860" height="155" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1093" y="305" font-size="26" fill="#7aa2f7">fork_child_notice(source_name, source_id, prompt)</text>
+    <text x="1093" y="345" font-size="23" fill="#a9b1d6">called for every accepted fork</text>
+    <text x="1093" y="382" font-size="21" fill="#565f89">the existing optional API field remains unchanged</text>
+  </g>
+  <line x1="1495" y1="415" x2="1495" y2="505" stroke="#9ece6a" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <g>
+    <rect x="1065" y="515" width="860" height="240" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="562" font-size="26" fill="#9ece6a">One durable fork notice is enqueued</text>
+    <text x="1093" y="605" font-size="23" fill="#a9b1d6">identifies source session name + UUID</text>
+    <text x="1093" y="646" font-size="23" fill="#a9b1d6">states “You are the child session”</text>
+    <text x="1093" y="687" font-size="23" fill="#a9b1d6">states the source thread continues independently</text>
+    <text x="1093" y="728" font-size="21" fill="#565f89">set_last_input_sender records the synthetic “Fork notice”</text>
+  </g>
+  <line x1="1495" y1="755" x2="1495" y2="835" stroke="#9ece6a" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <g>
+    <rect x="1065" y="845" width="860" height="165" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1093" y="892" font-size="26" fill="#c0caf5">Direction is explicit</text>
+    <text x="1093" y="935" font-size="23" fill="#9ece6a">blank → await the user; supplied → use the divergence prompt</text>
+    <text x="1093" y="976" font-size="21" fill="#565f89">custom direction never removes lineage or child-role context</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: the notice is an ordinary queued user input; this PR does not add a new protocol role or enable Muse forking.</text>
+</svg>
