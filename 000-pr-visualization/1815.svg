@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="red-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/></marker>
+    <marker id="green-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1815 · Exclude thinking markers from render budget</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Bodyless Claude thinking markers consumed the 100-record DOM budget; weighted retention now</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">charges only substantive messages, preserving history while keeping the same rendered-content cap.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="255" width="840" height="175" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="108" y="302" font-size="26" fill="#7aa2f7">retain_newest_items</text>
+    <text x="108" y="345" font-size="23" fill="#a9b1d6">messages.len() &gt; MAX_MESSAGES_PER_SESSION</text>
+    <text x="108" y="388" font-size="21" fill="#565f89">every wire record had identical cost: 1</text>
+  </g>
+  <line x1="500" y1="430" x2="500" y2="510" stroke="#f7768e" stroke-width="2" marker-end="url(#red-arrow)"/>
+  <g>
+    <rect x="80" y="520" width="840" height="240" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="108" y="567" font-size="26" fill="#c0caf5">One Claude turn can spend most slots</text>
+    <text x="108" y="612" font-size="23" fill="#f7768e">system / thinking_tokens → 1 slot each</text>
+    <text x="108" y="655" font-size="23" fill="#a9b1d6">the renderer later collapses the whole run into one chip</text>
+    <text x="108" y="698" font-size="21" fill="#565f89">compact output, but earlier user and assistant records are gone</text>
+    <text x="108" y="735" font-size="21" fill="#565f89">REST, reconnect, and live paths all enforce the same raw count</text>
+  </g>
+  <g>
+    <rect x="80" y="855" width="840" height="155" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="108" y="902" font-size="26" fill="#c0caf5">100 records ≠ 100 useful messages</text>
+    <text x="108" y="946" font-size="23" fill="#f7768e">bodyless accounting crowds substantive history out</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="255" width="860" height="175" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="302" font-size="26" fill="#7aa2f7">retain_newest_items_by_cost</text>
+    <text x="1093" y="345" font-size="23" fill="#a9b1d6">counts_toward_render_limit(&amp;message.content)</text>
+    <text x="1093" y="388" font-size="21" fill="#565f89">one retention primitive shared by all three ingestion paths</text>
+  </g>
+  <line x1="1495" y1="430" x2="1495" y2="510" stroke="#9ece6a" stroke-width="2" marker-end="url(#green-arrow)"/>
+  <g>
+    <rect x="1065" y="520" width="860" height="240" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="567" font-size="26" fill="#9ece6a">Cost follows rendered weight</text>
+    <text x="1093" y="612" font-size="23" fill="#a9b1d6">Claude system / thinking_tokens → 0</text>
+    <text x="1093" y="655" font-size="23" fill="#a9b1d6">every other valid, unknown, or malformed frame → 1</text>
+    <text x="1093" y="698" font-size="21" fill="#565f89">free markers stay between the newest 100 substantive messages</text>
+    <text x="1093" y="735" font-size="21" fill="#565f89">markers older than that retained tail are discarded as orphans</text>
+  </g>
+  <g>
+    <rect x="1065" y="855" width="860" height="155" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1093" y="902" font-size="26" fill="#c0caf5">100 substantive messages remain</text>
+    <text x="1093" y="946" font-size="23" fill="#9ece6a">thinking chips no longer evict useful transcript context</text>
+  </g>
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: assistant thinking blocks with visible text still count; only bodyless Claude thinking-token markers are free.</text>
+</svg>
