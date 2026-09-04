@@ -1,0 +1,23 @@
+{
+  "canvas": [2000, 1200],
+  "margin": 40,
+  "char_factor": 0.5,
+  "divider_x": 1000,
+  "divider_band": [190, 1140],
+  "palette": [
+    "#16161e",
+    "#1e202e",
+    "#3d4666",
+    "#565f89",
+    "#a9b1d6",
+    "#c0caf5",
+    "#e6e9f5",
+    "#7aa2f7",
+    "#9ece6a",
+    "#f7768e",
+    "#e0af68",
+    "#bb9af7",
+    "#7dcfff",
+    "none"
+  ]
+}

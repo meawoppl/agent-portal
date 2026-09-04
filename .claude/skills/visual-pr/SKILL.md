@@ -130,9 +130,15 @@ arrows. When in doubt, rasterize and look:
    table; footer caveat last.
 5. **Validate**: `python3 .claude/skills/visual-pr/check_svg.py <file.svg>` —
    fixes anything it flags (parse errors and off-palette colors are hard errors,
-   overflow estimates are warnings to eyeball).
-6. **Show it**: save as `/tmp/visual-pr-<N>.svg` (keep the repo clean — do not
-   commit generated SVGs) and run `agent-portal show /tmp/visual-pr-<N>.svg`.
+   overflow estimates are warnings to eyeball). CI runs the same validator.
+6. **Commit it to the PR**: save as `000-pr-visualization/<N>.svg` on the PR
+   branch, commit ("Add visual summary for PR #<N>"), and push. The `000-`
+   prefix sorts the SVG first in GitHub's review file list, and the
+   `Visual PR attached` check requires the file to exist and validate — a PR
+   without it does not merge (label `no-visual` for changes where a diagram is
+   genuinely noise).
+7. **Show it**: run `agent-portal show 000-pr-visualization/<N>.svg` so it also
+   renders inline in the session.
 
 ## Quality bar
 
