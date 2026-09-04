@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::components::model_select::model_cli_args;
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
 use crate::components::{ModelSelect, ProxyTokenSetup};
@@ -590,12 +587,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     create_worktree: want_worktree,
                 };
 
-                match Request::post("/api/launch")
-                    .json(&body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
+                match utils::send_json(Request::post("/api/launch"), &body).await {
                     Ok(resp) if resp.ok() => {
                         let launched = match resp.json::<LaunchResponse>().await {
                             Ok(launched) => launched,

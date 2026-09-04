@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! Admin ▸ Subdomains: assign a human-readable custom subdomain to a session's
 //! forward (docs/PORT_FORWARDING.md). The custom URL routes alongside the auto
 //! hash URL. Deconfliction errors from the backend are shown inline.
@@ -100,7 +97,7 @@ pub fn admin_subdomains_tab() -> Html {
                 saving.set(true);
                 let url = utils::api_url("/api/admin/subdomains");
                 let body = CreateCustomSubdomainRequest { session_id, label };
-                match Request::post(&url).json(&body).unwrap().send().await {
+                match utils::send_json(Request::post(&url), &body).await {
                     Ok(resp) if resp.status() == 201 => {
                         label_input.set(String::new());
                         error.set(None);
