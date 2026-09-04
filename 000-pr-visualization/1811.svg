@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1811 · Require a committed visual summary on every PR</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Visual summaries lived one session in /tmp and depended on agent discipline; each PR now</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">commits its own SVG where review opens on it, enforced by a reusable checked requirement.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="250" width="840" height="160" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#7aa2f7">visual-pr skill → /tmp → agent-portal show</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">the SVG rendered once, inline in the portal session</text>
+    <text x="104" y="364" font-size="21" fill="#565f89">SKILL.md step 6: "keep the repo clean — do not commit generated SVGs"</text>
+  </g>
+
+  <line x1="500" y1="410" x2="500" y2="476" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="480" width="840" height="160" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="522" font-size="26" fill="#c0caf5">GitHub review sees none of it</text>
+    <text x="104" y="560" font-size="23" fill="#f7768e">the PR page is text only — the diagram never reaches the reviewer</text>
+    <text x="104" y="594" font-size="21" fill="#565f89">and the convention was AGENTS.md prose: skipping it failed nothing</text>
+  </g>
+
+  <line x1="500" y1="640" x2="500" y2="922" stroke="#f7768e" stroke-width="1.5" stroke-dasharray="4 6" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="930" width="840" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="976" font-size="26" fill="#c0caf5">coverage = agent discipline</text>
+    <text x="104" y="1014" font-size="23" fill="#f7768e">a forgotten visual is silent; the artifact evaporates with the session</text>
+    <text x="104" y="1048" font-size="21" fill="#565f89">no history, no enforcement, no reviewer-facing copy</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1065" y="250" width="860" height="160" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="292" font-size="26" fill="#9ece6a">000-pr-visualization/&lt;pr-number&gt;.svg — committed</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">the 000- prefix sorts first in "Files changed" — review opens on it</text>
+    <text x="1089" y="364" font-size="21" fill="#565f89">merged SVGs accumulate as a visual history (~6-10 KB of text each)</text>
+  </g>
+
+  <line x1="1495" y1="410" x2="1495" y2="476" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="480" width="860" height="230" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="522" font-size="26" fill="#9ece6a">meawoppl/visual-pr@v1 — reusable required check</text>
+    <text x="1089" y="560" font-size="23" fill="#a9b1d6">validates with check_svg.py against this repo's style artifact</text>
+    <text x="1089" y="594" font-size="23" fill="#a9b1d6">(.github/visual-pr/style.json) + injectable custom instructions</text>
+    <text x="1089" y="628" font-size="21" fill="#9ece6a">on failure it teaches the agent: spec + effective style + the exact</text>
+    <text x="1089" y="658" font-size="21" fill="#9ece6a">local check to run before pushing — the red X carries its own fix</text>
+    <text x="1089" y="692" font-size="21" fill="#565f89">pull_request_target: reports on every open PR at merge; head is data only</text>
+  </g>
+
+  <line x1="1495" y1="710" x2="1495" y2="922" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1520" y="820" font-size="21" fill="#565f89">no-visual label opts out — skipped job</text>
+  <text x="1520" y="850" font-size="21" fill="#565f89">still satisfies the ruleset</text>
+
+  <g>
+    <rect x="1065" y="930" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="976" font-size="26" fill="#c0caf5">every PR opens on its own picture</text>
+    <text x="1089" y="1014" font-size="23" fill="#9ece6a">this file is the first instance — the PR you are reviewing ships it</text>
+    <text x="1089" y="1048" font-size="21" fill="#565f89">any repo can adopt the action; the style and instructions are theirs</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not yet in pr-to-main's required list — 13 PRs are open and would strand; flip the ruleset when the queue drains. Dotfile paths still sort before 000-.</text>
+</svg>
