@@ -75,23 +75,38 @@ pub enum ClaudeMessage {
 impl ClaudeMessage {
     pub fn parse(json: &str) -> Result<Self, serde_json::Error> {
         if let Ok(output) = serde_json::from_str::<shared::ClaudeOutput>(json) {
-            return Ok(match output {
-                shared::ClaudeOutput::System(msg) => Self::System(msg),
-                shared::ClaudeOutput::User(msg) => Self::User(msg),
-                shared::ClaudeOutput::Assistant(msg) => Self::Assistant(msg),
-                shared::ClaudeOutput::Result(msg) => Self::Result(msg),
-                shared::ClaudeOutput::Error(msg) => Self::Error(msg),
-                shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
-                shared::ClaudeOutput::ConversationReset(msg) => Self::ConversationReset(msg),
-                // Wildcard: control frames plus the 2.1.160 wire additions
-                // (stream_event, tool_progress, transcript variants, …) that
-                // have no dedicated renderer yet.
-                _ => Self::Unknown,
-            });
+            return Ok(Self::from_output(output));
         }
 
         let value: serde_json::Value = serde_json::from_str(json)?;
-        Ok(parse_local_frame(&value).unwrap_or(Self::Unknown))
+        Ok(Self::from_value(value))
+    }
+
+    /// Shared dispatch for a typed [`shared::ClaudeOutput`], used by both
+    /// [`Self::parse`] and the [`serde::Deserialize`] impl so the two can
+    /// never drift apart (a new wire variant added in one path only would
+    /// render in some transcripts and raw-bubble in others).
+    fn from_output(output: shared::ClaudeOutput) -> Self {
+        match output {
+            shared::ClaudeOutput::System(msg) => Self::System(msg),
+            shared::ClaudeOutput::User(msg) => Self::User(msg),
+            shared::ClaudeOutput::Assistant(msg) => Self::Assistant(msg),
+            shared::ClaudeOutput::Result(msg) => Self::Result(msg),
+            shared::ClaudeOutput::Error(msg) => Self::Error(msg),
+            shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
+            shared::ClaudeOutput::ConversationReset(msg) => Self::ConversationReset(msg),
+            // Wildcard: control frames plus the 2.1.160 wire additions
+            // (stream_event, tool_progress, transcript variants, …) that
+            // have no dedicated renderer yet.
+            _ => Self::Unknown,
+        }
+    }
+
+    /// A non-`ClaudeOutput` frame is either portal-authored (a
+    /// [`shared::LocalFrame`]) or foreign — the raw-bubble fallback reserved
+    /// for agent shapes the renderer does not type yet.
+    fn from_value(value: serde_json::Value) -> Self {
+        parse_local_frame(&value).unwrap_or(Self::Unknown)
     }
 }
 
@@ -102,21 +117,9 @@ impl<'de> Deserialize<'de> for ClaudeMessage {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         if let Ok(output) = serde_json::from_value::<shared::ClaudeOutput>(value.clone()) {
-            return Ok(match output {
-                shared::ClaudeOutput::System(msg) => Self::System(msg),
-                shared::ClaudeOutput::User(msg) => Self::User(msg),
-                shared::ClaudeOutput::Assistant(msg) => Self::Assistant(msg),
-                shared::ClaudeOutput::Result(msg) => Self::Result(msg),
-                shared::ClaudeOutput::Error(msg) => Self::Error(msg),
-                shared::ClaudeOutput::RateLimitEvent(msg) => Self::RateLimitEvent(msg),
-                shared::ClaudeOutput::ConversationReset(msg) => Self::ConversationReset(msg),
-                // Wildcard: control frames plus the 2.1.160 wire additions
-                // (stream_event, tool_progress, transcript variants, …) that
-                // have no dedicated renderer yet.
-                _ => Self::Unknown,
-            });
+            return Ok(Self::from_output(output));
         }
-        Ok(parse_local_frame(&value).unwrap_or(Self::Unknown))
+        Ok(Self::from_value(value))
     }
 }
 
