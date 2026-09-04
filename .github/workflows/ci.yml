@@ -166,6 +166,10 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
+    # Single source for the service-container connection string; both DB steps
+    # below inherit it instead of repeating the literal.
+    env:
+      DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
     # Dedicated job for DB-backed tests (#1209 item 1): the E2E harness plus the
     # backend unit tests that need a real Postgres (messages/replay pagination,
     # session-access). Kept separate from `Tests` so the main lane stays
@@ -201,13 +205,9 @@ jobs:
           protoc: "true"
 
       - name: Run E2E harness (migrates the fresh Postgres)
-        env:
-          DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
         run: cargo test -p backend --test harness
 
       - name: Run DB-backed backend unit tests
-        env:
-          DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
         run: |
           cargo test -p backend --lib handlers::messages::db_tests
           cargo test -p backend --lib handlers::session_access::db_tests
