@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1819 · Carry turn id through Steer routing</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Steer was a unit variant — the consumer re-derived the turn id under a comment guarantee;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now the variant carries the id, so the type holds what the comment used to promise.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="170" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#7aa2f7">route_user_input(active, id) → Steer</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">producer checks known + non-empty, returns bare unit</text>
+    <text x="104" y="364" font-size="22" fill="#565f89">the id it just validated is thrown away at the boundary</text>
+  </g>
+  <line x1="510" y1="420" x2="510" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <text x="526" y="462" font-size="22" fill="#565f89">re-derive</text>
+  <g>
+    <rect x="80" y="495" width="860" height="170" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="537" font-size="26" fill="#7aa2f7">current_turn_id().expect(..) at use site</text>
+    <text x="104" y="575" font-size="23" fill="#a9b1d6">second derivation of the same fact, or panic</text>
+    <text x="104" y="609" font-size="22" fill="#565f89">comment asserts what the type does not enforce</text>
+  </g>
+  <line x1="510" y1="665" x2="510" y2="940" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">guarantee lives in prose</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">refactor past the comment and it silently lies</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="250" width="860" height="170" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="292" font-size="26" fill="#7aa2f7">route_user_input(active, id) → Steer(id)</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">the validated id moves into the variant (Copy out)</text>
+    <text x="1089" y="364" font-size="22" fill="#565f89">only construction site; Queue/StartTurn unchanged</text>
+  </g>
+  <line x1="1495" y1="420" x2="1495" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1511" y="462" font-size="22" fill="#565f89">bind out</text>
+  <g>
+    <rect x="1065" y="495" width="860" height="170" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="537" font-size="26" fill="#9ece6a">Steer(turn_id) → steer_codex_turn(..)</text>
+    <text x="1089" y="575" font-size="23" fill="#a9b1d6">no re-read, no expect, no comment needed</text>
+    <text x="1089" y="609" font-size="22" fill="#565f89">three routing tests assert the carried payload</text>
+  </g>
+  <line x1="1495" y1="665" x2="1495" y2="940" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">guarantee lives in the type</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">37 codex-session-lib tests pass; clippy clean</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Queue fallback for steer-request failures is untouched — only the id plumbing changed.</text>
+</svg>
