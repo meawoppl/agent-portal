@@ -282,11 +282,10 @@ impl Component for TasksPanel {
         }
 
         let mut tasks: Vec<_> = self.active_tasks.iter().collect();
-        tasks.sort_by(|a, b| {
-            a.1.started_at
-                .partial_cmp(&b.1.started_at)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // `total_cmp` is a panic-free total order; `partial_cmp` + Equal on
+        // NaN is not (NaN would compare Equal to everything while finite
+        // values order among themselves).
+        tasks.sort_by(|a, b| a.1.started_at.total_cmp(&b.1.started_at));
 
         html! {
             <div class={classes.join(" ")}>
