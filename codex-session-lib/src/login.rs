@@ -77,8 +77,8 @@ impl CodexLoginSession {
     pub fn poll(&self) -> AgentLoginOutcome {
         self.outcome
             .lock()
-            .unwrap()
-            .clone()
+            .ok()
+            .and_then(|guard| guard.clone())
             .unwrap_or(AgentLoginOutcome {
                 done: false,
                 success: false,
@@ -111,7 +111,11 @@ async fn watch(
     outcome: Arc<Mutex<Option<AgentLoginOutcome>>>,
     cancel: Arc<Notify>,
 ) {
-    let set = |o: AgentLoginOutcome| *outcome.lock().unwrap() = Some(o);
+    let set = |o: AgentLoginOutcome| {
+        if let Ok(mut guard) = outcome.lock() {
+            *guard = Some(o);
+        }
+    };
     let deadline = tokio::time::sleep(DEVICE_TIMEOUT);
     tokio::pin!(deadline);
 
