@@ -13,7 +13,7 @@
 //!
 //! [`poll`]: CodexLoginSession::poll
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use codex_codes::{
@@ -74,11 +74,14 @@ impl CodexLoginSession {
     }
 
     /// Current outcome; `done == false` until the browser approval lands.
+    ///
+    /// A poisoned mutex still yields its guarded state — poisoning is sticky,
+    /// so discarding the guard would wedge the login as pending forever.
     pub fn poll(&self) -> AgentLoginOutcome {
         self.outcome
             .lock()
-            .ok()
-            .and_then(|guard| guard.clone())
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
             .unwrap_or(AgentLoginOutcome {
                 done: false,
                 success: false,
@@ -111,10 +114,10 @@ async fn watch(
     outcome: Arc<Mutex<Option<AgentLoginOutcome>>>,
     cancel: Arc<Notify>,
 ) {
+    // Recover the guard on poisoning (sticky): dropping the update would
+    // wedge the login, since no later poll could ever observe it.
     let set = |o: AgentLoginOutcome| {
-        if let Ok(mut guard) = outcome.lock() {
-            *guard = Some(o);
-        }
+        *outcome.lock().unwrap_or_else(PoisonError::into_inner) = Some(o);
     };
     let deadline = tokio::time::sleep(DEVICE_TIMEOUT);
     tokio::pin!(deadline);
@@ -162,5 +165,30 @@ fn failed(message: &str) -> AgentLoginOutcome {
         done: true,
         success: false,
         message: Some(message.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Poisoning is sticky: `poll` must recover the guarded state instead of
+    /// discarding it, or the login wedges as pending forever.
+    #[test]
+    fn poll_recovers_poisoned_outcome() {
+        let session = CodexLoginSession {
+            outcome: Arc::new(Mutex::new(Some(AgentLoginOutcome {
+                done: true,
+                success: true,
+                message: None,
+            }))),
+            cancel: Arc::new(Notify::new()),
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = session.outcome.lock().unwrap();
+            panic!("poison probe");
+        }));
+        let outcome = session.poll();
+        assert!(outcome.done && outcome.success);
     }
 }
