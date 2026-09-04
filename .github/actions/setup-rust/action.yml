@@ -68,20 +68,24 @@ runs:
       with:
         shared-key: ${{ inputs.cache-key }}
 
-    - name: Cache trunk binary
+    # Swatinem/rust-cache already owns ~/.cargo/bin. Keep Trunk's download
+    # cache separate so two caches never restore the same binary.
+    - name: Cache trunk downloads
       if: inputs.trunk == 'true'
-      id: cache-trunk
       uses: actions/cache@v4
       with:
-        path: |
-          ~/.cargo/bin/trunk
-          ~/.cache/trunk
+        path: ~/.cache/trunk
         key: ${{ runner.os }}-trunk-${{ inputs.trunk-version }}
 
-    - name: Install trunk
-      if: inputs.trunk == 'true' && steps.cache-trunk.outputs.cache-hit != 'true'
+    - name: Ensure pinned trunk version
+      if: inputs.trunk == 'true'
       shell: bash
-      run: cargo install trunk --locked --version "${{ inputs.trunk-version }}"
+      run: |
+        expected="${{ inputs.trunk-version }}"
+        installed="$(trunk --version 2>/dev/null | awk '{print $2}' || true)"
+        if [ "$installed" != "$expected" ]; then
+          cargo install trunk --locked --force --version "$expected"
+        fi
 
     - name: Verify trunk
       if: inputs.trunk == 'true'
