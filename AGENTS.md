@@ -980,8 +980,6 @@ When making changes, verify:
 | `PORTAL_APNS_TEAM_ID` | Apple Developer Team ID for native iOS push | Required with other `PORTAL_APNS_*` vars |
 | `PORTAL_APNS_BUNDLE_ID` | App bundle id used as the APNs topic | Required with other `PORTAL_APNS_*` vars |
 | `PORTAL_FCM_SERVICE_ACCOUNT_PATH` | Google service-account JSON path for FCM v1 native Android push | Optional (FCM disabled when unset) |
-| `PORTAL_VISUAL_PR_REPO_DIR` | Git checkout that the admin Visual-PRs tab runs `gh`/`claude` in (testing feature; the checkout needs `gh` auth and the `visual-pr` skill) | Optional (tab disabled when unset) |
-| `PORTAL_VISUAL_PR_CLAUDE_BIN` | Binary invoked for visual-PR generation | Optional (default: `claude`) |
 
 Note: Dev mode is enabled via `--dev-mode` CLI flag, not an environment variable. Voice input is browser-native (Web Speech API on Chromium / Safari) unless `PORTAL_STT_BACKEND` is configured — see below.
 
@@ -1072,16 +1070,17 @@ use uuid::Uuid;
 - **Titles**: describe the change, not the ticket. Don't reference issue/PR numbers — they're noise in the title.
 - **Bodies**: focus on *what* the change does and *why*. Keep it concise — no commit-by-commit play-by-play.
 - **No attribution footer**: don't add "Generated with Claude Code" (or similar) to PR titles or bodies.
-- **Visual PR summary (required)**: when a PR is ready (right after
-  `gh pr create`), invoke the `visual-pr` skill
-  (`.claude/skills/visual-pr/SKILL.md`). It reads the actual diff and
-  surrounding code, renders a before/after SVG in the house style, validates
-  it, and **commits it to the PR branch as
-  `000-pr-visualization/<pr-number>.svg`** (the `000-` prefix sorts it first
-  in GitHub's review file list). The `Visual PR attached` CI check fails a PR
-  without a valid SVG; label a PR `no-visual` only when a diagram is genuinely
-  noise (dependency bumps, typo fixes). Also show it inline via
-  `agent-portal show`.
+- **Visual PR summary (required)**: every PR commits a before/after summary
+  SVG of itself at `000-pr-visualization/<pr-number>.svg` (the `000-` prefix
+  sorts it first in GitHub's review file list). The tooling lives upstream in
+  [meawoppl/visual-pr](https://github.com/meawoppl/visual-pr): read its
+  `SPEC.md` for the authoring rules, ground every identifier in the actual
+  diff, and verify with its `check_svg.py` (this repo's style artifact is
+  `.github/visual-pr/style.json`) before pushing — the `Visual PR attached`
+  check runs exactly that validator, and its failure output contains the full
+  spec and fetch/run commands if you need them. Label a PR `no-visual` only
+  when a diagram is genuinely noise (dependency bumps, typo fixes). Also show
+  the SVG inline in your session via `agent-portal show`.
 
 ## SHIP Workflow
 
