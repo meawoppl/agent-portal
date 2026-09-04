@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/></marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1820 · Show hostnames in agent message list</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Message-list rows omitted AgentSessionInfo.hostname; adding the existing field makes sessions</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">with identical repository paths distinguishable across launcher machines.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="270" width="840" height="190" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="108" y="318" font-size="26" fill="#7aa2f7">GET /api/agent/sessions</text>
+    <text x="108" y="362" font-size="23" fill="#a9b1d6">AgentSessionInfo.hostname = “build-a”</text>
+    <text x="108" y="406" font-size="21" fill="#565f89">the CLI already received the distinguishing field</text>
+  </g>
+  <line x1="500" y1="460" x2="500" y2="540" stroke="#f7768e" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <g>
+    <rect x="80" y="550" width="840" height="230" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="108" y="598" font-size="26" fill="#c0caf5">agent-portal message list</text>
+    <text x="108" y="646" font-size="23" fill="#a9b1d6">3035c77c  muse / connected / idle</text>
+    <text x="108" y="688" font-size="23" fill="#a9b1d6">agent-portal  /home/me/repos/agent-portal</text>
+    <text x="108" y="738" font-size="21" fill="#f7768e">hostname discarded at println!</text>
+  </g>
+  <g>
+    <rect x="80" y="870" width="840" height="145" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="108" y="918" font-size="26" fill="#c0caf5">Same path, unknown machine</text>
+    <text x="108" y="963" font-size="23" fill="#f7768e">host-specific triage needs another API call</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="270" width="860" height="190" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1093" y="318" font-size="26" fill="#7aa2f7">format_session_row</text>
+    <text x="1093" y="362" font-size="23" fill="#a9b1d6">session.hostname is part of the row contract</text>
+    <text x="1093" y="406" font-size="21" fill="#565f89">exact output pinned by a launcher unit test</text>
+  </g>
+  <line x1="1495" y1="460" x2="1495" y2="540" stroke="#9ece6a" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <g>
+    <rect x="1065" y="550" width="860" height="230" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="598" font-size="26" fill="#c0caf5">agent-portal message list</text>
+    <text x="1093" y="646" font-size="23" fill="#a9b1d6">3035c77c  muse / connected / idle</text>
+    <text x="1093" y="688" font-size="23" fill="#9ece6a">build-a  agent-portal  /home/me/repos/agent-portal</text>
+    <text x="1093" y="738" font-size="21" fill="#565f89">host precedes name and directory for quick scanning</text>
+  </g>
+  <g>
+    <rect x="1065" y="870" width="860" height="145" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1093" y="918" font-size="26" fill="#c0caf5">Machine is visible immediately</text>
+    <text x="1093" y="963" font-size="23" fill="#9ece6a">duplicate checkout paths are no longer ambiguous</text>
+  </g>
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: list output only; recipient resolution and agent-portal message send are unchanged.</text>
+</svg>
