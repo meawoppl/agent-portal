@@ -343,26 +343,22 @@ pub async fn fork_session(
             .set(sessions::fork_create_worktree.eq(true))
             .execute(&mut conn)?;
     }
-    if let Some(prompt) = req
-        .divergence_prompt
-        .as_deref()
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty())
-    {
-        app_state.session_manager.set_last_input_sender(
-            session_id,
-            user_id,
-            "Fork divergence prompt".to_string(),
-        );
-        app_state.session_manager.enqueue_input(
-            &app_state.db_pool,
-            &session_id.to_string(),
-            session_id,
-            serde_json::Value::String(prompt.to_string()),
-            None,
-            None,
-        );
-    }
+    let fork_notice = fork_child_notice(
+        &source.session_name,
+        source_id,
+        req.divergence_prompt.as_deref(),
+    );
+    app_state
+        .session_manager
+        .set_last_input_sender(session_id, user_id, "Fork notice".to_string());
+    app_state.session_manager.enqueue_input(
+        &app_state.db_pool,
+        &session_id.to_string(),
+        session_id,
+        serde_json::Value::String(fork_notice),
+        None,
+        None,
+    );
     app_state
         .session_manager
         .register_launch_session(request_id, session_id);
@@ -420,6 +416,21 @@ fn apply_model_override(args: Vec<String>, agent_type: AgentType, model: String)
         AgentType::Muse => {}
     }
     next
+}
+
+fn fork_child_notice(
+    source_name: &str,
+    source_id: Uuid,
+    divergence_prompt: Option<&str>,
+) -> String {
+    let direction = divergence_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or("Please await new directions from the user.");
+    format!(
+        "This session was forked from Agent Portal session \"{source_name}\" ({source_id}). \
+         You are the child session, and the source thread is continuing independently. {direction}"
+    )
 }
 
 fn resolve_launch_target(
@@ -982,5 +993,30 @@ mod tests {
             "new".into(),
         );
         assert_eq!(codex, ["--yolo", "-c", "model=new"]);
+    }
+
+    #[test]
+    fn fork_notice_identifies_child_and_defaults_to_waiting() {
+        let source_id = Uuid::from_u128(0x11111111222233334444555555555555);
+        assert_eq!(
+            fork_child_notice("research", source_id, None),
+            "This session was forked from Agent Portal session \"research\" \
+             (11111111-2222-3333-4444-555555555555). You are the child session, and the \
+             source thread is continuing independently. Please await new directions from the user."
+        );
+    }
+
+    #[test]
+    fn divergence_prompt_replaces_only_default_direction() {
+        let source_id = Uuid::nil();
+        let notice = fork_child_notice(
+            "implementation",
+            source_id,
+            Some("  Explore the alternate storage design.  "),
+        );
+        assert!(notice.contains("You are the child session"));
+        assert!(notice.contains("source thread is continuing independently"));
+        assert!(notice.ends_with("Explore the alternate storage design."));
+        assert!(!notice.contains("await new directions"));
     }
 }
