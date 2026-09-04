@@ -26,13 +26,17 @@
 
 /* Header buttons - use shared .header-button class from dashboard.css */
 
-/* Settings Tabs */
+/* Settings Tabs. The strip holds many tabs and must never shed them off the
+   right edge on narrow viewports (the iPad hit this: wider than the phone
+   breakpoint, narrower than the tab row) — it scrolls horizontally instead,
+   with the global thin scrollbar as the affordance. */
 .settings-tabs {
     display: flex;
     gap: 0;
     padding: 0 2rem;
     background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
+    overflow-x: auto;
 }
 
 .tab-button {
@@ -47,6 +51,8 @@
     align-items: center;
     gap: 0.5rem;
     transition: color 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .tab-button:hover {

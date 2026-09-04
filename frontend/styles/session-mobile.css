@@ -20,6 +20,19 @@
     }
 }
 
+/* --- Touch devices of any width (iPads live above the 768px breakpoint) --
+   100dvh goes stale on iPadOS after an orientation change while the software
+   keyboard is involved: the container keeps the previous orientation's
+   keyboard inset and a dead band opens above the keyboard. --app-height is
+   set from visualViewport (index.html), which tracks rotations and keyboard
+   transitions correctly. Phones (max-width block below) override this with
+   position:fixed + inset:0; desktop pointers keep pure-CSS 100dvh. */
+@media (pointer: coarse) {
+    .focus-flow-container {
+        height: var(--app-height, 100dvh);
+    }
+}
+
 /* --- Tablet + phone (max-width: 768px) ---------------------------------- */
 @media (max-width: 768px) {
     /* Ensure dashboard fills exactly the visual viewport on mobile.

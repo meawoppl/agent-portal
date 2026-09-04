@@ -46,17 +46,22 @@
 }
 
 /* Admin Tabs — matches settings tab style */
+/* Scrolls horizontally on narrow viewports instead of shedding tabs off the
+   right edge (same treatment as .settings-tabs). */
 .admin-tabs {
     display: flex;
     gap: 0;
     padding: 0 2rem;
     background: var(--bg-darker);
     border-bottom: 1px solid var(--border);
+    overflow-x: auto;
 }
 
 .admin-tabs .tab-btn {
     background: transparent;
     border: none;
+    white-space: nowrap;
+    flex-shrink: 0;
     color: var(--text-secondary);
     padding: 1rem 1.5rem;
     font-size: 1rem;
