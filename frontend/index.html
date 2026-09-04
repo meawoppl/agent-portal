@@ -101,6 +101,34 @@
     <link data-trunk rel="css" href="styles/schedule-dialog.css" />
     <link data-trunk rel="css" href="styles/session-mobile.css" />
     <link data-trunk rel="css" href="styles/keyboard.css" />
+    <script>
+        // Publish the *visual* viewport height as --app-height. Pure-CSS 100dvh
+        // goes stale on iPadOS when the device rotates while the software
+        // keyboard is involved: the layout keeps the previous orientation's
+        // keyboard inset and a dead band opens above the keyboard.
+        // visualViewport is authoritative across rotations and keyboard
+        // open/close; touch layouts consume the variable (session-mobile.css),
+        // desktop keeps pure-CSS dvh. The delayed re-applies cover iPadOS
+        // settling the viewport a beat after the orientationchange event.
+        (function () {
+            var style = document.documentElement.style;
+            function apply() {
+                var vv = window.visualViewport;
+                var h = vv ? vv.height : window.innerHeight;
+                style.setProperty('--app-height', Math.round(h) + 'px');
+            }
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', apply);
+                window.visualViewport.addEventListener('scroll', apply);
+            }
+            window.addEventListener('resize', apply);
+            window.addEventListener('orientationchange', function () {
+                setTimeout(apply, 100);
+                setTimeout(apply, 500);
+            });
+            apply();
+        })();
+    </script>
     <link data-trunk rel="css" href="styles/settings.css" />
     <link data-trunk rel="css" href="styles/history.css" />
     <link data-trunk rel="css" href="styles/performance.css" />
