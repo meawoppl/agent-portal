@@ -688,7 +688,10 @@ fn handle_launcher_message(
         }
         LauncherToServer::AgentLoginStartResult { request_id, .. }
         | LauncherToServer::AgentLoginOutcomeResult { request_id, .. }
-        | LauncherToServer::InstallAgentResult { request_id, .. } => {
+        | LauncherToServer::InstallAgentResult { request_id, .. }
+        | LauncherToServer::VisualPrListResult { request_id, .. }
+        | LauncherToServer::VisualPrGenerateResult { request_id, .. }
+        | LauncherToServer::VisualPrApproveResult { request_id, .. } => {
             // Same request/response correlation as the probe path.
             app_state
                 .session_manager

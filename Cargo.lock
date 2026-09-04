@@ -97,6 +97,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "claude-codes",
  "claude-session-lib",
  "codex-session-lib",
  "croner",

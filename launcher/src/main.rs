@@ -14,6 +14,7 @@ mod process_manager;
 mod scheduler;
 mod seppuku;
 mod service;
+mod visual_pr;
 mod worktree;
 
 use clap::{Parser, Subcommand};

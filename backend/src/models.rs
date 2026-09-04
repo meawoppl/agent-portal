@@ -701,6 +701,20 @@ pub struct NewTurnMetric {
     pub context_snapshot_tokens: Option<i64>,
 }
 
+/// One stored visual-PR preview SVG (admin feature), upserted per
+/// `(repo, pr_number)` — regenerating replaces the previous render.
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::visual_pr_previews)]
+pub struct NewVisualPrPreview {
+    pub repo: String,
+    pub pr_number: i64,
+    pub svg: String,
+    pub model: Option<String>,
+    /// Hostname of the launcher that rendered it.
+    pub generated_on: Option<String>,
+    pub created_by: Option<Uuid>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

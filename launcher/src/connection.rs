@@ -85,6 +85,10 @@ pub async fn run_launcher_loop(
     let mut last_parked_reason: Option<LauncherRejectReason> = None;
     let mut scheduler = Scheduler::new();
     let mut login_registry = crate::login_registry::LoginRegistry::new();
+    // Replies from detached work (visual-PR generation runs minutes): tasks
+    // send finished frames here and the select loop forwards them, so long
+    // work never blocks the message loop or the heartbeat.
+    let (bg_tx, mut bg_rx) = mpsc::unbounded_channel::<LauncherToServer>();
 
     loop {
         // Re-resolve the token every attempt (CLI flag still wins): a parked
@@ -118,6 +122,7 @@ pub async fn run_launcher_loop(
                         shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
                         shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
                         shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
+                        shared::LAUNCHER_CAPABILITY_VISUAL_PR.to_string(),
                     ],
                 };
                 if ws_sender.send(register).await.is_err() {
@@ -243,6 +248,7 @@ pub async fn run_launcher_loop(
                                             &mut process_manager,
                                             &mut scheduler,
                                             &mut login_registry,
+                                            &bg_tx,
                                         ).await;
                                     }
                                 }
@@ -284,6 +290,13 @@ pub async fn run_launcher_loop(
                             // Enforce max runtime on scheduled sessions
                             for session_id in scheduler.timed_out_sessions() {
                                 process_manager.stop(&session_id).await;
+                            }
+                        }
+
+                        Some(reply) = bg_rx.recv() => {
+                            if ws_sender.send(reply).await.is_err() {
+                                warn!("Failed to send background task reply");
+                                break;
                             }
                         }
 
@@ -621,6 +634,7 @@ async fn handle_message(
     process_manager: &mut ProcessManager,
     scheduler: &mut Scheduler,
     login_registry: &mut crate::login_registry::LoginRegistry,
+    bg_tx: &mpsc::UnboundedSender<LauncherToServer>,
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
@@ -812,10 +826,17 @@ async fn handle_message(
         ServerToLauncher::ProbeAgents { request_id } => {
             // Synchronous probe in a blocking task so two `--version` spawns
             // don't hold up the message loop.
-            let agents = tokio::task::spawn_blocking(probe_agents_for_response)
-                .await
-                .unwrap_or_default();
-            let response = shared::LauncherToServer::ProbeAgentsResult { request_id, agents };
+            let (agents, gh) = tokio::task::spawn_blocking(|| {
+                (probe_agents_for_response(), session_lib::probe::probe_gh())
+            })
+            .await
+            .map(|(agents, gh)| (agents, Some(gh)))
+            .unwrap_or((Vec::new(), None));
+            let response = shared::LauncherToServer::ProbeAgentsResult {
+                request_id,
+                agents,
+                gh,
+            };
             if ws_sender.send(response).await.is_err() {
                 warn!("Failed to send probe agents result");
             }
@@ -843,6 +864,61 @@ async fn handle_message(
             if ws_sender.send(response).await.is_err() {
                 warn!("Failed to send install agent result");
             }
+        }
+        ServerToLauncher::VisualPrListPrs { request_id, repo } => {
+            let bg_tx = bg_tx.clone();
+            tokio::spawn(async move {
+                let (prs, error) = match crate::visual_pr::list_prs(&repo).await {
+                    Ok(prs) => (prs, None),
+                    Err(e) => (Vec::new(), Some(e)),
+                };
+                let _ = bg_tx.send(LauncherToServer::VisualPrListResult {
+                    request_id,
+                    prs,
+                    error,
+                });
+            });
+        }
+        ServerToLauncher::VisualPrGenerate {
+            request_id,
+            repo,
+            pr_number,
+            model,
+        } => {
+            info!("Visual PR generate requested: {repo}#{pr_number}");
+            // Minutes of clone + headless claude — always detached; the reply
+            // rides the background channel.
+            let bg_tx = bg_tx.clone();
+            tokio::spawn(async move {
+                let (svg, error) =
+                    match crate::visual_pr::generate(&repo, pr_number, model.as_deref()).await {
+                        Ok(svg) => (Some(svg), None),
+                        Err(e) => (None, Some(e)),
+                    };
+                let _ = bg_tx.send(LauncherToServer::VisualPrGenerateResult {
+                    request_id,
+                    svg,
+                    error,
+                });
+            });
+        }
+        ServerToLauncher::VisualPrApprove {
+            request_id,
+            repo,
+            pr_number,
+        } => {
+            let bg_tx = bg_tx.clone();
+            tokio::spawn(async move {
+                let (success, message) = match crate::visual_pr::approve(&repo, pr_number).await {
+                    Ok(m) => (true, Some(m)),
+                    Err(e) => (false, Some(e)),
+                };
+                let _ = bg_tx.send(LauncherToServer::VisualPrApproveResult {
+                    request_id,
+                    success,
+                    message,
+                });
+            });
         }
         ServerToLauncher::ScheduleSync { tasks } => {
             info!("Received ScheduleSync with {} task(s)", tasks.len());

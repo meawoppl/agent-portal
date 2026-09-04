@@ -649,8 +649,8 @@ pub async fn probe_agents(
     }
 
     match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-        Ok(Ok(LauncherToServer::ProbeAgentsResult { agents, .. })) => {
-            Ok(Json(ProbeAgentsResponse { agents }))
+        Ok(Ok(LauncherToServer::ProbeAgentsResult { agents, gh, .. })) => {
+            Ok(Json(ProbeAgentsResponse { agents, gh }))
         }
         Ok(Ok(_)) => Err(AppError::Internal(
             "Unexpected launcher probe response".to_string(),
@@ -669,7 +669,7 @@ pub async fn probe_agents(
 /// Confirm the caller owns `launcher_id` (agent logins run credentials on that
 /// host, so only its owner may drive them). 404 on unknown so we don't leak
 /// launcher existence to non-owners.
-fn require_launcher_owner(
+pub(crate) fn require_launcher_owner(
     app_state: &AppState,
     launcher_id: Uuid,
     user_id: Uuid,
@@ -685,7 +685,7 @@ fn require_launcher_owner(
 }
 
 /// Relay one request/response RPC to a launcher, reusing the probe correlation.
-async fn launcher_rpc(
+pub(crate) async fn launcher_rpc(
     app_state: &AppState,
     launcher_id: Uuid,
     request_id: Uuid,

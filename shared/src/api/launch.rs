@@ -75,6 +75,10 @@ pub struct DirectoryListingResponse {
 pub struct ProbeAgentsResponse {
     #[serde(default)]
     pub agents: Vec<crate::AgentInstall>,
+    /// `gh` CLI availability on the host (visual-PR host picker). `None` when
+    /// the launcher predates the probe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gh: Option<crate::GhStatus>,
 }
 
 /// Body of POST /api/launchers/:id/agent-login/start — which agent to sign in.

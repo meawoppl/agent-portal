@@ -39,6 +39,12 @@ pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
 /// undecodable frame (#1366).
 pub const LAUNCHER_CAPABILITY_HEARTBEAT_ACK: &str = "launcher.heartbeat_ack";
 
+/// Launcher capability advertised by versions that handle the visual-PR RPCs
+/// (`ServerToLauncher::VisualPrListPrs` / `VisualPrGenerate` /
+/// `VisualPrApprove`). The backend only sends those frames to launchers that
+/// advertise this, so older launchers never see an undecodable frame (#1366).
+pub const LAUNCHER_CAPABILITY_VISUAL_PR: &str = "launcher.visual_pr";
+
 /// Tokyo-Night data-visualization palette shared by charts, sparklines, and
 /// terminal colors. CSS theme tokens remain in the stylesheets where the
 /// browser can resolve them directly.
@@ -536,6 +542,19 @@ pub struct AgentLoginOutcome {
     /// have it. Shown verbatim so a failure is diagnosable, not mysterious.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// `gh` CLI availability on a launcher host, probed alongside the agent CLIs.
+/// Drives the visual-PR host picker: generation and PR listing run through
+/// the host's own authenticated `gh`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GhStatus {
+    /// True iff `gh --version` exited successfully.
+    pub installed: bool,
+    /// True iff `gh auth status` exited successfully (a logged-in `gh`).
+    pub authenticated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// Result of probing one agent CLI on a launcher host. Built at launcher

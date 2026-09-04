@@ -134,6 +134,36 @@ pub enum LauncherToServer {
         request_id: Uuid,
         #[serde(default)]
         agents: Vec<AgentInstall>,
+        /// `gh` CLI availability on this host (additive; older launchers omit
+        /// it → `None` = unknown). Drives the visual-PR host picker.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gh: Option<crate::GhStatus>,
+    },
+
+    /// Reply to `VisualPrListPrs`: the repo's open PRs, or `gh`'s own error.
+    VisualPrListResult {
+        request_id: Uuid,
+        #[serde(default)]
+        prs: Vec<crate::api::VisualPrRow>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `VisualPrGenerate`: the rendered SVG, or why generation failed.
+    VisualPrGenerateResult {
+        request_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        svg: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `VisualPrApprove`.
+    VisualPrApproveResult {
+        request_id: Uuid,
+        success: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
 
     /// Reply to `InstallAgent`: whether the install command exited cleanly, plus
@@ -314,6 +344,33 @@ pub enum ServerToLauncher {
     InstallAgent {
         request_id: Uuid,
         agent_type: AgentType,
+    },
+
+    /// List a repo's open PRs via this host's authenticated `gh`
+    /// (`gh pr list --repo …`). Replies `VisualPrListResult`. Sent only to
+    /// launchers advertising [`crate::LAUNCHER_CAPABILITY_VISUAL_PR`].
+    VisualPrListPrs { request_id: Uuid, repo: String },
+
+    /// Render the visual-PR summary SVG for `repo`#`pr_number` on this host:
+    /// shallow-clone into a tempdir, run a headless `claude` (optionally with
+    /// `model`) against the PR's diff, return the SVG, clean the tempdir up.
+    /// Replies `VisualPrGenerateResult` (generation runs minutes — the
+    /// launcher must not block its message loop on it). Capability-gated like
+    /// `VisualPrListPrs`.
+    VisualPrGenerate {
+        request_id: Uuid,
+        repo: String,
+        pr_number: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
+
+    /// Squash-merge (auto) `repo`#`pr_number` via this host's `gh`. Replies
+    /// `VisualPrApproveResult`. Capability-gated like `VisualPrListPrs`.
+    VisualPrApprove {
+        request_id: Uuid,
+        repo: String,
+        pr_number: i64,
     },
 
     /// Begin an interactive login for `agent_type` on this host. The launcher

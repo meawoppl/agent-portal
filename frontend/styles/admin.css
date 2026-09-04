@@ -518,3 +518,28 @@
     border-radius: 4px;
     background: #16161e;
 }
+
+.visual-pr-pickers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 0.5rem 0 1rem;
+}
+
+.visual-pr-pickers label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.visual-pr-pickers select,
+.visual-pr-pickers input {
+    background: var(--bg-darker);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    min-width: 14rem;
+}

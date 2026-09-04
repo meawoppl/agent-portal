@@ -301,6 +301,22 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    visual_pr_previews (id) {
+        id -> Uuid,
+        #[max_length = 255]
+        repo -> Varchar,
+        pr_number -> Int8,
+        svg -> Text,
+        #[max_length = 100]
+        model -> Nullable<Varchar>,
+        #[max_length = 255]
+        generated_on -> Nullable<Varchar>,
+        created_by -> Nullable<Uuid>,
+        created_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(custom_subdomains -> sessions (session_id));
 diesel::joinable!(custom_subdomains -> users (created_by));
 diesel::joinable!(deleted_session_costs -> users (user_id));
@@ -323,6 +339,7 @@ diesel::joinable!(turn_metrics -> messages (user_message_id));
 diesel::joinable!(turn_metrics -> sessions (session_id));
 diesel::joinable!(turn_metrics -> users (user_id));
 diesel::joinable!(user_identities -> users (user_id));
+diesel::joinable!(visual_pr_previews -> users (created_by));
 
 diesel::allow_tables_to_appear_in_same_query!(
     custom_subdomains,
@@ -341,4 +358,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     turn_metrics,
     user_identities,
     users,
+    visual_pr_previews,
 );

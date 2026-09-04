@@ -9,6 +9,8 @@ name = "agent-portal"
 path = "src/main.rs"
 
 [dependencies]
+tempfile = "3.27.0"
+claude-codes = { workspace = true }
 # Shared types
 shared = { path = "../shared" }
 

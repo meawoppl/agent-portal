@@ -121,6 +121,33 @@ pub fn probe_muse_sandbox() -> Option<bool> {
     }
 }
 
+/// Probe the `gh` CLI: presence via `gh --version`, sign-in via
+/// `gh auth status` (exit 0 iff some host is authenticated). Drives the
+/// visual-PR host picker — generation and PR listing run through the host's
+/// own `gh`, so an unauthenticated host is not a candidate.
+pub fn probe_gh() -> shared::GhStatus {
+    let version = match Command::new("gh").arg("--version").output() {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty()),
+        Ok(_) | Err(_) => None,
+    };
+    let installed = version.is_some();
+    let authenticated = installed
+        && Command::new("gh")
+            .args(["auth", "status"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+    shared::GhStatus {
+        installed,
+        authenticated,
+        version,
+    }
+}
+
 /// Presence-only login probe for Muse: the CLI persists no account
 /// identity (no `whoami` at 0.1.0), so a logged-in cell carries a provider
 /// label instead of a name, annotated when the credential comes from the

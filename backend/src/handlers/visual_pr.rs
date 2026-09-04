@@ -1,180 +1,215 @@
-//! Admin ▸ Visual PRs: list open pull requests and generate before/after
-//! summary SVGs in the `.claude/skills/visual-pr` house style.
+//! Admin ▸ Visual PRs: list a repo's open pull requests and manage generated
+//! before/after summary SVGs (the `.claude/skills/visual-pr` style).
 //!
-//! Generation shells out to a headless `claude` run (driven through the
-//! `claude-codes` protocol types) inside a configured git checkout
-//! (`PORTAL_VISUAL_PR_REPO_DIR`); PR listing and approval shell out to `gh`
-//! in the same checkout, reusing its ambient auth. This is an admin-only
-//! testing feature: previews are held in memory and do not survive a backend
-//! restart — regeneration is one click.
+//! All `gh` and `claude` work runs on a **launcher host the admin picks in the
+//! tab** — one that advertises [`shared::LAUNCHER_CAPABILITY_VISUAL_PR`] and
+//! probes with an authenticated `gh`. Generation on that host is
+//! self-contained (shallow clone into a tempdir, render, clean up); the
+//! returned SVG is stored durably in `visual_pr_previews`, upserted per
+//! `(repo, pr_number)`. Nothing is configured on the backend.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
-use claude_codes::ClaudeOutput;
+use diesel::prelude::*;
 use serde::Deserialize;
 use shared::api::{
-    VisualPrApproveResponse, VisualPrItem, VisualPrListResponse, VisualPrPreviewState,
+    VisualPrApproveRequest, VisualPrApproveResponse, VisualPrGenerateRequest, VisualPrItem,
+    VisualPrListResponse, VisualPrPreviewState,
 };
+use shared::{LauncherToServer, ServerToLauncher, LAUNCHER_CAPABILITY_VISUAL_PR};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tower_cookies::Cookies;
 use tracing::{error, info};
+use uuid::Uuid;
 
-use crate::{errors::AppError, handlers::admin::require_admin, AppState};
+use crate::handlers::launchers::{launcher_rpc, require_launcher_owner};
+use crate::{errors::AppError, handlers::admin::require_admin, schema, AppState};
 
-/// Ceiling on one headless generation run. A typical run is 1–3 minutes;
-/// past ten something is wedged and the slot should free up.
-const GENERATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+/// Ceiling on one launcher-side generation (shallow clone + headless claude).
+/// Slightly above the launcher's own 600s so its verdict arrives first.
+const GENERATE_TIMEOUT_SECS: u64 = 620;
+const LIST_TIMEOUT_SECS: u64 = 30;
+const APPROVE_TIMEOUT_SECS: u64 = 60;
 
 // ============================================================================
-// State
+// State: in-flight/failed markers only — finished SVGs live in the DB
 // ============================================================================
 
-/// One PR's preview lifecycle. SVGs are small (≈10 KB) so they live inline.
 #[derive(Debug, Clone)]
-enum PreviewEntry {
+enum Transient {
     Generating,
-    Ready { svg: String },
     Failed { error: String },
 }
 
-/// In-memory visual-PR runtime hung off [`AppState`]. Cloning shares the
-/// entry map (AppState itself derives `Clone`).
-#[derive(Clone)]
+/// In-memory generation markers hung off [`AppState`] (cloning shares the
+/// map). Ready previews are durable rows in `visual_pr_previews`.
+#[derive(Clone, Default)]
 pub struct VisualPrState {
-    /// Git checkout that `gh` and `claude` run in. `None` = feature disabled
-    /// (the list endpoint reports why; everything else 503s).
-    pub repo_dir: Option<PathBuf>,
-    /// Binary to invoke for generation (default `claude`).
-    pub claude_bin: String,
-    entries: Arc<Mutex<HashMap<i64, PreviewEntry>>>,
+    transient: Arc<Mutex<HashMap<(String, i64), Transient>>>,
 }
 
 impl VisualPrState {
-    pub fn from_env() -> Self {
-        let repo_dir = std::env::var("PORTAL_VISUAL_PR_REPO_DIR")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .map(PathBuf::from);
-        let claude_bin = std::env::var("PORTAL_VISUAL_PR_CLAUDE_BIN")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or_else(|| "claude".to_string());
-        match &repo_dir {
-            Some(dir) => info!("Visual PRs: enabled, repo dir {}", dir.display()),
-            None => info!("Visual PRs: disabled (PORTAL_VISUAL_PR_REPO_DIR unset)"),
-        }
-        Self {
-            repo_dir,
-            claude_bin,
-            entries: Arc::new(Mutex::new(HashMap::new())),
-        }
+    fn get(&self, repo: &str, n: i64) -> Option<Transient> {
+        self.transient
+            .lock()
+            .expect("poisoned")
+            .get(&(repo.to_string(), n))
+            .cloned()
     }
 
-    fn repo_dir(&self) -> Result<&PathBuf, AppError> {
-        self.repo_dir.as_ref().ok_or(AppError::ServiceUnavailable(
-            "visual PRs disabled: set PORTAL_VISUAL_PR_REPO_DIR",
-        ))
+    fn set(&self, repo: &str, n: i64, t: Transient) {
+        self.transient
+            .lock()
+            .expect("poisoned")
+            .insert((repo.to_string(), n), t);
     }
 
-    fn entry(&self, number: i64) -> Option<PreviewEntry> {
-        self.entries.lock().expect("poisoned").get(&number).cloned()
-    }
-
-    fn set_entry(&self, number: i64, entry: PreviewEntry) {
-        self.entries.lock().expect("poisoned").insert(number, entry);
+    fn clear(&self, repo: &str, n: i64) {
+        self.transient
+            .lock()
+            .expect("poisoned")
+            .remove(&(repo.to_string(), n));
     }
 }
 
 // ============================================================================
-// GET /api/admin/visual-prs — open PRs merged with preview state
+// Shared checks
 // ============================================================================
 
-/// Shape of one element of `gh pr list --json ...`.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GhPr {
-    number: i64,
-    title: String,
-    head_ref_name: String,
-    updated_at: String,
-    is_draft: bool,
-    url: String,
-    author: GhAuthor,
+/// `owner/name` with a bounded charset — the only repo shape relayed to a
+/// launcher (which validates again before touching `gh`).
+fn validate_repo(repo: &str) -> Result<(), AppError> {
+    let mut parts = repo.split('/');
+    let ok = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 100
+            && !s.starts_with('-')
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(owner), Some(name), None) if ok(owner) && ok(name) => Ok(()),
+        _ => Err(AppError::BadRequest("repo must be owner/name")),
+    }
 }
 
+/// Model overrides pass straight to `claude --model`; bound the charset.
+fn validate_model(model: &Option<String>) -> Result<(), AppError> {
+    if let Some(m) = model {
+        let ok = !m.is_empty()
+            && m.len() <= 64
+            && !m.starts_with('-')
+            && m.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'));
+        if !ok {
+            return Err(AppError::BadRequest("invalid model name"));
+        }
+    }
+    Ok(())
+}
+
+/// The chosen launcher must be the caller's, connected, and advertise the
+/// visual-PR capability (older launchers can't decode the frames — #1366).
+/// Returns the launcher's hostname for provenance stamping.
+fn require_visual_pr_launcher(
+    app_state: &AppState,
+    launcher_id: Uuid,
+    user_id: Uuid,
+) -> Result<String, AppError> {
+    require_launcher_owner(app_state, launcher_id, user_id)?;
+    let launcher = app_state
+        .session_manager
+        .get_launchers_for_user(&user_id)
+        .into_iter()
+        .find(|l| l.launcher_id == launcher_id)
+        .ok_or(AppError::NotFound("Launcher not found"))?;
+    if !launcher
+        .capabilities
+        .iter()
+        .any(|c| c == LAUNCHER_CAPABILITY_VISUAL_PR)
+    {
+        return Err(AppError::Conflict(
+            "this launcher is too old for visual PRs — update it first",
+        ));
+    }
+    Ok(launcher.hostname)
+}
+
+// ============================================================================
+// GET /api/admin/visual-prs?launcher_id=…&repo=… — open PRs + preview state
+// ============================================================================
+
 #[derive(Deserialize)]
-struct GhAuthor {
-    login: String,
+pub struct VisualPrListQuery {
+    pub launcher_id: Uuid,
+    pub repo: String,
 }
 
 pub async fn list_visual_prs(
     State(app_state): State<Arc<AppState>>,
     headers: HeaderMap,
     cookies: Cookies,
+    Query(q): Query<VisualPrListQuery>,
 ) -> Result<Json<VisualPrListResponse>, AppError> {
-    require_admin(&app_state, &headers, &cookies)?;
+    let admin = require_admin(&app_state, &headers, &cookies)?;
+    validate_repo(&q.repo)?;
+    require_visual_pr_launcher(&app_state, q.launcher_id, admin.id)?;
 
-    let Some(repo_dir) = app_state.visual_prs.repo_dir.clone() else {
-        return Ok(Json(VisualPrListResponse {
-            enabled: false,
-            disabled_reason: Some(
-                "Set PORTAL_VISUAL_PR_REPO_DIR to a git checkout with gh auth to enable."
-                    .to_string(),
-            ),
-            prs: vec![],
-        }));
+    let request_id = Uuid::new_v4();
+    let reply = launcher_rpc(
+        &app_state,
+        q.launcher_id,
+        request_id,
+        ServerToLauncher::VisualPrListPrs {
+            request_id,
+            repo: q.repo.clone(),
+        },
+        LIST_TIMEOUT_SECS,
+    )
+    .await?;
+    let rows = match reply {
+        LauncherToServer::VisualPrListResult { error: Some(e), .. } => {
+            return Err(AppError::BadGatewayMessage(format!("gh pr list: {e}")))
+        }
+        LauncherToServer::VisualPrListResult { prs, .. } => prs,
+        _ => {
+            return Err(AppError::Internal(
+                "unexpected launcher reply to VisualPrListPrs".into(),
+            ))
+        }
     };
 
-    let output = tokio::process::Command::new("gh")
-        .args([
-            "pr",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "50",
-            "--json",
-            "number,title,headRefName,updatedAt,isDraft,url,author",
-        ])
-        .current_dir(&repo_dir)
-        .output()
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to spawn gh: {e}")))?;
+    // Stored previews for this repo (Ready), merged under any transient state.
+    let stored: Vec<i64> = {
+        let mut conn = app_state.conn()?;
+        schema::visual_pr_previews::table
+            .filter(schema::visual_pr_previews::repo.eq(&q.repo))
+            .select(schema::visual_pr_previews::pr_number)
+            .load(&mut conn)?
+    };
+    let stored: std::collections::HashSet<i64> = stored.into_iter().collect();
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        error!("gh pr list failed: {}", stderr.trim());
-        return Err(AppError::BadGatewayMessage(format!(
-            "gh pr list failed: {}",
-            stderr.trim()
-        )));
-    }
-
-    let gh_prs: Vec<GhPr> = serde_json::from_slice(&output.stdout)
-        .map_err(|e| AppError::Internal(format!("unparseable gh pr list output: {e}")))?;
-
-    let prs = gh_prs
+    let prs = rows
         .into_iter()
         .map(|pr| {
-            let (preview, preview_error) = match app_state.visual_prs.entry(pr.number) {
+            let (preview, preview_error) = match app_state.visual_prs.get(&q.repo, pr.number) {
+                Some(Transient::Generating) => (VisualPrPreviewState::Generating, None),
+                Some(Transient::Failed { error }) => (VisualPrPreviewState::Failed, Some(error)),
+                None if stored.contains(&pr.number) => (VisualPrPreviewState::Ready, None),
                 None => (VisualPrPreviewState::None, None),
-                Some(PreviewEntry::Generating) => (VisualPrPreviewState::Generating, None),
-                Some(PreviewEntry::Ready { .. }) => (VisualPrPreviewState::Ready, None),
-                Some(PreviewEntry::Failed { error }) => (VisualPrPreviewState::Failed, Some(error)),
             };
             VisualPrItem {
                 number: pr.number,
                 title: pr.title,
-                head_ref: pr.head_ref_name,
-                author: pr.author.login,
+                head_ref: pr.head_ref,
+                author: pr.author,
                 updated_at: pr.updated_at,
-                draft: pr.is_draft,
+                draft: pr.draft,
                 url: pr.url,
                 preview,
                 preview_error,
@@ -182,15 +217,11 @@ pub async fn list_visual_prs(
         })
         .collect();
 
-    Ok(Json(VisualPrListResponse {
-        enabled: true,
-        disabled_reason: None,
-        prs,
-    }))
+    Ok(Json(VisualPrListResponse { prs }))
 }
 
 // ============================================================================
-// POST /api/admin/visual-prs/{number}/generate — kick off a background run
+// POST /api/admin/visual-prs/{number}/generate — render on the chosen host
 // ============================================================================
 
 pub async fn generate_visual_pr(
@@ -198,157 +229,168 @@ pub async fn generate_visual_pr(
     Path(number): Path<i64>,
     headers: HeaderMap,
     cookies: Cookies,
+    Json(req): Json<VisualPrGenerateRequest>,
 ) -> Result<StatusCode, AppError> {
     let admin = require_admin(&app_state, &headers, &cookies)?;
-    app_state.visual_prs.repo_dir()?;
+    validate_repo(&req.repo)?;
+    validate_model(&req.model)?;
+    let hostname = require_visual_pr_launcher(&app_state, req.launcher_id, admin.id)?;
 
     if matches!(
-        app_state.visual_prs.entry(number),
-        Some(PreviewEntry::Generating)
+        app_state.visual_prs.get(&req.repo, number),
+        Some(Transient::Generating)
     ) {
         return Err(AppError::Conflict("a generation is already running"));
     }
 
-    info!("Visual PR #{number}: generation started by {}", admin.email);
+    info!(
+        "Visual PR {}#{number}: generation on {hostname} (model {:?}) by {}",
+        req.repo, req.model, admin.email
+    );
     app_state
         .visual_prs
-        .set_entry(number, PreviewEntry::Generating);
-    tokio::spawn(run_generation(app_state.clone(), number));
+        .set(&req.repo, number, Transient::Generating);
+    tokio::spawn(run_generation(
+        app_state.clone(),
+        req,
+        number,
+        hostname,
+        admin.id,
+    ));
     Ok(StatusCode::ACCEPTED)
 }
 
-/// The background generation task: headless `claude` follows the committed
-/// `visual-pr` skill and writes the SVG to a temp path; we parse its final
-/// `ResultMessage` (via `claude-codes`) for success, then lift the file into
-/// memory.
-async fn run_generation(app_state: Arc<AppState>, number: i64) {
-    let result = generate_svg(&app_state, number).await;
-    match result {
+/// Background half of generate: RPC to the launcher (which clones, renders,
+/// and cleans up), then persist the SVG for long-term serving.
+async fn run_generation(
+    app_state: Arc<AppState>,
+    req: VisualPrGenerateRequest,
+    number: i64,
+    hostname: String,
+    admin_id: Uuid,
+) {
+    let request_id = Uuid::new_v4();
+    let reply = launcher_rpc(
+        &app_state,
+        req.launcher_id,
+        request_id,
+        ServerToLauncher::VisualPrGenerate {
+            request_id,
+            repo: req.repo.clone(),
+            pr_number: number,
+            model: req.model.clone(),
+        },
+        GENERATE_TIMEOUT_SECS,
+    )
+    .await;
+
+    let outcome: Result<String, String> = match reply {
+        Ok(LauncherToServer::VisualPrGenerateResult { svg: Some(svg), .. }) => Ok(svg),
+        Ok(LauncherToServer::VisualPrGenerateResult { error, .. }) => {
+            Err(error.unwrap_or_else(|| "launcher returned no SVG".into()))
+        }
+        Ok(_) => Err("unexpected launcher reply to VisualPrGenerate".into()),
+        // launcher_rpc's failures carry static reasons; keep them readable.
+        Err(AppError::GatewayTimeout(m)) | Err(AppError::BadGateway(m)) => Err(m.to_string()),
+        Err(e) => Err(format!("{e:?}")),
+    };
+
+    match outcome {
         Ok(svg) => {
-            info!("Visual PR #{number}: preview ready ({} bytes)", svg.len());
-            app_state
-                .visual_prs
-                .set_entry(number, PreviewEntry::Ready { svg });
-        }
-        Err(e) => {
-            error!("Visual PR #{number}: generation failed: {e}");
-            app_state
-                .visual_prs
-                .set_entry(number, PreviewEntry::Failed { error: e });
-        }
-    }
-}
-
-async fn generate_svg(app_state: &Arc<AppState>, number: i64) -> Result<String, String> {
-    let repo_dir = app_state
-        .visual_prs
-        .repo_dir
-        .clone()
-        .ok_or("visual PRs disabled")?;
-    let out_path = std::env::temp_dir().join(format!("visual-pr-{number}.svg"));
-    // A stale file from an earlier run must not be mistaken for this run's output.
-    let _ = tokio::fs::remove_file(&out_path).await;
-
-    let prompt = format!(
-        "Generate the visual PR summary for PR #{number} of this repository by following \
-         .claude/skills/visual-pr/SKILL.md exactly. Read the real diff first \
-         (`gh pr view {number}`, `gh pr diff {number}`) and ground every identifier in the \
-         code — do not invent names. Write the final SVG to {out} and validate it with \
-         `python3 .claude/skills/visual-pr/check_svg.py {out}`. Do NOT run `agent-portal show`, \
-         do NOT check out branches, do NOT commit, push, or modify the repository.",
-        out = out_path.display(),
-    );
-
-    let child = tokio::process::Command::new(&app_state.visual_prs.claude_bin)
-        .args([
-            "-p",
-            &prompt,
-            "--output-format",
-            "json",
-            "--dangerously-skip-permissions",
-        ])
-        .current_dir(&repo_dir)
-        .stdin(std::process::Stdio::null())
-        .output();
-
-    let output = tokio::time::timeout(GENERATION_TIMEOUT, child)
-        .await
-        .map_err(|_| format!("timed out after {}s", GENERATION_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("failed to spawn claude: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let tail: String = stderr
-            .chars()
-            .rev()
-            .take(400)
-            .collect::<Vec<_>>()
-            .iter()
-            .rev()
-            .collect();
-        return Err(format!(
-            "claude exited with {}: {}",
-            output.status,
-            tail.trim()
-        ));
-    }
-
-    // `--output-format json` prints a single ResultMessage object.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    match serde_json::from_str::<ClaudeOutput>(stdout.trim()) {
-        Ok(ClaudeOutput::Result(result)) if result.is_error => {
-            return Err(format!(
-                "claude reported an error: {}",
-                result.result.unwrap_or_else(|| "(no detail)".to_string())
-            ));
-        }
-        Ok(_) => {}
-        Err(e) => {
-            // The run may still have produced the file; note the parse failure
-            // only if it didn't.
-            if !out_path.exists() {
-                return Err(format!("unparseable claude output ({e})"));
+            let row = crate::models::NewVisualPrPreview {
+                repo: req.repo.clone(),
+                pr_number: number,
+                svg,
+                model: req.model.clone(),
+                generated_on: Some(hostname),
+                created_by: Some(admin_id),
+            };
+            let stored = app_state
+                .conn()
+                .map_err(|e| format!("{e:?}"))
+                .and_then(|mut conn| {
+                    diesel::insert_into(schema::visual_pr_previews::table)
+                        .values(&row)
+                        .on_conflict((
+                            schema::visual_pr_previews::repo,
+                            schema::visual_pr_previews::pr_number,
+                        ))
+                        .do_update()
+                        .set((
+                            schema::visual_pr_previews::svg.eq(&row.svg),
+                            schema::visual_pr_previews::model.eq(&row.model),
+                            schema::visual_pr_previews::generated_on.eq(&row.generated_on),
+                            schema::visual_pr_previews::created_by.eq(row.created_by),
+                            schema::visual_pr_previews::created_at.eq(diesel::dsl::now),
+                        ))
+                        .execute(&mut conn)
+                        .map_err(|e| e.to_string())
+                });
+            match stored {
+                Ok(_) => {
+                    info!("Visual PR {}#{number}: preview stored", req.repo);
+                    app_state.visual_prs.clear(&req.repo, number);
+                }
+                Err(e) => {
+                    error!("Visual PR {}#{number}: store failed: {e}", req.repo);
+                    app_state.visual_prs.set(
+                        &req.repo,
+                        number,
+                        Transient::Failed {
+                            error: format!("generated, but storing failed: {e}"),
+                        },
+                    );
+                }
             }
         }
+        Err(e) => {
+            error!("Visual PR {}#{number}: generation failed: {e}", req.repo);
+            app_state
+                .visual_prs
+                .set(&req.repo, number, Transient::Failed { error: e });
+        }
     }
-
-    let svg = tokio::fs::read_to_string(&out_path).await.map_err(|e| {
-        format!(
-            "claude finished but wrote no SVG at {}: {e}",
-            out_path.display()
-        )
-    })?;
-    if !svg.trim_start().starts_with("<svg") {
-        return Err("output file does not start with <svg".to_string());
-    }
-    Ok(svg)
 }
 
 // ============================================================================
-// GET /api/admin/visual-prs/{number}/preview.svg — serve a ready preview
+// GET /api/admin/visual-prs/{number}/preview.svg?repo=… — serve a stored SVG
 // ============================================================================
+
+#[derive(Deserialize)]
+pub struct PreviewQuery {
+    pub repo: String,
+}
 
 pub async fn get_visual_pr_svg(
     State(app_state): State<Arc<AppState>>,
     Path(number): Path<i64>,
     headers: HeaderMap,
     cookies: Cookies,
+    Query(q): Query<PreviewQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     require_admin(&app_state, &headers, &cookies)?;
-    match app_state.visual_prs.entry(number) {
-        Some(PreviewEntry::Ready { svg }) => Ok((
+    validate_repo(&q.repo)?;
+    let mut conn = app_state.conn()?;
+    let svg: Option<String> = schema::visual_pr_previews::table
+        .filter(schema::visual_pr_previews::repo.eq(&q.repo))
+        .filter(schema::visual_pr_previews::pr_number.eq(number))
+        .select(schema::visual_pr_previews::svg)
+        .first(&mut conn)
+        .optional()?;
+    match svg {
+        Some(svg) => Ok((
             [
                 (header::CONTENT_TYPE, "image/svg+xml"),
                 (header::CACHE_CONTROL, "no-store"),
             ],
             svg,
         )),
-        _ => Err(AppError::NotFound("no preview for this PR")),
+        None => Err(AppError::NotFound("no preview for this PR")),
     }
 }
 
 // ============================================================================
-// POST /api/admin/visual-prs/{number}/approve — squash-merge via gh
+// POST /api/admin/visual-prs/{number}/approve — squash-merge via the host's gh
 // ============================================================================
 
 pub async fn approve_visual_pr(
@@ -356,36 +398,71 @@ pub async fn approve_visual_pr(
     Path(number): Path<i64>,
     headers: HeaderMap,
     cookies: Cookies,
+    Json(req): Json<VisualPrApproveRequest>,
 ) -> Result<Json<VisualPrApproveResponse>, AppError> {
     let admin = require_admin(&app_state, &headers, &cookies)?;
-    let repo_dir = app_state.visual_prs.repo_dir()?.clone();
+    validate_repo(&req.repo)?;
+    require_visual_pr_launcher(&app_state, req.launcher_id, admin.id)?;
 
-    info!("Visual PR #{number}: approve requested by {}", admin.email);
-    // `--auto` merges immediately when requirements are already met and
-    // otherwise arms auto-merge for when CI goes green — either way one call.
-    let output = tokio::process::Command::new("gh")
-        .args([
-            "pr",
-            "merge",
-            &number.to_string(),
-            "--squash",
-            "--delete-branch",
-            "--auto",
-        ])
-        .current_dir(&repo_dir)
-        .output()
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to spawn gh: {e}")))?;
+    info!(
+        "Visual PR {}#{number}: approve requested by {}",
+        req.repo, admin.email
+    );
+    let request_id = Uuid::new_v4();
+    let reply = launcher_rpc(
+        &app_state,
+        req.launcher_id,
+        request_id,
+        ServerToLauncher::VisualPrApprove {
+            request_id,
+            repo: req.repo.clone(),
+            pr_number: number,
+        },
+        APPROVE_TIMEOUT_SECS,
+    )
+    .await?;
+    match reply {
+        LauncherToServer::VisualPrApproveResult {
+            success: true,
+            message,
+            ..
+        } => Ok(Json(VisualPrApproveResponse {
+            message: message.unwrap_or_else(|| format!("PR #{number} approved")),
+        })),
+        LauncherToServer::VisualPrApproveResult { message, .. } => {
+            Err(AppError::BadGatewayMessage(format!(
+                "gh pr merge failed: {}",
+                message.unwrap_or_else(|| "(no detail)".into())
+            )))
+        }
+        _ => Err(AppError::Internal(
+            "unexpected launcher reply to VisualPrApprove".into(),
+        )),
+    }
+}
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::BadGatewayMessage(format!(
-            "gh pr merge failed: {}",
-            stderr.trim()
-        )));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_validation_is_strict() {
+        assert!(validate_repo("meawoppl/agent-portal").is_ok());
+        assert!(validate_repo("a-b/c_d.e").is_ok());
+        assert!(validate_repo("meawoppl").is_err());
+        assert!(validate_repo("a/b/c").is_err());
+        assert!(validate_repo("a b/c").is_err());
+        assert!(validate_repo("-owner/name").is_err());
+        assert!(validate_repo("owner/").is_err());
     }
 
-    Ok(Json(VisualPrApproveResponse {
-        message: format!("PR #{number} approved — squash merge queued (auto-merge)"),
-    }))
+    #[test]
+    fn model_validation_is_strict() {
+        assert!(validate_model(&None).is_ok());
+        assert!(validate_model(&Some("sonnet".into())).is_ok());
+        assert!(validate_model(&Some("claude-fable-5".into())).is_ok());
+        assert!(validate_model(&Some("-p".into())).is_err());
+        assert!(validate_model(&Some("a model".into())).is_err());
+        assert!(validate_model(&Some(String::new())).is_err());
+    }
 }
