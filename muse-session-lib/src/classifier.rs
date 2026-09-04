@@ -152,6 +152,22 @@ impl MuseClassifier {
             return vec![AgentOutput::Noop];
         }
 
+        // Reminder scaffolding identifies itself by *operation* even when its
+        // task was never registered above (Muse Code 1.0.x emits the
+        // `reminder.child_run` auto-approval under a task id whose `proposed`
+        // this classifier may never see). Same rationale as the tracked case:
+        // policy bookkeeping renders as repeated
+        // "reminder.child_run — policy: …" noise, so screen on the operation
+        // name too, not only on task tracking.
+        if event_kind == Some("side_effect_intent")
+            && event
+                .and_then(|e| e.get("operation"))
+                .and_then(|o| o.as_str())
+                .is_some_and(|op| op.starts_with("reminder."))
+        {
+            return vec![AgentOutput::Noop];
+        }
+
         // Turn boundary: any link whose `proposed` never arrived (crash,
         // drift) flushes fail-open as visible rather than being held
         // forever.
@@ -578,6 +594,35 @@ mod reminder_screen {
             matches!(c.classify(policy)[..], [AgentOutput::Noop]),
             "reminder auto-approval policy is internal bookkeeping"
         );
+    }
+
+    #[test]
+    fn reminder_operation_is_screened_even_without_task_registration() {
+        // Live-captured (Muse Code 1.0.x): the `reminder.child_run`
+        // auto-approval can arrive under a task id whose `proposed` this
+        // classifier never saw — task tracking alone misses it, and the
+        // record rendered as "reminder.child_run — policy: …" noise. The
+        // operation name is screened directly.
+        let mut c = MuseClassifier::default();
+        let policy = lifecycle(
+            "side_effect_intent",
+            "never-registered",
+            json!({
+                "operation": "reminder.child_run",
+                "policy_decision": "reminder_child:read_only:subagent_tool_auto_approval"
+            }),
+        );
+        assert!(
+            matches!(c.classify(policy)[..], [AgentOutput::Noop]),
+            "reminder-operation bookkeeping is screened without registration"
+        );
+        // A non-reminder operation on an unregistered task still passes.
+        let other = lifecycle(
+            "side_effect_intent",
+            "never-registered-2",
+            json!({"operation": "tool.exec", "policy_decision": "deny:policy"}),
+        );
+        assert!(matches!(c.classify(other)[..], [AgentOutput::Visible(_)]));
     }
 
     #[test]
