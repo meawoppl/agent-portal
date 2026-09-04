@@ -252,6 +252,10 @@ impl Component for PermissionHandler {
 
         html! {
             <PermissionDialog
+                // Keyed by request so each new prompt remounts: the dialog's
+                // collapse state is per-instance and must start expanded
+                // rather than inherit the previous prompt's fold.
+                key={perm.request_id.clone()}
                 permission={perm.clone()}
                 selected={self.selected}
                 multi_select_options={self.multi_select_options.clone()}

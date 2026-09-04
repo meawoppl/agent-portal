@@ -26,11 +26,59 @@
     }
 }
 
-.permission-header {
+/* Collapse toggle bar. Replaces the old static `.permission-header` and is
+   present on every prompt kind.
+
+   The prompt is a flex sibling of the transcript inside `.session-view`, so its
+   height is taken directly out of the scroll area — a tall prompt squeezes the
+   transcript to an unreadable sliver. Folding to this bar gives that space
+   back, so the bar must stay cheap: one line, no wrapping. */
+.permission-collapse-toggle {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.permission-prompt:not(.collapsed) .permission-collapse-toggle {
     margin-bottom: 0.75rem;
+}
+
+/* Collapsed: the bar is the whole prompt, so drop the scroll cap that only
+   makes sense for a body that is no longer rendered. */
+.permission-prompt.collapsed {
+    max-height: none;
+    overflow: visible;
+    padding: 0.6rem 1rem;
+}
+
+.permission-collapse-toggle .collapse-caret {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.permission-collapse-toggle:hover .collapse-caret {
+    color: var(--text-primary);
+}
+
+/* Gist of the folded prompt. Clipped rather than wrapped: wrapping would grow
+   the bar and re-take the space collapsing just freed. */
+.permission-collapse-toggle .collapse-summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
 }
 
 .permission-icon {
@@ -161,6 +209,12 @@
 .permission-prompt.ask-user-question {
     background: linear-gradient(135deg, rgba(122, 162, 247, 0.15) 0%, rgba(187, 154, 247, 0.15) 100%);
     border-color: rgba(122, 162, 247, 0.4);
+}
+
+/* The question prompt uses the blue/purple palette, not the red permission
+   one, so its toggle title should not read as an error. */
+.permission-prompt.ask-user-question .permission-title {
+    color: var(--accent);
 }
 
 .ask-user-question .question-container {
