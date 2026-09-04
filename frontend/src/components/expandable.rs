@@ -133,11 +133,19 @@ pub fn expandable_text(props: &ExpandableTextProps) -> Html {
                 <div class="expandable-toggle" onclick={toggle}>{ toggle_label }</div>
             </div>
         },
+        // The toggle sits OUTSIDE the `pre`: several `pre` consumers are
+        // scroll containers (`.tool-result-content` caps at 200px,
+        // `.write-content` at 400px), and a toggle inside one lands at the
+        // bottom of the scroll window — half-clipped at the box edge and
+        // reachable only by noticing a thin scrollbar. Outside, it is always
+        // fully visible and clickable regardless of scroll position.
         _ => html! {
-            <pre class={props.class.clone()}>
-                { render_body(&display, props.ansi) }
+            <div class="expandable-block">
+                <pre class={props.class.clone()}>
+                    { render_body(&display, props.ansi) }
+                </pre>
                 <div class="expandable-toggle" onclick={toggle}>{ toggle_label }</div>
-            </pre>
+            </div>
         },
     }
 }
@@ -187,14 +195,18 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
     };
     let remaining = total - props.max_lines;
 
+    // Toggle outside the (scrollable) `pre` — see the ExpandableText `pre`
+    // arm for why.
     html! {
-        <pre class={classes!(props.class.clone(), "write-content")}>
-            { for visible.iter().enumerate().map(|(i, line)| html! {
-                <div class="write-line">
-                    <span class="line-number">{ format!("{:>4}", i + 1) }</span>
-                    <span class="line-content">{ linkify_urls(line) }</span>
-                </div>
-            })}
+        <div class="expandable-block">
+            <pre class={classes!(props.class.clone(), "write-content")}>
+                { for visible.iter().enumerate().map(|(i, line)| html! {
+                    <div class="write-line">
+                        <span class="line-number">{ format!("{:>4}", i + 1) }</span>
+                        <span class="line-content">{ linkify_urls(line) }</span>
+                    </div>
+                })}
+            </pre>
             <div class="write-truncated expandable-toggle" onclick={toggle}>
                 { if *expanded {
                     "show less".to_string()
@@ -202,7 +214,7 @@ pub fn expandable_lines(props: &ExpandableLinesProps) -> Html {
                     format!("... {} more lines", remaining)
                 }}
             </div>
-        </pre>
+        </div>
     }
 }
 
