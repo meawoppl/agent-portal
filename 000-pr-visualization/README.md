@@ -11,7 +11,11 @@ thing a reviewer sees when opening "Files changed".
   validates it with `check_svg.py` — the same validator the CI check runs.
 - **Enforcement**: the `Visual PR attached` workflow
   ([.github/workflows/visual-pr.yml](../.github/workflows/visual-pr.yml))
-  fails a PR that lacks its SVG or whose SVG fails validation.
+  wires up the reusable [meawoppl/visual-pr](https://github.com/meawoppl/visual-pr)
+  action, which fails a PR that lacks its SVG or whose SVG fails validation —
+  and on failure emits the full authoring spec, this repo's style JSON
+  ([.github/visual-pr/style.json](../.github/visual-pr/style.json)), and the
+  exact local check to run.
 - **Opting out**: label a PR `no-visual` when a diagram is genuinely noise
   (dependency bumps, typo fixes). The job skips, which satisfies the check.
 

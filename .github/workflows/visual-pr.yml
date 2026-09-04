@@ -1,16 +1,15 @@
 name: Visual PR
 
 # Every PR ships its own visual summary, committed at
-# 000-pr-visualization/<pr-number>.svg (the 000- prefix sorts it first in
-# GitHub's review file list, so the picture is the first thing a reviewer
-# sees). This check makes that a requirement.
+# 000-pr-visualization/<pr-number>.svg. Enforcement, validation, and the
+# agent-facing fix instructions live in the reusable action
+# (github.com/meawoppl/visual-pr); this workflow just wires it up.
 #
 # pull_request_target runs THIS file from the BASE branch, so the check exists
 # for every open PR the moment it lands on main — old branches don't need a
 # rebase to start reporting. The PR head is checked out as DATA only (an SVG
 # to look at); nothing from the head is ever executed, which is what makes
-# _target safe here. Keep it that way: never run scripts, build files, or
-# hooks from the head checkout in this workflow.
+# _target safe here. Keep it that way.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
@@ -21,16 +20,12 @@ permissions:
 jobs:
   visual-pr:
     name: Visual PR attached
-    # Escape hatch for changes where a diagram is genuinely noise (bot bumps,
-    # typo fixes): label the PR `no-visual`. A skipped required job satisfies
-    # the ruleset, so the label is a real opt-out, not a dodge around a red X.
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-visual') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the validator (base branch — trusted code)
+      - name: Check out this repo's visual-pr config (base branch — trusted)
         uses: actions/checkout@v4
         with:
-          sparse-checkout: .claude/skills/visual-pr
+          sparse-checkout: .github/visual-pr
 
       - name: Check out the PR's visualization (head — data only)
         uses: actions/checkout@v4
@@ -40,13 +35,14 @@ jobs:
           path: pr-head
           sparse-checkout: 000-pr-visualization
 
-      - name: Require and validate the PR's SVG
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          FILE="pr-head/000-pr-visualization/${PR_NUMBER}.svg"
-          if [ ! -f "$FILE" ]; then
-            echo "::error::Missing 000-pr-visualization/${PR_NUMBER}.svg — every PR ships its visual summary (generate it with the visual-pr skill: .claude/skills/visual-pr/SKILL.md). For changes where a diagram is genuinely noise, label the PR 'no-visual'."
-            exit 1
-          fi
-          python3 .claude/skills/visual-pr/check_svg.py "$FILE"
+      - uses: meawoppl/visual-pr@v1
+        with:
+          head-path: pr-head
+          style: .github/visual-pr/style.json
+          instructions: |
+            This is a Rust workspace (Axum backend, Yew/WASM frontend, launcher
+            daemon). Ground every identifier in the actual diff — real type,
+            function, table, and message names. Prefer the in-repo skill
+            (.claude/skills/visual-pr/SKILL.md), whose local validator matches
+            this check. Show the finished SVG in your portal session with
+            `agent-portal show`.
