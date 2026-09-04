@@ -42,7 +42,5 @@ jobs:
           instructions: |
             This is a Rust workspace (Axum backend, Yew/WASM frontend, launcher
             daemon). Ground every identifier in the actual diff — real type,
-            function, table, and message names. Prefer the in-repo skill
-            (.claude/skills/visual-pr/SKILL.md), whose local validator matches
-            this check. Show the finished SVG in your portal session with
-            `agent-portal show`.
+            function, table, and message names. Show the finished SVG in your
+            portal session with `agent-portal show`.

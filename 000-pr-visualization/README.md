@@ -5,10 +5,13 @@ here as `<pr-number>.svg` on the PR branch. The `000-` directory prefix sorts
 this path first in GitHub's review file list, so the picture is the first
 thing a reviewer sees when opening "Files changed".
 
-- **Generating one**: the `visual-pr` skill
-  ([.claude/skills/visual-pr/SKILL.md](../.claude/skills/visual-pr/SKILL.md))
-  reads the PR's actual diff, renders the SVG in the house style, and
-  validates it with `check_svg.py` — the same validator the CI check runs.
+- **Generating one**: follow the authoring spec in
+  [meawoppl/visual-pr](https://github.com/meawoppl/visual-pr) (`SPEC.md`) —
+  read the PR's actual diff, render the SVG in the house style, and validate
+  with its `check_svg.py` against
+  [.github/visual-pr/style.json](../.github/visual-pr/style.json) — the same
+  validator the CI check runs. The check's failure output carries the full
+  recipe.
 - **Enforcement**: the `Visual PR attached` workflow
   ([.github/workflows/visual-pr.yml](../.github/workflows/visual-pr.yml))
   wires up the reusable [meawoppl/visual-pr](https://github.com/meawoppl/visual-pr)

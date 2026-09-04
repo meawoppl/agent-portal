@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1813 · Pull the in-repo visual-PR tooling; the upstream action is the product</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The visual-PR tooling lived in three places in this repo while the real product moved</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">upstream; this deletes the copies and keeps only the thin consumer of meawoppl/visual-pr.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="250" width="840" height="180" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#7aa2f7">admin Visual PRs tab</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">visual_prs_tab.rs · handlers/visual_pr.rs · 4 routes</text>
+    <text x="104" y="364" font-size="23" fill="#a9b1d6">shared::api::visual_prs · PORTAL_VISUAL_PR_* env config</text>
+    <text x="104" y="398" font-size="21" fill="#f7768e">a portal viewer for images whose real home is now the PR itself</text>
+  </g>
+
+  <g>
+    <rect x="80" y="470" width="840" height="180" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="512" font-size="26" fill="#7aa2f7">.claude/skills/visual-pr/</text>
+    <text x="104" y="550" font-size="23" fill="#a9b1d6">SKILL.md spec · template.svg · check_svg.py</text>
+    <text x="104" y="584" font-size="21" fill="#f7768e">a second copy of the spec and validator — guaranteed to drift from</text>
+    <text x="104" y="614" font-size="21" fill="#f7768e">the one the CI check actually runs</text>
+  </g>
+
+  <g>
+    <rect x="80" y="690" width="840" height="140" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="732" font-size="26" fill="#c0caf5">the consumer (kept)</text>
+    <text x="104" y="770" font-size="23" fill="#a9b1d6">Visual PR attached workflow · style.json · 000-pr-visualization/</text>
+    <text x="104" y="804" font-size="21" fill="#565f89">already delegating to meawoppl/visual-pr@v1</text>
+  </g>
+
+  <line x1="500" y1="830" x2="500" y2="922" stroke="#f7768e" stroke-width="1.5" stroke-dasharray="4 6" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="930" width="840" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="976" font-size="26" fill="#c0caf5">three homes, one product</text>
+    <text x="104" y="1014" font-size="23" fill="#f7768e">tab, skill, and action each carried their own copy of the idea</text>
+    <text x="104" y="1048" font-size="21" fill="#565f89">every spec change would need three edits — or silently diverge</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1065" y="250" width="860" height="200" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="292" font-size="26" fill="#9ece6a">github.com/meawoppl/visual-pr — the one home</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">action.yml · SPEC.md · check_svg.py · styles · template</text>
+    <text x="1089" y="364" font-size="23" fill="#a9b1d6">the check's failure output IS the documentation an agent needs:</text>
+    <text x="1089" y="398" font-size="21" fill="#565f89">spec + effective style + fetch/run commands for the exact validator</text>
+  </g>
+
+  <line x1="1495" y1="450" x2="1495" y2="516" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="520" width="860" height="180" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="562" font-size="26" fill="#c0caf5">this repo keeps only consumption</text>
+    <text x="1089" y="600" font-size="23" fill="#a9b1d6">the workflow (uses: meawoppl/visual-pr@v1) · style.json</text>
+    <text x="1089" y="634" font-size="23" fill="#a9b1d6">000-pr-visualization/ · one AGENTS.md bullet pointing upstream</text>
+    <text x="1089" y="668" font-size="21" fill="#565f89">net diff: −16 files of tab/skill machinery, zero behavior lost in review</text>
+  </g>
+
+  <line x1="1495" y1="700" x2="1495" y2="922" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1520" y="800" font-size="21" fill="#565f89">companion: the launcher-host generation</text>
+  <text x="1520" y="830" font-size="21" fill="#565f89">PR closes as superseded</text>
+
+  <g>
+    <rect x="1065" y="930" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="976" font-size="26" fill="#c0caf5">one spec, one validator, one owner</text>
+    <text x="1089" y="1014" font-size="23" fill="#9ece6a">any repo adopts the action; this repo is just its first customer</text>
+    <text x="1089" y="1048" font-size="21" fill="#565f89">this SVG was authored against the upstream spec and validator</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">The portal loses its stored-preview gallery — GitHub is the only viewer now; if a portal gallery is ever wanted again, it should read these committed files.</text>
+</svg>

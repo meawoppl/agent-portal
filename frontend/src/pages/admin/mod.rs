@@ -10,13 +10,11 @@ mod overview_tab;
 mod sessions_tab;
 mod subdomains_tab;
 mod users_tab;
-mod visual_prs_tab;
 
 use overview_tab::AdminOverviewTab;
 use sessions_tab::AdminSessionsTab;
 use subdomains_tab::AdminSubdomainsTab;
 use users_tab::AdminUsersTab;
-use visual_prs_tab::AdminVisualPrsTab;
 
 use crate::components::ConfirmModal;
 use crate::utils::{self, FetchError, On401};
@@ -43,7 +41,6 @@ enum AdminTab {
     Users,
     Sessions,
     Subdomains,
-    VisualPrs,
 }
 
 // ============================================================================
@@ -430,7 +427,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let on_users_tab = make_tab_handler(AdminTab::Users);
     let on_sessions_tab = make_tab_handler(AdminTab::Sessions);
     let on_subdomains_tab = make_tab_handler(AdminTab::Subdomains);
-    let on_visual_prs_tab = make_tab_handler(AdminTab::VisualPrs);
 
     // Cancel confirmation
     let on_cancel_confirm = {
@@ -501,12 +497,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                 >
                                     { "Subdomains" }
                                 </button>
-                                <button
-                                    class={classes!("tab-btn", if *active_tab == AdminTab::VisualPrs { Some("active") } else { None })}
-                                    onclick={on_visual_prs_tab}
-                                >
-                                    { "Visual PRs" }
-                                </button>
                             </nav>
 
                             <div class="admin-content">
@@ -537,9 +527,6 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                         }
                                         AdminTab::Subdomains => {
                                             html! { <AdminSubdomainsTab /> }
-                                        }
-                                        AdminTab::VisualPrs => {
-                                            html! { <AdminVisualPrsTab /> }
                                         }
                                     }
                                 }
