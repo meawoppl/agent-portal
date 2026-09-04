@@ -14,7 +14,7 @@
   <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1818 · Survive mutex poisoning in codex login</text>
 
   <text x="55" y="100" font-size="34" fill="#e6e9f5">The login mutex was locked with unwrap() — one poisoned guard panicked poll() and the watcher;</text>
-  <text x="55" y="140" font-size="34" fill="#e6e9f5">now both fold lock failure into the existing default, so a poisoned login degrades, not dies.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now both recover the guard, since poisoning is sticky and dropping it wedges login forever.</text>
   <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
 
   <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
@@ -42,21 +42,21 @@
 
   <g>
     <rect x="1065" y="250" width="860" height="132" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
-    <text x="1089" y="292" font-size="26" fill="#9ece6a">poll(): lock().ok().and_then(clone)</text>
-    <text x="1089" y="330" font-size="23" fill="#a9b1d6">poison joins None in the existing not-done default</text>
-    <text x="1089" y="364" font-size="22" fill="#565f89">same default value, strictly wider trigger</text>
+    <text x="1089" y="292" font-size="26" fill="#9ece6a">poll(): unwrap_or_else(into_inner).clone()</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">poisoned guard still yields its state — never wedged</text>
+    <text x="1089" y="364" font-size="22" fill="#565f89">None still falls into the existing not-done default</text>
   </g>
   <g>
     <rect x="1065" y="402" width="860" height="132" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
-    <text x="1089" y="444" font-size="26" fill="#9ece6a">setter: if-let assigns, else skips</text>
-    <text x="1089" y="482" font-size="23" fill="#a9b1d6">one missed update beats a dead login task</text>
-    <text x="1089" y="516" font-size="22" fill="#565f89">next poll or update proceeds normally</text>
+    <text x="1089" y="444" font-size="26" fill="#9ece6a">setter recovers, then assigns</text>
+    <text x="1089" y="482" font-size="23" fill="#a9b1d6">no update dropped — the next poll observes it</text>
+    <text x="1089" y="516" font-size="22" fill="#565f89">discarding would wedge, since poison never clears</text>
   </g>
   <line x1="1495" y1="534" x2="1495" y2="940" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
   <g>
     <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
-    <text x="1089" y="1006" font-size="26" fill="#c0caf5">poison degrades, never kills</text>
-    <text x="1089" y="1046" font-size="23" fill="#9ece6a">37 codex-session-lib tests pass; clippy clean</text>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">poison surfaces state, never wedges</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">regression test poisons via probe; 38 tests pass</text>
   </g>
 
   <text x="55" y="1172" font-size="22" fill="#565f89">Poisoning still needs a prior panic elsewhere — this only stops it from cascading through login.</text>
