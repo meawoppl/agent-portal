@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1806 · Drop dead spend plumbing, pin native-1M table</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Spend state updated on every push but nobody read it, and the 1M table had no pin;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now the dead chain is gone with an explicit no-op, and the table is pinned exactly.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="170" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#7aa2f7">UserSpendUpdate → state → dead field</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">WS handler sets total_spend; no reader exists anywhere</text>
+    <text x="104" y="364" font-size="22" fill="#565f89">spend screens read REST totals; plus dead format_cost</text>
+  </g>
+  <line x1="510" y1="420" x2="510" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <text x="526" y="462" font-size="22" fill="#565f89">write-only</text>
+  <g>
+    <rect x="80" y="495" width="860" height="170" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="537" font-size="26" fill="#7aa2f7">NATIVE_1M_MODELS asserted nowhere</text>
+    <text x="104" y="575" font-size="23" fill="#a9b1d6">only mythos-preview had a test; five entries unpinned</text>
+    <text x="104" y="609" font-size="22" fill="#565f89">an edit rots the gauge with no red test — 5× too full</text>
+  </g>
+  <line x1="510" y1="665" x2="510" y2="940" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">carried code, silent rot</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">dead allows guard code nothing calls</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="250" width="860" height="170" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="292" font-size="26" fill="#9ece6a">chain deleted; arm stays explicit</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">UserSpendUpdate → ignored bindings, documented no-op</text>
+    <text x="1089" y="364" font-size="22" fill="#565f89">format_cost removed — admin uses format_dollars</text>
+  </g>
+  <line x1="1495" y1="420" x2="1495" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1511" y="462" font-size="22" fill="#565f89">pinned</text>
+  <g>
+    <rect x="1065" y="495" width="860" height="170" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="537" font-size="26" fill="#9ece6a">table == literal array + behavior loop</text>
+    <text x="1089" y="575" font-size="23" fill="#a9b1d6">add/remove/rename fails; each entry resolves 1M</text>
+    <text x="1089" y="609" font-size="22" fill="#565f89">probe entry verified to fail, then removed</text>
+  </g>
+  <line x1="1495" y1="665" x2="1495" y2="940" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">less code, louder table</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">shared + frontend suites green; REST screens untouched</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">WS spend push stays unconsumed by design; the table is hand-kept until SDK #250 lands.</text>
+</svg>
