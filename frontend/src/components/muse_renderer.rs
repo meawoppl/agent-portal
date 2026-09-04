@@ -277,22 +277,31 @@ fn is_reminder_task(node: &TaskNode) -> bool {
 /// ("latest running task") lands tool outcomes on a running scaffolding task
 /// in every captured turn, so blindly hiding all reminders would silently drop
 /// the tool results Matt most wants to see. Rendering any reminder node that
-/// holds a tool result, streamed output, or a side-effect keeps that content
-/// visible; the attribution itself is corrected upstream in the reducer.
+/// holds a tool result, streamed output, or a *noteworthy* side-effect keeps
+/// that content visible; a routine grant (the 1.0.x `…auto_approval`
+/// bookkeeping) is not content — a reminder card carrying only that would
+/// render as a bare "reminder.child_run — policy: …" line.
 fn is_hidden_scaffolding(node: &TaskNode) -> bool {
     is_reminder_task(node)
         && node.tool_results.is_empty()
         && node.output.is_empty()
-        && node.side_effect.is_none()
+        && !node
+            .side_effect
+            .as_ref()
+            .is_some_and(|(_, decision)| side_effect_is_noteworthy(decision))
 }
 
 /// Whether a side-effect policy decision deserves a line on the task card.
-/// Muse's routine decisions (`allow:policy`, `not_applicable`) are stamped on
+/// Muse's routine decisions (`allow:policy`, `not_applicable`, and the 1.0.x
+/// grant vocabulary ending `auto_approval` — e.g.
+/// `reminder_child:read_only:subagent_tool_auto_approval`) are stamped on
 /// effectively every task and carry no information; a denial is the anomaly
 /// the audit line exists for. Anything outside the known-boring vocabulary
 /// renders too, so future decision kinds surface instead of vanishing.
 fn side_effect_is_noteworthy(decision: &str) -> bool {
-    !(decision == "not_applicable" || decision.starts_with("allow"))
+    !(decision == "not_applicable"
+        || decision.starts_with("allow")
+        || decision.ends_with("auto_approval"))
 }
 
 fn render_task_node(node: &TaskNode) -> Html {
@@ -532,11 +541,33 @@ mod tests {
 
     #[test]
     fn routine_policy_decisions_are_not_noteworthy() {
-        // The two decisions muse stamps on every routine task (observed in
-        // the captured fixtures) must stay off the card.
+        // The decisions muse stamps on every routine task (observed in the
+        // captured fixtures) must stay off the card.
         assert!(!side_effect_is_noteworthy("allow:policy"));
         assert!(!side_effect_is_noteworthy("allow:user"));
         assert!(!side_effect_is_noteworthy("not_applicable"));
+        // Muse Code 1.0.x grant vocabulary — an approval, same class as allow.
+        assert!(!side_effect_is_noteworthy(
+            "reminder_child:read_only:subagent_tool_auto_approval"
+        ));
+    }
+
+    #[test]
+    fn reminder_with_only_a_routine_grant_stays_hidden() {
+        // Live-captured (2026-09-04): a `reminder.child_run` node carrying only
+        // its auto-approval side-effect rendered as a bare
+        // "reminder.child_run — policy: …" line. A boring grant is not content.
+        let mut n = node(Some("reminder.child_run"));
+        n.side_effect = Some((
+            "reminder.child_run".to_string(),
+            "reminder_child:read_only:subagent_tool_auto_approval".to_string(),
+        ));
+        assert!(is_hidden_scaffolding(&n));
+
+        // A denial on a reminder task is the anomaly — it must render.
+        let mut denied = node(Some("reminder.child_run"));
+        denied.side_effect = Some(("reminder.child_run".to_string(), "deny:policy".to_string()));
+        assert!(!is_hidden_scaffolding(&denied));
     }
 
     #[test]
