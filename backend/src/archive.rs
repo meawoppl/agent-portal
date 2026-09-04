@@ -114,14 +114,12 @@ impl ArchiveRuntime {
     /// or older than [`HISTORY_SCAN_SELF_HEAL`]. **Blocking** (the S3 backend
     /// blocks on its captured runtime handle) — call on the blocking pool.
     pub fn scan_rows(&self) -> std::io::Result<std::sync::Arc<Vec<scan::FlatRow>>> {
-        if let Some((at, rows)) = self
-            .scan_cache
-            .lock()
-            .expect("scan cache lock poisoned")
-            .as_ref()
-        {
+        // A poisoned lock reads as a cold cache: rescan below instead of
+        // panicking the history request.
+        let cached = self.scan_cache.lock().ok().and_then(|guard| guard.clone());
+        if let Some((at, rows)) = cached {
             if at.elapsed() < HISTORY_SCAN_SELF_HEAL {
-                return Ok(rows.clone());
+                return Ok(rows);
             }
         }
         self.rescan()
@@ -140,8 +138,10 @@ impl ArchiveRuntime {
         let rows = std::sync::Arc::new(scan::collect_rows(&self.store, &mut |w| {
             tracing::warn!("history archive scan: {w}");
         })?);
-        *self.scan_cache.lock().expect("scan cache lock poisoned") =
-            Some((std::time::Instant::now(), rows.clone()));
+        // A poisoned lock skips the cache update; the fresh rows still return.
+        if let Ok(mut guard) = self.scan_cache.lock() {
+            *guard = Some((std::time::Instant::now(), rows.clone()));
+        }
         Ok(rows)
     }
 
@@ -161,11 +161,9 @@ impl ArchiveRuntime {
     pub fn scan_rows_cached(
         self: &std::sync::Arc<Self>,
     ) -> std::io::Result<std::sync::Arc<Vec<scan::FlatRow>>> {
-        let cached = self
-            .scan_cache
-            .lock()
-            .expect("scan cache lock poisoned")
-            .clone();
+        // A poisoned lock reads as a cold cache: fall through to `scan_rows`
+        // instead of panicking the history request.
+        let cached = self.scan_cache.lock().ok().and_then(|guard| guard.clone());
 
         match cached {
             Some((at, rows)) => {

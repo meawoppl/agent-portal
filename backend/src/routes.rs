@@ -38,23 +38,31 @@ pub const AUTH_DEVICE_APPROVE: &str = "/api/auth/device/approve";
 pub const AUTH_DEVICE_DENY: &str = "/api/auth/device/deny";
 
 /// Per-IP rate limiting layer (via SmartIpKeyExtractor for proxy support)
+///
+/// `finish` only fails on zero burst/period; the error propagates so a
+/// misconfigured limiter fails startup loudly instead of panicking.
 fn rate_limit(
     per_second: u64,
     burst_size: u32,
-) -> GovernorLayer<SmartIpKeyExtractor, NoOpMiddleware<QuantaInstant>, axum::body::Body> {
-    GovernorLayer::new(Arc::new(
-        GovernorConfigBuilder::default()
-            .per_second(per_second)
-            .burst_size(burst_size)
-            .key_extractor(SmartIpKeyExtractor)
-            .finish()
-            .unwrap(),
-    ))
+) -> anyhow::Result<
+    GovernorLayer<SmartIpKeyExtractor, NoOpMiddleware<QuantaInstant>, axum::body::Body>,
+> {
+    let config = GovernorConfigBuilder::default()
+        .per_second(per_second)
+        .burst_size(burst_size)
+        .key_extractor(SmartIpKeyExtractor)
+        .finish()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "invalid rate-limit config: per_second={per_second}, burst_size={burst_size}"
+            )
+        })?;
+    Ok(GovernorLayer::new(Arc::new(config)))
 }
 
 /// Build the full application router: API routes, WebSocket endpoints,
 /// rate-limited route groups, embedded frontend assets, and middleware.
-pub fn build_router(app_state: Arc<AppState>) -> Router {
+pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // Setup CORS
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -69,7 +77,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
     // user-visible work and should not be spammed.
     let auth_device_code_routes = Router::new()
         .route(AUTH_DEVICE_CODE, post(handlers::device_flow::device_code))
-        .layer(rate_limit(6, 10))
+        .layer(rate_limit(6, 10)?)
         .with_state(app_state.clone());
 
     // Rate-limited device polling. The CLI polls every 5s, and this limiter is
@@ -77,7 +85,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
     // NAT without draining the burst during a slow browser approval (#1047).
     let auth_device_poll_routes = Router::new()
         .route(AUTH_DEVICE_POLL, post(handlers::device_flow::device_poll))
-        .layer(rate_limit(2, 30))
+        .layer(rate_limit(2, 30)?)
         .with_state(app_state.clone());
 
     // Rate-limited browser auth routes. These endpoints either initiate OAuth
@@ -90,7 +98,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route(AUTH_GITHUB_CALLBACK, get(handlers::auth::github_callback))
         .route(AUTH_DEV_LOGIN, get(handlers::auth::dev_login))
         .route(AUTH_DEVICE_LOGIN, get(handlers::auth::device_login))
-        .layer(rate_limit(2, 20))
+        .layer(rate_limit(2, 20)?)
         .with_state(app_state.clone());
 
     // Rate-limited device approval actions. The verify page remains unthrottled
@@ -102,7 +110,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             post(handlers::device_flow::device_approve),
         )
         .route(AUTH_DEVICE_DENY, post(handlers::device_flow::device_deny))
-        .layer(rate_limit(2, 20))
+        .layer(rate_limit(2, 20)?)
         .with_state(app_state.clone());
 
     // Rate-limited download routes
@@ -115,10 +123,10 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             "/api/download/proxy",
             get(handlers::downloads::proxy_binary).head(handlers::downloads::proxy_binary),
         )
-        .layer(rate_limit(6, 10))
+        .layer(rate_limit(6, 10)?)
         .with_state(app_state.clone());
 
-    Router::new()
+    Ok(Router::new()
         // Health check endpoint
         .route(
             "/api/health",
@@ -461,5 +469,5 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             app_state_for_forward_gate,
             handlers::forward_proxy::forward_host_gate,
-        ))
+        )))
 }

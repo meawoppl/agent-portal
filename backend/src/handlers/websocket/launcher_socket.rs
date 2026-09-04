@@ -223,7 +223,23 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                 }
                                 Err(_) => {
                                     if app_state.dev_mode {
-                                        (get_dev_user_id(&app_state), None)
+                                        match get_dev_user_id(&app_state) {
+                                            Some(id) => (id, None),
+                                            None => {
+                                                let _ = ws_sender
+                                                    .send(ServerToLauncher::LauncherRegisterAck {
+                                                        success: false,
+                                                        fatal: true,
+                                                        launcher_id,
+                                                        error: Some("Dev user missing".to_string()),
+                                                        reject_reason: Some(
+                                                            LauncherRejectReason::AuthFailed,
+                                                        ),
+                                                    })
+                                                    .await;
+                                                return;
+                                            }
+                                        }
                                     } else {
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
@@ -255,7 +271,21 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         }
                     }
                 } else if app_state.dev_mode {
-                    (get_dev_user_id(&app_state), None)
+                    match get_dev_user_id(&app_state) {
+                        Some(id) => (id, None),
+                        None => {
+                            let _ = ws_sender
+                                .send(ServerToLauncher::LauncherRegisterAck {
+                                    success: false,
+                                    fatal: true,
+                                    launcher_id,
+                                    error: Some("Dev user missing".to_string()),
+                                    reject_reason: Some(LauncherRejectReason::AuthFailed),
+                                })
+                                .await;
+                            return;
+                        }
+                    }
                 } else {
                     let _ = ws_sender
                         .send(ServerToLauncher::LauncherRegisterAck {
@@ -1298,11 +1328,9 @@ fn launch_backoff(failure_count: i32) -> chrono::Duration {
     chrono::Duration::seconds(secs as i64)
 }
 
-fn get_dev_user_id(app_state: &AppState) -> Uuid {
-    let mut conn = app_state.db_pool.get().expect("DB connection for dev mode");
-    crate::auth::dev_user(&mut conn)
-        .expect("Test user must exist in dev mode")
-        .id
+fn get_dev_user_id(app_state: &AppState) -> Option<Uuid> {
+    let mut conn = app_state.db_pool.get().ok()?;
+    crate::auth::dev_user(&mut conn).ok().map(|user| user.id)
 }
 
 #[cfg(test)]

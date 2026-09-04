@@ -57,7 +57,7 @@ async fn spawn_test_app() -> SocketAddr {
     state.dev_mode = true;
     state.device_flow_store = Some(DeviceFlowStore::default());
 
-    let app = backend::routes::build_router(Arc::new(state));
+    let app = backend::routes::build_router(Arc::new(state)).expect("router builds");
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind ephemeral port");
