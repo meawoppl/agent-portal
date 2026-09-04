@@ -38,8 +38,8 @@ use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
 };
 use super::state::{
-    insert_turn_metrics_sorted, push_message_with_limit, retain_newest_items,
-    sort_turn_metrics_by_start,
+    counts_toward_render_limit, insert_turn_metrics_sorted, push_message_with_cost_limit,
+    retain_newest_items_by_cost, sort_turn_metrics_by_start,
 };
 use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
@@ -812,7 +812,11 @@ impl SessionView {
                 // live-output cleanup path.
                 self.muse_live_turn = MuseLiveTurn::default();
                 self.messages.extend(messages);
-                retain_newest_items(&mut self.messages, MAX_MESSAGES_PER_SESSION);
+                retain_newest_items_by_cost(
+                    &mut self.messages,
+                    MAX_MESSAGES_PER_SESSION,
+                    |message| counts_toward_render_limit(&message.content),
+                );
                 // Set the reconnect-replay watermark to the server-assigned
                 // timestamp of the latest message in the batch (closes
                 // #784). Empty batches (or a pre-#784 backend that didn't
@@ -1081,9 +1085,9 @@ impl SessionView {
         mut messages: Vec<MessageData>,
         last_timestamp: Option<String>,
     ) {
-        if messages.len() > MAX_MESSAGES_PER_SESSION {
-            retain_newest_items(&mut messages, MAX_MESSAGES_PER_SESSION);
-        }
+        retain_newest_items_by_cost(&mut messages, MAX_MESSAGES_PER_SESSION, |message| {
+            counts_toward_render_limit(&message.content)
+        });
         let session_id = ctx.props().session.id;
         self.dispatch_tasks(TasksInbound::ClearForReplay);
         for msg in &messages {
@@ -1216,7 +1220,12 @@ impl SessionView {
         self.ephemeral_status = None;
         self.muse_live_turn.clear_if_terminal(&output.content);
 
-        push_message_with_limit(&mut self.messages, output, MAX_MESSAGES_PER_SESSION);
+        push_message_with_cost_limit(
+            &mut self.messages,
+            output,
+            MAX_MESSAGES_PER_SESSION,
+            |message| counts_toward_render_limit(&message.content),
+        );
         true
     }
 

@@ -6,22 +6,58 @@
 
 use shared::TurnMetrics;
 
-/// Trim a newest-first-retained message buffer to `max_len`.
+/// Trim a chronological buffer to at most `max_cost` counted items.
 ///
-/// `SessionView` appends messages in chronological order, so retaining the
-/// tail keeps the newest rows and drops only old history.
-pub(super) fn retain_newest_items<T>(items: &mut Vec<T>, max_len: usize) {
-    if items.len() > max_len {
-        let excess = items.len() - max_len;
-        items.drain(0..excess);
+/// Items for which `counts_toward_limit` is false remain alongside the newest
+/// counted tail without displacing it. Free items older than that tail are
+/// discarded too, preventing detached metadata from growing without bound.
+pub(super) fn retain_newest_items_by_cost<T>(
+    items: &mut Vec<T>,
+    max_cost: usize,
+    counts_toward_limit: impl Fn(&T) -> bool,
+) {
+    let excess = items
+        .iter()
+        .filter(|item| counts_toward_limit(item))
+        .count()
+        .saturating_sub(max_cost);
+    if excess == 0 {
+        return;
     }
+
+    let mut counted = 0;
+    let keep_from = items
+        .iter()
+        .position(|item| {
+            if counts_toward_limit(item) {
+                counted += 1;
+            }
+            counted == excess
+        })
+        .map_or(items.len(), |index| index + 1);
+    items.drain(0..keep_from);
 }
 
 /// Append one live message and apply the same retention rule as history
 /// hydration and replay batches.
-pub(super) fn push_message_with_limit<T>(messages: &mut Vec<T>, message: T, max_len: usize) {
+pub(super) fn push_message_with_cost_limit<T>(
+    messages: &mut Vec<T>,
+    message: T,
+    max_cost: usize,
+    counts_toward_limit: impl Fn(&T) -> bool,
+) {
     messages.push(message);
-    retain_newest_items(messages, max_len);
+    retain_newest_items_by_cost(messages, max_cost, counts_toward_limit);
+}
+
+/// Claude emits many bodyless cumulative thinking-token markers during one
+/// turn. They render as one compact chip and therefore cost nothing against
+/// the live DOM budget.
+pub(super) fn counts_toward_render_limit(content: &str) -> bool {
+    !matches!(
+        serde_json::from_str::<shared::ClaudeOutput>(content),
+        Ok(shared::ClaudeOutput::System(message)) if message.is_thinking_tokens()
+    )
 }
 
 /// Insert one live `TurnMetrics` into the buffer, preserving `started_at ASC`
@@ -76,10 +112,10 @@ mod tests {
     }
 
     #[test]
-    fn retain_newest_items_keeps_tail() {
+    fn retain_newest_items_keeps_counted_tail() {
         let mut messages = vec!["old".to_string(), "middle".to_string(), "new".to_string()];
 
-        retain_newest_items(&mut messages, 2);
+        retain_newest_items_by_cost(&mut messages, 2, |_| true);
 
         assert_eq!(messages, vec!["middle", "new"]);
     }
@@ -88,7 +124,7 @@ mod tests {
     fn retain_newest_items_noops_when_within_limit() {
         let mut messages = vec!["one".to_string(), "two".to_string()];
 
-        retain_newest_items(&mut messages, 2);
+        retain_newest_items_by_cost(&mut messages, 2, |_| true);
 
         assert_eq!(messages, vec!["one", "two"]);
     }
@@ -97,9 +133,38 @@ mod tests {
     fn push_message_with_limit_appends_then_trims_oldest() {
         let mut messages = vec!["one".to_string(), "two".to_string()];
 
-        push_message_with_limit(&mut messages, "three".to_string(), 2);
+        push_message_with_cost_limit(&mut messages, "three".to_string(), 2, |_| true);
 
         assert_eq!(messages, vec!["two", "three"]);
+    }
+
+    #[test]
+    fn free_items_do_not_displace_counted_history() {
+        let mut messages = vec!["old", "free-a", "middle", "free-b", "new"];
+
+        retain_newest_items_by_cost(&mut messages, 2, |message| !message.starts_with("free"));
+
+        assert_eq!(messages, vec!["free-a", "middle", "free-b", "new"]);
+    }
+
+    #[test]
+    fn free_items_before_the_retained_tail_are_discarded() {
+        let mut messages = vec!["orphan-free", "old", "middle", "new"];
+
+        retain_newest_items_by_cost(&mut messages, 2, |message| !message.ends_with("free"));
+
+        assert_eq!(messages, vec!["middle", "new"]);
+    }
+
+    #[test]
+    fn only_claude_thinking_token_markers_are_free() {
+        let thinking = r#"{"type":"system","subtype":"thinking_tokens","estimated_tokens":150,"estimated_tokens_delta":50,"session_id":"01890000-0000-7000-8000-000000000001","uuid":"01890000-0000-7000-8000-000000000002"}"#;
+
+        assert!(!counts_toward_render_limit(thinking));
+        assert!(counts_toward_render_limit(
+            r#"{"type":"system","subtype":"init","session_id":"s"}"#
+        ));
+        assert!(counts_toward_render_limit("not json"));
     }
 
     #[test]
