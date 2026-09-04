@@ -48,6 +48,20 @@ impl std::fmt::Display for ContinuationStatus {
 /// `overloaded` continuation rows in this window is the whole cap mechanism, so
 /// it survives backend restarts for free (the count is DB-backed).
 const OVERLOAD_RETRY_WINDOW_MINUTES: i64 = 15;
+
+/// Parse the stored agent-type string, warning on unknown values.
+///
+/// Unknown strings fall back to the default so rendering never breaks — but
+/// silent defaulting hides data problems, so log it.
+fn parse_agent_type(raw: &str) -> AgentType {
+    match raw.parse() {
+        Ok(agent_type) => agent_type,
+        Err(_) => {
+            warn!("Unknown session agent_type {raw:?}, falling back to default");
+            AgentType::default()
+        }
+    }
+}
 /// Maximum overload auto-retries within the window before we give up.
 const OVERLOAD_RETRY_ATTEMPT_CAP: i64 = 3;
 
@@ -149,7 +163,7 @@ pub fn handle_session_limit_reached(
             key,
             ServerToClient::AgentOutput {
                 content: portal.to_json(),
-                agent_type: session.agent_type.parse().unwrap_or_default(),
+                agent_type: parse_agent_type(&session.agent_type),
                 meta,
             },
         );
@@ -326,7 +340,7 @@ fn update_terminal_status(
                         &session_id.to_string(),
                         ServerToClient::AgentOutput {
                             content: portal.to_json(),
-                            agent_type: session.agent_type.parse().unwrap_or_default(),
+                            agent_type: parse_agent_type(&session.agent_type),
                             meta,
                         },
                     );
@@ -386,7 +400,7 @@ pub fn load_scheduled_continuations(
         .map(|(row, session)| {
             let claude_args =
                 serde_json::from_value::<Vec<String>>(session.claude_args).unwrap_or_default();
-            let agent_type = session.agent_type.parse().unwrap_or_default();
+            let agent_type = parse_agent_type(&session.agent_type);
             ContinuationConfig {
                 id: row.id,
                 session_id: row.session_id,
@@ -537,7 +551,7 @@ pub fn schedule_overloaded_retry(
                 key,
                 ServerToClient::AgentOutput {
                     content: portal.to_json(),
-                    agent_type: session.agent_type.parse().unwrap_or_default(),
+                    agent_type: parse_agent_type(&session.agent_type),
                     meta,
                 },
             );
@@ -595,7 +609,7 @@ pub fn schedule_overloaded_retry(
             key,
             ServerToClient::AgentOutput {
                 content: portal.to_json(),
-                agent_type: session.agent_type.parse().unwrap_or_default(),
+                agent_type: parse_agent_type(&session.agent_type),
                 meta,
             },
         );

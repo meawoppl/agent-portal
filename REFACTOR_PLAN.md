@@ -131,10 +131,10 @@ just the issue tracker. Organized by **outcome**, not issue number.
     AskUserQuestion checkbox-clear.
 
 ## Cross-cutting policy (continuous, not ranked projects)
-- Panic/`unwrap` cleanup in production paths (survey flagged `heartbeat.rs`
-  mutex-poison via `.lock().unwrap()`, `proxy_tokens.rs` token-expiry unwrap,
-  `background.rs:151` swallowed DB error via `.unwrap_or_default()`); add a small
-  clippy deny baseline, then clean per touched area.
+- Panic/`unwrap` cleanup in production paths (the original survey examples have
+  since moved — the workspace now denies `unwrap_used`/`expect_used` with
+  per-file `#1165` ratchets instead of a baseline, tests exempt via
+  `clippy.toml`); clean per touched area.
 - Typed SDK upstreaming (claude-codes / codex-codes) over JSON-poking.
 - Split oversized modules (`shared/api`, `endpoints`, frontend monoliths) **when
   touched**, not as a standalone sweep.
