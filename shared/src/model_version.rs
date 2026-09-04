@@ -343,19 +343,23 @@ mod tests {
         assert_eq!(context_window_for("claude-mythos-preview"), Some(1_000_000));
     }
 
-    /// Every entry in the transcribed [`NATIVE_1M_MODELS`] table must resolve
-    /// to 1M. The ids are hardcoded (not read from the table) so editing the
-    /// table breaks this test — that is the point: table rot otherwise
-    /// surfaces only as a wrong context gauge.
+    /// The transcribed [`NATIVE_1M_MODELS`] table is pinned exactly: adding,
+    /// removing, or renaming an entry fails here, so table rot surfaces as
+    /// red rather than a wrong context gauge.
     #[test]
     fn context_window_honors_every_transcribed_native_1m_model() {
-        for id in [
-            "claude-fable-5",
-            "claude-opus-4-7",
-            "claude-opus-4-8",
-            "claude-opus-5",
-            "claude-sonnet-5",
-        ] {
+        assert_eq!(
+            NATIVE_1M_MODELS,
+            [
+                "claude-fable-5",
+                "claude-opus-4-7",
+                "claude-opus-4-8",
+                "claude-opus-5",
+                "claude-sonnet-5",
+            ]
+            .as_slice()
+        );
+        for id in NATIVE_1M_MODELS {
             assert_eq!(context_window_for(id), Some(1_000_000), "{id}");
         }
         // Trailing date/build suffixes still match.
