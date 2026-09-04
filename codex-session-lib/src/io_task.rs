@@ -97,14 +97,15 @@ type QueuedPrompt = (String, Option<DeliveryAck>, Option<Box<serde_json::Value>>
 /// How a fresh `IoCommand::UserInput` should be delivered, given the current
 /// turn state. Pure decision so the routing can be unit-tested without a live
 /// app-server (there is no mock client harness in this crate).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum InputRouting {
     /// No turn is running — begin a new `turn/start`.
     StartTurn,
     /// A turn is running and its id is known — steer the input into it
     /// (`turn/steer`) so it lands mid-turn, matching claude's native stdin
-    /// steering. Falls back to `Queue` if the steer request itself fails.
-    Steer,
+    /// steering. Carries the id so the consumer never re-derives it.
+    /// Falls back to `Queue` if the steer request itself fails.
+    Steer(String),
     /// A turn is running but we haven't observed its `turn/started` yet, so we
     /// have no `expectedTurnId` (required, non-empty) to steer against — queue
     /// the input for the turn-end drain, exactly as before.
@@ -117,7 +118,7 @@ enum InputRouting {
 fn route_user_input(turn_active: bool, current_turn_id: Option<&str>) -> InputRouting {
     match (turn_active, current_turn_id) {
         (false, _) => InputRouting::StartTurn,
-        (true, Some(turn_id)) if !turn_id.is_empty() => InputRouting::Steer,
+        (true, Some(turn_id)) if !turn_id.is_empty() => InputRouting::Steer(turn_id.to_string()),
         (true, _) => InputRouting::Queue,
     }
 }
@@ -792,13 +793,7 @@ pub(crate) async fn codex_io_task(
                                     // `subagent_token_tracker` are untouched — the
                                     // steered input belongs to the current turn's
                                     // metrics.
-                                    InputRouting::Steer => {
-                                        // `Steer` is only returned with a known,
-                                        // non-empty turn id.
-                                        let turn_id = state
-                                            .current_turn_id()
-                                            .expect("Steer routing implies a known turn id")
-                                            .to_string();
+                                    InputRouting::Steer(turn_id) => {
                                         match steer_codex_turn(
                                             &mut client,
                                             &thread_id,
@@ -1503,7 +1498,10 @@ mod tests {
 
     #[test]
     fn route_user_input_steers_active_turn_with_known_id() {
-        assert_eq!(route_user_input(true, Some("turn-1")), InputRouting::Steer);
+        assert_eq!(
+            route_user_input(true, Some("turn-1")),
+            InputRouting::Steer("turn-1".to_string())
+        );
     }
 
     #[test]
@@ -1528,7 +1526,10 @@ mod tests {
         assert_eq!(state.route_input(), InputRouting::Queue);
         // Active with a known, non-empty turn id → steer.
         state.set_turn_id("turn-1");
-        assert_eq!(state.route_input(), InputRouting::Steer);
+        assert_eq!(
+            state.route_input(),
+            InputRouting::Steer("turn-1".to_string())
+        );
         // Empty turn id is unusable as expectedTurnId → queue.
         state.set_turn_id("");
         assert_eq!(state.route_input(), InputRouting::Queue);
@@ -1539,7 +1540,10 @@ mod tests {
         let mut state = CodexIoState::default();
         state.set_turn_active(true);
         state.set_turn_id("turn-1");
-        assert_eq!(state.route_input(), InputRouting::Steer);
+        assert_eq!(
+            state.route_input(),
+            InputRouting::Steer("turn-1".to_string())
+        );
         // turn/completed clears the id; a still-active follow-on turn with no
         // observed id must queue rather than steer against a stale id.
         state.clear_turn_id();
