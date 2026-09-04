@@ -46,6 +46,7 @@
 }
 
 /* Admin Tabs — matches settings tab style */
+
 /* Scrolls horizontally on narrow viewports instead of shedding tabs off the
    right edge (same treatment as .settings-tabs). */
 .admin-tabs {
