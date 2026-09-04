@@ -244,31 +244,45 @@ pub async fn list() -> Result<()> {
         None
     });
     for s in &data.sessions {
-        let marker = if self_id.as_deref() == Some(&s.id.to_string()) {
-            " (this session)"
-        } else {
-            ""
-        };
         println!(
-            "{}  {} / {} / {}  {}  {}{}",
-            display_session_id(s, &data.sessions),
-            full_agent_name(s),
-            if session_is_connected(s) {
-                "connected"
-            } else {
-                "disconnected"
-            },
-            if s.busy.unwrap_or(false) {
-                "busy"
-            } else {
-                "idle"
-            },
-            s.session_name,
-            s.working_directory,
-            marker
+            "{}",
+            format_session_row(s, &data.sessions, self_id.as_deref())
         );
     }
     Ok(())
+}
+
+/// One `message list` row. Hostname sits before the working directory: hosts
+/// discriminate rows that share a checkout path across machines.
+fn format_session_row(
+    session: &shared::api::AgentSessionInfo,
+    sessions: &[shared::api::AgentSessionInfo],
+    self_id: Option<&str>,
+) -> String {
+    let marker = if self_id == Some(&session.id.to_string()) {
+        " (this session)"
+    } else {
+        ""
+    };
+    format!(
+        "{}  {} / {} / {}  {}  {}  {}{}",
+        display_session_id(session, sessions),
+        full_agent_name(session),
+        if session_is_connected(session) {
+            "connected"
+        } else {
+            "disconnected"
+        },
+        if session.busy.unwrap_or(false) {
+            "busy"
+        } else {
+            "idle"
+        },
+        session.session_name,
+        session.hostname,
+        session.working_directory,
+        marker
+    )
 }
 
 fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
@@ -524,6 +538,26 @@ mod tests {
         assert!(session_is_connected(&old_wire));
         old_wire.status = "disconnected".to_string();
         assert!(!session_is_connected(&old_wire));
+    }
+
+    #[test]
+    fn session_row_lists_hostname_before_working_directory() {
+        let sessions = vec![session("12345678-0000-0000-0000-000000000000")];
+
+        assert_eq!(
+            format_session_row(&sessions[0], &sessions, None),
+            "12345678  claude / connected / idle  session  host  /repo"
+        );
+    }
+
+    #[test]
+    fn session_row_marks_callers_own_session() {
+        let sessions = vec![session("12345678-0000-0000-0000-000000000000")];
+
+        assert!(
+            format_session_row(&sessions[0], &sessions, Some(&sessions[0].id.to_string()))
+                .ends_with(" (this session)")
+        );
     }
 
     #[test]

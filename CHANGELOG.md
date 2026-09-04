@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **`message list` shows each session's host (closes #1710).** Rows read
+  `{id}  {agent} / {conn} / {busy}  {name}  {host}  {dir}`, so sessions in
+  identical checkout paths on different machines are distinguishable without
+  hand-querying `/api/agent/sessions`. Row rendering moved into a tested
+  `format_session_row` helper; output is otherwise unchanged.
+
 - **Interactive Rizzma parameters.** Schema-4 portable figures expose their
   bounded, author-declared parameters as host-rendered sliders. Applied values
   come back from the sandboxed renderer after clamp and step normalization;
