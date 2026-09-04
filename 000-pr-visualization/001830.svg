@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="red-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/></marker>
+    <marker id="green-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1830 · dedup ClaudeMessage parse and Deserialize dispatch</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">parse() and the Deserialize impl carried byte-identical dispatch matches;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">one shared helper means the two paths can never drift apart.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="255" width="840" height="175" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="108" y="302" font-size="26" fill="#7aa2f7">types.rs: two copies of one match</text>
+    <text x="108" y="345" font-size="23" fill="#a9b1d6">parse() matches all 8 ClaudeOutput variants</text>
+    <text x="108" y="388" font-size="21" fill="#565f89">Deserialize matches the same 8 again, plus the same fallback</text>
+  </g>
+  <line x1="500" y1="430" x2="500" y2="510" stroke="#f7768e" stroke-width="2" marker-end="url(#red-arrow)"/>
+  <g>
+    <rect x="80" y="520" width="840" height="260" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="108" y="567" font-size="26" fill="#c0caf5">A new variant needs two edits</text>
+    <text x="108" y="612" font-size="23" fill="#a9b1d6">System / User / Assistant / Result /</text>
+    <text x="108" y="655" font-size="23" fill="#a9b1d6">Error / RateLimitEvent / ConversationReset ...</text>
+    <text x="108" y="698" font-size="23" fill="#f7768e">miss one path and that transcript raw-bubbles</text>
+    <text x="108" y="741" font-size="23" fill="#f7768e">while the other renders fine</text>
+  </g>
+  <g>
+    <rect x="80" y="855" width="840" height="155" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="108" y="902" font-size="26" fill="#c0caf5">28 lines doing the job of 14</text>
+    <text x="108" y="946" font-size="23" fill="#f7768e">nothing enforces the copies stay identical</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="255" width="860" height="175" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="302" font-size="26" fill="#7aa2f7">from_output + from_value</text>
+    <text x="1093" y="345" font-size="23" fill="#a9b1d6">one dispatch over ClaudeOutput, one fallback helper</text>
+    <text x="1093" y="388" font-size="21" fill="#565f89">parse() and Deserialize both call them</text>
+  </g>
+  <line x1="1495" y1="430" x2="1495" y2="510" stroke="#9ece6a" stroke-width="2" marker-end="url(#green-arrow)"/>
+  <g>
+    <rect x="1065" y="520" width="860" height="260" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="567" font-size="26" fill="#9ece6a">A new variant needs one edit</text>
+    <text x="1093" y="612" font-size="23" fill="#a9b1d6">add the arm in from_output ...</text>
+    <text x="1093" y="655" font-size="23" fill="#a9b1d6">... and str, Value, and serde paths agree</text>
+    <text x="1093" y="698" font-size="23" fill="#9ece6a">drift is structurally impossible</text>
+    <text x="1093" y="741" font-size="23" fill="#565f89">parse_local_frame fallback unchanged</text>
+  </g>
+  <g>
+    <rect x="1065" y="855" width="860" height="155" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1093" y="902" font-size="26" fill="#c0caf5">Same behavior, half the surface</text>
+    <text x="1093" y="946" font-size="23" fill="#9ece6a">681 frontend lib tests pass unmodified</text>
+  </g>
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: mechanical dedup in message_renderer/types.rs only - no wire, render, or protocol change.</text>
+</svg>
