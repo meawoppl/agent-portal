@@ -228,7 +228,7 @@ fn env_max_context_tokens() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_model_version, context_window_for};
+    use super::{compact_model_version, context_window_for, NATIVE_1M_MODELS};
 
     #[test]
     fn claude_dashed_major_minor() {
