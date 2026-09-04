@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! Hand-rolled stacked-area chart, used by the Performance page's stop-reason
 //! mix plot.
 //!
@@ -68,8 +65,10 @@ pub fn stacked_area(props: &StackedAreaProps) -> Html {
     // floor for series i at bucket b — the previous series' top.
     let mut bottoms: Vec<Vec<f64>> = vec![vec![0.0; n_buckets]];
     for s in &props.series[..props.series.len() - 1] {
-        let prev = bottoms.last().unwrap().clone();
-        let mut next = prev.clone();
+        let Some(prev) = bottoms.last().cloned() else {
+            break;
+        };
+        let mut next = prev;
         for (i, b) in next.iter_mut().enumerate().take(n_buckets) {
             *b += s.values.get(i).copied().unwrap_or(0.0).max(0.0);
         }

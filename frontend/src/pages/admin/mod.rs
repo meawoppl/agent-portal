@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! Admin dashboard page
 //!
 //! Restricted to users with is_admin=true. Provides system overview,
@@ -63,12 +60,7 @@ pub struct AdminPageProps {
 /// update (HTTP 204).
 async fn patch_user(user_id: Uuid, body: &UpdateUserRequest) -> bool {
     let api_endpoint = utils::api_url(&format!("/api/admin/users/{}", user_id));
-    match Request::patch(&api_endpoint)
-        .json(body)
-        .unwrap()
-        .send()
-        .await
-    {
+    match utils::send_json(Request::patch(&api_endpoint), body).await {
         Ok(response) => response.status() == 204,
         Err(e) => {
             log::error!("Failed to update user: {:?}", e);
@@ -104,7 +96,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let ban_dialog = use_state(|| None::<Uuid>);
     let ban_reason_input = use_state(String::new);
 
-    let navigator = use_navigator().unwrap();
+    let navigator = use_navigator();
 
     // Fetch current user to get their ID (skipped when the parent supplied it)
     {
@@ -119,7 +111,13 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                             current_user_id.set(Some(me.id));
                         }
                         Err(FetchError::Status(401)) => {
-                            navigator.push(&Route::Home);
+                            if let Some(navigator) = navigator.as_ref() {
+                                navigator.push(&Route::Home);
+                            } else {
+                                error.set(Some(
+                                    "Session expired. Please reload and sign in again.".to_string(),
+                                ));
+                            }
                         }
                         Err(FetchError::Status(403)) => {
                             error.set(Some(
@@ -155,7 +153,13 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                         error.set(None);
                     }
                     Err(FetchError::Status(401)) => {
-                        navigator.push(&Route::Home);
+                        if let Some(navigator) = navigator.as_ref() {
+                            navigator.push(&Route::Home);
+                        } else {
+                            error.set(Some(
+                                "Session expired. Please reload and sign in again.".to_string(),
+                            ));
+                        }
                         return;
                     }
                     Err(FetchError::Status(403)) => {
