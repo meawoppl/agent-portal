@@ -585,9 +585,9 @@ async fn run_shim_connection(
                         let request_id = &perm_response.request_id;
                         let should_forward = {
                             let mut perms = permissions.lock().await;
-                            match perms.get(request_id) {
-                                Some(PermissionState::Pending) => {
-                                    *perms.get_mut(request_id).unwrap() = PermissionState::Answered;
+                            match perms.get_mut(request_id) {
+                                Some(state @ PermissionState::Pending) => {
+                                    *state = PermissionState::Answered;
                                     debug!("Permission {} answered by portal", request_id);
                                     true
                                 }
