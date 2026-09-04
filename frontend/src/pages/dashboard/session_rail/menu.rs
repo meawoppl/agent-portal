@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use shared::{SessionInfo, SessionRole};
 use uuid::Uuid;
 use wasm_bindgen_futures::JsFuture;
@@ -216,7 +213,9 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     let on_copy_id = {
         let on_set_copied_id = props.on_set_copied_id.clone();
         Callback::from(move |_: MouseEvent| {
-            let window = web_sys::window().expect("no window");
+            let Some(window) = web_sys::window() else {
+                return;
+            };
             let clipboard = window.navigator().clipboard();
             let id_str = session_id.to_string();
             let on_set_copied_id = on_set_copied_id.clone();

@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::utils::{self, On401};
 use crate::VERSION;
 use gloo::console;
@@ -114,7 +111,9 @@ fn login_buttons(config: Option<&AppConfig>) -> Html {
 fn login_callback(route: &'static str) -> Callback<MouseEvent> {
     Callback::from(move |_| {
         console::log!("Redirecting to OAuth:", route);
-        let window = web_sys::window().expect("no global `window` exists");
+        let Some(window) = web_sys::window() else {
+            return;
+        };
         let location = window.location();
         let auth_url = utils::api_url(route);
         let _ = location.set_href(&auth_url);
