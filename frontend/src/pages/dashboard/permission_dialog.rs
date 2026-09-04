@@ -133,6 +133,123 @@ fn render_options(props: &PermissionDialogProps, options: &[(&str, &str)]) -> Ht
         .collect::<Html>()
 }
 
+/// Keys the collapsed shell swallows-and-reopens on instead of forwarding.
+///
+/// While collapsed the option rows are not on screen, so letting these through
+/// to [`nav_keydown`] would move a selection the user cannot see — or, on
+/// Enter/Space, confirm an Allow/Deny blind. Any of them re-opens the prompt
+/// instead, which is both safe and how you'd expect a collapsed control to
+/// behave.
+const REOPEN_KEYS: &[&str] = &["ArrowUp", "ArrowDown", "j", "k", "Enter", " "];
+
+/// Props for [`CollapsiblePrompt`].
+#[derive(Properties, PartialEq)]
+struct CollapsiblePromptProps {
+    /// Extra class on the container, selecting the per-kind palette
+    /// (e.g. `ask-user-question`).
+    #[prop_or_default]
+    variant: Option<&'static str>,
+    /// Leading glyph in the toggle bar.
+    icon: &'static str,
+    /// Toggle-bar label.
+    title: &'static str,
+    /// One-line gist rendered only while collapsed, so a folded prompt still
+    /// says what it is waiting for.
+    summary: String,
+    /// Focus target for the handler's focus management — stays on the
+    /// container so collapsing never moves it.
+    dialog_ref: NodeRef,
+    /// The prompt's own key handling. Forwarded only while expanded.
+    onkeydown: Callback<KeyboardEvent>,
+    #[prop_or_default]
+    children: Html,
+}
+
+/// Collapsible shell shared by every permission prompt.
+///
+/// **Why this exists.** `.permission-prompt` is a flex *sibling* of the
+/// transcript inside `.session-view`, which is a fixed-height flex column. Any
+/// height the prompt takes comes straight out of `.session-view-scroll-area`
+/// (`flex: 1; min-height: 0`), so a tall prompt — a many-option question, a
+/// long plan — squeezes the transcript down to an unreadable sliver. It reads
+/// as "the popup blocks me from scrolling back", even though nothing overlays
+/// anything. Folding the prompt to its toggle bar hands that space back.
+///
+/// Prompts open **expanded**, so nothing is ever missed; collapsing is a
+/// deliberate act. State is per-instance, and the handler keys each request by
+/// `request_id`, so a new prompt always arrives open rather than inheriting the
+/// last one's fold.
+#[function_component(CollapsiblePrompt)]
+fn collapsible_prompt(props: &CollapsiblePromptProps) -> Html {
+    let collapsed = use_state(|| false);
+
+    let onkeydown = {
+        let collapsed = collapsed.clone();
+        let inner = props.onkeydown.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if *collapsed {
+                if REOPEN_KEYS.contains(&e.key().as_str()) {
+                    e.prevent_default();
+                    collapsed.set(false);
+                }
+                return;
+            }
+            inner.emit(e);
+        })
+    };
+
+    let ontoggle = {
+        let collapsed = collapsed.clone();
+        Callback::from(move |_| collapsed.set(!*collapsed))
+    };
+
+    // Enter/Space on the focused toggle already fires its click. Without this
+    // the same keypress also bubbles to the container and confirms the
+    // prompt — collapsing would answer it.
+    let toggle_onkeydown = Callback::from(|e: KeyboardEvent| {
+        if matches!(e.key().as_str(), "Enter" | " ") {
+            e.stop_propagation();
+        }
+    });
+
+    let mut class = classes!("permission-prompt");
+    if let Some(variant) = props.variant {
+        class.push(variant);
+    }
+    if *collapsed {
+        class.push("collapsed");
+    }
+
+    let toggle_title = if *collapsed {
+        "Expand this prompt"
+    } else {
+        "Collapse this prompt to free up the transcript"
+    };
+
+    html! {
+        <div {class} ref={props.dialog_ref.clone()} tabindex="0" {onkeydown}>
+            <button
+                type="button"
+                class="permission-collapse-toggle"
+                aria-expanded={(!*collapsed).to_string()}
+                title={toggle_title}
+                onclick={ontoggle}
+                onkeydown={toggle_onkeydown}
+            >
+                <span class="collapse-caret">{ if *collapsed { "\u{25b8}" } else { "\u{25be}" } }</span>
+                <span class="permission-icon">{ props.icon }</span>
+                <span class="permission-title">{ props.title }</span>
+                if *collapsed {
+                    <span class="collapse-summary">{ &props.summary }</span>
+                }
+            </button>
+            if !*collapsed {
+                { props.children.clone() }
+            }
+        </div>
+    }
+}
+
 /// Render the standard permission dialog (Allow/Deny)
 fn render_standard_permission(props: &PermissionDialogProps) -> Html {
     let perm = &props.permission;
@@ -153,16 +270,13 @@ fn render_standard_permission(props: &PermissionDialogProps) -> Html {
     };
 
     html! {
-        <div
-            class="permission-prompt"
-            ref={props.dialog_ref.clone()}
-            tabindex="0"
+        <CollapsiblePrompt
+            icon="⚠️"
+            title="Permission Required"
+            summary={perm.tool_name.clone()}
+            dialog_ref={props.dialog_ref.clone()}
             {onkeydown}
         >
-            <div class="permission-header">
-                <span class="permission-icon">{ "⚠️" }</span>
-                <span class="permission-title">{ "Permission Required" }</span>
-            </div>
             <div class="permission-body">
                 <div class="permission-tool">
                     <span class="tool-label">{ "Tool:" }</span>
@@ -178,7 +292,7 @@ fn render_standard_permission(props: &PermissionDialogProps) -> Html {
             <div class="permission-hint">
                 { "↑↓ or tap to select" }
             </div>
-        </div>
+        </CollapsiblePrompt>
     }
 }
 
@@ -258,11 +372,36 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
     let on_submit_click = props.on_submit.clone();
     let submit_onclick = Callback::from(move |_| on_submit_click.emit(()));
 
+    // Collapsed gist: answer progress plus what is being asked. A question
+    // counts as answered by a picked/typed answer OR a ticked multi-select box,
+    // since those two live in separate maps.
+    let total = parsed.questions.len();
+    let answered = (0..total)
+        .filter(|i| {
+            props.question_answers.contains_key(i)
+                || props
+                    .multi_select_options
+                    .get(i)
+                    .is_some_and(|opts| !opts.is_empty())
+        })
+        .count();
+    let gist = match parsed.questions.as_slice() {
+        [only] if !only.header.is_empty() => only.header.clone(),
+        [only] => only.question.clone(),
+        _ => format!("{} questions", total),
+    };
+    // Overflow is clipped by CSS rather than truncated here, so the bar adapts
+    // to the pane width instead of guessing at a character count.
+    let summary = format!("{}/{} answered · {}", answered, total, gist);
+    let title = if total == 1 { "Question" } else { "Questions" };
+
     html! {
-        <div
-            class="permission-prompt ask-user-question"
-            ref={props.dialog_ref.clone()}
-            tabindex="0"
+        <CollapsiblePrompt
+            variant="ask-user-question"
+            icon="❓"
+            {title}
+            {summary}
+            dialog_ref={props.dialog_ref.clone()}
             {onkeydown}
         >
             {
@@ -415,7 +554,7 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                     { "Click options to answer each question, then submit" }
                 </div>
             </div>
-        </div>
+        </CollapsiblePrompt>
     }
 }
 
@@ -440,17 +579,21 @@ fn render_exitplanmode_permission(props: &PermissionDialogProps) -> Html {
 
     let options: Vec<(&str, &str)> = vec![("allow", "Allow"), ("deny", "Deny")];
 
+    let plan_summary = match allowed_prompts.len() {
+        0 => "no extra permissions requested".to_string(),
+        1 => "1 permission requested".to_string(),
+        n => format!("{} permissions requested", n),
+    };
+
     html! {
-        <div
-            class="permission-prompt exitplanmode-permission"
-            ref={props.dialog_ref.clone()}
-            tabindex="0"
+        <CollapsiblePrompt
+            variant="exitplanmode-permission"
+            icon="📋"
+            title="Plan Ready"
+            summary={plan_summary}
+            dialog_ref={props.dialog_ref.clone()}
             {onkeydown}
         >
-            <div class="permission-header">
-                <span class="permission-icon">{ "📋" }</span>
-                <span class="permission-title">{ "Plan Ready" }</span>
-            </div>
             <div class="permission-body">
                 {
                     if !allowed_prompts.is_empty() {
@@ -483,6 +626,6 @@ fn render_exitplanmode_permission(props: &PermissionDialogProps) -> Html {
             <div class="permission-hint">
                 { "↑↓ or tap to select" }
             </div>
-        </div>
+        </CollapsiblePrompt>
     }
 }
