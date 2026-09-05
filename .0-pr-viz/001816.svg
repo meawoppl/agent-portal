@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/></marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1816 · Move PR visual summaries to .0-pr-viz with six-digit names</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Files changed sorts by path bytes and '.' &lt; '0', so 000-pr-visualization/ opened below .claude/ and .github/;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now .0-pr-viz/001816.svg sorts ahead of every dotfile, and matches what visual-pr@v1 looks for.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- BEFORE -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">.github/workflows/visual-pr.yml</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">head checkout: sparse-checkout: 000-pr-visualization</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">uses: meawoppl/visual-pr@v1 · style: .github/visual-pr/style.json</text>
+  </g>
+  <line x1="510" y1="400" x2="510" y2="445" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <text x="526" y="430" font-size="22" fill="#f7768e">v1 moved: svg-dir .0-pr-viz, %06d names</text>
+  <g>
+    <rect x="80" y="450" width="860" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="490" font-size="26" fill="#c0caf5">000-pr-visualization/1811.svg … 1815.svg</text>
+    <text x="104" y="530" font-size="23" fill="#a9b1d6">action looks for pr-head/.0-pr-viz/001816.svg — never checked out</text>
+    <text x="104" y="566" font-size="22" fill="#f7768e">every new PR fails "Visual PR attached" as missing</text>
+  </g>
+  <line x1="450" y1="680" x2="570" y2="680" stroke="#f7768e" stroke-width="3"/>
+  <text x="510" y="725" font-size="23" fill="#f7768e" text-anchor="middle">PR #1813's own list: .claude/, .github/ ahead of the picture</text>
+  <text x="510" y="757" font-size="22" fill="#565f89" text-anchor="middle">the README even noted the caveat instead of fixing it</text>
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">Review opens on a config file, and the check is broken</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">repo and upstream action disagree on where the SVG lives</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <rect x="1065" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">.github/workflows/visual-pr.yml</text>
+    <text x="1089" y="330" font-size="23" fill="#9ece6a">head checkout: sparse-checkout: .0-pr-viz</text>
+    <text x="1089" y="366" font-size="22" fill="#565f89">uses: meawoppl/visual-pr@v1 · style unchanged · no svg-dir override</text>
+  </g>
+  <line x1="1495" y1="400" x2="1495" y2="445" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1511" y="430" font-size="22" fill="#9ece6a">git mv, four renames</text>
+  <g>
+    <rect x="1065" y="450" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="490" font-size="26" fill="#9ece6a">.0-pr-viz/001811.svg 001813.svg 001814.svg 001815.svg</text>
+    <text x="1089" y="530" font-size="23" fill="#a9b1d6">same files, zero-padded; README and AGENTS.md conventions updated</text>
+    <text x="1089" y="566" font-size="22" fill="#565f89">'.0' &lt; '.c' &lt; '.g': first in Files changed, always</text>
+  </g>
+  <g>
+    <rect x="1065" y="660" width="860" height="130" fill="#1e202e" stroke="#e0af68" stroke-width="1.5"/>
+    <text x="1089" y="700" font-size="24" fill="#e0af68">This PR's own check still fails</text>
+    <text x="1089" y="736" font-size="22" fill="#a9b1d6">pull_request_target runs main's workflow, which checks out the old dir</text>
+    <text x="1089" y="770" font-size="22" fill="#565f89">heals for every PR after merge; open PRs must move their SVG</text>
+  </g>
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">Review opens on the picture; check and repo agree again</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">upstream's glyph allowlist and box-overrun warnings come along free</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Does not enable upstream's min-changed-lines escape; tiny PRs still need the no-visual label. Plain ls hides the dot-directory.</text>
+</svg>

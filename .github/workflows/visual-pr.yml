@@ -7,12 +7,14 @@ name: Visual PR
 #
 # pull_request_target runs THIS file from the BASE branch, so the check exists
 # for every open PR the moment it lands on main — old branches don't need a
-# rebase to start reporting. The PR head is checked out as DATA only (an SVG
+# rebase to start reporting. `edited` is included because v2 also validates
+# the PR description; correcting that description must re-run the check. The
+# PR head is checked out as DATA only (an SVG
 # to look at); nothing from the head is ever executed, which is what makes
 # _target safe here. Keep it that way.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
