@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1852 · Hoist e2e DATABASE_URL to job-level env</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The e2e DATABASE_URL literal was pasted on two steps — update one, miss the other;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now one job-level env feeds both steps, so the value cannot disagree with itself.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel: x 55–945 ==================== -->
+
+  <g>
+    <rect x="80" y="250" width="810" height="140" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">e2e-tests</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">runs-on: ubuntu-latest · postgres:16-alpine service</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">job carries no env: — every step wires its own</text>
+  </g>
+
+  <line x1="485" y1="390" x2="485" y2="430" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="440" width="810" height="200" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="480" font-size="26" fill="#c0caf5">Run E2E harness (migrates the fresh Postgres)</text>
+    <text x="104" y="520" font-size="23" fill="#f7768e">env: DATABASE_URL: postgresql://claude_portal:</text>
+    <text x="104" y="556" font-size="23" fill="#f7768e">dev_password_change_in_production@localhost:5432/claude_portal</text>
+    <text x="104" y="596" font-size="22" fill="#565f89">cargo test -p backend --test harness</text>
+  </g>
+
+  <g>
+    <rect x="80" y="660" width="810" height="200" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="700" font-size="26" fill="#c0caf5">Run DB-backed backend unit tests</text>
+    <text x="104" y="740" font-size="23" fill="#f7768e">env: DATABASE_URL: postgresql://claude_portal:</text>
+    <text x="104" y="776" font-size="23" fill="#f7768e">dev_password_change_in_production@localhost:5432/claude_portal</text>
+    <text x="104" y="816" font-size="22" fill="#565f89">3 × cargo test -p backend --lib …db_tests</text>
+  </g>
+
+  <g>
+    <rect x="80" y="890" width="810" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="936" font-size="26" fill="#c0caf5">two copies of one literal</text>
+    <text x="104" y="976" font-size="23" fill="#f7768e">one edit can update one step and silently miss the other</text>
+  </g>
+
+  <!-- ==================== AFTER panel: x 1040–1945 ==================== -->
+
+  <g>
+    <rect x="1065" y="250" width="810" height="180" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">e2e-tests</text>
+    <text x="1089" y="330" font-size="23" fill="#9ece6a">env: DATABASE_URL: postgresql://claude_portal:</text>
+    <text x="1089" y="366" font-size="23" fill="#9ece6a">dev_password_change_in_production@localhost:5432/claude_portal</text>
+    <text x="1089" y="402" font-size="22" fill="#565f89">declared once — inherited by every step</text>
+  </g>
+
+  <line x1="1470" y1="430" x2="1470" y2="470" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="480" width="810" height="160" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="520" font-size="26" fill="#c0caf5">Run E2E harness (migrates the fresh Postgres)</text>
+    <text x="1089" y="560" font-size="23" fill="#a9b1d6">no local env: — inherits the job value</text>
+    <text x="1089" y="596" font-size="22" fill="#565f89">cargo test -p backend --test harness</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="660" width="810" height="160" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="700" font-size="26" fill="#c0caf5">Run DB-backed backend unit tests</text>
+    <text x="1089" y="740" font-size="23" fill="#a9b1d6">no local env: — inherits the job value</text>
+    <text x="1089" y="776" font-size="22" fill="#565f89">messages / session_access / replay db_tests</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="890" width="810" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="936" font-size="26" fill="#c0caf5">a single source of truth</text>
+    <text x="1089" y="976" font-size="23" fill="#9ece6a">both steps read the same value — no second copy to drift</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">Placement only — the value is byte-identical; the checkout fetch-depth and dist-stub repetitions elsewhere are left alone.</text>
+</svg>
