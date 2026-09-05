@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1862 · Enforce unwrap deny in proxy crate</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">proxy's crate-root #![allow] shadowed the workspace unwrap deny — but every</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">remaining unwrap already sits in #[cfg(test)] mods, so the allow deletes cleanly.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel: x 55–945 ==================== -->
+
+  <g>
+    <rect x="80" y="250" width="810" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">proxy/src/main.rs — lines 1–4</text>
+    <text x="104" y="326" font-size="23" fill="#f7768e">#![allow(clippy::unwrap_used,</text>
+    <text x="104" y="362" font-size="23" fill="#f7768e">  clippy::expect_used)] — whole crate</text>
+    <text x="104" y="398" font-size="22" fill="#565f89">#1165 item 8 ratchet comment, now stale</text>
+  </g>
+
+  <g>
+    <rect x="80" y="460" width="810" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="500" font-size="26" fill="#c0caf5">workspace deny never fires here</text>
+    <text x="104" y="536" font-size="23" fill="#f7768e">[workspace.lints.clippy] unwrap_used = deny</text>
+    <text x="104" y="572" font-size="23" fill="#f7768e">shadowed by the crate-root allow above</text>
+    <text x="104" y="608" font-size="22" fill="#565f89">"still has production unwrap" — it does not</text>
+  </g>
+
+  <line x1="485" y1="650" x2="485" y2="690" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="710" width="810" height="180" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="756" font-size="26" fill="#c0caf5">a stray .unwrap() slips through</text>
+    <text x="104" y="792" font-size="23" fill="#f7768e">new production unwrap compiles fine —</text>
+    <text x="104" y="828" font-size="23" fill="#f7768e">CI stays green while the deny is mute</text>
+  </g>
+
+  <!-- ==================== AFTER panel: x 1040–1945 ==================== -->
+
+  <g>
+    <rect x="1065" y="250" width="810" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">header deleted — four lines gone</text>
+    <text x="1089" y="326" font-size="23" fill="#9ece6a">workspace deny now applies to the crate</text>
+    <text x="1089" y="362" font-size="23" fill="#a9b1d6">stale ratchet comment goes with it</text>
+    <text x="1089" y="398" font-size="22" fill="#565f89">diff is -4 / +0 in proxy/src/main.rs</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="460" width="810" height="190" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="500" font-size="26" fill="#c0caf5">deny proven live, not just present</text>
+    <text x="1089" y="536" font-size="23" fill="#a9b1d6">probe unwrap in prod code trips</text>
+    <text x="1089" y="572" font-size="23" fill="#9ece6a">clippy::unwrap_used — probe then removed</text>
+    <text x="1089" y="608" font-size="22" fill="#565f89">negative control, not assumed enforcement</text>
+  </g>
+
+  <line x1="1470" y1="650" x2="1470" y2="690" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="710" width="810" height="180" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="756" font-size="26" fill="#c0caf5">tests still compile and pass</text>
+    <text x="1089" y="792" font-size="23" fill="#a9b1d6">11 unwraps, all in #[cfg(test)] mods</text>
+    <text x="1089" y="828" font-size="23" fill="#9ece6a">clippy.toml exemption covers them; 7/7 pass</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">No functional change: removes no unwraps, only re-arms the lint; other crates keep their own allows.</text>
+</svg>
