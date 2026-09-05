@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1833 · Remove unused format_cost helper</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">A cost-chip helper with zero callers sat behind allow(dead_code); now it</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">is gone, so the module holds only chips the UI actually renders.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="132" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#7aa2f7">format_cost had zero callers</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">repo-wide search: the definition was the only hit</text>
+    <text x="104" y="364" font-size="22" fill="#565f89">turn_metrics_display.rs</text>
+  </g>
+  <g>
+    <rect x="80" y="402" width="860" height="132" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="444" font-size="26" fill="#7aa2f7">allow(dead_code) hid the rot</text>
+    <text x="104" y="482" font-size="23" fill="#a9b1d6">kept-for-telemetry comment, nobody reading it</text>
+    <text x="104" y="516" font-size="22" fill="#565f89">spend screens read REST totals; admin uses format_dollars</text>
+  </g>
+  <line x1="510" y1="534" x2="510" y2="940" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">dead code behind a live allow</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">the ratchet it needed now guards nothing</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="250" width="860" height="132" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="292" font-size="26" fill="#9ece6a">function and allow deleted</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">13 lines removed, no other file touched</text>
+    <text x="1089" y="364" font-size="22" fill="#565f89">frontend clippy clean, no new warnings</text>
+  </g>
+  <line x1="1495" y1="382" x2="1495" y2="940" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#9ece6a">module renders only live chips</text>
+    <text x="1089" y="1046" font-size="23" fill="#a9b1d6">TTFT, cache-hit, max-gap formatters stay</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">If a telemetry screen needs cost text again, re-add it with a caller and a test.</text>
+</svg>
