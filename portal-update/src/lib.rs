@@ -75,7 +75,7 @@ fn binary_name_for(binary_prefix: &str, os: &str, arch: &str) -> String {
         return binary_prefix.to_string();
     }
     let ext = if os == "windows" { ".exe" } else { "" };
-    format!("{}-{}-{}{}", binary_prefix, os, arch, ext)
+    format!("{binary_prefix}-{os}-{arch}{ext}")
 }
 
 /// GitHub release asset from the API
@@ -132,10 +132,7 @@ pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<U
         .context("Failed to create HTTP client")?;
 
     // Get the latest release from GitHub API
-    let api_url = format!(
-        "https://api.github.com/repos/{}/releases/tags/latest",
-        GITHUB_REPO
-    );
+    let api_url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/tags/latest");
 
     let resp = client
         .get(&api_url)
