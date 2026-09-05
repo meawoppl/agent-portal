@@ -214,11 +214,15 @@ pub fn render_task_tree(tree: &TaskTree) -> Html {
     // task list; a muted footer count keeps the "nothing drops silently"
     // invariant.
     let mut hidden_reminders = 0usize;
+    let mut hidden_bare = 0usize;
     let visible: Vec<&TaskNode> = tree
         .nodes()
         .filter(|node| {
             if is_hidden_scaffolding(node) {
                 hidden_reminders += 1;
+                false
+            } else if is_bare_node(node) {
+                hidden_bare += 1;
                 false
             } else {
                 true
@@ -239,6 +243,10 @@ pub fn render_task_tree(tree: &TaskTree) -> Html {
     if hidden_reminders > 0 {
         let plural = if hidden_reminders == 1 { "" } else { "s" };
         footer.push(format!("{hidden_reminders} reminder task{plural} hidden"));
+    }
+    if hidden_bare > 0 {
+        let plural = if hidden_bare == 1 { "" } else { "s" };
+        footer.push(format!("{hidden_bare} bare task record{plural} hidden"));
     }
 
     html! {
@@ -302,6 +310,22 @@ fn side_effect_is_noteworthy(decision: &str) -> bool {
     !(decision == "not_applicable"
         || decision.starts_with("allow")
         || decision.ends_with("auto_approval"))
+}
+
+/// A node holding nothing but a task id: no kind, no reason/status, no output,
+/// no side-effect, no tool results. These materialize when a group holds a
+/// stray task-referencing record whose lifecycle lives elsewhere — most often
+/// a `task.stream.linked` the classifier flushed fail-open at a turn boundary.
+/// The card such a node draws is pure noise ("PROPOSED task" with an empty
+/// body — live-reported), so it folds into the footer count instead. A node
+/// with a kind, or with any content at all, still renders.
+fn is_bare_node(node: &TaskNode) -> bool {
+    node.task_kind.is_none()
+        && node.reason.is_none()
+        && node.status.is_none()
+        && node.output.is_empty()
+        && node.side_effect.is_none()
+        && node.tool_results.is_empty()
 }
 
 fn render_task_node(node: &TaskNode) -> Html {
@@ -393,6 +417,29 @@ mod tests {
     }
 
     const REMINDER: &str = "reminder.agent.plugin:tbh-reminders:scope-reminder";
+
+    /// Live-reported (2026-09-05): a stray task-referencing record stranded in
+    /// its own group materialized a kindless, contentless node that rendered
+    /// as a bare "PROPOSED task" card. Bare nodes fold into the footer.
+    #[test]
+    fn bare_nodes_are_hidden_and_content_keeps_them() {
+        // Kindless + contentless = bare, whatever its state.
+        assert!(is_bare_node(&node(None)));
+        let mut completed = node(None);
+        completed.state = TaskState::Completed;
+        assert!(is_bare_node(&completed));
+
+        // A kind alone is information ("PROPOSED tool.bash") — renders.
+        assert!(!is_bare_node(&node(Some("tool.bash"))));
+
+        // Kindless but carrying content (the tool-attribution case) — renders.
+        let mut with_output = node(None);
+        with_output.output.push("streamed text".to_string());
+        assert!(!is_bare_node(&with_output));
+        let mut with_reason = node(None);
+        with_reason.reason = Some("cancelled by user".to_string());
+        assert!(!is_bare_node(&with_reason));
+    }
 
     /// Real capture (meawoppl-fc): muse's `bash` tool packs its structured
     /// result into `tool.result.text` as JSON, and emits the identical string a
