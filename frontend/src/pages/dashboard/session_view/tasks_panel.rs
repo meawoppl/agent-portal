@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! `TasksPanel` — sub-component owning sub-agent / background-task UI state.
 //!
 //! Pulled out of `SessionView` so the parent component no longer carries the
@@ -285,7 +282,10 @@ impl Component for TasksPanel {
         }
 
         let mut tasks: Vec<_> = self.active_tasks.iter().collect();
-        tasks.sort_by(|a, b| a.1.started_at.partial_cmp(&b.1.started_at).unwrap());
+        // `total_cmp` is a panic-free total order; `partial_cmp` + Equal on
+        // NaN is not (NaN would compare Equal to everything while finite
+        // values order among themselves).
+        tasks.sort_by(|a, b| a.1.started_at.total_cmp(&b.1.started_at));
 
         html! {
             <div class={classes.join(" ")}>
