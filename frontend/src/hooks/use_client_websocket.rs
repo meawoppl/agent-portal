@@ -1,4 +1,4 @@
-//! Hook for managing the client WebSocket connection with spend updates.
+//! Hook for managing the client WebSocket connection.
 
 #[path = "client_websocket_events.rs"]
 mod client_websocket_events;

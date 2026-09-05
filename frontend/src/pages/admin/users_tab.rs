@@ -66,10 +66,10 @@ fn sort_users(
                 rank(a).cmp(&rank(b))
             }
             SortColumn::Sessions => a.session_count.cmp(&b.session_count),
-            SortColumn::Spend => a
-                .total_spend_usd
-                .partial_cmp(&b.total_spend_usd)
-                .unwrap_or(std::cmp::Ordering::Equal),
+            // `total_cmp` is a panic-free total order; `partial_cmp` + Equal
+            // on NaN is not (NaN would compare Equal to everything while
+            // finite values order among themselves).
+            SortColumn::Spend => a.total_spend_usd.total_cmp(&b.total_spend_usd),
             SortColumn::Created => a.created_at.cmp(&b.created_at),
         };
         match direction {
