@@ -17,7 +17,7 @@ pub const TOKEN_TYPE_MOBILE: &str = "mobile";
 /// JWT claims for proxy authentication tokens
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyTokenClaims {
-    /// Token ID (for revocation lookup in proxy_auth_tokens table)
+    /// Token ID (for revocation lookup in `proxy_auth_tokens` table)
     pub jti: Uuid,
     /// User ID
     pub sub: Uuid,
@@ -52,12 +52,22 @@ pub struct ProxyInitConfig {
 
 impl ProxyInitConfig {
     /// Encode the config as base64url for use in URLs
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`serde_json::Error`] when the config cannot be serialized
+    /// (unreachable for this struct shape, but surfaced rather than panicked on).
     pub fn encode(&self) -> Result<String, serde_json::Error> {
         let json = serde_json::to_string(self)?;
         Ok(base64_url_encode(json.as_bytes()))
     }
 
     /// Decode the config from base64url
+    ///
+    /// # Errors
+    ///
+    /// Returns a boxed error when the input is not valid base64url, is not
+    /// UTF-8, or does not deserialize into a [`ProxyInitConfig`].
     pub fn decode(encoded: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let bytes = base64_url_decode(encoded)?;
         let json = String::from_utf8(bytes)?;
