@@ -4,6 +4,7 @@
 
 /// Truncate a string to at most `max_len` bytes, backing off to the
 /// nearest UTF-8 character boundary so the slice is always valid.
+#[must_use]
 pub fn truncate_str(s: &str, max_len: usize) -> &str {
     if s.len() <= max_len {
         s
@@ -18,9 +19,10 @@ pub fn truncate_str(s: &str, max_len: usize) -> &str {
 
 /// Format a millisecond duration as a short human-readable string:
 /// `"950ms"`, `"2.5s"`, or `"3m 17s"`.
+#[must_use]
 pub fn format_duration(ms: u64) -> String {
     if ms < 1000 {
-        format!("{}ms", ms)
+        format!("{ms}ms")
     } else if ms < 60000 {
         format!("{:.1}s", ms as f64 / 1000.0)
     } else {
@@ -33,9 +35,10 @@ pub fn format_duration(ms: u64) -> String {
 /// Formats a byte count as a human-readable size (`"512 B"`, `"1.5 KB"`, `"2.0 MB"`).
 /// Single `B/KB/MB` implementation for the workspace — frontend and launcher
 /// use this via `shared` instead of ad-hoc formatting.
+#[must_use]
 pub fn format_file_size(bytes: u64) -> String {
     if bytes < 1024 {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
@@ -46,6 +49,7 @@ pub fn format_file_size(bytes: u64) -> String {
 /// Formats a token count with `K`/`M` suffixes for readability.
 /// Takes `i64` to match `usage` counts without casts at call sites (counts can
 /// be negative in tests; `u64` would require casts).
+#[must_use]
 pub fn format_token_count(count: i64) -> String {
     if count < 1000 {
         count.to_string()
