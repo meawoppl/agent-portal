@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans','DejaVu Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#f7768e"/></marker>
+    <marker id="green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" fill="#565f89">PR #1831 · Adopt visual-pr v2 contract</text>
+  <text x="55" y="105" font-size="34" fill="#e6e9f5">The required check adopts v2's stable path and PR-body contract while keeping executable</text>
+  <text x="55" y="147" font-size="34" fill="#e6e9f5">workflow code pinned to an immutable commit.</text>
+  <line x1="55" y1="175" x2="1945" y2="175" stroke="#3d4666"/>
+  <text x="70" y="230" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="230" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="205" x2="1000" y2="1110" stroke="#3d4666" stroke-dasharray="2 6"/>
+  <rect x="80" y="285" width="840" height="210" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="115" y="345" font-size="27" fill="#c0caf5">visual-pr v1 compatibility pin</text>
+  <text x="115" y="397" font-size="23" fill="#a9b1d6">000-pr-visualization/&lt;number&gt;.svg</text>
+  <text x="115" y="445" font-size="21" fill="#565f89">older filename and presentation contract</text>
+  <line x1="500" y1="495" x2="500" y2="600" stroke="#f7768e" stroke-width="2" marker-end="url(#red)"/>
+  <rect x="80" y="615" width="840" height="230" fill="#1e202e" stroke="#3d4666"/>
+  <text x="115" y="675" font-size="27" fill="#7aa2f7">Contributor instructions</text>
+  <text x="115" y="730" font-size="23" fill="#a9b1d6">path documented without six-digit example</text>
+  <text x="115" y="780" font-size="23" fill="#a9b1d6">PR body image not required</text>
+
+  <rect x="1065" y="285" width="860" height="210" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1100" y="345" font-size="27" fill="#c0caf5">visual-pr v2 immutable commit</text>
+  <text x="1100" y="397" font-size="23" fill="#9ece6a">676648294d6a43f2dde58cfac700c5254f2147aa</text>
+  <text x="1100" y="445" font-size="21" fill="#565f89">workflow behavior cannot drift underneath open PRs</text>
+  <line x1="1495" y1="495" x2="1495" y2="600" stroke="#9ece6a" stroke-width="2" marker-end="url(#green)"/>
+  <rect x="1065" y="615" width="860" height="230" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1100" y="675" font-size="27" fill="#7aa2f7">One explicit v2 contract</text>
+  <text x="1100" y="730" font-size="23" fill="#a9b1d6">.0-pr-viz/&lt;six-digit-number&gt;.svg</text>
+  <text x="1100" y="780" font-size="23" fill="#a9b1d6">PR description opens with the committed image</text>
+  <rect x="1065" y="900" width="860" height="120" fill="#1e202e" stroke="#9ece6a"/>
+  <text x="1100" y="970" font-size="24" fill="#9ece6a">Workflow and AGENTS.md now agree.</text>
+  <text x="55" y="1160" font-size="22" fill="#565f89">Scope: visual-summary enforcement only; application builds and runtime behavior are unchanged.</text>
+</svg>
