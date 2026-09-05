@@ -755,11 +755,7 @@ fn radio_messages(
     peer_session_id: Uuid,
     peer_agent_type: AgentType,
 ) -> Vec<DemoMessage> {
-    let peer_label = match peer_agent_type {
-        AgentType::Claude => "Claude",
-        AgentType::Codex => "Codex",
-        AgentType::Muse => "Muse",
-    };
+    let peer_label = peer_agent_type.display_name();
     let mut messages = vec![
         user(
             "2026-07-20T04:01:07.000000Z",

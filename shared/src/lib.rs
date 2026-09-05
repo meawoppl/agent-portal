@@ -214,6 +214,17 @@ impl AgentType {
         }
     }
 
+    /// Human-facing label ("Claude", "Codex", "Muse") for dropdowns, chips,
+    /// and settings titles. Single source of truth so the frontend never
+    /// re-matches the enum just to capitalize the wire name.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AgentType::Claude => "Claude",
+            AgentType::Codex => "Codex",
+            AgentType::Muse => "Muse",
+        }
+    }
+
     /// The command that installs this agent's CLI, as structured data so the
     /// launcher (which runs it) and the frontend (which displays it for the
     /// user to confirm) agree on exactly one thing.
@@ -1389,6 +1400,21 @@ mod tests {
 
         let replaced: SessionStatus = serde_json::from_str("\"replaced\"").unwrap();
         assert_eq!(replaced, SessionStatus::Replaced);
+    }
+
+    #[test]
+    fn agent_type_display_names_are_capitalized() {
+        // `display_name` is the single source of truth for the human label;
+        // it must stay the capitalized wire name for every variant.
+        for agent in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
+            let wire = agent.as_str();
+            let mut expected = String::from(&wire[..1].to_ascii_uppercase());
+            expected.push_str(&wire[1..]);
+            assert_eq!(agent.display_name(), expected);
+        }
+        assert_eq!(AgentType::Claude.display_name(), "Claude");
+        assert_eq!(AgentType::Codex.display_name(), "Codex");
+        assert_eq!(AgentType::Muse.display_name(), "Muse");
     }
 
     #[test]
