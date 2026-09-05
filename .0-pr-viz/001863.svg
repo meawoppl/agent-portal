@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1863 · Remove unwrap ratchet from math scanner</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">the math scanner unwrapped the same char lookup three times — one helper</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">plus let-else clears the TODO(#1165) and re-arms the workspace deny.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel: x 55–945 ==================== -->
+
+  <g>
+    <rect x="80" y="250" width="810" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">math.rs — three copies, three panics</text>
+    <text x="104" y="326" font-size="23" fill="#f7768e">text[i..].chars().next().unwrap()</text>
+    <text x="104" y="362" font-size="23" fill="#f7768e">in fence, inline-code, and plain paths</text>
+    <text x="104" y="398" font-size="22" fill="#565f89">extract_math_placeholders, lines 29/42/116</text>
+  </g>
+
+  <g>
+    <rect x="80" y="460" width="810" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="500" font-size="26" fill="#c0caf5">ratchet allow hides the debt</text>
+    <text x="104" y="536" font-size="23" fill="#f7768e">#![allow(clippy::unwrap_used, ...)]</text>
+    <text x="104" y="572" font-size="23" fill="#f7768e">TODO(#1165): replace production paths</text>
+    <text x="104" y="608" font-size="22" fill="#565f89">indexing text[i..] can also panic off-boundary</text>
+  </g>
+
+  <line x1="485" y1="650" x2="485" y2="690" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="710" width="810" height="180" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="756" font-size="26" fill="#c0caf5">a corrupt index kills rendering</text>
+    <text x="104" y="792" font-size="23" fill="#f7768e">one bad byte offset panics the component —</text>
+    <text x="104" y="828" font-size="23" fill="#f7768e">the whole message fails to render</text>
+  </g>
+
+  <!-- ==================== AFTER panel: x 1040–1945 ==================== -->
+
+  <g>
+    <rect x="1065" y="250" width="810" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">one char_at helper, three call sites</text>
+    <text x="1089" y="326" font-size="23" fill="#9ece6a">text.get(i..)?.chars().next() — total</text>
+    <text x="1089" y="362" font-size="23" fill="#a9b1d6">let Some(c) = char_at(text, i) else { break }</text>
+    <text x="1089" y="398" font-size="22" fill="#565f89">boundary-safe get, not panicking index</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="460" width="810" height="190" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="500" font-size="26" fill="#c0caf5">TODO gone, deny enforced</text>
+    <text x="1089" y="536" font-size="23" fill="#a9b1d6">file-local allow deleted with the TODO</text>
+    <text x="1089" y="572" font-size="23" fill="#9ece6a">probe unwrap trips clippy::unwrap_used</text>
+    <text x="1089" y="608" font-size="22" fill="#565f89">negative control, then probe removed</text>
+  </g>
+
+  <line x1="1470" y1="650" x2="1470" y2="690" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="710" width="810" height="180" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="756" font-size="26" fill="#c0caf5">degraded scan, never a panic</text>
+    <text x="1089" y="792" font-size="23" fill="#a9b1d6">same output on every reachable input;</text>
+    <text x="1089" y="828" font-size="23" fill="#9ece6a">9 math tests pass, clippy + fmt clean</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope is one file: sibling frontend allows (launch/share/schedule dialogs, panels) keep their own TODOs.</text>
+</svg>
