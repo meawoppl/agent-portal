@@ -29,6 +29,15 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
 
     session_manager.add_user_client(user_id, tx.clone());
 
+    let ctx = WebClientCtx {
+        app_state: &app_state,
+        session_manager: &session_manager,
+        db_pool: &db_pool,
+        tx: &tx,
+        user_id,
+        initial_replay_limit,
+    };
+
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if ws_sender.send(msg).await.is_err() {
@@ -42,12 +51,7 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
             Ok(client_msg) => {
                 let should_break = handle_web_client_message(
                     client_msg,
-                    &app_state,
-                    &session_manager,
-                    &db_pool,
-                    &tx,
-                    user_id,
-                    initial_replay_limit,
+                    ctx,
                     &mut session_key,
                     &mut verified_session_id,
                     &mut pending_uploads,
@@ -77,20 +81,37 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
     }
 }
 
-/// Returns true if the connection should be closed
-#[allow(clippy::too_many_arguments)]
-fn handle_web_client_message(
-    client_msg: ClientToServer,
-    app_state: &AppState,
-    session_manager: &SessionManager,
-    db_pool: &crate::db::DbPool,
-    tx: &WebClientSender,
+/// Shared per-connection context for the web-client message handlers below.
+/// Bundled so the handler signatures stay under the argument-count lint;
+/// `Copy` so dispatch arms can pass it down freely. The three `&mut`
+/// connection states stay as separate params — they are per-message
+/// mutable borrows, not shared context.
+#[derive(Clone, Copy)]
+struct WebClientCtx<'a> {
+    app_state: &'a AppState,
+    session_manager: &'a SessionManager,
+    db_pool: &'a crate::db::DbPool,
+    tx: &'a WebClientSender,
     user_id: Uuid,
     initial_replay_limit: i64,
+}
+
+/// Returns true if the connection should be closed
+fn handle_web_client_message(
+    client_msg: ClientToServer,
+    ctx: WebClientCtx<'_>,
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
     pending_uploads: &mut HashMap<String, PendingUpload>,
 ) -> bool {
+    let WebClientCtx {
+        app_state,
+        session_manager,
+        db_pool,
+        tx,
+        user_id,
+        ..
+    } = ctx;
     match client_msg {
         ClientToServer::Register(shared::RegisterFields {
             session_id,
@@ -98,15 +119,10 @@ fn handle_web_client_message(
             replay_after,
             ..
         }) => handle_web_register(
-            app_state,
-            session_manager,
-            db_pool,
-            tx,
-            user_id,
+            ctx,
             session_id,
             &session_name,
             replay_after,
-            initial_replay_limit,
             session_key,
             verified_session_id,
         ),
@@ -182,8 +198,7 @@ fn handle_web_client_message(
                 });
             }
             handle_web_input(
-                session_manager,
-                db_pool,
+                ctx,
                 session_key,
                 *verified_session_id,
                 content,
@@ -329,20 +344,22 @@ fn handle_web_client_message(
 }
 
 /// Handle web client registration. Returns true if the connection should be closed.
-#[allow(clippy::too_many_arguments)]
 fn handle_web_register(
-    app_state: &AppState,
-    session_manager: &SessionManager,
-    db_pool: &crate::db::DbPool,
-    tx: &WebClientSender,
-    user_id: Uuid,
+    ctx: WebClientCtx<'_>,
     session_id: Uuid,
     session_name: &str,
     replay_after: Option<String>,
-    initial_replay_limit: i64,
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
 ) -> bool {
+    let WebClientCtx {
+        app_state,
+        session_manager,
+        db_pool,
+        tx,
+        user_id,
+        initial_replay_limit,
+    } = ctx;
     let access = app_state.conn().and_then(|mut conn| {
         crate::handlers::session_access::verify_session_reader(&mut conn, session_id, user_id)
     });
@@ -397,10 +414,8 @@ fn pending_input_exists(
     .unwrap_or(false)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_web_input(
-    session_manager: &SessionManager,
-    db_pool: &crate::db::DbPool,
+    ctx: WebClientCtx<'_>,
     session_key: &Option<SessionId>,
     verified_session_id: Option<Uuid>,
     content: serde_json::Value,
@@ -408,6 +423,11 @@ fn handle_web_input(
     user_id: Uuid,
     client_msg_id: Option<Uuid>,
 ) {
+    let WebClientCtx {
+        session_manager,
+        db_pool,
+        ..
+    } = ctx;
     let Some(ref key) = session_key else {
         warn!("Web client tried to send ClaudeInput but no session_key set (not registered?)");
         return;
