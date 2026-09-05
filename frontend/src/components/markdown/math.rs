@@ -44,32 +44,19 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             i += c.len_utf8();
             continue;
         }
-        // Display math: $$...$$
-        if bytes[i] == b'$' && bytes.get(i + 1) == Some(&b'$') {
-            if let Some(rel) = text[i + 2..].find("$$") {
-                let end = i + 2 + rel + 2;
+        // Fixed-delimiter math: `$$...$$`, `\[...\]`, `\(...\)`. The three
+        // shapes differ only in their delimiters, so one table covers them.
+        let mut matched = false;
+        for (open, close) in [("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)")] {
+            if let Some(end) = match_fixed_span(text, i, open, close) {
                 emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
                 i = end;
-                continue;
+                matched = true;
+                break;
             }
         }
-        // LaTeX-style display: \[...\]
-        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'[') {
-            if let Some(rel) = text[i + 2..].find("\\]") {
-                let end = i + 2 + rel + 2;
-                emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
-                i = end;
-                continue;
-            }
-        }
-        // LaTeX-style inline: \(...\)
-        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'(') {
-            if let Some(rel) = text[i + 2..].find("\\)") {
-                let end = i + 2 + rel + 2;
-                emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
-                i = end;
-                continue;
-            }
+        if matched {
+            continue;
         }
         // Inline math: $...$ on a single line.
         //
@@ -119,6 +106,17 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
     }
 
     (output, math_blocks)
+}
+
+/// Match one fixed-delimiter math span (`$$…$$`, `\[…\]`, `\(…\)`) at byte
+/// offset `i`, returning the end offset (exclusive) on success. `i` must be a
+/// char boundary, as the scan maintains throughout.
+fn match_fixed_span(text: &str, i: usize, open: &str, close: &str) -> Option<usize> {
+    if !text[i..].starts_with(open) {
+        return None;
+    }
+    let rel = text[i + open.len()..].find(close)?;
+    Some(i + open.len() + rel + close.len())
 }
 
 fn emit_placeholder(output: &mut String, math_blocks: &mut Vec<String>, math: &str) {

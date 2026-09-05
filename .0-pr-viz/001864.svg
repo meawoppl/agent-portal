@@ -15,8 +15,8 @@
   <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1864 · Dedupe math placeholder token parsing</text>
 
   <!-- Thesis -->
-  <text x="55" y="100" font-size="34" fill="#e6e9f5">split and restore each hand-rolled the same MATH token scan — two helpers,</text>
-  <text x="55" y="140" font-size="34" fill="#e6e9f5">one call each, zero behavior change.</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">extract, split, restore each hand-rolled the same scans — three helpers,</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">one helper each, zero behavior change.</text>
   <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
 
   <!-- Panel labels + center divider -->
@@ -74,7 +74,7 @@
   <g>
     <rect x="1065" y="710" width="810" height="180" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
     <text x="1089" y="756" font-size="26" fill="#c0caf5">same bytes, less code</text>
-    <text x="1089" y="792" font-size="23" fill="#a9b1d6">+25 / -26, malformed still dropped silently;</text>
+    <text x="1089" y="792" font-size="23" fill="#a9b1d6">+45 / -48, malformed still dropped silently;</text>
     <text x="1089" y="828" font-size="23" fill="#9ece6a">44 markdown tests pass, clippy clean</text>
   </g>
 
