@@ -96,6 +96,18 @@ pub fn api_url(path: &str) -> String {
     format!("{}{}", get_base_url(), path)
 }
 
+/// Serialize `body` into `builder` and send it in one fallible step.
+///
+/// `RequestBuilder::json` fails when the body doesn't serialize; chaining it
+/// behind `.unwrap()` turns that into a panic inside `spawn_local`. Awaiting
+/// this instead routes both failures into the caller's existing `Err` arm.
+pub async fn send_json(
+    builder: gloo_net::http::RequestBuilder,
+    body: &impl serde::Serialize,
+) -> Result<gloo_net::http::Response, gloo_net::Error> {
+    builder.json(body)?.send().await
+}
+
 /// Build a full WebSocket URL from a path (e.g., "/ws/client" -> "ws://localhost:3000/ws/client")
 pub fn ws_url(path: &str) -> String {
     format!("{}{}", get_ws_url(), path)

@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::audio::{self, EventSound, SoundConfig, SoundEvent, Waveform, STORAGE_KEY};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
@@ -86,11 +83,7 @@ pub fn sounds_panel() -> Html {
                 let cfg = (*config).clone();
                 let url = utils::api_url("/api/settings/sound");
                 let json = serde_json::to_value(&cfg).unwrap_or_default();
-                let result = Request::put(&url)
-                    .json(&json)
-                    .expect("json body")
-                    .send()
-                    .await;
+                let result = utils::send_json(Request::put(&url), &json).await;
                 match result {
                     Ok(resp) if resp.ok() => {
                         // Update localStorage so play_sound() uses new settings

@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::components::model_select::{extract_model_arg, model_cli_args};
 use crate::components::skip_permissions::{
     skip_permissions_args, skip_permissions_label, strip_skip_permissions_args,
@@ -268,11 +265,11 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             },
                             hostname: host,
                         };
-                        Request::post(&utils::api_url("/api/scheduled-tasks"))
-                            .json(&body)
-                            .unwrap()
-                            .send()
-                            .await
+                        utils::send_json(
+                            Request::post(&utils::api_url("/api/scheduled-tasks")),
+                            &body,
+                        )
+                        .await
                     }
                     Some(FormMode::Edit(id)) => {
                         let body = UpdateScheduledTaskRequest {
@@ -286,11 +283,14 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             session_mode: Some(data.session_mode),
                             ..Default::default()
                         };
-                        Request::patch(&utils::api_url(&format!("/api/scheduled-tasks/{}", id)))
-                            .json(&body)
-                            .unwrap()
-                            .send()
-                            .await
+                        utils::send_json(
+                            Request::patch(&utils::api_url(&format!(
+                                "/api/scheduled-tasks/{}",
+                                id
+                            ))),
+                            &body,
+                        )
+                        .await
                     }
                     None => return,
                 };
@@ -327,13 +327,13 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                     enabled: Some(!enabled),
                     ..Default::default()
                 };
-                let _ = Request::patch(&utils::api_url(&format!(
-                    "/api/scheduled-tasks/{}",
-                    task_id
-                )))
-                .json(&body)
-                .unwrap()
-                .send()
+                let _ = utils::send_json(
+                    Request::patch(&utils::api_url(&format!(
+                        "/api/scheduled-tasks/{}",
+                        task_id
+                    ))),
+                    &body,
+                )
                 .await;
                 reload_tasks.emit(());
             });

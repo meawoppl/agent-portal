@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::components::{ConfirmModal, ConfirmModalStyle};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
@@ -274,12 +271,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                         expires_in_days: 30,
                     };
 
-                    match Request::post(&api_endpoint)
-                        .json(&request_body)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
+                    match utils::send_json(Request::post(&api_endpoint), &request_body).await {
                         Ok(response) => {
                             if let Ok(data) = response.json::<CreateProxyTokenResponse>().await {
                                 renewed_token.set(Some(data));
@@ -327,12 +319,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                     },
                 };
 
-                match Request::post(&api_endpoint)
-                    .json(&request_body)
-                    .unwrap()
-                    .send()
-                    .await
-                {
+                match utils::send_json(Request::post(&api_endpoint), &request_body).await {
                     Ok(response) => {
                         if let Ok(data) = response.json::<CreateProxyTokenResponse>().await {
                             created_token.set(Some(data));

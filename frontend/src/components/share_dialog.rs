@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use gloo::events::EventListener;
 use gloo_net::http::Request;
 use shared::api::{
@@ -116,7 +113,7 @@ impl Component for ShareDialog {
                 spawn_local(async move {
                     let url = utils::api_url(&format!("/api/sessions/{}/members", session_id));
                     let body = AddMemberRequest { email, role };
-                    match Request::post(&url).json(&body).unwrap().send().await {
+                    match utils::send_json(Request::post(&url), &body).await {
                         Ok(response) if response.status() == 201 => {
                             link.send_message(ShareDialogMsg::MemberAdded);
                         }
@@ -191,7 +188,7 @@ impl Component for ShareDialog {
                         session_id, user_id
                     ));
                     let body = UpdateMemberRoleRequest { role };
-                    match Request::patch(&url).json(&body).unwrap().send().await {
+                    match utils::send_json(Request::patch(&url), &body).await {
                         Ok(response) if response.ok() => {
                             link.send_message(ShareDialogMsg::RoleChanged(user_id, role));
                         }
