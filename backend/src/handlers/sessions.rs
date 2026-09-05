@@ -200,6 +200,18 @@ pub async fn delete_session(
         current_user_id,
     )?;
 
+    close_session(&app_state, conn, &session).await?;
+
+    Ok(EmptyResponse::NO_CONTENT)
+}
+
+/// Shared close path for owner and administrator endpoints.
+pub(crate) async fn close_session(
+    app_state: &AppState,
+    mut conn: crate::db::DbConnection,
+    session: &crate::models::Session,
+) -> Result<(), AppError> {
+    let session_id = session.id;
     // Close = archive-then-delete. When the archive is enabled, take a final
     // snapshot before destroying the hot rows so the session stays readable in
     // History even if the sweep never got to it (closed before the idle
@@ -236,10 +248,10 @@ pub async fn delete_session(
         Some(session.working_directory.clone()),
     );
 
-    super::helpers::delete_session_with_data(&mut conn, &session, true)
+    super::helpers::delete_session_with_data(&mut conn, session, true)
         .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
 
-    Ok(EmptyResponse::NO_CONTENT)
+    Ok(())
 }
 
 pub async fn stop_session(

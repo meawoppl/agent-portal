@@ -1028,6 +1028,35 @@ fn get_session_paused(
         .map_err(|e| e.to_string())
 }
 
+/// The sessions a launcher is expected to be running: everything owned by the
+/// user on that launcher that has not been paused, superseded, or handed to the
+/// scheduler.
+///
+/// `paused` is the do-not-relaunch flag. Stopping a session sets it (#1776) —
+/// without that, a stopped session is still "desired" and the next heartbeat
+/// starts it again. Closing a session deletes the row, so it leaves the desired
+/// set by disappearing from it.
+///
+/// Shared with the tests so the relaunch predicate has exactly one definition.
+pub(crate) fn load_desired_sessions(
+    conn: &mut crate::db::DbConnection,
+    user_id: Uuid,
+    launcher_id: Uuid,
+) -> diesel::QueryResult<Vec<crate::models::Session>> {
+    use crate::models::Session;
+    use crate::schema::sessions;
+    use diesel::prelude::*;
+
+    sessions::table
+        .filter(sessions::user_id.eq(user_id))
+        .filter(sessions::launcher_id.eq(launcher_id))
+        .filter(sessions::paused.eq(false))
+        .filter(sessions::scheduled_task_id.is_null())
+        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
+        .select(Session::as_select())
+        .load(conn)
+}
+
 fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: Uuid) {
     use crate::models::Session;
     use crate::schema::sessions;
@@ -1042,15 +1071,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         return;
     };
 
-    let desired: Vec<Session> = match sessions::table
-        .filter(sessions::user_id.eq(user_id))
-        .filter(sessions::launcher_id.eq(launcher_id))
-        .filter(sessions::paused.eq(false))
-        .filter(sessions::scheduled_task_id.is_null())
-        .filter(sessions::status.ne(SessionStatus::Replaced.as_str()))
-        .select(Session::as_select())
-        .load(&mut conn)
-    {
+    let desired: Vec<Session> = match load_desired_sessions(&mut conn, user_id, launcher_id) {
         Ok(rows) => rows,
         Err(e) => {
             warn!(
@@ -1335,6 +1356,69 @@ fn get_dev_user_id(app_state: &AppState) -> Option<Uuid> {
 
 #[cfg(test)]
 mod tests {
+    /// Stopping a session must take it out of the launcher's desired set.
+    ///
+    /// Regression for #1776: `stop_session` used to write `paused = false`,
+    /// which is exactly what [`load_desired_sessions`] selects on, so the next
+    /// heartbeat relaunched the session the user (or `agent-portal seppuku`)
+    /// had just stopped.
+    #[test]
+    fn stopped_session_is_not_desired_but_a_running_one_is() {
+        use super::load_desired_sessions;
+        use crate::schema::sessions;
+        use diesel::prelude::*;
+        use uuid::Uuid;
+
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+
+        let owner = crate::test_support::insert_user(&mut conn, "stop_desired");
+        let launcher_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        diesel::insert_into(sessions::table)
+            .values((
+                sessions::id.eq(session_id),
+                sessions::user_id.eq(owner.id),
+                sessions::session_name.eq("stop-vs-desired"),
+                sessions::session_key.eq(session_id.to_string()),
+                sessions::working_directory.eq("/tmp"),
+                sessions::status.eq(shared::SessionStatus::Active.as_str()),
+                sessions::hostname.eq("test-host"),
+                sessions::launcher_id.eq(launcher_id),
+                sessions::agent_type.eq("claude"),
+                sessions::paused.eq(false),
+            ))
+            .execute(&mut conn)
+            .expect("insert session");
+
+        let running = load_desired_sessions(&mut conn, owner.id, launcher_id).expect("query");
+
+        // Exactly the write `stop_session` performs.
+        diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::paused.eq(true),
+                sessions::status.eq(shared::SessionStatus::Disconnected.as_str()),
+            ))
+            .execute(&mut conn)
+            .expect("stop write");
+
+        let stopped = load_desired_sessions(&mut conn, owner.id, launcher_id).expect("query");
+
+        let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
+        let _ = diesel::delete(crate::schema::users::table.find(owner.id)).execute(&mut conn);
+
+        assert!(
+            running.iter().any(|s| s.id == session_id),
+            "a live session should be desired, or this test proves nothing"
+        );
+        assert!(
+            !stopped.iter().any(|s| s.id == session_id),
+            "a stopped session must not be relaunched by reconcile"
+        );
+    }
+
     use super::{
         crashloop_give_up, exit_is_launch_failure, launch_backoff, launcher_token_needs_refresh,
         recent_refresh_cutoff, token_grace_expires_at, LAUNCH_CRASHLOOP_GIVEUP,

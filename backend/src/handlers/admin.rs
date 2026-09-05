@@ -412,18 +412,14 @@ pub async fn delete_session(
         .first(&mut conn)
         .map_err(|_| AppError::NotFound("session"))?;
 
-    // Remove from session manager (disconnect if connected)
-    let session_key = session_id.to_string();
-    app_state
-        .session_manager
-        .unregister_session(&session_key, None);
-
-    // Delete session and all associated data, recording costs
-    super::helpers::delete_session_with_data(&mut conn, &session, true)
-        .map_err(|e| AppError::Internal(format!("Failed to delete session data: {e:?}")))?;
+    // Same close path as the owner-facing `DELETE /api/sessions/{id}`: archive
+    // first, tell the proxy and the launcher to stop, then delete the rows.
+    // Keeping both routes on one implementation preserves configured history
+    // and ensures the launcher cannot retain a process for a deleted session.
+    super::sessions::close_session(&app_state, conn, &session).await?;
 
     info!(
-        "Admin {} deleted session {} ({}) - cost ${:.4} recorded",
+        "Admin {} closed session {} ({}) - cost ${:.4} recorded",
         admin.email, session_id, session.session_name, session.total_cost_usd
     );
 
