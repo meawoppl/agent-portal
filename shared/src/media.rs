@@ -52,6 +52,7 @@ pub const RIZZMA_HTML_CARRIER_OPEN: &str =
     r#"<script type="application/vnd.rizzma.figure+base64" id="riz">"#;
 
 /// Classify a supported content type, or return `None`.
+#[must_use]
 pub fn media_kind(content_type: &str) -> Option<MediaKind> {
     let ct = content_type.trim();
     if SUPPORTED_IMAGE_TYPES.contains(&ct) {
@@ -76,38 +77,46 @@ pub const SUPPORTED_FORMATS_HINT: &str =
 // recovers a content type when a blob's sidecar is missing. Both live here so
 // the two can't drift (see the module docs).
 
+#[must_use]
 pub fn has_png_magic(b: &[u8]) -> bool {
     b.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 }
 
+#[must_use]
 pub fn has_jpeg_magic(b: &[u8]) -> bool {
     b.starts_with(&[0xFF, 0xD8, 0xFF])
 }
 
+#[must_use]
 pub fn has_gif_magic(b: &[u8]) -> bool {
     b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a")
 }
 
+#[must_use]
 pub fn has_webp_magic(b: &[u8]) -> bool {
     b.len() >= 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP"
 }
 
+#[must_use]
 pub fn has_mp4_magic(b: &[u8]) -> bool {
     // ISO Base Media: an `ftyp` box at offset 4.
     b.len() >= 12 && &b[4..8] == b"ftyp"
 }
 
+#[must_use]
 pub fn has_webm_magic(b: &[u8]) -> bool {
     // EBML header (Matroska/WebM).
     b.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
 }
 
+#[must_use]
 pub fn has_rizzma_magic(b: &[u8]) -> bool {
     b.starts_with(b"RZFG")
 }
 
 /// Fast declared-wrapper check used by the launcher before upload. Full HTML
 /// carrier validation and artifact validation remain backend responsibilities.
+#[must_use]
 pub fn has_rizzma_html_carrier(b: &[u8]) -> bool {
     let Ok(text) = std::str::from_utf8(b) else {
         return false;
@@ -119,6 +128,7 @@ pub fn has_rizzma_html_carrier(b: &[u8]) -> bool {
 /// SVG is XML text, so there's no single magic number. Skip a UTF-8 BOM and
 /// leading whitespace, then look for an `<svg` (or `<?xml` prolog) near the
 /// start.
+#[must_use]
 pub fn looks_like_svg(b: &[u8]) -> bool {
     let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(b);
     let head = &b[..b.len().min(1024)];
@@ -139,6 +149,7 @@ pub fn looks_like_svg(b: &[u8]) -> bool {
 /// heuristic goes last because it's the loosest. Returns `None` for anything
 /// outside the supported set, leaving the caller to pick a fallback — never
 /// invent a type for bytes we don't recognize.
+#[must_use]
 pub fn sniff_content_type(bytes: &[u8]) -> Option<&'static str> {
     if has_png_magic(bytes) {
         Some("image/png")

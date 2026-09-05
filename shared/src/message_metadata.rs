@@ -4,12 +4,14 @@
 use crate::{HistoryEntry, MessageSource, PortalMeta};
 
 /// Extract the server-created timestamp from an optional metadata sidecar.
+#[must_use]
 pub fn created_at_iso(meta: Option<&PortalMeta>) -> Option<&str> {
     meta.and_then(PortalMeta::created_at_iso)
 }
 
 /// Parse stored message content as JSON, falling back to a typed envelope when
 /// the persisted row predates strict JSON storage or contains raw text.
+#[must_use]
 pub fn content_value_or_fallback(role: &str, content: &str) -> serde_json::Value {
     #[derive(serde::Serialize)]
     struct FallbackMessageContent<'a> {
@@ -29,12 +31,14 @@ pub fn content_value_or_fallback(role: &str, content: &str) -> serde_json::Value
 
 impl PortalMeta {
     /// Server-assigned persisted-row timestamp as an ISO string.
+    #[must_use]
     pub fn created_at_iso(&self) -> Option<&str> {
         self.created_at.as_deref()
     }
 
     /// Typed origin/attribution for this message, when it is not the session's
     /// own agent output.
+    #[must_use]
     pub fn source(&self) -> Option<&MessageSource> {
         self.source.as_ref()
     }
@@ -42,6 +46,7 @@ impl PortalMeta {
 
 impl HistoryEntry {
     /// Server-assigned timestamp from this historical row's metadata sidecar.
+    #[must_use]
     pub fn created_at_iso(&self) -> Option<&str> {
         created_at_iso(self.meta.as_ref())
     }

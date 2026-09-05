@@ -18,6 +18,7 @@
 /// Abbreviations are inherently ambiguous (e.g. `CST` is US Central *or* China
 /// Standard); these resolve to the North American zones this tool's users mean.
 /// Anything not listed should be treated as an IANA name by the caller.
+#[must_use]
 pub fn abbrev_to_iana(input: &str) -> Option<&'static str> {
     let key = input.trim().to_ascii_uppercase();
     Some(match key.as_str() {
