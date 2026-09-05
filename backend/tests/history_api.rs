@@ -272,6 +272,7 @@ async fn get(fixture: &Fixture, auth: Option<&str>, uri: &str) -> axum::response
         req = req.header(header::AUTHORIZATION, auth);
     }
     backend::routes::build_router(fixture.state.clone())
+        .expect("router builds")
         .oneshot(req.body(Body::empty()).unwrap())
         .await
         .unwrap()
@@ -379,6 +380,7 @@ async fn history_per_session_endpoints_enforce_visibility() {
         .body(Body::empty())
         .unwrap();
     let resp = backend::routes::build_router(f.state.clone())
+        .expect("router builds")
         .oneshot(req)
         .await
         .unwrap();
@@ -451,6 +453,7 @@ async fn close_session_takes_final_archive_before_delete() {
         .body(Body::empty())
         .unwrap();
     let resp = backend::routes::build_router(f.state.clone())
+        .expect("router builds")
         .oneshot(req)
         .await
         .unwrap();

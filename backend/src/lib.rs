@@ -1,7 +1,3 @@
-// Ratchet for the workspace unwrap/expect deny (#1165 item 8): this crate
-// still has production unwrap/expect; remove this allow as it is cleaned.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! Agent Portal backend.
 //!
 //! This is a lib + thin bin: the binary (`main.rs`) just calls [`run`]. Exposing
@@ -28,6 +24,10 @@ pub mod schema;
 // *without* `cfg(test)`. The `test-support` feature is enabled only via the
 // crate's self dev-dependency in `Cargo.toml`, so this module is never
 // compiled into `cargo build`/release binaries.
+// `expect`/`unwrap` inside are fixture setup: a failed insert, pool build,
+// or migration must fail the test loudly, and this module never ships in
+// release binaries (see the `cfg` gate above).
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
@@ -231,7 +231,7 @@ pub async fn run() -> anyhow::Result<()> {
     push::spawn_dispatcher(app_state.clone(), notification_rx, push_transport);
 
     // Build our application with routes
-    let app = routes::build_router(app_state.clone());
+    let app = routes::build_router(app_state.clone())?;
 
     // Spawn background maintenance tasks
     background::spawn_periodic(
@@ -327,17 +327,19 @@ pub async fn run() -> anyhow::Result<()> {
 /// Broadcasts ServerShutdown message to all clients before returning
 async fn shutdown_signal(app_state: Arc<AppState>) {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::warn!("failed to install Ctrl+C handler: {e}");
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                let _ = sig.recv().await;
+            }
+            Err(e) => tracing::warn!("failed to install SIGTERM handler: {e}"),
+        }
     };
 
     #[cfg(not(unix))]

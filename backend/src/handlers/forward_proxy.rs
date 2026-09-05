@@ -777,9 +777,9 @@ fn build_downstream_response(
                 continue;
             }
         }
-        if (lower == "location" || lower == "content-location") && origin.is_some() {
-            if let Ok(loc) = value.to_str() {
-                let rewritten = rewrite_upstream_location(loc, port, origin.as_deref().unwrap());
+        if lower == "location" || lower == "content-location" {
+            if let (Some(origin), Ok(loc)) = (origin.as_deref(), value.to_str()) {
+                let rewritten = rewrite_upstream_location(loc, port, origin);
                 if let Ok(v) = HeaderValue::from_str(&rewritten) {
                     headers.append(name.clone(), v);
                     continue;
