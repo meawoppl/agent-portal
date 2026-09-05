@@ -441,20 +441,7 @@ fn handle_web_input(
 
     // Track who sent this input so we can attribute the echoed user message
     if let Ok(mut conn) = db_pool.get() {
-        use crate::schema::users;
-        let display_name: String = users::table
-            .find(user_id)
-            .select(users::name)
-            .first::<Option<String>>(&mut conn)
-            .ok()
-            .flatten()
-            .or_else(|| {
-                users::table
-                    .find(user_id)
-                    .select(users::email)
-                    .first::<String>(&mut conn)
-                    .ok()
-            })
+        let display_name: String = crate::handlers::helpers::user_display_name(&mut conn, user_id)
             .unwrap_or_else(|| "Unknown".to_string());
         session_manager.set_last_input_sender(session_id, user_id, display_name);
     }
