@@ -20,7 +20,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use tower_cookies::Key;
 use uuid::Uuid;
 
-use crate::models::{NewUser, User};
+use crate::models::{NewSessionWithId, NewUser, Session, User};
 
 use crate::config::MobileAppLinksConfig;
 use crate::db::DbPool;
@@ -146,4 +146,46 @@ pub fn insert_user(conn: &mut PgConnection, label: &str) -> User {
         })
         .get_result::<User>(conn)
         .expect("insert test user")
+}
+
+/// Insert a throwaway session owned by `user_id` and return the persisted row.
+///
+/// Consolidates the near-identical `NewSessionWithId` literals + inserts that
+/// every DB-gated test module hand-wrote (the same class of duplication
+/// `insert_user` removed for users in #924). The defaults are what those
+/// literals all agreed on: `Active` status, `/tmp` working directory,
+/// `test-host` hostname, `claude` agent type, empty `claude_args`, everything
+/// else `None`/`false`. `session_key` is the fresh session id, so rows stay
+/// unique even when `session_name` repeats across parallel tests
+/// (`session_name` itself is not unique — only `session_key` is).
+///
+/// Takes a bare `&mut PgConnection` like `insert_user`, so it works with both
+/// a pooled and a direct connection. Tests needing non-default columns (a
+/// `Disconnected` status, a launcher version, ...) insert here then apply a
+/// follow-up `diesel::update` — the insert-then-update shape
+/// `archive_pending_sessions_db_tests` already used for timestamps.
+pub fn insert_session(conn: &mut PgConnection, user_id: Uuid, session_name: &str) -> Session {
+    use crate::schema::sessions;
+    let id = Uuid::new_v4();
+    diesel::insert_into(sessions::table)
+        .values(&NewSessionWithId {
+            id,
+            user_id,
+            session_name: session_name.to_string(),
+            session_key: id.to_string(),
+            working_directory: "/tmp".to_string(),
+            status: shared::SessionStatus::Active.as_str().to_string(),
+            git_branch: None,
+            client_version: None,
+            hostname: "test-host".to_string(),
+            launcher_id: None,
+            agent_type: "claude".to_string(),
+            repo_url: None,
+            scheduled_task_id: None,
+            paused: false,
+            claude_args: serde_json::Value::Array(Vec::new()),
+            launcher_version: None,
+        })
+        .get_result::<Session>(conn)
+        .expect("insert test session")
 }

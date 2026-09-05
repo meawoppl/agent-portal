@@ -643,7 +643,6 @@ fn insert_portal_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{NewSessionWithId, NewUser, User};
 
     #[test]
     fn overload_matcher_accepts_only_transient_529_overloads() {
@@ -681,46 +680,16 @@ mod tests {
         assert_eq!(overload_retry_delay_secs(4), None);
     }
 
-    fn make_user(conn: &mut diesel::PgConnection) -> User {
-        use crate::schema::users;
-        let nonce = Uuid::new_v4();
-        let new_user = NewUser {
-            email: format!("test_overload_{nonce}@example.invalid"),
-            name: Some("Overload Test".to_string()),
-            avatar_url: None,
-        };
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .get_result::<User>(conn)
-            .expect("insert test user")
-    }
-
     fn make_session(conn: &mut diesel::PgConnection, user_id: Uuid) -> Uuid {
         use crate::schema::sessions;
-        let session_id = Uuid::new_v4();
-        let new_session = NewSessionWithId {
-            id: session_id,
-            user_id,
-            session_name: "overload-test".to_string(),
-            session_key: session_id.to_string(),
-            working_directory: "/tmp".to_string(),
-            status: shared::SessionStatus::Active.as_str().to_string(),
-            git_branch: None,
-            client_version: None,
-            hostname: "test-host".to_string(),
-            launcher_id: Some(Uuid::new_v4()),
-            agent_type: "claude".to_string(),
-            repo_url: None,
-            scheduled_task_id: None,
-            paused: false,
-            claude_args: serde_json::Value::Array(Vec::new()),
-            launcher_version: None,
-        };
-        diesel::insert_into(sessions::table)
-            .values(&new_session)
+        let session = crate::test_support::insert_session(conn, user_id, "overload-test");
+        // Preserve the launcher-owned shape the old literal had: the
+        // continuations under test carry their own launcher ids.
+        diesel::update(sessions::table.find(session.id))
+            .set(sessions::launcher_id.eq(Uuid::new_v4()))
             .execute(conn)
-            .expect("insert session");
-        session_id
+            .expect("set session launcher");
+        session.id
     }
 
     fn insert_overloaded_continuation(
@@ -753,7 +722,7 @@ mod tests {
             return;
         };
         let mut conn = pool.get().expect("db conn");
-        let user = make_user(&mut conn);
+        let user = crate::test_support::insert_user(&mut conn, "overload");
         let session_id = make_session(&mut conn, user.id);
 
         // 0 prior -> immediate.

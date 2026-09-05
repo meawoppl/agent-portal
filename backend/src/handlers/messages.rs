@@ -287,34 +287,11 @@ mod tests {
 #[cfg(test)]
 mod db_tests {
     use super::*;
-    use crate::models::{NewSessionWithId, Session};
+    use crate::models::Session;
     use chrono::Utc;
 
     fn make_session(conn: &mut diesel::pg::PgConnection, owner_id: uuid::Uuid) -> Session {
-        use crate::schema::sessions;
-        let session_id = uuid::Uuid::new_v4();
-        let new_session = NewSessionWithId {
-            id: session_id,
-            user_id: owner_id,
-            session_name: format!("test-msg-session-{}", session_id),
-            session_key: session_id.to_string(),
-            working_directory: "/tmp".to_string(),
-            status: shared::SessionStatus::Active.as_str().to_string(),
-            git_branch: None,
-            client_version: None,
-            hostname: "test-host".to_string(),
-            launcher_id: None,
-            agent_type: "claude".to_string(),
-            repo_url: None,
-            scheduled_task_id: None,
-            paused: false,
-            claude_args: serde_json::Value::Array(Vec::new()),
-            launcher_version: None,
-        };
-        diesel::insert_into(sessions::table)
-            .values(&new_session)
-            .get_result::<Session>(conn)
-            .expect("insert test session")
+        crate::test_support::insert_session(conn, owner_id, "test-msg-session")
     }
 
     /// Seed `count` messages with strictly increasing `created_at`. We use

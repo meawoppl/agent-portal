@@ -96,12 +96,7 @@ jobs:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
       - name: Stub frontend dist
-        # Backend embeds frontend/dist at build time, but memory_serve falls
-        # back to dynamic loading when it is empty. CI compile/test checks do
-        # not need the real bundle, so stub it instead of depending on (and
-        # waiting for) build-frontend. Keeps backend lanes independent of
-        # frontend/CSS failures (#1165 item 1).
-        run: mkdir -p frontend/dist
+        uses: ./.github/actions/stub-frontend-dist
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -122,12 +117,7 @@ jobs:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
       - name: Stub frontend dist
-        # Backend embeds frontend/dist at build time, but memory_serve falls
-        # back to dynamic loading when it is empty. CI compile/test checks do
-        # not need the real bundle, so stub it instead of depending on (and
-        # waiting for) build-frontend. Keeps backend lanes independent of
-        # frontend/CSS failures (#1165 item 1).
-        run: mkdir -p frontend/dist
+        uses: ./.github/actions/stub-frontend-dist
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -147,12 +137,7 @@ jobs:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
       - name: Stub frontend dist
-        # Backend embeds frontend/dist at build time, but memory_serve falls
-        # back to dynamic loading when it is empty. CI compile/test checks do
-        # not need the real bundle, so stub it instead of depending on (and
-        # waiting for) build-frontend. Keeps backend lanes independent of
-        # frontend/CSS failures (#1165 item 1).
-        run: mkdir -p frontend/dist
+        uses: ./.github/actions/stub-frontend-dist
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -194,7 +179,7 @@ jobs:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
       - name: Stub frontend dist
-        run: mkdir -p frontend/dist
+        uses: ./.github/actions/stub-frontend-dist
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust

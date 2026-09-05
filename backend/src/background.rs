@@ -1132,7 +1132,6 @@ mod background_decision_tests {
 
 #[cfg(test)]
 mod archive_pending_sessions_db_tests {
-    use crate::models::NewSessionWithId;
     use crate::schema::sessions;
     use chrono::NaiveDateTime;
     use diesel::prelude::*;
@@ -1145,32 +1144,13 @@ mod archive_pending_sessions_db_tests {
         last_activity: NaiveDateTime,
         archived_at: Option<NaiveDateTime>,
     ) -> Uuid {
-        let id = Uuid::new_v4();
-        let new_session = NewSessionWithId {
-            id,
-            user_id,
-            session_name: format!("test-{id}"),
-            session_key: id.to_string(),
-            working_directory: "/tmp".to_string(),
-            status: status.to_string(),
-            git_branch: None,
-            client_version: None,
-            hostname: "test-host".to_string(),
-            launcher_id: None,
-            agent_type: "claude".to_string(),
-            repo_url: None,
-            scheduled_task_id: None,
-            paused: false,
-            claude_args: serde_json::Value::Array(Vec::new()),
-            launcher_version: None,
-        };
-        diesel::insert_into(sessions::table)
-            .values(&new_session)
-            .execute(conn)
-            .expect("insert session");
-        // Override timestamps set by DB defaults to the exact values for the predicate.
+        let session = crate::test_support::insert_session(conn, user_id, "test-archive-pending");
+        let id = session.id;
+        // Override the helper defaults (status) and DB defaults (timestamps)
+        // to the exact values for the predicate.
         diesel::update(sessions::table.find(id))
             .set((
+                sessions::status.eq(status.to_string()),
                 sessions::last_activity.eq(last_activity),
                 sessions::archived_at.eq(archived_at),
                 sessions::updated_at.eq(last_activity),
@@ -1270,35 +1250,21 @@ mod archive_pending_sessions_db_tests {
 mod retention_archive_hold_tests {
     use crate::archive::{ArchiveConfig, ArchiveRuntime};
     use crate::handlers::retention::RetentionConfig;
-    use crate::models::NewSessionWithId;
     use crate::schema::{messages, sessions};
     use diesel::prelude::*;
     use uuid::Uuid;
 
     fn make_session(conn: &mut diesel::PgConnection, user_id: Uuid) -> Uuid {
-        let id = Uuid::new_v4();
-        let new_session = NewSessionWithId {
-            id,
-            user_id,
-            session_name: format!("ret-{id}"),
-            session_key: id.to_string(),
-            working_directory: "/tmp".to_string(),
-            status: "disconnected".to_string(),
-            git_branch: None,
-            client_version: None,
-            hostname: "h".to_string(),
-            launcher_id: None,
-            agent_type: "claude".to_string(),
-            repo_url: None,
-            scheduled_task_id: None,
-            paused: false,
-            claude_args: serde_json::Value::Array(Vec::new()),
-            launcher_version: None,
-        };
-        diesel::insert_into(sessions::table)
-            .values(&new_session)
+        let session = crate::test_support::insert_session(conn, user_id, "test-retention");
+        let id = session.id;
+        // Stamp the non-default columns the old literal set inline.
+        diesel::update(sessions::table.find(id))
+            .set((
+                sessions::status.eq("disconnected"),
+                sessions::hostname.eq("h"),
+            ))
             .execute(conn)
-            .expect("insert session");
+            .expect("set session status");
         id
     }
 
