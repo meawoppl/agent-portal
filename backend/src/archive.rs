@@ -92,6 +92,13 @@ pub struct ArchiveRuntime {
     /// Set while a background rescan is in flight, so a burst of requests
     /// against an expired cache triggers one scan rather than one per request.
     scan_refreshing: std::sync::atomic::AtomicBool,
+    /// Serializes whole-manifest writers: the archive sweep
+    /// (`put_session_archive`) and the history backfill both read-modify-write
+    /// the same manifest object, and an unserialized backfill could clobber a
+    /// concurrently re-archived (newer) manifest with its stale copy. An
+    /// in-process lock suffices — this backend process is the only writer.
+    /// Held across blocking store IO, so take it only on the blocking pool.
+    pub manifest_write_lock: std::sync::Mutex<()>,
 }
 
 impl ArchiveRuntime {
@@ -107,6 +114,7 @@ impl ArchiveRuntime {
             stats: ArchiveStats::default(),
             scan_cache: std::sync::Mutex::new(None),
             scan_refreshing: std::sync::atomic::AtomicBool::new(false),
+            manifest_write_lock: std::sync::Mutex::new(()),
         })
     }
 

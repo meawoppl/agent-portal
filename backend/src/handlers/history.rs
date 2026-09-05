@@ -412,11 +412,12 @@ fn backfill_user_message_count(
     session_id: Uuid,
     ndjson: &[u8],
 ) -> bool {
-    let Some(mut manifest) = manifest else {
-        return false;
-    };
-    if manifest.user_message_count.is_some() {
-        return false;
+    // Cheap pre-checks on the manifest fetched earlier in this request; the
+    // authoritative read happens under the write lock below.
+    match &manifest {
+        None => return false,
+        Some(m) if m.user_message_count.is_some() => return false,
+        Some(_) => {}
     }
     let count = ndjson
         .split(|b| *b == b'\n')
@@ -426,6 +427,31 @@ fn backfill_user_message_count(
             l.role == "user" && shared::user_messages::is_substantive_user_record(&l.content)
         })
         .count() as i64;
+
+    // Serialize with the archive sweep and RE-READ before writing: both
+    // writers read-modify-write the whole manifest object, and writing our
+    // earlier copy here could clobber a concurrently re-archived (newer)
+    // manifest — losing its fresher last_activity, counts, and transcript
+    // info. Under the lock, a fresh read + conditional write is a CAS.
+    let _manifest_guard = runtime
+        .manifest_write_lock
+        .lock()
+        // A poisoned lock only means another writer panicked mid-write; the
+        // ordering guarantee is unaffected, so continue.
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut manifest = match runtime.store.get_session_manifest(owner_id, session_id) {
+        Ok(Some(m)) => m,
+        Ok(None) => return false,
+        Err(e) => {
+            tracing::warn!("history backfill: manifest re-read failed for {session_id}: {e}");
+            return false;
+        }
+    };
+    if manifest.user_message_count.is_some() {
+        // A re-archive filled it in while we were counting — theirs is
+        // computed from the same merged transcript; nothing to do.
+        return false;
+    }
     manifest.user_message_count = Some(count);
     let bytes = match serde_json::to_vec(&manifest) {
         Ok(bytes) => bytes,

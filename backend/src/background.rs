@@ -544,7 +544,17 @@ fn archive_one_session(
         .as_ref()
         .map(|b| b.len() as u64)
         .unwrap_or(0);
-    runtime.store.put_session_archive(&bundle)?;
+    {
+        // Serialize with the history backfill's manifest rewrite — see
+        // `ArchiveRuntime::manifest_write_lock`.
+        let _manifest_guard = runtime
+            .manifest_write_lock
+            .lock()
+            // A poisoned lock only means another writer panicked mid-write;
+            // the ordering guarantee is unaffected, so continue.
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        runtime.store.put_session_archive(&bundle)?;
+    }
     runtime.stats.record_success(bytes);
     Ok(())
 }
