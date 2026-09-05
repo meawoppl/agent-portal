@@ -107,6 +107,12 @@ fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// `binary_prefix` is the base name (e.g. "claude-portal" or "agent-portal").
 /// If `check_only` is true, reports availability without installing.
+///
+/// # Errors
+///
+/// Returns `Err` when the current executable can't be located or read, the
+/// platform is unsupported, or any step of the GitHub fetch / download /
+/// install fails (network, non-2xx status, unparseable JSON, filesystem).
 pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<UpdateResult> {
     let self_path = std::env::current_exe().context("Failed to get current executable path")?;
     let self_bytes = fs::read(&self_path).context("Failed to read current binary")?;
@@ -419,6 +425,11 @@ fn apply_pending_update() -> Result<bool> {
 /// Returns `Ok(true)` when the binary was replaced and the process should
 /// restart, `Ok(false)` when it is already current (or `check` is false).
 /// Callers decide whether a check failure is fatal.
+///
+/// # Errors
+///
+/// Propagates the [`check_for_update`] failure when `check` is true. A pending
+/// Windows swap that can't be applied is swallowed (logged, retried next run).
 pub async fn startup_auto_update(binary_prefix: &str, check: bool) -> Result<bool> {
     // Failure to apply a pending update is non-fatal; the swap is logged
     // and retried on the next startup.
