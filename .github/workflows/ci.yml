@@ -172,6 +172,8 @@ jobs:
     # DB-free. The harness step runs first because it self-migrates the fresh
     # Postgres; then run only the DB-gated lib test modules instead of the full
     # backend lib suite, which already runs in the main `Tests` job.
+    env:
+      DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
     services:
       postgres:
         image: postgres:16-alpine
@@ -201,13 +203,9 @@ jobs:
           protoc: "true"
 
       - name: Run E2E harness (migrates the fresh Postgres)
-        env:
-          DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
         run: cargo test -p backend --test harness
 
       - name: Run DB-backed backend unit tests
-        env:
-          DATABASE_URL: postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal
         run: |
           cargo test -p backend --lib handlers::messages::db_tests
           cargo test -p backend --lib handlers::session_access::db_tests
