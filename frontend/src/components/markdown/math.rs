@@ -137,6 +137,25 @@ pub(super) enum MathSegment {
     Math { latex: String, display: bool },
 }
 
+/// Read one placeholder token following a `MATH_OPEN`, consuming through the
+/// closing `MATH_CLOSE` (or end of input for a truncated token).
+fn read_placeholder_token(chars: &mut std::str::Chars<'_>) -> String {
+    let mut token = String::new();
+    for tc in chars.by_ref() {
+        if tc == MATH_CLOSE {
+            break;
+        }
+        token.push(tc);
+    }
+    token
+}
+
+/// Resolve a `MATH<idx>` placeholder token to its captured literal.
+fn lookup_placeholder<'a>(token: &str, math_blocks: &'a [String]) -> Option<&'a str> {
+    let idx = token.strip_prefix("MATH")?.parse::<usize>().ok()?;
+    math_blocks.get(idx).map(String::as_str)
+}
+
 /// Split a text run on math placeholders, resolving each back to its captured
 /// literal and classifying it as inline or display math.
 ///
@@ -154,18 +173,8 @@ pub(super) fn split_math_segments(text: &str, math_blocks: &[String]) -> Vec<Mat
             buf.push(c);
             continue;
         }
-        let mut token = String::new();
-        for tc in chars.by_ref() {
-            if tc == MATH_CLOSE {
-                break;
-            }
-            token.push(tc);
-        }
-        let resolved = token
-            .strip_prefix("MATH")
-            .and_then(|idx| idx.parse::<usize>().ok())
-            .and_then(|idx| math_blocks.get(idx))
-            .and_then(|literal| strip_math_delimiters(literal));
+        let token = read_placeholder_token(&mut chars);
+        let resolved = lookup_placeholder(&token, math_blocks).and_then(strip_math_delimiters);
         // A malformed placeholder is dropped, matching `restore_math`.
         if let Some((latex, display)) = resolved {
             if !buf.is_empty() {
@@ -205,20 +214,10 @@ pub(super) fn restore_math(text: &str, math_blocks: &[String]) -> String {
     let mut chars = text.chars();
     while let Some(c) = chars.next() {
         if c == MATH_OPEN {
-            let mut token = String::new();
-            for tc in chars.by_ref() {
-                if tc == MATH_CLOSE {
-                    break;
-                }
-                token.push(tc);
-            }
-            if let Some(n_str) = token.strip_prefix("MATH") {
-                if let Ok(idx) = n_str.parse::<usize>() {
-                    if let Some(math) = math_blocks.get(idx) {
-                        out.push_str(math);
-                        continue;
-                    }
-                }
+            let token = read_placeholder_token(&mut chars);
+            if let Some(math) = lookup_placeholder(&token, math_blocks) {
+                out.push_str(math);
+                continue;
             }
             // Malformed: drop silently
         } else {
