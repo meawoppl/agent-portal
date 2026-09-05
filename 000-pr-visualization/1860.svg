@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1860 · Hide bare muse task cards; count them in the footer</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">A stray task record stranded in its own group materialized a node with only a task id,</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">drawn as an empty "PROPOSED task" card; bare nodes now fold into the footer count.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="250" width="840" height="180" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#7aa2f7">a task.stream.linked strands alone in a group</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">its proposed/lifecycle records live in a different render group —</text>
+    <text x="104" y="364" font-size="23" fill="#a9b1d6">e.g. the classifier's fail-open flush at a run.terminal boundary</text>
+    <text x="104" y="398" font-size="21" fill="#565f89">TaskTree::apply: "task.stream.linked" → node_mut(id) — node created</text>
+  </g>
+
+  <line x1="500" y1="430" x2="500" y2="496" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="500" width="840" height="180" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="542" font-size="26" fill="#c0caf5">TaskNode::default() is a renderable card</text>
+    <text x="104" y="580" font-size="23" fill="#f7768e">task_kind: None → header falls back to "task"</text>
+    <text x="104" y="614" font-size="23" fill="#f7768e">state: Proposed by default · reason/output/side_effect all empty</text>
+    <text x="104" y="648" font-size="21" fill="#565f89">nothing in render_task_tree filtered it — only reminder.* nodes hide</text>
+  </g>
+
+  <line x1="500" y1="680" x2="500" y2="922" stroke="#f7768e" stroke-width="1.5" stroke-dasharray="4 6" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="930" width="840" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="976" font-size="26" fill="#c0caf5">what the transcript showed</text>
+    <text x="104" y="1014" font-size="23" fill="#f7768e">a card reading only "PROPOSED  task" — badge, label, empty body</text>
+    <text x="104" y="1048" font-size="21" fill="#565f89">live-reported with a screenshot; recurring across muse sessions</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1065" y="250" width="860" height="200" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="292" font-size="26" fill="#9ece6a">is_bare_node — nothing but a task id</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">task_kind None · no reason · no status · no output</text>
+    <text x="1089" y="364" font-size="23" fill="#a9b1d6">no side_effect · no tool_results — whatever the state</text>
+    <text x="1089" y="398" font-size="21" fill="#565f89">such a node cannot say anything a reviewer can use</text>
+  </g>
+
+  <line x1="1495" y1="450" x2="1495" y2="516" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="520" width="860" height="180" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="562" font-size="26" fill="#c0caf5">folds into the muted footer, not a card</text>
+    <text x="1089" y="600" font-size="23" fill="#9ece6a">"N bare task records hidden" — same pattern as reminder tasks</text>
+    <text x="1089" y="634" font-size="21" fill="#565f89">the nothing-drops-silently invariant holds: the count names the loss</text>
+    <text x="1089" y="668" font-size="21" fill="#565f89">renderer-side, so already-stored transcripts heal on deploy</text>
+  </g>
+
+  <line x1="1495" y1="700" x2="1495" y2="922" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1520" y="800" font-size="21" fill="#565f89">a kind alone still renders — "PROPOSED</text>
+  <text x="1520" y="830" font-size="21" fill="#565f89">tool.bash" is information; bare isn't</text>
+
+  <g>
+    <rect x="1065" y="930" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="976" font-size="26" fill="#c0caf5">only cards that say something render</text>
+    <text x="1089" y="1014" font-size="23" fill="#9ece6a">kindless nodes carrying content (tool attribution) keep rendering</text>
+    <text x="1089" y="1048" font-size="21" fill="#565f89">682 frontend tests green, incl. bare/kind/content boundary cases</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">The stranding itself (a linked record flushed into its own group at a turn boundary) is untouched — this hides its noise, not its cause.</text>
+</svg>
