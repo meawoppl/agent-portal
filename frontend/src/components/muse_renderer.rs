@@ -94,7 +94,7 @@ fn parse_read_result<'a>(tool_name: Option<&str>, text: &'a str) -> Option<MuseR
 /// path is carried separately in typed `edit_facts` and is never scraped from
 /// the prose result.
 fn parse_edit_diff(tool_name: Option<&str>, text: &str) -> Option<String> {
-    if tool_name != Some("edit_file") {
+    if !matches!(tool_name, Some("edit_file" | "tool.edit_file")) {
         return None;
     }
     let lines: Vec<&str> = text.lines().collect();
@@ -111,7 +111,7 @@ fn parse_edit_diff(tool_name: Option<&str>, text: &str) -> Option<String> {
     )
 }
 
-fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
+fn render_muse_tool_result(result: &task_tree::ToolOutcome, task_kind: Option<&str>) -> Html {
     use crate::components::diff::{DiffCard, DiffSource};
     use crate::components::tool_renderers::ReadToolCard;
 
@@ -172,7 +172,7 @@ fn render_muse_tool_result(result: &task_tree::ToolOutcome) -> Html {
             </div>
         };
     }
-    if let Some(diff) = parse_edit_diff(result.tool_name.as_deref(), &result.text) {
+    if let Some(diff) = parse_edit_diff(result.tool_name.as_deref().or(task_kind), &result.text) {
         return html! {
             <div class={classes!("muse-tool-card", format!("muse-tool-{outcome}"))}>
                 <DiffCard
@@ -305,6 +305,8 @@ fn side_effect_is_noteworthy(decision: &str) -> bool {
 }
 
 fn render_task_node(node: &TaskNode) -> Html {
+    use crate::components::diff::{DiffCard, DiffSource};
+
     let state = node.state;
     let kind = node.task_kind.as_deref().unwrap_or("task");
     // Codex-style stacked item: one card per task, no accordion. A running
@@ -322,6 +324,10 @@ fn render_task_node(node: &TaskNode) -> Html {
     // twice (the original bug).
     let shown_as_result: std::collections::HashSet<&str> =
         node.tool_results.iter().map(|r| r.text.as_str()).collect();
+    let edit_path = node
+        .tool_results
+        .iter()
+        .find_map(|result| result.edit_path.clone());
     let header = html! {
         <div class="muse-task-header">
             <span class={classes!("muse-task-badge", format!("muse-task-{}", state.label()))}>
@@ -353,12 +359,22 @@ fn render_task_node(node: &TaskNode) -> Html {
                     { format!("{op} — policy: {decision}") }
                 </div>
             }
-            { for node.tool_results.iter().map(render_muse_tool_result) }
+            { for node.tool_results.iter().map(|result| render_muse_tool_result(result, node.task_kind.as_deref())) }
             { for node.output.iter().filter(|c| !shown_as_result.contains(c.as_str())).map(|chunk| {
                 // A surviving chunk that is itself a command payload still gets
                 // the card treatment rather than a raw dump.
                 if let Some(cmd) = parse_command_result(chunk) {
                     html! { <div class="muse-tool-command">{ render_command_card(&cmd) }</div> }
+                } else if let Some(diff) = parse_edit_diff(node.task_kind.as_deref(), chunk) {
+                    html! {
+                        <div class="muse-tool-card">
+                            <DiffCard
+                                source={DiffSource::Unified { text: diff }}
+                                file_path={edit_path.clone().map(AttrValue::from)}
+                                kind="update"
+                            />
+                        </div>
+                    }
                 } else {
                     html! {
                         <ExpandableText
@@ -480,6 +496,14 @@ mod tests {
         assert!(diff.starts_with("--- original\n"));
         assert!(diff.contains("-old\n+new"));
         assert!(parse_edit_diff(Some("read_file"), text).is_none());
+    }
+
+    #[test]
+    fn edit_task_output_yields_a_unified_diff_body_without_correlation_facts() {
+        let text = "edited\nchanged lines: lines 1-4\n--- original\n+++ updated\n@@\n-old\n+new";
+        let diff = parse_edit_diff(Some("tool.edit_file"), text).expect("Muse edit task output");
+        assert!(diff.starts_with("--- original\n"));
+        assert!(diff.contains("-old\n+new"));
     }
 
     #[test]
