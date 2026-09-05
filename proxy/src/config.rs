@@ -136,12 +136,12 @@ impl Drop for ConfigLock {
 }
 
 impl ProxyConfig {
-    pub fn config_path() -> Result<PathBuf> {
-        Ok(session_lib::paths::config_dir().join("config.json"))
+    pub fn config_path() -> PathBuf {
+        session_lib::paths::config_dir().join("config.json")
     }
 
     pub fn load() -> Result<Self> {
-        let path = Self::config_path()?;
+        let path = Self::config_path();
 
         if !path.exists() {
             return Ok(Self::default());
@@ -158,7 +158,7 @@ impl ProxyConfig {
     /// Atomically save the config with file locking
     /// This prevents race conditions when multiple proxy instances run in the same directory
     pub fn atomic_save(&self) -> Result<()> {
-        let path = Self::config_path()?;
+        let path = Self::config_path();
         let lock = ConfigLock::acquire(&path)?;
         self.save_with_lock(&lock)
         // Lock is released on drop
@@ -166,7 +166,7 @@ impl ProxyConfig {
 
     /// Load config with file locking (for read-modify-write operations)
     pub fn load_locked() -> Result<(Self, ConfigLock)> {
-        let path = Self::config_path()?;
+        let path = Self::config_path();
         let lock = ConfigLock::acquire(&path)?;
 
         let config = if path.exists() {
@@ -181,7 +181,7 @@ impl ProxyConfig {
 
     /// Save config while holding a lock
     pub fn save_with_lock(&self, _lock: &ConfigLock) -> Result<()> {
-        let path = Self::config_path()?;
+        let path = Self::config_path();
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
