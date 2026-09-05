@@ -150,7 +150,6 @@ impl TurnTracker {
     /// `now_instant` / `now_utc` must come from the caller so the
     /// terminator's timestamps line up with whatever clock source the
     /// agent-specific I/O task is using.
-    #[allow(clippy::too_many_arguments)]
     pub fn finalize(
         &mut self,
         now_instant: Instant,
