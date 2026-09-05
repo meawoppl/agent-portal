@@ -381,11 +381,13 @@ fn handle_proxy_message(
                 session_key,
                 *db_session_id,
                 db_pool,
-                update_session_id,
-                git_branch,
-                pr_url,
-                repo_url,
-                open_prs,
+                SessionUpdatePayload {
+                    update_session_id,
+                    git_branch,
+                    pr_url,
+                    repo_url,
+                    open_prs,
+                },
             );
         }
         ProxyToServer::InputAck {
@@ -564,18 +566,30 @@ fn handle_proxy_message(
     ControlFlow::Continue(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_session_update(
-    session_manager: &SessionManager,
-    session_key: &Option<SessionId>,
-    db_session_id: Option<Uuid>,
-    db_pool: &crate::db::DbPool,
+/// Payload of a `ProxyToServer::SessionUpdate` frame, bundled so
+/// `handle_session_update` stays under the argument-count lint.
+struct SessionUpdatePayload {
     update_session_id: Uuid,
     git_branch: Option<String>,
     pr_url: Option<String>,
     repo_url: Option<String>,
     open_prs: Vec<shared::PrRef>,
+}
+
+fn handle_session_update(
+    session_manager: &SessionManager,
+    session_key: &Option<SessionId>,
+    db_session_id: Option<Uuid>,
+    db_pool: &crate::db::DbPool,
+    payload: SessionUpdatePayload,
 ) {
+    let SessionUpdatePayload {
+        update_session_id,
+        git_branch,
+        pr_url,
+        repo_url,
+        open_prs,
+    } = payload;
     let Some(current_session_id) = db_session_id else {
         return;
     };
