@@ -46,7 +46,7 @@ use crate::archive::{
 };
 use crate::auth::extract_user;
 use crate::errors::AppError;
-use crate::handlers::media_store::parse_range;
+use crate::handlers::media_store::{parse_range, RangeOutcome};
 use crate::models::User;
 use crate::AppState;
 
@@ -435,13 +435,13 @@ pub async fn get_history_media(
 fn bytes_response(bytes: &[u8], content_type: &str, headers: &HeaderMap) -> Response {
     let total = bytes.len() as u64;
     let mut response = match parse_range(headers, total) {
-        Some(Err(())) => Response::builder()
+        RangeOutcome::NotSatisfiable => Response::builder()
             .status(StatusCode::RANGE_NOT_SATISFIABLE)
             .header(header::ACCEPT_RANGES, "bytes")
             .header(header::CONTENT_RANGE, format!("bytes */{total}"))
             .body(Body::empty())
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
-        Some(Ok((start, end))) => {
+        RangeOutcome::Partial { start, end } => {
             let slice = bytes[start as usize..=end as usize].to_vec();
             let len = end - start + 1;
             Response::builder()
@@ -456,7 +456,7 @@ fn bytes_response(bytes: &[u8], content_type: &str, headers: &HeaderMap) -> Resp
                 .body(Body::from(slice))
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
-        None => Response::builder()
+        RangeOutcome::Full => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, content_type)
             .header(header::ACCEPT_RANGES, "bytes")
