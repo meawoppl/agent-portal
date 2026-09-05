@@ -252,9 +252,11 @@ mod path_tests {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // `install_default` fails only when another provider is already set;
+    // report it through main's `anyhow::Result` instead of panicking.
     rustls::crypto::ring::default_provider()
         .install_default()
-        .expect("Failed to install rustls crypto provider");
+        .map_err(|_| anyhow::anyhow!("Failed to install rustls crypto provider"))?;
 
     let args = Args::parse();
 
