@@ -42,14 +42,14 @@ fn parse_init_url(value: &str) -> Result<(Option<String>, String)> {
         "{}://{}{}",
         ws_scheme,
         url.host_str().unwrap_or("localhost"),
-        url.port().map(|p| format!(":{}", p)).unwrap_or_default()
+        url.port().map(|p| format!(":{p}")).unwrap_or_default()
     );
 
     // Extract config from path (expected: /p/{config})
     let path = url.path();
     if let Some(config_part) = path.strip_prefix("/p/") {
         let config = ProxyInitConfig::decode(config_part)
-            .map_err(|e| anyhow::anyhow!("Failed to decode init config from URL: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to decode init config from URL: {e}"))?;
 
         return Ok((Some(ws_url), config.token));
     }
@@ -91,7 +91,7 @@ fn base64_url_decode(input: &str) -> Result<Vec<u8>> {
         .collect();
     BASE64_URL
         .decode(filtered)
-        .map_err(|e| anyhow::anyhow!("Invalid base64url: {}", e))
+        .map_err(|e| anyhow::anyhow!("Invalid base64url: {e}"))
 }
 
 #[cfg(test)]

@@ -77,7 +77,7 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
     let stderr_task = tokio::spawn(async move {
         let mut reader = BufReader::new(claude_stderr).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            eprintln!("{}", line);
+            eprintln!("{line}");
         }
     });
 
@@ -149,7 +149,7 @@ fn spawn_claude(
     );
 
     cmd.spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn claude: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to spawn claude: {e}"))
 }
 
 /// Main shim loop with WebSocket reconnection.
