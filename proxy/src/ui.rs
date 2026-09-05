@@ -128,7 +128,7 @@ pub fn print_init_start(email: &str) {
 /// Print init complete
 pub fn print_init_complete(email: &str, backend_url: &str) {
     println!("{} Configuration saved for {}", "✓".bright_green(), email);
-    println!("  Backend: {}", backend_url);
+    println!("  Backend: {backend_url}");
     println!();
     println!(
         "You can now run {} without arguments.",

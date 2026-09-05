@@ -86,7 +86,7 @@ impl ConfigLock {
                 Ok(mut file) => {
                     // Write our PID to the lock file
                     let pid = std::process::id();
-                    writeln!(file, "{}", pid)?;
+                    writeln!(file, "{pid}")?;
                     file.flush()?;
 
                     return Ok(ConfigLock {
@@ -117,8 +117,7 @@ impl ConfigLock {
                     attempts += 1;
                     if attempts >= max_attempts {
                         anyhow::bail!(
-                            "Failed to acquire config lock after {} attempts",
-                            max_attempts
+                            "Failed to acquire config lock after {max_attempts} attempts"
                         );
                     }
                     std::thread::sleep(Duration::from_millis(100));
