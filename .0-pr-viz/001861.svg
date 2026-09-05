@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1861 · Consolidate test session fixture into helper</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Eight DB-gated test modules pasted the same 16-field session literal —</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now test_support::insert_session owns it; each fixture keeps a one-line call.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel: x 55–945 ==================== -->
+
+  <g>
+    <rect x="80" y="250" width="810" height="200" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">messages / session_access / replay: make_session</text>
+    <text x="104" y="330" font-size="23" fill="#f7768e">16-field NewSessionWithId literal, pasted 8x</text>
+    <text x="104" y="366" font-size="23" fill="#f7768e">only the session_name ever differed</text>
+    <text x="104" y="402" font-size="22" fill="#565f89">a new sessions column means editing every copy</text>
+  </g>
+
+  <line x1="485" y1="450" x2="485" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="510" width="810" height="200" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="550" font-size="26" fill="#7aa2f7">continuations / replay / registration: users</text>
+    <text x="104" y="590" font-size="23" fill="#f7768e">local make_user duplicates insert_user (#924)</text>
+    <text x="104" y="626" font-size="23" fill="#f7768e">same email-nonce shape, three more copies</text>
+    <text x="104" y="662" font-size="22" fill="#565f89">the consolidation already happened — then drifted</text>
+  </g>
+
+  <g>
+    <rect x="80" y="730" width="810" height="165" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="776" font-size="26" fill="#c0caf5">adding one column touches every fixture</text>
+    <text x="104" y="816" font-size="23" fill="#f7768e">Active, /tmp, test-host, claude — retyped each time</text>
+    <text x="104" y="852" font-size="23" fill="#f7768e">reviewers diff literals instead of logic</text>
+  </g>
+
+  <!-- ==================== AFTER panel: x 1040–1945 ==================== -->
+
+  <g>
+    <rect x="1065" y="250" width="810" height="200" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">test_support.rs · insert_session</text>
+    <text x="1089" y="330" font-size="23" fill="#9ece6a">canonical defaults: Active, /tmp, test-host, claude</text>
+    <text x="1089" y="366" font-size="23" fill="#a9b1d6">session_key is the fresh id, so names may repeat</text>
+    <text x="1089" y="402" font-size="22" fill="#565f89">next column is one default in one place</text>
+  </g>
+
+  <line x1="1470" y1="450" x2="1470" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="500" width="810" height="230" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="540" font-size="26" fill="#c0caf5">one-line call sites + update for overrides</text>
+    <text x="1089" y="580" font-size="23" fill="#9ece6a">insert_session(conn, owner, "…") everywhere</text>
+    <text x="1089" y="616" font-size="23" fill="#a9b1d6">Disconnected / launcher_version via diesel::update</text>
+    <text x="1089" y="652" font-size="23" fill="#a9b1d6">the insert-then-update shape tests already used</text>
+    <text x="1089" y="688" font-size="22" fill="#565f89">100 insertions / 271 deletions, net -170 lines</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="750" width="810" height="145" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="796" font-size="26" fill="#c0caf5">pinned by the DB-gated suite itself</text>
+    <text x="1089" y="836" font-size="23" fill="#9ece6a">29 touched-module tests pass on real Postgres</text>
+    <text x="1089" y="872" font-size="22" fill="#565f89">zero production change: fixtures only</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">harness.rs + history_api.rs keep their own literals (custom dirs, codex agent) — a follow-up, not this diff.</text>
+</svg>
