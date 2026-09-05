@@ -119,16 +119,3 @@ pub(crate) fn format_max_gap(max_inter_token_gap_ms: Option<i64>) -> Option<Stri
     }
     Some(format!("max gap {:.1}s", ms as f64 / 1000.0))
 }
-
-/// Cost chip text, e.g. `"$0.014"` for sub-$1 and `"$1.23"` for $1+.
-// Kept for telemetry/reporting screens (performance/admin/history) — not shown on
-// claude-code messages or the top bar.
-#[allow(dead_code)]
-pub(crate) fn format_cost(total_cost_usd: Option<f64>) -> Option<String> {
-    let cost = total_cost_usd?;
-    if cost.abs() < 1.0 {
-        Some(format!("${:.3}", cost))
-    } else {
-        Some(format!("${:.2}", cost))
-    }
-}

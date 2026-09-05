@@ -14,9 +14,6 @@ use yew::prelude::*;
 
 /// Return value from the use_client_websocket hook.
 pub struct UseClientWebSocket {
-    /// Total user spend across all sessions (retained for telemetry/reporting screens; no longer shown in top bar)
-    #[allow(dead_code)]
-    pub total_spend: f64,
     /// Server shutdown reason (if server is shutting down).
     /// Cleared automatically on the next successful (re)connect.
     pub shutdown_reason: Option<String>,
@@ -87,11 +84,10 @@ fn is_newer_version(prev: &str, next: &str) -> bool {
 /// backend's `server_version` advances past what the client booted with.
 ///
 /// # Returns
-/// * `UseClientWebSocket` - The current spend data, shutdown status, and
-///   pending-update version.
+/// * `UseClientWebSocket` - Shutdown status, pending-update version, and
+///   turn-metrics data.
 #[hook]
 pub fn use_client_websocket() -> UseClientWebSocket {
-    let total_spend = use_state(|| 0.0f64);
     let shutdown_reason = use_state(|| None::<String>);
     let update_available = use_state(|| None::<String>);
     // Everything updated *relative to its previous value* lives in one reducer.
@@ -122,13 +118,11 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     }
 
     {
-        let total_spend = total_spend.clone();
         let shutdown_reason = shutdown_reason.clone();
         let update_available = update_available.clone();
         let live = live.clone();
 
         use_effect_with((), move |_| {
-            let total_spend = total_spend.clone();
             let shutdown_reason = shutdown_reason.clone();
             let update_available = update_available.clone();
             let live = live.clone();
@@ -170,12 +164,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
 
                             while let Some(result) = receiver.recv().await {
                                 match result {
-                                    Ok(msg) => handle_server_message(
-                                        msg,
-                                        &total_spend,
-                                        &shutdown_reason,
-                                        &live,
-                                    ),
+                                    Ok(msg) => handle_server_message(msg, &shutdown_reason, &live),
                                     Err(e) => {
                                         log::error!("Client WebSocket error: {:?}", e);
                                         break;
@@ -208,7 +197,6 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     }
 
     UseClientWebSocket {
-        total_spend: *total_spend,
         shutdown_reason: (*shutdown_reason).clone(),
         update_available: (*update_available).clone(),
         recent_turn_metrics: live.recent_turn_metrics.clone(),

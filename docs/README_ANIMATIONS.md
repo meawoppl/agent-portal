@@ -167,9 +167,9 @@ or scrubbing it to show it is live, not a screenshot.
 
 `docs/media/feature-turn-metrics.webp` — 91 KB, 6.5 s, tight crop. Shot by
 `cap-metrics.js`. **Retargeted:** there is no cost ticker in the top bar in the
-current UI (`format_cost` is explicitly not shown on messages or the top bar —
-cost lives on the Performance page and in history), so the clip shows the metric
-sparkline building and the picker switching it to cache-hit rate.
+current UI (cost lives on the Performance page and in history), so the clip
+shows the metric sparkline building and the picker switching it to cache-hit
+rate.
 **Slot:** Features ▸ Cost and performance visibility. **~4 s, tight crop.**
 
 The per-session cost badge shaking as it increments, and the rail sparkline

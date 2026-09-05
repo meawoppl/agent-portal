@@ -228,7 +228,7 @@ fn env_max_context_tokens() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_model_version, context_window_for};
+    use super::{compact_model_version, context_window_for, NATIVE_1M_MODELS};
 
     #[test]
     fn claude_dashed_major_minor() {
@@ -341,6 +341,32 @@ mod tests {
     #[test]
     fn context_window_honors_natively_one_million_models() {
         assert_eq!(context_window_for("claude-mythos-preview"), Some(1_000_000));
+    }
+
+    /// The transcribed [`NATIVE_1M_MODELS`] table is pinned exactly: adding,
+    /// removing, or renaming an entry fails here, so table rot surfaces as
+    /// red rather than a wrong context gauge.
+    #[test]
+    fn context_window_honors_every_transcribed_native_1m_model() {
+        assert_eq!(
+            NATIVE_1M_MODELS,
+            [
+                "claude-fable-5",
+                "claude-opus-4-7",
+                "claude-opus-4-8",
+                "claude-opus-5",
+                "claude-sonnet-5",
+            ]
+            .as_slice()
+        );
+        for id in NATIVE_1M_MODELS {
+            assert_eq!(context_window_for(id), Some(1_000_000), "{id}");
+        }
+        // Trailing date/build suffixes still match.
+        assert_eq!(
+            context_window_for("claude-opus-4-8-20260101"),
+            Some(1_000_000)
+        );
     }
 
     /// The tag still wins for an id that is neither a known family nor

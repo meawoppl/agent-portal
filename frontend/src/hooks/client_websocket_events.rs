@@ -93,17 +93,15 @@ impl Reducible for ClientWsState {
 
 pub(crate) fn handle_server_message(
     msg: ServerToClient,
-    total_spend: &UseStateHandle<f64>,
     shutdown_reason: &UseStateHandle<Option<String>>,
     live: &UseReducerHandle<ClientWsState>,
 ) {
     match msg {
+        // Spend screens read REST totals; the WS push is currently unconsumed.
         ServerToClient::UserSpendUpdate {
-            total_spend_usd,
+            total_spend_usd: _,
             session_costs: _,
-        } => {
-            total_spend.set(total_spend_usd);
-        }
+        } => {}
         ServerToClient::ServerShutdown {
             reason,
             reconnect_delay_ms,
