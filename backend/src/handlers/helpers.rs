@@ -79,6 +79,19 @@ pub fn sender_names(conn: &mut PgConnection, message_list: &[Message]) -> HashMa
         .collect()
 }
 
+/// Load one user's display name in a single query, using the same
+/// nickname-then-name-then-email precedence as [`display_name`].
+/// Returns `None` when the user row is missing so callers keep their own
+/// fallback label for unknown users.
+pub fn user_display_name(conn: &mut PgConnection, user_id: Uuid) -> Option<String> {
+    users::table
+        .find(user_id)
+        .select((users::nickname, users::name, users::email))
+        .first::<(Option<String>, Option<String>, String)>(conn)
+        .ok()
+        .map(|(nickname, name, email)| display_name(nickname.as_deref(), name.as_deref(), &email))
+}
+
 /// Error type for helper operations
 pub struct DeleteSessionError(String);
 

@@ -41,22 +41,12 @@ pub(crate) fn resolve_user(
     crate::auth::extract_user_id(app_state, Some(headers), cookies)
 }
 
-/// Look up a display name for `user_id` (name, falling back to email).
+/// Look up a display name for `user_id`, keeping this path's `"portal"`
+/// fallback for unknown users. Resolution itself lives in
+/// [`crate::handlers::helpers::user_display_name`] (single query,
+/// nickname-then-name-then-email).
 fn user_display_name(conn: &mut crate::db::DbConnection, user_id: Uuid) -> String {
-    use crate::schema::users;
-    users::table
-        .find(user_id)
-        .select(users::name)
-        .first::<Option<String>>(conn)
-        .ok()
-        .flatten()
-        .or_else(|| {
-            users::table
-                .find(user_id)
-                .select(users::email)
-                .first::<String>(conn)
-                .ok()
-        })
+    crate::handlers::helpers::user_display_name(conn, user_id)
         .unwrap_or_else(|| "portal".to_string())
 }
 
