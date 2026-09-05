@@ -51,7 +51,7 @@ pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static 
 
     let (content_type, magic_ok) = match ext.as_deref() {
         Some("png") => ("image/png", has_png_magic(bytes)),
-        Some("jpg") | Some("jpeg") => ("image/jpeg", has_jpeg_magic(bytes)),
+        Some("jpg" | "jpeg") => ("image/jpeg", has_jpeg_magic(bytes)),
         Some("gif") => ("image/gif", has_gif_magic(bytes)),
         Some("webp") => ("image/webp", has_webp_magic(bytes)),
         Some("svg") => ("image/svg+xml", looks_like_svg(bytes)),

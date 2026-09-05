@@ -102,7 +102,7 @@ impl DeliveryMeta {
     pub fn pending(&self) -> bool {
         !matches!(
             self.stage,
-            Some(InputDeliveryStage::AgentAccepted) | Some(InputDeliveryStage::Failed)
+            Some(InputDeliveryStage::AgentAccepted | InputDeliveryStage::Failed)
         )
     }
 }
