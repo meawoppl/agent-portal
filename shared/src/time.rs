@@ -4,6 +4,7 @@
 /// read as UTC rather than local time. A designator is a `Z` or a `+`/`-`
 /// offset in the time portion (after `T`); date hyphens don't count.
 /// Date-only values (no `T`) are left untouched and returned as `Borrowed`.
+#[must_use]
 pub fn normalize_iso_utc(iso: &str) -> std::borrow::Cow<'_, str> {
     let Some((_, time)) = iso.split_once('T') else {
         return std::borrow::Cow::Borrowed(iso);
