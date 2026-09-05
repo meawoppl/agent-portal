@@ -313,43 +313,23 @@ mod tests {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
         };
-        use crate::models::{NewMessage, NewSessionWithId, NewUser};
+        use crate::models::NewMessage;
         use crate::schema::{messages, sessions, users};
 
         let mut conn = pool.get().expect("conn");
-        let nonce = Uuid::new_v4();
-        let owner: Uuid = diesel::insert_into(users::table)
-            .values(&NewUser {
-                email: format!("media_rt_{nonce}@example.invalid"),
-                name: Some("Media RT".into()),
-                avatar_url: None,
-            })
-            .returning(users::id)
-            .get_result::<Uuid>(&mut conn)
-            .expect("insert user");
+        let owner: Uuid = crate::test_support::insert_user(&mut conn, "media_rt").id;
 
-        let session_id = Uuid::new_v4();
-        diesel::insert_into(sessions::table)
-            .values(&NewSessionWithId {
-                id: session_id,
-                user_id: owner,
-                session_name: format!("media-rt-{session_id}"),
-                session_key: session_id.to_string(),
-                working_directory: "/tmp".into(),
-                status: shared::SessionStatus::Disconnected.as_str().to_string(),
-                git_branch: None,
-                client_version: None,
-                hostname: "test".into(),
-                launcher_id: None,
-                agent_type: "claude".into(),
-                repo_url: None,
-                scheduled_task_id: None,
-                paused: false,
-                claude_args: serde_json::Value::Array(vec![]),
-                launcher_version: None,
-            })
+        let session = crate::test_support::insert_session(&mut conn, owner, "media-rt");
+        let session_id = session.id;
+        // The read-through path only handles `Disconnected` sessions; stamp
+        // the status (and hostname) the old literal set inline.
+        diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::status.eq(shared::SessionStatus::Disconnected.as_str()),
+                sessions::hostname.eq("test"),
+            ))
             .execute(&mut conn)
-            .expect("insert session");
+            .expect("set session status");
 
         // The transcript row embeds the served URL — the durable media→session
         // mapping the read-through relies on.

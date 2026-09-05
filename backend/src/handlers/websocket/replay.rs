@@ -111,48 +111,11 @@ pub(super) fn replay_history(
 // =============================================================================
 #[cfg(test)]
 mod replay_tests {
-    use crate::models::{NewSessionWithId, NewUser, Session, User};
+    use crate::models::Session;
     use chrono::Utc;
     use diesel::prelude::*;
-    fn make_user(conn: &mut diesel::pg::PgConnection, label: &str) -> User {
-        use crate::schema::users;
-        let nonce = uuid::Uuid::new_v4();
-        let new_user = NewUser {
-            email: format!("test_replay_{}_{}@example.invalid", label, nonce),
-            name: Some(format!("Test {}", label)),
-            avatar_url: None,
-        };
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .get_result::<User>(conn)
-            .expect("insert test user")
-    }
-
     fn make_session(conn: &mut diesel::pg::PgConnection, owner_id: uuid::Uuid) -> Session {
-        use crate::schema::sessions;
-        let session_id = uuid::Uuid::new_v4();
-        let new_session = NewSessionWithId {
-            id: session_id,
-            user_id: owner_id,
-            session_name: format!("test-replay-{}", session_id),
-            session_key: session_id.to_string(),
-            working_directory: "/tmp".to_string(),
-            status: shared::SessionStatus::Active.as_str().to_string(),
-            git_branch: None,
-            client_version: None,
-            hostname: "test-host".to_string(),
-            launcher_id: None,
-            agent_type: "claude".to_string(),
-            repo_url: None,
-            scheduled_task_id: None,
-            paused: false,
-            claude_args: serde_json::Value::Array(Vec::new()),
-            launcher_version: None,
-        };
-        diesel::insert_into(sessions::table)
-            .values(&new_session)
-            .get_result::<Session>(conn)
-            .expect("insert test session")
+        crate::test_support::insert_session(conn, owner_id, "test-replay")
     }
 
     fn seed_messages(
@@ -216,7 +179,7 @@ mod replay_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let user = make_user(&mut conn, "limit");
+        let user = crate::test_support::insert_user(&mut conn, "limit");
         let session = make_session(&mut conn, user.id);
         let stamps = seed_messages(&mut conn, session.id, user.id, 200);
 
@@ -284,7 +247,7 @@ mod replay_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let user = make_user(&mut conn, "strict_gt");
+        let user = crate::test_support::insert_user(&mut conn, "strict_gt");
         let session = make_session(&mut conn, user.id);
         // Three rows with strictly increasing server-assigned timestamps.
         let stamps = seed_messages(&mut conn, session.id, user.id, 3);
@@ -355,7 +318,7 @@ mod replay_tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let user = make_user(&mut conn, "no_watermark");
+        let user = crate::test_support::insert_user(&mut conn, "no_watermark");
         let session = make_session(&mut conn, user.id);
         let stamps = seed_messages(&mut conn, session.id, user.id, 3);
         drop(conn);

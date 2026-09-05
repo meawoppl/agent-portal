@@ -535,7 +535,7 @@ mod tests {
     /// in-memory registry entry is gone. Skips when no test DB is available.
     #[test]
     fn launcher_version_persists_on_session_row() {
-        use crate::models::{NewSessionWithId, NewUser, Session, User};
+        use crate::models::Session;
         use crate::schema::{sessions, users};
 
         let Some(pool) = crate::test_support::shared_pool() else {
@@ -543,40 +543,18 @@ mod tests {
         };
         let mut conn = pool.get().expect("conn");
 
-        let nonce = Uuid::new_v4();
-        let user = diesel::insert_into(users::table)
-            .values(&NewUser {
-                email: format!("test_launcher_version_{nonce}@example.invalid"),
-                name: Some("Launcher Version Test".to_string()),
-                avatar_url: None,
-            })
-            .get_result::<User>(&mut conn)
-            .expect("insert test user");
+        let user = crate::test_support::insert_user(&mut conn, "launcher_version");
 
-        let session_id = Uuid::new_v4();
-        let created = diesel::insert_into(sessions::table)
-            .values(&NewSessionWithId {
-                id: session_id,
-                user_id: user.id,
-                session_name: format!("launcher-version-{session_id}"),
-                session_key: session_id.to_string(),
-                working_directory: "/tmp".to_string(),
-                status: SessionStatus::Active.as_str().to_string(),
-                git_branch: None,
-                client_version: None,
-                hostname: "test-host".to_string(),
-                launcher_id: Some(Uuid::new_v4()),
-                agent_type: "claude".to_string(),
-                repo_url: None,
-                scheduled_task_id: None,
-                paused: false,
-                claude_args: serde_json::Value::Array(Vec::new()),
-                launcher_version: Some("2.13.42".to_string()),
-            })
-            .get_result::<Session>(&mut conn)
-            .expect("insert session");
-
-        assert_eq!(created.launcher_version.as_deref(), Some("2.13.42"));
+        let created = crate::test_support::insert_session(&mut conn, user.id, "launcher-version");
+        let session_id = created.id;
+        // Stamp the launcher provenance the old literal set inline.
+        diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::launcher_id.eq(Uuid::new_v4()),
+                sessions::launcher_version.eq("2.13.42"),
+            ))
+            .execute(&mut conn)
+            .expect("set launcher version");
 
         let fetched = sessions::table
             .find(session_id)

@@ -276,31 +276,8 @@ mod db_tests {
         let mut conn = pool.get().expect("db conn");
         let user = crate::test_support::insert_user(&mut conn, "push");
 
-        use crate::models::NewSessionWithId;
-        use crate::schema::sessions;
-        let session_id = Uuid::new_v4();
-        let new_session = NewSessionWithId {
-            id: session_id,
-            user_id: user.id,
-            session_name: "resolve-test".to_string(),
-            session_key: session_id.to_string(),
-            working_directory: "/tmp".to_string(),
-            status: shared::SessionStatus::Active.as_str().to_string(),
-            git_branch: None,
-            client_version: None,
-            hostname: "test-host".to_string(),
-            launcher_id: None,
-            agent_type: "claude".to_string(),
-            repo_url: None,
-            scheduled_task_id: None,
-            paused: false,
-            claude_args: serde_json::Value::Array(Vec::new()),
-            launcher_version: None,
-        };
-        diesel::insert_into(sessions::table)
-            .values(&new_session)
-            .execute(&mut conn)
-            .expect("insert session");
+        let session = crate::test_support::insert_session(&mut conn, user.id, "resolve-test");
+        let session_id = session.id;
 
         let resolved = resolve_recipient(&mut conn, session_id).expect("resolve");
         // A fresh user has NULL notification_prefs -> defaults (C6 semantics).
