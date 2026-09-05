@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1800 · Handle missing window without panicking</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Two click handlers assumed a browser window exists — outside one, expect() panicked;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now a missing window is a quiet no-op, and two #1165 ratchets come off.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="132" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#7aa2f7">window().expect("no window") on copy-id</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">session_rail/menu.rs — clipboard copy precedes any guard</text>
+    <text x="104" y="364" font-size="22" fill="#565f89">non-browser renderers (tests, SSR) die on click</text>
+  </g>
+  <g>
+    <rect x="80" y="402" width="860" height="132" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="444" font-size="26" fill="#7aa2f7">window().expect(..) on OAuth redirect</text>
+    <text x="104" y="482" font-size="23" fill="#a9b1d6">splash.rs login_callback — location.set_href needs it</text>
+    <text x="104" y="516" font-size="22" fill="#565f89">same unguarded assumption, one click earlier</text>
+  </g>
+  <g>
+    <rect x="80" y="554" width="860" height="132" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="596" font-size="26" fill="#7aa2f7">file-level allows hid the expects</text>
+    <text x="104" y="634" font-size="23" fill="#a9b1d6">unwrap_used ratchets atop both click files</text>
+    <text x="104" y="668" font-size="22" fill="#565f89">TODO(#1165) markers awaiting this fix</text>
+  </g>
+  <line x1="510" y1="686" x2="510" y2="940" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">clicks assume the world they run in</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">two click paths opted out of deny-by-default</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="250" width="860" height="132" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="292" font-size="26" fill="#9ece6a">let-else return on copy-id click</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">no window → nothing to copy into, so do nothing</text>
+    <text x="1089" y="364" font-size="22" fill="#565f89">real browsers take the identical path as before</text>
+  </g>
+  <g>
+    <rect x="1065" y="402" width="860" height="132" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="444" font-size="26" fill="#9ece6a">let-else return on OAuth click</text>
+    <text x="1089" y="482" font-size="23" fill="#a9b1d6">no window → nowhere to redirect, so do nothing</text>
+    <text x="1089" y="516" font-size="22" fill="#565f89">redirect logic below the guard is untouched</text>
+  </g>
+  <g>
+    <rect x="1065" y="554" width="860" height="132" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="596" font-size="26" fill="#9ece6a">ratchets come off both files</text>
+    <text x="1089" y="634" font-size="23" fill="#a9b1d6">no production unwrap/expect remains in either</text>
+    <text x="1089" y="668" font-size="22" fill="#565f89">future violations fail loudly instead of hiding</text>
+  </g>
+  <line x1="1495" y1="686" x2="1495" y2="940" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#9ece6a">menu and splash clicks are panic-free</text>
+    <text x="1089" y="1046" font-size="23" fill="#a9b1d6">window absence is a no-op in both handlers</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">No behavior change inside a real browser — both clicks take the exact pre-existing path there.</text>
+</svg>
