@@ -1,0 +1,14 @@
+name: Stub frontend dist
+description: >
+  Create an empty frontend/dist so the backend (which embeds
+  frontend/dist at build time) compiles without the real WASM bundle.
+  memory_serve falls back to dynamic loading when the directory is empty,
+  so backend compile/test checks do not need trunk or build-frontend.
+  Keeps backend lanes independent of frontend/CSS failures (#1165 item 1).
+
+runs:
+  using: composite
+  steps:
+    - name: Stub frontend dist
+      shell: bash
+      run: mkdir -p frontend/dist
