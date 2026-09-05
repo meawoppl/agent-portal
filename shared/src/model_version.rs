@@ -81,9 +81,7 @@ pub fn compact_model_version(model_id: &str) -> Option<String> {
             // (so a trailing date or family suffix isn't mixed in). Before it
             // starts, skip leading family words.
             Kind::DateOrBuild | Kind::Other => {
-                if parts.is_empty() {
-                    continue;
-                } else {
+                if !parts.is_empty() {
                     break;
                 }
             }
