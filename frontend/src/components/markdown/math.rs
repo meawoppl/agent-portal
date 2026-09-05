@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 pub(super) const MATH_OPEN: char = '\u{E000}';
 pub(super) const MATH_CLOSE: char = '\u{E001}';
 
@@ -26,7 +23,9 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             continue;
         }
         if in_code_fence {
-            let c = text[i..].chars().next().unwrap();
+            let Some(c) = text.get(i..).and_then(|tail| tail.chars().next()) else {
+                break;
+            };
             output.push(c);
             i += c.len_utf8();
             continue;
@@ -39,7 +38,9 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             continue;
         }
         if in_inline_code {
-            let c = text[i..].chars().next().unwrap();
+            let Some(c) = text.get(i..).and_then(|tail| tail.chars().next()) else {
+                break;
+            };
             output.push(c);
             i += c.len_utf8();
             continue;
@@ -113,7 +114,9 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             }
         }
 
-        let c = text[i..].chars().next().unwrap();
+        let Some(c) = text.get(i..).and_then(|tail| tail.chars().next()) else {
+            break;
+        };
         output.push(c);
         i += c.len_utf8();
     }

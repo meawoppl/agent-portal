@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! Cron expression to English description converter.
 //!
 //! Supports the standard 5-field UNIX cron format:
@@ -122,10 +119,10 @@ fn join_english(items: &[String]) -> String {
         0 => String::new(),
         1 => items[0].clone(),
         2 => format!("{} and {}", items[0], items[1]),
-        _ => {
-            let (last, rest) = items.split_last().unwrap();
-            format!("{}, and {}", rest.join(", "), last)
-        }
+        _ => match items.split_last() {
+            Some((last, rest)) => format!("{}, and {}", rest.join(", "), last),
+            None => String::new(),
+        },
     }
 }
 

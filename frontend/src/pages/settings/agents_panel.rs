@@ -1,6 +1,3 @@
-// TODO(#1165): remove this file-local ratchet after replacing production unwrap/expect paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! Agents triage matrix (Settings ▸ Agents).
 //!
 //! A new user's first question is "what do I still need to set up, and where?".
