@@ -77,7 +77,7 @@ fn service_file_path() -> Result<std::path::PathBuf> {
 fn generate_unit(binary_path: &str) -> String {
     let path = service_path(binary_path);
     format!(
-        r#"[Unit]
+        r"[Unit]
 Description=Agent Launcher
 After=network-online.target
 Wants=network-online.target
@@ -91,7 +91,7 @@ RestartSec=5
 
 [Install]
 WantedBy=default.target
-"#
+"
     )
 }
 

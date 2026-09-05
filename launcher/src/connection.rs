@@ -140,16 +140,14 @@ pub async fn run_launcher_loop(
                             if success {
                                 info!("Registration successful");
                                 break Ok(true);
-                            } else {
-                                let msg = error.unwrap_or_default();
-                                if fatal {
-                                    error!("Registration rejected (fatal): {}", msg);
-                                    break Err(classify_fatal(reject_reason, &msg));
-                                } else {
-                                    error!("Registration failed: {}", msg);
-                                    break Ok(false);
-                                }
                             }
+                            let msg = error.unwrap_or_default();
+                            if fatal {
+                                error!("Registration rejected (fatal): {}", msg);
+                                break Err(classify_fatal(reject_reason, &msg));
+                            }
+                            error!("Registration failed: {}", msg);
+                            break Ok(false);
                         }
                         Some(Ok(_)) => continue,
                         Some(Err(e)) => {
