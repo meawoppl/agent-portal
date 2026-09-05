@@ -197,16 +197,15 @@ fn refuse_reason_code(reason: TunnelRefuseReason) -> u8 {
     }
 }
 
-fn refuse_reason_from_code(code: u8) -> Result<TunnelRefuseReason, DecodeError> {
+fn refuse_reason_from_code(code: u8) -> TunnelRefuseReason {
     match code {
-        0 => Ok(TunnelRefuseReason::NoListener),
-        1 => Ok(TunnelRefuseReason::StreamLimit),
-        2 => Ok(TunnelRefuseReason::NotForwarded),
-        3 => Ok(TunnelRefuseReason::Protocol),
+        0 => TunnelRefuseReason::NoListener,
+        1 => TunnelRefuseReason::StreamLimit,
+        2 => TunnelRefuseReason::NotForwarded,
         // A newer peer sent a reason this build doesn't know. Degrade to
         // `Protocol` rather than dropping the frame: the stream still has to be
         // failed, and inventing a decode error would strand it half-open.
-        _ => Ok(TunnelRefuseReason::Protocol),
+        _ => TunnelRefuseReason::Protocol,
     }
 }
 
@@ -318,7 +317,7 @@ impl WsCodec for TunnelFrame {
                 exact_len(&body[n..], 1, "Refused")?;
                 Ok(Self::Refused {
                     stream_id,
-                    reason: refuse_reason_from_code(body[n])?,
+                    reason: refuse_reason_from_code(body[n]),
                 })
             }
             TAG_DATA => {
