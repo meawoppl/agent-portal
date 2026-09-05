@@ -307,9 +307,8 @@ async fn run_shim_loop(
                 // pre-refactor behavior). The `stream_event` filter from before the
                 // refactor is preserved here for parity.
                 None => {
-                    let raw = match serde_json::from_str::<serde_json::Value>(&line) {
-                        Ok(v) => v,
-                        Err(_) => continue, // non-JSON: don't forward to portal
+                    let Ok(raw) = serde_json::from_str::<serde_json::Value>(&line) else {
+                        continue; // non-JSON: don't forward to portal
                     };
                     let msg_type = raw.get("type").and_then(|t| t.as_str());
                     if matches!(msg_type, Some("stream_event")) {
@@ -343,8 +342,8 @@ async fn run_shim_loop(
                 serde_json::from_str::<ClaudeOutput>(&line)
             {
                 let request_id = match &resp.response {
-                    ControlResponsePayload::Success { request_id, .. } => request_id,
-                    ControlResponsePayload::Error { request_id, .. } => request_id,
+                    ControlResponsePayload::Success { request_id, .. }
+                    | ControlResponsePayload::Error { request_id, .. } => request_id,
                 };
                 let mut perms = permissions_for_stdin.lock().await;
                 if let Some(state) = perms.get_mut(request_id) {
