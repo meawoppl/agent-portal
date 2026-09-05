@@ -696,11 +696,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     };
     let selected_agent_missing = agent_installed(&agent_installs, *agent_type) == Some(false);
     let still_probing = *probing_agents && agent_installs.is_empty();
-    let selected_agent_label = match *agent_type {
-        AgentType::Claude => "Claude",
-        AgentType::Codex => "Codex",
-        AgentType::Muse => "Muse",
-    };
+    let selected_agent_label = agent_type.display_name();
 
     // Pre-compute directory listing HTML
     let dir_listing_html = if *dir.loading {

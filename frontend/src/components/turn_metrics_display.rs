@@ -61,14 +61,9 @@ pub(crate) fn format_agent_model_tier_label(
     model: &Option<String>,
     tier: &Option<String>,
 ) -> String {
-    let base = match (agent_type, model.as_deref()) {
-        (AgentType::Claude, None) => "Claude".to_string(),
-        (AgentType::Codex, None) => "Codex".to_string(),
-        (AgentType::Muse, None) => "Muse".to_string(),
-        (_, Some(model)) if is_displayable_model(model) => model.to_string(),
-        (AgentType::Claude, Some(_)) => "Claude".to_string(),
-        (AgentType::Codex, Some(_)) => "Codex".to_string(),
-        (AgentType::Muse, Some(_)) => "Muse".to_string(),
+    let base = match model.as_deref().filter(|m| is_displayable_model(m)) {
+        Some(model) => model.to_string(),
+        None => agent_type.display_name().to_string(),
     };
     append_nonstandard_tier(base, tier.as_deref())
 }
