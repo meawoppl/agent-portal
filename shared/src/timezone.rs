@@ -44,9 +44,7 @@ pub fn abbrev_to_iana(input: &str) -> Option<&'static str> {
 /// name. Never fails — an unknown value is passed through verbatim so the caller
 /// can decide how to handle it.
 pub fn canonicalize_timezone(input: &str) -> String {
-    abbrev_to_iana(input)
-        .map(str::to_string)
-        .unwrap_or_else(|| input.trim().to_string())
+    abbrev_to_iana(input).map_or_else(|| input.trim().to_string(), str::to_string)
 }
 
 /// Common IANA zones offered as suggestions in the schedule dialog. Not
