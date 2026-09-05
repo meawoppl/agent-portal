@@ -35,21 +35,21 @@ pub fn session_keyterms(
     let mut terms: Vec<String> = Vec::new();
 
     if let Some(repo) = repo_url.and_then(repo_name) {
-        push_term(&mut terms, repo);
+        push_term(&mut terms, &repo);
     }
     if let Some(branch) = git_branch {
         // A branch like `meawoppl/multi-provider-identity-model` is a phrase
         // someone will dictate almost verbatim, so contribute both the whole
         // slug and its words.
-        push_term(&mut terms, branch.to_string());
+        push_term(&mut terms, branch);
         for word in split_slug(branch) {
-            push_term(&mut terms, word);
+            push_term(&mut terms, &word);
         }
     }
     if let Some(leaf) = path_leaf(working_directory) {
-        push_term(&mut terms, leaf);
+        push_term(&mut terms, &leaf);
     }
-    push_term(&mut terms, agent_type.to_string());
+    push_term(&mut terms, agent_type);
 
     terms.truncate(MAX_KEYTERMS);
     terms
@@ -57,7 +57,7 @@ pub fn session_keyterms(
 
 /// Add a term unless it is empty, a stop word, or already present
 /// (case-insensitively).
-fn push_term(terms: &mut Vec<String>, term: String) {
+fn push_term(terms: &mut Vec<String>, term: &str) {
     let term = term.trim().trim_matches('/').to_string();
     if term.len() < 3 || term.len() > 64 {
         return;

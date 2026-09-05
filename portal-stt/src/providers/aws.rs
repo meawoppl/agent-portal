@@ -231,7 +231,7 @@ impl AwsStt {
             ("x-amz-target".to_string(), format!("Transcribe.{target}")),
         ];
 
-        let request = self.signed_request("POST", &url, headers, body, "transcribe")?;
+        let request = self.signed_request("POST", &url, &headers, body, "transcribe")?;
         let response = self.http.execute(request).await.map_err(transport)?;
         ensure_ok(response).await?.text().await.map_err(decode)
     }
@@ -244,14 +244,14 @@ impl AwsStt {
     ) -> Result<(), SttError> {
         let url = self.object_url(key);
         let headers = vec![("content-type".to_string(), content_type.to_string())];
-        let request = self.signed_request("PUT", &url, headers, audio.to_vec(), "s3")?;
+        let request = self.signed_request("PUT", &url, &headers, audio.to_vec(), "s3")?;
         let response = self.http.execute(request).await.map_err(transport)?;
         ensure_ok(response).await.map(|_| ())
     }
 
     async fn delete_object(&self, key: &str) -> Result<(), SttError> {
         let url = self.object_url(key);
-        let request = self.signed_request("DELETE", &url, Vec::new(), Vec::new(), "s3")?;
+        let request = self.signed_request("DELETE", &url, &[], Vec::new(), "s3")?;
         let response = self.http.execute(request).await.map_err(transport)?;
         ensure_ok(response).await.map(|_| ())
     }
@@ -269,7 +269,7 @@ impl AwsStt {
         &self,
         method: &str,
         url: &str,
-        headers: Vec<(String, String)>,
+        headers: &[(String, String)],
         body: Vec<u8>,
         service: &str,
     ) -> Result<reqwest::Request, SttError> {
@@ -308,7 +308,7 @@ impl AwsStt {
             .into_parts();
 
         let mut builder = http::Request::builder().method(method).uri(url);
-        for (name, value) in &headers {
+        for (name, value) in headers {
             builder = builder.header(name, value);
         }
         let mut http_request = builder
