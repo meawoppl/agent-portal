@@ -44,32 +44,19 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
             i += c.len_utf8();
             continue;
         }
-        // Display math: $$...$$
-        if bytes[i] == b'$' && bytes.get(i + 1) == Some(&b'$') {
-            if let Some(rel) = text[i + 2..].find("$$") {
-                let end = i + 2 + rel + 2;
+        // Fixed-delimiter math: `$$...$$`, `\[...\]`, `\(...\)`. The three
+        // shapes differ only in their delimiters, so one table covers them.
+        let mut matched = false;
+        for (open, close) in [("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)")] {
+            if let Some(end) = match_fixed_span(text, i, open, close) {
                 emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
                 i = end;
-                continue;
+                matched = true;
+                break;
             }
         }
-        // LaTeX-style display: \[...\]
-        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'[') {
-            if let Some(rel) = text[i + 2..].find("\\]") {
-                let end = i + 2 + rel + 2;
-                emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
-                i = end;
-                continue;
-            }
-        }
-        // LaTeX-style inline: \(...\)
-        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'(') {
-            if let Some(rel) = text[i + 2..].find("\\)") {
-                let end = i + 2 + rel + 2;
-                emit_placeholder(&mut output, &mut math_blocks, &text[i..end]);
-                i = end;
-                continue;
-            }
+        if matched {
+            continue;
         }
         // Inline math: $...$ on a single line.
         //
@@ -121,6 +108,17 @@ pub(super) fn extract_math_placeholders(text: &str) -> (String, Vec<String>) {
     (output, math_blocks)
 }
 
+/// Match one fixed-delimiter math span (`$$…$$`, `\[…\]`, `\(…\)`) at byte
+/// offset `i`, returning the end offset (exclusive) on success. `i` must be a
+/// char boundary, as the scan maintains throughout.
+fn match_fixed_span(text: &str, i: usize, open: &str, close: &str) -> Option<usize> {
+    if !text[i..].starts_with(open) {
+        return None;
+    }
+    let rel = text[i + open.len()..].find(close)?;
+    Some(i + open.len() + rel + close.len())
+}
+
 fn emit_placeholder(output: &mut String, math_blocks: &mut Vec<String>, math: &str) {
     let idx = math_blocks.len();
     math_blocks.push(math.to_string());
@@ -135,6 +133,25 @@ fn emit_placeholder(output: &mut String, math_blocks: &mut Vec<String>, math: &s
 pub(super) enum MathSegment {
     Text(String),
     Math { latex: String, display: bool },
+}
+
+/// Read one placeholder token following a `MATH_OPEN`, consuming through the
+/// closing `MATH_CLOSE` (or end of input for a truncated token).
+fn read_placeholder_token(chars: &mut std::str::Chars<'_>) -> String {
+    let mut token = String::new();
+    for tc in chars.by_ref() {
+        if tc == MATH_CLOSE {
+            break;
+        }
+        token.push(tc);
+    }
+    token
+}
+
+/// Resolve a `MATH<idx>` placeholder token to its captured literal.
+fn lookup_placeholder<'a>(token: &str, math_blocks: &'a [String]) -> Option<&'a str> {
+    let idx = token.strip_prefix("MATH")?.parse::<usize>().ok()?;
+    math_blocks.get(idx).map(String::as_str)
 }
 
 /// Split a text run on math placeholders, resolving each back to its captured
@@ -154,18 +171,8 @@ pub(super) fn split_math_segments(text: &str, math_blocks: &[String]) -> Vec<Mat
             buf.push(c);
             continue;
         }
-        let mut token = String::new();
-        for tc in chars.by_ref() {
-            if tc == MATH_CLOSE {
-                break;
-            }
-            token.push(tc);
-        }
-        let resolved = token
-            .strip_prefix("MATH")
-            .and_then(|idx| idx.parse::<usize>().ok())
-            .and_then(|idx| math_blocks.get(idx))
-            .and_then(|literal| strip_math_delimiters(literal));
+        let token = read_placeholder_token(&mut chars);
+        let resolved = lookup_placeholder(&token, math_blocks).and_then(strip_math_delimiters);
         // A malformed placeholder is dropped, matching `restore_math`.
         if let Some((latex, display)) = resolved {
             if !buf.is_empty() {
@@ -205,20 +212,10 @@ pub(super) fn restore_math(text: &str, math_blocks: &[String]) -> String {
     let mut chars = text.chars();
     while let Some(c) = chars.next() {
         if c == MATH_OPEN {
-            let mut token = String::new();
-            for tc in chars.by_ref() {
-                if tc == MATH_CLOSE {
-                    break;
-                }
-                token.push(tc);
-            }
-            if let Some(n_str) = token.strip_prefix("MATH") {
-                if let Ok(idx) = n_str.parse::<usize>() {
-                    if let Some(math) = math_blocks.get(idx) {
-                        out.push_str(math);
-                        continue;
-                    }
-                }
+            let token = read_placeholder_token(&mut chars);
+            if let Some(math) = lookup_placeholder(&token, math_blocks) {
+                out.push_str(math);
+                continue;
             }
             // Malformed: drop silently
         } else {
