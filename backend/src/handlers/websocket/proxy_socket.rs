@@ -63,13 +63,16 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                 if let Some(key) = session_key.as_ref() {
                     session_manager.touch_session(key);
                 }
+                let ctx = ProxyCtx {
+                    app_state: &app_state,
+                    session_manager: &session_manager,
+                    db_pool: &db_pool,
+                    tx: &tx,
+                    cancel: &cancel,
+                };
                 let flow = handle_proxy_message(
                     proxy_msg,
-                    &app_state,
-                    &session_manager,
-                    &db_pool,
-                    &tx,
-                    &cancel,
+                    ctx,
                     &mut session_key,
                     &mut db_session_id,
                     &mut connection_gen,
@@ -177,18 +180,34 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     let _ = send_task.await;
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Shared per-connection context for the proxy message handlers below.
+/// Bundled so the handler signatures stay under the argument-count lint;
+/// `Copy` so dispatch can pass it down freely. Mirrors `WebClientCtx` on the
+/// web-client side. The three `&mut` connection states stay as separate
+/// params — they are per-message mutable borrows, not shared context.
+#[derive(Clone, Copy)]
+struct ProxyCtx<'a> {
+    app_state: &'a AppState,
+    session_manager: &'a SessionManager,
+    db_pool: &'a crate::db::DbPool,
+    tx: &'a ProxySender,
+    cancel: &'a tokio_util::sync::CancellationToken,
+}
+
 fn handle_proxy_message(
     proxy_msg: ProxyToServer,
-    app_state: &AppState,
-    session_manager: &SessionManager,
-    db_pool: &crate::db::DbPool,
-    tx: &ProxySender,
-    cancel: &tokio_util::sync::CancellationToken,
+    ctx: ProxyCtx<'_>,
     session_key: &mut Option<SessionId>,
     db_session_id: &mut Option<Uuid>,
     connection_gen: &mut Option<u64>,
 ) -> ControlFlow<()> {
+    let ProxyCtx {
+        app_state,
+        session_manager,
+        db_pool,
+        tx,
+        cancel,
+    } = ctx;
     match proxy_msg {
         ProxyToServer::Register(shared::RegisterFields {
             session_id: claude_session_id,
