@@ -1,7 +1,7 @@
 name: Visual PR
 
 # Every PR ships its own visual summary, committed at
-# 000-pr-visualization/<pr-number>.svg. Enforcement, validation, and the
+# .0-pr-viz/<six-digit-pr-number>.svg. Enforcement, validation, and the
 # agent-facing fix instructions live in the reusable action
 # (github.com/meawoppl/visual-pr); this workflow just wires it up.
 #
@@ -33,11 +33,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           path: pr-head
-          sparse-checkout: 000-pr-visualization
+          sparse-checkout: .0-pr-viz
 
-      # Pin the executable action: a moving v1 tag changed its path contract
-      # after this workflow landed, making every PR's required check fail.
-      - uses: meawoppl/visual-pr@669787fdc7aaf7afc3975dbbab5af65ee50da6da
+      - uses: meawoppl/visual-pr@v2
         with:
           head-path: pr-head
           style: .github/visual-pr/style.json
