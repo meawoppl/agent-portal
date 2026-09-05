@@ -35,9 +35,7 @@ jobs:
           path: pr-head
           sparse-checkout: .0-pr-viz
 
-      # Immutable pin for the v2 contract. Moving tags previously changed the
-      # required path underneath open PRs and made every check fail at once.
-      - uses: meawoppl/visual-pr@676648294d6a43f2dde58cfac700c5254f2147aa
+      - uses: meawoppl/visual-pr@v2
         with:
           head-path: pr-head
           style: .github/visual-pr/style.json

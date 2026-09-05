@@ -6,7 +6,7 @@
   </defs>
   <text x="55" y="52" font-size="24" fill="#565f89">PR #1831 · Adopt visual-pr v2 contract</text>
   <text x="55" y="105" font-size="34" fill="#e6e9f5">The required check adopts v2's stable path and PR-body contract while keeping executable</text>
-  <text x="55" y="147" font-size="34" fill="#e6e9f5">workflow code pinned to an immutable commit.</text>
+  <text x="55" y="147" font-size="34" fill="#e6e9f5">workflow code following the maintained v2 release tag.</text>
   <line x1="55" y1="175" x2="1945" y2="175" stroke="#3d4666"/>
   <text x="70" y="230" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
   <text x="1040" y="230" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
@@ -22,9 +22,9 @@
   <text x="115" y="780" font-size="23" fill="#a9b1d6">PR body image not required</text>
 
   <rect x="1065" y="285" width="860" height="210" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-  <text x="1100" y="345" font-size="27" fill="#c0caf5">visual-pr v2 immutable commit</text>
-  <text x="1100" y="397" font-size="23" fill="#9ece6a">676648294d6a43f2dde58cfac700c5254f2147aa</text>
-  <text x="1100" y="445" font-size="21" fill="#565f89">workflow behavior cannot drift underneath open PRs</text>
+  <text x="1100" y="345" font-size="27" fill="#c0caf5">meawoppl/visual-pr@v2</text>
+  <text x="1100" y="397" font-size="23" fill="#9ece6a">maintained v2 release channel</text>
+  <text x="1100" y="445" font-size="21" fill="#565f89">compatible v2 updates arrive without repository edits</text>
   <line x1="1495" y1="495" x2="1495" y2="600" stroke="#9ece6a" stroke-width="2" marker-end="url(#green)"/>
   <rect x="1065" y="615" width="860" height="230" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="1100" y="675" font-size="27" fill="#7aa2f7">One explicit v2 contract</text>
