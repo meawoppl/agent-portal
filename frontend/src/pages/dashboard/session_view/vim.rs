@@ -297,7 +297,15 @@ fn handle_normal(
         Pending::Replace => return resolve_replace(state, textarea, event, key, &text, cursor),
         Pending::GPrefix => return resolve_g(state, textarea, event, key),
         Pending::Find { op, kind, count } => {
-            return resolve_find(state, textarea, event, key, &text, cursor, op, kind, count);
+            return resolve_find(
+                state,
+                textarea,
+                event,
+                key,
+                &text,
+                cursor,
+                FindMotion { op, kind, count },
+            );
         }
         Pending::TextObject { op, around } => {
             return resolve_text_object(state, textarea, event, key, &text, cursor, (op, around));
@@ -517,11 +525,18 @@ fn set_find(
     VimHandled::Consumed { rerender: false }
 }
 
+/// Find-motion operands, bundled out of the `Pending::Find` slot so
+/// `resolve_find` stays under the argument-count lint.
+struct FindMotion {
+    op: Option<Op>,
+    kind: FindKind,
+    count: usize,
+}
+
 /// Resolve a find-character motion once its target char arrives. As a bare
 /// motion it moves the block caret; under an operator it deletes/changes/yanks
 /// the spanned range. A missing char (`Esc`, non-printable) or no match on the
 /// line cancels with the buffer untouched — matching vim.
-#[allow(clippy::too_many_arguments)]
 fn resolve_find(
     state: &mut VimState,
     textarea: &HtmlTextAreaElement,
@@ -529,9 +544,7 @@ fn resolve_find(
     key: &str,
     text: &[char],
     cursor: usize,
-    op: Option<Op>,
-    kind: FindKind,
-    count: usize,
+    motion: FindMotion,
 ) -> VimHandled {
     state.clear_pending();
     event.prevent_default();
@@ -545,20 +558,20 @@ fn resolve_find(
         }
     };
 
-    let matched = ch.and_then(|c| find_char_match(text, cursor, c, kind, count));
+    let matched = ch.and_then(|c| find_char_match(text, cursor, c, motion.kind, motion.count));
     let Some(m) = matched else {
         // No char or no match on the line — leave everything as-is.
         place_block(textarea, text, cursor);
         return VimHandled::Consumed { rerender: false };
     };
 
-    match op {
+    match motion.op {
         None => {
-            place_block(textarea, text, find_motion_target(m, kind));
+            place_block(textarea, text, find_motion_target(m, motion.kind));
             VimHandled::Consumed { rerender: false }
         }
         Some(op) => {
-            let (start, end) = find_operator_range(cursor, m, kind);
+            let (start, end) = find_operator_range(cursor, m, motion.kind);
             edit_range(state, textarea, event, text, op, start, end)
         }
     }
