@@ -1071,8 +1071,9 @@ use uuid::Uuid;
 - **Bodies**: focus on *what* the change does and *why*. Keep it concise — no commit-by-commit play-by-play.
 - **No attribution footer**: don't add "Generated with Claude Code" (or similar) to PR titles or bodies.
 - **Visual PR summary (required)**: every PR commits a before/after summary
-  SVG of itself at `000-pr-visualization/<pr-number>.svg` (the `000-` prefix
-  sorts it first in GitHub's review file list). The tooling lives upstream in
+  SVG of itself at `.0-pr-viz/<six-digit-pr-number>.svg` (for example, PR 412
+  uses `.0-pr-viz/000412.svg`) and opens its PR body with an image of that SVG.
+  The tooling lives upstream in
   [meawoppl/visual-pr](https://github.com/meawoppl/visual-pr): read its
   `SPEC.md` for the authoring rules, ground every identifier in the actual
   diff, and verify with its `check_svg.py` (this repo's style artifact is
