@@ -128,6 +128,9 @@ pub mod time;
 // a bar) and backend text classification (strip before summarizing)
 pub mod system_reminder;
 
+// Substantive-user-message detection (the history viewer's "User msgs" count)
+pub mod user_messages;
+
 // Compact model-version extraction for the session-pill watermark
 pub mod model_version;
 pub use model_version::{compact_model_version, context_window_for};

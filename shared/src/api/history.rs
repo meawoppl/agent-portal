@@ -98,6 +98,12 @@ pub struct HistorySessionSummary {
     pub total_cost_usd: f64,
     #[serde(default)]
     pub message_count: i64,
+    /// Substantive user messages (tool results and reinjected notice blocks
+    /// excluded — `shared::user_messages`). `None` until the archive manifest
+    /// has the count (written at archive time; backfilled when the session's
+    /// transcript is next viewed).
+    #[serde(default)]
+    pub user_message_count: Option<i64>,
     #[serde(default)]
     pub media_count: i64,
     #[serde(default)]

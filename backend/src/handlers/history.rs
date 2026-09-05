@@ -303,6 +303,7 @@ fn session_summary(row: &scan::FlatRow) -> HistorySessionSummary {
         last_activity: fmt_dt(&m.last_activity),
         total_cost_usd: m.total_cost_usd,
         message_count: row.message_count(),
+        user_message_count: m.user_message_count,
         media_count: row.media_count() as i64,
         models: m.turns.models.clone(),
     }
@@ -357,7 +358,8 @@ pub async fn get_history_messages(
     let (owner_id, session_id) = parse_ids(&user, &session)?;
     verify_history_reader(&app_state, &runtime, &caller, owner_id, session_id).await?;
 
-    let ndjson = on_blocking(move || {
+    let backfill_runtime = runtime.clone();
+    let (ndjson, backfilled) = on_blocking(move || {
         match runtime
             .store
             .get_object(&transcript_key(owner_id, session_id))?
@@ -366,19 +368,28 @@ pub async fn get_history_messages(
             // (#1466). Manifest-last write order means an absent manifest is a
             // mid-write read; fall back to the write-side default.
             Some(raw) => {
-                let compression = runtime
-                    .store
-                    .get_session_manifest(owner_id, session_id)?
-                    .and_then(|m| m.transcript)
-                    .map(|t| t.compression)
+                let manifest = runtime.store.get_session_manifest(owner_id, session_id)?;
+                let compression = manifest
+                    .as_ref()
+                    .and_then(|m| m.transcript.as_ref())
+                    .map(|t| t.compression.clone())
                     .unwrap_or_else(|| TRANSCRIPT_COMPRESSION.to_string());
-                decode_transcript(&compression, &raw).map(Some)
+                let ndjson = decode_transcript(&compression, &raw)?;
+                let backfilled =
+                    backfill_user_message_count(&runtime, manifest, owner_id, session_id, &ndjson);
+                Ok((Some(ndjson), backfilled))
             }
-            None => Ok(None),
+            None => Ok((None, false)),
         }
     })
-    .await?
-    .unwrap_or_default();
+    .await?;
+    let ndjson = ndjson.unwrap_or_default();
+    if backfilled {
+        // The manifest object changed under the list cache; refresh it behind
+        // this request so the new count shows on the next list fetch rather
+        // than after the self-heal window.
+        backfill_runtime.warm_scan_cache();
+    }
 
     let stream = ReaderStream::new(Cursor::new(ndjson));
     Ok((
@@ -386,6 +397,82 @@ pub async fn get_history_messages(
         Body::from_stream(stream),
     )
         .into_response())
+}
+
+/// Lazily backfill `user_message_count` on a pre-existing manifest the first
+/// time its transcript is viewed. New archives get the count at archive time
+/// (`background.rs`); this fills manifests written before the field existed
+/// without a bulk migration pass over the whole archive. Best-effort: a failed
+/// write only delays the backfill to the next view. Returns true when the
+/// manifest object was rewritten.
+fn backfill_user_message_count(
+    runtime: &ArchiveRuntime,
+    manifest: Option<SessionArchiveManifest>,
+    owner_id: Uuid,
+    session_id: Uuid,
+    ndjson: &[u8],
+) -> bool {
+    // Cheap pre-checks on the manifest fetched earlier in this request; the
+    // authoritative read happens under the write lock below.
+    match &manifest {
+        None => return false,
+        Some(m) if m.user_message_count.is_some() => return false,
+        Some(_) => {}
+    }
+    let count = ndjson
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| serde_json::from_slice::<crate::archive::ArchiveMessageLine>(line).ok())
+        .filter(|l| {
+            l.role == "user" && shared::user_messages::is_substantive_user_record(&l.content)
+        })
+        .count() as i64;
+
+    // Serialize with the archive sweep and RE-READ before writing: both
+    // writers read-modify-write the whole manifest object, and writing our
+    // earlier copy here could clobber a concurrently re-archived (newer)
+    // manifest — losing its fresher last_activity, counts, and transcript
+    // info. Under the lock, a fresh read + conditional write is a CAS.
+    let _manifest_guard = runtime
+        .manifest_write_lock
+        .lock()
+        // A poisoned lock only means another writer panicked mid-write; the
+        // ordering guarantee is unaffected, so continue.
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut manifest = match runtime.store.get_session_manifest(owner_id, session_id) {
+        Ok(Some(m)) => m,
+        Ok(None) => return false,
+        Err(e) => {
+            tracing::warn!("history backfill: manifest re-read failed for {session_id}: {e}");
+            return false;
+        }
+    };
+    if manifest.user_message_count.is_some() {
+        // A re-archive filled it in while we were counting — theirs is
+        // computed from the same merged transcript; nothing to do.
+        return false;
+    }
+    manifest.user_message_count = Some(count);
+    let bytes = match serde_json::to_vec(&manifest) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::warn!("history backfill: could not serialize manifest {session_id}: {e}");
+            return false;
+        }
+    };
+    match runtime
+        .store
+        .put_object(&manifest_key(owner_id, session_id), bytes)
+    {
+        Ok(()) => {
+            tracing::info!("history backfill: user_message_count={count} for session {session_id}");
+            true
+        }
+        Err(e) => {
+            tracing::warn!("history backfill: manifest write failed for {session_id}: {e}");
+            false
+        }
+    }
 }
 
 /// GET /api/history/media/{user}/{session}/{media_id} — archived media bytes

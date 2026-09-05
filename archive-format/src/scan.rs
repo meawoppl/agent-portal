@@ -239,6 +239,7 @@ pub mod test_support {
             last_activity,
             archived_at: last_activity,
             message_counts: BTreeMap::new(),
+            user_message_count: None,
             tokens: ArchiveTokenTotals::default(),
             total_cost_usd: 0.0,
             turns: ArchiveTurnStats::default(),
