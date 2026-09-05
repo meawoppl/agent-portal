@@ -139,8 +139,7 @@ pub fn strip_system_reminders(text: &str) -> String {
             Segment::Reminder(_) => None,
             Segment::TaskNotification(_) => unreachable!("system-reminder-only split"),
         })
-        .collect::<Vec<_>>()
-        .join("")
+        .collect::<String>()
 }
 
 /// The prose of `text` with every complete collapsible notice removed.
@@ -154,8 +153,7 @@ pub fn strip_collapsible_notices(text: &str) -> String {
             Segment::Text(text) => Some(text),
             Segment::Reminder(_) | Segment::TaskNotification(_) => None,
         })
-        .collect::<Vec<_>>()
-        .join("")
+        .collect::<String>()
 }
 
 #[cfg(test)]
