@@ -230,40 +230,53 @@ impl MediaStore {
     }
 }
 
+/// Outcome of parsing a single-range `Range: bytes=start-end` header against
+/// `total` bytes. A dedicated enum instead of `Option<Result<_, ()>>`: the
+/// three cases (serve whole file / serve one range / answer 416) are what both
+/// callers match on, and the type no longer trips the complexity lint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RangeOutcome {
+    /// Header absent or malformed: serve the whole file with 200.
+    Full,
+    /// Satisfiable single range: serve inclusive `start..=end` with 206.
+    Partial { start: u64, end: u64 },
+    /// Syntactically valid but unsatisfiable: answer 416.
+    NotSatisfiable,
+}
+
 /// Parse a single-range `Range: bytes=start-end` header against `total` bytes.
-/// Returns the inclusive `(start, end)` byte range, or `None` when the header
-/// is absent/malformed (caller then serves the whole file). Returns
-/// `Some(Err(()))` when the range is syntactically valid but unsatisfiable.
-#[allow(clippy::type_complexity)]
-pub(crate) fn parse_range(headers: &HeaderMap, total: u64) -> Option<Result<(u64, u64), ()>> {
-    let raw = headers.get(header::RANGE)?.to_str().ok()?;
-    let spec = raw.strip_prefix("bytes=")?;
-    // Only a single range is supported; reject multi-range specs.
-    if spec.contains(',') {
-        return Some(Err(()));
-    }
-    let (start_s, end_s) = spec.split_once('-')?;
-    let (start, end) = if start_s.is_empty() {
-        // Suffix range: bytes=-N → last N bytes.
-        let n: u64 = end_s.parse().ok()?;
-        if n == 0 || total == 0 {
-            return Some(Err(()));
+pub(crate) fn parse_range(headers: &HeaderMap, total: u64) -> RangeOutcome {
+    let outcome = (|| {
+        let raw = headers.get(header::RANGE)?.to_str().ok()?;
+        let spec = raw.strip_prefix("bytes=")?;
+        // Only a single range is supported; reject multi-range specs.
+        if spec.contains(',') {
+            return Some(RangeOutcome::NotSatisfiable);
         }
-        let n = n.min(total);
-        (total - n, total - 1)
-    } else {
-        let start: u64 = start_s.parse().ok()?;
-        let end: u64 = if end_s.is_empty() {
-            total.saturating_sub(1)
+        let (start_s, end_s) = spec.split_once('-')?;
+        let (start, end) = if start_s.is_empty() {
+            // Suffix range: bytes=-N → last N bytes.
+            let n: u64 = end_s.parse().ok()?;
+            if n == 0 || total == 0 {
+                return Some(RangeOutcome::NotSatisfiable);
+            }
+            let n = n.min(total);
+            (total - n, total - 1)
         } else {
-            end_s.parse().ok()?
+            let start: u64 = start_s.parse().ok()?;
+            let end: u64 = if end_s.is_empty() {
+                total.saturating_sub(1)
+            } else {
+                end_s.parse().ok()?
+            };
+            (start, end.min(total.saturating_sub(1)))
         };
-        (start, end.min(total.saturating_sub(1)))
-    };
-    if total == 0 || start > end || start >= total {
-        return Some(Err(()));
-    }
-    Some(Ok((start, end)))
+        if total == 0 || start > end || start >= total {
+            return Some(RangeOutcome::NotSatisfiable);
+        }
+        Some(RangeOutcome::Partial { start, end })
+    })();
+    outcome.unwrap_or(RangeOutcome::Full)
 }
 
 /// GET /api/media/{id} — serve a stored video, with HTTP Range support so
@@ -310,7 +323,7 @@ pub async fn serve_media(
     let range = parse_range(&headers, total);
 
     match range {
-        Some(Err(())) => {
+        RangeOutcome::NotSatisfiable => {
             // Syntactically valid but unsatisfiable range.
             Ok(Response::builder()
                 .status(StatusCode::RANGE_NOT_SATISFIABLE)
@@ -318,7 +331,7 @@ pub async fn serve_media(
                 .body(Body::empty())
                 .map_err(|e| AppError::Internal(format!("build range response: {e}")))?)
         }
-        Some(Ok((start, end))) => {
+        RangeOutcome::Partial { start, end } => {
             let len = end - start + 1;
             let mut file = tokio::fs::File::open(&meta.path)
                 .await
@@ -344,7 +357,7 @@ pub async fn serve_media(
             response.headers_mut().extend(security);
             Ok(response)
         }
-        None => {
+        RangeOutcome::Full => {
             let file = tokio::fs::File::open(&meta.path)
                 .await
                 .map_err(|_| AppError::NotFound("Media not found"))?;
@@ -430,27 +443,39 @@ mod tests {
     fn parse_range_variants() {
         let mut headers = HeaderMap::new();
         // No Range header → whole file.
-        assert!(parse_range(&headers, 100).is_none());
+        assert_eq!(parse_range(&headers, 100), RangeOutcome::Full);
 
         headers.insert(header::RANGE, "bytes=0-49".parse().unwrap());
-        assert_eq!(parse_range(&headers, 100), Some(Ok((0, 49))));
+        assert_eq!(
+            parse_range(&headers, 100),
+            RangeOutcome::Partial { start: 0, end: 49 }
+        );
 
         headers.insert(header::RANGE, "bytes=50-".parse().unwrap());
-        assert_eq!(parse_range(&headers, 100), Some(Ok((50, 99))));
+        assert_eq!(
+            parse_range(&headers, 100),
+            RangeOutcome::Partial { start: 50, end: 99 }
+        );
 
         headers.insert(header::RANGE, "bytes=-20".parse().unwrap());
-        assert_eq!(parse_range(&headers, 100), Some(Ok((80, 99))));
+        assert_eq!(
+            parse_range(&headers, 100),
+            RangeOutcome::Partial { start: 80, end: 99 }
+        );
 
         // End past EOF clamps to last byte.
         headers.insert(header::RANGE, "bytes=90-200".parse().unwrap());
-        assert_eq!(parse_range(&headers, 100), Some(Ok((90, 99))));
+        assert_eq!(
+            parse_range(&headers, 100),
+            RangeOutcome::Partial { start: 90, end: 99 }
+        );
 
         // Start past EOF is unsatisfiable.
         headers.insert(header::RANGE, "bytes=200-".parse().unwrap());
-        assert_eq!(parse_range(&headers, 100), Some(Err(())));
+        assert_eq!(parse_range(&headers, 100), RangeOutcome::NotSatisfiable);
 
         // Multi-range unsupported.
         headers.insert(header::RANGE, "bytes=0-10,20-30".parse().unwrap());
-        assert_eq!(parse_range(&headers, 100), Some(Err(())));
+        assert_eq!(parse_range(&headers, 100), RangeOutcome::NotSatisfiable);
     }
 }
