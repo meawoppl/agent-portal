@@ -48,7 +48,7 @@
   <g>
     <rect x="80" y="930" width="840" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
     <text x="104" y="976" font-size="26" fill="#c0caf5">what the transcript showed</text>
-    <text x="104" y="1014" font-size="23" fill="#f7768e">a card reading only "PROPOSED  task" — badge, fallback label, empty body</text>
+    <text x="104" y="1014" font-size="23" fill="#f7768e">a card reading only "PROPOSED  task" — badge, label, empty body</text>
     <text x="104" y="1048" font-size="21" fill="#565f89">live-reported with a screenshot; recurring across muse sessions</text>
   </g>
 
