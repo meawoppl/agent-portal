@@ -343,9 +343,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let probing_agents = probing_agents.clone();
         use_effect_with(props.launcher_refresh, move |_| {
             spawn_local(async move {
-                if let Ok(data) =
-                    utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
-                {
+                if let Ok(data) = utils::fetch_launchers().await {
                     // A live refresh must not yank a selection that is
                     // still valid — but a selection whose launcher just
                     // dropped off the list is stale, and launching against
