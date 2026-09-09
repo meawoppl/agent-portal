@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans','DejaVu Sans',ui-sans-serif,system-ui,sans-serif">
+<rect width="2000" height="1200" fill="#16161e"/>
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1904 · dedupe localStorage access in frontend utils</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">One local_storage() helper in utils.rs; three call sites repointed, behavior unchanged.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+<rect x="80" y="270" width="840" height="300" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="325" font-size="26" fill="#c0caf5">localStorage chain spelled out thrice</text>
+<text x="108" y="380" font-size="23" fill="#a9b1d6">storage_get, storage_set, storage_remove in utils.rs</text>
+<text x="108" y="430" font-size="23" fill="#f7768e">identical window/localStorage/ok/flatten reads</text>
+<text x="108" y="480" font-size="23" fill="#f7768e">get uses a ?-chain, set/remove use and_then</text>
+<rect x="80" y="650" width="840" height="245" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="705" font-size="26" fill="#c0caf5">Two shapes, one chain</text>
+<text x="108" y="760" font-size="23" fill="#a9b1d6">same access, two spellings side by side</text>
+<text x="108" y="810" font-size="23" fill="#f7768e">a fallback tweak must land in three places</text>
+<rect x="1065" y="270" width="860" height="300" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="325" font-size="26" fill="#7aa2f7">local_storage owns the access</text>
+<text x="1093" y="380" font-size="23" fill="#a9b1d6">single fn returns Option of web_sys Storage</text>
+<text x="1093" y="430" font-size="23" fill="#9ece6a">None only when there is no window</text>
+<text x="1093" y="480" font-size="23" fill="#9ece6a">disabled storage still falls back the same way</text>
+<rect x="1065" y="650" width="860" height="245" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="705" font-size="26" fill="#7aa2f7">All three helpers map over it</text>
+<text x="1093" y="760" font-size="23" fill="#a9b1d6">same reads, same silent-ignore writes</text>
+<text x="1093" y="810" font-size="23" fill="#9ece6a">685 frontend tests green, clippy and fmt clean</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: frontend/src/utils.rs only; storage_get/set/remove callers untouched.</text>
+</svg>

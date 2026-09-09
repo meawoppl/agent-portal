@@ -180,22 +180,22 @@ pub fn calculate_backoff(attempt: u32) -> u32 {
         .min(MAX_MS)
 }
 
+/// Access browser localStorage, returning `None` when unavailable (no
+/// window, storage disabled).
+fn local_storage() -> Option<web_sys::Storage> {
+    window()?.local_storage().ok().flatten()
+}
+
 /// Read a value from browser localStorage, returning `None` when storage is
 /// unavailable (no window, storage disabled) or the key is absent.
 pub fn storage_get(key: &str) -> Option<String> {
-    window()?
-        .local_storage()
-        .ok()
-        .flatten()?
-        .get_item(key)
-        .ok()
-        .flatten()
+    local_storage()?.get_item(key).ok().flatten()
 }
 
 /// Write a value to browser localStorage, silently doing nothing when
 /// storage is unavailable or the write fails.
 pub fn storage_set(key: &str, value: &str) {
-    if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten()) {
+    if let Some(storage) = local_storage() {
         let _ = storage.set_item(key, value);
     }
 }
@@ -203,7 +203,7 @@ pub fn storage_set(key: &str, value: &str) {
 /// Remove a key from browser localStorage, silently doing nothing when
 /// storage is unavailable.
 pub fn storage_remove(key: &str) {
-    if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten()) {
+    if let Some(storage) = local_storage() {
         let _ = storage.remove_item(key);
     }
 }
