@@ -223,7 +223,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                     let api_endpoint = utils::api_url(&format!("/api/proxy-tokens/{}", token_id));
                     match Request::delete(&api_endpoint).send().await {
                         Ok(response) => {
-                            if response.status() == 204 || response.status() == 200 {
+                            if response.ok() {
                                 let mut updated: Vec<ProxyTokenInfo> = (*tokens).to_vec();
                                 if let Some(token) = updated.iter_mut().find(|t| t.id == token_id) {
                                     token.revoked = true;

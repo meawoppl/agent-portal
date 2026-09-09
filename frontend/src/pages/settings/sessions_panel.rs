@@ -134,7 +134,7 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
                     let api_endpoint = utils::api_url(&format!("/api/sessions/{}", session_id));
                     match Request::delete(&api_endpoint).send().await {
                         Ok(response) => {
-                            if response.status() == 204 || response.status() == 200 {
+                            if response.ok() {
                                 let updated: Vec<SessionInfo> = (*sessions)
                                     .iter()
                                     .filter(|s| s.id != session_id)

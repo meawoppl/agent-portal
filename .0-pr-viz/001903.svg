@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans','DejaVu Sans',ui-sans-serif,system-ui,sans-serif">
+<rect width="2000" height="1200" fill="#16161e"/>
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1903 · use response.ok() for delete success checks</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Duplicated 200-or-204 DELETE check in two panels collapses into response.ok().</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+<rect x="80" y="270" width="840" height="300" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="325" font-size="26" fill="#c0caf5">Same verbose predicate in two panels</text>
+<text x="108" y="380" font-size="23" fill="#a9b1d6">sessions_panel.rs and tokens_panel.rs</text>
+<text x="108" y="430" font-size="23" fill="#f7768e">response.status() == 204 || response.status() == 200</text>
+<text x="108" y="480" font-size="23" fill="#f7768e">identical logic, twice the drift surface</text>
+<rect x="1065" y="270" width="860" height="300" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="325" font-size="26" fill="#7aa2f7">One idiom: if response.ok()</text>
+<text x="1093" y="380" font-size="23" fill="#a9b1d6">both DELETE handlers collapse to response.ok()</text>
+<text x="1093" y="430" font-size="23" fill="#9ece6a">gloo_net 2xx check, matches share_dialog usage</text>
+<text x="1093" y="480" font-size="23" fill="#9ece6a">backends return 204; behavior unchanged</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Limitation: ok() accepts any 2xx, so a future non-204 success code would also count as success.</text>
+</svg>
