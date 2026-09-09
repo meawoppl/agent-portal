@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans','DejaVu Sans',ui-sans-serif,system-ui,sans-serif">
+<rect width="2000" height="1200" fill="#16161e"/>
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1900 · dedupe unbalanced-closer check in link trimmer</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">One single-pass helper in links.rs; paren and bracket trims share it.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+<rect x="80" y="270" width="840" height="300" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="325" font-size="26" fill="#c0caf5">unbalanced ")" check, four lines</text>
+<text x="108" y="380" font-size="23" fill="#a9b1d6">trim_url_punctuation in links.rs</text>
+<text x="108" y="430" font-size="23" fill="#f7768e">filter count ( and ), then compare</text>
+<text x="108" y="480" font-size="23" fill="#f7768e">two full passes over the URL per check</text>
+<rect x="80" y="650" width="840" height="245" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="705" font-size="26" fill="#c0caf5">unbalanced "]" check, four lines</text>
+<text x="108" y="760" font-size="23" fill="#a9b1d6">same function, ten lines below</text>
+<text x="108" y="810" font-size="23" fill="#f7768e">identical count logic, second copy</text>
+<rect x="1065" y="270" width="860" height="300" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="325" font-size="26" fill="#7aa2f7">has_unbalanced_closer(url, open, close)</text>
+<text x="1093" y="380" font-size="23" fill="#a9b1d6">single pub(super) helper in links.rs</text>
+<text x="1093" y="430" font-size="23" fill="#9ece6a">one pass counts both chars</text>
+<text x="1093" y="480" font-size="23" fill="#9ece6a">trim loop dispatches on ) vs ]</text>
+<rect x="1065" y="650" width="860" height="245" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="705" font-size="26" fill="#7aa2f7">Shared copy pinned by unit tests</text>
+<text x="1093" y="760" font-size="23" fill="#a9b1d6">helper cases plus parenthesized-URL case</text>
+<text x="1093" y="810" font-size="23" fill="#9ece6a">46 markdown tests green, clippy and fmt clean</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: components/markdown only; trim decisions unchanged.</text>
+</svg>

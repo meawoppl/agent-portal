@@ -136,33 +136,35 @@ fn find_url_end(text: &str) -> usize {
     end
 }
 
+/// True when `url` holds more `close` chars than matching `open` chars, i.e. a
+/// trailing closer is sentence punctuation rather than part of the URL.
+pub(super) fn has_unbalanced_closer(url: &str, open: char, close: char) -> bool {
+    let (mut opens, mut closes) = (0usize, 0usize);
+    for ch in url.chars() {
+        if ch == open {
+            opens += 1;
+        } else if ch == close {
+            closes += 1;
+        }
+    }
+    closes > opens
+}
+
 /// Trim trailing punctuation that's commonly not part of URLs.
 fn trim_url_punctuation(url: &str) -> &str {
     let mut url = url;
     let trim_chars = ['.', ',', '!', '?', ';', ':', '"', '\''];
 
     while let Some(c) = url.chars().last() {
-        // Handle unbalanced closing parens/brackets
-        if c == ')' {
-            let open = url.chars().filter(|&ch| ch == '(').count();
-            let close = url.chars().filter(|&ch| ch == ')').count();
-            if close > open {
-                url = &url[..url.len() - 1];
-                continue;
+        // A trailing closer with no matching opener is sentence punctuation,
+        // not part of the URL; a balanced one ends the URL here.
+        if c == ')' || c == ']' {
+            let (open, close) = if c == ')' { ('(', ')') } else { ('[', ']') };
+            if !has_unbalanced_closer(url, open, close) {
+                break;
             }
-            break;
-        }
-        if c == ']' {
-            let open = url.chars().filter(|&ch| ch == '[').count();
-            let close = url.chars().filter(|&ch| ch == ']').count();
-            if close > open {
-                url = &url[..url.len() - 1];
-                continue;
-            }
-            break;
-        }
-        // Trim common trailing punctuation
-        if trim_chars.contains(&c) {
+            url = &url[..url.len() - 1];
+        } else if trim_chars.contains(&c) {
             url = &url[..url.len() - c.len_utf8()];
         } else {
             break;

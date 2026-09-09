@@ -23,7 +23,7 @@ use shared::system_reminder::{has_collapsible_notice, split_collapsible_notices,
 use system_reminder::{SystemReminderBar, TaskNotificationBar};
 
 #[cfg(test)]
-use links::{find_next_url, is_valid_url};
+use links::{find_next_url, has_unbalanced_closer, is_valid_url};
 #[cfg(test)]
 use math::{
     extract_math_placeholders, restore_math, split_math_segments, MathSegment, MATH_CLOSE,
@@ -170,6 +170,29 @@ mod tests {
     fn test_find_next_url_none() {
         let result = find_next_url("No URLs here");
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_has_unbalanced_closer() {
+        assert!(!has_unbalanced_closer("https://example.com", '(', ')'));
+        assert!(!has_unbalanced_closer(
+            "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+            '(',
+            ')'
+        ));
+        assert!(has_unbalanced_closer("https://example.com/foo)", '(', ')'));
+        assert!(!has_unbalanced_closer(
+            "https://example.com/[foo]",
+            '[',
+            ']'
+        ));
+        assert!(has_unbalanced_closer("https://example.com/foo]", '[', ']'));
+    }
+
+    #[test]
+    fn test_find_next_url_wrapped_in_parens() {
+        let result = find_next_url("See (https://example.com/foo) here");
+        assert_eq!(result, Some(("See (", "https://example.com/foo", ") here")));
     }
 
     #[test]
