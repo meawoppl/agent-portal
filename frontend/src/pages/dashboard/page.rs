@@ -10,8 +10,8 @@ use super::session_order;
 use super::session_rail::{ActivityRef, AgentMessageBroadcast, BroadcastRef, SessionRail};
 use super::session_view::SessionView;
 use super::types::{
-    load_group_by_host, load_hidden_sessions, load_inactive_hidden, load_rail_position,
-    save_hidden_sessions, save_inactive_hidden,
+    load_group_by_host, load_header_collapsed, load_hidden_sessions, load_inactive_hidden,
+    load_rail_position, save_header_collapsed, save_hidden_sessions, save_inactive_hidden,
 };
 use crate::components::{
     ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, TurnMetricsHeaderPill,
@@ -93,6 +93,7 @@ pub fn dashboard_page() -> Html {
             load_inactive_hidden(),
             load_rail_position(),
             load_group_by_host(),
+            load_header_collapsed(),
         )
     });
     // Focus is tracked by `session_id` (the source of truth), not by array
@@ -389,6 +390,14 @@ pub fn dashboard_page() -> Html {
         })
     };
 
+    let toggle_header_collapsed = {
+        let ui_state = ui_state.clone();
+        Callback::from(move |_: MouseEvent| {
+            save_header_collapsed(!ui_state.header_collapsed);
+            ui_state.dispatch(DashboardUiAction::ToggleHeaderCollapsed);
+        })
+    };
+
     let toggle_launch_dialog = {
         let ui_state = ui_state.clone();
         Callback::from(move |_: MouseEvent| {
@@ -654,8 +663,16 @@ pub fn dashboard_page() -> Html {
                 }
             }
 
-            // Header
-            <header class="focus-flow-header">
+            // Header. On phones the collapse toggle shrinks it to a slim
+            // full-width pull strip (title and actions hidden) for vertical
+            // space; the strip tints when sessions await permission so the
+            // collapsed header never hides that signal. Desktop CSS ignores
+            // both the toggle and the `collapsed` class.
+            <header class={classes!(
+                "focus-flow-header",
+                ui_state.header_collapsed.then_some("collapsed"),
+                (ui_state.header_collapsed && waiting_count > 0).then_some("has-waiting"),
+            )}>
                 <h1>{ app_title.clone() }</h1>
                 <div class="header-actions">
                     <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
@@ -710,6 +727,24 @@ pub fn dashboard_page() -> Html {
                         { "Logout" }
                     </button>
                 </div>
+                <button
+                    class="header-collapse-toggle"
+                    onclick={toggle_header_collapsed}
+                    title={if ui_state.header_collapsed { "Expand header" } else { "Collapse header" }}
+                    aria-label={if ui_state.header_collapsed { "Expand header" } else { "Collapse header" }}
+                >
+                    {
+                        if ui_state.header_collapsed {
+                            if waiting_count > 0 {
+                                format!("▾ {waiting_count} waiting")
+                            } else {
+                                "▾".to_string()
+                            }
+                        } else {
+                            "▴".to_string()
+                        }
+                    }
+                </button>
             </header>
 
             // Launch session dialog

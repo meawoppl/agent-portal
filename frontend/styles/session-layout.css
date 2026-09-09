@@ -39,6 +39,13 @@
     gap: 1rem;
 }
 
+/* Mobile-only affordance: desktop always shows the full header, so the
+   collapse toggle (and the `.collapsed` state it drives, styled in
+   session-mobile.css) is hidden above the phone breakpoint. */
+.focus-flow-header .header-collapse-toggle {
+    display: none;
+}
+
 .total-spend-badge {
     background: rgba(158, 206, 106, 0.2);
     color: var(--success);
