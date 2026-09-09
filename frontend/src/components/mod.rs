@@ -43,4 +43,4 @@ pub use proxy_token_setup::ProxyTokenSetup;
 pub use schedule_dialog::ScheduleDialog;
 pub use share_dialog::ShareDialog;
 pub use turn_metrics_pill::TurnMetricsHeaderPill;
-pub use voice_input::VoiceInput;
+pub use voice_input::{load_voice_hold_open, save_voice_hold_open, VoiceInput};

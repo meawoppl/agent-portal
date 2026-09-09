@@ -1,3 +1,4 @@
+use crate::components::{load_voice_hold_open, save_voice_hold_open};
 use crate::pages::dashboard::{
     load_group_by_host, load_rail_position, load_vim_mode, save_group_by_host, save_rail_position,
     save_vim_mode, RailPosition,
@@ -16,6 +17,7 @@ pub fn appearance_panel() -> Html {
     let position = use_state(load_rail_position);
     let vim_enabled = use_state(load_vim_mode);
     let group_by_host = use_state(load_group_by_host);
+    let voice_hold_open = use_state(load_voice_hold_open);
 
     let on_toggle_group_by_host = {
         let group_by_host = group_by_host.clone();
@@ -24,6 +26,16 @@ pub fn appearance_panel() -> Html {
             let enabled = input.checked();
             save_group_by_host(enabled);
             group_by_host.set(enabled);
+        })
+    };
+
+    let on_toggle_voice_hold_open = {
+        let voice_hold_open = voice_hold_open.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            let enabled = input.checked();
+            save_voice_hold_open(enabled);
+            voice_hold_open.set(enabled);
         })
     };
 
@@ -108,6 +120,21 @@ pub fn appearance_panel() -> Html {
                         onchange={on_toggle_vim}
                     />
                     <span>{ if *vim_enabled { "Enabled" } else { "Disabled" } }</span>
+                </label>
+            </div>
+
+            <div class="appearance-setting">
+                <h3>{ "Voice input: hold mic open" }</h3>
+                <p class="setting-description">
+                    { "By default the browser stops listening after a short pause                        in speech, and that silence gap is not adjustable. Enable                        this to keep the mic open across pauses — dictation                        continues until you tap the mic again (or 5 minutes                        elapse). Applies to browser speech recognition;                        server-side transcription already records until tapped.                        Takes effect on the next recording." }
+                </p>
+                <label class="toggle-label">
+                    <input
+                        type="checkbox"
+                        checked={*voice_hold_open}
+                        onchange={on_toggle_voice_hold_open}
+                    />
+                    <span>{ if *voice_hold_open { "Enabled" } else { "Disabled" } }</span>
                 </label>
             </div>
         </section>
