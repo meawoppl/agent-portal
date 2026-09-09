@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">The header now collapses to a slim pull strip — the transcript gets the space</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE: phone mock with fat header -->
+  <g>
+    <!-- phone frame -->
+    <rect x="290" y="170" width="420" height="760" rx="28" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <!-- safe area / notch -->
+    <rect x="440" y="182" width="120" height="18" rx="9" fill="#16161e"/>
+    <!-- header: two wrapped rows -->
+    <rect x="304" y="212" width="392" height="108" fill="#16161e" stroke="#3d4666" stroke-width="1"/>
+    <text x="322" y="248" fill="#c0caf5" font-size="17" font-weight="bold">Agent Portal</text>
+    <rect x="470" y="230" width="90" height="26" rx="13" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="515" y="248" text-anchor="middle" fill="#f7768e" font-size="12">2 waiting</text>
+    <rect x="570" y="230" width="112" height="26" rx="13" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="626" y="248" text-anchor="middle" fill="#7aa2f7" font-size="12">+ Launch</text>
+    <rect x="322" y="272" width="72" height="26" rx="13" fill="#1e202e" stroke="#565f89" stroke-width="1"/>
+    <text x="358" y="290" text-anchor="middle" fill="#a9b1d6" font-size="12">History</text>
+    <rect x="404" y="272" width="76" height="26" rx="13" fill="#1e202e" stroke="#565f89" stroke-width="1"/>
+    <text x="442" y="290" text-anchor="middle" fill="#a9b1d6" font-size="12">Settings</text>
+    <rect x="490" y="272" width="70" height="26" rx="13" fill="#1e202e" stroke="#565f89" stroke-width="1"/>
+    <text x="525" y="290" text-anchor="middle" fill="#a9b1d6" font-size="12">Logout</text>
+    <!-- rail -->
+    <rect x="304" y="320" width="392" height="52" fill="#1e202e"/>
+    <rect x="318" y="332" width="120" height="30" rx="15" fill="#16161e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <rect x="448" y="332" width="120" height="30" rx="15" fill="#16161e" stroke="#565f89" stroke-width="1"/>
+    <!-- transcript (short) -->
+    <rect x="318" y="392" width="300" height="16" rx="4" fill="#3d4666"/>
+    <rect x="318" y="422" width="360" height="16" rx="4" fill="#3d4666"/>
+    <rect x="318" y="452" width="250" height="16" rx="4" fill="#3d4666"/>
+    <rect x="318" y="482" width="340" height="16" rx="4" fill="#3d4666"/>
+    <rect x="318" y="512" width="200" height="16" rx="4" fill="#3d4666"/>
+    <rect x="318" y="542" width="320" height="16" rx="4" fill="#3d4666"/>
+    <rect x="318" y="572" width="280" height="16" rx="4" fill="#3d4666"/>
+    <!-- input + keyboard -->
+    <rect x="304" y="612" width="392" height="48" rx="8" fill="#16161e" stroke="#3d4666" stroke-width="1"/>
+    <text x="322" y="642" fill="#565f89" font-size="14" font-style="italic">Message…</text>
+    <rect x="304" y="672" width="392" height="246" fill="#1e202e"/>
+    <text x="500" y="800" text-anchor="middle" fill="#565f89" font-size="16">software keyboard</text>
+
+    <!-- annotation -->
+    <rect x="150" y="960" width="700" height="130" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="998" fill="#f7768e" font-size="19" font-weight="bold">Header wraps to two rows on narrow screens:</text>
+    <text x="180" y="1030" fill="#c0caf5" font-size="17">- title + badges + 4 nav buttons ≈ 108px of chrome</text>
+    <text x="180" y="1060" fill="#c0caf5" font-size="17">- with keyboard up, ~7 transcript lines remain visible</text>
+  </g>
+
+  <!-- AFTER: phone mock with collapsed strip -->
+  <g>
+    <!-- phone frame -->
+    <rect x="1290" y="170" width="420" height="760" rx="28" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <rect x="1440" y="182" width="120" height="18" rx="9" fill="#16161e"/>
+    <!-- collapsed pull strip -->
+    <rect x="1304" y="212" width="392" height="26" fill="#16161e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1500" y="231" text-anchor="middle" fill="#f7768e" font-size="14" font-weight="bold">▾ 2 waiting</text>
+    <!-- rail -->
+    <rect x="1304" y="238" width="392" height="52" fill="#1e202e"/>
+    <rect x="1318" y="250" width="120" height="30" rx="15" fill="#16161e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <rect x="1448" y="250" width="120" height="30" rx="15" fill="#16161e" stroke="#565f89" stroke-width="1"/>
+    <!-- transcript (taller) -->
+    <rect x="1318" y="310" width="300" height="16" rx="4" fill="#3d4666"/>
+    <rect x="1318" y="340" width="360" height="16" rx="4" fill="#3d4666"/>
+    <rect x="1318" y="370" width="250" height="16" rx="4" fill="#3d4666"/>
+    <rect x="1318" y="400" width="340" height="16" rx="4" fill="#3d4666"/>
+    <rect x="1318" y="430" width="200" height="16" rx="4" fill="#3d4666"/>
+    <rect x="1318" y="460" width="320" height="16" rx="4" fill="#3d4666"/>
+    <rect x="1318" y="490" width="280" height="16" rx="4" fill="#3d4666"/>
+    <rect x="1318" y="520" width="330" height="16" rx="4" fill="#9ece6a"/>
+    <rect x="1318" y="550" width="240" height="16" rx="4" fill="#9ece6a"/>
+    <rect x="1318" y="580" width="300" height="16" rx="4" fill="#9ece6a"/>
+    <!-- input + keyboard -->
+    <rect x="1304" y="612" width="392" height="48" rx="8" fill="#16161e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1322" y="642" fill="#565f89" font-size="14" font-style="italic">Message…</text>
+    <rect x="1304" y="672" width="392" height="246" fill="#1e202e"/>
+    <text x="1500" y="800" text-anchor="middle" fill="#565f89" font-size="16">software keyboard</text>
+
+    <!-- annotation -->
+    <rect x="1150" y="960" width="700" height="130" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="1180" y="998" fill="#9ece6a" font-size="19" font-weight="bold">Tap the chevron: header → slim pull strip</text>
+    <text x="1180" y="1030" fill="#c0caf5" font-size="17">- ~3 extra transcript lines; safe-area inset preserved</text>
+    <text x="1180" y="1060" fill="#c0caf5" font-size="17">- strip tints + shows "▾ N waiting" when agents are blocked</text>
+  </g>
+
+  <!-- mechanism strip (kept clear of the divider band) -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">ToggleHeaderCollapsed · persisted in localStorage</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Works on every viewport — the strip is the expand target</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: manual toggle only — no auto-hide on scroll; while collapsed, Launch/Settings need one extra tap to reach.</text>
+</svg>

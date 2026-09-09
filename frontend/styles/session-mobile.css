@@ -69,6 +69,16 @@
         gap: 0.5rem;
     }
 
+    /* Collapsed pull strip: restate the side safe-area insets this block's
+       expanded-header rule above would otherwise provide. Everything else
+       (hiding h1/actions, full-width toggle, waiting tint) is viewport-
+       independent and lives in session-layout.css. */
+    .focus-flow-header.collapsed {
+        padding: max(0px, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) 0
+            max(0.75rem, env(safe-area-inset-left));
+        gap: 0;
+    }
+
     .total-spend-badge,
     .waiting-badge {
         font-size: 0.7rem;
