@@ -355,7 +355,7 @@ async fn start_login(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
-        return Err(error_body(resp).await);
+        return Err(utils::error_body(resp).await);
     }
     resp.json::<StartAgentLoginResponse>()
         .await
@@ -375,7 +375,7 @@ async fn submit_code(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
-        return Err(error_body(resp).await);
+        return Err(utils::error_body(resp).await);
     }
     resp.json::<AgentLoginOutcome>()
         .await
@@ -388,7 +388,7 @@ async fn poll_login(launcher_id: Uuid, flow_id: Uuid) -> Result<AgentLoginOutcom
     ));
     let resp = Request::get(&url).send().await.map_err(|e| e.to_string())?;
     if !resp.ok() {
-        return Err(error_body(resp).await);
+        return Err(utils::error_body(resp).await);
     }
     resp.json::<AgentLoginOutcome>()
         .await
@@ -404,16 +404,6 @@ fn cancel_login(launcher_id: Uuid, flow_id: Uuid) {
         ));
         let _ = Request::post(&url).send().await;
     });
-}
-
-/// Read a non-2xx response body as the error message, falling back to the
-/// status. The backend relays the agent CLI's own text on login-start failures.
-async fn error_body(resp: gloo_net::http::Response) -> String {
-    let status = resp.status();
-    match resp.text().await {
-        Ok(t) if !t.trim().is_empty() => t,
-        _ => format!("HTTP {status}"),
-    }
 }
 
 #[cfg(test)]

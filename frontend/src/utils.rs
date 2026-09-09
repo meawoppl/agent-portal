@@ -110,6 +110,17 @@ pub async fn send_json(
     builder.json(body)?.send().await
 }
 
+/// Read a non-2xx response body as the error message, falling back to the
+/// status when the body is empty or unreadable. Backends relay upstream
+/// agent-CLI text on launcher failures, which is more useful than the status.
+pub async fn error_body(resp: gloo_net::http::Response) -> String {
+    let status = resp.status();
+    match resp.text().await {
+        Ok(t) if !t.trim().is_empty() => t,
+        _ => format!("HTTP {status}"),
+    }
+}
+
 /// Build a full WebSocket URL from a path (e.g., "/ws/client" -> "ws://localhost:3000/ws/client")
 pub fn ws_url(path: &str) -> String {
     format!("{}{}", get_ws_url(), path)

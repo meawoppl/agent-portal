@@ -150,13 +150,7 @@ async fn install_agent(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(if body.trim().is_empty() {
-            format!("HTTP {status}")
-        } else {
-            body
-        });
+        return Err(utils::error_body(resp).await);
     }
     resp.json::<InstallAgentResponse>()
         .await
