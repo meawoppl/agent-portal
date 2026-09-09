@@ -1,6 +1,6 @@
 //! Shared types for the dashboard module
 
-use crate::utils::{storage_get, storage_set};
+use crate::utils::{non_empty, storage_get, storage_set};
 use serde::Deserialize;
 use shared::ToolInput;
 use std::collections::{HashMap, HashSet};
@@ -280,12 +280,6 @@ fn pretty_input<T: serde::Serialize + std::fmt::Debug + ?Sized>(input: &T) -> St
     serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
 }
 
-/// Keep an optional string only when it is present and non-empty, so empty
-/// `reason`/`grant_root` fields are omitted instead of rendering blank lines.
-fn non_empty(opt: Option<&str>) -> Option<&str> {
-    opt.filter(|s| !s.is_empty())
-}
-
 /// Render a Claude-side permission tool input from the SDK's named,
 /// typed `ToolInput` parser.
 fn format_claude_permission_input(tool_name: &str, input: &serde_json::Value) -> String {
@@ -344,13 +338,9 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
         C::Permissions { reason, .. } => non_empty(reason.as_deref())
             .map(|s| s.to_string())
             .unwrap_or_else(|| pretty_input(input)),
-        C::McpElicitation { server_name } => {
-            if server_name.is_empty() {
-                "MCP server is asking for input".to_string()
-            } else {
-                format!("MCP server `{}` is asking for input", server_name)
-            }
-        }
+        C::McpElicitation { server_name } => non_empty(Some(server_name.as_str()))
+            .map(|s| format!("MCP server `{}` is asking for input", s))
+            .unwrap_or_else(|| "MCP server is asking for input".to_string()),
         C::AskUserQuestion { .. } => {
             // The AskUserQuestion renderer is invoked elsewhere in the
             // permission dialog; this code path is only hit for the
@@ -423,6 +413,43 @@ mod tests {
         assert_eq!(
             format_permission_input("FileChange", &input),
             "File change 2 file(s):\n  src/main.rs\n  tests/app.rs\nReason: needs approval"
+        );
+    }
+
+    #[test]
+    fn format_codex_file_change_omits_whitespace_only_reason_and_grant_root() {
+        let input = serde_json::json!({
+            "tool": "fileChange",
+            "itemId": "fc1",
+            "paths": ["src/main.rs"],
+            "reason": "   ",
+            "grantRoot": "  "
+        });
+
+        assert_eq!(
+            format_permission_input("FileChange", &input),
+            "File change 1 file(s):\n  src/main.rs"
+        );
+    }
+
+    #[test]
+    fn format_mcp_elicitation_omits_blank_server_name() {
+        let blank = serde_json::json!({
+            "tool": "mcpElicitation",
+            "serverName": "   "
+        });
+        assert_eq!(
+            format_permission_input("McpElicitation", &blank),
+            "MCP server is asking for input"
+        );
+
+        let named = serde_json::json!({
+            "tool": "mcpElicitation",
+            "serverName": "github"
+        });
+        assert_eq!(
+            format_permission_input("McpElicitation", &named),
+            "MCP server `github` is asking for input"
         );
     }
 

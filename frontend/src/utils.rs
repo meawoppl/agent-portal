@@ -218,6 +218,14 @@ pub fn storage_set(key: &str, value: &str) {
     }
 }
 
+/// Keep a string only when it is present and non-blank.
+///
+/// Trims leading/trailing whitespace so whitespace-only values are treated as
+/// absent instead of rendering blank lines or being sent as empty constraints.
+pub fn non_empty(opt: Option<&str>) -> Option<&str> {
+    opt.map(str::trim).filter(|s| !s.is_empty())
+}
+
 /// Remove a key from browser localStorage, silently doing nothing when
 /// storage is unavailable.
 pub fn storage_remove(key: &str) {
@@ -252,6 +260,14 @@ mod tests {
         assert_eq!(calculate_backoff(2), 4000);
         assert_eq!(calculate_backoff(5), 30000);
         assert_eq!(calculate_backoff(99), 30000);
+    }
+
+    #[test]
+    fn non_empty_treats_missing_empty_and_blank_as_absent() {
+        assert_eq!(non_empty(None), None);
+        assert_eq!(non_empty(Some("")), None);
+        assert_eq!(non_empty(Some("   ")), None);
+        assert_eq!(non_empty(Some("  hi  ")), Some("hi"));
     }
 
     #[test]
