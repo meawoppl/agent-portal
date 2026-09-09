@@ -296,7 +296,11 @@ impl Component for SessionView {
             let mut last_message_time: Option<String> = None;
 
             if let Ok(data) = utils::fetch_json::<MessagesResponse>(
-                &format!("/api/sessions/{}/messages", session_id),
+                &format!(
+                    "/api/sessions/{}/messages?limit={}",
+                    session_id,
+                    crate::pages::dashboard::types::HISTORY_FETCH_LIMIT
+                ),
                 On401::Ignore,
             )
             .await
@@ -459,6 +463,20 @@ impl Component for SessionView {
                 false
             }
             SessionViewMsg::WebSocketConnected(sender) => {
+                // Cold-load telemetry (#1915): first live connection of the
+                // focused session, measured from navigation start.
+                if !self.ws_connected && self.reconnect_attempt == 0 && ctx.props().focused {
+                    if let Some(now) = web_sys::window()
+                        .and_then(|w| w.performance())
+                        .map(|p| p.now())
+                    {
+                        log::info!(
+                            "cold-load: focused session {} live in {:.0}ms",
+                            ctx.props().session.id,
+                            now
+                        );
+                    }
+                }
                 self.ws_connected = true;
                 self.ws_sender = Some(sender);
                 self.reconnect_attempt = 0;

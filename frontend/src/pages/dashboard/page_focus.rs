@@ -1,10 +1,18 @@
 use super::page_state::{active_session_ids, DashboardSessionAction, DashboardSessionState};
 use super::session_order;
 use super::types::{load_last_active_session, save_last_active_session};
+use gloo::timers::callback::Timeout;
 use shared::SessionInfo;
 use std::collections::HashSet;
 use uuid::Uuid;
 use yew::prelude::*;
+
+/// Background sessions activated per hydration tick (#1915).
+const HYDRATION_BATCH: usize = 2;
+/// Delay between hydration ticks. With a batch of 2, twenty background
+/// sessions are all warm ~4s after load — without the reload thundering herd
+/// of every history fetch, socket, and transcript parse landing in one flush.
+const HYDRATION_DRIP_MS: u32 = 400;
 
 pub(super) struct DashboardFocus {
     pub focused_index: usize,
@@ -108,7 +116,11 @@ pub(super) fn use_dashboard_focus(
         );
     }
 
-    // On initial load, focus first non-hidden session and activate all non-hidden sessions.
+    // On initial load, focus the saved (or first non-hidden) session and
+    // activate ONLY it (#1915). Background sessions hydrate through the drip
+    // effect below instead of all at once — the reload thundering herd was
+    // every visible session firing its history fetch, socket connect, and
+    // transcript parse in a single render flush.
     {
         let active_sessions = active_sessions.clone();
         let effective_hidden_sessions = effective_hidden_sessions.clone();
@@ -140,32 +152,61 @@ pub(super) fn use_dashboard_focus(
                             .map(|s| s.id)
                     });
 
-                    let mut activate_ids: Vec<Uuid> = focus_id.into_iter().collect();
-                    activate_ids.extend(
-                        sessions
-                            .iter()
-                            .filter(visible)
-                            .map(|s| s.id)
-                            .filter(|id| Some(*id) != focus_id),
-                    );
-                    if activate_ids.is_empty() {
-                        activate_ids.extend(sessions.iter().map(|s| s.id));
-                    }
-
                     if let Some(id) = focus_id {
                         save_last_active_session(id);
                     }
 
-                    // Activate the preferred session first. The reducer stores
-                    // a set, but the dashboard render also prioritizes the
-                    // focused id so the saved session's websocket starts
-                    // before background sessions on reload.
                     session_state.dispatch(DashboardSessionAction::InitializeFocus {
                         focus_id,
-                        activate_ids,
+                        activate_ids: focus_id.into_iter().collect(),
                     });
                 }
                 || ()
+            },
+        );
+    }
+
+    // Background hydration drip (#1915): activate the not-yet-activated
+    // visible sessions HYDRATION_BATCH at a time, most recently messaged
+    // first. Each Activate re-renders the page, which re-runs this effect
+    // and schedules the next tick, so the drip is self-perpetuating and
+    // stops on its own once nothing is pending. Selecting a session
+    // activates it immediately (FocusAndActivate) regardless of the drip;
+    // that dispatch also changes this effect's deps, cancelling the armed
+    // tick so the user's selection hydrates without contention.
+    {
+        let active_sessions = active_sessions.clone();
+        let hidden_sessions = effective_hidden_sessions.clone();
+        let activated = session_state.activated_sessions.clone();
+        let initialized = session_state.initial_focus_set;
+        let session_state = session_state.clone();
+
+        use_effect_with(
+            (
+                initialized,
+                activated.clone(),
+                active_session_ids(&active_sessions),
+                hidden_sessions.clone(),
+            ),
+            move |_| {
+                let mut tick = None;
+                if initialized {
+                    let mut pending: Vec<&SessionInfo> = active_sessions
+                        .iter()
+                        .filter(|s| !hidden_sessions.contains(&s.id) && !activated.contains(&s.id))
+                        .collect();
+                    if !pending.is_empty() {
+                        pending.sort_by(|a, b| session_order::history_hydration_cmp(a, b));
+                        let next: Vec<Uuid> =
+                            pending.iter().take(HYDRATION_BATCH).map(|s| s.id).collect();
+                        tick = Some(Timeout::new(HYDRATION_DRIP_MS, move || {
+                            for id in next {
+                                session_state.dispatch(DashboardSessionAction::Activate(id));
+                            }
+                        }));
+                    }
+                }
+                move || drop(tick)
             },
         );
     }
