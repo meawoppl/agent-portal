@@ -204,6 +204,42 @@ const STOP_WATCHDOG_MS: u32 = 1500;
 /// holding the mic indicator on iOS.
 const MAX_SESSION_MS: u32 = 60_000;
 
+/// Session ceiling in hold-open mode, where the whole point is dictating
+/// through long pauses — still bounded, just generously.
+const MAX_SESSION_HOLD_OPEN_MS: u32 = 300_000;
+
+/// Storage key for the "hold the mic open across pauses" preference.
+const VOICE_HOLD_OPEN_STORAGE_KEY: &str = "claude-portal-voice-hold-open";
+
+/// Whether the browser recognizer should keep listening across pauses
+/// (`continuous = true`) instead of letting the browser's end-of-speech
+/// detector stop the session (default). The browser endpointer's silence
+/// gap is aggressive and not configurable — this preference is the only
+/// lever the Web Speech API offers. The server-STT recorder path already
+/// records until tapped, so this only changes the browser path.
+pub fn load_voice_hold_open() -> bool {
+    utils::storage_get(VOICE_HOLD_OPEN_STORAGE_KEY)
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
+/// Save the hold-open preference to localStorage.
+pub fn save_voice_hold_open(enabled: bool) {
+    utils::storage_set(
+        VOICE_HOLD_OPEN_STORAGE_KEY,
+        if enabled { "true" } else { "false" },
+    );
+}
+
+/// The active session ceiling under the current hold-open preference.
+fn max_session_ms() -> u32 {
+    if load_voice_hold_open() {
+        MAX_SESSION_HOLD_OPEN_MS
+    } else {
+        MAX_SESSION_MS
+    }
+}
+
 /// How long to wait after `MediaRecorder::stop()` for the final chunk before
 /// declaring the recording lost. Assembling a blob is fast; this only has to
 /// beat a wedged recorder, and it deliberately does not cover the upload,
@@ -563,7 +599,7 @@ impl Component for VoiceInput {
                 if self.capture.is_some() {
                     log::warn!(
                         "Voice session exceeded {}ms — auto-stopping",
-                        MAX_SESSION_MS
+                        max_session_ms()
                     );
                     self.stop_capture(ctx);
                     true
@@ -687,7 +723,7 @@ impl VoiceInput {
     /// Arm the safety stop that keeps a wedged capture from holding the mic.
     fn arm_max_duration(&mut self, ctx: &Context<Self>) {
         let link = ctx.link().clone();
-        self.max_duration_timer = Some(Timeout::new(MAX_SESSION_MS, move || {
+        self.max_duration_timer = Some(Timeout::new(max_session_ms(), move || {
             link.send_message(VoiceInputMsg::MaxDurationReached);
         }));
     }
@@ -947,10 +983,15 @@ async fn start_session_async(
             &JsValue::from_bool(val),
         );
     };
-    // continuous=false: single-utterance per tap. With true, iOS Safari
-    // never auto-ends and our SessionView's "auto-send on Final" already
-    // implies a one-tap-one-utterance UX anyway. See #840 follow-up.
-    set_bool("continuous", false);
+    // Default (continuous=false): single-utterance per tap — the browser's
+    // end-of-speech detector stops the session, and "auto-send on Final"
+    // gives a one-tap-one-utterance UX (#840 follow-up). That detector's
+    // silence gap is aggressive and not configurable, so users who dictate
+    // with pauses can opt into hold-open mode (continuous=true): the mic
+    // stays open across pauses — accumulating final results — until they
+    // tap again (iOS Safari never auto-ends in continuous mode, which is
+    // exactly the behavior wanted here).
+    set_bool("continuous", load_voice_hold_open());
     set_bool("interimResults", true);
 
     let lang = document_language().unwrap_or_else(|| "en-US".to_string());

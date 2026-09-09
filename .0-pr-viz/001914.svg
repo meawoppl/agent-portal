@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Voice input can now hold the mic open across pauses — no more mid-thought cutoffs</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE: speech timeline cut at first pause -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Dictating one message with a natural pause:</text>
+
+    <!-- timeline -->
+    <line x1="180" y1="300" x2="860" y2="300" stroke="#3d4666" stroke-width="2"/>
+    <!-- speech block 1 -->
+    <rect x="180" y="272" width="240" height="56" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="300" y="306" text-anchor="middle" fill="#7aa2f7" font-size="16">"refactor the io task…"</text>
+    <!-- pause -->
+    <rect x="430" y="284" width="90" height="32" rx="6" fill="#1e202e" stroke="#e0af68" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="475" y="305" text-anchor="middle" fill="#e0af68" font-size="14">~1s pause</text>
+    <!-- cutoff -->
+    <line x1="540" y1="250" x2="540" y2="350" stroke="#f7768e" stroke-width="3"/>
+    <text x="556" y="268" fill="#f7768e" font-size="16" font-weight="bold">endpointer fires: mic stops, message auto-sends</text>
+    <!-- lost speech -->
+    <rect x="560" y="284" width="270" height="32" rx="6" fill="#1e202e" stroke="#565f89" stroke-width="1"/>
+    <text x="695" y="305" text-anchor="middle" fill="#565f89" font-size="14">"…and also fix the tests" (lost)</text>
+
+    <!-- explanation card -->
+    <rect x="150" y="420" width="700" height="240" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="458" fill="#f7768e" font-size="19" font-weight="bold">The gap is the browser's, and it is not adjustable:</text>
+    <text x="180" y="494" fill="#c0caf5" font-size="17">- Web Speech API exposes no silence-timeout knob at all</text>
+    <text x="180" y="524" fill="#c0caf5" font-size="17">- voice_input.rs pinned continuous = false (one tap, one utterance)</text>
+    <text x="180" y="554" fill="#c0caf5" font-size="17">- so end-of-speech detection belonged entirely to the browser</text>
+    <text x="180" y="584" fill="#c0caf5" font-size="17">- pausing to think = message sent early, rest of the thought dropped</text>
+    <rect x="180" y="606" width="640" height="34" rx="6" fill="#16161e"/>
+    <text x="200" y="629" fill="#565f89" font-size="14" font-family="monospace">set_bool("continuous", false);  // browser decides when you're done</text>
+  </g>
+
+  <!-- AFTER: hold-open timeline -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Hold-open mode: you decide when you're done</text>
+
+    <!-- timeline -->
+    <line x1="1180" y1="300" x2="1860" y2="300" stroke="#3d4666" stroke-width="2"/>
+    <rect x="1180" y="272" width="220" height="56" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="1290" y="306" text-anchor="middle" fill="#7aa2f7" font-size="16">"refactor the io task…"</text>
+    <rect x="1410" y="284" width="90" height="32" rx="6" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="1455" y="305" text-anchor="middle" fill="#9ece6a" font-size="14">pause ok</text>
+    <rect x="1510" y="272" width="230" height="56" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="1625" y="306" text-anchor="middle" fill="#7aa2f7" font-size="16">"…and also fix the tests"</text>
+    <!-- tap stop -->
+    <circle cx="1800" cy="300" r="26" fill="#1e202e" stroke="#9ece6a" stroke-width="2.5"/>
+    <text x="1800" y="307" text-anchor="middle" fill="#9ece6a" font-size="15" font-weight="bold">tap</text>
+    <text x="1800" y="356" text-anchor="middle" fill="#9ece6a" font-size="14">one full message sends</text>
+
+    <!-- settings card -->
+    <rect x="1150" y="420" width="700" height="240" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="1180" y="458" fill="#9ece6a" font-size="19" font-weight="bold">Settings → Appearance → "Voice input: hold mic open"</text>
+    <text x="1180" y="494" fill="#c0caf5" font-size="17">- opt-in; default keeps today's auto-stop + auto-send behavior</text>
+    <text x="1180" y="524" fill="#c0caf5" font-size="17">- continuous = true: finals accumulate across pauses until you tap</text>
+    <text x="1180" y="554" fill="#c0caf5" font-size="17">- safety ceiling 60s → 5min so long dictation isn't truncated</text>
+    <text x="1180" y="584" fill="#c0caf5" font-size="17">- server-STT recorder path unchanged (already records until tapped)</text>
+    <rect x="1180" y="606" width="640" height="34" rx="6" fill="#16161e"/>
+    <text x="1200" y="629" fill="#565f89" font-size="14" font-family="monospace">set_bool("continuous", load_voice_hold_open());  // your call now</text>
+  </g>
+
+  <!-- bottom mechanism cards -->
+  <rect x="150" y="720" width="700" height="120" rx="12" fill="#1e202e" stroke="#bb9af7" stroke-width="1.5"/>
+  <text x="500" y="762" text-anchor="middle" fill="#bb9af7" font-size="18" font-weight="bold">Why iOS made this easy</text>
+  <text x="500" y="794" text-anchor="middle" fill="#c0caf5" font-size="16">iOS Safari never auto-ends in continuous mode — formerly the</text>
+  <text x="500" y="820" text-anchor="middle" fill="#c0caf5" font-size="16">reason to avoid it (#840), here exactly the wanted behavior.</text>
+
+  <rect x="1150" y="720" width="700" height="120" rx="12" fill="#1e202e" stroke="#7dcfff" stroke-width="1.5"/>
+  <text x="1500" y="762" text-anchor="middle" fill="#7dcfff" font-size="18" font-weight="bold">No new plumbing</text>
+  <text x="1500" y="794" text-anchor="middle" fill="#c0caf5" font-size="16">final_acc already space-joins multiple final results; onend still</text>
+  <text x="1500" y="820" text-anchor="middle" fill="#c0caf5" font-size="16">drains it into one Final → one transcription → one send.</text>
+
+  <!-- storage note -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Persisted as claude-portal-voice-hold-open (localStorage)</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Applies on next recording; watchdogs otherwise unchanged</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: a global toggle, not a per-recording gesture — and hold-open mode ends only on tap, so a forgotten mic runs until the 5-minute ceiling.</text>
+</svg>
