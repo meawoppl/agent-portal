@@ -291,7 +291,28 @@ impl Component for SessionView {
         let agent_type = ctx.props().session.agent_type;
         let on_awaiting_change = ctx.props().on_awaiting_change.clone();
 
-        // Fetch existing messages via REST, then connect WebSocket
+        // Hydrate the per-turn metrics buffer in its own task, off the
+        // history→WebSocket critical path (#1915): metrics only feed the
+        // chip-strip footer for past turns, so they must never delay live
+        // connectivity. Failure is non-fatal — the footer simply stays empty
+        // for past turns; live broadcasts still populate the buffer.
+        {
+            let link = link.clone();
+            spawn_local(async move {
+                if let Ok(data) = utils::fetch_json::<TurnMetricsResponse>(
+                    &format!("/api/sessions/{}/turn-metrics", session_id),
+                    On401::Ignore,
+                )
+                .await
+                {
+                    link.send_message(SessionViewMsg::LoadTurnMetrics(data.metrics));
+                }
+            });
+        }
+
+        // Fetch existing messages via REST, then connect WebSocket. History
+        // must precede the socket: its newest timestamp becomes the
+        // `replay_after` watermark that keeps the server replay to a delta.
         spawn_local(async move {
             let mut last_message_time: Option<String> = None;
 
@@ -314,20 +335,6 @@ impl Component for SessionView {
                     data.messages,
                     last_message_time.clone(),
                 ));
-            }
-
-            // Hydrate the per-turn metrics buffer in parallel (PR 2 of N).
-            // Failure here is non-fatal: the chip-strip footer simply stays
-            // empty for past turns; live broadcasts still populate the
-            // buffer for new turns. Same `MeResponse`-style typed deserialize
-            // pattern the existing `MessagesResponse` path uses.
-            if let Ok(data) = utils::fetch_json::<TurnMetricsResponse>(
-                &format!("/api/sessions/{}/turn-metrics", session_id),
-                On401::Ignore,
-            )
-            .await
-            {
-                link.send_message(SessionViewMsg::LoadTurnMetrics(data.metrics));
             }
 
             // Connect WebSocket with event callback
