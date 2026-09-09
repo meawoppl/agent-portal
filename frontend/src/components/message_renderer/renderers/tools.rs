@@ -2,6 +2,12 @@ use crate::components::expandable::ExpandableText;
 use serde_json::Value;
 use yew::prelude::*;
 
+/// Pretty-print a JSON value, falling back to its compact form when
+/// pretty-printing fails.
+fn pretty_json(value: &Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
 pub(super) fn render_server_tool_use(name: &str, input: &Value) -> Html {
     let badge_label = if name.contains("web_search") || name.contains("search") {
         "Web Search"
@@ -25,7 +31,7 @@ pub(super) fn render_server_tool_use(name: &str, input: &Value) -> Html {
 }
 
 pub(super) fn render_web_search_result(content: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
+    let preview = pretty_json(content);
     html! {
         <div class="tool-result web-search-result">
             <div class="tool-use-header">
@@ -37,7 +43,7 @@ pub(super) fn render_web_search_result(content: &Value) -> Html {
 }
 
 pub(super) fn render_code_execution_result(content: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
+    let preview = pretty_json(content);
     html! {
         <div class="tool-result code-execution-result">
             <div class="tool-use-header">
@@ -75,7 +81,7 @@ pub(super) fn render_mcp_tool_result(content: &Value, is_error: bool) -> Html {
     } else {
         "tool-result mcp-tool-result"
     };
-    let preview = serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string());
+    let preview = pretty_json(content);
     html! {
         <div class={class}>
             <div class="tool-use-header">
@@ -89,7 +95,7 @@ pub(super) fn render_mcp_tool_result(content: &Value, is_error: bool) -> Html {
 }
 
 pub(super) fn render_container_upload(data: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(data).unwrap_or_else(|_| data.to_string());
+    let preview = pretty_json(data);
     html! {
         <div class="tool-use container-upload">
             <div class="tool-use-header">
@@ -101,7 +107,7 @@ pub(super) fn render_container_upload(data: &Value) -> Html {
 }
 
 pub(super) fn render_unknown_block(value: &Value) -> Html {
-    let preview = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    let preview = pretty_json(value);
     html! {
         <div class="tool-use unknown-block">
             <div class="tool-use-header">
