@@ -712,6 +712,17 @@ impl Component for SessionView {
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
                 <div class="session-view-header">
                     <span class="session-name">{ &ctx.props().session.session_name }</span>
+                    // Which model this session is running — claude's transcript
+                    // badges carry it per-message, but codex and muse wire
+                    // events don't, so the header is the one place it reads
+                    // uniformly. `last_model` comes from turn metrics (all
+                    // three agents emit them) with the live-turn overlay from
+                    // the page, so it tracks mid-session model switches.
+                    if let Some(model) = ctx.props().session.last_model.as_deref() {
+                        <span class="session-model" title="Model this session last reported">
+                            { model }
+                        </span>
+                    }
                     <span class="session-hostname">{ &ctx.props().session.hostname }</span>
                     <span class="session-path">{ &ctx.props().session.working_directory }</span>
                     if let Some(version) = launcher_version {

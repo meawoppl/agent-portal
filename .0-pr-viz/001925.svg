@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#565f89"/></marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/></marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1925 - Move the Visual PR check to meawoppl/visual-pr@v3</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Under @v2 a PR visual could pass the check and still show reviewers empty boxes for arrows and math signs;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">@v3 only admits ASCII + Latin-1, so a passing visual now draws every character on the reviewer's screen.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- BEFORE -->
+  <g>
+    <rect x="80" y="250" width="620" height="130" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">.github/workflows/visual-pr.yml</text>
+    <text x="104" y="328" font-size="23" fill="#a9b1d6">uses: meawoppl/visual-pr@v2</text>
+    <text x="104" y="362" font-size="22" fill="#565f89">style: .github/visual-pr/style.json (no "glyphs" key)</text>
+  </g>
+  <line x1="390" y1="380" x2="390" y2="425" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <g>
+    <rect x="80" y="430" width="620" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="470" font-size="26" fill="#c0caf5">v2 check_svg.py glyph allowlist</text>
+    <text x="104" y="508" font-size="23" fill="#a9b1d6">Latin-1, Greek, Cyrillic, 2190-21FF, 2200-22FF, ...</text>
+    <text x="104" y="544" font-size="22" fill="#565f89">built from font tables, never from a viewer</text>
+  </g>
+  <line x1="390" y1="580" x2="390" y2="660" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <line x1="330" y1="675" x2="450" y2="675" stroke="#f7768e" stroke-width="3"/>
+  <text x="390" y="720" font-size="23" fill="#f7768e" text-anchor="middle">U+2192, U+2212, U+2248 pass, then draw as boxes</text>
+  <text x="390" y="752" font-size="22" fill="#565f89" text-anchor="middle">seen on a real PR in a sibling repo (visual-pr#10)</text>
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">"ok: 0 warning(s)" on a diagram with holes in it</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">the check vouched for something the reviewer could not read</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <rect x="1065" y="250" width="620" height="130" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">.github/workflows/visual-pr.yml</text>
+    <text x="1089" y="328" font-size="23" fill="#9ece6a">uses: meawoppl/visual-pr@v3</text>
+    <text x="1089" y="362" font-size="22" fill="#565f89">the only line this PR changes</text>
+  </g>
+  <line x1="1375" y1="380" x2="1375" y2="425" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1065" y="430" width="620" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="470" font-size="26" fill="#9ece6a">v3 allowlist: 0020-007E, 00A0-00FF</text>
+    <text x="1089" y="508" font-size="23" fill="#a9b1d6">anything else is an ERROR naming its stand-in</text>
+    <text x="1089" y="544" font-size="22" fill="#565f89">-> &lt;= ~ - ... + x  (write &lt; as &amp;lt; in SVG text)</text>
+  </g>
+  <g>
+    <rect x="1065" y="640" width="860" height="130" fill="#1e202e" stroke="#e0af68" stroke-width="1.5"/>
+    <text x="1089" y="680" font-size="24" fill="#e0af68">Merged visuals are never re-checked</text>
+    <text x="1089" y="716" font-size="22" fill="#a9b1d6">only new PRs feel this; existing .0-pr-viz files stay as they are</text>
+    <text x="1089" y="748" font-size="22" fill="#565f89">style.json unchanged: with no "glyphs" key it inherits the v3 default</text>
+  </g>
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">A passing visual draws every character for the reviewer</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">and a rejected one tells the author exactly what to type instead</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Latin-1 is kept on the evidence of one viewer plus a DejaVu render; if this repo's reviewers see a box in it, the upstream list shrinks again.</text>
+</svg>
