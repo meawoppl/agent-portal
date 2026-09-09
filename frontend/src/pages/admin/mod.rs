@@ -66,6 +66,11 @@ async fn patch_user(user_id: Uuid, body: &UpdateUserRequest) -> bool {
     }
 }
 
+/// Find a user by id in a snapshot of the local list.
+fn find_user(users: &[AdminUserInfo], user_id: Uuid) -> Option<AdminUserInfo> {
+    users.iter().find(|u| u.id == user_id).cloned()
+}
+
 /// Apply `f` to the matching user in the local list and re-set the state.
 fn update_user_in(
     users: &UseStateHandle<Vec<AdminUserInfo>>,
@@ -260,7 +265,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             let users_inner = users.clone();
             let confirm_inner = confirm_action.clone();
 
-            let target_user = users_inner.iter().find(|u| u.id == user_id).cloned();
+            let target_user = find_user(&users_inner, user_id);
             let is_currently_admin = target_user.as_ref().is_some_and(|u| u.is_admin);
             let action_text = if is_currently_admin {
                 "Remove admin privileges from this user?"
@@ -300,7 +305,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             let ban_dialog = ban_dialog.clone();
             let ban_reason_input = ban_reason_input.clone();
 
-            let target_user = users_inner.iter().find(|u| u.id == user_id).cloned();
+            let target_user = find_user(&users_inner, user_id);
             let is_currently_disabled = target_user.as_ref().is_some_and(|u| u.disabled);
 
             if is_currently_disabled {
