@@ -274,6 +274,12 @@ pub fn format_permission_input(tool_name: &str, input: &serde_json::Value) -> St
     format_claude_permission_input(tool_name, input)
 }
 
+/// Pretty-print a permission input, falling back to its debug form when
+/// pretty-printing fails.
+fn pretty_input<T: serde::Serialize + std::fmt::Debug + ?Sized>(input: &T) -> String {
+    serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
+}
+
 /// Render a Claude-side permission tool input from the SDK's named,
 /// typed `ToolInput` parser.
 fn format_claude_permission_input(tool_name: &str, input: &serde_json::Value) -> String {
@@ -282,7 +288,7 @@ fn format_claude_permission_input(tool_name: &str, input: &serde_json::Value) ->
         ToolInput::Read(read) => read.file_path,
         ToolInput::Edit(edit) => edit.file_path,
         ToolInput::Write(write) => write.file_path,
-        _ => serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input)),
+        _ => pretty_input(input),
     }
 }
 
@@ -321,7 +327,7 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
         C::ApplyPatch { file_changes, .. } => {
             let paths: Vec<String> = file_changes.keys().cloned().collect();
             if paths.is_empty() {
-                serde_json::to_string_pretty(file_changes).unwrap_or_default()
+                pretty_input(file_changes)
             } else {
                 format!("Patch {} file(s):\n  {}", paths.len(), paths.join("\n  "))
             }
@@ -333,9 +339,7 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
             .as_deref()
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
-            }),
+            .unwrap_or_else(|| pretty_input(input)),
         C::McpElicitation { server_name } => {
             if server_name.is_empty() {
                 "MCP server is asking for input".to_string()
@@ -348,7 +352,7 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
             // permission dialog; this code path is only hit for the
             // standard-permission summary preview, so fall back to the
             // typed pretty-print.
-            serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
+            pretty_input(input)
         }
     }
 }
