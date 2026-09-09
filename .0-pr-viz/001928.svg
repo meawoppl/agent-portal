@@ -27,11 +27,11 @@
   <g>
     <text x="1150" y="220" fill="#a9b1d6" font-size="20" font-weight="bold">The same frame follows an explicit typed path:</text>
     <rect x="1150" y="255" width="700" height="360" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-    <rect x="1200" y="305" width="600" height="70" rx="10" fill="#24283b" stroke="#7aa2f7" stroke-width="1.5"/>
+    <rect x="1200" y="305" width="600" height="70" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
     <text x="1500" y="348" text-anchor="middle" fill="#7aa2f7" font-size="18" font-family="monospace">ClaudeOutput::CommandLifecycle</text>
     <line x1="1500" y1="375" x2="1500" y2="425" stroke="#565f89" stroke-width="3"/>
     <polygon points="1490,420 1510,420 1500,438" fill="#565f89"/>
-    <rect x="1200" y="445" width="600" height="105" rx="10" fill="#24283b" stroke="#9ece6a" stroke-width="1.5"/>
+    <rect x="1200" y="445" width="600" height="105" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
     <text x="1500" y="487" text-anchor="middle" fill="#9ece6a" font-size="18" font-weight="bold">Recognized and suppressed</text>
     <text x="1500" y="522" text-anchor="middle" fill="#a9b1d6" font-size="15">no raw fallback and no empty transcript row</text>
     <text x="1500" y="585" text-anchor="middle" fill="#9ece6a" font-size="15">conversation stays focused on user and agent content</text>
@@ -43,6 +43,5 @@
     <text x="1185" y="855" fill="#a9b1d6" font-size="16">The reported completed-frame shape is pinned by tests.</text>
   </g>
 
-  <text x="1000" y="1050" text-anchor="middle" fill="#bb9af7" font-size="20" font-weight="bold">Typed control signal in; zero transcript cards out</text>
-  <text x="1000" y="1110" text-anchor="middle" fill="#565f89" font-size="15">Scope: #1913 removes the incorrect raw rendering; richer queued/running UI needs an end-to-end UUID correlation contract.</text>
+  <text x="1000" y="1170" text-anchor="middle" fill="#565f89" font-size="15">Scope: #1913 removes raw rendering; richer queued/running UI needs an end-to-end UUID correlation contract.</text>
 </svg>
