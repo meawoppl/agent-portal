@@ -27,6 +27,7 @@ pub(crate) mod tool_card;
 mod tool_renderers;
 pub(crate) mod turn_metrics_display;
 mod turn_metrics_pill;
+mod upload_notice;
 mod voice_input;
 
 pub use confirm_modal::{ConfirmModal, ConfirmModalStyle};
@@ -45,4 +46,5 @@ pub use proxy_token_setup::ProxyTokenSetup;
 pub use schedule_dialog::ScheduleDialog;
 pub use share_dialog::ShareDialog;
 pub use turn_metrics_pill::TurnMetricsHeaderPill;
+pub use upload_notice::{build_upload_message, split_upload_notice, UploadNotice};
 pub use voice_input::{load_voice_hold_open, save_voice_hold_open, VoiceInput};

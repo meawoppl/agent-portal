@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Upload notices render as attachment chips — the boilerplate stays on the wire only</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="210" fill="#a9b1d6" font-size="19" font-weight="bold">Pasting a screenshot into a muse session showed:</text>
+
+    <!-- user message card -->
+    <rect x="180" y="250" width="680" height="170" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <rect x="196" y="266" width="52" height="24" rx="12" fill="#3d4666"/>
+    <text x="222" y="283" text-anchor="middle" fill="#c0caf5" font-size="13">You</text>
+    <text x="200" y="330" fill="#c0caf5" font-size="16">I've uploaded the following files to your working</text>
+    <text x="200" y="358" fill="#c0caf5" font-size="16">directory:</text>
+    <text x="200" y="392" fill="#c0caf5" font-size="16">- portal_pasted_image_260909_093931.png (33.6 KB)</text>
+
+    <rect x="150" y="480" width="700" height="230" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="518" fill="#f7768e" font-size="19" font-weight="bold">Machine text impersonating the user:</text>
+    <text x="180" y="554" fill="#c0caf5" font-size="16">- the sentence is real and necessary — but for the AGENT,</text>
+    <text x="180" y="582" fill="#c0caf5" font-size="16">  whose working directory just grew a file</text>
+    <text x="180" y="610" fill="#c0caf5" font-size="16">- the transcript rendered it verbatim under the "You" badge</text>
+    <text x="180" y="638" fill="#c0caf5" font-size="16">- worst on muse: no inline media preview softens it, so the</text>
+    <text x="180" y="666" fill="#c0caf5" font-size="16">  boilerplate IS the whole message</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="210" fill="#a9b1d6" font-size="19" font-weight="bold">Same wire text, rendered as what it is:</text>
+
+    <rect x="1180" y="250" width="680" height="170" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <rect x="1196" y="266" width="52" height="24" rx="12" fill="#3d4666"/>
+    <text x="1222" y="283" text-anchor="middle" fill="#c0caf5" font-size="13">You</text>
+    <text x="1200" y="330" fill="#c0caf5" font-size="16">check this layout please</text>
+    <!-- attachment chip -->
+    <rect x="1200" y="352" width="500" height="36" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <path d="M 1222 378 l 10 -12 a5 5 0 0 1 8 6 l -11 13 a8 8 0 0 1 -12 -10 l 11 -13" fill="none" stroke="#7dcfff" stroke-width="2"/>
+    <text x="1248" y="376" fill="#c0caf5" font-size="15">portal_pasted_image_260909_093931.png</text>
+    <text x="1590" y="376" fill="#565f89" font-size="13">33.6 KB</text>
+
+    <rect x="1150" y="480" width="700" height="230" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="518" fill="#9ece6a" font-size="19" font-weight="bold">components::upload_notice — builder + parser together:</text>
+    <text x="1180" y="554" fill="#c0caf5" font-size="16">- build_upload_message moved out of input_bar; a strict</text>
+    <text x="1180" y="582" fill="#c0caf5" font-size="16">  split_upload_notice recovers user text + (name, size) rows</text>
+    <text x="1180" y="610" fill="#c0caf5" font-size="16">- round-trip test pins builder output == parser input</text>
+    <text x="1180" y="638" fill="#c0caf5" font-size="16">- anything that doesn't parse exactly stays prose — quoting</text>
+    <text x="1180" y="666" fill="#c0caf5" font-size="16">  the sentence never rewrites a real message into chips</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Agent-facing wire text unchanged — the agent still gets told</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Both render paths patched: optimistic echo + durable user frames</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: chips show name + size only — no thumbnail preview of the uploaded image, and old transcripts re-render but the wire rows keep the prose.</text>
+</svg>
