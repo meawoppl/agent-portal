@@ -73,6 +73,12 @@ pub enum WsEvent {
     Ephemeral(serde_json::Value),
 }
 
+/// Log a WebSocket failure and surface it to the UI as a [`WsEvent::Error`].
+fn report_ws_error(on_event: &Callback<WsEvent>, context: &str, err: impl std::fmt::Debug) {
+    log::error!("{context}: {err:?}");
+    on_event.emit(WsEvent::Error(format!("{err:?}")));
+}
+
 /// Connect to WebSocket and start receiving messages.
 /// Returns immediately, spawns async task to handle connection.
 pub fn connect_websocket(
@@ -127,8 +133,7 @@ pub fn connect_websocket(
                 spawn_local(async move {
                     while let Some(msg) = queue_rx.next().await {
                         if let Err(e) = sender.send(msg).await {
-                            log::error!("WebSocket send error: {:?}", e);
-                            on_event_for_send.emit(WsEvent::Error(format!("{:?}", e)));
+                            report_ws_error(&on_event_for_send, "WebSocket send error", e);
                             break;
                         }
                     }
@@ -140,16 +145,14 @@ pub fn connect_websocket(
                             handle_proxy_message(msg, &on_event);
                         }
                         Err(e) => {
-                            log::error!("WebSocket error: {:?}", e);
-                            on_event.emit(WsEvent::Error(format!("{:?}", e)));
+                            report_ws_error(&on_event, "WebSocket error", e);
                             break;
                         }
                     }
                 }
             }
             Err(e) => {
-                log::error!("Failed to connect WebSocket: {:?}", e);
-                on_event.emit(WsEvent::Error(format!("{:?}", e)));
+                report_ws_error(&on_event, "Failed to connect WebSocket", e);
             }
         }
     });
