@@ -25,7 +25,7 @@
   <g>
     <rect x="80" y="430" width="620" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
     <text x="104" y="470" font-size="26" fill="#c0caf5">v2 check_svg.py glyph allowlist</text>
-    <text x="104" y="508" font-size="23" fill="#a9b1d6">Latin-1 + Greek + Cyrillic + 2190-21FF + 2200-22FF + ...</text>
+    <text x="104" y="508" font-size="23" fill="#a9b1d6">Latin-1, Greek, Cyrillic, 2190-21FF, 2200-22FF, ...</text>
     <text x="104" y="544" font-size="22" fill="#565f89">built from font tables, never from a viewer</text>
   </g>
   <line x1="390" y1="580" x2="390" y2="660" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
