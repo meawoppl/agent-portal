@@ -1,6 +1,6 @@
 use crate::components::model_select::model_cli_args;
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
-use crate::components::{ModelSelect, ProxyTokenSetup};
+use crate::components::{DismissibleBackdrop, ModelSelect, ProxyTokenSetup};
 use crate::hooks::{use_escape_capture, use_focus_trap};
 use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
@@ -627,11 +627,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         })
     };
 
-    let on_backdrop = {
-        let on_close = props.on_close.clone();
-        Callback::from(move |_| on_close.emit(()))
-    };
-
     // Keyboard access (#1384): trap Tab within the dialog and focus its first
     // field on open. Escape closes it (capture-phase so it doesn't reach the
     // bubble-phase nav/interrupt handlers underneath).
@@ -754,11 +749,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     };
 
     html! {
-        <div class="launch-dialog-backdrop" onclick={on_backdrop}>
+        <DismissibleBackdrop class="launch-dialog-backdrop" on_close={props.on_close.clone()}>
             <div
                 ref={dialog_ref}
                 class="launch-dialog"
-                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
             >
                 <h3>{ "Launch Session" }</h3>
 
@@ -960,6 +954,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     </div>
                 }
             </div>
-        </div>
+        </DismissibleBackdrop>
     }
 }

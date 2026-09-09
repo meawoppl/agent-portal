@@ -21,6 +21,8 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
+use crate::components::DismissibleBackdrop;
+
 use crate::utils;
 
 /// How often to poll a browser-completion (codex) flow, in milliseconds.
@@ -178,25 +180,23 @@ impl Component for AgentLoginModal {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let on_close = ctx.link().callback(|_| Msg::Close);
-        let on_overlay = ctx.link().callback(|_| Msg::Close);
-        let stop = Callback::from(|e: MouseEvent| e.stop_propagation());
+        let on_close = ctx.link().callback(|()| Msg::Close);
 
         html! {
-            <div class="agent-login-overlay" onclick={on_overlay}>
-                <div class="agent-login-modal" onclick={stop}>
+            <DismissibleBackdrop class="agent-login-overlay" on_close={on_close.clone()}>
+                <div class="agent-login-modal">
                     <div class="agent-login-header">
                         <h2>{ format!("Sign in to {}", ctx.props().agent_name) }</h2>
-                        <button class="agent-login-close" onclick={on_close.clone()}>{ "×" }</button>
+                        <button class="agent-login-close" onclick={on_close.clone().reform(|_: MouseEvent| ())}>{ "×" }</button>
                     </div>
                     <div class="agent-login-body">
                         { self.view_stage(ctx) }
                     </div>
                     <div class="agent-login-footer">
-                        <button class="link-button" onclick={on_close}>{ self.close_label() }</button>
+                        <button class="link-button" onclick={on_close.reform(|_: MouseEvent| ())}>{ self.close_label() }</button>
                     </div>
                 </div>
-            </div>
+            </DismissibleBackdrop>
         }
     }
 }

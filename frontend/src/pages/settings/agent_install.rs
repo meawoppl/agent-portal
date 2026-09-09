@@ -14,6 +14,7 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
+use crate::components::DismissibleBackdrop;
 use crate::utils;
 
 #[derive(Properties, PartialEq)]
@@ -70,12 +71,7 @@ pub fn agent_install_modal(props: &AgentInstallModalProps) -> Html {
         })
     };
 
-    let on_close = {
-        let on_close = props.on_close.clone();
-        Callback::from(move |_| on_close.emit(()))
-    };
-    let stop = Callback::from(|e: MouseEvent| e.stop_propagation());
-
+    let on_close = props.on_close.clone();
     let body = match &*stage {
         Stage::Confirm => html! {
             <>
@@ -102,18 +98,18 @@ pub fn agent_install_modal(props: &AgentInstallModalProps) -> Html {
     };
 
     html! {
-        <div class="agent-login-overlay" onclick={on_close.clone()}>
-            <div class="agent-login-modal" onclick={stop}>
+        <DismissibleBackdrop class="agent-login-overlay" on_close={on_close.clone()}>
+            <div class="agent-login-modal">
                 <div class="agent-login-header">
                     <h2>{ format!("Install {}", props.agent_name) }</h2>
-                    <button class="agent-login-close" onclick={on_close.clone()}>{ "×" }</button>
+                    <button class="agent-login-close" onclick={on_close.clone().reform(|_: MouseEvent| ())}>{ "×" }</button>
                 </div>
                 <div class="agent-login-body">{ body }</div>
                 <div class="agent-login-footer">
-                    <button class="link-button" onclick={on_close}>{ close_label }</button>
+                    <button class="link-button" onclick={on_close.reform(|_: MouseEvent| ())}>{ close_label }</button>
                 </div>
             </div>
-        </div>
+        </DismissibleBackdrop>
     }
 }
 
