@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Every session header now names its model - codex and muse chats stop being anonymous</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">A codex session's chat header:</text>
+    <rect x="180" y="230" width="680" height="52" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="200" y="262" fill="#c0caf5" font-size="16" font-weight="bold">rps-arena</text>
+    <text x="300" y="262" fill="#565f89" font-size="14">zeus</text>
+    <text x="352" y="262" fill="#565f89" font-size="13" font-family="monospace">~/repos/rps-arena</text>
+    <rect x="560" y="238" width="112" height="30" rx="5" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="616" y="258" text-anchor="middle" fill="#565f89" font-size="12" font-family="monospace">launcher v2.14</text>
+    <rect x="684" y="238" width="70" height="30" rx="15" fill="#1e202e" stroke="#9ece6a" stroke-width="1"/>
+    <text x="719" y="258" text-anchor="middle" fill="#9ece6a" font-size="12">active</text>
+    <text x="520" y="316" text-anchor="middle" fill="#f7768e" font-size="15" font-style="italic">gpt-5.4? gpt-5.4-sol? codex-mini? - the chat never says</text>
+
+    <text x="180" y="380" fill="#a9b1d6" font-size="19" font-weight="bold">Why claude sessions felt different:</text>
+    <rect x="150" y="410" width="700" height="260" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="448" fill="#c0caf5" font-size="16">- claude's wire carries `model` on every assistant message,</text>
+    <text x="180" y="476" fill="#c0caf5" font-size="16">  so each transcript badge names it (Opus 4.8, Fable 5, ...)</text>
+    <text x="180" y="504" fill="#c0caf5" font-size="16">- codex ThreadItems and muse journal records carry no</text>
+    <text x="180" y="532" fill="#c0caf5" font-size="16">  per-message model; muse's run.model.configured record is</text>
+    <text x="180" y="560" fill="#c0caf5" font-size="16">  deliberately screened from the transcript as setup noise</text>
+    <text x="180" y="588" fill="#c0caf5" font-size="16">- the rail pill has a model watermark, but the place you</text>
+    <text x="180" y="616" fill="#c0caf5" font-size="16">  actually read - the chat - said nothing</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Same header, model chip for every agent:</text>
+    <rect x="1180" y="230" width="680" height="52" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#c0caf5" font-size="16" font-weight="bold">rps-arena</text>
+    <rect x="1296" y="238" width="120" height="30" rx="5" fill="#1e202e" stroke="#bb9af7" stroke-width="1.5"/>
+    <text x="1356" y="258" text-anchor="middle" fill="#bb9af7" font-size="12" font-family="monospace">gpt-5.4-sol</text>
+    <text x="1432" y="262" fill="#565f89" font-size="14">zeus</text>
+    <text x="1484" y="262" fill="#565f89" font-size="13" font-family="monospace">~/repos/rps-arena</text>
+    <rect x="1684" y="238" width="70" height="30" rx="15" fill="#1e202e" stroke="#9ece6a" stroke-width="1"/>
+    <text x="1719" y="258" text-anchor="middle" fill="#9ece6a" font-size="12">active</text>
+    <text x="1520" y="316" text-anchor="middle" fill="#9ece6a" font-size="15" font-style="italic">works for muse (llama4-maverick-mm) and claude alike</text>
+
+    <text x="1180" y="380" fill="#a9b1d6" font-size="19" font-weight="bold">Where the value comes from:</text>
+    <rect x="1150" y="410" width="700" height="260" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="448" fill="#c0caf5" font-size="16">- sessions.last_model, written by the backend from turn</text>
+    <text x="1180" y="476" fill="#c0caf5" font-size="16">  metrics - which all three agents emit (muse since #1882)</text>
+    <text x="1180" y="504" fill="#c0caf5" font-size="16">- the page already overlays the live turn's model, so a</text>
+    <text x="1180" y="532" fill="#c0caf5" font-size="16">  mid-session model switch updates the chip immediately</text>
+    <text x="1180" y="560" fill="#c0caf5" font-size="16">- stays visible on phones: hostname and path are hidden</text>
+    <text x="1180" y="588" fill="#c0caf5" font-size="16">  there, but the model is the short, high-value datum</text>
+    <text x="1180" y="616" fill="#c0caf5" font-size="16">- no wire or backend change - the column already existed</text>
+  </g>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: the chip is empty until a session's first completed turn reports metrics - a freshly launched session shows no model yet.</text>
+</svg>
