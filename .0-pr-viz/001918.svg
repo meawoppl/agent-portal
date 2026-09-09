@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">One render-budget rule, shared: the server now sends exactly what the client keeps</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">The counting rule lived only in the frontend:</text>
+
+    <!-- request flow -->
+    <rect x="180" y="240" width="290" height="60" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="325" y="266" text-anchor="middle" fill="#7aa2f7" font-size="16" font-family="monospace">GET /messages?limit=150</text>
+    <text x="325" y="288" text-anchor="middle" fill="#565f89" font-size="13" font-style="italic">a guess: 100 + 50 headroom</text>
+
+    <line x1="470" y1="270" x2="560" y2="270" stroke="#565f89" stroke-width="2.5"/>
+    <polygon points="560,270 544,263 544,277" fill="#565f89"/>
+
+    <rect x="560" y="240" width="280" height="60" rx="10" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+    <text x="700" y="266" text-anchor="middle" fill="#e0af68" font-size="16">server: raw row count</text>
+    <text x="700" y="288" text-anchor="middle" fill="#565f89" font-size="13">has no idea what renders</text>
+
+    <!-- two failure modes -->
+    <rect x="150" y="360" width="700" height="200" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="398" fill="#f7768e" font-size="18" font-weight="bold">Sparse-marker session (most sessions):</text>
+    <rect x="180" y="420" width="430" height="26" rx="5" fill="#16161e" stroke="#9ece6a" stroke-width="1"/>
+    <text x="395" y="438" text-anchor="middle" fill="#9ece6a" font-size="13">100 kept after trim</text>
+    <rect x="614" y="420" width="206" height="26" rx="5" fill="#16161e" stroke="#f7768e" stroke-width="1"/>
+    <text x="717" y="438" text-anchor="middle" fill="#f7768e" font-size="13">~50 rows parsed, discarded</text>
+    <text x="180" y="486" fill="#f7768e" font-size="18" font-weight="bold">Marker-dense window (long thinking turns):</text>
+    <rect x="180" y="508" width="640" height="26" rx="5" fill="#16161e" stroke="#e0af68" stroke-width="1"/>
+    <text x="500" y="526" text-anchor="middle" fill="#e0af68" font-size="13">150 rows, but &lt;100 renderable — buffer underfilled, history lost from view</text>
+
+    <rect x="150" y="620" width="700" height="200" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="658" fill="#a9b1d6" font-size="18" font-weight="bold">Two copies of the budget logic:</text>
+    <text x="180" y="694" fill="#c0caf5" font-size="16">- counts_toward_render_limit — frontend only</text>
+    <text x="180" y="722" fill="#c0caf5" font-size="16">- retain_newest_items_by_cost — frontend only</text>
+    <text x="180" y="750" fill="#c0caf5" font-size="16">- server pages by raw LIMIT; any drift between the two</text>
+    <text x="180" y="778" fill="#c0caf5" font-size="16">  sides is invisible until someone counts bytes</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">shared::render_budget — one definition, both sides:</text>
+
+    <rect x="1180" y="240" width="330" height="60" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="1345" y="266" text-anchor="middle" fill="#7aa2f7" font-size="16" font-family="monospace">GET /messages?render_limit=100</text>
+    <text x="1345" y="288" text-anchor="middle" fill="#565f89" font-size="13" font-style="italic">the client's actual budget</text>
+
+    <line x1="1510" y1="270" x2="1590" y2="270" stroke="#565f89" stroke-width="2.5"/>
+    <polygon points="1590,270 1574,263 1574,277" fill="#565f89"/>
+
+    <rect x="1590" y="240" width="290" height="60" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1735" y="266" text-anchor="middle" fill="#9ece6a" font-size="16">server counts renderable</text>
+    <text x="1735" y="288" text-anchor="middle" fill="#565f89" font-size="13">same predicate, same trim</text>
+
+    <rect x="1150" y="360" width="700" height="200" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="398" fill="#9ece6a" font-size="18" font-weight="bold">Page = exactly the window the client keeps:</text>
+    <text x="1180" y="434" fill="#c0caf5" font-size="16">- 100 counting messages; thinking-token markers ride free</text>
+    <text x="1180" y="462" fill="#c0caf5" font-size="16">- zero rows fetched just to be trimmed away</text>
+    <text x="1180" y="490" fill="#c0caf5" font-size="16">- marker-dense windows fill the buffer completely (server</text>
+    <text x="1180" y="518" fill="#c0caf5" font-size="16">  extends the fetch instead of the client losing history)</text>
+
+    <rect x="1150" y="620" width="700" height="200" rx="12" fill="#1e202e" stroke="#bb9af7" stroke-width="1.5"/>
+    <text x="1180" y="658" fill="#bb9af7" font-size="18" font-weight="bold">Mechanics:</text>
+    <text x="1180" y="694" fill="#c0caf5" font-size="16">- one SQL fetch of render_limit + 64 slack rows, newest first;</text>
+    <text x="1180" y="722" fill="#c0caf5" font-size="16">  a second bounded fetch only if full AND underfilled</text>
+    <text x="1180" y="750" fill="#c0caf5" font-size="16">- frontend deletes its local copies, re-exports from shared</text>
+    <text x="1180" y="778" fill="#c0caf5" font-size="16">- parity test pins client trim == server window, item for item</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">render_limit is exclusive with limit/before/after (400 otherwise)</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Follow-up to #1915 · frontend embedded in backend, so no version skew</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: the server now JSON-parses each fetched row to classify it (~164/request) — cheap, but the budget rule runs on Postgres rows, not in SQL.</text>
+</svg>
