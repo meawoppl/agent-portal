@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">The dictation preview shows everything said so far, not just the current segment</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="210" fill="#a9b1d6" font-size="19" font-weight="bold">Dictating in hold-open mode, with a pause mid-thought:</text>
+
+    <!-- timeline of speech -->
+    <text x="180" y="266" fill="#7aa2f7" font-size="15" font-family="monospace">say:  "fix the login bug"   …pause…   "and add a test"</text>
+
+    <!-- preview states -->
+    <rect x="180" y="300" width="680" height="46" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="329" fill="#c0caf5" font-size="15">preview while speaking part 1:  <tspan fill="#9ece6a">fix the login bug</tspan></text>
+    <rect x="180" y="358" width="680" height="46" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="200" y="387" fill="#c0caf5" font-size="15">at the pause (segment finalizes):  <tspan fill="#f7768e">[blank]</tspan></text>
+    <rect x="180" y="416" width="680" height="46" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="200" y="445" fill="#c0caf5" font-size="15">while speaking part 2:  <tspan fill="#f7768e">and add a test</tspan>  <tspan fill="#565f89">← part 1 gone</tspan></text>
+
+    <rect x="150" y="510" width="700" height="230" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="548" fill="#f7768e" font-size="19" font-weight="bold">Why: the preview only carried `interim`</text>
+    <text x="180" y="584" fill="#c0caf5" font-size="16">- each pause finalizes the segment into final_acc, leaving</text>
+    <text x="180" y="612" fill="#c0caf5" font-size="16">  interim empty — the preview cleared, then restarted with</text>
+    <text x="180" y="640" fill="#c0caf5" font-size="16">  only the new segment's words</text>
+    <text x="180" y="668" fill="#c0caf5" font-size="16">- the SENT message was always complete (onend drains the</text>
+    <text x="180" y="696" fill="#c0caf5" font-size="16">  full accumulator) — only the live preview lied to you</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="210" fill="#a9b1d6" font-size="19" font-weight="bold">Same dictation:</text>
+
+    <text x="1180" y="266" fill="#7aa2f7" font-size="15" font-family="monospace">say:  "fix the login bug"   …pause…   "and add a test"</text>
+
+    <rect x="1180" y="300" width="680" height="46" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="329" fill="#c0caf5" font-size="15">while speaking part 1:  <tspan fill="#9ece6a">fix the login bug</tspan></text>
+    <rect x="1180" y="358" width="680" height="46" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="387" fill="#c0caf5" font-size="15">at the pause:  <tspan fill="#9ece6a">fix the login bug</tspan>  <tspan fill="#565f89">← held, not cleared</tspan></text>
+    <rect x="1180" y="416" width="680" height="46" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="445" fill="#c0caf5" font-size="15">while speaking part 2:  <tspan fill="#9ece6a">fix the login bug and add a test</tspan></text>
+
+    <rect x="1150" y="510" width="700" height="230" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="548" fill="#9ece6a" font-size="19" font-weight="bold">Fix: compose the preview from both halves</text>
+    <text x="1180" y="584" fill="#c0caf5" font-size="16">- preview = accumulated finals + live interim, space-joined</text>
+    <text x="1180" y="612" fill="#c0caf5" font-size="16">- default (auto-stop) mode unchanged in practice: finals only</text>
+    <text x="1180" y="640" fill="#c0caf5" font-size="16">  accumulate at the end of the single utterance</text>
+    <text x="1180" y="668" fill="#c0caf5" font-size="16">- one closure edited in voice_input.rs; send path, watchdogs,</text>
+    <text x="1180" y="696" fill="#c0caf5" font-size="16">  and accumulation logic untouched</text>
+  </g>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: a very long hold-open dictation makes a very long preview strip — it grows with the whole message, no tail-truncation yet.</text>
+</svg>
