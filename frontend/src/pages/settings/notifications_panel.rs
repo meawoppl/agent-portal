@@ -515,8 +515,9 @@ fn key_b64url(
 /// POST the subscription and remember its server-side id for later deletion.
 async fn register_subscription(req: &RegisterPushSubscriptionRequest) -> Result<(), String> {
     let url = utils::api_url("/api/push/subscriptions");
-    let request = Request::post(&url).json(req).map_err(|e| e.to_string())?;
-    let resp = request.send().await.map_err(|e| e.to_string())?;
+    let resp = utils::send_json(Request::post(&url), req)
+        .await
+        .map_err(|e| e.to_string())?;
     if !resp.ok() {
         return Err(format!("server returned {}", resp.status()));
     }

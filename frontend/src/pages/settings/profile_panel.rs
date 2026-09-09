@@ -66,10 +66,13 @@ pub fn profile_panel() -> Html {
             let nickname = nickname.clone();
             saving.set(true);
             spawn_local(async move {
-                let ok = match Request::put(&utils::api_url("/api/settings/profile")).json(&body) {
-                    Ok(req) => req.send().await.map(|r| r.ok()).unwrap_or(false),
-                    Err(_) => false,
-                };
+                let ok = utils::send_json(
+                    Request::put(&utils::api_url("/api/settings/profile")),
+                    &body,
+                )
+                .await
+                .map(|r| r.ok())
+                .unwrap_or(false);
                 // Reflect the normalized value locally so the field matches
                 // what the server stored.
                 nickname.set(trimmed);
