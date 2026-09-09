@@ -168,6 +168,38 @@ pub fn dashboard_page() -> Html {
         session_state.clone(),
     );
 
+    // Seed the rail's awaiting flags from the server as soon as the session
+    // list lands (#1915). The per-view `is_awaiting` signal only exists once a
+    // session hydrates, and background sessions now hydrate on a drip — without
+    // this seed, a session blocked on a permission wouldn't show its red flag
+    // until its turn in the queue. One batched request; each view's own signal
+    // refines (and can clear) the flag as it hydrates.
+    {
+        let session_state = session_state.clone();
+        use_effect_with(loading, move |is_loading| {
+            if !*is_loading {
+                spawn_local(async move {
+                    if let Ok(data) = utils::fetch_json::<shared::api::AgentSessionsResponse>(
+                        "/api/agent/sessions",
+                        utils::On401::Ignore,
+                    )
+                    .await
+                    {
+                        for session in data.sessions {
+                            if session.awaiting_permission {
+                                session_state.dispatch(DashboardSessionAction::SetAwaiting {
+                                    session_id: session.id,
+                                    awaiting: true,
+                                });
+                            }
+                        }
+                    }
+                });
+            }
+            || ()
+        });
+    }
+
     // Push-notification deep link (mobile-apps plan D4). `sw.js` opens
     // `/dashboard?session=<uuid>` on notification click; parse that id once at
     // mount and hold it until the target session shows up in `active_sessions`

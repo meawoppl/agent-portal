@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Reload herd fixed: focused session first, the rest drip in, 90% less JSON parsed</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE: the herd -->
+  <g>
+    <text x="180" y="196" fill="#a9b1d6" font-size="19" font-weight="bold">Reload with 8 sessions — one render flush:</text>
+
+    <!-- stacked simultaneous request bars -->
+    <text x="180" y="248" fill="#7aa2f7" font-size="15" font-family="monospace">s1</text>
+    <rect x="230" y="232" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="510" y="249" text-anchor="middle" fill="#f7768e" font-size="13">1000 msgs + metrics + WS</text>
+    <text x="180" y="288" fill="#7aa2f7" font-size="15" font-family="monospace">s2</text>
+    <rect x="230" y="272" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="510" y="289" text-anchor="middle" fill="#f7768e" font-size="13">1000 msgs + metrics + WS</text>
+    <text x="180" y="328" fill="#7aa2f7" font-size="15" font-family="monospace">s3</text>
+    <rect x="230" y="312" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="510" y="329" text-anchor="middle" fill="#f7768e" font-size="13">1000 msgs + metrics + WS</text>
+    <text x="180" y="368" fill="#7aa2f7" font-size="15" font-family="monospace">s4</text>
+    <rect x="230" y="352" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="408" fill="#7aa2f7" font-size="15" font-family="monospace">s5</text>
+    <rect x="230" y="392" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="448" fill="#7aa2f7" font-size="15" font-family="monospace">s6</text>
+    <rect x="230" y="432" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="488" fill="#7aa2f7" font-size="15" font-family="monospace">s7</text>
+    <rect x="230" y="472" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="528" fill="#7aa2f7" font-size="15" font-family="monospace">s8</text>
+    <rect x="230" y="512" width="560" height="24" rx="5" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+
+    <text x="230" y="580" fill="#f7768e" font-size="16" font-weight="bold">16 HTTP requests + 8 sockets at t=0, then the main thread</text>
+    <text x="230" y="606" fill="#f7768e" font-size="16" font-weight="bold">parses 8 × 1000 messages — keeping only 100 of each</text>
+
+    <rect x="150" y="650" width="700" height="220" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="688" fill="#a9b1d6" font-size="18" font-weight="bold">Why it felt like "a static page taking forever":</text>
+    <text x="180" y="722" fill="#c0caf5" font-size="16">- page_focus activated every visible session at once</text>
+    <text x="180" y="750" fill="#c0caf5" font-size="16">- fetch limit defaulted to MESSAGE_RETENTION_COUNT (1000)</text>
+    <text x="180" y="778" fill="#c0caf5" font-size="16">- render buffer keeps 100 → ~90% of parse work discarded</text>
+    <text x="180" y="806" fill="#c0caf5" font-size="16">- one WASM thread chewed through it all before feeling responsive</text>
+  </g>
+
+  <!-- AFTER: focused first + drip -->
+  <g>
+    <text x="1180" y="196" fill="#a9b1d6" font-size="19" font-weight="bold">Focused session first, the rest drip in:</text>
+
+    <text x="1180" y="248" fill="#9ece6a" font-size="15" font-family="monospace">s1*</text>
+    <rect x="1240" y="232" width="180" height="24" rx="5" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1330" y="249" text-anchor="middle" fill="#9ece6a" font-size="13">150 msgs → WS live</text>
+
+    <text x="1180" y="288" fill="#7aa2f7" font-size="15" font-family="monospace">s2</text>
+    <rect x="1300" y="272" width="150" height="24" rx="5" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1180" y="328" fill="#7aa2f7" font-size="15" font-family="monospace">s3</text>
+    <rect x="1300" y="312" width="150" height="24" rx="5" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1180" y="368" fill="#7aa2f7" font-size="15" font-family="monospace">s4</text>
+    <rect x="1400" y="352" width="150" height="24" rx="5" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1180" y="408" fill="#7aa2f7" font-size="15" font-family="monospace">s5</text>
+    <rect x="1400" y="392" width="150" height="24" rx="5" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1180" y="448" fill="#7aa2f7" font-size="15" font-family="monospace">s6</text>
+    <rect x="1500" y="432" width="150" height="24" rx="5" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1180" y="488" fill="#7aa2f7" font-size="15" font-family="monospace">s7</text>
+    <rect x="1500" y="472" width="150" height="24" rx="5" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1180" y="528" fill="#7aa2f7" font-size="15" font-family="monospace">s8</text>
+    <rect x="1600" y="512" width="150" height="24" rx="5" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+
+    <text x="1240" y="580" fill="#9ece6a" font-size="16" font-weight="bold">drip: 2 sessions / 400ms, most-recently-messaged first —</text>
+    <text x="1240" y="606" fill="#9ece6a" font-size="16" font-weight="bold">tap any pill and it activates instantly, tick cancelled</text>
+
+    <rect x="1150" y="650" width="700" height="220" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="1180" y="688" fill="#a9b1d6" font-size="18" font-weight="bold">Rail flags don't go blind while sessions queue:</text>
+    <text x="1180" y="722" fill="#c0caf5" font-size="16">- one batched GET /api/agent/sessions at load seeds the</text>
+    <text x="1180" y="750" fill="#c0caf5" font-size="16">  red "waiting" flags (pending_permission_requests, server-side)</text>
+    <text x="1180" y="778" fill="#c0caf5" font-size="16">- each view refines its own flag as it hydrates</text>
+    <text x="1180" y="806" fill="#c0caf5" font-size="16">- cold-load log: navigation start → focused session's live WS</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">?limit=150 vs 1000 — headroom over the 100-row render buffer</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Closes #1915 · builds on #1916 (metrics off the WS critical path)</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: a cold pill tapped before its drip turn now pays its own hydration (~1 fetch + parse) instead of being pre-warmed; no IndexedDB cache — history refetches every reload.</text>
+</svg>
