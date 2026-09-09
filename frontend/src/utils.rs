@@ -60,35 +60,37 @@ pub async fn fetch_json<T: DeserializeOwned>(path: &str, on_401: On401) -> Resul
         .map_err(|e| FetchError::Decode(e.to_string()))
 }
 
-/// Get the base HTTP URL (e.g., "http://localhost:3000" or "https://myapp.com")
-pub fn get_base_url() -> String {
-    let Some(window) = window() else {
-        return "http://localhost:3000".to_string();
-    };
+/// Read `(protocol, host)` from the browser location, with per-field fallbacks.
+///
+/// Returns `None` only when there is no window (e.g. SSR/tests); per-field
+/// failures still fall back to local-dev defaults so callers stay total.
+fn location_parts() -> Option<(String, String)> {
+    let window = window()?;
     let location = window.location();
-
     let protocol = location.protocol().unwrap_or_else(|_| "http:".to_string());
     let host = location
         .host()
         .unwrap_or_else(|_| "localhost:3000".to_string());
+    Some((protocol, host))
+}
 
-    format!("{}//{}", protocol, host)
+/// Get the base HTTP URL (e.g., "http://localhost:3000" or "https://myapp.com")
+pub fn get_base_url() -> String {
+    match location_parts() {
+        Some((protocol, host)) => format!("{}//{}", protocol, host),
+        None => "http://localhost:3000".to_string(),
+    }
 }
 
 /// Get the WebSocket URL (e.g., "ws://localhost:3000" or "wss://myapp.com")
 pub fn get_ws_url() -> String {
-    let Some(window) = window() else {
-        return "ws://localhost:3000".to_string();
-    };
-    let location = window.location();
-
-    let protocol = location.protocol().unwrap_or_else(|_| "http:".to_string());
-    let ws_protocol = if protocol == "https:" { "wss:" } else { "ws:" };
-    let host = location
-        .host()
-        .unwrap_or_else(|_| "localhost:3000".to_string());
-
-    format!("{}//{}", ws_protocol, host)
+    match location_parts() {
+        Some((protocol, host)) => {
+            let ws_protocol = if protocol == "https:" { "wss:" } else { "ws:" };
+            format!("{}//{}", ws_protocol, host)
+        }
+        None => "ws://localhost:3000".to_string(),
+    }
 }
 
 /// Build a full API URL from a path (e.g., "/api/sessions" -> "http://localhost:3000/api/sessions")
