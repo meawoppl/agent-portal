@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">The secret-drop receipt gets actual layout — filename no longer collides with size</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="220" fill="#a9b1d6" font-size="19" font-weight="bold">As rendered in the transcript today:</text>
+
+    <!-- transcript card mock -->
+    <rect x="180" y="260" width="680" height="120" rx="10" fill="#1e202e" stroke="#7dcfff" stroke-width="1"/>
+    <rect x="180" y="260" width="4" height="120" fill="#7dcfff"/>
+    <rect x="220" y="303" width="16" height="12" rx="2" fill="#e0af68"/>
+    <path d="M 223 303 v-4 a5 5 0 0 1 10 0 v4" fill="none" stroke="#e0af68" stroke-width="2.5"/>
+    <text x="246" y="316" fill="#c0caf5" font-size="17">portal-drop-8d016eee-2711-4e7f-b243-</text>
+    <text x="220" y="346" fill="#c0caf5" font-size="17">c88b4b62548a<tspan fill="#f7768e" font-weight="bold">19 bytes · contents not stored in chat</tspan></text>
+
+    <rect x="150" y="440" width="700" height="230" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="478" fill="#f7768e" font-size="19" font-weight="bold">Why: .portal-secret-drop had no CSS at all</text>
+    <text x="180" y="514" fill="#c0caf5" font-size="16">- three bare inline spans — lock, filename, size line</text>
+    <text x="180" y="542" fill="#c0caf5" font-size="16">- no gap between them, so the generated drop filename</text>
+    <text x="180" y="570" fill="#c0caf5" font-size="16">  (a full UUID) runs straight into the byte count:</text>
+    <rect x="180" y="592" width="640" height="34" rx="6" fill="#16161e"/>
+    <text x="200" y="615" fill="#f7768e" font-size="14" font-family="monospace">…-c88b4b62548a19 bytes — is the secret 19 bytes or 548a19?</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="220" fill="#a9b1d6" font-size="19" font-weight="bold">Same markup, styled:</text>
+
+    <rect x="1180" y="260" width="680" height="120" rx="10" fill="#1e202e" stroke="#7dcfff" stroke-width="1"/>
+    <rect x="1180" y="260" width="4" height="120" fill="#7dcfff"/>
+    <rect x="1220" y="303" width="16" height="12" rx="2" fill="#e0af68"/>
+    <path d="M 1223 303 v-4 a5 5 0 0 1 10 0 v4" fill="none" stroke="#e0af68" stroke-width="2.5"/>
+    <text x="1248" y="316" fill="#c0caf5" font-size="17">portal-drop-8d016eee-2711-4e7f-b243-c88b4b62548a</text>
+    <text x="1248" y="346" fill="#565f89" font-size="14">19 bytes · contents not stored in chat</text>
+
+    <rect x="1150" y="440" width="700" height="230" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="478" fill="#9ece6a" font-size="19" font-weight="bold">messages.css gains .portal-secret-drop rules:</text>
+    <text x="1180" y="514" fill="#c0caf5" font-size="16">- flex row, 0.5rem gap, baseline-aligned</text>
+    <text x="1180" y="542" fill="#c0caf5" font-size="16">- size line muted and smaller — filename is the subject</text>
+    <text x="1180" y="570" fill="#c0caf5" font-size="16">- flex-wrap + break-all: the UUID filename wraps on</text>
+    <text x="1180" y="598" fill="#c0caf5" font-size="16">  phones instead of overflowing the card</text>
+    <text x="1180" y="640" fill="#565f89" font-size="15" font-style="italic">CSS-only; the Yew markup was already three separate spans</text>
+  </g>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: the receipt still shows the raw portal-drop UUID filename — informative for the agent conversation, but not pretty.</text>
+</svg>

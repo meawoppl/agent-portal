@@ -154,6 +154,26 @@
     border-left: 3px solid #7dcfff;
 }
 
+/* Secret-drop receipt: the transcript's only record of a Ctrl+Shift+Enter
+   secret send — a lock, the generated drop filename, and the byte count.
+   Without the gap the spans run together ("…548a19 bytes"). The filename can
+   be a full portal-drop UUID, so let it break rather than overflow. */
+.portal-secret-drop {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.portal-secret-drop-size {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
 /* Muse turn card: blue agent stripe, mirroring the codex/portal/user
    left-accent treatment so muse reads as its own agent, not an assistant. */
 .muse-message {
