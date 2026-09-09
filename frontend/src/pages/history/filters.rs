@@ -7,6 +7,8 @@
 //! ever holds a single page and filtering that would silently narrow one page
 //! instead of the archive.
 
+use crate::utils::non_empty;
+
 /// Active filter selections from the browser controls. Empty/`None` fields
 /// are "no constraint".
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -41,16 +43,12 @@ impl SessionFilter {
             ("to", &self.to),
             ("q", &self.query),
         ] {
-            if let Some(v) = non_empty(value) {
+            if let Some(v) = non_empty(value.as_deref()) {
                 parts.push(format!("{key}={}", encode_component(v)));
             }
         }
         parts.join("&")
     }
-}
-
-fn non_empty(opt: &Option<String>) -> Option<&str> {
-    opt.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
 
 /// Percent-encode everything outside the unreserved set. Hand-rolled to keep
