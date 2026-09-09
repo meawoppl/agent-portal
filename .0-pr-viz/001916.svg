@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Turn metrics no longer gate the WebSocket — live connectivity lands one RTT sooner</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE: sequential waterfall -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">SessionView::create — one sequential task per session:</text>
+
+    <!-- time axis -->
+    <line x1="180" y1="640" x2="860" y2="640" stroke="#3d4666" stroke-width="2"/>
+    <text x="860" y="668" text-anchor="end" fill="#565f89" font-size="14">time →</text>
+
+    <!-- waterfall bars -->
+    <rect x="180" y="260" width="220" height="52" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="290" y="292" text-anchor="middle" fill="#7aa2f7" font-size="16">GET /messages (≤1000)</text>
+
+    <rect x="400" y="340" width="200" height="52" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+    <text x="500" y="372" text-anchor="middle" fill="#e0af68" font-size="16">GET /turn-metrics</text>
+    <text x="500" y="416" text-anchor="middle" fill="#f7768e" font-size="14" font-style="italic">comment said "in parallel" — it was .await'ed</text>
+
+    <rect x="600" y="440" width="230" height="52" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="715" y="472" text-anchor="middle" fill="#9ece6a" font-size="16">WebSocket connect</text>
+
+    <!-- dependency arrows -->
+    <line x1="400" y1="286" x2="400" y2="366" stroke="#565f89" stroke-width="2"/>
+    <line x1="600" y1="366" x2="600" y2="466" stroke="#565f89" stroke-width="2"/>
+
+    <rect x="150" y="700" width="700" height="180" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="738" fill="#f7768e" font-size="19" font-weight="bold">Live connectivity waited on cosmetic data:</text>
+    <text x="180" y="774" fill="#c0caf5" font-size="17">- metrics only fill the chip-strip footer for past turns</text>
+    <text x="180" y="804" fill="#c0caf5" font-size="17">- yet every session's socket sat behind that round trip</text>
+    <text x="180" y="834" fill="#c0caf5" font-size="17">- on a reload herd this stacks across all N sessions at once</text>
+  </g>
+
+  <!-- AFTER: parallel -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Two tasks: metrics off the critical path</text>
+
+    <line x1="1180" y1="640" x2="1860" y2="640" stroke="#3d4666" stroke-width="2"/>
+    <text x="1860" y="668" text-anchor="end" fill="#565f89" font-size="14">time →</text>
+
+    <!-- track 1: history -> ws -->
+    <rect x="1180" y="260" width="220" height="52" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="1290" y="292" text-anchor="middle" fill="#7aa2f7" font-size="16">GET /messages (≤1000)</text>
+
+    <rect x="1400" y="260" width="230" height="52" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2.5"/>
+    <text x="1515" y="292" text-anchor="middle" fill="#9ece6a" font-size="16" font-weight="bold">WebSocket connect</text>
+    <text x="1515" y="336" text-anchor="middle" fill="#9ece6a" font-size="14">one RTT sooner, × N sessions</text>
+
+    <!-- track 2: metrics parallel -->
+    <rect x="1180" y="400" width="200" height="52" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+    <text x="1280" y="432" text-anchor="middle" fill="#e0af68" font-size="16">GET /turn-metrics</text>
+    <text x="1400" y="432" fill="#565f89" font-size="14" font-style="italic">own spawn_local — truly parallel now</text>
+
+    <rect x="1150" y="700" width="700" height="180" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="1180" y="738" fill="#9ece6a" font-size="19" font-weight="bold">Kept deliberately sequential: history → socket</text>
+    <text x="1180" y="774" fill="#c0caf5" font-size="17">- the newest history timestamp becomes replay_after</text>
+    <text x="1180" y="804" fill="#c0caf5" font-size="17">- that watermark keeps the server-side WS replay to a delta</text>
+    <text x="1180" y="834" fill="#c0caf5" font-size="17">- metrics failure stays non-fatal: footer empty, live turns still fill it</text>
+  </g>
+
+  <!-- context strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">First slice of #1915 — dashboard reload thundering herd</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Next: WS-first focused hydration, batched rail status, lazy background</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: saves one RTT per session but the herd itself remains — all sessions still hydrate simultaneously until #1915's later slices land.</text>
+</svg>
