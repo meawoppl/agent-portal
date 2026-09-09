@@ -251,11 +251,11 @@ impl Component for InputBar {
         let became_focused = now_focused && !self.was_focused;
         self.was_focused = now_focused;
 
-        // A just-launched session mounts with its socket still down, so the
-        // textarea is `disabled` and the mount-time focus (see `rendered`)
-        // no-ops on a disabled node. Re-apply focus when the socket comes up
-        // while this bar is the focused session's, so the composer is ready to
-        // type in without a stray click (#1405).
+        // Re-apply focus when the socket comes up while this bar is the
+        // focused session's, so after a launch or a server restart the
+        // composer is ready to type in without a stray click (#1405). (The
+        // textarea itself stays enabled while disconnected — sends queue in
+        // the outbox — but page-load/dialog focus stealing still applies.)
         let now_connected = ctx.props().ws_connected;
         let became_connected = now_connected && !self.was_ws_connected;
         self.was_ws_connected = now_connected;
@@ -272,12 +272,10 @@ impl Component for InputBar {
             self.focus_after_render = false;
             // Focus immediately for the common case (switching to an
             // already-mounted, enabled session). Two things can defeat that
-            // synchronous focus, and both hit the new-session path (#1405):
-            //   1. the textarea is `disabled` while the just-launched session's
-            //      socket comes up, so `.focus()` no-ops on it; and
-            //   2. even once it lands, the browser can restore focus to the
-            //      document as a page load — or a just-closed launch dialog —
-            //      settles, silently stealing it (#1373).
+            // synchronous focus on the new-session path (#1405): the browser
+            // can restore focus to the document as a page load — or a
+            // just-closed launch dialog — settles, silently stealing it
+            // (#1373).
             // Re-apply on the next macrotask, after that settles. Originally
             // only the first-render (page-load) path got this retry; the
             // new-session path reaches here via the `became_focused` /
@@ -663,11 +661,18 @@ impl Component for InputBar {
                                 && self.vim.borrow().mode == vim::VimMode::Normal)
                                 .then_some("vim-normal")
                         )}
-                        placeholder={self.pending_suggestion.clone().unwrap_or_else(|| "Type your message... (Shift+Enter for new line)".into())}
+                        placeholder={self.pending_suggestion.clone().unwrap_or_else(|| if ctx.props().ws_connected {
+                            "Type your message... (Shift+Enter for new line)".into()
+                        } else {
+                            // The composer stays usable through a server
+                            // restart: sends queue in the outbox and flush on
+                            // reconnect (#1236), so say so instead of locking
+                            // the box.
+                            "Reconnecting — messages will send when the server is back".into()
+                        })}
                         oninput={handle_input}
                         onkeydown={handle_keydown}
                         onpaste={handle_paste}
-                        disabled={!ctx.props().ws_connected}
                         rows="1"
                     />
                     if self.pending_suggestion.is_some() && self.input_text.is_empty() {
@@ -1068,7 +1073,7 @@ impl InputBar {
                 <button
                     type="submit"
                     class="send-button"
-                    disabled={!ws_connected || is_uploading}
+                    disabled={is_uploading}
                     onclick={on_send}
                 >
                     { "Send" }
@@ -1076,7 +1081,7 @@ impl InputBar {
                 <button
                     type="button"
                     class="send-mode-toggle"
-                    disabled={!ws_connected || is_uploading}
+                    disabled={is_uploading}
                     onclick={on_toggle_dropdown}
                 >
                     { "\u{25bc}" }
@@ -1104,6 +1109,8 @@ impl InputBar {
                     <button
                         type="button"
                         class="dropdown-option attachment"
+                        disabled={!ws_connected}
+                        title={if ws_connected { "" } else { "File uploads need the live connection" }}
                         onclick={on_attach_dropdown}
                     >
                         { "Send with attachment(s)" }
