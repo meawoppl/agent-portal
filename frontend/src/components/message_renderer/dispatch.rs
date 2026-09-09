@@ -81,6 +81,10 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             AgentFrame::Claude(ClaudeMessage::RateLimitEvent(msg)) => {
                 renderers::render_rate_limit_event(&msg, ctx.timestamp)
             }
+            // Transport bookkeeping is intentionally not a transcript row.
+            // `group_messages` normally removes it before dispatch; retain an
+            // empty direct-render fallback for callers rendering one frame.
+            AgentFrame::Claude(ClaudeMessage::CommandLifecycle(_)) => html! {},
             AgentFrame::Claude(ClaudeMessage::LocalError(msg)) => {
                 renderers::render_local_error(&msg, ctx.timestamp)
             }

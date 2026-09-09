@@ -34,6 +34,9 @@ pub enum AgentFrameKind {
     ClaudeUser,
     ClaudeError,
     ClaudeRateLimitEvent,
+    /// Command transport bookkeeping. Recognized but omitted from the
+    /// transcript; see the grouping filter for #1913.
+    ClaudeCommandLifecycle,
     Portal,
     OptimisticUser,
     CodexThreadStarted,
@@ -158,6 +161,7 @@ impl FrameRenderer {
             | AgentFrameKind::ClaudeUser
             | AgentFrameKind::ClaudeError
             | AgentFrameKind::ClaudeRateLimitEvent
+            | AgentFrameKind::ClaudeCommandLifecycle
             | AgentFrameKind::Portal
             | AgentFrameKind::OptimisticUser => Self::Claude,
             AgentFrameKind::CodexThreadStarted
@@ -193,6 +197,7 @@ impl ClaudeMessage {
             Self::Error(_) => AgentFrameKind::ClaudeError,
             Self::Portal(_) => AgentFrameKind::Portal,
             Self::RateLimitEvent(_) => AgentFrameKind::ClaudeRateLimitEvent,
+            Self::CommandLifecycle(_) => AgentFrameKind::ClaudeCommandLifecycle,
             // A `/clear` seam is a session-level event, so it routes and groups
             // with system frames; `dispatch` still selects its own renderer off
             // the message variant, not this kind.

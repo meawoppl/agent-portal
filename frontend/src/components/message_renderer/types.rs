@@ -58,6 +58,11 @@ pub enum ClaudeMessage {
     Error(shared::AnthropicError),
     Portal(shared::PortalMessage),
     RateLimitEvent(shared::RateLimitEvent),
+    /// Claude's delivery bookkeeping for an input carrying a client-supplied
+    /// UUID. It is typed so it never falls through to the raw-JSON renderer,
+    /// but it has no transcript body: queued/started/terminal states describe
+    /// command transport, not conversation content (#1913).
+    CommandLifecycle(shared::CommandLifecycleMessage),
     /// `/clear`. Worth its own variant rather than falling to `Unknown`: it is
     /// the visible seam between two conversations in one session, and it also
     /// marks where claude's conversation id rotates (see the render).
@@ -103,6 +108,7 @@ impl ClaudeMessage {
             shared::ClaudeOutput::Result(msg) => Some(Self::Result(msg)),
             shared::ClaudeOutput::Error(msg) => Some(Self::Error(msg)),
             shared::ClaudeOutput::RateLimitEvent(msg) => Some(Self::RateLimitEvent(msg)),
+            shared::ClaudeOutput::CommandLifecycle(msg) => Some(Self::CommandLifecycle(msg)),
             shared::ClaudeOutput::ConversationReset(msg) => Some(Self::ConversationReset(msg)),
             // Wildcard: control frames plus the 2.1.160 wire additions
             // (stream_event, tool_progress, transcript variants, …) that
