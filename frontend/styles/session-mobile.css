@@ -69,43 +69,14 @@
         gap: 0.5rem;
     }
 
-    /* Collapse toggle: sits at the end of the expanded header row; when the
-       header is collapsed it becomes the whole header — a slim full-width
-       pull strip (comfortable tap target despite its height) that keeps only
-       the safe-area inset above it. */
-    .focus-flow-header .header-collapse-toggle {
-        display: block;
-        background: none;
-        border: none;
-        color: var(--text-muted);
-        font-size: 0.8rem;
-        line-height: 1;
-        padding: 0.3rem 0.5rem;
-        cursor: pointer;
-    }
-
+    /* Collapsed pull strip: restate the side safe-area insets this block's
+       expanded-header rule above would otherwise provide. Everything else
+       (hiding h1/actions, full-width toggle, waiting tint) is viewport-
+       independent and lives in session-layout.css. */
     .focus-flow-header.collapsed {
-        /* Keep the notch/Dynamic Island inset; drop all other chrome. */
         padding: max(0px, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) 0
             max(0.75rem, env(safe-area-inset-left));
         gap: 0;
-    }
-
-    .focus-flow-header.collapsed h1,
-    .focus-flow-header.collapsed .header-actions {
-        display: none;
-    }
-
-    .focus-flow-header.collapsed .header-collapse-toggle {
-        width: 100%;
-        padding: 0.15rem 0 0.25rem;
-    }
-
-    /* Collapsed must not hide the "agent is blocked on you" signal: the pull
-       strip takes the waiting badge's color and shows the count inline. */
-    .focus-flow-header.collapsed.has-waiting .header-collapse-toggle {
-        color: var(--error);
-        font-weight: 600;
     }
 
     .total-spend-badge,

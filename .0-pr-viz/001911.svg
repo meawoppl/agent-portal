@@ -2,7 +2,7 @@
   <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
 
   <!-- Thesis -->
-  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">The mobile header now collapses to a slim pull strip — transcript gets the space</text>
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">The header now collapses to a slim pull strip — the transcript gets the space</text>
 
   <!-- BEFORE / AFTER labels -->
   <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
@@ -91,7 +91,7 @@
 
   <!-- mechanism strip (kept clear of the divider band) -->
   <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">ToggleHeaderCollapsed · persisted in localStorage</text>
-  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">CSS scoped to ≤768px — desktop never collapses</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Works on every viewport — the strip is the expand target</text>
 
   <!-- Footer limitation -->
   <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: manual toggle only — no auto-hide on scroll; while collapsed, Launch/Settings need one extra tap to reach.</text>

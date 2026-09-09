@@ -39,11 +39,44 @@
     gap: 1rem;
 }
 
-/* Mobile-only affordance: desktop always shows the full header, so the
-   collapse toggle (and the `.collapsed` state it drives, styled in
-   session-mobile.css) is hidden above the phone breakpoint. */
+/* Collapse toggle: chevron at the end of the header row, on every viewport.
+   Collapsed, the header shrinks to a slim full-width pull strip (title and
+   actions hidden) that doubles as the expand target. The top padding keeps
+   the notch safe-area inset via env() — 0 on desktop, restated with the
+   side insets in session-mobile.css for phones. */
 .focus-flow-header .header-collapse-toggle {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1;
+    padding: 0.3rem 0.5rem;
+    cursor: pointer;
+}
+
+.focus-flow-header .header-collapse-toggle:hover {
+    color: var(--text-primary);
+}
+
+.focus-flow-header.collapsed {
+    padding: max(0px, env(safe-area-inset-top)) 1.5rem 0;
+}
+
+.focus-flow-header.collapsed h1,
+.focus-flow-header.collapsed .header-actions {
     display: none;
+}
+
+.focus-flow-header.collapsed .header-collapse-toggle {
+    width: 100%;
+    padding: 0.15rem 0 0.25rem;
+}
+
+/* Collapsed must not hide the "agent is blocked on you" signal: the pull
+   strip takes the waiting badge's color and shows the count inline. */
+.focus-flow-header.collapsed.has-waiting .header-collapse-toggle {
+    color: var(--error);
+    font-weight: 600;
 }
 
 .total-spend-badge {

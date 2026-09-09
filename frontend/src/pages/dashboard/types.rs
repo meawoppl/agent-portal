@@ -28,7 +28,7 @@ pub const SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY: &str = "claude-portal-session-
 /// Storage key for the opt-in vim editing mode in localStorage
 pub const VIM_MODE_STORAGE_KEY: &str = "claude-portal-vim-mode";
 
-/// Whether the dashboard header is collapsed to its slim strip (mobile only).
+/// Whether the dashboard header is collapsed to its slim pull strip.
 pub const HEADER_COLLAPSED_STORAGE_KEY: &str = "claude-portal-header-collapsed";
 /// Maximum number of messages held in the frontend live buffer.
 ///
@@ -143,15 +143,14 @@ pub fn save_inactive_hidden(hidden: bool) {
     save_bool_pref(INACTIVE_HIDDEN_STORAGE_KEY, hidden);
 }
 
-/// Load whether the dashboard header is collapsed to its slim mobile strip
-/// (default: expanded). Desktop ignores the flag entirely — the collapsed
-/// styles are scoped to the mobile breakpoint — so a phone preference can
-/// never lose the header on a desktop browser sharing the same storage.
+/// Load whether the dashboard header is collapsed to its slim pull strip
+/// (default: expanded). Applies on every viewport; the strip itself is the
+/// expand affordance, so the header can never be lost.
 pub fn load_header_collapsed() -> bool {
     load_bool_pref(HEADER_COLLAPSED_STORAGE_KEY)
 }
 
-/// Save the mobile header-collapsed preference to localStorage.
+/// Save the header-collapsed preference to localStorage.
 pub fn save_header_collapsed(collapsed: bool) {
     save_bool_pref(HEADER_COLLAPSED_STORAGE_KEY, collapsed);
 }

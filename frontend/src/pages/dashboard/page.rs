@@ -663,11 +663,11 @@ pub fn dashboard_page() -> Html {
                 }
             }
 
-            // Header. On phones the collapse toggle shrinks it to a slim
-            // full-width pull strip (title and actions hidden) for vertical
-            // space; the strip tints when sessions await permission so the
-            // collapsed header never hides that signal. Desktop CSS ignores
-            // both the toggle and the `collapsed` class.
+            // Header. The collapse toggle shrinks it to a slim full-width
+            // pull strip (title and actions hidden) for vertical space —
+            // most valuable on phones, available everywhere. The strip tints
+            // when sessions await permission so the collapsed header never
+            // hides that signal.
             <header class={classes!(
                 "focus-flow-header",
                 ui_state.header_collapsed.then_some("collapsed"),

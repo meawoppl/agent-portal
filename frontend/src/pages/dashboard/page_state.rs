@@ -191,9 +191,8 @@ pub(super) struct DashboardUiState {
     pub rail_position: RailPosition,
     /// Opt-in: group the session rail's pills into per-host sections.
     pub group_by_host: bool,
-    /// Mobile-only: header collapsed to its slim pull strip. The flag is
-    /// stored regardless of viewport, but the collapsed CSS is scoped to the
-    /// phone breakpoint so desktop always shows the full header.
+    /// Header collapsed to its slim pull strip (any viewport). The strip is
+    /// itself the expand affordance, so the header can never be lost.
     pub header_collapsed: bool,
     pub pending_leave: Option<Uuid>,
 }
