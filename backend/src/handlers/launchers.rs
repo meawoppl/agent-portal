@@ -475,14 +475,7 @@ pub async fn list_directories(
     Path(launcher_id): Path<Uuid>,
     Query(query): Query<DirectoryQuery>,
 ) -> Result<Json<DirectoryListingResponse>, AppError> {
-    // Verify the launcher belongs to this user
-    let owner = app_state
-        .session_manager
-        .launcher_owner(launcher_id)
-        .ok_or(AppError::NotFound("Launcher not found"))?;
-    if owner != user_id {
-        return Err(AppError::Forbidden);
-    }
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     let request_id = Uuid::new_v4();
     let rx = app_state.session_manager.register_dir_request(request_id);
@@ -561,15 +554,7 @@ pub async fn update_launcher(
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    {
-        let owner = app_state
-            .session_manager
-            .launcher_owner(launcher_id)
-            .ok_or(AppError::NotFound("Launcher not found"))?;
-        if owner != user_id {
-            return Err(AppError::Forbidden);
-        }
-    }
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     // Route through the evicting sender (not a cloned raw sender) so a dead
     // channel tears the stale connection down instead of lingering.
@@ -595,15 +580,7 @@ pub async fn restart_launcher(
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
-    {
-        let owner = app_state
-            .session_manager
-            .launcher_owner(launcher_id)
-            .ok_or(AppError::NotFound("Launcher not found"))?;
-        if owner != user_id {
-            return Err(AppError::Forbidden);
-        }
-    }
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     if !app_state
         .session_manager
@@ -639,15 +616,7 @@ pub async fn probe_agents(
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
 ) -> Result<Json<ProbeAgentsResponse>, AppError> {
-    {
-        let owner = app_state
-            .session_manager
-            .launcher_owner(launcher_id)
-            .ok_or(AppError::NotFound("Launcher not found"))?;
-        if owner != user_id {
-            return Err(AppError::Forbidden);
-        }
-    }
+    require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     let request_id = Uuid::new_v4();
     let rx = app_state.session_manager.register_probe_request(request_id);

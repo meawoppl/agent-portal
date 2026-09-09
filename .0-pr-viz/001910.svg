@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans','DejaVu Sans',ui-sans-serif,system-ui,sans-serif">
+<rect width="2000" height="1200" fill="#16161e"/>
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1910 · dedupe launcher owner checks into helper</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Four endpoints route through require_launcher_owner; behavior unchanged.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+<rect x="80" y="270" width="840" height="300" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="325" font-size="26" fill="#c0caf5">four handlers hand-roll the owner check</text>
+<text x="108" y="380" font-size="23" fill="#a9b1d6">launcher_owner + 404/403 mapping, copied 4x</text>
+<text x="108" y="430" font-size="23" fill="#f7768e">list_directories, update, restart, probe_agents</text>
+<text x="108" y="480" font-size="23" fill="#f7768e">7-line guard block repeated per handler</text>
+<rect x="80" y="650" width="840" height="245" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="705" font-size="26" fill="#c0caf5">same guard drifts across edits</text>
+<text x="108" y="760" font-size="23" fill="#a9b1d6">helper exists but only 5 login/install callers use it</text>
+<text x="108" y="810" font-size="23" fill="#f7768e">one fix must land in four places at once</text>
+<rect x="1065" y="270" width="860" height="300" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="325" font-size="26" fill="#7aa2f7">all four call require_launcher_owner</text>
+<text x="1093" y="380" font-size="23" fill="#a9b1d6">one helper: launcher_owner + 404/403 mapping</text>
+<text x="1093" y="430" font-size="23" fill="#9ece6a">9 callers share one ownership rule</text>
+<text x="1093" y="480" font-size="23" fill="#9ece6a">328 backend tests green, clippy and fmt clean</text>
+<rect x="1065" y="650" width="860" height="245" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="705" font-size="26" fill="#7aa2f7">warn-logging check stays inline</text>
+<text x="1093" y="760" font-size="23" fill="#a9b1d6">resolve_launch_target logs the owner on mismatch</text>
+<text x="1093" y="810" font-size="23" fill="#9ece6a">deliberately untouched — extra behavior, not dup</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: backend/src/handlers/launchers.rs only; no API or protocol change.</text>
+</svg>
