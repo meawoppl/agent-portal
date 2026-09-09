@@ -1050,11 +1050,21 @@ async fn start_session_async(
             }
         }
 
+        // The preview is everything dictated so far: the finals accumulated
+        // across pauses plus the segment currently being recognized. Showing
+        // only `interim` truncated the preview to the current segment — in
+        // hold-open mode every pause finalizes a segment into `final_acc`, so
+        // the bar appeared to keep only the last part of the message (and
+        // went blank at each pause, since a finalized segment leaves `interim`
+        // empty).
+        let mut preview = final_for_result.borrow().clone();
         if !interim.is_empty() {
-            link_for_result.send_message(VoiceInputMsg::Interim(interim));
-        } else {
-            link_for_result.send_message(VoiceInputMsg::Interim(String::new()));
+            if !preview.is_empty() && !preview.ends_with(' ') {
+                preview.push(' ');
+            }
+            preview.push_str(&interim);
         }
+        link_for_result.send_message(VoiceInputMsg::Interim(preview));
     }) as Box<dyn FnMut(JsValue)>);
 
     let link_for_error = link.clone();
