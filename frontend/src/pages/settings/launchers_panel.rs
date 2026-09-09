@@ -636,9 +636,7 @@ pub fn launchers_panel() -> Html {
             let loading = loading.clone();
 
             spawn_local(async move {
-                if let Ok(data) =
-                    utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
-                {
+                if let Ok(data) = utils::fetch_launchers().await {
                     launchers.set(data);
                 }
                 loading.set(false);

@@ -9,7 +9,7 @@ use shared::api::{
     CreateScheduledTaskRequest, ScheduledTaskInfo, ScheduledTaskListResponse,
     UpdateScheduledTaskRequest,
 };
-use shared::{LauncherInfo, SessionInfo};
+use shared::SessionInfo;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -103,9 +103,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let hostname = hostname.clone();
         use_effect_with(hostname.clone(), move |_| {
             spawn_local(async move {
-                if let Ok(launchers) =
-                    utils::fetch_json::<Vec<LauncherInfo>>("/api/launchers", On401::Ignore).await
-                {
+                if let Ok(launchers) = utils::fetch_launchers().await {
                     if let Some(l) = launchers.iter().find(|l| l.hostname == hostname) {
                         launcher_version.set(l.version.clone());
                     }

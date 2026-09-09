@@ -60,6 +60,13 @@ pub async fn fetch_json<T: DeserializeOwned>(path: &str, on_401: On401) -> Resul
         .map_err(|e| FetchError::Decode(e.to_string()))
 }
 
+/// GET the launcher list (e.g. for install-mode auto-select or version
+/// probes). The path, element type, and 401 policy are identical at every
+/// call site, so they live here instead of being repeated.
+pub async fn fetch_launchers() -> Result<Vec<shared::LauncherInfo>, FetchError> {
+    fetch_json("/api/launchers", On401::Ignore).await
+}
+
 /// Read `(protocol, host)` from the browser location, with per-field fallbacks.
 ///
 /// Returns `None` only when there is no window (e.g. SSR/tests); per-field
