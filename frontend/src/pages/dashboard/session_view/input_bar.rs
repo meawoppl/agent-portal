@@ -15,6 +15,7 @@
 
 use super::history::CommandHistory;
 use super::vim::{self, VimState};
+use crate::components::build_upload_message;
 use crate::components::VoiceInput;
 use crate::pages::dashboard::load_vim_mode;
 use crate::utils::format_file_size;
@@ -1122,29 +1123,6 @@ impl InputBar {
     }
 }
 
-/// Compose the combined user-text + file-list message the upload pipeline
-/// sends to Claude after the last chunk lands. Pulled out so the message
-/// shape (preserved verbatim from the pre-extraction behavior) is
-/// unit-testable without a `web_sys::File`.
-fn build_upload_message(user_input: &str, files: &[(String, u64)]) -> String {
-    let file_list: Vec<String> = files
-        .iter()
-        .map(|(name, size)| format!("- {} ({})", name, format_file_size(*size)))
-        .collect();
-    let list = file_list.join("\n");
-    if user_input.is_empty() {
-        format!(
-            "I've uploaded the following files to your working directory:\n{}",
-            list
-        )
-    } else {
-        format!(
-            "{}\n\nI've uploaded the following files to your working directory:\n{}",
-            user_input, list
-        )
-    }
-}
-
 /// Add agent-facing context to text produced by speech recognition. The
 /// reminder stays out of the textarea and command history, while the shared
 /// markdown path renders it as the established compact reminder bumper in the
@@ -1168,56 +1146,6 @@ mod tests {
         );
         assert!(prompt.contains("consider phonetic interpretations"));
         assert!(shared::system_reminder::has_system_reminder(&prompt));
-    }
-
-    // --- build_upload_message ---
-
-    #[test]
-    fn build_upload_message_with_user_text_prepends_text_and_blank_line() {
-        let files = vec![("a.txt".to_string(), 100u64)];
-        let out = build_upload_message("hello", &files);
-        assert_eq!(
-            out,
-            "hello\n\nI've uploaded the following files to your working directory:\n- a.txt (100 B)"
-        );
-    }
-
-    #[test]
-    fn build_upload_message_without_user_text_omits_blank_line_and_header() {
-        let files = vec![("a.txt".to_string(), 100u64)];
-        let out = build_upload_message("", &files);
-        assert_eq!(
-            out,
-            "I've uploaded the following files to your working directory:\n- a.txt (100 B)"
-        );
-    }
-
-    #[test]
-    fn build_upload_message_lists_one_file_per_line_in_input_order() {
-        let files = vec![
-            ("first.png".to_string(), 1024u64),
-            ("second.jpg".to_string(), 2 * 1024 * 1024),
-            ("third.txt".to_string(), 42u64),
-        ];
-        let out = build_upload_message("ship it", &files);
-        // Verify the ordering matches the input vec — the bar relies on
-        // this so the user sees the files they picked in the order they
-        // picked them.
-        let expected = "ship it\n\nI've uploaded the following files to your working directory:\n- first.png (1.0 KB)\n- second.jpg (2.0 MB)\n- third.txt (42 B)";
-        assert_eq!(out, expected);
-    }
-
-    #[test]
-    fn build_upload_message_with_empty_file_list_still_renders_header() {
-        // Defensive: an empty list shouldn't crash, even though the
-        // upload pipeline always supplies at least one file. The format
-        // ends with just the header + a trailing colon + newline; no list
-        // rows.
-        let out = build_upload_message("", &[]);
-        assert_eq!(
-            out,
-            "I've uploaded the following files to your working directory:\n"
-        );
     }
 
     // --- slash command pass-through ---

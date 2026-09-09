@@ -9,6 +9,7 @@ use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
     has_askuserquestion_answers, render_askuserquestion_result,
 };
+use crate::components::{split_upload_notice, UploadNotice};
 use shared::UserFrame as OptimisticUserMessage;
 use uuid::Uuid;
 use yew::prelude::*;
@@ -128,11 +129,38 @@ pub fn render_optimistic_user_message_content(
     msg: &OptimisticUserMessage,
     session_id: Uuid,
 ) -> Option<Html> {
-    (!msg.content.trim().is_empty()).then(|| {
-        html! {
-            <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&msg.content), session_id) }</div>
-        }
+    if msg.content.trim().is_empty() {
+        return None;
+    }
+    if let Some(notice) = split_upload_notice(&msg.content) {
+        return Some(render_upload_notice(&notice, session_id));
+    }
+    Some(html! {
+        <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&msg.content), session_id) }</div>
     })
+}
+
+/// Render the upload pipeline's agent-facing notice as the user's own words
+/// plus compact attachment chips. The wire text (which the agent needs — the
+/// files just appeared in its working directory) is untouched; only the
+/// transcript stops impersonating the user with machine boilerplate.
+fn render_upload_notice(notice: &UploadNotice<'_>, session_id: Uuid) -> Html {
+    html! {
+        <>
+            if let Some(text) = notice.user_text {
+                <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(text), session_id) }</div>
+            }
+            <div class="upload-notice">
+                { for notice.files.iter().map(|(name, size)| html! {
+                    <span class="upload-chip">
+                        <span aria-hidden="true">{ "📎" }</span>
+                        <span class="upload-chip-name">{ *name }</span>
+                        <span class="upload-chip-size">{ *size }</span>
+                    </span>
+                }) }
+            </div>
+        </>
+    }
 }
 
 /// Render a user message's body, returning `None` when it produces nothing
@@ -151,6 +179,8 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
         render_content_blocks(&msg.message.content, session_id)
     } else if text_content.is_empty() {
         None
+    } else if let Some(notice) = split_upload_notice(&text_content) {
+        Some(render_upload_notice(&notice, session_id))
     } else {
         Some(html! {
             <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
