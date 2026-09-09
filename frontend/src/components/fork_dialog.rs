@@ -7,6 +7,7 @@ use web_sys::{HtmlInputElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 use crate::components::{FloatingPane, ModelSelect};
+use crate::utils;
 
 #[derive(Properties, PartialEq)]
 pub struct ForkDialogProps {
@@ -87,16 +88,11 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
             let on_close = on_close.clone();
             let on_forked = on_forked.clone();
             spawn_local(async move {
-                let request =
-                    match Request::post(&format!("/api/sessions/{source_id}/fork")).json(&body) {
-                        Ok(request) => request,
-                        Err(e) => {
-                            error.set(Some(format!("Could not encode fork request: {e}")));
-                            submitting.set(false);
-                            return;
-                        }
-                    };
-                let response = request.send().await;
+                let response = utils::send_json(
+                    Request::post(&format!("/api/sessions/{source_id}/fork")),
+                    &body,
+                )
+                .await;
                 match response {
                     Ok(response) if response.ok() => {
                         match response.json::<ForkSessionResponse>().await {

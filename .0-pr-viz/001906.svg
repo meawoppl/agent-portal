@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="dim-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#565f89"/></marker>
+    <marker id="red-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/></marker>
+    <marker id="green-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1906 · Adopt send_json in fork dialog request</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">fork_dialog hand-rolled .json() plus .send() with a bespoke encode arm;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now one shared utils::send_json call — zero behavior change.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="255" width="840" height="240" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="108" y="302" font-size="26" fill="#7aa2f7">fork_dialog.rs — fork submit</text>
+    <text x="108" y="345" font-size="23" fill="#a9b1d6">match Request::post(...).json(&amp;body)</text>
+    <text x="108" y="388" font-size="23" fill="#a9b1d6">Ok versus Err with custom message,</text>
+    <text x="108" y="431" font-size="23" fill="#a9b1d6">then request.send().await</text>
+    <text x="108" y="474" font-size="21" fill="#565f89">two-step chain spelled out by hand</text>
+  </g>
+  <line x1="500" y1="495" x2="500" y2="575" stroke="#565f89" stroke-width="2" marker-end="url(#dim-arrow)"/>
+  <g>
+    <rect x="80" y="590" width="840" height="240" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="108" y="637" font-size="26" fill="#7aa2f7">last of its kind</text>
+    <text x="108" y="680" font-size="23" fill="#a9b1d6">every other .json() site already uses</text>
+    <text x="108" y="723" font-size="23" fill="#a9b1d6">utils::send_json (#1892, #1896, #1898)</text>
+    <text x="108" y="766" font-size="21" fill="#565f89">encode failure exits via the same Err arm</text>
+  </g>
+  <line x1="500" y1="830" x2="500" y2="910" stroke="#f7768e" stroke-width="2" marker-end="url(#red-arrow)"/>
+  <g>
+    <rect x="80" y="925" width="840" height="155" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="108" y="972" font-size="26" fill="#c0caf5">One helper, one holdout</text>
+    <text x="108" y="1016" font-size="23" fill="#f7768e">reader re-derives the shared chain</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="255" width="860" height="240" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="302" font-size="26" fill="#7aa2f7">utils::send_json(Request::post(...), &amp;body)</text>
+    <text x="1093" y="345" font-size="23" fill="#a9b1d6">.await, then the existing match</text>
+    <text x="1093" y="388" font-size="23" fill="#a9b1d6">serialize plus send in one fallible step</text>
+    <text x="1093" y="431" font-size="21" fill="#565f89">fork_dialog.rs:91 — Err arm unchanged</text>
+  </g>
+  <line x1="1495" y1="495" x2="1495" y2="575" stroke="#9ece6a" stroke-width="2" marker-end="url(#green-arrow)"/>
+  <g>
+    <rect x="1065" y="590" width="860" height="240" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1093" y="637" font-size="26" fill="#9ece6a">1 site, 1 helper, -4 net lines</text>
+    <text x="1093" y="680" font-size="23" fill="#a9b1d6">same error text, same control flow</text>
+    <text x="1093" y="723" font-size="23" fill="#a9b1d6">clippy clean, 685 frontend tests pass</text>
+    <text x="1093" y="766" font-size="21" fill="#565f89">cargo fmt, clippy, test verified locally</text>
+  </g>
+  <line x1="1495" y1="830" x2="1495" y2="910" stroke="#9ece6a" stroke-width="2" marker-end="url(#green-arrow)"/>
+  <g>
+    <rect x="1065" y="925" width="860" height="155" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1093" y="972" font-size="26" fill="#c0caf5">Direct .json() adoption complete</text>
+    <text x="1093" y="1016" font-size="23" fill="#9ece6a">no remaining hand-chained call sites</text>
+  </g>
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: 1 file; encode errors now flow through the shared Fork request failed arm.</text>
+</svg>
