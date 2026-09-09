@@ -47,9 +47,8 @@ pub fn forwarding_panel() -> Html {
             let reload = reload.clone();
             spawn_local(async move {
                 let url = utils::api_url(&format!("/api/sessions/{session_id}/forwards/public"));
-                if let Ok(req) = Request::patch(&url).json(&SetForwardPublicRequest { public }) {
-                    let _ = req.send().await;
-                }
+                let _ = utils::send_json(Request::patch(&url), &SetForwardPublicRequest { public })
+                    .await;
                 // Refetch so the row reflects the server (and any concurrent
                 // registration/revocation).
                 reload();
