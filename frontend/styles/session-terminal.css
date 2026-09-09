@@ -78,6 +78,17 @@
     white-space: nowrap;
 }
 
+.session-view-header .session-model {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-family: monospace;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(187, 154, 247, 0.08);
+    white-space: nowrap;
+}
+
 .session-view-header .session-launcher-version {
     font-size: 0.78rem;
     color: var(--text-secondary);
