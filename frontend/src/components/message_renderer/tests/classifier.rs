@@ -1,12 +1,16 @@
 //! Cross-family classifier contracts: turn-terminator detection and the
 //! one-row-per-realistic-message-kind sweep that guards every category.
 
-use super::super::grouping::{classify, group_is_turn_terminator, GroupCategory, MessageGroup};
+use super::super::grouping::{
+    classify, group_is_turn_terminator, group_messages, GroupCategory, MessageGroup,
+};
+use super::super::types::ClaudeMessage;
 use super::fixtures::{
     assistant_with_tool_use, codex_item_started_agent_message, plain_user_text,
     portal_text_message, read_tool_result_user_message, rendered, result_message,
     thinking_tokens_message,
 };
+use crate::components::agent_frame::{AgentFrameKind, AgentFrameRegistry};
 
 #[test]
 fn turn_terminator_detection_covers_claude_and_codex() {
@@ -243,4 +247,29 @@ fn every_local_frame_the_portal_can_author_renders() {
         let _parsed = ClaudeMessage::parse(&json)
             .unwrap_or_else(|e| panic!("{tag} frame must parse: {e} ({json})"));
     }
+}
+
+#[test]
+fn claude_command_lifecycle_is_typed_not_raw_json() {
+    let json = r#"{"command_uuid":"8823a584-c752-4981-957b-fa5e23a053c0","session_id":"041ddc00-ff2f-4281-99da-b66bebcf78e6","state":"completed","type":"command_lifecycle","uuid":"132c02dc-453c-4d5a-a8ff-03f4b1579c89"}"#;
+
+    assert!(matches!(
+        ClaudeMessage::parse(json),
+        Ok(ClaudeMessage::CommandLifecycle(message))
+            if message.state == shared::CommandLifecycleState::Completed
+    ));
+    assert_eq!(
+        AgentFrameRegistry::parse(json, shared::AgentType::Claude).kind(),
+        AgentFrameKind::ClaudeCommandLifecycle
+    );
+
+    let groups = group_messages(
+        &[rendered(json.to_string())],
+        shared::AgentType::Claude,
+        None,
+    );
+    assert!(
+        groups.is_empty(),
+        "command lifecycle bookkeeping must not create a transcript row"
+    );
 }

@@ -525,16 +525,22 @@ pub fn group_messages(
     }
 
     for message in messages {
+        let kind = AgentFrameRegistry::parse(&message.content, agent_type).kind();
+
+        // Claude command lifecycle frames are transport bookkeeping, not
+        // conversation. Recognize and omit them rather than surfacing raw JSON
+        // or leaving empty keyed rows in the transcript (#1913).
+        if kind == AgentFrameKind::ClaudeCommandLifecycle {
+            continue;
+        }
+
         // Cumulative `turn/diff/updated` events are dropped entirely — Codex
         // re-sends the whole-turn diff on every edit tick, so they pile up
         // O(ticks) redundant cards (each the size of the full turn) on top of
         // the per-file diffs that already show the same edits. Skipping here
         // rather than in `classify` keeps the surrounding Codex events in one
         // run instead of fragmenting the group around each dropped diff.
-        if matches!(
-            AgentFrameRegistry::parse(&message.content, agent_type).kind(),
-            AgentFrameKind::CodexTurnDiffUpdated
-        ) {
+        if matches!(kind, AgentFrameKind::CodexTurnDiffUpdated) {
             continue;
         }
         match classify(message, agent_type, current_user_id) {

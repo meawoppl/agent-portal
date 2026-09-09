@@ -16,12 +16,15 @@
 /// Whether one stored wire frame counts against the render budget.
 ///
 /// Claude's cumulative thinking-token system markers are free: many arrive per
-/// turn and the frontend collapses them into a single chip.
+/// turn and the frontend collapses them into a single chip. Command-lifecycle
+/// records are also free because they are transport bookkeeping omitted from
+/// the transcript (#1913).
 pub fn counts_toward_render_limit(content: &str) -> bool {
-    !matches!(
-        serde_json::from_str::<crate::ClaudeOutput>(content),
-        Ok(crate::ClaudeOutput::System(message)) if message.is_thinking_tokens()
-    )
+    match serde_json::from_str::<crate::ClaudeOutput>(content) {
+        Ok(crate::ClaudeOutput::System(message)) => !message.is_thinking_tokens(),
+        Ok(crate::ClaudeOutput::CommandLifecycle(_)) => false,
+        _ => true,
+    }
 }
 
 /// Trim `items` (chronological, oldest first) to the newest window containing
@@ -91,10 +94,12 @@ mod tests {
 
     const THINKING: &str = r#"{"type":"system","subtype":"thinking_tokens","session_id":"s","cumulative_thinking_tokens":42}"#;
     const TEXTISH: &str = r#"{"type":"user","content":"hello"}"#;
+    const COMMAND_LIFECYCLE: &str = r#"{"type":"command_lifecycle","command_uuid":"cmd-1","state":"completed","uuid":"frame-1","session_id":"session-1"}"#;
 
     #[test]
     fn thinking_token_markers_ride_free() {
         assert!(!counts_toward_render_limit(THINKING));
+        assert!(!counts_toward_render_limit(COMMAND_LIFECYCLE));
         assert!(counts_toward_render_limit(TEXTISH));
         assert!(counts_toward_render_limit("not json at all"));
     }
