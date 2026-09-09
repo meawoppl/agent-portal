@@ -56,6 +56,14 @@ pub struct ListMessagesQuery {
     /// `created_at > after`.
     #[serde(default)]
     pub after: Option<String>,
+    /// Size the page by the *render budget* instead of raw rows (#1915): the
+    /// newest window containing exactly N messages that count toward the
+    /// frontend's render limit (`shared::render_budget`), with non-counting
+    /// rows (thinking-token markers) riding along free. Sized server-side so
+    /// the client never fetches rows its trim would immediately discard.
+    /// Mutually exclusive with `limit`/`before`/`after`.
+    #[serde(default)]
+    pub render_limit: Option<i64>,
 }
 
 /// Request body for creating a new message
@@ -149,7 +157,14 @@ pub async fn list_messages(
             "`before` and `after` are mutually exclusive",
         ));
     }
-    if let Some(l) = params.limit {
+    if params.render_limit.is_some()
+        && (params.limit.is_some() || params.before.is_some() || params.after.is_some())
+    {
+        return Err(AppError::BadRequest(
+            "`render_limit` cannot be combined with `limit`, `before`, or `after`",
+        ));
+    }
+    if let Some(l) = params.limit.or(params.render_limit) {
         if l <= 0 {
             return Err(AppError::BadRequest("`limit` must be > 0"));
         }
@@ -182,7 +197,9 @@ pub async fn list_messages(
     // in-memory before serializing so the wire shape stays chronological —
     // matches the prior `order(created_at.asc())` contract that the frontend
     // depends on (it appends to a chronological vector and trims the front).
-    let message_list: Vec<Message> = if let Some(after) = after_ts {
+    let message_list: Vec<Message> = if let Some(render_limit) = params.render_limit {
+        fetch_render_window(&mut conn, session_id, render_limit as usize)?
+    } else if let Some(after) = after_ts {
         messages::table
             .filter(messages::session_id.eq(session_id))
             .filter(messages::created_at.gt(after))
@@ -225,6 +242,50 @@ pub async fn list_messages(
         messages: enriched,
         total,
     }))
+}
+
+/// Slack rows fetched beyond `render_limit` on the first pass, absorbing the
+/// typical density of non-counting thinking-token markers without a second
+/// query. Underfill past the slack (a marker-dense window) falls back to one
+/// bounded full fetch.
+const RENDER_WINDOW_SLACK: i64 = 64;
+
+/// Fetch the newest window containing `render_limit` *counting* messages
+/// (`shared::render_budget`), chronological order out. One SQL round trip in
+/// the common case; a second, bounded by [`MAX_LIST_MESSAGES_LIMIT`], only
+/// when the first page was both full and underfilled with counting rows.
+fn fetch_render_window(
+    conn: &mut crate::db::DbConnection,
+    session_id: uuid::Uuid,
+    render_limit: usize,
+) -> Result<Vec<Message>, AppError> {
+    use shared::render_budget::{counts_toward_render_limit, take_render_window_newest_first};
+
+    let fetch_newest = |conn: &mut crate::db::DbConnection, sql_limit: i64| {
+        messages::table
+            .filter(messages::session_id.eq(session_id))
+            .order(messages::created_at.desc())
+            .limit(sql_limit)
+            .load::<Message>(conn)
+    };
+
+    let first_limit = (render_limit as i64 + RENDER_WINDOW_SLACK).min(MAX_LIST_MESSAGES_LIMIT);
+    let mut newest_first = fetch_newest(conn, first_limit)?;
+
+    let counting = newest_first
+        .iter()
+        .filter(|m| counts_toward_render_limit(&m.content))
+        .count();
+    let page_was_full = newest_first.len() as i64 == first_limit;
+    if counting < render_limit && page_was_full && first_limit < MAX_LIST_MESSAGES_LIMIT {
+        newest_first = fetch_newest(conn, MAX_LIST_MESSAGES_LIMIT)?;
+    }
+
+    Ok(take_render_window_newest_first(
+        newest_first,
+        render_limit,
+        |m| counts_toward_render_limit(&m.content),
+    ))
 }
 
 // =============================================================================

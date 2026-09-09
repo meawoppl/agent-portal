@@ -135,6 +135,8 @@ pub mod time;
 
 // `<system-reminder>` splitting, shared by the frontend renderer (collapse to
 // a bar) and backend text classification (strip before summarizing)
+pub mod render_budget;
+
 pub mod system_reminder;
 
 // Substantive-user-message detection (the history viewer's "User msgs" count)

@@ -54,15 +54,6 @@ pub const HEADER_COLLAPSED_STORAGE_KEY: &str = "claude-portal-header-collapsed";
 /// the live view, though nothing is lost server-side.
 pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
-/// How many messages the REST history fetch requests (#1915). The live buffer
-/// keeps [`MAX_MESSAGES_PER_SESSION`] renderable rows, so fetching the
-/// server-side default (`MESSAGE_RETENTION_COUNT`, typically 1000) meant
-/// parsing ~10x more JSON than survives the trim — on every session, on every
-/// reload, on the WASM main thread. The headroom above 100 absorbs rows that
-/// don't count toward the render limit (thinking-token system frames; see
-/// `counts_toward_render_limit`).
-pub const HISTORY_FETCH_LIMIT: usize = 150;
-
 /// Type alias for WebSocket sender.
 ///
 /// This is the **producer half** of an unbounded mpsc queue that feeds a
