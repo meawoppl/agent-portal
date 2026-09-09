@@ -316,11 +316,14 @@ impl Component for SessionView {
         spawn_local(async move {
             let mut last_message_time: Option<String> = None;
 
+            // `render_limit` sizes the page server-side to exactly what the
+            // local trim keeps (`shared::render_budget`, #1915) — no rows
+            // fetched just to be discarded, no underfilled buffer when a turn
+            // was dense with free-riding thinking-token markers.
             if let Ok(data) = utils::fetch_json::<MessagesResponse>(
                 &format!(
-                    "/api/sessions/{}/messages?limit={}",
-                    session_id,
-                    crate::pages::dashboard::types::HISTORY_FETCH_LIMIT
+                    "/api/sessions/{}/messages?render_limit={}",
+                    session_id, MAX_MESSAGES_PER_SESSION
                 ),
                 On401::Ignore,
             )

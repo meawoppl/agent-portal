@@ -11,32 +11,7 @@ use shared::TurnMetrics;
 /// Items for which `counts_toward_limit` is false remain alongside the newest
 /// counted tail without displacing it. Free items older than that tail are
 /// discarded too, preventing detached metadata from growing without bound.
-pub(super) fn retain_newest_items_by_cost<T>(
-    items: &mut Vec<T>,
-    max_cost: usize,
-    counts_toward_limit: impl Fn(&T) -> bool,
-) {
-    let excess = items
-        .iter()
-        .filter(|item| counts_toward_limit(item))
-        .count()
-        .saturating_sub(max_cost);
-    if excess == 0 {
-        return;
-    }
-
-    let mut counted = 0;
-    let keep_from = items
-        .iter()
-        .position(|item| {
-            if counts_toward_limit(item) {
-                counted += 1;
-            }
-            counted == excess
-        })
-        .map_or(items.len(), |index| index + 1);
-    items.drain(0..keep_from);
-}
+pub(super) use shared::render_budget::retain_newest_items_by_cost;
 
 /// Append one live message and apply the same retention rule as history
 /// hydration and replay batches.
@@ -52,13 +27,10 @@ pub(super) fn push_message_with_cost_limit<T>(
 
 /// Claude emits many bodyless cumulative thinking-token markers during one
 /// turn. They render as one compact chip and therefore cost nothing against
-/// the live DOM budget.
-pub(super) fn counts_toward_render_limit(content: &str) -> bool {
-    !matches!(
-        serde_json::from_str::<shared::ClaudeOutput>(content),
-        Ok(shared::ClaudeOutput::System(message)) if message.is_thinking_tokens()
-    )
-}
+/// the live DOM budget. The rule lives in `shared::render_budget` — the same
+/// definition sizes the backend's `render_limit` hydration page, so the page
+/// sent and the buffer kept can never disagree (#1915).
+pub(super) use shared::render_budget::counts_toward_render_limit;
 
 /// Insert one live `TurnMetrics` into the buffer, preserving `started_at ASC`
 /// order and deduping by populated DB `id`.
