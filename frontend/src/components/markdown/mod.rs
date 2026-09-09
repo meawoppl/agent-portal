@@ -396,14 +396,12 @@ Where:\n\
         // The placeholders must land in plain Text events, where the renderer
         // can split them out into their own `MathSpan` elements. If they end
         // up in `Event::Html`/`Event::InlineHtml` the math is never typeset.
-        let math_in_text = events.iter().any(|e| match e {
-            Event::Text(t) => t.contains(MATH_OPEN),
-            _ => false,
-        });
-        let math_in_html = events.iter().any(|e| match e {
-            Event::Html(t) | Event::InlineHtml(t) => t.contains(MATH_OPEN),
-            _ => false,
-        });
+        let math_in_text = events
+            .iter()
+            .any(|e| matches!(e, Event::Text(t) if t.contains(MATH_OPEN)));
+        let math_in_html = events
+            .iter()
+            .any(|e| matches!(e, Event::Html(t) | Event::InlineHtml(t) if t.contains(MATH_OPEN)));
         assert!(math_in_text, "math placeholders should reach Event::Text");
         assert!(!math_in_html, "math should not leak into Event::Html");
     }
