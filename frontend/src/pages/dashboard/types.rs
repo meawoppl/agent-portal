@@ -280,6 +280,12 @@ fn pretty_input<T: serde::Serialize + std::fmt::Debug + ?Sized>(input: &T) -> St
     serde_json::to_string_pretty(input).unwrap_or_else(|_| format!("{:?}", input))
 }
 
+/// Keep an optional string only when it is present and non-empty, so empty
+/// `reason`/`grant_root` fields are omitted instead of rendering blank lines.
+fn non_empty(opt: Option<&str>) -> Option<&str> {
+    opt.filter(|s| !s.is_empty())
+}
+
 /// Render a Claude-side permission tool input from the SDK's named,
 /// typed `ToolInput` parser.
 fn format_claude_permission_input(tool_name: &str, input: &serde_json::Value) -> String {
@@ -316,10 +322,10 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
                 lines.extend(paths.iter().map(|p| format!("  {}", p)));
                 lines
             };
-            if let Some(r) = reason.as_deref().filter(|s| !s.is_empty()) {
+            if let Some(r) = non_empty(reason.as_deref()) {
                 lines.push(format!("Reason: {}", r));
             }
-            if let Some(g) = grant_root.as_deref().filter(|s| !s.is_empty()) {
+            if let Some(g) = non_empty(grant_root.as_deref()) {
                 lines.push(format!("Grant root: {}", g));
             }
             lines.join("\n")
@@ -335,9 +341,7 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
         C::Bash { command, .. } | C::ExecCommand { command, .. } => {
             format!("$ {}", command)
         }
-        C::Permissions { reason, .. } => reason
-            .as_deref()
-            .filter(|s| !s.is_empty())
+        C::Permissions { reason, .. } => non_empty(reason.as_deref())
             .map(|s| s.to_string())
             .unwrap_or_else(|| pretty_input(input)),
         C::McpElicitation { server_name } => {
@@ -419,6 +423,22 @@ mod tests {
         assert_eq!(
             format_permission_input("FileChange", &input),
             "File change 2 file(s):\n  src/main.rs\n  tests/app.rs\nReason: needs approval"
+        );
+    }
+
+    #[test]
+    fn format_codex_file_change_omits_empty_reason_and_grant_root() {
+        let input = serde_json::json!({
+            "tool": "fileChange",
+            "itemId": "fc1",
+            "paths": ["src/main.rs"],
+            "reason": "",
+            "grantRoot": ""
+        });
+
+        assert_eq!(
+            format_permission_input("FileChange", &input),
+            "File change 1 file(s):\n  src/main.rs"
         );
     }
 }
