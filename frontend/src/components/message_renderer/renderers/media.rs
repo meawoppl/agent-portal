@@ -2,6 +2,7 @@
 //! lightbox, the `agent-portal show` video player, and the expired-blob
 //! placeholder both degrade to.
 
+use crate::components::DismissibleBackdrop;
 use crate::hooks::use_escape_capture;
 use gloo::events::EventListener;
 use wasm_bindgen::prelude::*;
@@ -117,9 +118,9 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
         Callback::from(move |_: MouseEvent| expanded.set(true))
     };
 
-    let on_close = {
+    let close_lightbox = {
         let expanded = expanded.clone();
-        Callback::from(move |_: MouseEvent| expanded.set(false))
+        Callback::from(move |()| expanded.set(false))
     };
 
     let ext = match props.media_type.as_str() {
@@ -144,7 +145,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                 <img src={props.src.clone()} alt="Tool result image" onerror={on_error} />
             </div>
             if *expanded {
-                <div class="image-lightbox" onclick={on_close.clone()}>
+                <DismissibleBackdrop class="image-lightbox" on_close={close_lightbox.clone()}>
                     <div class="image-lightbox-content" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
                         <img class={classes!(size_fallback)} src={props.src.clone()} alt="Full size image" />
                         <div class="image-lightbox-controls">
@@ -155,12 +156,12 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                             >
                                 { "Download" }
                             </a>
-                            <button class="image-lightbox-close" onclick={on_close}>
+                            <button class="image-lightbox-close" onclick={close_lightbox.reform(|_: MouseEvent| ())}>
                                 { "\u{00d7}" }
                             </button>
                         </div>
                     </div>
-                </div>
+                </DismissibleBackdrop>
             }
         </>
     }

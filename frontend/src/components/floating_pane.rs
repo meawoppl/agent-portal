@@ -31,6 +31,7 @@
 
 use yew::prelude::*;
 
+use super::DismissibleBackdrop;
 use crate::hooks::{use_escape_capture, use_focus_trap};
 
 #[derive(Properties, PartialEq)]
@@ -51,20 +52,14 @@ pub fn floating_pane(props: &FloatingPaneProps) -> Html {
     use_focus_trap(container.clone());
     use_escape_capture(true, props.on_close.clone());
 
-    let on_backdrop = {
-        let on_close = props.on_close.clone();
-        Callback::from(move |_: MouseEvent| on_close.emit(()))
-    };
-
     html! {
-        <div class={props.overlay_class.clone()} onclick={on_backdrop}>
+        <DismissibleBackdrop class={props.overlay_class.clone()} on_close={props.on_close.clone()}>
             <div
                 ref={container}
                 class={props.pane_class.clone()}
-                onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
             >
                 { props.children.clone() }
             </div>
-        </div>
+        </DismissibleBackdrop>
     }
 }

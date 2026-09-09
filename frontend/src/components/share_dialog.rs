@@ -9,6 +9,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
+use crate::components::DismissibleBackdrop;
 use crate::hooks::escape_listener;
 use crate::utils::{self, On401};
 
@@ -223,14 +224,6 @@ impl Component for ShareDialog {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let on_close = ctx.props().on_close.clone();
-        let on_overlay_click = {
-            let on_close = on_close.clone();
-            Callback::from(move |_| on_close.emit(()))
-        };
-        let on_dialog_click = Callback::from(|e: MouseEvent| {
-            e.stop_propagation();
-        });
-
         let on_email_input = ctx.link().callback(|e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             ShareDialogMsg::UpdateEmail(input.value())
@@ -252,8 +245,8 @@ impl Component for ShareDialog {
         });
 
         html! {
-            <div class="share-dialog-overlay" onclick={on_overlay_click}>
-                <div class="share-dialog" onclick={on_dialog_click}>
+            <DismissibleBackdrop class="share-dialog-overlay" on_close={on_close.clone()}>
+                <div class="share-dialog">
                     <div class="share-dialog-header">
                         <h2>{ "Share Session" }</h2>
                         <button class="share-dialog-close" onclick={move |_| on_close.emit(())}>
@@ -304,7 +297,7 @@ impl Component for ShareDialog {
                         }
                     </div>
                 </div>
-            </div>
+            </DismissibleBackdrop>
         }
     }
 }

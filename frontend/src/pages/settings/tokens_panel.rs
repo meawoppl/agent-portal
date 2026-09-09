@@ -1,4 +1,4 @@
-use crate::components::{ConfirmModal, ConfirmModalStyle};
+use crate::components::{ConfirmModal, ConfirmModalStyle, DismissibleBackdrop};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
 use shared::{
@@ -465,9 +465,9 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
             </section>
 
             if let Some(token_response) = &*renewed_token {
-                <div class="modal-overlay" onclick={{
+                <DismissibleBackdrop class="modal-overlay" on_close={{
                     let renewed_token = renewed_token.clone();
-                    Callback::from(move |_| renewed_token.set(None))
+                    Callback::from(move |()| renewed_token.set(None))
                 }}>
                     <div class="confirm-modal token-renewed-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
                         { render_token_secret("Token Renewed", token_response, {
@@ -475,7 +475,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
                             Callback::from(move |_| renewed_token.set(None))
                         }) }
                     </div>
-                </div>
+                </DismissibleBackdrop>
             }
 
             if let Some((message, action)) = &*confirm_action {

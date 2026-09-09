@@ -13,7 +13,7 @@ use sessions_tab::AdminSessionsTab;
 use subdomains_tab::AdminSubdomainsTab;
 use users_tab::AdminUsersTab;
 
-use crate::components::ConfirmModal;
+use crate::components::{ConfirmModal, DismissibleBackdrop};
 use crate::utils::{self, FetchError, On401};
 use crate::Route;
 use gloo_net::http::Request;
@@ -367,6 +367,10 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             ban_dialog.set(None);
         })
     };
+    let on_cancel_ban_backdrop = {
+        let ban_dialog = ban_dialog.clone();
+        Callback::from(move |()| ban_dialog.set(None))
+    };
 
     // Ban reason input change
     let on_ban_reason_change = {
@@ -559,7 +563,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
             {
                 if ban_dialog.is_some() {
                     html! {
-                        <div class="modal-overlay" onclick={on_cancel_ban.clone()}>
+                        <DismissibleBackdrop class="modal-overlay" on_close={on_cancel_ban_backdrop.clone()}>
                             <div class="modal-content ban-modal" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
                                 <h3>{ "Ban User" }</h3>
                                 <p>{ "This will disable the user account and revoke all their access tokens. They will be unable to log in." }</p>
@@ -578,7 +582,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                     <button class="modal-confirm ban-confirm" onclick={on_confirm_ban.clone()}>{ "Ban User" }</button>
                                 </div>
                             </div>
-                        </div>
+                        </DismissibleBackdrop>
                     }
                 } else {
                     html! {}
