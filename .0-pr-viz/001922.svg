@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">The text bar stays usable through a server restart — typing queues, reconnect delivers</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="210" fill="#a9b1d6" font-size="19" font-weight="bold">During a restart / deploy window:</text>
+
+    <!-- banner -->
+    <rect x="180" y="250" width="680" height="44" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="1.5"/>
+    <text x="520" y="278" text-anchor="middle" fill="#e0af68" font-size="15">Server restarting (update) — reconnecting…</text>
+
+    <!-- locked input bar -->
+    <rect x="180" y="320" width="560" height="52" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="1.5" opacity="0.5"/>
+    <text x="200" y="352" fill="#565f89" font-size="15" opacity="0.6">Type your message…</text>
+    <rect x="756" y="320" width="104" height="52" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="1.5" opacity="0.5"/>
+    <text x="808" y="352" text-anchor="middle" fill="#565f89" font-size="15" opacity="0.6">Send</text>
+    <text x="520" y="404" text-anchor="middle" fill="#f7768e" font-size="15" font-style="italic">disabled — clicks and keystrokes bounce off for the whole window</text>
+
+    <rect x="150" y="460" width="700" height="230" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="498" fill="#f7768e" font-size="19" font-weight="bold">The irony: offline delivery already existed</text>
+    <text x="180" y="534" fill="#c0caf5" font-size="16">- the outbox records every send, flushes on reconnect,</text>
+    <text x="180" y="562" fill="#c0caf5" font-size="16">  and the backend dedupes by client_msg_id (#1236)</text>
+    <text x="180" y="590" fill="#c0caf5" font-size="16">- but disabled={!ws_connected} on the textarea + Send button</text>
+    <text x="180" y="618" fill="#c0caf5" font-size="16">  meant nothing could ever reach that machinery</text>
+    <text x="180" y="646" fill="#c0caf5" font-size="16">- your half-formed thought waits on someone else's deploy</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="210" fill="#a9b1d6" font-size="19" font-weight="bold">Same restart window:</text>
+
+    <rect x="1180" y="250" width="680" height="44" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="1.5"/>
+    <text x="1520" y="278" text-anchor="middle" fill="#e0af68" font-size="15">Server restarting (update) — reconnecting…</text>
+
+    <!-- live input bar -->
+    <rect x="1180" y="320" width="560" height="52" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1200" y="352" fill="#c0caf5" font-size="15">also update the readme when you're done|</text>
+    <rect x="1756" y="320" width="104" height="52" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1808" y="352" text-anchor="middle" fill="#7aa2f7" font-size="15">Send</text>
+    <!-- pending echo -->
+    <rect x="1180" y="392" width="500" height="40" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="417" fill="#c0caf5" font-size="14">also update the readme when you're done</text>
+    <text x="1640" y="417" fill="#e0af68" font-size="13">sent ●</text>
+    <text x="1520" y="462" text-anchor="middle" fill="#9ece6a" font-size="15" font-style="italic">queued as pending; flushes the moment the socket returns</text>
+
+    <rect x="1150" y="500" width="700" height="230" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="538" fill="#9ece6a" font-size="19" font-weight="bold">What changed (input_bar.rs only):</text>
+    <text x="1180" y="574" fill="#c0caf5" font-size="16">- textarea + Send + mode toggle: no longer gated on the socket</text>
+    <text x="1180" y="602" fill="#c0caf5" font-size="16">- placeholder while down: "Reconnecting — messages will send</text>
+    <text x="1180" y="630" fill="#c0caf5" font-size="16">  when the server is back"</text>
+    <text x="1180" y="658" fill="#c0caf5" font-size="16">- attachments stay socket-gated: upload chunk frames are</text>
+    <text x="1180" y="686" fill="#c0caf5" font-size="16">  fire-and-forget and genuinely need the live connection</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Delivery machinery untouched — this only unlocks the door to it</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Reconnect still hands focus back to the focused session's bar</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: voice input stays disabled while disconnected (server STT needs the backend), and the 50-entry outbox cap still bounds a long offline backlog.</text>
+</svg>
