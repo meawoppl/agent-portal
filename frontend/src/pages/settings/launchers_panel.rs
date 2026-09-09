@@ -582,17 +582,17 @@ pub fn launchers_panel() -> Html {
                         let id = l.launcher_id;
                         async move {
                             let path = format!("/api/launchers/{id}/probe-agents");
-                            let state = match utils::fetch_json::<shared::api::ProbeAgentsResponse>(
+                            let state = utils::fetch_json::<shared::api::ProbeAgentsResponse>(
                                 &path,
                                 On401::Ignore,
                             )
                             .await
-                            {
-                                Ok(resp) => ProbeState::Loaded(
+                            .map(|resp| {
+                                ProbeState::Loaded(
                                     resp.agents.into_iter().map(|a| (a.agent_type, a)).collect(),
-                                ),
-                                Err(_) => ProbeState::Unreachable,
-                            };
+                                )
+                            })
+                            .unwrap_or(ProbeState::Unreachable);
                             (id, state)
                         }
                     })

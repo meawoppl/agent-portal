@@ -426,10 +426,9 @@ async fn current_subscription_present() -> bool {
     let Ok(promise) = pm.get_subscription() else {
         return false;
     };
-    match JsFuture::from(promise).await {
-        Ok(v) => !v.is_null() && !v.is_undefined(),
-        Err(_) => false,
-    }
+    JsFuture::from(promise)
+        .await
+        .is_ok_and(|v| !v.is_null() && !v.is_undefined())
 }
 
 /// Request permission, subscribe, and register the subscription server-side.
