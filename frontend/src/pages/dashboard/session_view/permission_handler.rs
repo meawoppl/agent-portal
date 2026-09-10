@@ -16,6 +16,7 @@ use crate::pages::dashboard::types::{
     parse_ask_user_question, AskUserQuestion, AskUserQuestionInput, PendingPermission,
     QuestionAnswers,
 };
+use crate::utils;
 
 /// Typed answer the handler emits to the parent. The parent translates each
 /// variant into a `ClientToServer::PermissionResponse` frame; keeping the
@@ -201,7 +202,7 @@ impl Component for PermissionHandler {
                 // A blank answer (e.g. a cleared "something else" field)
                 // un-answers the question rather than counting an empty string
                 // as a valid answer.
-                if answer.trim().is_empty() {
+                if !utils::is_non_blank(&answer) {
                     self.question_answers.remove(&question_idx);
                 } else {
                     self.question_answers.insert(question_idx, answer);
@@ -507,7 +508,7 @@ fn assemble_answers(
             let joined = joined_ticks(question, ticks.get(&q_idx));
             if !joined.is_empty() {
                 out.insert(q_idx, joined);
-            } else if let Some(custom) = answers.get(&q_idx).filter(|a| !a.trim().is_empty()) {
+            } else if let Some(custom) = answers.get(&q_idx).filter(|a| utils::is_non_blank(a)) {
                 out.insert(q_idx, custom.clone());
             } else {
                 out.insert(q_idx, String::new());
@@ -531,7 +532,7 @@ fn empty_multi_select_questions(
     for (q_idx, question) in parsed.questions.iter().enumerate() {
         let has_custom = answers
             .get(&q_idx)
-            .map(|a| !a.trim().is_empty())
+            .map(|a| utils::is_non_blank(a))
             .unwrap_or(false);
         if question.multi_select
             && joined_ticks(question, ticks.get(&q_idx)).is_empty()

@@ -914,7 +914,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     if *create_worktree {
                         <div class="launch-note">
                             {
-                                if session_name.trim().is_empty() {
+                                if !utils::is_non_blank(&session_name) {
                                     "Worktree branch will be named session-<timestamp> (set a session name above to name it)".to_string()
                                 } else {
                                     format!("Worktree branch will be named {}", session_name.trim())

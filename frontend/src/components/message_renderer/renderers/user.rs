@@ -10,6 +10,7 @@ use crate::components::tool_renderers::{
     has_askuserquestion_answers, render_askuserquestion_result,
 };
 use crate::components::{split_upload_notice, UploadNotice};
+use crate::utils;
 use shared::UserFrame as OptimisticUserMessage;
 use uuid::Uuid;
 use yew::prelude::*;
@@ -129,7 +130,7 @@ pub fn render_optimistic_user_message_content(
     msg: &OptimisticUserMessage,
     session_id: Uuid,
 ) -> Option<Html> {
-    if msg.content.trim().is_empty() {
+    if !utils::is_non_blank(&msg.content) {
         return None;
     }
     if let Some(notice) = split_upload_notice(&msg.content) {

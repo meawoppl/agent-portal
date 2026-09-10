@@ -226,7 +226,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             let host = host.clone();
             let agent_type = agent_type;
 
-            if data.name.trim().is_empty() || data.cron_expression.trim().is_empty() {
+            if !utils::is_non_blank(&data.name) || !utils::is_non_blank(&data.cron_expression) {
                 return;
             }
 

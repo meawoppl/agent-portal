@@ -12,6 +12,8 @@
 use muse_codes::CommandResult;
 use yew::prelude::*;
 
+use crate::utils;
+
 use super::expandable::ExpandableText;
 use super::tool_renderers::OUTPUT_PREVIEW_CHARS;
 
@@ -30,7 +32,7 @@ fn parse_command_result(text: &str) -> Option<CommandResult> {
     }
     serde_json::from_str::<CommandResult>(trimmed)
         .ok()
-        .filter(|c| !c.command.trim().is_empty())
+        .filter(|c| utils::is_non_blank(&c.command))
 }
 
 /// Render a muse command result via the shared [`CommandResultCard`] — the same
@@ -465,7 +467,7 @@ mod tests {
 
     fn bash_tree() -> TaskTree {
         let mut tree = TaskTree::default();
-        for line in BASH_FIXTURE.lines().filter(|l| !l.trim().is_empty()) {
+        for line in BASH_FIXTURE.lines().filter(|l| utils::is_non_blank(l)) {
             tree.apply(&serde_json::from_str(line).expect("fixture line is JSON"));
         }
         tree

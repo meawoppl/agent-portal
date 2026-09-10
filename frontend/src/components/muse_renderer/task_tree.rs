@@ -23,6 +23,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::utils;
+
 /// Where a task sits in its lifecycle. Ordered by progression so a node can
 /// only advance, never regress on an out-of-order record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -226,8 +228,8 @@ impl TaskTree {
             // answer (better a stale reply than a blank card) — deliberate.
             t if t.starts_with("run.terminal.") => {
                 let answer = str_field(payload, "text")
-                    .filter(|t| !t.trim().is_empty())
-                    .or_else(|| str_field(payload, "reason").filter(|r| !r.trim().is_empty()));
+                    .filter(|t| utils::is_non_blank(t))
+                    .or_else(|| str_field(payload, "reason").filter(|r| utils::is_non_blank(r)));
                 if answer.is_some() {
                     self.answer = answer;
                     self.answer_is_terminal = true;
@@ -374,7 +376,7 @@ mod tests {
     fn events(capture: &str) -> Vec<serde_json::Value> {
         capture
             .lines()
-            .filter(|l| !l.trim().is_empty())
+            .filter(|l| utils::is_non_blank(l))
             .map(|l| {
                 let r: serde_json::Value = serde_json::from_str(l).expect("capture parses");
                 json!({

@@ -1085,7 +1085,7 @@ async fn start_session_async(
     let final_for_end = final_acc.clone();
     let on_end = Closure::wrap(Box::new(move |_event: JsValue| {
         let text = std::mem::take(&mut *final_for_end.borrow_mut());
-        if !text.trim().is_empty() {
+        if utils::is_non_blank(&text) {
             link_for_end.send_message(VoiceInputMsg::Final(text));
         }
         link_for_end.send_message(VoiceInputMsg::Ended);

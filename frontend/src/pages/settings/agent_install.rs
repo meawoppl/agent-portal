@@ -131,7 +131,7 @@ fn install_status(resp: &InstallAgentResponse) -> (&'static str, String) {
         let detail = resp
             .message
             .as_deref()
-            .filter(|m| !m.trim().is_empty())
+            .filter(|m| utils::is_non_blank(m))
             .unwrap_or("the install command failed");
         ("error", format!("Install failed: {detail}"))
     }

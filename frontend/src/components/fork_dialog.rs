@@ -64,11 +64,11 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
         let on_close = props.on_close.clone();
         let on_forked = props.on_forked.clone();
         Callback::from(move |_| {
-            if name.trim().is_empty() {
+            if !utils::is_non_blank(&name) {
                 error.set(Some("Name is required".into()));
                 return;
             }
-            if *mode == ForkDirectoryMode::Other && other_directory.trim().is_empty() {
+            if *mode == ForkDirectoryMode::Other && !utils::is_non_blank(&other_directory) {
                 error.set(Some("Choose the other working directory".into()));
                 return;
             }

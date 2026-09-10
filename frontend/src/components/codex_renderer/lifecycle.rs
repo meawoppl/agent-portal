@@ -1,10 +1,12 @@
 use super::events::{ContextCompactedParams, TurnPlanStep};
 use yew::prelude::*;
 
+use crate::utils;
+
 pub(super) fn render_turn_plan(plan: Option<&[TurnPlanStep]>, explanation: Option<&str>) -> Html {
     let plan = plan.unwrap_or(&[]);
     let explanation = explanation.unwrap_or("");
-    if plan.is_empty() && explanation.trim().is_empty() {
+    if plan.is_empty() && !utils::is_non_blank(explanation) {
         return html! {};
     }
     html! {
@@ -16,7 +18,7 @@ pub(super) fn render_turn_plan(plan: Option<&[TurnPlanStep]>, explanation: Optio
                         <span class="tool-name">{ "Plan" }</span>
                     </div>
                     {
-                        if !explanation.trim().is_empty() {
+                        if utils::is_non_blank(explanation) {
                             html! { <div class="assistant-text">{ explanation }</div> }
                         } else {
                             html! {}
