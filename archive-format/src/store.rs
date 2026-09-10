@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::{
     decode_transcript, manifest_key, media_key, media_meta_key, parse_transcript_ndjson,
-    transcript_key, zstd_encode, ArchiveMessageLine, ArchivedMediaMeta, SessionArchiveBundle,
-    SessionArchiveManifest, TRANSCRIPT_COMPRESSION,
+    strings::is_non_blank, transcript_key, zstd_encode, ArchiveMessageLine, ArchivedMediaMeta,
+    SessionArchiveBundle, SessionArchiveManifest, TRANSCRIPT_COMPRESSION,
 };
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ pub fn archive_config_from_env() -> Result<Option<ArchiveConfig>, String> {
                  PORTAL_SESSION_ARCHIVE_LOCAL_ROOT to be set"
                     .to_string()
             })?;
-            if root.trim().is_empty() {
+            if !is_non_blank(&root) {
                 return Err("PORTAL_SESSION_ARCHIVE_LOCAL_ROOT must not be empty".to_string());
             }
             ArchiveBackendConfig::Local {
@@ -82,7 +82,7 @@ pub fn archive_config_from_env() -> Result<Option<ArchiveConfig>, String> {
                  PORTAL_SESSION_ARCHIVE_S3_BUCKET to be set"
                     .to_string()
             })?;
-            if bucket.trim().is_empty() {
+            if !is_non_blank(&bucket) {
                 return Err("PORTAL_SESSION_ARCHIVE_S3_BUCKET must not be empty".to_string());
             }
             let prefix = match std::env::var("PORTAL_SESSION_ARCHIVE_S3_PREFIX") {
