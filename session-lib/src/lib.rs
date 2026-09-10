@@ -39,6 +39,7 @@ pub mod probe;
 pub mod proxy_session;
 pub mod session;
 pub mod snapshot;
+pub mod strings;
 pub mod tunnel;
 pub mod turn_tracker;
 

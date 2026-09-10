@@ -10,6 +10,8 @@
 use shared::AgentType;
 use std::process::Command;
 
+use crate::strings::is_non_blank;
+
 /// Outcome of an install attempt.
 #[derive(Debug, Clone)]
 pub struct InstallResult {
@@ -51,7 +53,7 @@ pub fn install_agent(agent: AgentType) -> InstallResult {
 /// stdout, tail-truncated.
 fn failure_detail(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let body = if stderr.trim().is_empty() {
+    let body = if !is_non_blank(&stderr) {
         String::from_utf8_lossy(&output.stdout)
     } else {
         stderr
