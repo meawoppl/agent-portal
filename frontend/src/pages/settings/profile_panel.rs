@@ -59,7 +59,7 @@ pub fn profile_panel() -> Html {
             let trimmed = (*nickname).trim().to_string();
             let body = UpdateProfileRequest {
                 // Blank clears the nickname; send `None` so the server stores NULL.
-                nickname: (!trimmed.is_empty()).then(|| trimmed.clone()),
+                nickname: utils::owned_non_blank(&trimmed),
             };
             let saving = saving.clone();
             let feedback = feedback.clone();

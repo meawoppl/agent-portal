@@ -226,6 +226,24 @@ pub fn non_empty(opt: Option<&str>) -> Option<&str> {
     opt.map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// Keep a borrowed string only when it is non-blank.
+///
+/// Borrowed counterpart to [`non_empty`] for call sites that already hold a
+/// `&str`/`String` instead of an `Option`. Trims before checking so
+/// whitespace-only input is treated as absent.
+pub fn non_blank(s: &str) -> Option<&str> {
+    non_empty(Some(s))
+}
+
+/// Keep a trimmed owned copy of `s` only when it is non-blank.
+///
+/// Covers the repeated `(!s.trim().is_empty()).then(|| s.trim().to_string())`
+/// shape at form-submit call sites so they cannot drift (e.g. one arm
+/// trimming while another clones the untrimmed value).
+pub fn owned_non_blank(s: &str) -> Option<String> {
+    non_blank(s).map(str::to_string)
+}
+
 /// Remove a key from browser localStorage, silently doing nothing when
 /// storage is unavailable.
 pub fn storage_remove(key: &str) {
@@ -268,6 +286,20 @@ mod tests {
         assert_eq!(non_empty(Some("")), None);
         assert_eq!(non_empty(Some("   ")), None);
         assert_eq!(non_empty(Some("  hi  ")), Some("hi"));
+    }
+
+    #[test]
+    fn non_blank_trims_and_treats_blank_as_absent() {
+        assert_eq!(non_blank(""), None);
+        assert_eq!(non_blank("   "), None);
+        assert_eq!(non_blank("  hi  "), Some("hi"));
+    }
+
+    #[test]
+    fn owned_non_blank_returns_trimmed_owned_string() {
+        assert_eq!(owned_non_blank(""), None);
+        assert_eq!(owned_non_blank("   "), None);
+        assert_eq!(owned_non_blank("  hi  "), Some("hi".to_string()));
     }
 
     #[test]

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans','DejaVu Sans',ui-sans-serif,system-ui,sans-serif">
+<rect width="2000" height="1200" fill="#16161e"/>
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1929 · dedupe blank-string guard into frontend utils</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">One owned helper serves every blank-to-None form submit.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+<rect x="80" y="270" width="840" height="300" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="325" font-size="26" fill="#c0caf5">three call sites hand-roll the same guard</text>
+<text x="108" y="380" font-size="23" fill="#a9b1d6">(!s.trim().is_empty()).then(|| ...) x3</text>
+<text x="108" y="430" font-size="23" fill="#f7768e">fork model clones the untrimmed value</text>
+<text x="108" y="480" font-size="23" fill="#f7768e">prompt trims but model does not: drift</text>
+<rect x="80" y="650" width="840" height="245" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="108" y="705" font-size="26" fill="#c0caf5">only Option inputs had a shared helper</text>
+<text x="108" y="760" font-size="23" fill="#a9b1d6">non_empty takes Option; &amp;str sites inline it</text>
+<text x="108" y="810" font-size="23" fill="#f7768e">next form repeats the pattern again</text>
+<rect x="1065" y="270" width="860" height="300" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="325" font-size="26" fill="#7aa2f7">non_blank + owned_non_blank in utils.rs</text>
+<text x="1093" y="380" font-size="23" fill="#a9b1d6">borrowed check plus trimmed owned copy</text>
+<text x="1093" y="430" font-size="23" fill="#9ece6a">fork dialog model + prompt use it</text>
+<text x="1093" y="480" font-size="23" fill="#9ece6a">profile nickname save uses it too</text>
+<rect x="1065" y="650" width="860" height="245" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1093" y="705" font-size="26" fill="#7aa2f7">model trim drift fixed, with tests</text>
+<text x="1093" y="760" font-size="23" fill="#a9b1d6">whitespace-only still maps to None</text>
+<text x="1093" y="810" font-size="23" fill="#9ece6a">698 frontend tests green, clippy and fmt clean</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: frontend utils, fork dialog, profile panel; no protocol change.</text>
+</svg>
