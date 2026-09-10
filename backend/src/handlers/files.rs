@@ -14,6 +14,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Max on-disk size for a `portal://file/` pull. Must stay deliverable through
+/// the session socket: the proxy answers with one base64 text message, so this
+/// cap ×4/3 (+ envelope) must fit under
+/// [`super::websocket::SESSION_WS_MAX_MESSAGE_BYTES`] — pinned by
+/// `pull_cap_fits_the_session_socket` below.
 const MAX_PULL_BYTES: u64 = 25 * 1024 * 1024;
 const PULL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -146,6 +151,22 @@ mod tests {
         assert_eq!(
             sanitize_download_filename("../bad\"name\n.txt"),
             "..badname.txt"
+        );
+    }
+
+    /// The invariant that made #ecba289d's downloads kill the session socket:
+    /// a max-size pull, base64-encoded into one FileDownloadResponse message
+    /// (plus generous envelope headroom), must fit under the session socket's
+    /// frame/message ceiling — otherwise the backend closes the connection on
+    /// exactly the files the cap says are allowed.
+    #[test]
+    fn pull_cap_fits_the_session_socket() {
+        let base64_len = MAX_PULL_BYTES.div_ceil(3) * 4;
+        let envelope_headroom = 64 * 1024;
+        assert!(
+            base64_len + envelope_headroom
+                < crate::handlers::websocket::SESSION_WS_MAX_MESSAGE_BYTES as u64,
+            "MAX_PULL_BYTES ({MAX_PULL_BYTES}) base64s to {base64_len}, exceeding the              session socket ceiling — raise SESSION_WS_MAX_MESSAGE_BYTES or lower the cap"
         );
     }
 }

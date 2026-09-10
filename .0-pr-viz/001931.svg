@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Large file downloads no longer kill the session socket - limits now cover the cap</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Click a portal://file link for a 12.6 MB zip:</text>
+
+    <!-- flow -->
+    <rect x="180" y="240" width="180" height="60" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="270" y="276" text-anchor="middle" fill="#7aa2f7" font-size="16">proxy</text>
+    <line x1="360" y1="270" x2="530" y2="270" stroke="#f7768e" stroke-width="3"/>
+    <polygon points="530,270 514,263 514,277" fill="#f7768e"/>
+    <text x="445" y="252" text-anchor="middle" fill="#f7768e" font-size="14">ONE 16.8 MB text frame</text>
+    <rect x="530" y="240" width="200" height="60" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="630" y="268" text-anchor="middle" fill="#f7768e" font-size="16">backend closes</text>
+    <text x="630" y="290" text-anchor="middle" fill="#f7768e" font-size="13">frame &gt; 16 MiB default</text>
+
+    <rect x="180" y="340" width="640" height="70" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="368" fill="#565f89" font-size="13" font-family="monospace">WebSocket error: connection closed</text>
+    <text x="200" y="392" fill="#565f89" font-size="13" font-family="monospace">Failed to send file download response: connection closed</text>
+
+    <rect x="150" y="460" width="700" height="260" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="498" fill="#f7768e" font-size="19" font-weight="bold">Three facts that didn't compose:</text>
+    <text x="180" y="534" fill="#c0caf5" font-size="16">- read_download_file sends the whole file as one base64</text>
+    <text x="180" y="562" fill="#c0caf5" font-size="16">  message; tokio-tungstenite never fragments on send</text>
+    <text x="180" y="590" fill="#c0caf5" font-size="16">- the session upgrade used default limits (16 MiB/frame)</text>
+    <text x="180" y="618" fill="#c0caf5" font-size="16">- MAX_PULL_BYTES advertises 25 MiB - so 13-25 MB files were</text>
+    <text x="180" y="646" fill="#c0caf5" font-size="16">  "allowed" but undeliverable, and the user saw a session</text>
+    <text x="180" y="674" fill="#c0caf5" font-size="16">  crash + reconnect instead of a download</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Same click:</text>
+
+    <rect x="1180" y="240" width="180" height="60" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="1270" y="276" text-anchor="middle" fill="#7aa2f7" font-size="16">proxy</text>
+    <line x1="1360" y1="270" x2="1530" y2="270" stroke="#9ece6a" stroke-width="3"/>
+    <polygon points="1530,270 1514,263 1514,277" fill="#9ece6a"/>
+    <text x="1445" y="252" text-anchor="middle" fill="#9ece6a" font-size="14">16.8 MB frame accepted</text>
+    <rect x="1530" y="240" width="200" height="60" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1630" y="268" text-anchor="middle" fill="#9ece6a" font-size="16">file delivered</text>
+    <text x="1630" y="290" text-anchor="middle" fill="#565f89" font-size="13">ceiling now 48 MiB</text>
+
+    <rect x="1180" y="340" width="640" height="70" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="368" fill="#9ece6a" font-size="13" font-family="monospace">ws.max_frame_size(48 MiB).max_message_size(48 MiB)</text>
+    <text x="1200" y="392" fill="#565f89" font-size="13" font-family="monospace">// session socket only - client/launcher sockets unchanged</text>
+
+    <rect x="1150" y="460" width="700" height="260" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="498" fill="#9ece6a" font-size="19" font-weight="bold">And the invariant is pinned, not assumed:</text>
+    <text x="1180" y="534" fill="#c0caf5" font-size="16">- SESSION_WS_MAX_MESSAGE_BYTES = 48 MiB, documented with</text>
+    <text x="1180" y="562" fill="#c0caf5" font-size="16">  the send-side-no-fragmentation reason it exists</text>
+    <text x="1180" y="590" fill="#c0caf5" font-size="16">- unit test: base64(MAX_PULL_BYTES) + envelope headroom must</text>
+    <text x="1180" y="618" fill="#c0caf5" font-size="16">  fit under the ceiling - raising the pull cap without raising</text>
+    <text x="1180" y="646" fill="#c0caf5" font-size="16">  the socket limit is now a test failure, not a field bug</text>
+    <text x="1180" y="674" fill="#c0caf5" font-size="16">- 25 MiB cap -> ~33.4 MiB base64: comfortable headroom</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Reported by session ecba289d via agent-portal message send</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Repro was any 13-25 MB portal://file link; smaller files always worked</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: the file is still buffered whole (~34 MiB peak per download) - chunked FileDownloadResponse remains the right shape if the cap ever grows.</text>
+</svg>
